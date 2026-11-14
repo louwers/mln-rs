@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 
 use mln_actor::{AsyncTask, RunLoop};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::{BackendScope, ScopeType};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
 use mln_renderer::UpdateReader;
@@ -108,7 +107,6 @@ impl TimedHeadlessFrontend {
         let mut parameters = (*update.parameters).clone();
         parameters.time_point = Some(time);
         let parameters = Arc::new(parameters);
-        let _scope = BackendScope::new(self.frontend.get_backend(), ScopeType::Explicit);
         if let Some(frames) = self.frontend.target().frames() {
             self.frontend.with_renderer(|renderer| renderer.render(&parameters, frames));
         }
@@ -136,7 +134,7 @@ impl Frontend for TimedHeadlessFrontend {
 
 /// The rendering stats of the frontend's last frame.
 fn stats(frontend: &HeadlessFrontend) -> RenderingStats {
-    frontend.get_backend().get_context().rendering_stats().clone()
+    frontend.rendering_stats()
 }
 
 struct SymbolRenderingTest<F> {

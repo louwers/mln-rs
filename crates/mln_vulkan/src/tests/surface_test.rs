@@ -7,9 +7,9 @@
 // the desktop app's do (acquire, render pass, overlay, present), and each
 // one checked is read back (`request_readback`).
 //
-// A frame clears to one color and draws a background drawable in another
-// over half of it, as background_test.rs does: a frame that shows another
-// frame's image, or reads another frame's uniforms, has the wrong colors.
+// A frame clears to one color and draws the background shader in another
+// over half of it: a frame that shows another frame's image, or reads
+// another frame's uniforms, has the wrong colors.
 //
 // A backend made for a surface keeps two frames in flight, so a uniform buffer
 // has a copy for each: the frames that aren't read back aren't waited for,
@@ -22,33 +22,26 @@ use std::ffi::CStr;
 use std::rc::Rc;
 
 use ash::vk;
-use mln_gfx::backend_scope::{BackendScope, ScopeType};
+use bytemuck::Zeroable as _;
 use mln_gfx::color_mode::ColorMode;
-use mln_gfx::command_encoder::CommandEncoder;
-use mln_gfx::context::Context;
-use mln_gfx::depth_mode::DepthMode;
-use mln_gfx::draw_mode::DrawMode;
+use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::frame::FrameTarget as _;
-use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::paint_parameters::PaintParameters;
+use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gpu::{
+    BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
+    DepthStencilAttachment, Gpu as _, LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, StencilState,
+    TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute,
+    VertexBufferLayout, VertexStep, Viewport,
+};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::render_pass::{RenderPass as GfxRenderPass, RenderPassDescriptor};
-use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
-use mln_gfx::renderer::render_pass::RenderPass;
-use mln_gfx::renderer_backend::RendererBackend as _;
-use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
-};
+use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
+use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::texture2d::Texture2D as _;
-use mln_gfx::types::{DepthMaskType, TextureChannelDataType, TexturePixelType};
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
+use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -56,7 +49,7 @@ use mln_util::size::Size;
 
 use crate::renderer_backend::SurfaceProvider;
 use crate::surface_target::{Overlay, OverlayTarget, present_mode};
-use crate::{Device, RendererBackend, SurfaceTarget};
+use crate::{Device, RendererBackend, SurfaceTarget, VulkanGpu};
 
 const EXTENT: i16 = 8192;
 
@@ -134,7 +127,7 @@ impl Window {
         self.target.take_readback()
     }
 
-    fn set_overlay(&self, overlay: Option<Overlay>) {
+    fn set_overlay(&self, overlay: Option<Box<dyn Overlay>>) {
         self.target.set_overlay(overlay);
     }
 }
@@ -166,68 +159,6 @@ fn surface_backend(size: Size, cap_frame_rate: bool) -> Option<Window> {
     surface_backend_on(Rc::default(), size, cap_frame_rate)
 }
 
-const NUM_SUBLAYERS: u32 = 3;
-const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
-/// `1 - (layer_groups + 2) * NUM_SUBLAYERS * DEPTH_EPSILON`, for one layer
-/// group.
-const DEPTH_RANGE_SIZE: f32 = 1.0 - ((1 + 2) * NUM_SUBLAYERS) as f32 * DEPTH_EPSILON;
-
-/// The gfx-facing part of the renderer's `PaintParameters`, as in
-/// `background_test.rs`.
-struct TestPaintParameters<'a> {
-    context: &'a dyn Context,
-    encoder: Box<dyn CommandEncoder>,
-    render_pass: Option<Box<dyn GfxRenderPass>>,
-    pass: RenderPass,
-    scissor_rect: ScissorRect,
-}
-
-impl PaintParameters for TestPaintParameters<'_> {
-    fn context(&self) -> &dyn Context {
-        self.context
-    }
-    fn encoder(&self) -> Option<&dyn CommandEncoder> {
-        Some(&*self.encoder)
-    }
-    fn render_pass(&self) -> Option<&dyn GfxRenderPass> {
-        self.render_pass.as_deref()
-    }
-    fn pass(&self) -> RenderPass {
-        self.pass
-    }
-    fn scissor_rect(&self) -> ScissorRect {
-        self.scissor_rect
-    }
-    fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
-        let depth = DEPTH_RANGE_SIZE + (NUM_SUBLAYERS + u32::from(n)) as f32 * DEPTH_EPSILON;
-        DepthMode {
-            func: mln_gfx::types::DepthFunctionType::LessEqual,
-            mask,
-            range: mln_util::range::Range::new(depth, depth),
-        }
-    }
-    fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
-        DepthMode {
-            func: mln_gfx::types::DepthFunctionType::LessEqual,
-            mask,
-            range: mln_util::range::Range::new(0.0, DEPTH_RANGE_SIZE),
-        }
-    }
-    fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) -> bool {
-        true
-    }
-    fn stencil_mode_for_clipping(&self, _tile_id: &UnwrappedTileID) -> StencilMode {
-        StencilMode::disabled()
-    }
-    fn stencil_mode_for_3d(&mut self) -> StencilMode {
-        StencilMode::disabled()
-    }
-    fn stencil_modes_for_3d(&mut self, modes: &mut [StencilMode]) -> bool {
-        modes.fill(StencilMode::disabled());
-        true
-    }
-}
-
 /// Column-major matrix mapping the tile to the left or the right half of
 /// the viewport.
 fn half_matrix(right: bool) -> [f32; 16] {
@@ -236,56 +167,66 @@ fn half_matrix(right: bool) -> [f32; 16] {
     [1.0 / e, 0.0, 0.0, 0.0, 0.0, -2.0 / e, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, x, 1.0, 0.0, 1.0]
 }
 
-/// One opaque background drawable in a tile layer group, which keeps its
-/// uniform buffers from frame to frame, as a layer of the renderer does.
+/// One opaque tile of the background shader, whose uniform and storage
+/// buffers stay from frame to frame, as a layer's of the renderer do.
 struct Scene {
-    /// Keeps the shader's group.
-    _registry: ShaderRegistry,
-    layer_group: LayerGroupBasePtr,
+    shader: ShaderProgramPtr,
+    vertices: BufferId,
+    indexes: BufferId,
+    /// The background's color.
+    props: BufferId,
+    /// The matrices of the half the background covers.
+    drawable: BufferId,
+    projection: BufferId,
+    globals: BindGroupId,
+    layer: BindGroupId,
+}
+
+/// A buffer of `usage` holding `data`.
+fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
+    let buffer = gpu.create_buffer(&BufferDesc { label: "scene", usage, size: data.len() as u64 }).expect("buffer");
+    gpu.write_buffer(buffer, 0, data).expect("buffer write");
+    buffer
 }
 
 impl Scene {
     fn new(backend: &Window) -> Scene {
-        let registry = ShaderRegistry::new();
-        backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
-        let context = backend.get_context();
-        let layer_group = context.create_tile_layer_group(0, 64, "background".to_owned()).expect("layer group");
-        let shader = context
-            .get_generic_shader(&registry, "BackgroundShader", ProjectionVariant::Mercator)
-            .expect("BackgroundShader");
-
+        let gpu = &mut *backend.gpu();
+        let registry = ShaderRegistry::new(&ProgramParameters::new(1.0, false));
+        let shader = registry.shader("BackgroundShader", ProjectionVariant::Mercator).expect("BackgroundShader");
         let tile_vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
-        let passes = RenderPass::Opaque | RenderPass::Translucent;
-        let mut builder = context.create_drawable_builder();
-        builder.set_render_pass(passes);
-        builder.set_shader(Some(shader));
-        builder.set_depth_type(DepthMaskType::ReadWrite);
-        builder.set_color_mode(&ColorMode::unblended());
-        builder.set_vertex_attr_id(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE);
-        builder.set_raw_vertices(
-            bytemuck::cast_slice(&tile_vertices).to_vec(),
-            tile_vertices.len(),
-            AttributeDataType::Short2,
-        );
-        builder.set_segments(DrawMode::Triangles(), vec![0, 1, 2, 1, 2, 3], &[SegmentBase::with_lengths(0, 0, 4, 6)]);
-        builder.flush(context);
-
-        let tile_id = OverscaledTileID::from_zxy(0, 0, 0);
-        {
-            let mut group = layer_group.borrow_mut();
-            let tile_group = group.as_tile_layer_group_mut().expect("tile layer group");
-            for mut drawable in builder.clear_drawables() {
-                drawable.set_tile_id(tile_id);
-                drawable.set_ubo_index(0);
-                tile_group.add_drawable(passes, &tile_id, drawable);
-            }
+        let tile_indexes: [u16; 6] = [0, 1, 2, 1, 2, 3];
+        let props = buffer(gpu, BufferUsage::Uniform, bytemuck::bytes_of(&BackgroundPropsUBO::zeroed()));
+        let drawable = buffer(gpu, BufferUsage::Storage, bytemuck::bytes_of(&BackgroundDrawableUnionUBO::zeroed()));
+        let projection = buffer(gpu, BufferUsage::Storage, bytemuck::bytes_of(&ProjectionUBO::default()));
+        let entry = |id: usize, buffer, size: usize| BindGroupEntry::Buffer {
+            id: id as u32,
+            buffer,
+            offset: 0,
+            size: size as u64,
+        };
+        let entries = [
+            entry(ID_BACKGROUND_PROPS_UBO, props, size_of::<BackgroundPropsUBO>()),
+            entry(ID_BACKGROUND_DRAWABLE_UBO, drawable, size_of::<BackgroundDrawableUnionUBO>()),
+            entry(ID_PROJECTION_UBO, projection, size_of::<ProjectionUBO>()),
+        ];
+        Scene {
+            shader,
+            vertices: buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices)),
+            indexes: buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&tile_indexes)),
+            props,
+            drawable,
+            projection,
+            globals: gpu.create_bind_group(&BindGroupDesc { label: "globals", entries: &[] }).expect("bind group"),
+            layer: gpu
+                .create_bind_group(&BindGroupDesc { label: "background", entries: &entries })
+                .expect("bind group"),
         }
-        Scene { _registry: registry, layer_group }
     }
 
-    /// Writes the background's color into the layer's uniform buffer: the
-    /// buffer the frames before used, once it exists.
-    fn set_color(&self, context: &dyn Context, color: Color) {
+    /// Writes the background's color into its buffer, which the frames
+    /// before used.
+    fn set_color(&self, gpu: &mut VulkanGpu, color: Color) {
         let props = BackgroundPropsUBO {
             color: [color.r, color.g, color.b, color.a],
             opacity: 1.0,
@@ -293,32 +234,64 @@ impl Scene {
             pad2: 0.0,
             pad3: 0.0,
         };
-        self.layer_group.borrow_mut().mutable_uniform_buffers().create_or_update_pod(
-            ID_BACKGROUND_PROPS_UBO,
-            &props,
-            context,
-        );
+        gpu.write_buffer(self.props, 0, bytemuck::bytes_of(&props)).expect("buffer write");
     }
 
-    /// Writes the half the background covers into the layer's storage
-    /// buffers: the buffers the frames before used, once they exist.
-    fn set_half(&self, context: &dyn Context, right: bool) {
+    /// Writes the half the background covers into the storage buffers,
+    /// which the frames before used.
+    fn set_half(&self, gpu: &mut VulkanGpu, right: bool) {
         let matrix = half_matrix(right);
-        let drawable = [BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix })];
-        let projection = [ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() }];
-        let mut group = self.layer_group.borrow_mut();
-        let buffers = group.mutable_uniform_buffers();
-        for (id, data) in [
-            (ID_BACKGROUND_DRAWABLE_UBO, bytemuck::cast_slice::<_, u8>(&drawable)),
-            (ID_PROJECTION_UBO, bytemuck::cast_slice::<_, u8>(&projection)),
-        ] {
-            match buffers.get(id) {
-                Some(buffer) => buffer.update(data),
-                None => {
-                    buffers.set(id, Some(context.create_uniform_buffer(data, false, true)));
-                }
-            }
-        }
+        let drawable = BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix });
+        let projection = ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() };
+        gpu.write_buffer(self.drawable, 0, bytemuck::bytes_of(&drawable)).expect("buffer write");
+        gpu.write_buffer(self.projection, 0, bytemuck::bytes_of(&projection)).expect("buffer write");
+    }
+
+    /// The commands that draw the tile into attachments of `size` and
+    /// `targets`.
+    fn draw(&self, gpu: &mut VulkanGpu, size: Size, targets: TargetFormats) -> Vec<RenderCommand> {
+        let attribute = self.shader.attribute_id(VertexStep::Vertex, 0).expect("position attribute");
+        let color_mode = ColorMode::unblended();
+        let pipeline = gpu
+            .create_pipeline(&PipelineKey {
+                shader: self.shader.key().clone(),
+                state: PipelineState {
+                    vertex_buffers: vec![VertexBufferLayout {
+                        stride: 4,
+                        step: VertexStep::Vertex,
+                        attributes: vec![VertexAttribute {
+                            id: attribute as u32,
+                            format: AttributeDataType::Short2,
+                            offset: 0,
+                        }],
+                    }],
+                    primitive: DrawModeType::Triangles,
+                    cull: CullFaceMode::disabled(),
+                    blend: color_mode.blend_function,
+                    color_mask: color_mode.mask,
+                    depth: DepthState { compare: DepthFunctionType::LessEqual, write: true },
+                    stencil: StencilState::from(&StencilMode::disabled()),
+                },
+                targets,
+            })
+            .expect("pipeline");
+        vec![
+            RenderCommand::SetBindGroup { slot: 0, group: self.globals },
+            RenderCommand::SetBindGroup { slot: 1, group: self.layer },
+            RenderCommand::SetGlobalIndex(0),
+            RenderCommand::SetVertexBuffer { slot: 0, buffer: self.vertices, offset: 0 },
+            RenderCommand::SetIndexBuffer { buffer: self.indexes, offset: 0 },
+            RenderCommand::SetViewport(Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: size.width as f32,
+                height: size.height as f32,
+                min_depth: 0.5,
+                max_depth: 0.5,
+            }),
+            RenderCommand::SetPipeline(pipeline),
+            RenderCommand::DrawIndexed { indices: 0..6, base_vertex: 0, instances: 0..1 },
+        ]
     }
 }
 
@@ -346,49 +319,32 @@ fn render_frame(
         backend.request_readback();
         assert!(backend.take_readback().is_none(), "nothing is read before the frame is presented");
     }
-    let context = backend.get_context();
     let image = backend.target.begin_frame().expect("a frame");
-    let renderable = &*image;
-    context.begin_frame();
+    let mut gpu = backend.gpu();
 
-    let size = renderable.size();
-    let mut parameters = TestPaintParameters {
-        context,
-        encoder: context.create_command_encoder(),
-        render_pass: None,
-        pass: RenderPass::Opaque,
-        scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
-    };
+    let mut commands = Vec::new();
     if let Some(scene) = scene {
-        let upload_pass = parameters.encoder.create_upload_pass("layerGroup-upload", renderable);
         if let Some(color) = change.color {
-            scene.set_color(context, color);
+            scene.set_color(&mut gpu, color);
         }
         if let Some(right) = change.right {
-            scene.set_half(context, right);
+            scene.set_half(&mut gpu, right);
         }
-        scene.layer_group.borrow_mut().upload(&*upload_pass);
+        commands = scene.draw(&mut gpu, image.size, image.targets);
     }
-    parameters.render_pass = Some(parameters.encoder.create_render_pass(
-        "main buffer",
-        &RenderPassDescriptor {
-            target: renderable,
-            clear_color: Some(clear),
-            clear_depth: Some(1.0),
-            clear_stencil: Some(0),
-        },
-    ));
-    context.bind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
-    if let Some(scene) = scene {
-        for pass in [RenderPass::Opaque, RenderPass::Translucent] {
-            parameters.pass = pass;
-            scene.layer_group.borrow_mut().render(&mut parameters);
-        }
-    }
-    context.unbind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
-    parameters.render_pass = None;
-    backend.target.end_frame(&*parameters.encoder);
-    context.end_frame();
+    let pass = Pass {
+        label: "main buffer".to_owned(),
+        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(clear) }),
+        depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
+            texture,
+            depth: LoadOp::Clear(1.0),
+            stencil: LoadOp::Clear(0),
+        }),
+        commands,
+    };
+    gpu.submit(&[pass]).expect("submit");
+    drop(gpu);
+    backend.target.end_frame();
 
     let image = backend.take_readback();
     assert_eq!(image.is_some(), read, "a frame is read back when asked, once");
@@ -464,7 +420,6 @@ fn frames_present_what_they_draw() {
         let Some(backend) = surface_backend(size, cap_frame_rate) else {
             return;
         };
-        let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
         assert_eq!(backend.get_framebuffer_size(), size);
         assert_ne!(backend.target.get_color_format(), vk::Format::UNDEFINED);
         let scene = Scene::new(&backend);
@@ -486,7 +441,6 @@ fn uniforms_follow_each_frame_in_flight() {
     let Some(backend) = surface_backend(size, false) else {
         return;
     };
-    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let clear = color(0.0, 0.0, 0.0);
     let (red, green, blue) = (color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0), color(0.0, 0.0, 1.0));
@@ -531,7 +485,6 @@ fn resize_rebuilds_the_swapchain() {
     let Some(backend) = surface_backend(Size::new(64, 32), true) else {
         return;
     };
-    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let mut frame = 0;
     let mut draw = |size: Size, read: bool| {
@@ -568,7 +521,6 @@ fn empty_framebuffer_draws_nothing() {
     let Some(backend) = surface_backend(size, true) else {
         return;
     };
-    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let (clear, red, green) = (color(0.2, 0.4, 0.6), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
     let set = |color: Color| Change { color: Some(color), right: Some(true) };
@@ -601,27 +553,42 @@ fn empty_framebuffer_draws_nothing() {
 const OVERLAY_COLOR: [f32; 4] = [1.0, 1.0, 0.0, 1.0];
 
 /// An overlay that fills the top left quarter of the frame, and makes a
-/// texture and a buffer with the frame's context as an app's overlay does.
-/// It counts its frames in `calls`.
-fn quarter_overlay(calls: Rc<Cell<u32>>, sizes: Rc<RefCell<Vec<Size>>>) -> Overlay {
-    let mut texture = None;
-    Box::new(move |target: &OverlayTarget<'_>| {
-        calls.set(calls.get() + 1);
-        sizes.borrow_mut().push(target.size);
+/// texture and a buffer on the frame's `Gpu` as an app's overlay does. It
+/// counts its frames in `calls`, and its destroys in `destroyed`.
+#[derive(Default)]
+struct QuarterOverlay {
+    calls: Rc<Cell<u32>>,
+    sizes: Rc<RefCell<Vec<Size>>>,
+    destroyed: Rc<Cell<u32>>,
+    texture: Option<TextureId>,
+}
+
+impl Overlay for QuarterOverlay {
+    fn draw(&mut self, target: &mut OverlayTarget<'_>) {
+        self.calls.set(self.calls.get() + 1);
+        self.sizes.borrow_mut().push(target.size);
         assert_ne!(target.render_pass, vk::RenderPass::null());
 
-        // A texture uploaded inside the overlay's pass, kept for the next
-        // frames, and a buffer dropped while the frame still uses it.
-        let texture = texture.get_or_insert_with(|| target.context.create_vulkan_texture_2d());
-        {
-            let mut texture = texture.borrow_mut();
-            texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
-            texture.upload_data(Some(&[0xFF; 16]), Size::new(2, 2));
-            assert_ne!(texture.get_vulkan_image_view(), vk::ImageView::null());
-            assert_ne!(texture.get_vulkan_sampler(), vk::Sampler::null());
-        }
-        let buffer = target.context.create_buffer(Some(&[0; 64]), 64, vk::BufferUsageFlags::VERTEX_BUFFER, false);
-        assert!(buffer.is_valid());
+        // A texture written inside the overlay's pass, kept for the next
+        // frames, and a buffer destroyed while the frame still uses it.
+        let size = Size::new(2, 2);
+        let gpu = &mut *target.gpu;
+        let texture = *self.texture.get_or_insert_with(|| {
+            gpu.create_texture(&TextureDesc {
+                label: "overlay",
+                size,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+            })
+            .expect("a texture")
+        });
+        gpu.write_texture(texture, TextureRegion::whole(size), &[0xFF; 16]).expect("the texture's texels");
+        let (view, _) = gpu.raw_texture(texture).expect("the texture's view");
+        assert_ne!(view, vk::ImageView::null());
+        let buffer = gpu.create_buffer(&BufferDesc { label: "overlay", usage: BufferUsage::Vertex, size: 64 });
+        let buffer = buffer.expect("a buffer");
+        gpu.write_buffer(buffer, 0, &[0; 64]).expect("the buffer's contents");
+        let raw_buffer = gpu.raw_buffer(buffer).expect("the buffer");
 
         let attachment = vk::ClearAttachment::default()
             .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -635,10 +602,22 @@ fn quarter_overlay(calls: Rc<Cell<u32>>, sizes: Rc<RefCell<Vec<Size>>>) -> Overl
         // color attachment the rectangle is inside, and the vertex buffer
         // is destroyed when the frame is done.
         unsafe {
-            target.device.cmd_bind_vertex_buffers(target.command_buffer, 0, &[buffer.get_vulkan_buffer()], &[0]);
+            target.device.cmd_bind_vertex_buffers(target.command_buffer, 0, &[raw_buffer], &[0]);
             target.device.cmd_clear_attachments(target.command_buffer, &[attachment], &[rect]);
         }
-    })
+        target.gpu.destroy_buffer(buffer);
+    }
+
+    fn destroy(&mut self, gpu: &mut VulkanGpu) {
+        if let Some(texture) = self.texture.take() {
+            gpu.destroy_texture(texture);
+        }
+        self.destroyed.set(self.destroyed.get() + 1);
+    }
+}
+
+fn quarter_overlay(calls: Rc<Cell<u32>>, sizes: Rc<RefCell<Vec<Size>>>) -> QuarterOverlay {
+    QuarterOverlay { calls, sizes, ..QuarterOverlay::default() }
 }
 
 /// Checks a frame the quarter overlay drew over: the overlay's color in the
@@ -664,7 +643,6 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
     let Some(backend) = surface_backend(size, true) else {
         return;
     };
-    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let (calls, sizes) = (Rc::new(Cell::new(0)), Rc::new(RefCell::new(Vec::new())));
     let (clear, blue, green) = (color(0.2, 0.2, 0.2), color(0.0, 0.0, 1.0), color(0.0, 1.0, 0.0));
@@ -676,7 +654,9 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
 
     // With one, every frame has it over the scene, read back or not, and
     // after a resize too.
-    backend.set_overlay(Some(quarter_overlay(Rc::clone(&calls), Rc::clone(&sizes))));
+    let overlay = quarter_overlay(Rc::clone(&calls), Rc::clone(&sizes));
+    let destroyed = Rc::clone(&overlay.destroyed);
+    backend.set_overlay(Some(Box::new(overlay)));
     let image = render_frame(&backend, Some(&scene), set(green), clear, true).unwrap();
     check_overlaid(&image, size, green, clear, "overlay");
     render_frame(&backend, Some(&scene), set(blue), clear, false);
@@ -695,13 +675,18 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
     let image = render_frame(&backend, None, Change::default(), clear, true).unwrap();
     check_overlaid(&image, size, clear, clear, "overlay over the clear color");
 
-    // Another overlay replaces it, and none stops it.
+    // Another overlay replaces it, and none stops it. Each destroys what it
+    // made once, when it goes.
     let (other_calls, other_sizes) = (Rc::new(Cell::new(0)), Rc::new(RefCell::new(Vec::new())));
-    backend.set_overlay(Some(quarter_overlay(Rc::clone(&other_calls), other_sizes)));
+    let other = quarter_overlay(Rc::clone(&other_calls), other_sizes);
+    let other_destroyed = Rc::clone(&other.destroyed);
+    backend.set_overlay(Some(Box::new(other)));
+    assert_eq!(destroyed.get(), 1);
     let image = render_frame(&backend, Some(&scene), set(blue), clear, true).unwrap();
     check_overlaid(&image, size, blue, clear, "second overlay");
     assert_eq!((calls.get(), other_calls.get()), (5, 1));
     backend.set_overlay(None);
+    assert_eq!((destroyed.get(), other_destroyed.get()), (1, 1));
     let image = render_frame(&backend, Some(&scene), set(green), clear, true).unwrap();
     check_halves(&image, size, green, clear, "overlay removed");
     assert_eq!((calls.get(), other_calls.get()), (5, 1));
@@ -712,13 +697,15 @@ fn dropped_with_frames_in_flight_then_made_again() {
     let size = Size::new(48, 24);
     let (clear, red, green) = (color(0.0, 0.0, 0.4), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
     let set = |color: Color| Change { color: Some(color), right: Some(false) };
+    let destroyed;
     {
         let Some(backend) = surface_backend(size, false) else {
             return;
         };
-        let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
         let scene = Scene::new(&backend);
-        backend.set_overlay(Some(quarter_overlay(Rc::default(), Rc::default())));
+        let overlay = quarter_overlay(Rc::default(), Rc::default());
+        destroyed = Rc::clone(&overlay.destroyed);
+        backend.set_overlay(Some(Box::new(overlay)));
         // Nothing waits for these frames, a resize among them; the
         // overlay, its texture and the scene go with the backend.
         for frame in 0..5 {
@@ -731,6 +718,7 @@ fn dropped_with_frames_in_flight_then_made_again() {
         backend.request_readback();
         drop(scene);
     }
+    assert_eq!(destroyed.get(), 1, "the overlay goes with its target");
 
     // A backend dropped before it drew anything.
     drop(surface_backend(size, true));
@@ -739,7 +727,6 @@ fn dropped_with_frames_in_flight_then_made_again() {
     let Some(backend) = surface_backend(size, true) else {
         return;
     };
-    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let image = render_frame(&backend, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, red, clear, "second backend");
@@ -758,7 +745,6 @@ fn a_new_target_on_the_backend_presents() {
         return;
     };
     let backend = Rc::clone(&window.backend);
-    let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
     let scene = Scene::new(&window);
     let (clear, red, green) = (color(0.4, 0.4, 0.4), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
     let set = |color: Color| Change { color: Some(color), right: Some(true) };
@@ -798,7 +784,6 @@ fn readback_is_of_the_frame_asked_for() {
     let Some(backend) = surface_backend(size, true) else {
         return;
     };
-    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let (first, second, third) = (color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0), color(0.0, 0.0, 1.0));
     // No frame is read without a request.
     assert!(backend.take_readback().is_none());

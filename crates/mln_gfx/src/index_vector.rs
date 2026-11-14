@@ -1,22 +1,12 @@
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
 
-/// A backend buffer attached to a shared index vector.
-pub trait IndexBufferBase: Any {}
+use crate::buffer::BufferPtr;
 
-impl dyn IndexBufferBase {
-    /// The concrete type behind this trait object, if it is a `T`.
-    pub fn downcast_ref<T: IndexBufferBase>(&self) -> Option<&T> {
-        let any: &dyn Any = self;
-        any.downcast_ref()
-    }
-}
-
-/// Indexes for a draw, and the backend buffer they were uploaded to.
+/// Indexes for a draw, and the buffer they were uploaded to.
 /// `emplace_back_group` appends whole primitives of a draw mode.
 #[derive(Default)]
 pub struct IndexVectorBase {
@@ -25,15 +15,15 @@ pub struct IndexVectorBase {
     /// then.
     #[cfg(target_family = "wasm")]
     host: Option<HostBytes>,
-    buffer: Option<Box<dyn IndexBufferBase>>,
+    buffer: Option<BufferPtr>,
     dirty: bool,
     released: bool,
     /// The element count of the CPU data freed after upload.
     freed_count: usize,
 }
 
-/// A shared index vector. The upload pass attaches the buffer through the
-/// shared handle, hence the `RefCell`.
+/// A shared index vector. An upload attaches the buffer through the shared
+/// handle, hence the `RefCell`.
 pub type IndexVectorBasePtr = Rc<RefCell<IndexVectorBase>>;
 
 impl IndexVectorBase {
@@ -60,7 +50,7 @@ impl IndexVectorBase {
     }
 
     /// Port-only: a released vector of the indexes in a JS array, which the
-    /// upload pass writes to the GPU from there. Released, it frees them once
+    /// upload writes to the GPU from there. Released, it frees them once
     /// it is uploaded, so no buffer is ever updated from them.
     #[cfg(target_family = "wasm")]
     #[must_use]
@@ -94,10 +84,10 @@ impl IndexVectorBase {
     }
 
     #[must_use]
-    pub fn get_buffer(&self) -> Option<&dyn IndexBufferBase> {
-        self.buffer.as_deref()
+    pub fn get_buffer(&self) -> Option<&BufferPtr> {
+        self.buffer.as_ref()
     }
-    pub fn set_buffer(&mut self, value: Option<Box<dyn IndexBufferBase>>) {
+    pub fn set_buffer(&mut self, value: Option<BufferPtr>) {
         self.buffer = value;
     }
     #[must_use]

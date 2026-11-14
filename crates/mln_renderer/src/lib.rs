@@ -7,6 +7,9 @@ mod bucket_geometry;
 mod bucket_parameters;
 mod buckets;
 mod change_request;
+mod clip_masks;
+mod drawable;
+mod drawable_builder;
 mod frame_projection;
 mod geometry;
 mod gfx;
@@ -52,6 +55,7 @@ pub mod update_slot;
 pub mod util;
 
 pub use frame_projection::{ClipDepthRange, FrameProjection};
+pub use gfx::context::Stats;
 pub(crate) use paint_property_binder::paint_property_binders;
 pub use renderer::{RenderTimings, Renderer};
 pub use renderer_event::{

@@ -6,8 +6,8 @@
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
 > this crate as `mln_rs::mln_webgpu`.
 
-Ports the C++ WebGPU backend (`src/mln/webgpu`, its shaders and the headless
-backend) onto the `wgpu` crate.
+The WebGPU backend, on the `wgpu` crate, natively and in the browser: its `Gpu`,
+its WGSL shaders, and the targets that frames draw into.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

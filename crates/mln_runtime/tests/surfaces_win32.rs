@@ -221,23 +221,25 @@ fn a_minimized_window_takes_no_session_and_no_frames_on_each_backend() {
 #[cfg(feature = "vulkan")]
 fn vulkan_frame(backend: &mln_vulkan::RendererBackend, target: &mln_vulkan::SurfaceTarget) -> Option<mln_gfx::Handoff> {
     use mln_gfx::FrameTarget as _;
-    use mln_gfx::render_pass::RenderPassDescriptor;
+    use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, Pass};
     use mln_gfx::renderer_backend::RendererBackend as _;
 
-    let _scope = mln_gfx::BackendScope::new(backend, mln_gfx::ScopeType::Explicit);
     let image = target.begin_frame()?;
-    let context = backend.get_context();
-    context.begin_frame();
-    let encoder = context.create_command_encoder();
-    let descriptor = RenderPassDescriptor {
-        target: &*image,
-        clear_color: Some(mln_util::Color::new(1.0, 0.0, 0.0, 1.0)),
-        clear_depth: Some(1.0),
-        clear_stencil: Some(0),
+    let pass = Pass {
+        label: "frame".to_owned(),
+        color: Some(ColorAttachment {
+            texture: image.color,
+            load: LoadOp::Clear(mln_util::Color::new(1.0, 0.0, 0.0, 1.0)),
+        }),
+        depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
+            texture,
+            depth: LoadOp::Clear(1.0),
+            stencil: LoadOp::Clear(0),
+        }),
+        commands: Vec::new(),
     };
-    drop(encoder.create_render_pass("frame", &descriptor));
-    let handoff = target.end_frame(&*encoder);
-    context.end_frame();
+    backend.gpu().submit(&[pass]).ok()?;
+    let handoff = target.end_frame();
     Some(handoff)
 }
 

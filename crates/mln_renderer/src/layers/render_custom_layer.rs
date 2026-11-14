@@ -1,26 +1,20 @@
-// Differences from C++:
+// How a custom layer differs from the others:
 // - The host's prerender runs in a step of its own after the layer groups
 //   upload (`RenderLayer::prerender`), not in `update`, so it gets the frame's
 //   final projection, whose depth range depends on how many layer groups the
 //   frame has.
-// - The drawable is a type of its own whose `draw` lends the backend's live
-//   pass to the host (`gfx::RenderPass::lend_to_custom_layer`), which resets
-//   the pass's cached state after it; C++ adds a tweaker to an empty drawable.
+// - The layer group is of a kind of its own, whose `render` lends the
+//   frame's pass to the host (`PaintParameters::lend_pass`, through
+//   `Gpu::lend_to_custom_layer`).
 // - A host that drew is told the renderer stopped once the layer leaves it,
-//   after the GPU finished the host's work (`gfx::Context::finish`), or that
+//   after the GPU finished the host's work (`Gpu::finish`), or that
 //   its graphics objects are lost (`Renderer::lose_custom_layers`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::drawable::{self, DrawableBase, UniqueDrawSegment};
-use mln_gfx::index_vector::IndexVectorBasePtr;
-use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
-use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::uniform_buffer::UniformBufferArray;
-use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
-use mln_gfx::{AttributeDataType, Context, DrawMode, ShaderRegistry};
+use mln_gfx::{RendererBackend, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
@@ -30,8 +24,11 @@ use mln_style::layers::{
     CustomLayerRenderParameters,
 };
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_util::logging::{Event, Log};
 
 use crate::change_request::UniqueChangeRequestVec;
+use crate::gfx::context::Context;
+use crate::layer_group::{LayerGroup, LayerGroupKind};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
 use crate::render_pass::RenderPass;
@@ -46,9 +43,9 @@ struct Shared {
     /// Whether a callback ran since the renderer took the host, which then
     /// has to hear that the renderer stopped.
     used: Cell<bool>,
-    /// The context of the frame the host last prerendered for, to wait for
+    /// The backend of the frame the host last prerendered for, to wait for
     /// its work.
-    context: RefCell<Option<Rc<dyn Context>>>,
+    backend: RefCell<Option<Rc<dyn RendererBackend>>>,
 }
 
 impl Shared {
@@ -60,15 +57,18 @@ impl Shared {
     /// finished its work, or that its graphics objects are lost.
     fn end(&self, lost: bool) {
         let Some(host) = self.host.borrow_mut().take() else { return };
-        let context = self.context.borrow_mut().take();
+        let backend = self.backend.borrow_mut().take();
         if !self.used.replace(false) {
             return;
         }
         if lost {
             host.context_lost();
         } else {
-            if let Some(context) = context {
-                context.finish();
+            // The host frees what it drew with once the GPU is done with it.
+            if let Some(backend) = backend
+                && let Err(error) = backend.gpu().finish()
+            {
+                Log::error(Event::Render, format!("Waiting for a custom layer's frames failed: {error}"));
             }
             host.deinitialize();
         }
@@ -92,7 +92,7 @@ impl RenderCustomLayer {
                 host: RefCell::new(host),
                 frame: Cell::new(None),
                 used: Cell::new(false),
-                context: RefCell::new(None),
+                backend: RefCell::new(None),
             }),
         }
     }
@@ -154,7 +154,7 @@ impl RenderLayer for RenderCustomLayer {
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
-        context: &dyn Context,
+        _context: &Context,
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -162,37 +162,24 @@ impl RenderLayer for RenderCustomLayer {
         changes: &mut UniqueChangeRequestVec,
     ) {
         if self.base.layer_group.is_none() {
-            match context.create_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 1,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
-        }
-        let Some(layer_group) = self.base.layer_group.clone() else { return };
-        let mut group = layer_group.borrow_mut();
-        if group.get_drawable_count() == 0
-            && let Some(group) = group.as_layer_group_mut()
-        {
-            group.add_drawable(Box::new(CustomDrawable::new(self.get_id().to_owned(), Rc::clone(&self.shared))));
+            let kind = LayerGroupKind::Custom(CustomLayerDraw { shared: Rc::clone(&self.shared) });
+            self.set_layer_group(Some(LayerGroup::new(self.base.layer_index, self.get_id(), kind)), changes);
         }
     }
 
-    fn prerender(&mut self, parameters: &PaintParameters<'_>, target: &dyn mln_gfx::DrawTarget) {
+    fn prerender(&mut self, parameters: &PaintParameters<'_>) {
         let Some(frame) = parameters.custom_layer_frame else {
             return;
         };
         self.shared.frame.set(Some(frame));
-        self.shared.context.replace(Some(Rc::clone(parameters.backend.get_context_ptr())));
+        self.shared.backend.replace(Some(Rc::clone(parameters.context.backend())));
         let Some(host) = self.shared.host() else { return };
-        let Some(encoder) = parameters.encoder.as_deref() else { return };
-        let lent = encoder.lend_to_custom_layer(target, &mut |encoder| {
+        let lent = parameters.context.gpu().lend_to_custom_layer(None, &mut |encoder| {
             host.prerender(&mut CustomLayerPrerenderParameters { encoder, frame: &frame });
         });
-        if lent {
-            self.shared.used.set(true);
+        match lent {
+            Ok(()) => self.shared.used.set(true),
+            Err(error) => Log::error(Event::Render, format!("Lending a custom layer the commands failed: {error}")),
         }
     }
 
@@ -201,62 +188,31 @@ impl RenderLayer for RenderCustomLayer {
     }
 }
 
-/// The drawable of a custom layer: drawing it lends the live pass to the
-/// host.
-struct CustomDrawable {
-    base: DrawableBase,
+/// What a custom layer's layer group draws: in the translucent pass, it
+/// lends the live pass to the host.
+pub(crate) struct CustomLayerDraw {
     shared: Rc<Shared>,
-    uniform_buffers: UniformBufferArray,
 }
 
-impl CustomDrawable {
-    fn new(name: String, shared: Rc<Shared>) -> Self {
-        let mut base = DrawableBase::new(name);
-        base.render_pass = RenderPass::Translucent;
-        CustomDrawable { base, shared, uniform_buffers: UniformBufferArray::new() }
-    }
-}
-
-impl drawable::Drawable for CustomDrawable {
-    fn base(&self) -> &DrawableBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut DrawableBase {
-        &mut self.base
-    }
-
-    fn draw(&mut self, parameters: &mut dyn GfxPaintParameters) {
-        let parameters: &dyn GfxPaintParameters = parameters;
-        let (Some(host), Some(frame), Some(render_pass)) =
-            (self.shared.host(), self.shared.frame.get(), parameters.render_pass())
-        else {
+impl CustomLayerDraw {
+    pub(crate) fn render(&self, parameters: &PaintParameters<'_>) {
+        if parameters.pass != RenderPass::Translucent {
+            return;
+        }
+        let (Some(host), Some(frame)) = (self.shared.host(), self.shared.frame.get()) else {
             return;
         };
         let layer_depth = f64::from(parameters.layer_depth());
-        let lent = render_pass.lend_to_custom_layer(&mut |pass| {
+        let lent = parameters.lend_pass(&mut |pass| {
             host.render(&mut CustomLayerRenderParameters { pass, frame: &frame, layer_depth });
         });
-        if lent {
-            self.shared.used.set(true);
+        match lent {
+            Ok(lent) => {
+                if lent {
+                    self.shared.used.set(true);
+                }
+            }
+            Err(error) => Log::error(Event::Render, format!("Lending a custom layer the pass failed: {error}")),
         }
-    }
-
-    fn update_vertex_attributes(
-        &mut self,
-        _vertices: Option<VertexAttributeArrayPtr>,
-        _vertex_count: usize,
-        _mode: DrawMode,
-        _indexes: Option<IndexVectorBasePtr>,
-        _segments: &[SegmentBase],
-    ) {
-    }
-
-    fn set_vertices(&mut self, _data: Vec<u8>, _count: usize, _type: AttributeDataType) {}
-
-    fn set_index_data(&mut self, _indexes: Option<IndexVectorBasePtr>, _segments: Vec<UniqueDrawSegment>) {}
-
-    fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {
-        &mut self.uniform_buffers
     }
 }

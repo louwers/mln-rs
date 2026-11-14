@@ -1,19 +1,19 @@
 use std::rc::Rc;
 
-use mln_gfx::UploadPass;
 use mln_style::layer;
 use mln_style_types::image::ImagePosition;
 
 use crate::bucket::BucketPtr;
+use crate::gfx::context::Context;
 use crate::render_layer::LayerRenderData;
 use crate::render_source::SourcePrepareParameters;
 
-/// The glyph and icon (+ pattern) atlas textures of a tile. The upload pass
-/// sets them through the shared pointer, hence the `RefCell`.
+/// The glyph and icon (+ pattern) atlas textures of a tile. The frame's
+/// upload sets them through the shared pointer, hence the `RefCell`.
 #[derive(Default)]
 pub(crate) struct TileAtlasTextures {
-    pub(crate) glyph: std::cell::RefCell<Option<mln_gfx::texture2d::Texture2DPtr>>,
-    pub(crate) icon: std::cell::RefCell<Option<mln_gfx::texture2d::Texture2DPtr>>,
+    pub(crate) glyph: std::cell::RefCell<Option<crate::gfx::texture2d::Texture2DPtr>>,
+    pub(crate) icon: std::cell::RefCell<Option<crate::gfx::texture2d::Texture2DPtr>>,
 }
 
 impl std::fmt::Debug for TileAtlasTextures {
@@ -47,7 +47,7 @@ pub(crate) trait TileRenderData {
         None
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {}
+    fn upload(&self, _context: &Context) {}
 
     /// symbols: the tile's feature index (C++ `GeometryTile::getFeatureIndex`,
     /// reached through `RenderSource::getRenderedTile` in
@@ -86,9 +86,9 @@ impl TileRenderData for SharedBucketTileRenderData {
         self.bucket.as_ref()
     }
 
-    fn upload(&self, upload_pass: &dyn UploadPass) {
+    fn upload(&self, context: &Context) {
         if let Some(bucket) = &self.bucket {
-            bucket.upload(upload_pass);
+            bucket.upload(context);
         }
     }
 }

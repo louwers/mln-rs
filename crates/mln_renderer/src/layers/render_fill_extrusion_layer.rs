@@ -10,7 +10,6 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::drawable_tweaker::DrawableTweakerPtr;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::segment::SegmentBase;
@@ -21,10 +20,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, DrawableBuilder, ShaderRegistry,
-    UniqueDrawableBuilder,
-};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
@@ -39,17 +35,18 @@ use mln_style_types::AlignmentType;
 use mln_util::identity::SimpleIdentity;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
-use super::{
-    TileDrawables, drawable_binders_slot, drawable_has_layer_tweaker, drawable_render_tile_slot, shared_vertices,
-};
+use super::{DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_layer_tweaker, shared_vertices};
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutVertex, FillExtrusionStaticVertex,
 };
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
+use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
+use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{CaptureView, RenderLayer, RenderLayerBase, Stats, vertex_color_alpha};
@@ -193,24 +190,18 @@ fn read_paint_properties(
 
 /// The builder of a tile's depth pass or color pass drawables.
 fn create_builder(
-    context: &dyn Context,
-    shader: &mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr,
+    shader: &mln_gfx::shaders::shader_program::ShaderProgramPtr,
     enable_color: bool,
-    tweaker: Option<&DrawableTweakerPtr>,
 ) -> UniqueDrawableBuilder {
-    let mut builder = context.create_drawable_builder();
+    let mut builder = DrawableBuilder::boxed();
     builder.set_shader(Some(Rc::clone(shader)));
     builder.set_is_3d(true);
-    builder.set_enable_color(enable_color);
     if enable_color {
         builder.set_color_mode(&ColorMode::alpha_blended());
     }
     builder.set_render_pass(RenderPass::Translucent);
-    builder.set_cull_face_mode(&CullFaceMode::back_ccw());
+    builder.set_cull_face_mode(CullFaceMode::back_ccw());
     builder.set_draw_priority(i64::from(enable_color));
-    if let Some(tweaker) = tweaker {
-        builder.add_tweaker(Rc::clone(tweaker));
-    }
     builder
 }
 
@@ -325,7 +316,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        _context: &Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -345,14 +336,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
         // Set up a layer group
         if self.base.layer_group.is_none() {
-            match context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
+            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -368,17 +352,16 @@ impl RenderLayer for RenderFillExtrusionLayer {
         let layer_tweaker = self.base.layer_tweaker.clone();
 
         if self.fill_extrusion_group.is_none() {
-            self.fill_extrusion_group = shaders.get_shader_group("FillExtrusionShader");
+            self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
         }
         if self.fill_extrusion_pattern_group.is_none() {
-            self.fill_extrusion_pattern_group = shaders.get_shader_group("FillExtrusionPatternShader");
+            self.fill_extrusion_pattern_group = shaders.shader_group("FillExtrusionPatternShader");
         }
         if self.fill_extrusion_instanced_group.is_none() {
-            self.fill_extrusion_instanced_group = shaders.get_shader_group("FillExtrusionInstancedShader");
+            self.fill_extrusion_instanced_group = shaders.shader_group("FillExtrusionInstancedShader");
         }
         if self.fill_extrusion_pattern_instanced_group.is_none() {
-            self.fill_extrusion_pattern_instanced_group =
-                shaders.get_shader_group("FillExtrusionPatternInstancedShader");
+            self.fill_extrusion_pattern_instanced_group = shaders.shader_group("FillExtrusionPatternInstancedShader");
         }
 
         let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
@@ -387,13 +370,12 @@ impl RenderLayer for RenderFillExtrusionLayer {
         let draw_pass = RenderPass::Translucent;
 
         {
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             let base = &self.base;
             tile_layer_group.remove_drawables_if(|drawable| {
                 // If the render pass has changed or the tile has dropped out
                 // of the cover set, remove it.
-                let tile_id = drawable.get_tile_id();
+                let tile_id = drawable.tile_id;
                 !drawable.has_render_pass(draw_pass)
                     || tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
@@ -418,9 +400,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
         };
 
         {
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
-            tile_layer_group.set_stencil_tiles(Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect())));
+            let mut tile_layer_group = layer_group.borrow_mut();
+            tile_layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
         }
 
         let static_vertices = Rc::clone(
@@ -457,13 +438,12 @@ impl RenderLayer for RenderFillExtrusionLayer {
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
-            let mut tweaker: Option<DrawableTweakerPtr> = None;
             for builder in
                 [&mut depth_builder, &mut color_builder, &mut instanced_depth_builder, &mut instanced_color_builder]
                     .into_iter()
                     .flatten()
             {
-                builder.clear_tweakers();
+                builder.set_atlases(None);
             }
 
             let vertex_count = bucket.vertices.len();
@@ -481,7 +461,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             }
 
             // If we already have drawables for this tile, update them.
-            let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
+            let update_existing = |drawable: &mut crate::drawable::Drawable| {
                 // A drawable produced on a previous style/bucket should not
                 // be updated.
                 drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref())
@@ -498,7 +478,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 &binders.interleaved_vertex_buffer,
                 binders.depends_on_feature_state(),
             );
-            let vertex_attrs = context.create_vertex_attribute_array();
+            let vertex_attrs = VertexAttributeArray::new_ptr();
             read_paint_properties(
                 &mut vertex_attrs.borrow_mut(),
                 binders,
@@ -506,7 +486,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 &paint,
                 &mut properties_as_uniforms,
             );
-            let instance_attrs = context.create_vertex_attribute_array();
+            let instance_attrs = VertexAttributeArray::new_ptr();
             read_paint_properties(
                 &mut instance_attrs.borrow_mut(),
                 binders,
@@ -516,18 +496,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
             );
 
             let variant = self.base.projection_variant;
-            let Some(shader) = shader_group.get_or_create_shader(context, &properties_as_uniforms, variant, "a_pos")
-            else {
-                continue;
-            };
-            let Some(instanced_shader) = instanced_shader_group.get_or_create_shader(
-                context,
-                &instance_properties_as_uniforms,
-                variant,
-                "a_pos",
-            ) else {
-                continue;
-            };
+            let shader = shader_group.shader(&properties_as_uniforms, variant);
+            let instanced_shader = instanced_shader_group.shader(&instance_properties_as_uniforms, variant);
 
             // The non-pattern path in `render()` only uses two-pass
             // rendering if there's translucency. The pattern path always
@@ -535,23 +505,20 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let do_depth_pass = !opaque || has_pattern;
 
             if do_depth_pass && depth_builder.is_none() {
-                depth_builder = Some(create_builder(context, &shader, false, tweaker.as_ref()));
+                depth_builder = Some(create_builder(&shader, false));
             }
             if color_builder.is_none() {
-                color_builder = Some(create_builder(context, &shader, true, tweaker.as_ref()));
+                color_builder = Some(create_builder(&shader, true));
             }
             if do_depth_pass && instanced_depth_builder.is_none() {
-                instanced_depth_builder = Some(create_builder(context, &instanced_shader, false, tweaker.as_ref()));
+                instanced_depth_builder = Some(create_builder(&instanced_shader, false));
             }
             if instanced_color_builder.is_none() {
-                instanced_color_builder = Some(create_builder(context, &instanced_shader, true, tweaker.as_ref()));
+                instanced_color_builder = Some(create_builder(&instanced_shader, true));
             }
 
-            if has_pattern
-                && tweaker.is_none()
-                && let Some(atlases) = tile.get_atlas_textures()
-            {
-                let new_tweaker: DrawableTweakerPtr = Rc::new(DrawableAtlasesTweaker::new(
+            if has_pattern && let Some(atlases) = tile.get_atlas_textures() {
+                let atlases = Rc::new(DrawableAtlasesTweaker::new(
                     Some(Rc::clone(atlases)),
                     None,
                     Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
@@ -566,11 +533,9 @@ impl RenderLayer for RenderFillExtrusionLayer {
                         .into_iter()
                         .flatten()
                 {
-                    builder.add_tweaker(Rc::clone(&new_tweaker));
+                    builder.set_atlases(Some(Rc::clone(&atlases)));
                 }
-                tweaker = Some(new_tweaker);
             }
-            let _ = &tweaker;
 
             let vertices = bucket_vertices(geometry, bucket, &bucket.vertices);
             let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
@@ -600,7 +565,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 builder.set_vertex_attributes(Some(vertex_attrs));
             }
 
-            let instance_vertex_attrs = context.create_vertex_attribute_array();
+            let instance_vertex_attrs = VertexAttributeArray::new_ptr();
             {
                 let static_stride = size_of::<FillExtrusionStaticVertex>() as u32;
                 let mut attrs = instance_vertex_attrs.borrow_mut();
@@ -658,21 +623,20 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
             let triangles = bucket_indexes(geometry, bucket, &bucket.triangles);
             let instance_segments = [RenderStaticData::fill_extrusion_segment(vertex_count.saturating_sub(1))];
-            let finish = |builder: &mut dyn DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
+            let finish = |builder: &mut DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
                 builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(indexes)), segments);
 
-                builder.flush(context);
+                builder.flush();
 
-                let mut group = layer_group.borrow_mut();
-                let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+                let mut tile_layer_group = layer_group.borrow_mut();
                 for mut drawable in builder.clear_drawables() {
-                    drawable.set_tile_id(tile_id);
-                    drawable.set_type(usize::from(has_pattern));
-                    drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                    drawable.set_binders(drawable_binders_slot(&render_data.bucket, &layer_id));
-                    drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
+                    drawable.tile_id = Some(tile_id);
+                    drawable.type_ = usize::from(has_pattern);
+                    drawable.layer_tweaker = layer_tweaker.clone();
+                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &layer_id));
+                    drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
 
-                    tile_layer_group.add_drawable(draw_pass, &tile_id, drawable);
+                    tile_layer_group.add_tile_drawable(draw_pass, &tile_id, drawable);
                 }
             };
             let (depth, instanced_depth) =

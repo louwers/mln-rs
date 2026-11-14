@@ -11,13 +11,12 @@
 
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use glow::HasContext;
 use khronos_egl as egl;
-use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::export::Generations;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::{
     ConsumerSync, ExportKind, ExportKinds, ExportedFrame, ExportedRing, FrameDepth, NativeTexture, SyncKind, SyncKinds,
 };
@@ -26,9 +25,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
-use crate::context::Context;
 use crate::device::Device;
-use crate::renderer_backend::RendererBackend;
+use crate::renderer_backend::{GlContext, RendererBackend};
 use crate::types::{FramebufferID, TextureID};
 
 #[cfg(not(target_os = "android"))]
@@ -205,7 +203,7 @@ struct SlotTexture {
 
 /// A generation's GL objects and images, which go with it.
 struct Objects {
-    context: std::rc::Weak<Context>,
+    context: Weak<GlContext>,
     exporter: std::sync::Arc<Exporter>,
     slots: Vec<SlotTexture>,
     /// The texture that frames render into, and the framebuffer that their
@@ -216,26 +214,39 @@ struct Objects {
     canvas_depth: Option<TextureID>,
 }
 
+/// Deletes `texture`, of `context`, which is current. GL keeps it while the
+/// commands submitted so far use it.
+fn delete_texture(context: &GlContext, texture: TextureID) {
+    context.state().forget_texture(texture);
+    // SAFETY: the caller's contract, and the texture is alive.
+    unsafe { context.gl().delete_texture(texture) };
+}
+
+/// Deletes `framebuffer`, of `context`, which is current.
+fn delete_framebuffer(context: &GlContext, framebuffer: FramebufferID) {
+    context.state().forget_framebuffer(framebuffer);
+    // SAFETY: the caller's contract, and the framebuffer is alive.
+    unsafe { context.gl().delete_framebuffer(framebuffer) };
+}
+
 impl Drop for Objects {
     fn drop(&mut self) {
         let context = self.context.upgrade();
-        if let Some((texture, framebuffer)) = self.canvas.take()
-            && let Some(context) = &context
-        {
-            context.abandon_framebuffer(framebuffer);
-            context.abandon_texture(texture);
+        let _current = context.as_ref().map(GlContext::enter);
+        let context = context.as_deref();
+        if let (Some((texture, framebuffer)), Some(context)) = (self.canvas.take(), context) {
+            delete_framebuffer(context, framebuffer);
+            delete_texture(context, texture);
         }
-        if let Some(texture) = self.canvas_depth.take()
-            && let Some(context) = &context
-        {
-            context.abandon_texture(texture);
+        if let (Some(texture), Some(context)) = (self.canvas_depth.take(), context) {
+            delete_texture(context, texture);
         }
         for slot in self.slots.drain(..) {
-            if let Some(context) = &context {
-                context.abandon_framebuffer(slot.framebuffer);
-                context.abandon_texture(slot.texture);
+            if let Some(context) = context {
+                delete_framebuffer(context, slot.framebuffer);
+                delete_texture(context, slot.texture);
                 if let Some(depth) = slot.depth {
-                    context.abandon_texture(depth);
+                    delete_texture(context, depth);
                 }
             }
             // The image is the generation's, of its display; a texture over
@@ -259,7 +270,6 @@ struct Generation {
 }
 
 impl Generation {
-    /// Call it with the backend's context current.
     fn new(
         backend: &Rc<RendererBackend>,
         exporter: &std::sync::Arc<Exporter>,
@@ -268,9 +278,10 @@ impl Generation {
         size: Size,
         keep_depth: bool,
     ) -> Result<Generation, Error> {
-        let context = backend.gl_context().ok_or_else(|| Error::native("the OpenGL backend has no context"))?;
+        let context = backend.context();
+        let _current = context.enter();
         let mut objects = Objects {
-            context: context.weak(),
+            context: Rc::downgrade(context),
             exporter: std::sync::Arc::clone(exporter),
             slots: Vec::new(),
             canvas: None,
@@ -279,8 +290,8 @@ impl Generation {
         let gl = context.gl();
         let state = context.state();
         let framebuffer_of = |texture: TextureID| -> Result<FramebufferID, Error> {
-            // SAFETY: the context is current (the caller's), and the
-            // framebuffer is new; the state's cache sees each binding.
+            // SAFETY: the context is current, and the framebuffer is new; the
+            // state's cache sees each binding.
             unsafe {
                 let framebuffer = gl.create_framebuffer().map_err(Error::native)?;
                 state.bind_framebuffer(gl, Some(framebuffer));
@@ -294,7 +305,7 @@ impl Generation {
                 let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
                 state.bind_framebuffer(gl, None);
                 if status != glow::FRAMEBUFFER_COMPLETE {
-                    context.abandon_framebuffer(framebuffer);
+                    delete_framebuffer(context, framebuffer);
                     return Err(Error::native(format!(
                         "a {:?} makes no complete framebuffer: status {status:#x}",
                         platform::KIND
@@ -324,7 +335,7 @@ impl Generation {
             let framebuffer = match framebuffer_of(texture) {
                 Ok(framebuffer) => framebuffer,
                 Err(error) => {
-                    context.abandon_texture(texture);
+                    delete_texture(context, texture);
                     images.destroy(image);
                     return Err(error);
                 }
@@ -341,7 +352,7 @@ impl Generation {
                 producer: RefCell::new(None),
             });
             if keep_depth {
-                let depth = depth_texture(&context, framebuffer, size)?;
+                let depth = depth_texture(context, framebuffer, size)?;
                 if let Some(slot) = objects.slots.last_mut() {
                     slot.depth = Some(depth);
                 }
@@ -359,13 +370,13 @@ impl Generation {
         let read = match framebuffer_of(canvas) {
             Ok(read) => read,
             Err(error) => {
-                context.abandon_texture(canvas);
+                delete_texture(context, canvas);
                 return Err(error);
             }
         };
         objects.canvas = Some((canvas, read));
         if keep_depth {
-            objects.canvas_depth = Some(depth_texture(&context, read, size)?);
+            objects.canvas_depth = Some(depth_texture(context, read, size)?);
         }
         let textures = BorrowedTextures {
             textures: vec![canvas.0.get()],
@@ -379,9 +390,9 @@ impl Generation {
     }
 
     /// Copies the canvas into the buffer of `slot`, upside down, with its
-    /// depth and stencil when the slot keeps them. Call it with the context
+    /// depth and stencil when the slot keeps them. Call it with `context`
     /// current.
-    fn blit(&self, context: &Context, slot: usize) -> bool {
+    fn blit(&self, context: &GlContext, slot: usize) -> bool {
         let (Some((_, read)), Some(slot)) = (self.objects.canvas, self.objects.slots.get(slot)) else { return false };
         let gl = context.gl();
         let (width, height) = (self.size.width as i32, self.size.height as i32);
@@ -433,8 +444,7 @@ pub struct ExportedTarget {
 impl ExportedTarget {
     /// A target on `backend`, a renderer of `device`, that draws into
     /// `ring.depth` buffers of `size` pixels, and hands each frame over with
-    /// sync of the kind `producer`, one of [`sync_kinds`]'s. Call it with the
-    /// backend's context current.
+    /// sync of the kind `producer`, one of [`sync_kinds`]'s.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
     /// device can't export `kind`, a ring's layout or `producer`, and with
@@ -484,8 +494,7 @@ impl ExportedTarget {
 
     /// The host gave the frame at `slot` back, once its reads reach
     /// `consumer`: a finished frame, or on Android a sync file, which the
-    /// context's later commands wait for. Call it with the backend's context
-    /// current.
+    /// context's later commands wait for.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
     /// another kind of sync, and with [`ErrorKind::Native`](mln_util::ErrorKind)
@@ -506,6 +515,7 @@ impl ExportedTarget {
             if let Some(file) = consumer.sync_file.filter(|_| kind == SyncKind::SyncFd)
                 && let Some(fences) = &self.exporter.fences
             {
+                let _current = self.backend.context().enter();
                 return fences.wait(file);
             }
         }
@@ -528,7 +538,6 @@ impl ExportedTarget {
     /// Draws into buffers of `size` pixels from now on. The frames that the
     /// host holds, at `held` slots, keep their buffers. Returns whether the
     /// ring has new buffers, which it doesn't when they have `size` already.
-    /// Call it with the backend's context current.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a buffer
     /// can't be made, and the target then keeps its own.
@@ -580,7 +589,9 @@ impl ExportedTarget {
         let (Some(fences), Some(texture)) = (&self.exporter.fences, generation.objects.slots.get(slot)) else {
             return Handoff::Dropped;
         };
-        match fences.signal(self.backend.gl()) {
+        let context = self.backend.context();
+        let _current = context.enter();
+        match fences.signal(context.gl()) {
             Ok(file) => {
                 let handle = file.as_raw_fd() as u64;
                 *texture.producer.borrow_mut() = Some(file);
@@ -595,18 +606,20 @@ impl ExportedTarget {
 }
 
 impl FrameTarget for ExportedTarget {
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
+    fn begin_frame(&self) -> Option<FrameImage> {
         self.generations.borrow().current().target.begin_frame()
     }
 
-    fn end_frame(&self, encoder: &dyn CommandEncoder) -> Handoff {
+    fn end_frame(&self) -> Handoff {
         let slot = self.selected.get();
         let generations = self.generations.borrow();
         let generation = generations.current();
-        let Some(context) = self.backend.gl_context() else { return Handoff::Dropped };
-        if !generation.blit(&context, slot) {
+        let context = self.backend.context();
+        let current = context.enter();
+        if !generation.blit(context, slot) {
             return Handoff::Dropped;
         }
+        drop(current);
         // A sync file signals once the blit is done, without the canvas's
         // frame waiting for it.
         #[cfg(target_os = "android")]
@@ -614,7 +627,7 @@ impl FrameTarget for ExportedTarget {
             return self.hand_over_with_sync_file(generation, slot);
         }
         // The canvas's frame ends, and with it the blit.
-        match generation.target.end_frame(encoder) {
+        match generation.target.end_frame() {
             Handoff::GivenBack { sync, .. } => Handoff::Queued { slot, sync },
             other => other,
         }
@@ -629,8 +642,8 @@ impl Drop for ExportedTarget {
 
 /// A `GL_DEPTH24_STENCIL8` texture of `size`, attached to `framebuffer`: a
 /// canvas's, which frames draw into and blits read, or a slot's, which blits
-/// copy into. Call it with the context current.
-fn depth_texture(context: &Context, framebuffer: FramebufferID, size: Size) -> Result<TextureID, Error> {
+/// copy into. Call it with `context` current.
+fn depth_texture(context: &GlContext, framebuffer: FramebufferID, size: Size) -> Result<TextureID, Error> {
     let gl = context.gl();
     let state = context.state();
     // SAFETY: the context is current (the caller's), and the texture is new;
@@ -653,7 +666,7 @@ fn depth_texture(context: &Context, framebuffer: FramebufferID, size: Size) -> R
         let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
         state.bind_framebuffer(gl, None);
         if status != glow::FRAMEBUFFER_COMPLETE {
-            context.abandon_texture(texture);
+            delete_texture(context, texture);
             return Err(Error::native(format!("a depth texture makes no complete framebuffer: status {status:#x}")));
         }
         Ok(texture)

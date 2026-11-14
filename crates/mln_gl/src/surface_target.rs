@@ -1,34 +1,30 @@
 // The target of a native window: frames presented to an EGL window surface
 // on a Wayland surface, an X11 window, an Android `ANativeWindow` or an
 // OpenHarmony window, from an OpenGL ES 3.0 context of the window's display.
-// After the
-// GLFW app's backend (platform/glfw/glfw_gl_backend.cpp), which gets its
-// context and its buffer swaps from GLFW; here they are EGL's.
 //
-// Port-only, as on the other window backends: an overlay that draws over each
-// frame before it is presented (an app's controls), and a copy of a
-// presented frame.
+// As on the other window backends, an overlay can draw over each frame
+// before it is presented (an app's controls), and a presented frame can be
+// copied.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_ulong, c_void};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use khronos_egl as egl;
-use mln_gfx::command_encoder::CommandEncoder;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::Window;
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
+use mln_gfx::gpu::{Gpu as _, TextureRegion};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::window::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
-use mln_gfx::{BackendScope, ScopeType, Window};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
-use crate::context::Context;
-use crate::draw_target::{DrawTarget, TargetResource};
 use crate::egl::{Egl, library};
+use crate::frame_image::{FrameImports, default_framebuffer};
 use crate::renderer_backend::{PlatformContext, RendererBackend};
 use crate::types::Gl;
 
@@ -495,28 +491,14 @@ struct Presentation {
     readback: RefCell<Option<PremultipliedImage>>,
 }
 
-/// The window's framebuffer.
-struct WindowResource {
-    context: Weak<Context>,
-    size: Rc<Cell<Size>>,
-}
-
-impl TargetResource for WindowResource {
-    fn bind(&self) {
-        if let Some(context) = self.context.upgrade() {
-            context.bind_framebuffer(None, self.size.get(), true);
-        }
-    }
-}
-
 /// Frames presented to a window, from a GL context of the window's own.
 pub struct SurfaceTarget {
     backend: Rc<RendererBackend>,
     window: Rc<EglWindow>,
     presentation: Presentation,
     size: Rc<Cell<Size>>,
-    /// Made with the first frame.
-    image: RefCell<Option<Rc<DrawTarget>>>,
+    /// The frame's default framebuffer, imported into the backend's `GlGpu`.
+    image: FrameImports,
     /// Whether a frame began and hasn't ended. Until it ends, each
     /// `begin_frame` returns its image, as [`FrameTarget`] asks, even when
     /// the window went away in between.
@@ -560,7 +542,7 @@ impl SurfaceTarget {
             window,
             presentation: Presentation::default(),
             size: Rc::new(Cell::new(framebuffer_size)),
-            image: RefCell::new(None),
+            image: FrameImports::default(),
             in_frame: Cell::new(false),
         };
         Ok((backend, target))
@@ -580,7 +562,7 @@ impl SurfaceTarget {
 
     /// Draws `overlay` over each frame from now on, or nothing.
     pub fn set_overlay(&self, overlay: Option<Overlay>) {
-        let _scope = BackendScope::new(&*self.backend, ScopeType::Explicit);
+        let _current = self.backend.context().enter();
         *self.presentation.overlay.borrow_mut() = overlay;
     }
 
@@ -599,45 +581,50 @@ impl FrameTarget for SurfaceTarget {
     /// Takes the window over. A frame begins while the context is current
     /// on the window's surface, and not when EGL makes no surface of the
     /// window or the window went away.
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
+    fn begin_frame(&self) -> Option<FrameImage> {
+        let context = self.backend.context();
+        let _current = context.enter();
         if !self.window.presenting.replace(true) {
             // The context is current without a surface: make it current on
             // the window's.
-            self.backend.activate();
+            context.make_current_again();
         }
         if !self.in_frame.get() && !self.window.on_surface.get() {
             return None;
         }
-        let mut image = self.image.borrow_mut();
-        if image.is_none() {
-            let resource = WindowResource { context: self.backend.gl_context()?.weak(), size: Rc::clone(&self.size) };
-            *image = Some(Rc::new(DrawTarget::new(self.size.get(), Rc::new(resource))));
-        }
-        let image = image.clone()?;
-        image.set_size(self.size.get());
+        let image = self.image.get_or_import(|| default_framebuffer(&self.backend, self.size.get()))?;
         self.in_frame.set(true);
         Some(image)
     }
 
     /// Presents the frame, with the overlay over it. A frame that the window
     /// doesn't take, having gone away, is dropped.
-    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
+    fn end_frame(&self) -> Handoff {
         self.in_frame.set(false);
-        let Some(context) = self.backend.gl_context() else {
+        let Some(image) = self.image.get() else {
             return Handoff::Dropped;
         };
+        let context = self.backend.context();
+        let _current = context.enter();
         let size = self.size.get();
         if let Some(overlay) = self.presentation.overlay.borrow_mut().as_mut() {
-            context.bind_framebuffer(None, size, true);
-            context.set_stencil_mode(&StencilMode::disabled());
-            overlay(&OverlayTarget { gl: context.get_backend().gl_shared(), size });
-            context.set_dirty_state();
+            let (gl, state) = (context.gl(), context.state());
+            state.bind_framebuffer(gl, None);
+            state.set_scissor(gl, None);
+            state.set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
+            state.set_stencil_mode(gl, &StencilMode::disabled());
+            overlay(&OverlayTarget { gl: context.gl_shared(), size });
+            state.set_dirty();
         }
         if self.presentation.readback_requested.replace(false) {
-            context.bind_framebuffer(None, size, true);
-            let image = PremultipliedImage::from_vec(size, context.read_framebuffer(size));
-            *self.presentation.readback.borrow_mut() = Some(image);
+            match self.backend.gpu().read_texels(image.color, TextureRegion::whole(image.size)) {
+                Ok(texels) => {
+                    *self.presentation.readback.borrow_mut() = Some(PremultipliedImage::from_vec(image.size, texels));
+                }
+                Err(error) => Log::error(Event::Render, format!("Reading a window's frame back failed: {error}")),
+            }
         }
+        self.image.release(&self.backend);
         if self.window.swap() { Handoff::Presented } else { Handoff::Dropped }
     }
 }
@@ -648,9 +635,9 @@ impl Drop for SurfaceTarget {
         // surface, unless the window has this context's still.
         self.window.presenting.set(self.window.surface.get().is_some());
         {
-            let _scope = BackendScope::new(&*self.backend, ScopeType::Explicit);
+            let _current = self.backend.context().enter();
             self.presentation.overlay.borrow_mut().take();
-            self.image.borrow_mut().take();
+            self.image.release(&self.backend);
         }
         // The backend's context stays, current without a surface from now on.
         self.window.release_surface();

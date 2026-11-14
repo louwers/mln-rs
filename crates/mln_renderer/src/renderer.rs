@@ -1,25 +1,30 @@
 // C++ keeps a `gfx::RendererBackend&`; the frontend owns the backend, so the
 // renderer shares it through an `Rc`.
 
+use std::collections::BTreeSet;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, Pass};
+use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
-use mln_gfx::{
-    BackendScope, FrameTarget, Handoff, RenderPassDescriptor, RendererBackend, ScissorRect, ScopeType, ShaderRegistry,
-};
+use mln_gfx::{FrameTarget, Handoff, RendererBackend, ScissorRect, ShaderRegistry};
 use mln_map_types::{MapDebugOptions, MapView};
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_util::Color;
+use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
+use crate::clip_masks::ClipMasks;
 use crate::frame_projection::{self, FrameProjection};
-use crate::paint_parameters::PaintParameters;
+use crate::gfx::context::{Context, Stats};
+use crate::layer_tweaker::to_projection_ubo;
+use crate::paint_parameters::{PaintParameters, RecordedPass};
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -55,15 +60,20 @@ pub struct RenderTimings {
 }
 
 pub struct Renderer {
-    /// Dropped by hand in `drop`, inside a `BackendScope`: its layer groups,
-    /// atlases and tiles release graphics objects, which some backends (GL)
-    /// can only do with their context active. A safe `Drop` runs before the
-    /// fields drop, so it can't wrap their drops in the scope otherwise.
+    /// Dropped by hand in `drop`, inside the backend's hold: its custom
+    /// layers' hosts free their graphics objects as the layers go, which on
+    /// GL needs the context current. A safe `Drop` runs before the fields
+    /// drop, so it can't wrap their drops in the hold otherwise.
     orchestrator: ManuallyDrop<RenderOrchestrator>,
     backend: Rc<dyn RendererBackend>,
+    /// What the renderer keeps over the backend's `Gpu`, which goes after
+    /// the resources that `drop` drops first.
+    context: Rc<Context>,
     pixel_ratio: f32,
-    /// Dropped in `drop` inside the `BackendScope`, after the orchestrator.
+    /// Dropped in `drop` inside the hold, after the orchestrator.
     static_data: Option<RenderStaticData>,
+    /// Kept across frames; dropped in `drop` inside the hold.
+    clip_masks: ClipMasks,
     render_state: RenderState,
     frame_count: u64,
     style_loaded: bool,
@@ -89,9 +99,11 @@ impl Renderer {
     ) -> Self {
         Renderer {
             orchestrator: ManuallyDrop::new(RenderOrchestrator::new(true, local_font_family, glyph_cache)),
+            context: Rc::new(Context::new(Rc::clone(&backend))),
             backend,
             pixel_ratio,
             static_data: None,
+            clip_masks: ClipMasks::default(),
             render_state: RenderState::Never,
             frame_count: 0,
             style_loaded: false,
@@ -105,8 +117,6 @@ impl Renderer {
     /// renderer makes its shaders and drawables again, and keeps its
     /// tiles. The host sizes the backend's framebuffer for the new ratio.
     pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
-        let backend = Rc::clone(&self.backend);
-        let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
         if pixel_ratio == self.pixel_ratio {
             return;
         }
@@ -114,6 +124,7 @@ impl Renderer {
         // ratio takes new shaders, and new drawables that use them.
         self.pixel_ratio = pixel_ratio;
         self.static_data = None;
+        self.clip_masks = ClipMasks::default();
         self.orchestrator.release_shaders();
     }
 
@@ -305,10 +316,30 @@ impl Renderer {
         self.orchestrator.visit_render_layers(|layer| layer.lose_context());
     }
 
+    /// Destroys what the renderer released and waits for the GPU, so that
+    /// its work finishes before the app goes to the background, and lets go
+    /// of what the orchestrator caches.
     pub fn reduce_memory_use(&mut self) {
-        let _guard = BackendScope::new(&*self.backend, ScopeType::Explicit);
-        self.backend.get_context().reduce_memory_usage();
+        let _hold = self.backend.hold();
+        self.context.destroy_released();
+        if let Err(error) = self.context.gpu().finish() {
+            Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
+        }
         self.orchestrator.reduce_memory_use();
+    }
+
+    /// The rendering stats, which count the renderer's resources until it
+    /// releases them.
+    #[must_use]
+    pub fn rendering_stats(&self) -> RenderingStats {
+        self.context.stats().get()
+    }
+
+    /// The rendering stats, to read after the renderer goes: what it
+    /// releases as it goes comes off them.
+    #[must_use]
+    pub fn stats(&self) -> Rc<Stats> {
+        Rc::clone(self.context.stats())
     }
 
     pub fn clear_data(&mut self) {
@@ -325,26 +356,26 @@ impl Renderer {
     ) -> Option<Handoff> {
         let start = Instant::now();
         let backend = Rc::clone(&self.backend);
-        let context = backend.get_context();
+        let context = Rc::clone(&self.context);
+        let context = &*context;
+        let _hold = backend.hold();
 
         let image = target.begin_frame()?;
-        context.begin_frame();
+        {
+            let mut stats = context.rendering_stats();
+            stats.num_draw_calls = 0;
+            stats.num_frames += 1;
+        }
 
         if self.static_data.is_none() {
-            let static_data = RenderStaticData::new(Box::new(ShaderRegistry::new()));
-
-            // Initialize shaders for drawables
             let program_parameters = ProgramParameters::new(self.pixel_ratio, false);
-            backend.init_shaders(&static_data.shaders, &program_parameters);
-
-            // Notify post-shader registration
-            self.static_data = Some(static_data);
+            self.static_data = Some(RenderStaticData::new(Box::new(ShaderRegistry::new(&program_parameters))));
         }
 
         let render_tree_parameters = render_tree.get_parameters();
         let static_data = self.static_data.as_mut().expect("static data");
         static_data.has_3d = render_tree_parameters.has_3d;
-        let renderable_size = image.size();
+        let renderable_size = image.size;
 
         if self.render_state == RenderState::Never {
             self.orchestrator.emit(RendererEvent::RenderMapStarted);
@@ -372,7 +403,6 @@ impl Renderer {
         let mut parameters = PaintParameters::new(
             context,
             self.pixel_ratio,
-            &*backend,
             render_tree_parameters.debug_options,
             &render_tree_parameters.transform_params,
             static_data,
@@ -386,21 +416,15 @@ impl Renderer {
         parameters.evaluated_light = render_tree_parameters.light.clone(); // conformance
         parameters.opaque_pass_cutoff = render_tree_parameters.opaque_pass_cut_off;
 
-        // - UPLOAD PASS ---------------------------------------------------
+        // - UPLOAD --------------------------------------------------------
         // Uploads all required buffers and images before we do any actual
         // rendering.
-        {
-            let encoder = parameters.encoder.as_ref().expect("encoder");
-            let upload_pass = encoder.create_upload_pass("upload", &*image);
-
-            // Update all clipping IDs + upload buckets.
-            for item in render_tree.get_source_render_items() {
-                item.upload(&*upload_pass);
-            }
-            static_data.upload(&*upload_pass);
-            parameters.line_atlas.borrow_mut().upload(&*upload_pass);
-            parameters.pattern_atlas.borrow_mut().upload(&*upload_pass); // conformance
+        for item in render_tree.get_source_render_items() {
+            item.upload(context);
         }
+        static_data.upload(context);
+        parameters.line_atlas.borrow_mut().upload(context);
+        parameters.pattern_atlas.borrow_mut().upload(context); // conformance
 
         // - LAYER GROUP UPDATE --------------------------------------------
         // Updates all layer groups and process changes
@@ -417,52 +441,64 @@ impl Renderer {
         orchestrator.process_changes();
         let layers_updated = Instant::now();
 
-        // Upload layer groups
-        {
-            let encoder = parameters.encoder.as_ref().expect("encoder");
-            let upload_pass = encoder.create_upload_pass("layerGroup-upload", &*image);
+        // - LAYER GROUP UPLOAD ----------------------------------------------
+        // Update the debug layer groups
+        orchestrator.update_debug_layer_groups(render_tree, &parameters); // layers: debug
 
-            // Update the debug layer groups
-            orchestrator.update_debug_layer_groups(render_tree, &parameters); // layers: debug
-
-            // Tweakers are run in the upload pass so they can set up
-            // uniforms.
-            parameters.current_layer = 0;
-            for layer_group in orchestrator.layer_groups() {
-                orchestrator.run_tweakers(&layer_group, &parameters);
-                parameters.current_layer += 1;
-            }
-            parameters.current_layer = 0;
-            // layers: debug
-            for layer_group in orchestrator.debug_layer_groups() {
-                orchestrator.run_tweakers(&layer_group, &parameters);
-                parameters.current_layer += 1;
-            }
-
-            // Give the layers a chance to upload
-            orchestrator.visit_layer_groups(|layer_group| layer_group.upload(&*upload_pass));
-            if let Some(globe_depth) = orchestrator.get_globe_depth_layer_group() {
-                globe_depth.borrow_mut().upload(&*upload_pass);
-            }
-            if let Some(sky) = orchestrator.get_sky_layer_group() {
-                sky.borrow_mut().upload(&*upload_pass);
-            }
-            if let Some(atmosphere) = orchestrator.get_atmosphere_layer_group() {
-                atmosphere.borrow_mut().upload(&*upload_pass);
-            }
-
-            // Give the render targets a chance to upload
-            // dem-heatmap
-            for render_target in orchestrator.render_targets() {
-                render_target.borrow().upload(&*upload_pass);
-            }
-
-            // Upload the Debug layer group
-            // layers: debug
-            for layer_group in orchestrator.debug_layer_groups() {
-                layer_group.borrow_mut().upload(&*upload_pass);
-            }
+        // Tweakers run before the layer groups upload, so they can set up
+        // uniforms.
+        parameters.current_layer = 0;
+        for layer_group in orchestrator.layer_groups() {
+            orchestrator.run_tweakers(&layer_group, &parameters);
+            parameters.current_layer += 1;
         }
+        parameters.current_layer = 0;
+        // layers: debug
+        for layer_group in orchestrator.debug_layer_groups() {
+            orchestrator.run_tweakers(&layer_group, &parameters);
+            parameters.current_layer += 1;
+        }
+
+        // Give the layers a chance to upload
+        orchestrator.visit_layer_groups(|layer_group| layer_group.upload(context));
+        if let Some(globe_depth) = orchestrator.get_globe_depth_layer_group() {
+            globe_depth.borrow_mut().upload(context);
+        }
+        if let Some(sky) = orchestrator.get_sky_layer_group() {
+            sky.borrow_mut().upload(context);
+        }
+        if let Some(atmosphere) = orchestrator.get_atmosphere_layer_group() {
+            atmosphere.borrow_mut().upload(context);
+        }
+
+        // Give the render targets a chance to upload
+        // dem-heatmap
+        for render_target in orchestrator.render_targets() {
+            render_target.borrow().upload(context);
+        }
+
+        // Upload the Debug layer group
+        // layers: debug
+        for layer_group in orchestrator.debug_layer_groups() {
+            layer_group.borrow_mut().upload(context);
+        }
+
+        // The masks of the tiles the layer groups clip to and, when any
+        // of them uses the stencil buffer, of the tile that clears it.
+        let mut clip_tiles = BTreeSet::new();
+        orchestrator.visit_layer_groups(|layer_group| {
+            if let Some(tiles) = &layer_group.stencil_tiles {
+                clip_tiles.extend(tiles.iter().copied().chain(parameters.stencil_clear_tile()));
+            }
+        });
+        self.clip_masks.update(
+            context,
+            &static_data.shaders,
+            parameters.state.is_globe_rendering(),
+            &clip_tiles,
+            |tile| to_projection_ubo(&parameters.projection_data_for_tile(tile, false)),
+        );
+        parameters.clip_masks = std::mem::take(&mut self.clip_masks);
 
         let layers_uploaded = Instant::now();
         let atlas_size = parameters.pattern_atlas.borrow().get_pixel_size();
@@ -504,7 +540,7 @@ impl Renderer {
             height: renderable_size.height,
         });
         for item in render_tree.get_layer_render_item_map().values() {
-            item.layer.borrow_mut().prerender(&parameters, &*image);
+            item.layer.borrow_mut().prerender(&parameters);
         }
 
         // - 3D PASS -------------------------------------------------------
@@ -531,7 +567,7 @@ impl Renderer {
         // drawableTargetsPass: draw render targets
         // dem-heatmap
         for render_target in orchestrator.render_targets() {
-            render_target.borrow().render(orchestrator, &mut parameters);
+            render_target.borrow_mut().render(orchestrator, &mut parameters);
         }
 
         // commonClearPass
@@ -544,18 +580,21 @@ impl Renderer {
             } else {
                 render_tree_parameters.background_color
             };
-            let encoder = parameters.encoder.as_ref().expect("encoder");
-            parameters.render_pass = Some(encoder.create_render_pass(
-                "main buffer",
-                &RenderPassDescriptor {
-                    target: &*image,
-                    clear_color: Some(color),
-                    clear_depth: Some(1.0),
-                    clear_stencil: Some(0),
+            *parameters.recorded.borrow_mut() = Some(RecordedPass {
+                pass: Pass {
+                    label: "main buffer".to_owned(),
+                    color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(color) }),
+                    depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
+                        texture,
+                        depth: LoadOp::Clear(1.0),
+                        stencil: LoadOp::Clear(0),
+                    }),
+                    commands: Vec::new(),
                 },
-            ));
+                size: image.size,
+                targets: image.targets,
+            });
         }
-        context.bind_global_uniform_buffers(parameters.render_pass.as_deref().expect("render pass"));
 
         // drawableSkyPass
         if let Some(sky) = orchestrator.get_sky_layer_group() {
@@ -632,26 +671,24 @@ impl Renderer {
             parameters.current_layer += 1;
         }
 
-        // Give the layers a chance to do cleanup
-        orchestrator.visit_layer_groups(|layer_group| layer_group.post_render(&mut parameters));
-        context.unbind_global_uniform_buffers(parameters.render_pass.as_deref().expect("render pass"));
-
-        // Ends the RenderPass
-        parameters.render_pass = None;
-
         let start_rendering = Instant::now();
-        // Ending the frame submits its commands.
-        let handoff = target.end_frame(&**parameters.encoder.as_ref().expect("encoder"));
+        if let Err(error) = parameters.submit() {
+            Log::error(Event::Render, format!("Submitting the frame failed: {error}"));
+        }
+        let handoff = target.end_frame();
+        // The frame read back counts as a framebuffer, as C++'s headless
+        // backend's offscreen texture does.
+        context.rendering_stats().num_frame_buffers = i32::from(handoff == Handoff::ReadBack);
         let submitted = Instant::now();
         context.rendering_stats().rendering_time = (submitted - start_rendering).as_secs_f64();
 
-        parameters.encoder = None;
-        context.end_frame();
+        context.destroy_released();
+        self.clip_masks = std::mem::take(&mut parameters.clip_masks);
 
         let rendering_time = context.rendering_stats().rendering_time;
         context.rendering_stats().encoding_time = render_tree.get_elapsed_time() - rendering_time;
 
-        let mut stats = context.thread_safe_copy_rendering_stats();
+        let mut stats = context.stats().get();
         stats.frame_rendered_features = orchestrator.move_frame_rendered_features();
         let stats = Arc::new(stats);
         drop(parameters);
@@ -687,15 +724,16 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        // `gfx::BackendScope guard{impl->backend}; impl.reset();`
         let backend = Rc::clone(&self.backend);
-        let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
+        let _hold = backend.hold();
         // SAFETY: `orchestrator` is dropped once, here, and nothing reads it
         // afterwards: the remaining fields' drops don't touch it.
-        #[expect(unsafe_code, reason = "drops the orchestrator inside the backend scope; see its field")]
+        #[expect(unsafe_code, reason = "drops the orchestrator inside the backend's hold; see its field")]
         unsafe {
             ManuallyDrop::drop(&mut self.orchestrator);
         }
+        self.clip_masks = ClipMasks::default();
         self.static_data = None;
+        self.context.destroy_released();
     }
 }

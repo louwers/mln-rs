@@ -1,19 +1,19 @@
-// A ring of the host's textures, on the device that renders into them, that
-// frames are drawn into and given back to the host. Both sides submit to the
-// device's one queue, which orders the host's reads after the frame and the
-// next frame after the host's reads.
+//! A ring of the host's textures, on the device that renders into them, that
+//! frames are drawn into and given back to the host. Both sides submit to the
+//! device's one queue, which orders the host's reads after the frame and the
+//! next frame after the host's reads.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use mln_gfx::command_encoder::CommandEncoder as GfxCommandEncoder;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
+use mln_gfx::gpu::{Gpu as _, TargetFormats};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::command_encoder::CommandEncoder;
-use crate::draw_target::{DrawTarget, TargetResource};
+use crate::gpu::from_wgpu_format;
 use crate::renderer_backend::RendererBackend;
 
 /// A ring of the host's 2D textures, of `size` pixels and one format, with
@@ -112,59 +112,20 @@ pub fn depth_stencil_format(format: wgpu::TextureFormat) -> Option<DepthStencilF
     }
 }
 
-/// The selected texture's view, and the ring's depth and stencil texture.
-struct Resource {
-    device: wgpu::Device,
-    textures: RefCell<BorrowedTextures>,
-    selected: Cell<usize>,
-    depth_stencil_format: wgpu::TextureFormat,
-    depth_stencil: RefCell<Option<(Size, wgpu::TextureView)>>,
-}
-
-impl TargetResource for Resource {
-    fn get_color_texture_view(&self) -> Option<wgpu::TextureView> {
-        let textures = self.textures.borrow();
-        let texture = textures.textures.get(self.selected.get())?;
-        Some(texture.create_view(&wgpu::TextureViewDescriptor::default()))
-    }
-
-    fn get_color_texture_format(&self) -> Option<wgpu::TextureFormat> {
-        self.textures.borrow().format()
-    }
-
-    fn get_depth_stencil_texture_view(&self) -> Option<wgpu::TextureView> {
-        if let Some(depth) = self.textures.borrow().depth_textures.get(self.selected.get()) {
-            return Some(depth.create_view(&wgpu::TextureViewDescriptor::default()));
-        }
-        let size = self.textures.borrow().size;
-        let mut depth_stencil = self.depth_stencil.borrow_mut();
-        if depth_stencil.as_ref().is_none_or(|(made, _)| *made != size) {
-            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("borrowed ring depth and stencil"),
-                size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: self.depth_stencil_format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
-            *depth_stencil = Some((size, texture.create_view(&wgpu::TextureViewDescriptor::default())));
-        }
-        depth_stencil.as_ref().map(|(_, view)| view.clone())
-    }
-
-    fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
-        Some(self.textures.borrow().depth_format().unwrap_or(self.depth_stencil_format))
-    }
-}
-
 /// Frames drawn into the host's textures, each given back to the host.
 pub struct BorrowedTarget {
     backend: Rc<RendererBackend>,
-    resource: Rc<Resource>,
-    target: Rc<DrawTarget>,
+    textures: RefCell<BorrowedTextures>,
+    /// The slot that the next frame draws into.
+    selected: Cell<usize>,
     producer: SyncKind,
+    depth_stencil_format: wgpu::TextureFormat,
+    /// The target's own depth and stencil texture, where the host gave
+    /// none.
+    depth_stencil: Cell<Option<wgpu::Texture>>,
+    /// The slot of the frame begun and its textures, imported into the
+    /// backend's `WebGpu`, until the frame ends.
+    imports: Cell<Option<(usize, FrameImage)>>,
 }
 
 impl BorrowedTarget {
@@ -180,33 +141,26 @@ impl BorrowedTarget {
         if !BorrowedTextures::sync_kinds().0.contains(producer) {
             return Err(Error::unsupported(format!("a WebGPU target hands frames over with no {producer:?}")));
         }
-        let device = backend.device().device().clone();
-        let depth_stencil_format = if device.features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
-            wgpu::TextureFormat::Depth32FloatStencil8
-        } else {
-            wgpu::TextureFormat::Depth24PlusStencil8
-        };
-        let size = textures.size;
-        let resource = Rc::new(Resource {
-            device,
+        let depth_stencil_format =
+            if backend.device().device().features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
+                wgpu::TextureFormat::Depth32FloatStencil8
+            } else {
+                wgpu::TextureFormat::Depth24PlusStencil8
+            };
+        Ok(BorrowedTarget {
+            backend,
             textures: RefCell::new(textures),
             selected: Cell::new(0),
+            producer,
             depth_stencil_format,
-            depth_stencil: RefCell::new(None),
-        });
-        let target = Rc::new(DrawTarget::new(size, Rc::<Resource>::clone(&resource)));
-        Ok(BorrowedTarget { backend, resource, target, producer })
-    }
-
-    /// How many textures the ring has.
-    #[must_use]
-    pub(crate) fn depth(&self) -> usize {
-        self.resource.textures.borrow().textures.len()
+            depth_stencil: Cell::new(None),
+            imports: Cell::new(None),
+        })
     }
 
     /// Has the next frame draw into the texture at `slot`.
     pub fn select(&self, slot: usize) {
-        self.resource.selected.set(slot);
+        self.selected.set(slot);
     }
 
     /// The host gave the texture at `slot` back. The host's reads went to
@@ -234,38 +188,98 @@ impl BorrowedTarget {
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another format,
     /// and as [`BorrowedTextures::check`] does.
     pub fn replace(&self, textures: BorrowedTextures) -> Result<(), Error> {
-        if textures.textures.len() != self.depth() {
+        let current = self.textures.borrow();
+        if textures.textures.len() != current.textures.len() {
             return Err(Error::invalid_argument("a ring keeps its depth"));
         }
-        let current = self.resource.textures.borrow();
         if (textures.format(), textures.depth_format()) != (current.format(), current.depth_format()) {
             return Err(Error::unsupported("a ring keeps its formats, and its depth textures or their lack"));
         }
         drop(current);
         textures.check()?;
-        self.target.set_size(textures.size);
-        *self.resource.textures.borrow_mut() = textures;
+        // A frame begun on the old ring draws into the new one.
+        if let Some((_, image)) = self.imports.take() {
+            self.destroy_imports(image);
+        }
+        *self.textures.borrow_mut() = textures;
         Ok(())
+    }
+
+    /// The depth and stencil texture of the selected slot: the host's, or
+    /// the target's own of the ring's size.
+    fn depth_stencil(&self, textures: &BorrowedTextures) -> wgpu::Texture {
+        if let Some(depth) = textures.depth_textures.get(self.selected.get()) {
+            return depth.clone();
+        }
+        let size = textures.size;
+        let texture = match self.depth_stencil.take() {
+            Some(texture) if (texture.width(), texture.height()) == (size.width, size.height) => texture,
+            _ => self.backend.device().device().create_texture(&wgpu::TextureDescriptor {
+                label: Some("borrowed ring depth and stencil"),
+                size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.depth_stencil_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            }),
+        };
+        self.depth_stencil.set(Some(texture.clone()));
+        texture
+    }
+
+    fn destroy_imports(&self, image: FrameImage) {
+        let mut gpu = self.backend.gpu();
+        for import in [Some(image.color), image.depth_stencil].into_iter().flatten() {
+            gpu.destroy_texture(import);
+        }
     }
 }
 
 impl FrameTarget for BorrowedTarget {
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        Some(Rc::<DrawTarget>::clone(&self.target))
+    fn begin_frame(&self) -> Option<FrameImage> {
+        let slot = self.selected.get();
+        match self.imports.take() {
+            Some((imported, image)) if imported == slot => {
+                self.imports.set(Some((imported, image)));
+                return Some(image);
+            }
+            // A slot was selected since the frame began.
+            Some((_, image)) => self.destroy_imports(image),
+            None => {}
+        }
+        let textures = self.textures.borrow();
+        let texture = textures.textures.get(slot)?;
+        let depth_stencil = self.depth_stencil(&textures);
+        let mut gpu = self.backend.gpu();
+        let image = FrameImage {
+            size: textures.size,
+            color: gpu.import_texture(texture),
+            depth_stencil: Some(gpu.import_texture(&depth_stencil)),
+            targets: TargetFormats {
+                color: from_wgpu_format(texture.format()),
+                depth_stencil: from_wgpu_format(depth_stencil.format()),
+            },
+        };
+        self.imports.set(Some((slot, image)));
+        Some(image)
     }
 
-    fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {
-        let Some(encoder) = encoder.downcast_ref::<CommandEncoder>() else {
+    fn end_frame(&self) -> Handoff {
+        let Some((_, image)) = self.imports.take() else {
             return Handoff::Dropped;
         };
-        encoder.submit_frame(Some(self.target.resource()));
+        self.destroy_imports(image);
         let sync = if self.producer == SyncKind::QueueOrder {
             GpuSync::of(SyncKind::QueueOrder)
         } else {
-            let wait = wgpu::PollType::Wait { submission_index: None, timeout: None };
-            let _ = self.backend.device().device().poll(wait);
+            if let Err(error) = self.backend.gpu().finish() {
+                Log::error(Event::Render, format!("WebGPU: waiting for a borrowed texture's frame failed: {error}"));
+                return Handoff::Dropped;
+            }
             GpuSync::of(SyncKind::CpuComplete)
         };
-        Handoff::GivenBack { slot: self.resource.selected.get(), sync }
+        Handoff::GivenBack { slot: self.selected.get(), sync }
     }
 }

@@ -3,20 +3,19 @@
 // reads them; and the host's own surface, which frames are presented to.
 
 use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use glow::HasContext;
-use mln_gfx::command_encoder::CommandEncoder;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
+use mln_gfx::gpu::{Gpu as _, TargetFormats, TextureDesc, TextureId, TextureUsage};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::context::Context;
 use crate::device::SurfaceSwap;
-use crate::draw_target::{DrawTarget, TargetResource};
+use crate::frame_image::{COLOR, DEPTH_STENCIL, FrameImports, default_framebuffer};
 use crate::renderer_backend::RendererBackend;
-use crate::types::{FramebufferID, RenderbufferID};
 
 /// A ring of the host's `GL_TEXTURE_2D` textures, in the share group of the
 /// device that renders into them, all of `size` pixels with RGBA8 storage.
@@ -66,112 +65,18 @@ fn host_texture(name: u32) -> Result<glow::NativeTexture, Error> {
         .ok_or_else(|| Error::invalid_argument("a texture name is zero"))
 }
 
-/// The framebuffers over the ring's textures, and their depth and stencil
-/// attachments: the host's textures, or a renderbuffer of the target's own.
-struct Resource {
-    context: Weak<Context>,
-    size: Size,
-    framebuffers: Vec<FramebufferID>,
-    depth_stencil: Option<RenderbufferID>,
-    selected: Rc<Cell<usize>>,
-}
-
-impl Resource {
-    fn new(context: &Context, textures: &BorrowedTextures, selected: Rc<Cell<usize>>) -> Result<Self, Error> {
-        let gl = context.gl();
-        let size = textures.size;
-        // SAFETY: the renderbuffer and the framebuffers are new, and the
-        // textures are the host's, in the context's share group.
-        unsafe {
-            let depth_stencil = if textures.depth_textures.is_empty() {
-                let depth_stencil = gl.create_renderbuffer().map_err(Error::native)?;
-                gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth_stencil));
-                gl.renderbuffer_storage(
-                    glow::RENDERBUFFER,
-                    glow::DEPTH24_STENCIL8,
-                    size.width as i32,
-                    size.height as i32,
-                );
-                gl.bind_renderbuffer(glow::RENDERBUFFER, None);
-                Some(depth_stencil)
-            } else {
-                None
-            };
-            let mut resource =
-                Resource { context: context.weak(), size, framebuffers: Vec::new(), depth_stencil, selected };
-            for (slot, &texture) in textures.textures.iter().enumerate() {
-                let texture = host_texture(texture)?;
-                let framebuffer = gl.create_framebuffer().map_err(Error::native)?;
-                resource.framebuffers.push(framebuffer);
-                context.state().bind_framebuffer(gl, Some(framebuffer));
-                gl.framebuffer_texture_2d(
-                    glow::FRAMEBUFFER,
-                    glow::COLOR_ATTACHMENT0,
-                    glow::TEXTURE_2D,
-                    Some(texture),
-                    0,
-                );
-                match (depth_stencil, textures.depth_textures.get(slot)) {
-                    (Some(depth_stencil), _) => gl.framebuffer_renderbuffer(
-                        glow::FRAMEBUFFER,
-                        glow::DEPTH_STENCIL_ATTACHMENT,
-                        glow::RENDERBUFFER,
-                        Some(depth_stencil),
-                    ),
-                    (None, Some(&depth)) => gl.framebuffer_texture_2d(
-                        glow::FRAMEBUFFER,
-                        glow::DEPTH_STENCIL_ATTACHMENT,
-                        glow::TEXTURE_2D,
-                        Some(host_texture(depth)?),
-                        0,
-                    ),
-                    (None, None) => {}
-                }
-                let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
-                if status != glow::FRAMEBUFFER_COMPLETE {
-                    return Err(Error::invalid_argument(format!(
-                        "a texture of the ring makes no complete framebuffer: status {status:#x}"
-                    )));
-                }
-            }
-            context.state().bind_framebuffer(gl, None);
-            mln_gfx::context::Context::rendering_stats(context).num_frame_buffers += 1;
-            Ok(resource)
-        }
-    }
-}
-
-impl Drop for Resource {
-    fn drop(&mut self) {
-        if let Some(context) = self.context.upgrade() {
-            for framebuffer in self.framebuffers.drain(..) {
-                context.abandon_framebuffer(framebuffer);
-            }
-            if let Some(depth_stencil) = self.depth_stencil {
-                context.abandon_renderbuffer(depth_stencil);
-            }
-            mln_gfx::context::Context::rendering_stats(&*context).num_frame_buffers -= 1;
-        }
-    }
-}
-
-impl TargetResource for Resource {
-    fn bind(&self) {
-        if let Some(context) = self.context.upgrade()
-            && let Some(framebuffer) = self.framebuffers.get(self.selected.get())
-        {
-            context.bind_framebuffer(Some(*framebuffer), self.size, true);
-        }
-    }
-}
-
 /// Frames drawn into the host's textures, each given back to the host.
 pub struct BorrowedTarget {
     backend: Rc<RendererBackend>,
     textures: RefCell<BorrowedTextures>,
-    /// Made with the first frame, with the context current.
-    image: RefCell<Option<Rc<DrawTarget>>>,
-    selected: Rc<Cell<usize>>,
+    /// The frame's textures, imported into the backend's `GlGpu`.
+    image: FrameImports,
+    /// The slot that `image` is of.
+    imported_slot: Cell<usize>,
+    /// The target's own depth and stencil texture, of the backend's
+    /// `GlGpu`, where the host gave none.
+    depth_stencil: Cell<Option<(TextureId, Size)>>,
+    selected: Cell<usize>,
     producer: SyncKind,
     /// The fence of each slot's last frame, which the host may wait on
     /// until it gives the slot back.
@@ -194,8 +99,10 @@ impl BorrowedTarget {
         Ok(BorrowedTarget {
             backend,
             textures: RefCell::new(textures),
-            image: RefCell::new(None),
-            selected: Rc::new(Cell::new(0)),
+            image: FrameImports::default(),
+            imported_slot: Cell::new(0),
+            depth_stencil: Cell::new(None),
+            selected: Cell::new(0),
             producer,
             fences: RefCell::new(vec![None; depth]),
         })
@@ -214,17 +121,21 @@ impl BorrowedTarget {
     fn delete_fence(&self, slot: usize) {
         let fence = self.fences.borrow_mut().get_mut(slot).and_then(Option::take);
         if let Some(fence) = fence {
-            // SAFETY: the fence is the target's, and the context is current
-            // (the caller's backend scope).
-            unsafe { self.backend.gl().delete_sync(fence) };
+            self.backend.gpu().delete_sync(fence);
+        }
+    }
+
+    /// Destroys the target's own depth and stencil texture.
+    fn delete_depth_stencil(&self) {
+        if let Some((texture, _)) = self.depth_stencil.take() {
+            self.backend.gpu().destroy_texture(texture);
         }
     }
 
     /// The host gave the texture at `slot` back: the context's commands from
     /// here on wait for `consumer`, a sync of one of
     /// [`BorrowedTextures::sync_kinds`]'s consumer kinds, and the target
-    /// deletes the fence it names. Call it with the backend's context
-    /// current.
+    /// deletes the fence it names.
     #[expect(
         clippy::needless_pass_by_value,
         reason = "the release takes the host's sync, as every backend's does, and drops it"
@@ -238,14 +149,9 @@ impl BorrowedTarget {
                 if sync.handle == 0 {
                     return Err(Error::invalid_argument("an OpenGL fence release names no fence"));
                 }
-                let fence = glow::NativeFence(sync.handle as usize as *mut _);
-                let gl = self.backend.gl();
-                // SAFETY: the host's fence, in the context's share group,
-                // which the release hands over.
-                unsafe {
-                    gl.wait_sync(fence, 0, glow::TIMEOUT_IGNORED);
-                    gl.delete_sync(fence);
-                }
+                // The host's fence, in the context's share group, which the
+                // release hands over.
+                self.backend.gpu().wait_sync(glow::NativeFence(sync.handle as usize as *mut _));
                 Ok(())
             }
             kind => Err(Error::unsupported(format!("the OpenGL target waits for no {kind:?}"))),
@@ -253,14 +159,13 @@ impl BorrowedTarget {
     }
 
     /// The host gave up the texture at `slot`, which is never drawn into
-    /// again. Call it with the backend's context current.
+    /// again.
     pub fn discard(&self, slot: usize) {
         self.delete_fence(slot);
     }
 
     /// Draws into `textures` from now on, which must be as many, with depth
-    /// textures when the ring has them. Call it with the backend's context
-    /// current.
+    /// textures when the ring has them.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
     /// another number of textures, and with
@@ -277,68 +182,89 @@ impl BorrowedTarget {
         for slot in 0..self.depth() {
             self.delete_fence(slot);
         }
-        *self.image.borrow_mut() = None;
+        // A frame begun on the old ring draws into the new one.
+        self.image.release(&self.backend);
+        self.delete_depth_stencil();
         *self.textures.borrow_mut() = textures;
         Ok(())
     }
 }
 
-impl FrameTarget for BorrowedTarget {
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        let mut image = self.image.borrow_mut();
-        if image.is_none() {
-            let context = self.backend.gl_context()?;
-            let textures = self.textures.borrow();
-            match Resource::new(&context, &textures, Rc::clone(&self.selected)) {
-                Ok(resource) => *image = Some(Rc::new(DrawTarget::new(textures.size, Rc::new(resource)))),
-                Err(error) => {
-                    mln_util::logging::Log::error(mln_util::logging::Event::GraphicsBackend, error.message);
-                    return None;
-                }
-            }
+impl BorrowedTarget {
+    /// The selected texture and its depth and stencil texture, the host's
+    /// imported into the backend's `GlGpu` or the target's own, and whether
+    /// the depth is imported.
+    fn import(&self) -> Result<(FrameImage, bool), Error> {
+        let textures = self.textures.borrow();
+        let slot = self.selected.get();
+        let size = textures.size;
+        let desc = |label, format| TextureDesc {
+            label,
+            size,
+            format,
+            usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+        };
+        let color = host_texture(*textures.textures.get(slot).ok_or_else(|| Error::invalid_argument("no such slot"))?)?;
+        let host_depth = textures.depth_textures.get(slot).map(|&depth| host_texture(depth)).transpose()?;
+        if host_depth.is_none() && self.depth_stencil.get().is_none_or(|(_, own_size)| own_size != size) {
+            self.delete_depth_stencil();
+            let depth = self.backend.gpu().create_texture(&desc("borrowed ring depth and stencil", DEPTH_STENCIL));
+            self.depth_stencil.set(Some((depth.map_err(|error| Error::native(error.to_string()))?, size)));
         }
-        image.clone().map(|image| -> Rc<dyn frame::DrawTarget> { image })
+        let mut gpu = self.backend.gpu();
+        let color = gpu.import_texture(color, &desc("borrowed texture", COLOR));
+        let (depth_stencil, imported) = match (host_depth, self.depth_stencil.get()) {
+            (Some(depth), _) => (gpu.import_texture(depth, &desc("borrowed depth", DEPTH_STENCIL)), true),
+            (None, Some((depth, _))) => (depth, false),
+            (None, None) => return Err(Error::native("the ring has no depth and stencil texture")),
+        };
+        let targets = TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) };
+        Ok((FrameImage { size, color, depth_stencil: Some(depth_stencil), targets }, imported))
+    }
+}
+
+impl FrameTarget for BorrowedTarget {
+    fn begin_frame(&self) -> Option<FrameImage> {
+        // A slot was selected since the frame began.
+        if self.imported_slot.get() != self.selected.get() {
+            self.image.release(&self.backend);
+        }
+        self.imported_slot.set(self.selected.get());
+        self.image.get_or_import(|| {
+            self.import().inspect_err(|error| Log::error(Event::GraphicsBackend, error.message.clone())).ok()
+        })
     }
 
-    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
-        if self.image.borrow().is_none() {
+    fn end_frame(&self) -> Handoff {
+        if !self.image.release(&self.backend) {
             return Handoff::Dropped;
         }
         let slot = self.selected.get();
         self.delete_fence(slot);
-        let gl = self.backend.gl();
         // Mesa marks a depth texture that a framebuffer rendered into as
         // compressed, for another context that samples it to decompress it
         // first, only once the context applies a change of framebuffer,
         // which it does at its next draw or clear. Without that, radeonsi
         // hands the host's context the compressed data of its depth texture.
-        if !self.textures.borrow().depth_textures.is_empty()
-            && let Some(context) = self.backend.gl_context()
-        {
-            context.state().bind_framebuffer(gl, None);
-            // SAFETY: the context is current (the renderer's backend scope),
-            // on its own surface, whose color nothing reads.
-            unsafe { gl.clear(glow::COLOR_BUFFER_BIT) };
+        if !self.textures.borrow().depth_textures.is_empty() {
+            let context = self.backend.context();
+            let _current = context.enter();
+            context.state().bind_framebuffer(context.gl(), None);
+            // SAFETY: the context is current, on its own surface, whose
+            // color nothing reads.
+            unsafe { context.gl().clear(glow::COLOR_BUFFER_BIT) };
         }
+        let mut gpu = self.backend.gpu();
         let sync = if self.producer == SyncKind::OpenGlFence {
-            // SAFETY: the context is current (the renderer's backend
-            // scope).
-            let fence = unsafe { gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0) };
-            match fence {
-                Ok(fence) => {
-                    // SAFETY: as above; a flush makes the fence reach the
-                    // GPU, so that another context's wait ends.
-                    unsafe { gl.flush() };
-                    if let Some(entry) = self.fences.borrow_mut().get_mut(slot) {
-                        *entry = Some(fence);
-                    }
-                    GpuSync { kind: SyncKind::OpenGlFence, handle: fence.0 as usize as u64, value: 0 }
-                }
-                Err(_) => return Handoff::Dropped,
+            let Ok(fence) = gpu.fence_sync() else { return Handoff::Dropped };
+            if let Some(entry) = self.fences.borrow_mut().get_mut(slot) {
+                *entry = Some(fence);
             }
+            GpuSync { kind: SyncKind::OpenGlFence, handle: fence.0 as usize as u64, value: 0 }
         } else {
-            // SAFETY: as above.
-            unsafe { gl.finish() };
+            if let Err(error) = gpu.finish() {
+                Log::error(Event::GraphicsBackend, format!("Finishing a borrowed frame failed: {error}"));
+            }
             GpuSync::of(SyncKind::CpuComplete)
         };
         Handoff::GivenBack { slot, sync }
@@ -347,26 +273,11 @@ impl FrameTarget for BorrowedTarget {
 
 impl Drop for BorrowedTarget {
     fn drop(&mut self) {
-        let _scope = mln_gfx::BackendScope::new(&*self.backend, mln_gfx::ScopeType::Explicit);
         for slot in 0..self.depth() {
             self.delete_fence(slot);
         }
-        self.image.borrow_mut().take();
-    }
-}
-
-/// The default framebuffer of the host's surface that the context is current
-/// on.
-struct SurfaceResource {
-    context: Weak<Context>,
-    size: Rc<Cell<Size>>,
-}
-
-impl TargetResource for SurfaceResource {
-    fn bind(&self) {
-        if let Some(context) = self.context.upgrade() {
-            context.bind_framebuffer(None, self.size.get(), true);
-        }
+        self.image.release(&self.backend);
+        self.delete_depth_stencil();
     }
 }
 
@@ -375,8 +286,9 @@ impl TargetResource for SurfaceResource {
 pub struct HostSurfaceTarget {
     backend: Rc<RendererBackend>,
     swap: SurfaceSwap,
-    size: Rc<Cell<Size>>,
-    image: RefCell<Option<Rc<DrawTarget>>>,
+    size: Cell<Size>,
+    /// The frame's default framebuffer, imported into the backend's `GlGpu`.
+    image: FrameImports,
 }
 
 impl HostSurfaceTarget {
@@ -397,8 +309,8 @@ impl HostSurfaceTarget {
         let target = HostSurfaceTarget {
             backend: Rc::clone(&backend),
             swap,
-            size: Rc::new(Cell::new(size)),
-            image: RefCell::new(None),
+            size: Cell::new(size),
+            image: FrameImports::default(),
         };
         Ok((backend, target))
     }
@@ -410,26 +322,15 @@ impl HostSurfaceTarget {
 }
 
 impl FrameTarget for HostSurfaceTarget {
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        let size = self.size.get();
-        if size.width == 0 || size.height == 0 {
-            return None;
-        }
-        let mut image = self.image.borrow_mut();
-        if image.is_none() {
-            let context = self.backend.gl_context()?;
-            let resource = SurfaceResource { context: Rc::downgrade(&context), size: Rc::clone(&self.size) };
-            *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
-        }
-        let image = image.clone()?;
-        image.set_size(size);
-        Some(image)
+    fn begin_frame(&self) -> Option<FrameImage> {
+        self.image.get_or_import(|| default_framebuffer(&self.backend, self.size.get()))
     }
 
-    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
-        if self.image.borrow().is_none() {
+    fn end_frame(&self) -> Handoff {
+        if !self.image.release(&self.backend) {
             return Handoff::Dropped;
         }
+        let _current = self.backend.context().enter();
         if self.swap.swap() { Handoff::Presented } else { Handoff::Dropped }
     }
 }

@@ -1,23 +1,19 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Compiles and links every GLSL program `shader_source()` returns on an
-//! OpenGL ES 3.0 context and on a desktop OpenGL one, the way `gl::ShaderGroup` does: in both projection
-//! variants, with every data-driven property as a vertex attribute and with
+//! OpenGL ES 3.0 context and on a desktop OpenGL one, through `GlGpu`, with
+//! the keys of the shader groups: in both projection variants, with every data-driven property as a vertex attribute and with
 //! every one as a uniform. Also checks each program against its tables:
 //! every uniform block is as large as the UBO the renderer writes for it,
 //! and every attribute and sampler the program has is in them.
 
 use std::collections::{BTreeSet, HashSet};
 
-use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
 
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_program::as_gl_shader;
 use crate::shaders::shader_source::{REGISTERED_SHADERS, ShaderSource, shader_source};
 use crate::{Api, Device, DeviceOptions, RendererBackend};
 
@@ -113,7 +109,7 @@ fn fragment_shaders_declare_shared_uniform_blocks_first() {
 #[test]
 fn every_program_links_and_matches_its_tables_on_open_gl_es() {
     if let Some(backend) = headless_backend(Api::Gles) {
-        assert!(glow::HasContext::version(backend.gl()).is_embedded);
+        assert!(glow::HasContext::version(backend.context().gl()).is_embedded);
         every_program_links_and_matches_its_tables(&backend);
     }
 }
@@ -122,28 +118,23 @@ fn every_program_links_and_matches_its_tables_on_open_gl_es() {
 #[test]
 fn every_program_links_and_matches_its_tables_on_desktop_open_gl() {
     if let Some(backend) = headless_backend(Api::Gl) {
-        assert!(!glow::HasContext::version(backend.gl()).is_embedded);
+        assert!(!glow::HasContext::version(backend.context().gl()).is_embedded);
         every_program_links_and_matches_its_tables(&backend);
     }
 }
 
 fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
-    let _scope = BackendScope::new(backend, ScopeType::Explicit);
-    let version = glow::HasContext::version(backend.gl());
+    let version = glow::HasContext::version(backend.context().gl());
     println!("GL_RENDERER: {}, GL_VERSION: {}", backend.get_renderer_name(), version.vendor_info);
-    let registry = ShaderRegistry::new();
-    backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
-    let context = backend.get_context();
+    let registry = ShaderRegistry::new(&ProgramParameters::new(1.0, false));
 
     let mut programs = 0;
     for &shader_id in REGISTERED_SHADERS {
         let source = shader_source(shader_id).expect("a registered shader has a source");
-        let group = registry.get_shader_group(source.name).expect("a registered shader has a group");
+        let group = registry.shader_group(source.name).expect("a registered shader has a group");
         let properties = properties(source);
-        let all_uniforms: StringIDSetsPair = (
-            properties.iter().map(|name| format!("a_{name}")).collect::<HashSet<_>>(),
-            (0..properties.len()).collect::<HashSet<_>>(),
-        );
+        let all_uniforms: StringIDSetsPair =
+            (properties.iter().map(|name| format!("a_{name}")).collect::<HashSet<_>>(), HashSet::new());
         let mut property_sets = vec![StringIDSetsPair::default()];
         if !properties.is_empty() {
             property_sets.push(all_uniforms);
@@ -151,13 +142,14 @@ fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
             for (i, property_set) in property_sets.iter().enumerate() {
                 let what = format!("{} ({variant:?}, {})", source.name, ["attributes", "uniforms"][i]);
-                let shader = group
-                    .get_or_create_shader(context, property_set, variant, "")
-                    .unwrap_or_else(|| panic!("{what} failed to compile or link"));
-                let program = as_gl_shader(&shader).expect("a GL program");
+                let shader = group.shader(property_set, variant);
+                let program = backend
+                    .gpu()
+                    .program(shader.key())
+                    .unwrap_or_else(|error| panic!("{what} failed to compile or link: {error}"));
                 programs += 1;
 
-                for block in program.uniform_blocks() {
+                for block in &program.blocks {
                     let info = source
                         .uniform_blocks
                         .iter()
@@ -173,22 +165,15 @@ fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
 
                 // With every property an attribute, the program has every
                 // attribute of its table but the ones its GLSL leaves unused.
-                let attributes = program.get_vertex_attributes();
                 let mut locations = HashSet::new();
-                for info in source.attributes {
-                    if let Some(attribute) = attributes.get(info.id) {
-                        assert!(
-                            locations.insert(attribute.get_index()),
-                            "{what}: two attributes at location {}",
-                            attribute.get_index()
-                        );
-                    }
+                for &(_, location) in &program.vertex_locations {
+                    assert!(locations.insert(location), "{what}: two attributes at location {location}");
                 }
                 if i == 0 {
                     assert!(!locations.is_empty(), "{what}: no vertex attributes");
                 }
                 for info in source.textures {
-                    assert!(program.get_sampler_location(info.id).is_some(), "{what}: no sampler {}", info.name);
+                    assert!(program.textures.contains(&info.id), "{what}: no sampler {}", info.name);
                 }
             }
         }

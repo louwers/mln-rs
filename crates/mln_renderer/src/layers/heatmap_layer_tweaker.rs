@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO};
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::heatmap_layer_properties::{
     HeatmapIntensity, HeatmapLayerProperties, HeatmapRadius, HeatmapWeight,
@@ -12,8 +10,10 @@ use mln_style::layers::heatmap_layer_properties::{
 use mln_style::properties::Property;
 use mln_style_types::TranslateAnchorType;
 
-use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, slot_bucket};
+use super::{cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::buckets::heatmap_bucket::HeatmapBucket;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{
     LayerTweaker, LayerTweakerBase, get_projection_data, globe_extrude_scale, to_projection_ubo,
 };
@@ -44,7 +44,7 @@ impl LayerTweaker for HeatmapLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -61,8 +61,7 @@ impl LayerTweaker for HeatmapLayerTweaker {
                 intensity: *evaluated.get::<HeatmapIntensity>(),
                 padding: 0.0,
             };
-            context
-                .emplace_or_update_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &evaluated_props_ubo);
+            context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &evaluated_props_ubo);
             self.base.properties_updated = false;
         }
         layer_group
@@ -70,15 +69,15 @@ impl LayerTweaker for HeatmapLayerTweaker {
             .set(ID_HEATMAP_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
         let mut i: u32 = 0;
-        let mut drawable_ubo_vector = vec![HeatmapDrawableUBO::default(); layer_group.get_drawable_count()];
-        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
+        let mut drawable_ubo_vector = vec![HeatmapDrawableUBO::default(); layer_group.drawable_count()];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
 
         let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
+        layer_group.visit_drawables(|drawable| {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-            let Some(tile_id) = drawable.get_tile_id() else {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check_tweak_drawable_ptr(drawable, self_ptr) {
@@ -86,11 +85,11 @@ impl LayerTweaker for HeatmapLayerTweaker {
             }
             let tile_id = tile_id.to_unwrapped();
 
-            let Some(binders_slot) = get_drawable_binders(drawable) else {
+            let Some(binders_slot) = drawable.binders.clone() else {
                 debug_assert!(false);
                 return;
             };
-            if drawable.get_render_tile().is_none() {
+            if drawable.render_tile.is_none() {
                 debug_assert!(false);
                 return;
             }
@@ -125,17 +124,12 @@ impl LayerTweaker for HeatmapLayerTweaker {
                 radius_t: binders.heatmap_radius.interpolation_factor(zoom),
                 globe_extrude_scale: globe_extrude_scale(&tile_id, zoom, latitude_scale),
             };
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => {
-                self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true));
-            }
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         layer_group.mutable_uniform_buffers().set(ID_HEATMAP_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);

@@ -1,7 +1,10 @@
+//! The `#ifdef`, `#ifndef`, `#else` and `#endif` blocks of the WGSL
+//! sources, kept or dropped by the shader's defines.
+
 use std::collections::HashMap;
 
-fn is_space(b: u8) -> bool {
-    // std::isspace in the "C" locale
+/// Whether `b` is ASCII white space, vertical tab included.
+pub(crate) fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
 }
 
@@ -32,7 +35,7 @@ pub(crate) fn get_directive_argument(line: &str) -> String {
         return String::new();
     };
     let is_blank = |c: char| c == ' ' || c == '\t';
-    // find_first_not_of(" \t", hash + 1), then find_first_of(" \t", pos)
+    // The directive, then the argument after it.
     let Some(pos) = line[hash + 1..].find(|c| !is_blank(c)).map(|p| p + hash + 1) else {
         return String::new();
     };
@@ -63,8 +66,8 @@ pub(crate) fn preprocess_wgsl(source: &str, defines: &HashMap<String, bool>) -> 
     let mut stack: Vec<ConditionalFrame> = Vec::new();
     let mut current_active = true;
 
-    // std::getline: split on '\n'; the text after the last '\n' is a line
-    // only if it is non-empty (so "" and "a\n" have no trailing empty line).
+    // The text after the last '\n' is a line only if it is non-empty, so ""
+    // and "a\n" have no trailing empty line.
     let mut lines: Vec<&str> = source.split('\n').collect();
     if lines.last() == Some(&"") {
         lines.pop();

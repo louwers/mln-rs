@@ -17,8 +17,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, Drawable, LayerGroupBasePtr, ShaderProgramBasePtr,
-    ShaderRegistry,
+    AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, VertexAttributeArray,
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
@@ -38,11 +37,15 @@ use mln_util::size::Size;
 use super::heatmap_layer_tweaker::HeatmapLayerTweaker;
 use super::heatmap_texture_layer_tweaker::HeatmapTextureLayerTweaker;
 use super::render_line_layer::apply_color_ramp;
-use super::{drawable_binders_slot, drawable_has_layer_tweaker, drawable_render_tile_slot, shared_vertices};
+use super::{DrawableBinders, DrawableRenderTile, drawable_has_layer_tweaker, shared_vertices};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::heatmap_bucket::{HeatmapBucket, HeatmapLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
+use crate::drawable::Drawable;
+use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
+use crate::layer_group::{LayerGroup, LayerGroupPtr};
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{RenderLayer, RenderLayerBase};
@@ -88,7 +91,7 @@ pub(crate) struct RenderHeatmapLayer {
     segments: Vec<SegmentBase>,
 
     heatmap_shader_group: Option<ShaderGroupPtr>,
-    heatmap_texture_shader: Option<ShaderProgramBasePtr>,
+    heatmap_texture_shader: Option<ShaderProgramPtr>,
     render_target: Option<RenderTargetPtr>,
 
     shared_texture_vertices: Option<VertexVectorBasePtr>,
@@ -133,7 +136,7 @@ impl RenderHeatmapLayer {
     }
 
     /// The tile layer group of the render target (`renderTarget->getLayerGroup(0)`).
-    fn render_target_layer_group(&self) -> Option<LayerGroupBasePtr> {
+    fn render_target_layer_group(&self) -> Option<LayerGroupPtr> {
         self.render_target.as_ref().and_then(|target| target.borrow().get_layer_group(0).cloned())
     }
 
@@ -143,27 +146,21 @@ impl RenderHeatmapLayer {
         let Some(layer_group) = self.render_target_layer_group() else {
             return;
         };
-        let mut group = layer_group.borrow_mut();
-        let Some(tile_layer_group) = group.as_tile_layer_group_mut() else {
-            return;
-        };
+        let mut tile_layer_group = layer_group.borrow_mut();
         tile_layer_group.remove_drawables(render_pass, tile_id);
     }
 
     fn update_tile(
         &mut self,
-        layer_group: &LayerGroupBasePtr,
+        layer_group: &LayerGroupPtr,
         render_pass: RenderPass,
         tile_id: &OverscaledTileID,
-        mut update: impl FnMut(&mut dyn Drawable) -> bool,
+        mut update: impl FnMut(&mut Drawable) -> bool,
     ) -> bool {
         let mut any_updated = false;
         let mut un_updated_drawables = false;
         {
-            let mut group = layer_group.borrow_mut();
-            let Some(tile_layer_group) = group.as_tile_layer_group_mut() else {
-                return false;
-            };
+            let mut tile_layer_group = layer_group.borrow_mut();
             tile_layer_group.visit_drawables_for(render_pass, tile_id, |drawable| {
                 if update(drawable) {
                     any_updated = true;
@@ -281,7 +278,7 @@ impl RenderLayer for RenderHeatmapLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -304,11 +301,7 @@ impl RenderLayer for RenderHeatmapLayer {
             activate_render_target(self.render_target.as_ref(), self.base.is_renderable, changes);
 
             // Set up tile layer group
-            let Some(tile_layer_group) =
-                context.create_tile_layer_group(0, /*initial_capacity=*/ 64, self.get_id().to_owned())
-            else {
-                return;
-            };
+            let tile_layer_group = LayerGroup::tiles(0, self.get_id());
             render_target.borrow_mut().add_layer_group(tile_layer_group, /*replace=*/ true);
             self.texture_tweaker = None;
         }
@@ -320,7 +313,7 @@ impl RenderLayer for RenderHeatmapLayer {
         };
 
         if self.heatmap_shader_group.is_none() {
-            self.heatmap_shader_group = shaders.get_shader_group(HEATMAP_SHADER_GROUP_NAME);
+            self.heatmap_shader_group = shaders.shader_group(HEATMAP_SHADER_GROUP_NAME);
         }
         let Some(heatmap_shader_group) = self.heatmap_shader_group.clone() else {
             self.remove_all_drawables();
@@ -345,11 +338,10 @@ impl RenderLayer for RenderHeatmapLayer {
         }
 
         {
-            let mut group = tile_layer_group.borrow_mut();
-            let tile_group = group.as_tile_layer_group_mut().expect("heatmap render target group is a TileLayerGroup");
+            let mut tile_group = tile_layer_group.borrow_mut();
             let base = &self.base;
             tile_group.remove_drawables_if(|drawable| {
-                drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
         }
 
@@ -357,7 +349,7 @@ impl RenderLayer for RenderHeatmapLayer {
         let evaluated = get_evaluated::<HeatmapLayerProperties>(&evaluated_properties);
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 
-        let mut heatmap_shader: Option<ShaderProgramBasePtr> = None;
+        let mut heatmap_shader: Option<ShaderProgramPtr> = None;
 
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
@@ -387,7 +379,7 @@ impl RenderLayer for RenderHeatmapLayer {
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
-            let update_existing = |drawable: &mut dyn Drawable| {
+            let update_existing = |drawable: &mut Drawable| {
                 // A drawable produced on a previous style/bucket should not
                 // be updated.
                 drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref())
@@ -399,7 +391,7 @@ impl RenderLayer for RenderHeatmapLayer {
             properties_as_uniforms.0.clear();
             properties_as_uniforms.1.clear();
 
-            let heatmap_vertex_attrs = context.create_vertex_attribute_array();
+            let heatmap_vertex_attrs = VertexAttributeArray::new_ptr();
             {
                 let buffer = &paint_property_binders.interleaved_vertex_buffer;
                 let shared =
@@ -431,15 +423,8 @@ impl RenderLayer for RenderHeatmapLayer {
             }
 
             if heatmap_shader.is_none() {
-                heatmap_shader = heatmap_shader_group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    self.base.projection_variant,
-                    "a_pos",
-                );
-                if heatmap_shader.is_none() {
-                    continue;
-                }
+                heatmap_shader =
+                    Some(heatmap_shader_group.shader(&properties_as_uniforms, self.base.projection_variant));
             }
 
             if let Some(attr) = heatmap_vertex_attrs.borrow_mut().set(
@@ -457,11 +442,11 @@ impl RenderLayer for RenderHeatmapLayer {
                 );
             }
 
-            let mut heatmap_builder = context.create_drawable_builder();
+            let mut heatmap_builder = DrawableBuilder::boxed();
             heatmap_builder.set_shader(heatmap_shader.clone());
             heatmap_builder.set_enable_depth(false);
             heatmap_builder.set_color_mode(&ColorMode::additive());
-            heatmap_builder.set_cull_face_mode(&CullFaceMode::disabled());
+            heatmap_builder.set_cull_face_mode(CullFaceMode::disabled());
             heatmap_builder.set_render_pass(render_pass);
             heatmap_builder.set_vertex_attributes(Some(heatmap_vertex_attrs));
             heatmap_builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
@@ -471,37 +456,25 @@ impl RenderLayer for RenderHeatmapLayer {
                 &bucket.segments,
             );
 
-            heatmap_builder.flush(context);
+            heatmap_builder.flush();
 
-            let mut group = tile_layer_group.borrow_mut();
-            let tile_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+            let mut tile_group = tile_layer_group.borrow_mut();
             for mut drawable in heatmap_builder.clear_drawables() {
-                drawable.set_tile_id(tile_id);
-                drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                drawable.set_binders(drawable_binders_slot(&render_data.bucket, self.get_id()));
-                drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
-                tile_group.add_drawable(render_pass, &tile_id, drawable);
+                drawable.tile_id = Some(tile_id);
+                drawable.layer_tweaker = layer_tweaker.clone();
+                drawable.binders = Some(DrawableBinders::new(&render_data.bucket, self.get_id()));
+                drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
+                tile_group.add_tile_drawable(render_pass, &tile_id, drawable);
             }
         }
 
         // Set up texture layer group
         if self.base.layer_group.is_none() {
-            match context.create_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 1,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => {
-                    if let Some(texture_tweaker) = &self.texture_tweaker {
-                        changes.push(ChangeRequest::AddLayerTweaker(
-                            Rc::clone(&layer_group),
-                            Rc::downgrade(texture_tweaker),
-                        ));
-                    }
-                    self.set_layer_group(Some(layer_group), changes);
-                }
-                None => return,
+            let layer_group = LayerGroup::plain(self.base.layer_index, self.get_id());
+            if let Some(texture_tweaker) = &self.texture_tweaker {
+                changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(texture_tweaker)));
             }
+            self.set_layer_group(Some(layer_group), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
         if self.texture_tweaker.is_none() {
@@ -516,7 +489,7 @@ impl RenderLayer for RenderHeatmapLayer {
 
         if self.heatmap_texture_shader.is_none() {
             self.heatmap_texture_shader =
-                context.get_generic_shader(shaders, HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
+                shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
         }
         let Some(heatmap_texture_shader) = self.heatmap_texture_shader.clone() else {
             self.remove_all_drawables();
@@ -532,7 +505,7 @@ impl RenderLayer for RenderHeatmapLayer {
         let shared_texture_vertices = self.shared_texture_vertices.clone().expect("texture vertices");
         let texture_vertex_count = 4;
 
-        let texture_vertex_attrs = context.create_vertex_attribute_array();
+        let texture_vertex_attrs = VertexAttributeArray::new_ptr();
         if let Some(attr) =
             texture_vertex_attrs.borrow_mut().set(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
         {
@@ -545,11 +518,11 @@ impl RenderLayer for RenderHeatmapLayer {
             );
         }
 
-        let mut heatmap_texture_builder = context.create_drawable_builder();
+        let mut heatmap_texture_builder = DrawableBuilder::boxed();
         heatmap_texture_builder.set_shader(Some(heatmap_texture_shader));
         heatmap_texture_builder.set_enable_depth(false);
         heatmap_texture_builder.set_color_mode(&ColorMode::alpha_blended());
-        heatmap_texture_builder.set_cull_face_mode(&CullFaceMode::disabled());
+        heatmap_texture_builder.set_cull_face_mode(CullFaceMode::disabled());
         heatmap_texture_builder.set_render_pass(render_pass);
         heatmap_texture_builder.set_vertex_attributes(Some(texture_vertex_attrs));
         heatmap_texture_builder.set_raw_vertices(Vec::new(), texture_vertex_count, AttributeDataType::Short2);
@@ -569,7 +542,7 @@ impl RenderLayer for RenderHeatmapLayer {
         {
             let mut t = texture.borrow_mut();
             t.set_image(Some(Rc::clone(&self.color_ramp)));
-            t.set_sampler_configuration(SamplerState {
+            t.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,
@@ -578,14 +551,11 @@ impl RenderLayer for RenderHeatmapLayer {
         }
         heatmap_texture_builder.set_texture(Some(texture), ID_HEATMAP_COLOR_RAMP_TEXTURE);
 
-        heatmap_texture_builder.flush(context);
+        heatmap_texture_builder.flush();
 
-        let mut group = layer_group.borrow_mut();
-        let Some(texture_layer_group) = group.as_layer_group_mut() else {
-            return;
-        };
+        let mut texture_layer_group = layer_group.borrow_mut();
         for mut drawable in heatmap_texture_builder.clear_drawables() {
-            drawable.set_layer_tweaker(texture_tweaker.as_ref().and_then(layer_tweaker_slot));
+            drawable.layer_tweaker = texture_tweaker.clone();
             texture_layer_group.add_drawable(drawable);
         }
     }

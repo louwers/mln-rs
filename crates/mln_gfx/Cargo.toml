@@ -27,12 +27,13 @@ mln_vec_map.workspace = true
 # The windows of window targets (`Window`).
 raw-window-handle.workspace = true
 serde.workspace = true
+slotmap.workspace = true
+thiserror.workspace = true
 
-# gtests-core: test/renderer/backend_scope.test.cpp (OpenGL-only in C++; the
-# BackendScope logic it tests is backend-independent).
-[[test]]
-name = "gtest_backend_scope"
-path = "tests/gtest_backend_scope.rs"
+[features]
+# `gpu::conformance`, the frames that the backends' tests draw through their
+# `Gpu`.
+gpu-conformance = []
 
 [lints]
 workspace = true

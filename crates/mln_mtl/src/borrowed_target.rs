@@ -7,23 +7,24 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
-use mln_gfx::command_encoder::CommandEncoder;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
+use mln_gfx::gpu::{Gpu as _, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use objc2::Message;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{
-    MTLCommandBuffer, MTLCommandQueue, MTLDevice, MTLEvent, MTLPixelFormat, MTLRenderPassDescriptor, MTLResource,
-    MTLSharedEvent, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
+    MTLDevice, MTLEvent, MTLPixelFormat, MTLResource, MTLSharedEvent, MTLStorageMode, MTLTexture, MTLTextureType,
+    MTLTextureUsage,
 };
 
 use crate::device::Device;
-use crate::draw_target::{DrawTarget, TargetResource};
-use crate::mtl_fwd::{MTLCommandBufferPtr, MTLRenderPassDescriptorPtr, MTLTexturePtr};
-use crate::renderer_backend::{BackendImpl, RendererBackend};
+use crate::gpu::{MetalGpu, texture_format};
+use crate::mtl_fwd::MTLTexturePtr;
+use crate::renderer_backend::RendererBackend;
 
 /// A ring of the host's textures, all of `size` pixels, one pixel format and
 /// one device, with `MTLTextureUsageRenderTarget`.
@@ -162,101 +163,102 @@ impl BorrowedTextures {
 
 type SharedEventPtr = Retained<ProtocolObject<dyn MTLSharedEvent>>;
 
-/// The frame's command buffer and render pass over the selected texture, and
-/// their depth and stencil textures.
-struct Resource {
-    backend: Rc<BackendImpl>,
-    textures: RefCell<BorrowedTextures>,
-    selected: Cell<usize>,
-    depth: RefCell<Option<(Size, MTLTexturePtr, MTLTexturePtr)>>,
-    command_buffer: RefCell<Option<MTLCommandBufferPtr>>,
-    render_pass_descriptor: RefCell<Option<MTLRenderPassDescriptorPtr>>,
-    /// What the next frame drawn into each slot waits for, which the
-    /// frame's command buffer waits for before it draws.
-    waits: RefCell<Vec<Option<(SharedEventPtr, u64)>>>,
+/// What the next frame drawn into a slot waits for.
+#[derive(Clone, Default)]
+struct Slot {
+    wait: Option<(SharedEventPtr, u64)>,
+    /// The texture that has the next submit that draws into it wait for
+    /// `wait`, from the frame begun on the slot until it ends.
+    attached: Option<TextureId>,
 }
 
-impl Resource {
-    fn texture_2d(&self, format: MTLPixelFormat, size: Size) -> Option<MTLTexturePtr> {
-        // SAFETY: the size is non-zero and the format a valid 2D one.
-        let descriptor = unsafe {
-            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                format,
-                size.width as usize,
-                size.height as usize,
-                false,
-            )
+/// Metal's one depth and stencil format of every GPU.
+const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth32FloatStencil8;
+
+/// The ring's textures as textures of the backend's `Gpu`, with their depth
+/// and stencil textures: the host's, or one of the target's own.
+struct Imports {
+    gpu: Rc<RefCell<MetalGpu>>,
+    size: Size,
+    targets: TargetFormats,
+    color: Vec<TextureId>,
+    /// The host's depth and stencil textures, one for each slot.
+    depth: Vec<TextureId>,
+    /// The target's own depth and stencil, when the host gave none.
+    own_depth: Option<TextureId>,
+}
+
+impl Imports {
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// pixel format the `Gpu` has no texture of, and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when it can't make the
+    /// depth and stencil texture.
+    fn new(gpu: &Rc<RefCell<MetalGpu>>, textures: &BorrowedTextures) -> Result<Imports, Error> {
+        let pixel_format = textures.pixel_format();
+        let color_format = texture_format(pixel_format)
+            .ok_or_else(|| Error::unsupported(format!("the Metal target draws into no {pixel_format:?}")))?;
+        let mut imports = Imports {
+            gpu: Rc::clone(gpu),
+            size: textures.size,
+            targets: TargetFormats { color: Some(color_format), depth_stencil: Some(DEPTH_STENCIL) },
+            color: Vec::new(),
+            depth: Vec::new(),
+            own_depth: None,
         };
-        descriptor.setUsage(MTLTextureUsage::RenderTarget);
-        descriptor.setStorageMode(MTLStorageMode::Private);
-        self.backend.get_device().newTextureWithDescriptor(&descriptor)
+        let mut gpu = gpu.borrow_mut();
+        let import = |gpu: &mut MetalGpu, texture: &ProtocolObject<dyn MTLTexture>, format| {
+            gpu.import_texture(texture, format)
+                .map_err(|error| Error::native(format!("Importing a borrowed texture failed: {error}")))
+        };
+        for texture in &textures.textures {
+            imports.color.push(import(&mut gpu, texture, color_format)?);
+        }
+        for texture in &textures.depth_textures {
+            imports.depth.push(import(&mut gpu, texture, DEPTH_STENCIL)?);
+        }
+        if textures.depth_textures.is_empty() {
+            let desc = TextureDesc {
+                label: "BorrowedDepthStencil",
+                size: textures.size,
+                format: DEPTH_STENCIL,
+                usage: TextureUsage { sampled: false, render_target: true, copy_src: false },
+            };
+            let texture = gpu
+                .create_texture(&desc)
+                .map_err(|error| Error::native(format!("Making the depth and stencil texture failed: {error}")))?;
+            imports.own_depth = Some(texture);
+        }
+        Ok(imports)
     }
 
-    /// The depth and stencil textures of the ring's size: the host's of the
-    /// selected slot, which holds both, or the target's own. Intel and AMD
-    /// GPUs and the simulator take one texture for both.
-    fn depth_stencil(&self) -> Option<(MTLTexturePtr, MTLTexturePtr)> {
-        if let Some(depth) = self.textures.borrow().depth_textures.get(self.selected.get()) {
-            return Some((depth.clone(), depth.clone()));
-        }
-        let size = self.textures.borrow().size;
-        let mut depth = self.depth.borrow_mut();
-        if depth.as_ref().is_none_or(|(made, _, _)| *made != size) {
-            *depth = if cfg!(target_arch = "x86_64") || cfg!(target_abi = "sim") {
-                self.texture_2d(MTLPixelFormat::Depth32Float_Stencil8, size)
-                    .map(|texture| (size, texture.clone(), texture))
-            } else {
-                match (
-                    self.texture_2d(MTLPixelFormat::Depth32Float, size),
-                    self.texture_2d(MTLPixelFormat::Stencil8, size),
-                ) {
-                    (Some(depth), Some(stencil)) => Some((size, depth, stencil)),
-                    _ => None,
-                }
-            };
-        }
-        depth.as_ref().map(|(_, depth, stencil)| (depth.clone(), stencil.clone()))
+    /// The textures that a frame drawn into `slot` draws into.
+    fn frame_image(&self, slot: usize) -> Option<FrameImage> {
+        Some(FrameImage {
+            size: self.size,
+            color: *self.color.get(slot)?,
+            depth_stencil: self.own_depth.or_else(|| self.depth.get(slot).copied()),
+            targets: self.targets,
+        })
     }
 }
 
-impl TargetResource for Resource {
-    fn bind(&self) {
-        // An upload pass and a render pass both bind the resource in one
-        // frame, and the frame's end commits the one command buffer.
-        let mut command_buffer = self.command_buffer.borrow_mut();
-        if command_buffer.is_none() {
-            let buffer = self.backend.get_command_queue().commandBuffer();
-            let wait = self.waits.borrow_mut().get_mut(self.selected.get()).and_then(Option::take);
-            if let (Some(buffer), Some((event, value))) = (&buffer, wait) {
-                buffer.encodeWaitForEvent_value(ProtocolObject::<dyn MTLEvent>::from_ref(&*event), value);
-            }
-            *command_buffer = buffer;
+impl Drop for Imports {
+    fn drop(&mut self) {
+        let mut gpu = self.gpu.borrow_mut();
+        for texture in self.color.drain(..).chain(self.depth.drain(..)).chain(self.own_depth.take()) {
+            gpu.destroy_texture(texture);
         }
-        let descriptor = MTLRenderPassDescriptor::new();
-        let texture = self.textures.borrow().textures.get(self.selected.get()).cloned();
-        // SAFETY: index 0 is in the attachment array's bounds.
-        unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) }.setTexture(texture.as_deref());
-        if let Some((depth, stencil)) = self.depth_stencil() {
-            descriptor.depthAttachment().setTexture(Some(&depth));
-            descriptor.stencilAttachment().setTexture(Some(&stencil));
-        }
-        *self.render_pass_descriptor.borrow_mut() = Some(descriptor);
-    }
-
-    fn get_command_buffer(&self) -> Option<MTLCommandBufferPtr> {
-        self.command_buffer.borrow().clone()
-    }
-
-    fn get_render_pass_descriptor(&self) -> Option<MTLRenderPassDescriptorPtr> {
-        self.render_pass_descriptor.borrow().clone()
     }
 }
 
 /// Frames drawn into the host's textures, each given back to the host.
 pub struct BorrowedTarget {
     backend: Rc<RendererBackend>,
-    resource: Rc<Resource>,
-    target: Rc<DrawTarget>,
+    textures: RefCell<BorrowedTextures>,
+    imports: RefCell<Imports>,
+    /// The slot the next frame draws into.
+    selected: Cell<usize>,
+    slots: RefCell<Vec<Slot>>,
     producer: SyncKind,
     /// The event that frames signal, for a shared event producer.
     event: Option<SharedEventPtr>,
@@ -287,24 +289,23 @@ impl BorrowedTarget {
             ),
             _ => None,
         };
-        let depth = textures.textures.len();
-        let size = textures.size;
-        let resource = Rc::new(Resource {
-            backend: Rc::clone(backend.backend_impl()),
+        let imports = Imports::new(backend.shared_gpu(), &textures)?;
+        let slots = textures.textures.len();
+        Ok(BorrowedTarget {
+            backend,
             textures: RefCell::new(textures),
+            imports: RefCell::new(imports),
             selected: Cell::new(0),
-            depth: RefCell::new(None),
-            command_buffer: RefCell::new(None),
-            render_pass_descriptor: RefCell::new(None),
-            waits: RefCell::new(vec![None; depth]),
-        });
-        let target = Rc::new(DrawTarget::new(size, Rc::<Resource>::clone(&resource)));
-        Ok(BorrowedTarget { backend, resource, target, producer, event, event_value: Cell::new(0) })
+            slots: RefCell::new(vec![Slot::default(); slots]),
+            producer,
+            event,
+            event_value: Cell::new(0),
+        })
     }
 
     /// Has the next frame draw into the texture at `slot`.
     pub fn select(&self, slot: usize) {
-        self.resource.selected.set(slot);
+        self.selected.set(slot);
     }
 
     /// The host gave the texture at `slot` back: the next frame drawn into
@@ -319,10 +320,12 @@ impl BorrowedTarget {
     )]
     pub fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         let sync = consumer.sync;
-        let mut waits = self.resource.waits.borrow_mut();
-        let Some(wait) = waits.get_mut(slot) else {
+        let mut slots = self.slots.borrow_mut();
+        let Some(state) = slots.get_mut(slot) else {
             return Err(Error::invalid_argument("the ring has no such slot"));
         };
+        self.detach(state);
+        let wait = &mut state.wait;
         *wait = None;
         match sync.kind {
             SyncKind::CpuComplete | SyncKind::QueueOrder => Ok(()),
@@ -342,8 +345,9 @@ impl BorrowedTarget {
     /// The host gave up the texture at `slot`, which is never drawn into
     /// again.
     pub fn discard(&self, slot: usize) {
-        if let Some(wait) = self.resource.waits.borrow_mut().get_mut(slot) {
-            *wait = None;
+        if let Some(state) = self.slots.borrow_mut().get_mut(slot) {
+            self.detach(state);
+            state.wait = None;
         }
     }
 
@@ -358,7 +362,7 @@ impl BorrowedTarget {
     /// let go of, which the ring waits for before the host may use them.
     pub fn replace(&self, textures: BorrowedTextures) -> Result<PendingReads, Error> {
         {
-            let current = self.resource.textures.borrow();
+            let current = self.textures.borrow();
             if textures.textures.len() != current.textures.len() {
                 return Err(Error::invalid_argument("a ring keeps its depth"));
             }
@@ -371,14 +375,15 @@ impl BorrowedTarget {
             }
         }
         textures.check(self.backend.device())?;
-        self.target.set_size(textures.size);
-        let old = std::mem::replace(&mut *self.resource.textures.borrow_mut(), textures);
+        // The old imports go with what they wait for: the slots keep it.
+        *self.imports.borrow_mut() = Imports::new(self.backend.shared_gpu(), &textures)?;
+
+        let old = std::mem::replace(&mut *self.textures.borrow_mut(), textures);
         // A texture that the new ring has again keeps what it waits for, at
         // its new slot.
-        let mut waits = self.resource.waits.borrow_mut();
-        let mut previous = std::mem::take(&mut *waits);
+        let mut slots = self.slots.borrow_mut();
+        let mut previous = std::mem::take(&mut *slots);
         let kept = self
-            .resource
             .textures
             .borrow()
             .textures
@@ -388,54 +393,105 @@ impl BorrowedTarget {
                     .iter()
                     .position(|old| std::ptr::eq(Retained::as_ptr(old), Retained::as_ptr(texture)))
                     .and_then(|index| previous.get_mut(index))
-                    .and_then(Option::take)
+                    .and_then(|slot| slot.wait.take())
             })
+            .map(|wait| Slot { wait, attached: None })
             .collect();
-        *waits = kept;
-        Ok(PendingReads { waits: previous.into_iter().flatten().collect() })
+        *slots = kept;
+        Ok(PendingReads { waits: previous.into_iter().filter_map(|slot| slot.wait).collect() })
     }
 
     /// Takes what the ring's textures still wait for, the host's reads of
     /// them, for the ring to wait for before it lets go of the textures.
     pub fn take_pending(&self) -> PendingReads {
-        PendingReads { waits: self.resource.waits.borrow_mut().iter_mut().filter_map(Option::take).collect() }
+        let mut slots = self.slots.borrow_mut();
+        for slot in slots.iter_mut() {
+            self.detach(slot);
+        }
+        PendingReads { waits: slots.iter_mut().filter_map(|slot| slot.wait.take()).collect() }
     }
 
-    /// The sync the host waits for, once `command_buffer` was committed.
-    fn producer_sync(&self, command_buffer: &ProtocolObject<dyn MTLCommandBuffer>) -> GpuSync {
+    /// Has no submit wait for what `slot` waits for.
+    fn detach(&self, slot: &mut Slot) {
+        if let Some(texture) = slot.attached.take() {
+            self.backend.gpu().forget_waits(texture);
+        }
+    }
+
+    /// The sync the host waits for, once the frame was submitted.
+    fn producer_sync(&self) -> Option<GpuSync> {
         match (self.producer, &self.event) {
-            (SyncKind::MetalSharedEvent, Some(event)) => GpuSync {
+            (SyncKind::MetalSharedEvent, Some(event)) => Some(GpuSync {
                 kind: SyncKind::MetalSharedEvent,
                 handle: Retained::as_ptr(event) as usize as u64,
                 value: self.event_value.get(),
+            }),
+            (SyncKind::QueueOrder, _) => Some(GpuSync::of(SyncKind::QueueOrder)),
+            _ => match self.backend.gpu().finish() {
+                Ok(()) => Some(GpuSync::of(SyncKind::CpuComplete)),
+                Err(error) => {
+                    Log::error(Event::Render, format!("Waiting for a borrowed texture's frame failed: {error}"));
+                    None
+                }
             },
-            (SyncKind::QueueOrder, _) => GpuSync::of(SyncKind::QueueOrder),
-            _ => {
-                command_buffer.waitUntilCompleted();
-                GpuSync::of(SyncKind::CpuComplete)
-            }
         }
     }
 }
 
 impl FrameTarget for BorrowedTarget {
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        Some(Rc::<DrawTarget>::clone(&self.target))
+    /// The selected slot's texture, which the frame's first submit that
+    /// draws into it waits for the host's reads before.
+    fn begin_frame(&self) -> Option<FrameImage> {
+        let slot = self.selected.get();
+        let image = self.imports.borrow().frame_image(slot)?;
+        let mut slots = self.slots.borrow_mut();
+        let Some(state) = slots.get_mut(slot) else {
+            return Some(image);
+        };
+        // A frame begun again keeps the wait it attached.
+        if let (Some((event, value)), None) = (&state.wait, state.attached.filter(|&t| t == image.color)) {
+            let mut gpu = self.backend.gpu();
+            let event = ProtocolObject::<dyn MTLEvent>::from_ref(&**event);
+            if let Err(error) = gpu.wait_before_using(image.color, event, *value) {
+                Log::error(Event::Render, format!("Waiting for the host's reads failed: {error}"));
+            }
+            state.attached = Some(image.color);
+        }
+        Some(image)
     }
 
-    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
-        self.resource.render_pass_descriptor.borrow_mut().take();
-        let Some(command_buffer) = self.resource.command_buffer.borrow_mut().take() else {
+    /// Submits what is left of the frame, signaling the producer's event
+    /// after it.
+    fn end_frame(&self) -> Handoff {
+        let slot = self.selected.get();
+        let Some(color) = self.imports.borrow().color.get(slot).copied() else {
             return Handoff::Dropped;
         };
-        if let Some(event) = &self.event {
-            let value = self.event_value.get() + 1;
-            self.event_value.set(value);
-            command_buffer.encodeSignalEvent_value(ProtocolObject::<dyn MTLEvent>::from_ref(&**event), value);
+        let submitted = {
+            let mut gpu = self.backend.gpu();
+            // What no pass took yet, such as where the frame drew nothing.
+            gpu.take_waits_into_next_submit(color);
+            if let Some(event) = &self.event {
+                let value = self.event_value.get() + 1;
+                self.event_value.set(value);
+                gpu.signal_after_next_submit(ProtocolObject::<dyn MTLEvent>::from_ref(&**event), value);
+            }
+            gpu.submit(&[])
+        };
+        // The frame's submits took what the slot waited for.
+        if let Some(state) = self.slots.borrow_mut().get_mut(slot)
+            && state.attached.take() == Some(color)
+        {
+            state.wait = None;
         }
-        command_buffer.commit();
-        let sync = self.producer_sync(&command_buffer);
-        Handoff::GivenBack { slot: self.resource.selected.get(), sync }
+        if let Err(error) = submitted {
+            Log::error(Event::Render, format!("Submitting a borrowed texture's frame failed: {error}"));
+            return Handoff::Dropped;
+        }
+        match self.producer_sync() {
+            Some(sync) => Handoff::GivenBack { slot, sync },
+            None => Handoff::Dropped,
+        }
     }
 }
 

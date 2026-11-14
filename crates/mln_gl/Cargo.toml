@@ -9,8 +9,6 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
-# The [[test]]s below.
-autotests = false
 
 [lib]
 name = "mln_gl"
@@ -53,11 +51,9 @@ web-sys = { workspace = true, features = [
   "WebGlContextAttributes",
 ] }
 
-# A library device logs the platform it is on, and the process's first
-# context the GPU: a binary of its own, since that is once per process.
-[[test]]
-name = "log_test"
-path = "tests/log_test.rs"
+# The frame that `GlGpu`'s test draws.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 
 [lints]
 workspace = true

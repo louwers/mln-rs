@@ -13,14 +13,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_actor::LocalObject;
-use mln_gfx::Context;
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
+use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use shelf_pack::{ShelfPack, ShelfPackOptions};
+
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
 
 /// A bin of a dynamic texture.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -67,7 +70,7 @@ impl Eq for TextureHandle {}
 struct Inner {
     shelf_pack: ShelfPack,
     num_textures: i32,
-    /// The images queued for the next upload pass, keyed by handle id.
+    /// The images queued for the frame's next upload, keyed by handle id.
     images_to_upload: HashMap<i32, (RectU16, Vec<u8>)>,
 }
 
@@ -161,7 +164,8 @@ impl DynamicTexture {
         Some(tex_handle)
     }
 
-    /// Queues the pixels of the handle's rectangle for the next upload pass.
+    /// Queues the pixels of the handle's rectangle for the frame's next
+    /// upload.
     pub(crate) fn upload_image(&self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
         let mut inner = self.inner.lock();
         let rect = tex_handle.rectangle;
@@ -173,7 +177,7 @@ impl DynamicTexture {
 
     /// Creates the texture on first use and uploads the queued images. Runs
     /// on the render thread.
-    pub(crate) fn upload_deferred_images(&self, context: &dyn Context) {
+    pub(crate) fn upload_deferred_images(&self, context: &Context) {
         let mut inner = self.inner.lock();
         let texture = if let Some(texture) = self.get_texture() {
             texture
@@ -182,21 +186,26 @@ impl DynamicTexture {
             {
                 let mut t = texture.borrow_mut();
                 t.set_size(self.size);
-                t.set_format(self.pixel_format, TextureChannelDataType::UnsignedByte);
-                t.set_sampler_configuration(SamplerState {
+                t.set_format(texture_format(self.pixel_format, TextureChannelDataType::UnsignedByte));
+                t.set_sampler(SamplerState {
                     filter: TextureFilterType::Linear,
                     wrap_u: TextureWrapType::Clamp,
                     wrap_v: TextureWrapType::Clamp,
                     ..SamplerState::default()
                 });
-                t.create();
+                if let Err(error) = t.create(context) {
+                    Log::error(Event::Render, format!("Making an atlas texture failed: {error}"));
+                }
             }
             *self.gpu_texture.lock() = Some(LocalObject::new(RefCell::new(Some(std::rc::Rc::clone(&texture)))));
             texture
         };
         let mut t = texture.borrow_mut();
         for (rect, data) in inner.images_to_upload.values() {
-            t.upload_sub_region(Some(data), Size::new(u32::from(rect.w), u32::from(rect.h)), rect.x, rect.y);
+            let size = Size::new(u32::from(rect.w), u32::from(rect.h));
+            if let Err(error) = t.upload_sub_region(context, data, size, rect.x, rect.y) {
+                Log::error(Event::Render, format!("Uploading to an atlas texture failed: {error}"));
+            }
         }
         inner.images_to_upload.clear();
     }

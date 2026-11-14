@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::fill_layer_ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO,
     FillOutlineTriangulatedDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO, FillTilePropsUnionUBO,
@@ -9,7 +8,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_IMAGE_TEXTURE, ID_FILL_TILE_PROPS_UBO,
 };
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::fill_layer_properties::{
@@ -22,9 +20,11 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::render_fill_layer::FillVariant;
-use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
+use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::bucket::Bucket;
 use crate::buckets::fill_bucket::FillBucket;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -59,7 +59,7 @@ impl LayerTweaker for FillLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -81,7 +81,7 @@ impl LayerTweaker for FillLayerTweaker {
                 from_scale: crossfade.from_scale,
                 to_scale: crossfade.to_scale,
             };
-            context.emplace_or_update_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
+            context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
             self.base.properties_updated = false;
         }
         layer_group
@@ -94,17 +94,17 @@ impl LayerTweaker for FillLayerTweaker {
         let int_zoom = parameters.state.get_integer_zoom();
 
         let mut i: u32 = 0;
-        let count = layer_group.get_drawable_count();
+        let count = layer_group.drawable_count();
         let mut drawable_ubo_vector = vec![FillDrawableUnionUBO::default(); count];
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![FillTilePropsUnionUBO::default(); count];
 
         let self_ptr: *const Self = self;
         let id = self.base.id.clone();
-        visit_layer_group_drawables(layer_group, |drawable| {
+        layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = false;
-            let Some(tile_id) = drawable.get_tile_id() else {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check_tweak_drawable_ptr(drawable, self_ptr) {
@@ -113,7 +113,7 @@ impl LayerTweaker for FillLayerTweaker {
 
             let tile_id = tile_id.to_unwrapped();
 
-            let Some(binders_slot) = get_drawable_binders(drawable) else {
+            let Some(binders_slot) = drawable.binders.clone() else {
                 debug_assert!(false);
                 return;
             };
@@ -127,7 +127,7 @@ impl LayerTweaker for FillLayerTweaker {
             };
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
-            let tile = get_drawable_render_tile(drawable);
+            let tile = drawable.render_tile.as_ref().map(DrawableRenderTile::tile);
             debug_assert!(tile.is_some());
 
             let sdf_pattern: f32 = if bucket.is_sdf_pattern(&id) { 1.0 } else { 0.0 };
@@ -162,12 +162,12 @@ impl LayerTweaker for FillLayerTweaker {
             let pixel_y = tile_size_at_nearest_zoom.wrapping_mul(tile_id.canonical.y as i32);
 
             let mut texture_size = Size::new(0, 0);
-            if let Some(tex) = drawable.get_texture(ID_FILL_IMAGE_TEXTURE) {
-                texture_size = tex.borrow().get_size();
+            if let Some(tex) = drawable.textures[ID_FILL_IMAGE_TEXTURE].as_ref() {
+                texture_size = tex.borrow().size();
             }
 
             let ubo = &mut drawable_ubo_vector[i as usize];
-            match FillVariant::from_type(drawable.get_type()) {
+            match FillVariant::from_type(drawable.type_) {
                 Some(FillVariant::Fill) => {
                     ubo.set_fill(&FillDrawableUBO {
                         matrix: cast_matrix(&matrix),
@@ -226,21 +226,15 @@ impl LayerTweaker for FillLayerTweaker {
                     }
                 }
             }
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         let bytes: &[u8] = bytemuck::cast_slice(&tile_props_ubo_vector);
-        match &self.tile_props_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.tile_props_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.tile_props_uniform_buffer, bytes);
 
         let layer_uniforms = layer_group.mutable_uniform_buffers();
         layer_uniforms.set(ID_FILL_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());

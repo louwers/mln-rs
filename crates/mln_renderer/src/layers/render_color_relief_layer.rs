@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::gpu::TextureFormat;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::color_relief_layer_ubo::ColorReliefTilePropsUBO;
@@ -19,11 +20,13 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_IMAGE_TEXTURE,
     ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
-use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_gfx::texture2d::SamplerState;
+use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramBasePtr, ShaderRegistry};
+use mln_gfx::{
+    AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, VertexAttributeArray,
+};
 use mln_map_types::TransformState;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
@@ -48,8 +51,12 @@ use super::color_relief_layer_tweaker::{ColorReliefDrawableData, ColorReliefLaye
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
+use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
 use crate::render_pass::RenderPass;
@@ -85,7 +92,7 @@ pub(crate) struct RenderColorReliefLayer {
     elevation_stops_texture: Option<Texture2DPtr>,
     color_stops_texture: Option<Texture2DPtr>,
 
-    color_relief_shader: Option<ShaderProgramBasePtr>,
+    color_relief_shader: Option<ShaderProgramPtr>,
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
@@ -223,8 +230,8 @@ impl RenderColorReliefLayer {
 }
 
 /// The vertex attributes of a color-relief drawable over `vertices`.
-fn color_relief_vertex_attributes(context: &dyn Context, vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
-    let vertex_attrs = context.create_vertex_attribute_array();
+fn color_relief_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
+    let vertex_attrs = VertexAttributeArray::new_ptr();
     {
         let mut attrs = vertex_attrs.borrow_mut();
         let stride = size_of::<HillshadeLayoutVertex>() as u32;
@@ -335,7 +342,7 @@ impl RenderLayer for RenderColorReliefLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -355,14 +362,7 @@ impl RenderLayer for RenderColorReliefLayer {
 
         // Set up layer group
         if self.base.layer_group.is_none() {
-            match context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
+            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -378,8 +378,7 @@ impl RenderLayer for RenderColorReliefLayer {
         let layer_tweaker = self.base.layer_tweaker.clone();
 
         if self.color_relief_shader.is_none() {
-            self.color_relief_shader =
-                context.get_generic_shader(shaders, COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
+            self.color_relief_shader = shaders.shader(COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
         }
         let Some(color_relief_shader) = self.color_relief_shader.clone() else {
             Log::error(Event::Render, "ColorRelief shader failed to load");
@@ -393,12 +392,10 @@ impl RenderLayer for RenderColorReliefLayer {
         }
 
         {
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group =
-                group.as_tile_layer_group_mut().expect("color-relief layer group is a TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             let base = &self.base;
             tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
         }
 
@@ -416,12 +413,12 @@ impl RenderLayer for RenderColorReliefLayer {
             {
                 let mut t = ramp_changed_texture.borrow_mut();
                 // Use RGBA32F instead of R32F for llvmpipe compatibility
-                t.set_format(TexturePixelType::RGBA, TextureChannelDataType::Float);
-                t.upload_data(
-                    Some(bytemuck::cast_slice(&self.elevation_stops_data)),
-                    Size::new(self.color_ramp_size, 1),
-                );
-                t.set_sampler_configuration(SamplerState {
+                t.set_format(TextureFormat::Rgba32Float);
+                let data = bytemuck::cast_slice(&self.elevation_stops_data);
+                if let Err(error) = t.upload_data(context, data, Size::new(self.color_ramp_size, 1)) {
+                    Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
+                }
+                t.set_sampler(SamplerState {
                     filter: TextureFilterType::Nearest,
                     wrap_u: TextureWrapType::Clamp,
                     wrap_v: TextureWrapType::Clamp,
@@ -435,7 +432,7 @@ impl RenderLayer for RenderColorReliefLayer {
             {
                 let mut t = color_stops_texture.borrow_mut();
                 t.set_image(Some(Rc::new(self.color_stops.clone())));
-                t.set_sampler_configuration(SamplerState {
+                t.set_sampler(SamplerState {
                     filter: TextureFilterType::Linear,
                     wrap_u: TextureWrapType::Clamp,
                     wrap_v: TextureWrapType::Clamp,
@@ -561,14 +558,14 @@ impl RenderLayer for RenderColorReliefLayer {
                     texture
                 }
             };
-            dem_texture.borrow_mut().set_sampler_configuration(dem_sampler);
+            dem_texture.borrow_mut().set_sampler(dem_sampler);
 
-            let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
+            let update_existing = |drawable: &mut crate::drawable::Drawable| {
                 if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
                     return false;
                 }
                 // The masked geometry changed: rebuild (see the file comment).
-                if drawable.base().create_time < geometry_time {
+                if drawable.create_time < geometry_time {
                     return false;
                 }
 
@@ -585,13 +582,13 @@ impl RenderLayer for RenderColorReliefLayer {
                 continue;
             }
 
-            let mut builder = context.create_drawable_builder();
+            let mut builder = DrawableBuilder::boxed();
             builder.set_shader(Some(Rc::clone(&color_relief_shader)));
             builder.set_enable_depth(false);
             builder.set_color_mode(&ColorMode::alpha_blended());
-            builder.set_cull_face_mode(&CullFaceMode::disabled());
+            builder.set_cull_face_mode(CullFaceMode::disabled());
             builder.set_render_pass(render_pass);
-            builder.set_vertex_attributes(Some(color_relief_vertex_attributes(context, &vertices)));
+            builder.set_vertex_attributes(Some(color_relief_vertex_attributes(&vertices)));
             builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
             builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(&indices)), &segments);
 
@@ -601,19 +598,20 @@ impl RenderLayer for RenderColorReliefLayer {
             builder.set_texture(Some(Rc::clone(&elevation_stops_texture)), ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE);
             builder.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
 
-            builder.flush(context);
+            builder.flush();
 
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             for mut drawable in builder.clear_drawables() {
-                drawable.set_tile_id(tile_id);
-                drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
+                drawable.tile_id = Some(tile_id);
+                drawable.layer_tweaker = layer_tweaker.clone();
 
                 // Store tile props in drawable data for use by the tweaker
                 // (for consolidated backends)
-                drawable.set_data(Some(Box::new(ColorReliefDrawableData { tile_props: tile_props_ubo })));
+                drawable.data = Some(crate::drawable::DrawableData::ColorRelief(ColorReliefDrawableData {
+                    tile_props: tile_props_ubo,
+                }));
 
-                tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
+                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
             }
         }
     }

@@ -3,24 +3,27 @@
 // gamma space, premultiplied, with egui-wgpu's blending, but no dithering.
 //
 // The textures and the frames' vertex and index buffers are the backend's
-// (`Texture2D`, `BufferResource`), which destroy themselves once the frames
-// that use them are done. What the painter makes itself (the pipeline, its
-// layouts and the descriptor pools) goes through the context's deletion
-// queue for the same reason, and so does a freed texture's descriptor set
-// on its way to the next texture.
+// `Gpu`'s, which destroys them once the frames that use them are done. What
+// the painter makes itself (the pipeline, its layouts and the descriptor
+// pools) goes through `VulkanGpu::destroy_later` for the same reason, and so
+// does a freed texture's descriptor set on its way to the next texture.
 
 #![expect(unsafe_code, reason = "Vulkan through ash is the FFI here")]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use ash::vk;
-use mln_gfx::texture2d::{SamplerState, Texture2D as _};
-use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_gfx::gpu::{
+    BufferDesc, BufferId, BufferUsage, Gpu as _, GpuError, SamplerId, TextureDesc, TextureFormat, TextureId,
+    TextureRegion, TextureUsage,
+};
+use mln_gfx::texture2d::SamplerState;
+use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_vulkan::{Context, Device, Overlay, OverlayTarget, ShaderStage, Texture2D, compile_glsl};
+use mln_vulkan::{Overlay, OverlayTarget, ShaderStage, VulkanGpu, compile_glsl};
 
 use crate::overlay::Paint;
 
@@ -69,15 +72,14 @@ const TEXTURE_BINDING: u32 = 0;
 const SAMPLER_BINDING: u32 = 1;
 
 /// One of egui's textures, with the descriptor set that binds it.
+#[derive(Clone, Copy)]
 struct Texture {
-    texture: Rc<RefCell<Texture2D>>,
+    texture: TextureId,
+    sampler: SamplerId,
     set: vk::DescriptorSet,
 }
 
 struct Painter {
-    /// The device, which lives until the painter's objects are destroyed.
-    device: Device,
-    context: Weak<Context>,
     set_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
     /// The render pass `pipeline` is for.
@@ -91,52 +93,59 @@ struct Painter {
     textures: HashMap<egui::TextureId, Texture>,
 }
 
-/// The overlay that paints the controls on Vulkan, made with the first
-/// frame.
-pub(crate) fn vulkan_overlay(paint: Rc<RefCell<Paint>>) -> Overlay {
-    let mut painter: Option<Painter> = None;
-    let mut failed = false;
-    Box::new(move |target: &OverlayTarget<'_>| {
-        if failed {
+/// The overlay that paints the controls on Vulkan, with a painter made with
+/// the first frame.
+struct VulkanOverlay {
+    paint: Rc<RefCell<Paint>>,
+    painter: Option<Painter>,
+    failed: bool,
+}
+
+pub(crate) fn vulkan_overlay(paint: Rc<RefCell<Paint>>) -> Box<dyn Overlay> {
+    Box::new(VulkanOverlay { paint, painter: None, failed: false })
+}
+
+impl Overlay for VulkanOverlay {
+    fn draw(&mut self, target: &mut OverlayTarget<'_>) {
+        if self.failed {
             return;
         }
-        if painter.is_none() {
+        if self.painter.is_none() {
             match Painter::new(target) {
-                Ok(new) => painter = Some(new),
+                Ok(new) => self.painter = Some(new),
                 Err(e) => {
                     Log::error(Event::Render, format!("The controls can't be drawn: {e}"));
-                    failed = true;
+                    self.failed = true;
                     return;
                 }
             }
         }
-        let Some(painter) = painter.as_mut() else { return };
-        let mut paint = paint.borrow_mut();
+        let Some(painter) = self.painter.as_mut() else { return };
+        let mut paint = self.paint.borrow_mut();
         let mut textures = std::mem::take(&mut paint.textures);
         for (id, deltas) in &textures.set {
             for delta in deltas {
-                painter.update_texture(target, *id, delta);
+                if let Err(e) = painter.update_texture(target, *id, delta) {
+                    Log::error(Event::Render, format!("A texture of the controls can't be updated: {e}"));
+                }
             }
         }
         if let Err(e) = painter.paint(target, &paint.primitives, paint.pixels_per_point) {
             Log::error(Event::Render, format!("The controls can't be drawn: {e}"));
-            failed = true;
+            self.failed = true;
         }
         for id in &textures.free {
             if let Some(texture) = painter.textures.remove(id) {
-                painter.free_texture(texture);
+                painter.free_texture(target.gpu, texture);
             }
         }
         textures.clear();
-    })
-}
+    }
 
-/// Runs `destroy` once the frames that use what it destroys are done, or
-/// now if the context is gone, and its frames with it.
-fn destroy_later(context: &Weak<Context>, destroy: impl FnOnce() + 'static) {
-    match context.upgrade() {
-        Some(context) => context.enqueue_deletion(Box::new(move |_| destroy())),
-        None => destroy(),
+    fn destroy(&mut self, gpu: &mut VulkanGpu) {
+        if let Some(painter) = self.painter.take() {
+            painter.destroy(gpu);
+        }
     }
 }
 
@@ -173,10 +182,7 @@ impl Painter {
             })?
         };
 
-        // Dropping the painter destroys what a failed step leaves.
-        let mut painter = Painter {
-            device: target.context.device().clone(),
-            context: target.context.weak(),
+        let painter = Painter {
             set_layout,
             pipeline_layout,
             render_pass: vk::RenderPass::null(),
@@ -186,15 +192,34 @@ impl Painter {
             free_sets: Rc::default(),
             textures: HashMap::new(),
         };
-        painter.set_render_pass(device, target.render_pass)?;
-        Ok(painter)
+        match painter.create_pipeline(device, target.render_pass) {
+            Ok(pipeline) => Ok(Painter { pipeline, render_pass: target.render_pass, ..painter }),
+            Err(e) => {
+                // SAFETY: no frame used the layouts.
+                unsafe {
+                    device.destroy_pipeline_layout(pipeline_layout, None);
+                    device.destroy_descriptor_set_layout(set_layout, None);
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Makes the pipeline for `render_pass`, unless it is the one it has.
-    fn set_render_pass(&mut self, device: &ash::Device, render_pass: vk::RenderPass) -> Result<(), String> {
-        if self.pipeline != vk::Pipeline::null() && self.render_pass == render_pass {
+    fn set_render_pass(&mut self, target: &mut OverlayTarget<'_>) -> Result<(), String> {
+        if self.render_pass == target.render_pass {
             return Ok(());
         }
+        let pipeline = self.create_pipeline(target.device, target.render_pass)?;
+        let old = std::mem::replace(&mut self.pipeline, pipeline);
+        self.render_pass = target.render_pass;
+        // SAFETY: the frames that drew with the pipeline are done.
+        target.gpu.destroy_later(move |device| unsafe { device.destroy_pipeline(old, None) });
+        Ok(())
+    }
+
+    /// The pipeline for `render_pass`.
+    fn create_pipeline(&self, device: &ash::Device, render_pass: vk::RenderPass) -> Result<vk::Pipeline, String> {
         let module = |stage: ShaderStage, source: &str| {
             let spirv = compile_glsl(stage, source)?;
             let create_info = vk::ShaderModuleCreateInfo::default().code(&spirv);
@@ -203,7 +228,7 @@ impl Painter {
         };
         let vertex = module(ShaderStage::Vertex, VERTEX_SHADER)?;
         let pipeline = module(ShaderStage::Fragment, FRAGMENT_SHADER).and_then(|fragment| {
-            let pipeline = self.create_pipeline(device, render_pass, vertex, fragment);
+            let pipeline = self.create_vk_pipeline(device, render_pass, vertex, fragment);
             // SAFETY: a pipeline keeps nothing of the modules it was made
             // from.
             unsafe { device.destroy_shader_module(fragment, None) };
@@ -211,17 +236,10 @@ impl Painter {
         });
         // SAFETY: as above.
         unsafe { device.destroy_shader_module(vertex, None) };
-        let old = std::mem::replace(&mut self.pipeline, pipeline?);
-        self.render_pass = render_pass;
-        if old != vk::Pipeline::null() {
-            let device = self.device.clone();
-            // SAFETY: the frames that drew with the pipeline are done.
-            destroy_later(&self.context, move || unsafe { device.ash_device().destroy_pipeline(old, None) });
-        }
-        Ok(())
+        pipeline
     }
 
-    fn create_pipeline(
+    fn create_vk_pipeline(
         &self,
         device: &ash::Device,
         render_pass: vk::RenderPass,
@@ -320,73 +338,108 @@ impl Painter {
     }
 
     /// Frees a texture: its descriptor set is another texture's to take
-    /// once the frames that draw with it are done, when the texture
-    /// destroys itself too.
-    fn free_texture(&self, texture: Texture) {
-        let Texture { texture, set } = texture;
+    /// once the frames that draw with it are done, when the `Gpu` destroys
+    /// the texture and its sampler too.
+    fn free_texture(&self, gpu: &mut VulkanGpu, texture: Texture) {
+        let Texture { texture, sampler, set } = texture;
+        gpu.destroy_texture(texture);
+        gpu.destroy_sampler(sampler);
         let free_sets = Rc::clone(&self.free_sets);
-        destroy_later(&self.context, move || free_sets.borrow_mut().push(set));
-        drop(texture);
+        gpu.destroy_later(move |_| free_sets.borrow_mut().push(set));
     }
 
     /// Applies one of egui's texture updates: a whole new texture, or a
     /// region of an existing one.
-    fn update_texture(&mut self, target: &OverlayTarget<'_>, id: egui::TextureId, delta: &egui::epaint::ImageDelta) {
+    fn update_texture(
+        &mut self,
+        target: &mut OverlayTarget<'_>,
+        id: egui::TextureId,
+        delta: &egui::epaint::ImageDelta,
+    ) -> Result<(), GpuError> {
         let egui::ImageData::Color(image) = &delta.image;
         let [width, height] = image.size;
         if width == 0 || height == 0 {
-            return;
+            return Ok(());
         }
         let pixels: Vec<u8> = image.pixels.iter().flat_map(egui::Color32::to_array).collect();
         let size = Size::new(width as u32, height as u32);
+        let gpu = &mut *target.gpu;
         if let Some([x, y]) = delta.pos {
             if let Some(texture) = self.textures.get(&id) {
-                texture.texture.borrow_mut().upload_sub_region(Some(&pixels), size, x as u16, y as u16);
+                gpu.write_texture(texture.texture, TextureRegion { x: x as u32, y: y as u32, size }, &pixels)?;
             }
-        } else {
-            if let Some(old) = self.textures.remove(&id) {
-                self.free_texture(old);
-            }
-            let texture = target.context.create_vulkan_texture_2d();
-            let (image_view, sampler, layout) = {
-                let mut texture = texture.borrow_mut();
-                texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
-                texture.set_sampler_configuration(sampler_state(delta.options));
-                texture.upload_data(Some(&pixels), size);
-                (texture.get_vulkan_image_view(), texture.get_vulkan_sampler(), texture.get_vulkan_image_layout())
-            };
-            if image_view == vk::ImageView::null() || sampler == vk::Sampler::null() {
-                return;
-            }
-            let Ok(set) = self.allocate_set(target.device) else {
-                return;
-            };
-            let image_info = [vk::DescriptorImageInfo::default().image_view(image_view).image_layout(layout)];
-            let sampler_info = [vk::DescriptorImageInfo::default().sampler(sampler)];
-            let writes = [
-                vk::WriteDescriptorSet::default()
-                    .dst_set(set)
-                    .dst_binding(TEXTURE_BINDING)
-                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                    .image_info(&image_info),
-                vk::WriteDescriptorSet::default()
-                    .dst_set(set)
-                    .dst_binding(SAMPLER_BINDING)
-                    .descriptor_type(vk::DescriptorType::SAMPLER)
-                    .image_info(&sampler_info),
-            ];
-            // SAFETY: no frame uses the set, and the view and the
-            // sampler are the texture's, which is freed with the set.
-            unsafe { target.device.update_descriptor_sets(&writes, &[]) };
-            self.textures.insert(id, Texture { texture, set });
+            return Ok(());
         }
+        if let Some(old) = self.textures.remove(&id) {
+            self.free_texture(gpu, old);
+        }
+        let texture = gpu.create_texture(&TextureDesc {
+            label: "egui",
+            size,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+        })?;
+        let sampler = match gpu.create_sampler(&sampler_state(delta.options)) {
+            Ok(sampler) => sampler,
+            Err(e) => {
+                gpu.destroy_texture(texture);
+                return Err(e);
+            }
+        };
+        let texture = Texture { texture, sampler, set: vk::DescriptorSet::null() };
+        match self.fill(target.device, gpu, &texture, size, &pixels) {
+            Ok(set) => {
+                self.textures.insert(id, Texture { set, ..texture });
+                Ok(())
+            }
+            Err(e) => {
+                gpu.destroy_texture(texture.texture);
+                gpu.destroy_sampler(texture.sampler);
+                Err(e)
+            }
+        }
+    }
+
+    /// Writes `pixels` to a new texture of `size`, and returns a descriptor
+    /// set that binds it and its sampler.
+    fn fill(
+        &mut self,
+        device: &ash::Device,
+        gpu: &mut VulkanGpu,
+        texture: &Texture,
+        size: Size,
+        pixels: &[u8],
+    ) -> Result<vk::DescriptorSet, GpuError> {
+        gpu.write_texture(texture.texture, TextureRegion::whole(size), pixels)?;
+        let invalid = |what: &str| GpuError::Invalid(format!("egui's texture: {what}"));
+        let (view, layout) = gpu.raw_texture(texture.texture).ok_or_else(|| invalid("no view"))?;
+        let sampler = gpu.raw_sampler(texture.sampler).ok_or_else(|| invalid("no sampler"))?;
+        let set = self.allocate_set(device).map_err(|e| invalid(&e))?;
+        let image_info = [vk::DescriptorImageInfo::default().image_view(view).image_layout(layout)];
+        let sampler_info = [vk::DescriptorImageInfo::default().sampler(sampler)];
+        let writes = [
+            vk::WriteDescriptorSet::default()
+                .dst_set(set)
+                .dst_binding(TEXTURE_BINDING)
+                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                .image_info(&image_info),
+            vk::WriteDescriptorSet::default()
+                .dst_set(set)
+                .dst_binding(SAMPLER_BINDING)
+                .descriptor_type(vk::DescriptorType::SAMPLER)
+                .image_info(&sampler_info),
+        ];
+        // SAFETY: no frame uses the set, and the view and the sampler are
+        // the texture's, which is freed with the set.
+        unsafe { device.update_descriptor_sets(&writes, &[]) };
+        Ok(set)
     }
 
     /// Records the controls' meshes into the target's render pass, clipped
     /// to their rectangles.
     fn paint(
         &mut self,
-        target: &OverlayTarget<'_>,
+        target: &mut OverlayTarget<'_>,
         primitives: &[egui::ClippedPrimitive],
         pixels_per_point: f32,
     ) -> Result<(), String> {
@@ -400,7 +453,7 @@ impl Painter {
         if meshes.is_empty() {
             return Ok(());
         }
-        self.set_render_pass(target.device, target.render_pass)?;
+        self.set_render_pass(target)?;
 
         // All the meshes' vertices and indexes, each mesh's after the last.
         let mut vertices: Vec<u8> = Vec::new();
@@ -420,15 +473,18 @@ impl Painter {
                 indexes.extend_from_slice(&index.to_ne_bytes());
             }
         }
-        // Dropped after the draws are recorded, and destroyed when the
-        // frame is done.
-        let vertex_buffer =
-            target.context.create_buffer(Some(&vertices), vertices.len(), vk::BufferUsageFlags::VERTEX_BUFFER, false);
-        let index_buffer =
-            target.context.create_buffer(Some(&indexes), indexes.len(), vk::BufferUsageFlags::INDEX_BUFFER, false);
-        if !vertex_buffer.is_valid() || !index_buffer.is_valid() {
-            return Ok(());
-        }
+        // Destroyed once the draws are recorded, which the `Gpu` does when
+        // the frame is done.
+        let vertex_buffer = buffer(target.gpu, BufferUsage::Vertex, &vertices)?;
+        let index_buffer = buffer(target.gpu, BufferUsage::Index, &indexes);
+        let raw = index_buffer
+            .as_ref()
+            .ok()
+            .and_then(|&index_buffer| target.gpu.raw_buffer(vertex_buffer).zip(target.gpu.raw_buffer(index_buffer)));
+        let (Ok(index_buffer), Some((raw_vertex_buffer, raw_index_buffer))) = (index_buffer, raw) else {
+            target.gpu.destroy_buffer(vertex_buffer);
+            return Err("the meshes' buffers".to_owned());
+        };
 
         let (device, command_buffer) = (target.device, target.command_buffer);
         let (width, height) = (target.size.width as f32, target.size.height as f32);
@@ -447,8 +503,8 @@ impl Painter {
                 0,
                 &screen_size.map(f32::to_ne_bytes).concat(),
             );
-            device.cmd_bind_vertex_buffers(command_buffer, 0, &[vertex_buffer.get_vulkan_buffer()], &[0]);
-            device.cmd_bind_index_buffer(command_buffer, index_buffer.get_vulkan_buffer(), 0, vk::IndexType::UINT32);
+            device.cmd_bind_vertex_buffers(command_buffer, 0, &[raw_vertex_buffer], &[0]);
+            device.cmd_bind_index_buffer(command_buffer, raw_index_buffer, 0, vk::IndexType::UINT32);
         }
 
         for (clip, texture_id, first_vertex, first_index, index_count) in draws {
@@ -491,19 +547,21 @@ impl Painter {
                 );
             }
         }
+        target.gpu.destroy_buffer(vertex_buffer);
+        target.gpu.destroy_buffer(index_buffer);
         Ok(())
     }
-}
 
-impl Drop for Painter {
-    fn drop(&mut self) {
-        let device = self.device.clone();
-        let (set_layout, pipeline_layout, pipeline) = (self.set_layout, self.pipeline_layout, self.pipeline);
-        let pools = std::mem::take(&mut self.pools);
-        // The textures go first: each waits for the frames that use it.
-        self.textures.clear();
-        destroy_later(&self.context, move || {
-            let device = device.ash_device();
+    /// Destroys what the painter made, once the frames that use it are
+    /// done.
+    fn destroy(self, gpu: &mut VulkanGpu) {
+        for (_, texture) in self.textures {
+            gpu.destroy_texture(texture.texture);
+            gpu.destroy_sampler(texture.sampler);
+        }
+        let (set_layout, pipeline_layout, pipeline, pools) =
+            (self.set_layout, self.pipeline_layout, self.pipeline, self.pools);
+        gpu.destroy_later(move |device| {
             // SAFETY: the frames that drew with these are done, and nothing
             // else refers to them: destroying a pool frees its sets.
             unsafe {
@@ -516,6 +574,17 @@ impl Drop for Painter {
             }
         });
     }
+}
+
+/// A buffer of `usage` holding `data`.
+fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> Result<BufferId, String> {
+    let buffer = gpu.create_buffer(&BufferDesc { label: "egui", usage, size: data.len() as u64 });
+    let buffer = buffer.map_err(|e| e.to_string())?;
+    if let Err(e) = gpu.write_buffer(buffer, 0, data) {
+        gpu.destroy_buffer(buffer);
+        return Err(e.to_string());
+    }
+    Ok(buffer)
 }
 
 /// The backend's sampler configuration for egui's texture options. The

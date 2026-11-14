@@ -6,22 +6,15 @@ use std::rc::Rc;
 use mln_util::host_bytes::HostBytes;
 use mln_util::time::Instant;
 
-/// A backend buffer attached to a shared vertex vector.
-pub trait VertexBufferBase: Any {}
-
-impl dyn VertexBufferBase {
-    /// The concrete type behind this trait object, if it is a `T`.
-    pub fn downcast_ref<T: VertexBufferBase>(&self) -> Option<&T> {
-        let any: &dyn Any = self;
-        any.downcast_ref()
-    }
-}
+use crate::buffer::BufferPtr;
 
 /// The data members of `gfx::VertexVectorBase`. Interior mutability because
-/// the vector is shared (`VertexVectorBasePtr`) and the upload pass attaches
-/// buffers and modification times through the shared pointer.
+/// the vector is shared (`VertexVectorBasePtr`) and an upload attaches its
+/// buffer through the shared pointer.
 pub struct VertexVectorBaseData {
-    buffer: RefCell<Option<Box<dyn VertexBufferBase>>>,
+    /// The buffer of the vertices, and the modification time of the
+    /// vertices it holds.
+    buffer: RefCell<Option<(BufferPtr, Instant)>>,
     dirty: Cell<bool>,
     released: Cell<bool>,
     raw_freed: Cell<bool>,
@@ -60,15 +53,18 @@ pub trait VertexVectorBase: Any {
     /// Drop the CPU copy of the data. Vectors that keep their data leave it be.
     fn free_raw_data(&self) {}
 
-    fn get_buffer(&self) -> Ref<'_, Option<Box<dyn VertexBufferBase>>> {
-        self.vertex_vector_base().buffer.borrow()
+    /// The buffer of the vertices, and the modification time of the
+    /// vertices it holds.
+    fn get_buffer(&self) -> Option<(BufferPtr, Instant)> {
+        self.vertex_vector_base().buffer.borrow().clone()
     }
-    fn set_buffer(&self, value: Option<Box<dyn VertexBufferBase>>) {
+    /// Attaches `buffer`, which holds the vertices of modification time
+    /// `holds`. A released vector frees its CPU copy, since it won't be
+    /// modified or uploaded again.
+    fn set_buffer(&self, buffer: BufferPtr, holds: Instant) {
         let base = self.vertex_vector_base();
-        let has_buffer = value.is_some();
-        *base.buffer.borrow_mut() = value;
-        // The data now lives in the buffer; a released vector will not be modified or re-uploaded.
-        if base.released.get() && has_buffer {
+        *base.buffer.borrow_mut() = Some((buffer, holds));
+        if base.released.get() {
             self.free_raw_data();
         }
     }
@@ -120,11 +116,6 @@ impl<V: bytemuck::Pod> Default for VertexVector<V> {
 }
 
 impl<V: bytemuck::Pod> VertexVector<V> {
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     /// A vector holding `vertices` (C++ builds one with `emplace_back`; the
     /// renderer moves a bucket's vertices into a shared vector this way, see
     /// `mln_renderer::bucket_geometry`).
@@ -149,7 +140,7 @@ impl<V: bytemuck::Pod> VertexVector<V> {
     }
 
     /// Port-only: a released vector of the vertices in a JS array, which the
-    /// upload pass writes to the GPU from there. Released, it frees them once
+    /// upload writes to the GPU from there. Released, it frees them once
     /// it has a buffer, so no buffer is ever updated from them.
     #[cfg(target_family = "wasm")]
     #[must_use]
@@ -174,7 +165,7 @@ impl<V: bytemuck::Pod> VertexVector<V> {
         0
     }
 
-    pub(crate) fn emplace_back(&mut self, vertex: V) {
+    pub fn emplace_back(&mut self, vertex: V) {
         debug_assert!(!self.base.released.get());
         self.v.get_mut().push(vertex);
         self.base.dirty.set(true);
@@ -237,39 +228,5 @@ impl<V: bytemuck::Pod> VertexVectorBase for VertexVector<V> {
         #[cfg(target_family = "wasm")]
         self.host.borrow_mut().take();
         self.base.raw_freed.set(true);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct StubBuffer;
-
-    impl VertexBufferBase for StubBuffer {}
-
-    #[test]
-    fn released_vector_frees_its_data_once_it_has_a_buffer() {
-        let before = Instant::now();
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        let vec: VertexVectorBasePtr = Rc::new(VertexVector::from_vec_released(vec![[1i16, 2], [3, 4]]));
-        assert!(vec.has_raw_data());
-        assert_eq!(vec.get_raw_data().len(), 8);
-
-        vec.set_buffer(Some(Box::new(StubBuffer)));
-        assert!(!vec.has_raw_data());
-        assert!(vec.get_raw_data().is_empty());
-        assert_eq!(vec.get_raw_count(), 2);
-        // A drawable that bound its attributes before the vector was made
-        // still sees it as new.
-        assert!(vec.is_modified_after(before));
-    }
-
-    #[test]
-    fn vector_that_is_not_released_keeps_its_data() {
-        let vec: VertexVectorBasePtr = Rc::new(VertexVector::from_vec(vec![[1i16, 2]]));
-        vec.set_buffer(Some(Box::new(StubBuffer)));
-        assert!(vec.has_raw_data());
-        assert_eq!(vec.get_raw_data().len(), 4);
     }
 }

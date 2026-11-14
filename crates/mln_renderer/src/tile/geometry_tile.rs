@@ -27,7 +27,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_actor::{ActorRef, LocalObject, Mailbox, scheduler};
-use mln_gfx::UploadPass;
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
@@ -48,6 +47,7 @@ use serde::{Deserialize, Serialize};
 use crate::bucket::BucketPtr;
 use crate::bucket_geometry::BucketGeometry;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{GlyphAtlas, ImageAtlas, ImageVersionMap, TextureAtlas};
 use crate::image_manager::{ImageManager, ImageRequestPair, ImageRequestor, ImageRequestorBase, requestor_key};
 use crate::render_layer::LayerRenderData;
@@ -204,14 +204,14 @@ impl TileRenderData for GeometryTileRenderData {
         Some(&self.bucket_geometry)
     }
 
-    fn upload(&self, upload_pass: &dyn UploadPass) {
+    fn upload(&self, context: &Context) {
         let Some(layout_result) = &self.layout_result else {
             return;
         };
 
         for entry in layout_result.layer_render_data.values() {
             if entry.bucket.needs_upload() {
-                entry.bucket.upload(upload_pass);
+                entry.bucket.upload(context);
             }
         }
 
@@ -220,7 +220,6 @@ impl TileRenderData for GeometryTileRenderData {
             return;
         };
 
-        let context = upload_pass.get_context();
         if let Some(glyph_dynamic_texture) = &layout_result.glyph_atlas().dynamic_texture {
             glyph_dynamic_texture.upload_deferred_images(context);
             *atlas_textures.glyph.borrow_mut() = glyph_dynamic_texture.get_texture();

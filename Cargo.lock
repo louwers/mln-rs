@@ -2718,6 +2718,8 @@ dependencies = [
  "mln-rs-vec-map",
  "raw-window-handle",
  "serde",
+ "slotmap",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2755,6 +2757,7 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
+ "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-renderer",
  "mln-rs-runtime",
@@ -2768,6 +2771,9 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-webgpu",
  "naga",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
  "parking_lot",
  "serde_json",
  "wgpu",
@@ -2833,6 +2839,7 @@ version = "0.0.11"
 name = "mln-rs-mtl"
 version = "0.0.11"
 dependencies = [
+ "block2 0.6.2",
  "bytemuck",
  "mln-rs-gfx",
  "mln-rs-tile-id",
@@ -2843,6 +2850,7 @@ dependencies = [
  "objc2-io-surface",
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
+ "parking_lot",
 ]
 
 [[package]]
@@ -3288,11 +3296,7 @@ dependencies = [
 name = "mln-rs-webgpu"
 version = "0.0.11"
 dependencies = [
- "bytemuck",
  "mln-rs-gfx",
- "mln-rs-image",
- "mln-rs-pixelmatch",
- "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
  "parking_lot",

@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use mln_gfx::backend::Type as BackendType;
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
     LINE_EXPRESSION_UBO_SIZE, LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO,
@@ -15,7 +14,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_DASH_TEXTURE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO,
     ID_LINE_IMAGE_TEXTURE, ID_LINE_TILE_PROPS_UBO,
 };
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::line_layer_properties::{
@@ -27,8 +25,10 @@ use mln_style::renderer::cross_faded_property_evaluator::Faded;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
+use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::buckets::line_bucket::LineBucket;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::PaintParameters;
@@ -99,7 +99,7 @@ impl LayerTweaker for LineLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -158,7 +158,7 @@ impl LayerTweaker for LineLayerTweaker {
                 expression_mask: self.expression_mask,
                 pad1: 0.0,
             };
-            context.emplace_or_update_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
+            context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
             self.base.properties_updated = false;
         }
         layer_group
@@ -166,24 +166,23 @@ impl LayerTweaker for LineLayerTweaker {
             .set(ID_LINE_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
         if metal {
             if self.expression_uniform_buffer.is_none() {
-                self.expression_uniform_buffer =
-                    Some(context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE], false, false));
+                self.expression_uniform_buffer = context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]);
             }
             layer_group.mutable_uniform_buffers().set(ID_LINE_EXPRESSION_UBO, self.expression_uniform_buffer.clone());
         }
 
         let mut i: u32 = 0;
-        let count = layer_group.get_drawable_count();
+        let count = layer_group.drawable_count();
         let mut drawable_ubo_vector = vec![LineDrawableUnionUBO::default(); count];
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![LineTilePropsUnionUBO::default(); count];
 
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
+        layer_group.visit_drawables(|drawable| {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
-            let shader = drawable.get_shader().clone();
-            let Some(tile_id) = drawable.get_tile_id() else {
+            let shader = drawable.shader().cloned();
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if shader.is_none() || !check_tweak_drawable_ptr(drawable, self_ptr) {
@@ -192,7 +191,7 @@ impl LayerTweaker for LineLayerTweaker {
 
             let tile_id = tile_id.to_unwrapped();
 
-            let Some(binders_slot) = get_drawable_binders(drawable) else {
+            let Some(binders_slot) = drawable.binders.clone() else {
                 debug_assert!(false);
                 return;
             };
@@ -206,7 +205,7 @@ impl LayerTweaker for LineLayerTweaker {
             };
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
-            let tile = get_drawable_render_tile(drawable);
+            let tile = drawable.render_tile.as_ref().map(DrawableRenderTile::tile);
             debug_assert!(tile.is_some());
 
             let pattern_pos_a = tile.and_then(|t| t.get_pattern(line_pattern_value.from.id()));
@@ -227,7 +226,7 @@ impl LayerTweaker for LineLayerTweaker {
             let matrix = projection.fallback_matrix;
             projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
-            match LineType::from_type(drawable.get_type()) {
+            match LineType::from_type(drawable.type_) {
                 Some(LineType::Simple) => {
                     drawable_ubo_vector[i as usize].set(&LineDrawableUBO {
                         matrix: cast_matrix(&matrix),
@@ -260,8 +259,8 @@ impl LayerTweaker for LineLayerTweaker {
 
                 Some(LineType::Pattern) => {
                     let mut texture_size = Size::new(0, 0);
-                    if let Some(texture) = drawable.get_texture(ID_LINE_IMAGE_TEXTURE) {
-                        texture_size = texture.borrow().get_size();
+                    if let Some(texture) = drawable.textures[ID_LINE_IMAGE_TEXTURE].as_ref() {
+                        texture_size = texture.borrow().size();
                     }
                     drawable_ubo_vector[i as usize].set(&LinePatternDrawableUBO {
                         matrix: cast_matrix(&matrix),
@@ -296,10 +295,10 @@ impl LayerTweaker for LineLayerTweaker {
                 }
 
                 Some(line_type @ (LineType::Sdf | LineType::GradientSdf)) => {
-                    let line_pattern_cap = drawable
-                        .get_data()
-                        .and_then(|d| d.downcast_ref::<LineDrawableData>())
-                        .map(|d| d.line_pattern_cap);
+                    let line_pattern_cap = match &drawable.data {
+                        Some(crate::drawable::DrawableData::Line(data)) => Some(data.line_pattern_cap),
+                        _ => None,
+                    };
                     if let Some(cap) = line_pattern_cap {
                         let mut line_atlas = parameters.line_atlas.borrow_mut();
                         let dash_pattern_texture = line_atlas.get_dash_pattern_texture(
@@ -315,9 +314,9 @@ impl LayerTweaker for LineLayerTweaker {
                         } else {
                             ID_LINE_IMAGE_TEXTURE
                         };
-                        if drawable.get_texture(dash_texture_id).is_none() {
+                        if drawable.textures[dash_texture_id].as_ref().is_none() {
                             let texture = dash_pattern_texture.get_texture();
-                            drawable.set_enabled(texture.is_some());
+                            drawable.enabled = texture.is_some();
                             if let Some(texture) = texture {
                                 drawable.set_texture(Some(texture), dash_texture_id);
                             }
@@ -367,25 +366,19 @@ impl LayerTweaker for LineLayerTweaker {
                 }
 
                 None => {
-                    Log::error(Event::General, format!("LineLayerTweaker: unknown line type: {}", drawable.get_type()));
+                    Log::error(Event::General, format!("LineLayerTweaker: unknown line type: {}", drawable.type_));
                 }
             }
 
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         let bytes: &[u8] = bytemuck::cast_slice(&tile_props_ubo_vector);
-        match &self.tile_props_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.tile_props_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.tile_props_uniform_buffer, bytes);
 
         let layer_uniforms = layer_group.mutable_uniform_buffers();
         layer_uniforms.set(ID_LINE_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());

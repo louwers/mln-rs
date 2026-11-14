@@ -9,8 +9,6 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
-# The [[test]]s below; tests/ also holds their modules.
-autotests = false
 
 [lib]
 name = "mln_webgpu"
@@ -18,9 +16,7 @@ name = "mln_webgpu"
 doctest = false
 
 [dependencies]
-bytemuck.workspace = true
 mln_gfx.workspace = true
-mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
@@ -31,20 +27,8 @@ wgpu.workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 wgpu = { workspace = true, features = ["naga-ir"] }
 
-# Headless wgpu smoke test: Vulkan (lavapipe) device, offscreen clear and
-# readback.
-[[test]]
-name = "smoke_test"
-path = "tests/smoke_test.rs"
-
-# Ports test/util/offscreen_texture.test.cpp (marker `// gtest: Group.Name`).
-[[test]]
-name = "gtest_offscreen_texture"
-path = "tests/gtest_offscreen_texture.rs"
-
 [dev-dependencies]
-mln_image = { package = "mln-rs-image", path = "../mln_image" }
-pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
+mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 
 [lints]
 workspace = true

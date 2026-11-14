@@ -7,13 +7,13 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE,
     ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
+use mln_gfx::shaders::shader_program::ShaderProgramPtr;
+use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableBuilder, ShaderRegistry,
-    UniqueDrawableBuilder, VertexAttributeArrayPtr,
+    AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
+    VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
@@ -33,13 +33,16 @@ use mln_util::size::Size;
 
 use super::line_layer_tweaker::{LineDrawableData, LineLayerTweaker, LineType};
 use super::{
-    TileDrawables, drawable_binders_slot, drawable_has_layer_tweaker, drawable_render_tile_slot,
-    refresh_if_bucket_updated,
+    DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_layer_tweaker, refresh_if_bucket_updated,
 };
 use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
+use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
+use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
@@ -67,8 +70,6 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &LineLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), LineLayerImpl::static_type_info()));
     impl_.downcast_ref::<LineLayerImpl>().expect("RenderLineLayer: not a line layer impl")
 }
-
-const POS_NORMAL_ATTRIB_NAME: &str = "a_pos_normal";
 
 pub(crate) fn apply_color_ramp(
     color_value: &mln_style::color_ramp_property_value::ColorRampPropertyValue,
@@ -154,7 +155,7 @@ fn capture_rendered_features(
 }
 
 fn read_line_attributes(
-    attrs: &mut mln_gfx::vertex_attribute::VertexAttributeArray,
+    attrs: &mut VertexAttributeArray,
     b: &LineBinders,
     shared: &VertexVectorBasePtr,
     evaluated: &LinePaintProperties::PossiblyEvaluated,
@@ -523,7 +524,7 @@ impl RenderLayer for RenderLineLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -540,14 +541,7 @@ impl RenderLayer for RenderLineLayer {
 
         // Set up a layer group
         if self.base.layer_group.is_none() {
-            match context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
+            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -564,22 +558,21 @@ impl RenderLayer for RenderLineLayer {
             RenderPass(self.base.evaluated_properties.render_passes & !RenderPass::Opaque.underlying_type());
 
         {
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("line layer group is a TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             let base = &self.base;
             let passes = self.base.passes;
             // If the render pass has changed or the tile has dropped out of
             // the cover set, remove it.
             tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.get_render_pass() != passes
-                    || drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                drawable.render_pass != passes
+                    || drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
 
-            tile_layer_group.set_stencil_tiles(Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect())));
+            tile_layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
         }
 
-        let create_line_builder = |shader: ShaderProgramBasePtr| -> UniqueDrawableBuilder {
-            let mut builder = context.create_drawable_builder();
+        let create_line_builder = |shader: ShaderProgramPtr| -> UniqueDrawableBuilder {
+            let mut builder = DrawableBuilder::boxed();
             builder.set_shader(Some(shader));
             builder.set_render_pass(render_pass);
             builder.set_sub_layer_index(0);
@@ -589,12 +582,12 @@ impl RenderLayer for RenderLineLayer {
             } else {
                 ColorMode::unblended()
             });
-            builder.set_cull_face_mode(&CullFaceMode::disabled());
+            builder.set_cull_face_mode(CullFaceMode::disabled());
             builder.set_enable_stencil(true);
             builder
         };
 
-        let add_attributes = |builder: &mut dyn DrawableBuilder,
+        let add_attributes = |builder: &mut DrawableBuilder,
                               geometry: Option<&BucketGeometry>,
                               bucket: &LineBucket,
                               vertex_attrs: VertexAttributeArrayPtr| {
@@ -629,14 +622,13 @@ impl RenderLayer for RenderLineLayer {
             builder.set_vertex_attributes(Some(vertex_attrs));
         };
 
-        let set_segments =
-            |builder: &mut dyn DrawableBuilder, geometry: Option<&BucketGeometry>, bucket: &LineBucket| {
-                builder.set_segments_shared(
-                    DrawMode::Triangles(),
-                    Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
-                    &bucket.segments,
-                );
-            };
+        let set_segments = |builder: &mut DrawableBuilder, geometry: Option<&BucketGeometry>, bucket: &LineBucket| {
+            builder.set_segments_shared(
+                DrawMode::Triangles(),
+                Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
+                &bucket.segments,
+            );
+        };
 
         let layer_tweaker = self.base.layer_tweaker.clone();
         let layer_id = self.get_id().to_owned();
@@ -695,7 +687,7 @@ impl RenderLayer for RenderLineLayer {
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
-            let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
+            let update_existing = |drawable: &mut crate::drawable::Drawable| {
                 // A drawable produced on a previous style/bucket should not be updated.
                 let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
                 if current {
@@ -716,24 +708,24 @@ impl RenderLayer for RenderLineLayer {
             }
 
             let cap_type = dash_pattern_cap(bucket);
-            let add_drawable = |mut drawable: mln_gfx::UniqueDrawable, type_: LineType| {
-                drawable.set_tile_id(tile_id);
-                drawable.set_type(type_ as usize);
-                drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
-                drawable.set_binders(drawable_binders_slot(&render_data.bucket, &layer_id));
+            let add_drawable = |mut drawable: crate::drawable::UniqueDrawable, type_: LineType| {
+                drawable.tile_id = Some(tile_id);
+                drawable.type_ = type_ as usize;
+                drawable.layer_tweaker = layer_tweaker.clone();
+                drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
+                drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &layer_id));
 
-                drawable.set_data(Some(Box::new(LineDrawableData { line_pattern_cap: cap_type })));
+                drawable.data =
+                    Some(crate::drawable::DrawableData::Line(LineDrawableData { line_pattern_cap: cap_type }));
 
-                let mut group = layer_group.borrow_mut();
-                let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
-                tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
+                let mut tile_layer_group = layer_group.borrow_mut();
+                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
             };
 
             properties_as_uniforms.0.clear();
             properties_as_uniforms.1.clear();
 
-            let vertex_attrs = context.create_vertex_attribute_array();
+            let vertex_attrs = VertexAttributeArray::new_ptr();
             read_line_attributes(
                 &mut vertex_attrs.borrow_mut(),
                 paint_property_binders,
@@ -753,7 +745,7 @@ impl RenderLayer for RenderLineLayer {
                         {
                             let mut t = texture.borrow_mut();
                             t.set_image(Some(Rc::clone(color_ramp)));
-                            t.set_sampler_configuration(SamplerState {
+                            t.set_sampler(SamplerState {
                                 filter: TextureFilterType::Linear,
                                 wrap_u: TextureWrapType::Clamp,
                                 wrap_v: TextureWrapType::Clamp,
@@ -767,19 +759,12 @@ impl RenderLayer for RenderLineLayer {
             if has_dasharray && has_gradient {
                 // dash array over a gradient
                 if self.line_gradient_sdf_shader_group.is_none() {
-                    self.line_gradient_sdf_shader_group = shaders.get_shader_group("LineGradientSDFShader");
+                    self.line_gradient_sdf_shader_group = shaders.shader_group("LineGradientSDFShader");
                 }
                 let Some(group) = self.line_gradient_sdf_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    self.base.projection_variant,
-                    POS_NORMAL_ATTRIB_NAME,
-                ) else {
-                    continue;
-                };
+                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
 
                 let mut builder = create_line_builder(shader);
 
@@ -792,7 +777,7 @@ impl RenderLayer for RenderLineLayer {
 
                     set_segments(builder.as_mut(), geometry, bucket);
 
-                    builder.flush(context);
+                    builder.flush();
                     for drawable in builder.clear_drawables() {
                         add_drawable(drawable, LineType::GradientSdf);
                     }
@@ -800,19 +785,12 @@ impl RenderLayer for RenderLineLayer {
             } else if has_dasharray {
                 // dash array line (SDF)
                 if self.line_sdf_shader_group.is_none() {
-                    self.line_sdf_shader_group = shaders.get_shader_group("LineSDFShader");
+                    self.line_sdf_shader_group = shaders.shader_group("LineSDFShader");
                 }
                 let Some(group) = self.line_sdf_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    self.base.projection_variant,
-                    POS_NORMAL_ATTRIB_NAME,
-                ) else {
-                    continue;
-                };
+                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
 
                 let mut builder = create_line_builder(shader);
 
@@ -820,26 +798,19 @@ impl RenderLayer for RenderLineLayer {
                 add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
                 set_segments(builder.as_mut(), geometry, bucket);
 
-                builder.flush(context);
+                builder.flush();
                 for drawable in builder.clear_drawables() {
                     add_drawable(drawable, LineType::Sdf);
                 }
             } else if !self.unevaluated.get::<LinePattern>().is_undefined() {
                 // pattern line (conformance)
                 if self.line_pattern_shader_group.is_none() {
-                    self.line_pattern_shader_group = shaders.get_shader_group("LinePatternShader");
+                    self.line_pattern_shader_group = shaders.shader_group("LinePatternShader");
                 }
                 let Some(group) = self.line_pattern_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    self.base.projection_variant,
-                    POS_NORMAL_ATTRIB_NAME,
-                ) else {
-                    continue;
-                };
+                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
 
                 let mut builder = create_line_builder(shader);
 
@@ -848,23 +819,22 @@ impl RenderLayer for RenderLineLayer {
 
                 // texture
                 if let Some(atlases) = tile.get_atlas_textures().filter(|a| a.icon.borrow().is_some()) {
-                    let icon_tweaker: mln_gfx::drawable_tweaker::DrawableTweakerPtr =
-                        Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
-                            Some(Rc::clone(atlases)),
-                            None,
-                            Some(ID_LINE_IMAGE_TEXTURE),
-                            /*is_text*/ false,
-                            /*sdf_icons*/ true, // to force linear filter
-                            /*rotation_alignment*/ mln_style_types::AlignmentType::Auto,
-                            /*icon_scaled*/ false,
-                            /*text_size_is_zoom_constant*/ false,
-                        ));
+                    let icon_tweaker = Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
+                        Some(Rc::clone(atlases)),
+                        None,
+                        Some(ID_LINE_IMAGE_TEXTURE),
+                        /*is_text*/ false,
+                        /*sdf_icons*/ true, // to force linear filter
+                        /*rotation_alignment*/ mln_style_types::AlignmentType::Auto,
+                        /*icon_scaled*/ false,
+                        /*text_size_is_zoom_constant*/ false,
+                    ));
 
-                    builder.add_tweaker(icon_tweaker);
+                    builder.set_atlases(Some(icon_tweaker));
 
                     set_segments(builder.as_mut(), geometry, bucket);
 
-                    builder.flush(context);
+                    builder.flush();
                     for drawable in builder.clear_drawables() {
                         add_drawable(drawable, LineType::Pattern);
                     }
@@ -872,19 +842,12 @@ impl RenderLayer for RenderLineLayer {
             } else if has_gradient {
                 // gradient line
                 if self.line_gradient_shader_group.is_none() {
-                    self.line_gradient_shader_group = shaders.get_shader_group("LineGradientShader");
+                    self.line_gradient_shader_group = shaders.shader_group("LineGradientShader");
                 }
                 let Some(group) = self.line_gradient_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    self.base.projection_variant,
-                    POS_NORMAL_ATTRIB_NAME,
-                ) else {
-                    continue;
-                };
+                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
 
                 let mut builder = create_line_builder(shader);
 
@@ -897,7 +860,7 @@ impl RenderLayer for RenderLineLayer {
 
                     set_segments(builder.as_mut(), geometry, bucket);
 
-                    builder.flush(context);
+                    builder.flush();
                     for drawable in builder.clear_drawables() {
                         add_drawable(drawable, LineType::Gradient);
                     }
@@ -905,19 +868,12 @@ impl RenderLayer for RenderLineLayer {
             } else {
                 // simple line
                 if self.line_shader_group.is_none() {
-                    self.line_shader_group = shaders.get_shader_group("LineShader");
+                    self.line_shader_group = shaders.shader_group("LineShader");
                 }
                 let Some(group) = self.line_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    self.base.projection_variant,
-                    POS_NORMAL_ATTRIB_NAME,
-                ) else {
-                    continue;
-                };
+                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
 
                 let mut builder = create_line_builder(shader);
 
@@ -925,7 +881,7 @@ impl RenderLayer for RenderLineLayer {
                 add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
                 set_segments(builder.as_mut(), geometry, bucket);
 
-                builder.flush(context);
+                builder.flush();
                 for drawable in builder.clear_drawables() {
                     add_drawable(drawable, LineType::Simple);
                 }

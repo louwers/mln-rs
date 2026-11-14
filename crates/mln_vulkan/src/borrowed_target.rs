@@ -7,19 +7,16 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use ash::vk;
-use gpu_allocator::MemoryLocation;
-use mln_gfx::command_encoder::CommandEncoder;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
+use mln_gfx::gpu::{Gpu as _, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage};
 use mln_gfx::{ConsumerSync, GpuSync, SyncKind};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::context::{Context, RenderPassKey};
 use crate::device::Device;
-use crate::draw_target::{DrawTarget, TargetResource};
+use crate::gpu::ImportedImage;
 use crate::renderer_backend::{BackendImpl, RendererBackend};
-use crate::texture2d::ImageAllocation;
 
 /// The queue family that a borrowed image goes to after each frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -98,153 +95,96 @@ impl BorrowedImages {
     }
 }
 
-/// The render pass and framebuffers over the ring's images, and their depth
+/// The ring's images as textures of the backend's `Gpu`, with their depth
 /// and stencil attachments: the host's, or one of the target's own.
-struct Resource {
-    backend: Rc<BackendImpl>,
-    extent: vk::Extent2D,
-    render_pass: vk::RenderPass,
-    framebuffers: Vec<vk::Framebuffer>,
-    /// The image the next frame draws into.
-    selected: Cell<usize>,
-    /// The target's own depth and stencil image, when the host gave none.
-    _depth: Option<ImageAllocation>,
+struct Imports {
+    backend: Rc<RendererBackend>,
+    size: Size,
+    targets: TargetFormats,
+    color: Vec<TextureId>,
+    /// The host's depth and stencil images, one for each slot.
+    depth: Vec<TextureId>,
+    /// The target's own depth and stencil, when the host gave none.
+    own_depth: Option<TextureId>,
 }
 
-impl Resource {
-    fn new(context: &Context, images: &BorrowedImages) -> Result<Resource, Error> {
-        if let Some(depth) = &images.depth {
-            return Self::with_host_depth(context, images, depth);
-        }
-        let backend = Rc::clone(context.get_backend());
-        let extent = vk::Extent2D { width: images.size.width, height: images.size.height };
-        let formats = [vk::Format::D24_UNORM_S8_UINT, vk::Format::D32_SFLOAT_S8_UINT, vk::Format::D16_UNORM_S8_UINT];
-        let depth_format = formats
-            .into_iter()
-            .find(|&format| {
-                // SAFETY: a plain query of the physical device.
-                let properties = unsafe {
-                    backend.get_instance().get_physical_device_format_properties(backend.get_physical_device(), format)
-                };
-                properties.optimal_tiling_features.contains(vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
+impl Imports {
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// format the `Gpu` has no texture of, and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when it can't make the
+    /// depth and stencil texture.
+    fn new(backend: &Rc<RendererBackend>, images: &BorrowedImages) -> Result<Imports, Error> {
+        let release_to = match images.owner {
+            ImageOwner::GraphicsQueue => None,
+            ImageOwner::External => Some(vk::QUEUE_FAMILY_EXTERNAL),
+            ImageOwner::Foreign => Some(vk::QUEUE_FAMILY_FOREIGN_EXT),
+        };
+        let mut gpu = backend.gpu();
+        let color_format = gpu
+            .texture_format(images.format)
+            .ok_or_else(|| Error::unsupported(format!("the Vulkan target draws into no {:?}", images.format)))?;
+        let mut imports = Imports {
+            backend: Rc::clone(backend),
+            size: images.size,
+            targets: TargetFormats {
+                color: Some(color_format),
+                depth_stencil: Some(TextureFormat::Depth24PlusStencil8),
+            },
+            color: Vec::new(),
+            depth: Vec::new(),
+            own_depth: None,
+        };
+        let attachment = TextureUsage { sampled: false, render_target: true, copy_src: false };
+        let import = |gpu: &mut crate::gpu::VulkanGpu, image: &BorrowedImage, format, layout| {
+            gpu.import_image(&ImportedImage {
+                image: image.image,
+                view: image.view,
+                format,
+                size: images.size,
+                usage: attachment,
+                layout,
+                release_to,
             })
-            .ok_or_else(|| Error::unsupported("Depth/Stencil format not available"))?;
-        let image_info = vk::ImageCreateInfo::default()
-            .image_type(vk::ImageType::TYPE_2D)
-            .format(depth_format)
-            .extent(vk::Extent3D { width: extent.width, height: extent.height, depth: 1 })
-            .mip_levels(1)
-            .array_layers(1)
-            .samples(vk::SampleCountFlags::TYPE_1)
-            .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT)
-            .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .initial_layout(vk::ImageLayout::UNDEFINED);
-        let mut depth = ImageAllocation::create(&backend, &image_info, MemoryLocation::GpuOnly, "depth")
-            .ok_or_else(|| Error::native("Vulkan depth texture allocation failed"))?;
-        if !depth.create_view(
-            depth_format,
-            vk::ComponentMapping::default(),
-            vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL,
-            1,
-        ) {
-            return Err(Error::native("Vulkan depth texture view creation failed"));
-        }
-        let render_pass = context.get_render_pass(RenderPassKey {
-            color_format: images.format,
-            depth_format: Some(depth_format),
-            color_final_layout: images.final_layout,
-            color_load: false,
-            depth_final_layout: None,
-        });
-        if render_pass == vk::RenderPass::null() {
-            return Err(Error::native("Failed to create a render pass for the borrowed images"));
-        }
-        let views = vec![depth.image_view(); images.images.len()];
-        let mut resource = Resource {
-            backend,
-            extent,
-            render_pass,
-            framebuffers: Vec::new(),
-            selected: Cell::new(0),
-            _depth: Some(depth),
+            .map_err(|error| Error::native(format!("Importing a borrowed image failed: {error}")))
         };
-        resource.create_framebuffers(images, &views)?;
-        Ok(resource)
-    }
-
-    /// The resource over `images` that draws each frame's depth and stencil
-    /// into the host's `depth` image of its slot, and stores them.
-    fn with_host_depth(context: &Context, images: &BorrowedImages, depth: &BorrowedDepth) -> Result<Resource, Error> {
-        let render_pass = context.get_render_pass(RenderPassKey {
-            color_format: images.format,
-            depth_format: Some(depth.format),
-            color_final_layout: images.final_layout,
-            color_load: false,
-            depth_final_layout: Some(depth.final_layout),
-        });
-        if render_pass == vk::RenderPass::null() {
-            return Err(Error::native("Failed to create a render pass for the borrowed images"));
+        for image in &images.images {
+            imports.color.push(import(&mut gpu, image, images.format, images.final_layout)?);
         }
-        let mut resource = Resource {
-            backend: Rc::clone(context.get_backend()),
-            extent: vk::Extent2D { width: images.size.width, height: images.size.height },
-            render_pass,
-            framebuffers: Vec::new(),
-            selected: Cell::new(0),
-            _depth: None,
-        };
-        let views: Vec<_> = depth.images.iter().map(|image| image.view).collect();
-        resource.create_framebuffers(images, &views)?;
-        Ok(resource)
-    }
-
-    /// Makes the framebuffer of each slot, over its image and the view of
-    /// `depth_views` at the slot.
-    fn create_framebuffers(&mut self, images: &BorrowedImages, depth_views: &[vk::ImageView]) -> Result<(), Error> {
-        let (render_pass, extent) = (self.render_pass, self.extent);
-        for (image, depth_view) in images.images.iter().zip(depth_views) {
-            let attachments = [image.view, *depth_view];
-            let create_info = vk::FramebufferCreateInfo::default()
-                .render_pass(render_pass)
-                .attachments(&attachments)
-                .width(extent.width)
-                .height(extent.height)
-                .layers(1);
-            // SAFETY: the host's view and the depth view are live, of the
-            // render pass's formats and of the framebuffer's size.
-            let framebuffer = unsafe { self.backend.get_device().create_framebuffer(&create_info, None) }
-                .map_err(|e| Error::native(format!("Vulkan framebuffer creation failed: {e}")))?;
-            self.framebuffers.push(framebuffer);
-        }
-        Ok(())
-    }
-}
-
-impl TargetResource for Resource {
-    fn bind(&self) {}
-
-    fn get_extent(&self) -> vk::Extent2D {
-        self.extent
-    }
-
-    fn get_render_pass(&self) -> vk::RenderPass {
-        self.render_pass
-    }
-
-    fn get_framebuffer(&self) -> vk::Framebuffer {
-        self.framebuffers.get(self.selected.get()).copied().unwrap_or_default()
-    }
-}
-
-impl Drop for Resource {
-    fn drop(&mut self) {
-        // SAFETY: the backend waited for the frames that used the
-        // framebuffers (`BorrowedTarget`'s replacement and drop).
-        unsafe {
-            for framebuffer in self.framebuffers.drain(..) {
-                self.backend.get_device().destroy_framebuffer(framebuffer, None);
+        if let Some(depth) = &images.depth {
+            imports.targets.depth_stencil = gpu.texture_format(depth.format);
+            for image in &depth.images {
+                imports.depth.push(import(&mut gpu, image, depth.format, depth.final_layout)?);
             }
+        } else {
+            let texture = gpu
+                .create_texture(&TextureDesc {
+                    label: "BorrowedDepth",
+                    size: images.size,
+                    format: TextureFormat::Depth24PlusStencil8,
+                    usage: attachment,
+                })
+                .map_err(|error| Error::native(format!("Vulkan depth texture allocation failed: {error}")))?;
+            imports.own_depth = Some(texture);
+        }
+        Ok(imports)
+    }
+
+    /// The textures that a frame drawn into `slot` draws into.
+    fn frame_image(&self, slot: usize) -> Option<FrameImage> {
+        Some(FrameImage {
+            size: self.size,
+            color: *self.color.get(slot)?,
+            depth_stencil: self.own_depth.or_else(|| self.depth.get(slot).copied()),
+            targets: self.targets,
+        })
+    }
+}
+
+impl Drop for Imports {
+    fn drop(&mut self) {
+        let mut gpu = self.backend.gpu();
+        for texture in self.color.drain(..).chain(self.depth.drain(..)).chain(self.own_depth.take()) {
+            gpu.destroy_texture(texture);
         }
     }
 }
@@ -316,6 +256,9 @@ impl Drop for ImportedFence {
 #[derive(Default)]
 struct Slot {
     consumer_wait: Option<ConsumerWait>,
+    /// The texture that has the next submit that draws into it wait for
+    /// `consumer_wait`, from the frame begun on the slot until it ends.
+    attached: Option<TextureId>,
     /// The sync file of the slot's last frame, which the host may read until
     /// it gives the slot back.
     #[cfg(unix)]
@@ -326,8 +269,9 @@ struct Slot {
 pub struct BorrowedTarget {
     backend: Rc<RendererBackend>,
     images: RefCell<BorrowedImages>,
-    resource: RefCell<Rc<Resource>>,
-    target: RefCell<Rc<DrawTarget>>,
+    imports: RefCell<Imports>,
+    /// The slot the next frame draws into.
+    selected: Cell<usize>,
     producer: SyncKind,
     slots: RefCell<Vec<Slot>>,
     /// The timeline that frames signal, for a timeline or D3D12 fence
@@ -360,15 +304,13 @@ impl BorrowedTarget {
         if !device.sync_kinds().0.contains(producer) {
             return Err(Error::unsupported(format!("the Vulkan device can't hand frames over with {producer:?}")));
         }
-        let context = Rc::clone(backend.vulkan_context());
-        let resource = Rc::new(Resource::new(&context, &images)?);
-        let target = Rc::new(DrawTarget::new(images.size, Rc::<Resource>::clone(&resource)));
+        let imports = Imports::new(&backend, &images)?;
         let mut this = BorrowedTarget {
             backend,
             slots: RefCell::new(Vec::new()),
             images: RefCell::new(images),
-            resource: RefCell::new(resource),
-            target: RefCell::new(target),
+            imports: RefCell::new(imports),
+            selected: Cell::new(0),
             producer,
             timeline: vk::Semaphore::null(),
             timeline_value: Cell::new(0),
@@ -433,7 +375,7 @@ impl BorrowedTarget {
 
     /// Has the next frame draw into the image at `slot`.
     pub fn select(&self, slot: usize) {
-        self.resource.borrow().selected.set(slot);
+        self.selected.set(slot);
     }
 
     /// The host gave the image at `slot` back: the next frame drawn into it
@@ -444,6 +386,7 @@ impl BorrowedTarget {
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when the target
     /// can't wait for `consumer`, such as for a sync file Vulkan can't
     /// import. The host's GPU may then still read the image.
+    #[cfg_attr(not(unix), expect(clippy::needless_pass_by_value, reason = "a Unix release takes the host's sync file"))]
     pub fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         use ash::vk::Handle as _;
         let mut slots = self.slots.borrow_mut();
@@ -464,8 +407,10 @@ impl BorrowedTarget {
             SyncKind::QueueOrder => {
                 // The host's reads went to the queue before the next frame,
                 // which waits for them before it clears the image.
-                self.backend.vulkan_context().wait_for_queue_in_next_frame();
-                Ok(())
+                self.backend
+                    .gpu()
+                    .wait_for_queue()
+                    .map_err(|error| Error::native(format!("Waiting for the host's reads failed: {error}")))
             }
             SyncKind::VulkanTimelineSemaphore => {
                 state.consumer_wait =
@@ -526,10 +471,10 @@ impl BorrowedTarget {
     fn imported_fence(&self, handle: u64) -> Result<Rc<ImportedFence>, Error> {
         let mut fences = self.imported_fences.borrow_mut();
         if let Some((_, fence)) = fences.iter().find(|(known, _)| *known == handle) {
-            return Ok(fence.clone());
+            return Ok(Rc::clone(fence));
         }
         let fence = Rc::new(ImportedFence::import(self.backend.backend_impl(), handle)?);
-        fences.push((handle, fence.clone()));
+        fences.push((handle, Rc::clone(&fence)));
         Ok(fence)
     }
 
@@ -549,15 +494,27 @@ impl BorrowedTarget {
     /// Drops what `slot` waits for, destroying a semaphore of the target's
     /// that no frame waits on.
     fn forget_wait(&self, slot: &mut Slot) {
+        self.detach(slot);
         if let Some(wait) = slot.consumer_wait.take() {
             drop_wait(self.backend.backend_impl(), wait);
+        }
+    }
+
+    /// Has no submit wait for what `slot` waits for.
+    fn detach(&self, slot: &mut Slot) {
+        if let Some(texture) = slot.attached.take() {
+            self.backend.gpu().forget_waits(texture);
         }
     }
 
     /// Takes what the ring's images still wait for, the host's reads of
     /// them, for the ring to wait for before it lets go of the images.
     pub fn take_pending(&self) -> PendingReads {
-        let waits = self.slots.borrow_mut().iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
+        let mut slots = self.slots.borrow_mut();
+        for slot in slots.iter_mut() {
+            self.detach(slot);
+        }
+        let waits = slots.iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
         PendingReads { backend: Rc::clone(&self.backend), waits }
     }
 
@@ -589,12 +546,11 @@ impl BorrowedTarget {
             }
             images.check(self.backend.backend_impl().device())?;
         }
-        // The frames that drew into the old images are done before their
-        // framebuffers go.
+        let imports = Imports::new(&self.backend, &images)?;
+        // The frames that drew into the old images are done before the
+        // `Gpu` forgets them.
         self.backend.backend_impl().wait_idle("borrowed image replacement");
-        let resource = Rc::new(Resource::new(self.backend.vulkan_context(), &images)?);
-        *self.target.borrow_mut() = Rc::new(DrawTarget::new(images.size, Rc::<Resource>::clone(&resource)));
-        *self.resource.borrow_mut() = resource;
+        *self.imports.borrow_mut() = imports;
         let old = std::mem::replace(&mut *self.images.borrow_mut(), images);
         Ok(self.reset_slots(&old.images))
     }
@@ -612,87 +568,20 @@ impl BorrowedTarget {
                 .position(|old| old.image == image.image)
                 .and_then(|index| previous.get_mut(index))
                 .and_then(|slot| slot.consumer_wait.take());
-            #[cfg_attr(
-                not(unix),
-                expect(clippy::needless_update, reason = "only Unix's slots have fields besides the consumer's wait")
-            )]
             slots.push(Slot { consumer_wait: carried, ..Slot::default() });
         }
         let waits = previous.iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
         PendingReads { backend: Rc::clone(&self.backend), waits }
     }
 
-    /// Releases the frame's image to the host's queue family, after the
-    /// frame's passes.
-    fn record_release(&self, context: &Context) {
-        let images = self.images.borrow();
-        let destination = match images.owner {
-            ImageOwner::GraphicsQueue => return,
-            ImageOwner::External => vk::QUEUE_FAMILY_EXTERNAL,
-            ImageOwner::Foreign => vk::QUEUE_FAMILY_FOREIGN_EXT,
-        };
-        let slot = self.resource.borrow().selected.get();
-        let Some(image) = images.images.get(slot) else {
-            return;
-        };
-        let release = |image: vk::Image, layout, access, aspect_mask| {
-            vk::ImageMemoryBarrier::default()
-                .src_access_mask(access)
-                .dst_access_mask(vk::AccessFlags::empty())
-                .old_layout(layout)
-                .new_layout(layout)
-                .src_queue_family_index(self.backend.backend_impl().get_graphics_queue_index())
-                .dst_queue_family_index(destination)
-                .image(image)
-                .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                })
-        };
-        let mut barriers = vec![release(
-            image.image,
-            images.final_layout,
-            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            vk::ImageAspectFlags::COLOR,
-        )];
-        let mut stages = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
-        if let Some(depth) = &images.depth
-            && let Some(depth_image) = depth.images.get(slot)
-        {
-            barriers.push(release(
-                depth_image.image,
-                depth.final_layout,
-                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL,
-            ));
-            stages |= vk::PipelineStageFlags::LATE_FRAGMENT_TESTS;
-        }
-        // SAFETY: the frame's command buffer is recording outside a render
-        // pass, and the images are the frame's, in their final layouts.
-        unsafe {
-            self.backend.backend_impl().get_device().cmd_pipeline_barrier(
-                context.get_command_buffer(),
-                stages,
-                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &barriers,
-            );
-        }
-    }
-
     /// The sync the host waits for, once the frame was submitted.
     #[cfg_attr(not(unix), expect(unused_variables, reason = "sync files are Unix's"))]
-    fn producer_sync(&self, context: &Context, slot: usize) -> Option<GpuSync> {
+    fn producer_sync(&self, slot: usize) -> Option<GpuSync> {
         use ash::vk::Handle as _;
         match self.producer {
             SyncKind::CpuComplete => {
-                if !context.wait_frame() {
-                    Log::error(Event::Render, "Waiting for a borrowed image's frame failed");
+                if let Err(error) = self.backend.gpu().finish() {
+                    Log::error(Event::Render, format!("Waiting for a borrowed image's frame failed: {error}"));
                     return None;
                 }
                 Some(GpuSync::of(SyncKind::CpuComplete))
@@ -745,45 +634,84 @@ impl BorrowedTarget {
 }
 
 impl FrameTarget for BorrowedTarget {
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        Some(self.target.borrow().clone())
+    /// The selected slot's image, which the frame's first pass that draws
+    /// into it waits for the host's reads before.
+    fn begin_frame(&self) -> Option<FrameImage> {
+        let slot = self.selected.get();
+        let image = self.imports.borrow().frame_image(slot)?;
+        let mut gpu = self.backend.gpu();
+        let stages = vk::PipelineStageFlags::ALL_COMMANDS;
+        let mut slots = self.slots.borrow_mut();
+        let Some(state) = slots.get_mut(slot) else {
+            return Some(image);
+        };
+        // A frame begun again keeps the wait it attached.
+        if state.attached == Some(image.color) {
+            return Some(image);
+        }
+        let waited = match &state.consumer_wait {
+            Some(ConsumerWait::Timeline(semaphore, value)) => {
+                gpu.wait_before_using(image.color, *semaphore, Some(*value), stages)
+            }
+            #[cfg(unix)]
+            Some(ConsumerWait::Imported { semaphore, .. }) => {
+                gpu.wait_before_using(image.color, *semaphore, None, stages)
+            }
+            #[cfg(windows)]
+            Some(ConsumerWait::Fence(fence, value)) => {
+                gpu.wait_before_using(image.color, fence.semaphore, Some(*value), stages)
+            }
+            None => return Some(image),
+        };
+        state.attached = Some(image.color);
+        if let Err(error) = waited {
+            Log::error(Event::Render, format!("Waiting for the host's reads failed: {error}"));
+        }
+        Some(image)
     }
 
-    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
-        let context = self.backend.vulkan_context();
-        if !context.frame_has_image() {
-            context.submit_frame();
+    /// Submits what is left of the frame, signaling the producer's sync
+    /// after it.
+    fn end_frame(&self) -> Handoff {
+        let slot = self.selected.get();
+        let Some(color) = self.imports.borrow().color.get(slot).copied() else {
+            return Handoff::Dropped;
+        };
+        let submitted = {
+            let mut gpu = self.backend.gpu();
+            // What no pass took yet, such as where the frame drew nothing.
+            gpu.take_waits_into_next_submit(color);
+            match self.producer {
+                SyncKind::VulkanTimelineSemaphore | SyncKind::D3d12Fence => {
+                    let value = self.timeline_value.get() + 1;
+                    self.timeline_value.set(value);
+                    gpu.signal_after_next_submit(self.timeline, Some(value));
+                }
+                SyncKind::SyncFd => gpu.signal_after_next_submit(self.export_semaphore, None),
+                _ => {}
+            }
+            gpu.submit(&[])
+        };
+        // The frame's submits took what the slot waited for.
+        let consumed = self.slots.borrow_mut().get_mut(slot).and_then(|state| {
+            let attached = state.attached.take()?;
+            (attached == color).then(|| state.consumer_wait.take()).flatten()
+        });
+        // A timeline is the host's, and the target keeps a fence until it
+        // waits for the queue.
+        #[cfg(unix)]
+        if let Some(ConsumerWait::Imported { semaphore, file }) = consumed {
+            drop(file);
+            // SAFETY: destroyed once the frame that waits on it is done.
+            self.backend.gpu().destroy_later(move |device| unsafe { device.destroy_semaphore(semaphore, None) });
+        }
+        #[cfg(not(unix))]
+        drop(consumed);
+        if let Err(error) = submitted {
+            Log::error(Event::Render, format!("Submitting a borrowed image's frame failed: {error}"));
             return Handoff::Dropped;
         }
-        let slot = self.resource.borrow().selected.get();
-        self.record_release(context);
-        match self.slots.borrow_mut().get_mut(slot).and_then(|s| s.consumer_wait.take()) {
-            Some(ConsumerWait::Timeline(semaphore, value)) => context.wait_in_frame(semaphore, Some(value)),
-            #[cfg(unix)]
-            Some(ConsumerWait::Imported { semaphore, file }) => {
-                drop(file);
-                context.wait_in_frame(semaphore, None);
-                // SAFETY: destroyed once the frame that waits on it is done.
-                context.enqueue_deletion(Box::new(move |context: &Context| unsafe {
-                    context.get_backend().get_device().destroy_semaphore(semaphore, None);
-                }));
-            }
-            // The target keeps the fence until it waits for the queue.
-            #[cfg(windows)]
-            Some(ConsumerWait::Fence(fence, value)) => context.wait_in_frame(fence.semaphore, Some(value)),
-            None => {}
-        }
-        match self.producer {
-            SyncKind::VulkanTimelineSemaphore | SyncKind::D3d12Fence => {
-                let value = self.timeline_value.get() + 1;
-                self.timeline_value.set(value);
-                context.signal_in_frame(self.timeline, Some(value));
-            }
-            SyncKind::SyncFd => context.signal_in_frame(self.export_semaphore, None),
-            _ => {}
-        }
-        context.submit_frame();
-        match self.producer_sync(context, slot) {
+        match self.producer_sync(slot) {
             Some(sync) => Handoff::GivenBack { slot, sync },
             None => Handoff::Dropped,
         }
@@ -853,7 +781,7 @@ impl Drop for PendingReads {
 
 /// Lets go of `wait`, destroying a semaphore of the target's that no frame
 /// waits on.
-#[cfg_attr(not(unix), expect(unused_variables, reason = "sync files are Unix's"))]
+#[cfg_attr(not(unix), expect(unused_variables, clippy::needless_pass_by_value, reason = "sync files are Unix's"))]
 fn drop_wait(backend: &BackendImpl, wait: ConsumerWait) {
     match wait {
         ConsumerWait::Timeline(..) => {}

@@ -15,7 +15,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use mln_actor::RunLoopHandle;
-use mln_gfx::{BackendScope, ConsumerSync, Handoff, RendererBackend, ScopeType, SyncKind};
+use mln_gfx::{ConsumerSync, Handoff, RendererBackend, SyncKind};
 use mln_map::{MapView, RenderMode};
 use mln_renderer::{Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
 use mln_style::collection::ImmutableVector;
@@ -284,10 +284,6 @@ impl Gfx {
         Ok(Gfx { renderer, target, backend, glyph_cache, local_font_family })
     }
 
-    fn scope(&self) -> BackendScope<'_> {
-        BackendScope::new(&*self.backend, ScopeType::Explicit)
-    }
-
     /// Whether the target can take a frame now: its window, if any, has an
     /// area to present to, and it begins a frame, which a surface needs a
     /// texture for.
@@ -295,7 +291,6 @@ impl Gfx {
         if !self.target.window_has_area() {
             return false;
         }
-        let _scope = self.scope();
         self.target.frames().is_some_and(|frames| frames.begin_frame().is_some())
     }
 
@@ -1051,10 +1046,7 @@ impl Worker {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
             return RenderedFrame { result, events: Vec::new(), slot: None };
         }
-        let handoff = {
-            let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
-            gfx.target.frames().and_then(|frames| gfx.renderer.render(&update.parameters, frames))
-        };
+        let handoff = gfx.target.frames().and_then(|frames| gfx.renderer.render(&update.parameters, frames));
         {
             let mut state = self.shared.state.lock();
             state.graphics_objects = state.graphics_objects.max(Gfx::OBJECTS);
@@ -1258,10 +1250,7 @@ impl Worker {
                 drop(state);
                 return self.pump(outbox);
             }
-            Some(gfx) => {
-                let _scope = gfx.scope();
-                gfx.target.release_slot(slot, consumer)
-            }
+            Some(gfx) => gfx.target.release_slot(slot, consumer),
             None => Err(Error::target_lost("the render session lost its renderer")),
         };
         let failure = {
@@ -1291,7 +1280,6 @@ impl Worker {
     /// The host gave up the ring's `slot`, which the session quarantined.
     pub(crate) fn discard_slot(&mut self, slot: usize, outbox: &mut Outbox) {
         if let Some(gfx) = self.gfx.as_ref() {
-            let _scope = gfx.scope();
             let _ = gfx.target.discard_slot(slot);
         }
         self.pump(outbox);
@@ -1321,12 +1309,7 @@ impl Worker {
             }
             return Ok(None);
         }
-        let backend = Rc::clone(&gfx.backend);
-        let replaced = {
-            let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-            gfx.target.set_ring(ring.clone())
-        };
-        let pending = replaced?;
+        let pending = gfx.target.set_ring(ring.clone())?;
         let old = self.ring.replace(ring.clone());
         {
             let mut state = self.shared.state.lock();
@@ -1407,10 +1390,7 @@ impl Worker {
                     }
                     state.ring.iter().enumerate().filter(|(_, slot)| slot.acquired).map(|(index, _)| index).collect()
                 };
-                let resized = {
-                    let _scope = gfx.scope();
-                    gfx.target.resize_exported(physical, &held)
-                };
+                let resized = { gfx.target.resize_exported(physical, &held) };
                 match resized {
                     // Each slot has an image that never reached the host: a
                     // slot that the host gave up is free, and one it holds
@@ -1498,11 +1478,7 @@ impl Worker {
     /// one: no texture of it stays quarantined.
     pub(crate) fn release_target(&mut self, outbox: &mut Outbox) -> Result<Pending, Error> {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
-        let backend = Rc::clone(&gfx.backend);
-        let pending = {
-            let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-            gfx.target.release_surface()
-        };
+        let pending = gfx.target.release_surface();
         self.has_frame = false;
         self.ring = None;
         {
@@ -1594,11 +1570,7 @@ impl Worker {
         self.set_scale_factor(scale_factor)?;
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         let physical = physical_size(size, scale_factor as f32);
-        let backend = Rc::clone(&gfx.backend);
-        let replaced = {
-            let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-            gfx.target.set_surface(surface, physical)
-        };
+        let replaced = gfx.target.set_surface(surface, physical);
         match replaced {
             Ok(true) => gfx.renew_renderer(&self.renderer_events),
             Ok(false) => {}
@@ -1644,7 +1616,6 @@ impl Worker {
         if !self.has_frame {
             return Err(Error::invalid_state("the render session has no rendered frame since it attached or resized"));
         }
-        let _scope = gfx.scope();
         gfx.target.read_image()
     }
 

@@ -646,7 +646,6 @@ impl Scene {
             return (format!("{} (Vulkan)", vulkan.get_device_name()), vulkan.is_software_device());
         }
         if let Some(gl) = backend.downcast_ref::<mln_gl::RendererBackend>() {
-            let _scope = mln_gfx::BackendScope::new(gl, mln_gfx::ScopeType::Explicit);
             let name = gl.get_renderer_name();
             let software = ["llvmpipe", "softpipe", "swiftshader"].iter().any(|s| name.to_lowercase().contains(s));
             return (format!("{name} (OpenGL ES)"), software);

@@ -1,5 +1,4 @@
-// Compiles GLSL to SPIR-V, in place of the glslang calls of
-// src/mln/shaders/vulkan/shader_program.cpp (`compileGlsl`).
+// Compiles GLSL to SPIR-V with naga.
 //
 // naga's GLSL front end takes GLSL 4.50 for Vulkan, less what
 // `glsl_sources` avoids: combined image samplers, `bool` members of
@@ -12,7 +11,7 @@ use naga::valid::{Capabilities, ValidationFlags, Validator};
 
 use super::glsl_sources::{PRELUDE_FRAGMENT, PRELUDE_VERTEX};
 
-/// The GLSL version every source is compiled as (`defaultVersion`).
+/// The GLSL version every source is compiled as.
 const GLSL_VERSION: u32 = 450;
 
 /// The stages of a program.
@@ -56,6 +55,22 @@ pub(crate) fn parse(stage: Stage, source: &str) -> Result<naga::Module, String> 
 
 /// Compiles a composed source to SPIR-V 1.0, with the entry point `main`.
 pub fn compile(stage: Stage, source: &str) -> Result<Vec<u32>, String> {
+    compile_reflected(stage, source).map(|compiled| compiled.spirv)
+}
+
+/// A stage compiled to SPIR-V.
+pub(crate) struct Compiled {
+    pub(crate) spirv: Vec<u32>,
+    /// The set and binding of each resource the entry point uses, and the
+    /// size of a uniform or storage buffer's block: of its first element,
+    /// for a block that ends in an array of any length. 0 for a texture or
+    /// sampler.
+    pub(crate) bindings: Vec<(u32, u32, u64)>,
+}
+
+/// Compiles a composed source as [`compile`] does, and finds the resources
+/// it uses.
+pub(crate) fn compile_reflected(stage: Stage, source: &str) -> Result<Compiled, String> {
     let module = parse(stage, source)?;
     // Not the uniformity of control flow: it is WGSL's rule for derivatives,
     // which GLSL doesn't have.
@@ -67,12 +82,28 @@ pub fn compile(stage: Stage, source: &str) -> Result<Vec<u32>, String> {
         // The sources flip Y themselves (`applySurfaceTransform`) and write
         // no fragment depth.
         flags: spv::WriterFlags::LABEL_VARYINGS,
-        // As glslang compiles them: no checks added around loops, indexes
-        // and integer divisions.
+        // No checks added around loops, indexes and integer divisions.
         force_loop_bounding: false,
         emit_int_div_checks: false,
         ..spv::Options::default()
     };
     let pipeline_options = spv::PipelineOptions { shader_stage: stage.naga(), entry_point: "main".to_owned() };
-    spv::write_vec(&module, &info, &options, Some(&pipeline_options)).map_err(|error| format!("{error:?}"))
+    let spirv =
+        spv::write_vec(&module, &info, &options, Some(&pipeline_options)).map_err(|error| format!("{error:?}"))?;
+    let uses = info.get_entry_point(0);
+    let mut layouter = naga::proc::Layouter::default();
+    layouter.update(module.to_ctx()).map_err(|error| format!("{error:?}"))?;
+    let bindings = module
+        .global_variables
+        .iter()
+        .filter(|&(handle, _)| !uses[handle].is_empty())
+        .filter_map(|(_, global)| {
+            let size = match global.space {
+                naga::AddressSpace::Uniform | naga::AddressSpace::Storage { .. } => u64::from(layouter[global.ty].size),
+                _ => 0,
+            };
+            global.binding.as_ref().map(|binding| (binding.group, binding.binding, size))
+        })
+        .collect();
+    Ok(Compiled { spirv, bindings })
 }

@@ -16,7 +16,6 @@ use geo_types::{LineString, Point};
 use geojson::{GeoJson, Geometry};
 use mln_actor::{RunLoop, Timer};
 use mln_gfx::shaders::shader_source::BuiltIn;
-use mln_gfx::{BackendScope, ScopeType};
 use mln_headless::HeadlessFrontend;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
@@ -309,10 +308,7 @@ fn a_sourceless_style_loaded_after_the_camera_renders() {
     test.observer.did_finish_loading_map_callback.clear();
     assert!(loaded.get(), "the map never finished loading");
 
-    let image = {
-        let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
-        test.frontend.read_still_image()
-    };
+    let image = { test.frontend.read_still_image() };
     assert_eq!(center_pixel(&image), [0, 255, 0, 255]);
 }
 
@@ -2256,10 +2252,7 @@ fn globe_tile_drawn_for_its_children_meets_finer_tiles_without_a_gap() {
     test.map().jump_to(&CameraOptions { zoom: Some(8.2), ..Default::default() });
     run_with_timeout(&test.run_loop, 60);
 
-    let image = {
-        let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
-        test.frontend.read_still_image()
-    };
+    let image = { test.frontend.read_still_image() };
     let background = image.data.as_chunks::<4>().0.iter().filter(|pixel| pixel[0] > 128 && pixel[2] < 128).count();
     assert_eq!(0, background);
 }
@@ -4230,15 +4223,13 @@ fn frame_status_carries_rendering_stats() {
     assert!(stats.num_frames > 0);
     assert!(stats.num_draw_calls > 0);
     assert!(stats.total_draw_calls >= stats.num_draw_calls);
-    let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
-    assert_eq!(**stats, *test.frontend.get_backend().get_context().rendering_stats());
+    assert_eq!(**stats, test.frontend.rendering_stats());
 }
 
 /// Renders a frame and returns the RGB of the pixel at the centre of the map.
 fn render_center_pixel(test: &MapTest) -> [u8; 3] {
     test.map().trigger_repaint();
     test.frontend.render_frame();
-    let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
     let [r, g, b, _] = center_pixel(&test.frontend.read_still_image());
     [r, g, b]
 }
@@ -4262,10 +4253,7 @@ fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
     test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(1.0), ..Default::default() });
 
     let red_pixels = |test: &MapTest| {
-        let image = {
-            let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
-            test.frontend.read_still_image()
-        };
+        let image = { test.frontend.read_still_image() };
         image.data.as_chunks::<4>().0.iter().filter(|pixel| pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60).count()
     };
 
@@ -4457,7 +4445,6 @@ fn render_frame(test: &MapTest) {
 }
 
 fn center_pixel_of(test: &MapTest) -> [u8; 4] {
-    let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
     center_pixel(&test.frontend.read_still_image())
 }
 

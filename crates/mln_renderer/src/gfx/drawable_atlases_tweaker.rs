@@ -1,19 +1,15 @@
-// This tweaker reads the renderer's `TileAtlasTextures`, so it lives in
-// mln_renderer rather than mln_gfx.
-
 use std::rc::Rc;
 
-use mln_gfx::drawable::Drawable;
-use mln_gfx::drawable_tweaker::DrawableTweaker;
-use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style_types::AlignmentType;
 
+use crate::drawable::Drawable;
+use crate::paint_parameters::PaintParameters;
 use crate::tile_render_data::TileAtlasTextures;
 
-/// Tweaker that applies the latest values from a retained
-/// `TileAtlasTexturesPtr`.
+/// Gives a symbol drawable the textures of its tile's glyph and icon
+/// atlases, which change after the drawable is made.
 pub(crate) struct DrawableAtlasesTweaker {
     atlases: Option<Rc<TileAtlasTextures>>,
     icon_texture_id: Option<usize>,
@@ -51,8 +47,8 @@ impl DrawableAtlasesTweaker {
         }
     }
 
-    fn setup_textures(&self, drawable: &mut dyn Drawable, linear_filter_for_icons: bool) {
-        let Some(shader) = drawable.get_shader().clone() else {
+    fn setup_textures(&self, drawable: &mut Drawable, linear_filter_for_icons: bool) {
+        let Some(shader) = drawable.shader().cloned() else {
             return;
         };
         let (Some(glyph_texture_id), Some(atlases)) = (self.glyph_texture_id, &self.atlases) else {
@@ -61,7 +57,7 @@ impl DrawableAtlasesTweaker {
         let glyph = atlases.glyph.borrow().clone();
         let icon = atlases.icon.borrow().clone();
         if let Some(glyph) = &glyph {
-            glyph.borrow_mut().set_sampler_configuration(SamplerState {
+            glyph.borrow_mut().set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,
@@ -69,7 +65,7 @@ impl DrawableAtlasesTweaker {
             });
         }
         if let Some(icon) = &icon {
-            icon.borrow_mut().set_sampler_configuration(SamplerState {
+            icon.borrow_mut().set_sampler(SamplerState {
                 filter: if linear_filter_for_icons { TextureFilterType::Linear } else { TextureFilterType::Nearest },
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,
@@ -77,7 +73,7 @@ impl DrawableAtlasesTweaker {
             });
         }
         if let Some(icon_texture_id) = self.icon_texture_id
-            && shader.get_sampler_location(icon_texture_id).is_some()
+            && shader.samples(icon_texture_id)
         {
             debug_assert_ne!(glyph_texture_id, icon_texture_id);
             drawable.set_texture(glyph, glyph_texture_id);
@@ -88,17 +84,21 @@ impl DrawableAtlasesTweaker {
     }
 }
 
-impl DrawableTweaker for DrawableAtlasesTweaker {
-    fn init(&self, drawable: &mut dyn Drawable) {
+impl DrawableAtlasesTweaker {
+    /// Gives a drawable added to a layer group the atlases' textures.
+    pub(crate) fn init(&self, drawable: &mut Drawable) {
         self.setup_textures(drawable, true);
     }
 
-    fn execute(&self, drawable: &mut dyn Drawable, parameters: &mut dyn PaintParameters) {
-        let transformed = self.rotation_alignment == AlignmentType::Map || parameters.state_pitch() != 0.0;
+    /// Gives the drawable the atlases' textures before it draws, filtered
+    /// as the frame's view asks.
+    pub(crate) fn execute(&self, drawable: &mut Drawable, parameters: &PaintParameters<'_>) {
+        let state = parameters.state;
+        let transformed = self.rotation_alignment == AlignmentType::Map || state.get_pitch() != 0.0;
         let linear_filter_for_icons = if self.is_text {
-            parameters.state_is_changing() || transformed || !self.text_size_is_zoom_constant
+            state.is_changing() || transformed || !self.text_size_is_zoom_constant
         } else {
-            self.sdf_icons || parameters.state_is_changing() || self.icon_scaled || transformed
+            self.sdf_icons || state.is_changing() || self.icon_scaled || transformed
         };
         self.setup_textures(drawable, linear_filter_for_icons);
     }

@@ -5,11 +5,9 @@ mod glsl_compile_test;
 // through the swapchain, resizes, the overlay, readback, two frames in
 // flight.
 mod surface_test;
-// The background shader end to end on the drawable path (after
-// crates/mln_webgpu/tests/background_test.rs): an offscreen target, a
-// DrawableBuilder drawable in a TileLayerGroup, tile clipping masks,
-// rendered into the offscreen target and read back.
-mod background_test;
+// mln_gfx::gpu::conformance's frame through `VulkanGpu`, and its shaders
+// and texture writes.
+mod gpu_test;
 // A library device logs the GPU it is on, as maplibre-native-ffi's graphics
 // devices do.
 mod log_test;

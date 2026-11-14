@@ -1,69 +1,75 @@
-// C++ `gfx::Context::createRenderTarget` returns `std::make_shared<RenderTarget>`;
-// RenderTarget is a renderer type and mln_gfx can't name it, so callers use
-// `RenderTarget::new(context, size, type)` directly. The tweakers of the
-// contained layer groups are kept by the orchestrator (see
-// change_request.rs), so `render` runs them through it.
+// The tweakers of the contained layer groups are kept by the orchestrator
+// (see change_request.rs), so `render` runs them through it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_gfx::offscreen_texture::OffscreenTexture;
-use mln_gfx::render_pass::RenderPassDescriptor;
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, GpuError, LoadOp, Pass, TargetFormats};
 use mln_gfx::scissor_rect::ScissorRect;
-use mln_gfx::texture2d::Texture2DPtr;
-use mln_gfx::types::TextureChannelDataType;
-use mln_gfx::{Context, LayerGroupBasePtr, UploadPass};
+use mln_gfx::texture2d::{SamplerState, texture_format};
+use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_util::Color;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
-use crate::paint_parameters::PaintParameters;
+use crate::gfx::attachment::Attachment;
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
+use crate::layer_group::LayerGroupPtr;
+use crate::paint_parameters::{PaintParameters, RecordedPass};
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 
 pub(crate) type RenderTargetPtr = Rc<RefCell<RenderTarget>>;
 
-/// Render target class
+/// A texture that layer groups draw into ahead of the frame, which other
+/// drawables sample, with the depth texture the backend draws it with
+/// (`Context::render_target_depth`).
 pub struct RenderTarget {
-    offscreen_texture: Box<dyn OffscreenTexture>,
-    /// The channel type the offscreen texture was asked for.
+    texture: Texture2DPtr,
+    /// Made with the first pass, of the texture's size.
+    depth: Option<Attachment>,
+    /// The channel type the texture was asked for.
     type_: TextureChannelDataType,
-    layer_groups_by_layer_index: VecMap<i32, LayerGroupBasePtr>,
+    layer_groups_by_layer_index: VecMap<i32, LayerGroupPtr>,
 }
 
 impl RenderTarget {
-    pub(crate) fn new(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> Self {
+    pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         RenderTarget {
-            offscreen_texture: context.create_offscreen_texture(size, type_),
+            texture: texture(context, size, type_),
+            depth: None,
             type_,
             layer_groups_by_layer_index: VecMap::new(),
         }
     }
 
     /// Creates a shared render target of `size` with channel type `type_`.
-    pub(crate) fn create(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> RenderTargetPtr {
+    pub(crate) fn create(context: &Context, size: Size, type_: TextureChannelDataType) -> RenderTargetPtr {
         Rc::new(RefCell::new(RenderTarget::new(context, size, type_)))
     }
 
     /// Get the render target texture
     #[must_use]
     pub(crate) fn get_texture(&self) -> Texture2DPtr {
-        self.offscreen_texture.get_texture()
+        Rc::clone(&self.texture)
     }
 
     /// Draws into a texture of `size` from now on: a texture of another size
     /// replaces the current one, and [`get_texture`](Self::get_texture)
     /// returns the new one.
-    pub(crate) fn set_size(&mut self, context: &dyn Context, size: Size) {
-        if self.get_texture().borrow().get_size() != size {
-            self.offscreen_texture = context.create_offscreen_texture(size, self.type_);
+    pub(crate) fn set_size(&mut self, context: &Context, size: Size) {
+        if self.texture.borrow().size() != size {
+            self.texture = texture(context, size, self.type_);
+            self.depth = None;
         }
     }
 
     /// Add a layer group to the render target; `replace`: replace if
     /// exists. Returns whether added.
-    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupBasePtr, replace: bool) -> bool {
-        let index = layer_group.borrow().get_layer_index();
+    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupPtr, replace: bool) -> bool {
+        let index = layer_group.borrow().layer_index;
         match self.layer_groups_by_layer_index.entry(index) {
             mln_vec_map::Entry::Vacant(entry) => {
                 // added
@@ -84,42 +90,37 @@ impl RenderTarget {
 
     /// Get a specific layer group by index, if existent.
     #[must_use]
-    pub(crate) fn get_layer_group(&self, layer_index: i32) -> Option<&LayerGroupBasePtr> {
+    pub(crate) fn get_layer_group(&self, layer_index: i32) -> Option<&LayerGroupPtr> {
         self.layer_groups_by_layer_index.get(&layer_index)
     }
 
     /// The contained layer groups, in layer index order.
     #[must_use]
-    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupBasePtr> {
+    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupPtr> {
         self.layer_groups_by_layer_index.values().cloned().collect()
     }
 
     /// Upload the layer groups
-    pub(crate) fn upload(&self, upload_pass: &dyn UploadPass) {
+    pub(crate) fn upload(&self, context: &Context) {
         for layer_group in self.layer_groups_by_layer_index.values() {
-            layer_group.borrow_mut().upload(upload_pass);
+            layer_group.borrow_mut().upload(context);
         }
     }
 
     /// Render the layer groups. `renderTree` is only passed on to
     /// `runTweakers` in C++; the orchestrator runs them here.
-    pub(crate) fn render(&self, orchestrator: &mut RenderOrchestrator, parameters: &mut PaintParameters<'_>) {
-        let target = self.offscreen_texture.draw_target();
-        {
-            let encoder = parameters.encoder.as_ref().expect("encoder");
-            parameters.render_pass = Some(encoder.create_render_pass(
-                "render target",
-                &RenderPassDescriptor {
-                    target,
-                    clear_color: Some(Color::new(0.0, 0.0, 0.0, 1.0)),
-                    clear_depth: Some(1.0),
-                    clear_stencil: None,
-                },
-            ));
-        }
+    pub(crate) fn render(&mut self, orchestrator: &mut RenderOrchestrator, parameters: &mut PaintParameters<'_>) {
+        let pass = match self.begin_pass(parameters.context) {
+            Ok(pass) => pass,
+            Err(error) => {
+                Log::error(Event::Render, format!("Beginning a render target's pass failed: {error}"));
+                return;
+            }
+        };
+        let size = pass.size;
+        *parameters.recorded.borrow_mut() = Some(pass);
 
         let prev_scissor_rect = parameters.scissor_rect;
-        let size = self.get_texture().borrow().get_size();
         parameters.scissor_rect = ScissorRect { x: 0, y: 0, width: size.width, height: size.height };
 
         let layer_groups = self.layer_groups();
@@ -156,9 +157,54 @@ impl RenderTarget {
             }
         }
 
-        parameters.render_pass = None;
-        self.offscreen_texture.submit(&**parameters.encoder.as_ref().expect("encoder"));
+        // Submitted now, so that what samples the texture later sees it.
+        if let Err(error) = parameters.submit() {
+            Log::error(Event::Render, format!("Submitting a render target's pass failed: {error}"));
+        }
 
         parameters.scissor_rect = prev_scissor_rect;
     }
+
+    /// The pass that clears the texture to opaque black and its depth to 1.
+    fn begin_pass(&mut self, context: &Context) -> Result<RecordedPass, GpuError> {
+        let mut texture = self.texture.borrow_mut();
+        let (color, size, format) = (texture.create(context)?, texture.size(), texture.format());
+        drop(texture);
+        if self.depth.is_none()
+            && let Some(depth_format) = context.render_target_depth()
+        {
+            self.depth = Some(Attachment::new(context, "render target depth", size, depth_format)?);
+        }
+        let pass = Pass {
+            label: "render target".to_owned(),
+            color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 1.0)) }),
+            depth_stencil: self.depth.as_ref().map(|depth| DepthStencilAttachment {
+                texture: depth.id(),
+                depth: LoadOp::Clear(1.0),
+                stencil: LoadOp::Load,
+            }),
+            commands: Vec::new(),
+        };
+        let targets = TargetFormats { color: Some(format), depth_stencil: self.depth.as_ref().map(Attachment::format) };
+        Ok(RecordedPass { pass, size, targets })
+    }
+}
+
+/// The color texture of a render target of `size`, which drawables draw into
+/// and then sample, linear and clamped.
+fn texture(context: &Context, size: Size, type_: TextureChannelDataType) -> Texture2DPtr {
+    let texture = context.create_texture_2d();
+    {
+        let mut texture = texture.borrow_mut();
+        texture.set_size(size);
+        texture.set_format(texture_format(TexturePixelType::RGBA, context.render_target_type(type_)));
+        texture.set_render_target();
+        texture.set_sampler(SamplerState {
+            filter: TextureFilterType::Linear,
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..SamplerState::default()
+        });
+    }
+    texture
 }

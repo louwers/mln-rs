@@ -4,15 +4,14 @@ use crate::types::{ColorBlendEquationType, ColorBlendFactorType};
 
 /// The factors of a linear blend. The equation is the `BlendFunction`
 /// variant that holds them.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LinearBlend {
     pub src_factor: ColorBlendFactorType,
     pub dst_factor: ColorBlendFactorType,
 }
 
-/// A blend equation and its factors. The variants are in C++'s order, which
-/// `which` returns as an index.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A blend equation and its factors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BlendFunction {
     Replace,
     Add(LinearBlend),
@@ -60,7 +59,7 @@ impl BlendFunction {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Mask {
     pub r: bool,
     pub g: bool,
@@ -116,8 +115,7 @@ impl ColorMode {
         }
     }
 
-    // C++ uses util::hash (boost hash_combine); the value is only
-    // used as a pipeline cache key, so any stable combination works.
+    /// A hash of the mode, for a pipeline cache key.
     #[must_use]
     pub fn hash(&self) -> u64 {
         crate::util_hash::hash(&[

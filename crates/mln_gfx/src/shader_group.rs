@@ -1,77 +1,57 @@
-// Deviation: the C++ group stores `shared_ptr<gfx::Shader>` and callers
-// `static_pointer_cast` to `ShaderProgramBase`. Every registered shader is a
-// program, so the port stores `ShaderProgramBasePtr` (upcast to `dyn Shader`
-// where needed). The `shared_mutex` becomes a `RefCell` (one render thread).
-
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use crate::context::Context;
+use crate::gpu::ShaderKey;
 use crate::projection_variant::ProjectionVariant;
-use crate::shaders::shader_program_base::ShaderProgramBasePtr;
+use crate::shaders::program_info::ProgramInfo;
+use crate::shaders::program_parameters::ProgramParameters;
+use crate::shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
 
+/// The names (`a_color`) and attribute ids of the paint properties a layer
+/// reads from uniforms rather than vertex attributes.
 pub type StringIDSetsPair = (HashSet<String>, HashSet<usize>);
-
-pub(crate) type PropertyHashType = u64;
 
 /// The define that compiles a shader's globe variant.
 pub const GLOBE_DEFINE: &str = "PROJECTION_GLOBE";
 
-/// The data members of `gfx::ShaderGroup`.
-#[derive(Default)]
-pub struct ShaderGroupData {
-    programs: RefCell<HashMap<String, ShaderProgramBasePtr>>,
+const UNIFORM_PREFIX: &str = "HAS_UNIFORM_u_";
+
+/// The variants of one built-in program: one for each set of paint
+/// properties read from uniforms and each projection.
+pub struct ShaderGroup {
+    info: &'static ProgramInfo,
+    parameters: ProgramParameters,
+    programs: RefCell<HashMap<ShaderKey, ShaderProgramPtr>>,
 }
 
-pub trait ShaderGroup {
-    fn shader_group_data(&self) -> &ShaderGroupData;
+pub type ShaderGroupPtr = Rc<ShaderGroup>;
 
-    /// Get a shader from the group by name.
-    fn get_shader(&self, shader_name: &str) -> Option<ShaderProgramBasePtr> {
-        self.shader_group_data().programs.borrow().get(shader_name).cloned()
+impl ShaderGroup {
+    #[must_use]
+    pub fn new(info: &'static ProgramInfo, parameters: ProgramParameters) -> ShaderGroup {
+        ShaderGroup { info, parameters, programs: RefCell::default() }
     }
 
-    /// Register a new shader under `shader_name`. False on a name conflict.
-    fn register_shader_named(&self, shader: ShaderProgramBasePtr, shader_name: &str) -> bool {
-        let mut programs = self.shader_group_data().programs.borrow_mut();
-        if programs.contains_key(shader_name) {
-            return false;
-        }
-        programs.insert(shader_name.to_owned(), shader);
-        true
+    /// The variant that reads `properties_as_uniforms` from uniforms, for
+    /// `variant`'s projection. Its key has the program parameters' defines
+    /// (`DEVICE_PIXEL_RATIO=<ratio>`), a `HAS_UNIFORM_u_*` define for each
+    /// property read from a uniform (`a_color` gives `HAS_UNIFORM_u_color`),
+    /// and the globe's define for its variant.
+    pub fn shader(&self, properties_as_uniforms: &StringIDSetsPair, variant: ProjectionVariant) -> ShaderProgramPtr {
+        let parameters = self
+            .parameters
+            .get_defines()
+            .iter()
+            .map(|(name, value)| if value.is_empty() { name.clone() } else { format!("{name}={value}") });
+        let uniforms = properties_as_uniforms
+            .0
+            .iter()
+            .map(|name| format!("{UNIFORM_PREFIX}{}", name.strip_prefix("a_").unwrap_or(name)));
+        let globe = (variant == ProjectionVariant::Globe).then(|| GLOBE_DEFINE.to_owned());
+        let key = self.info.key(parameters.chain(uniforms).chain(globe));
+        let mut programs = self.programs.borrow_mut();
+        let program = programs.entry(key).or_insert_with_key(|key| Rc::new(ShaderProgram::new(key.clone(), self.info)));
+        Rc::clone(program)
     }
-
-    /// The shader named `shader_name`, if its type name is `type_name`.
-    fn get_typed(&self, shader_name: &str, type_name: &str) -> Option<ShaderProgramBasePtr> {
-        self.get_shader(shader_name).filter(|s| s.type_name() == type_name)
-    }
-
-    /// Get a shader by its set of data driven properties as uniforms; if
-    /// none is found, create and register it. The base returns none.
-    fn get_or_create_shader(
-        &self,
-        _context: &dyn Context,
-        _properties_as_uniforms: &StringIDSetsPair,
-        _variant: ProjectionVariant,
-        _first_attrib_name: &str,
-    ) -> Option<ShaderProgramBasePtr> {
-        None
-    }
-}
-
-pub type ShaderGroupPtr = Rc<dyn ShaderGroup>;
-
-/// The name of the variant of shader `name` with property hash `key`:
-/// `name#<hex key>`.
-#[must_use]
-pub fn get_shader_name(name: &str, key: PropertyHashType) -> String {
-    format!("{name}#{key:x}")
-}
-
-/// An order-independent hash of the property ids, the wrapping sum of their
-/// hashes. Only used as a cache key.
-#[must_use]
-pub fn property_hash(properties_as_uniforms: &StringIDSetsPair) -> PropertyHashType {
-    properties_as_uniforms.1.iter().fold(0u64, |acc, &id| acc.wrapping_add(crate::util_hash::hash(&[id as u64])))
 }

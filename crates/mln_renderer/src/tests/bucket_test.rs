@@ -3,11 +3,9 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_gfx::backend_scope::{BackendScope, ScopeType};
-use mln_gfx::index_vector::IndexBufferBase;
 use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::types::BufferUsageType;
+use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
@@ -32,8 +30,9 @@ use mln_util::geometry::FeatureType;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
+use mln_util::time::Instant;
 use mln_vec_map::VecMap;
-use mln_webgpu::{Device, OffscreenTarget, UploadPass as WebGpuUploadPass};
+use mln_webgpu::Device;
 use parking_lot::Mutex;
 
 use crate::bucket::Bucket;
@@ -44,6 +43,9 @@ use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
+use crate::gfx::upload::{upload_indexes, vertex_buffer};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;
 
@@ -79,17 +81,12 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
     )
 }
 
-/// Runs `f` with an upload pass of an offscreen target (the C++ tests create
-/// a `gl::HeadlessBackend`, a context and an upload pass).
-fn with_upload_pass(f: impl FnOnce(&dyn mln_gfx::UploadPass)) {
-    let backend = Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
-    let target = OffscreenTarget::new(Rc::clone(&backend), Size { width: 512, height: 256 });
-    let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-    let context = backend.get_context();
-    let command_encoder = context.create_command_encoder();
-    let image = mln_gfx::FrameTarget::begin_frame(&target).expect("a frame");
-    let upload_pass = command_encoder.create_upload_pass("upload", &*image);
-    f(&*upload_pass);
+/// Runs `f` with the context of a headless WebGPU backend (the C++ tests
+/// create a `gl::HeadlessBackend`, a context and an upload pass).
+fn with_context(f: impl FnOnce(&Context)) {
+    let backend: Rc<dyn RendererBackend> =
+        Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
+    f(&Context::new(Rc::clone(&backend)));
 }
 
 // gtest: Buckets.CircleBucket
@@ -118,7 +115,7 @@ fn circle_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_upload_pass(|upload_pass| bucket.upload(upload_pass));
+    with_context(|context| bucket.upload(context));
     assert!(bucket.has_data());
     assert!(!bucket.needs_upload());
 }
@@ -145,7 +142,7 @@ fn fill_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_upload_pass(|upload_pass| bucket.upload(upload_pass));
+    with_context(|context| bucket.upload(context));
     assert!(!bucket.needs_upload());
 }
 
@@ -177,18 +174,6 @@ fn fill_extrusion_bucket_rounds_corners() {
     assert_eq!(fill_extrusion_vertex_count(&square, 0.0), 5);
     // Rounding replaces each of the 4 corners with 5 points.
     assert_eq!(fill_extrusion_vertex_count(&square, 10.0), 21);
-}
-
-/// An index buffer that stands in for an upload.
-struct StubIndexBuffer;
-
-impl IndexBufferBase for StubIndexBuffer {}
-
-/// Runs `f` with the WebGPU upload pass of a headless backend.
-fn with_webgpu_upload_pass(f: impl FnOnce(&WebGpuUploadPass)) {
-    with_upload_pass(|upload_pass| {
-        f(upload_pass.downcast_ref::<WebGpuUploadPass>().expect("WebGPU upload pass"));
-    });
 }
 
 /// A fill bucket whose "fill-color" is the given data-driven expression, with
@@ -238,8 +223,8 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
     assert!(vertex_count > 0);
     assert!(index_count > 0);
 
-    with_webgpu_upload_pass(|upload_pass| {
-        bucket.upload(upload_pass);
+    with_context(|context| {
+        bucket.upload(context);
         let geometry = BucketGeometry::default();
 
         // A layer draws the bucket: its data moves to the render thread's
@@ -250,10 +235,9 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert_eq!(vertices.get_raw_data().len(), vertex_count * vertices.get_raw_size());
 
         // A drawable upload turns the shared vectors into buffers.
-        let buffer = upload_pass.get_buffer(Some(&vertices), BufferUsageType::StaticDraw, false).expect("buffer");
+        let buffer = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
         let triangles = geometry.indexes(&bucket, &bucket.triangles);
-        triangles.borrow_mut().set_buffer(Some(Box::new(StubIndexBuffer)));
-        triangles.borrow_mut().set_dirty(false);
+        upload_indexes(context, &mut triangles.borrow_mut()).expect("uploads");
 
         // The CPU copies are gone, the counts that drawables are built from
         // are not.
@@ -269,7 +253,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         let again = geometry.vertices(&bucket, &bucket.vertices);
         assert!(Rc::ptr_eq(&vertices, &again));
         assert!(Rc::ptr_eq(&geometry.indexes(&bucket, &bucket.triangles), &triangles));
-        let reused = upload_pass.get_buffer(Some(&again), BufferUsageType::StaticDraw, true).expect("buffer");
+        let reused = vertex_buffer(context, &again, true).expect("uploads").expect("a buffer");
         assert!(Rc::ptr_eq(&buffer, &reused));
 
         // Data-driven paint values are freed too when nothing can rewrite them.
@@ -278,7 +262,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(Some(&geometry), &bucket, buffer, false);
         assert!(paint.get_raw_count() > 0);
-        assert!(upload_pass.get_buffer(Some(&paint), BufferUsageType::StaticDraw, false).is_some());
+        assert!(vertex_buffer(context, &paint, false).expect("uploads").is_some());
         assert!(!paint.has_raw_data());
         assert_eq!(buffer.shared_vertex_vector.data().capacity(), 0);
     });
@@ -292,15 +276,15 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
         ["case", ["boolean", ["feature-state", "hover"], false], "red", "blue"]
     ]));
 
-    with_webgpu_upload_pass(|upload_pass| {
-        bucket.upload(upload_pass);
+    with_context(|context| {
+        bucket.upload(context);
         let geometry = BucketGeometry::default();
         let binders = bucket.paint_property_binders.get("fill").unwrap().read();
         assert!(binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(Some(&geometry), &bucket, buffer, binders.depends_on_feature_state());
         assert!(paint.get_raw_count() > 0);
-        assert!(upload_pass.get_buffer(Some(&paint), BufferUsageType::StaticDraw, false).is_some());
+        assert!(vertex_buffer(context, &paint, false).expect("uploads").is_some());
         assert!(!buffer.shared_vertex_vector.is_moved());
         assert_eq!(buffer.shared_vertex_vector.data().len(), paint.get_raw_count());
     });
@@ -313,11 +297,11 @@ fn fill_bucket_keeps_cpu_geometry_when_rendered_features_are_retained() {
     bucket.set_retain_features_by_id(true);
     let vertex_count = bucket.vertices.len();
 
-    with_webgpu_upload_pass(|upload_pass| {
-        bucket.upload(upload_pass);
+    with_context(|context| {
+        bucket.upload(context);
         let geometry = BucketGeometry::default();
         let vertices = geometry.vertices(&bucket, &bucket.vertices);
-        assert!(upload_pass.get_buffer(Some(&vertices), BufferUsageType::StaticDraw, false).is_some());
+        assert!(vertex_buffer(context, &vertices, false).expect("uploads").is_some());
 
         // Reading rendered features back needs the vertices.
         assert_eq!(bucket.vertices.data().len(), vertex_count);
@@ -360,7 +344,7 @@ fn line_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_upload_pass(|upload_pass| bucket.upload(upload_pass));
+    with_context(|context| bucket.upload(context));
     assert!(!bucket.needs_upload());
 }
 
@@ -381,14 +365,10 @@ fn line_bucket_drawables_build_from_freed_indexes() {
         .unwrap();
     assert!(bucket.has_data());
 
-    let backend = Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
-    let target = OffscreenTarget::new(Rc::clone(&backend), Size { width: 512, height: 256 });
-    let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-    let context = backend.get_context();
-    let command_encoder = context.create_command_encoder();
-    let image = mln_gfx::FrameTarget::begin_frame(&target).expect("a frame");
-    let upload_pass = command_encoder.create_upload_pass("upload", &*image);
-    bucket.upload(&*upload_pass);
+    let backend: Rc<dyn RendererBackend> =
+        Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
+    let context = &Context::new(Rc::clone(&backend));
+    bucket.upload(context);
 
     // An earlier drawable put the indexes in a buffer, which frees their CPU
     // copy.
@@ -396,13 +376,12 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     let vertex_count = bucket.vertices.len();
     let index_count = bucket.triangles.len();
     let triangles = geometry.indexes(&bucket, &bucket.triangles);
-    triangles.borrow_mut().set_buffer(Some(Box::new(StubIndexBuffer)));
-    triangles.borrow_mut().set_dirty(false);
+    upload_indexes(context, &mut triangles.borrow_mut()).expect("uploads");
     assert_eq!(*triangles.borrow().vector(), Vec::<u16>::new());
 
     // A layer that rebuilds its drawables for the tile builds the segments
     // from the counts.
-    let mut builder = context.create_drawable_builder();
+    let mut builder = DrawableBuilder::boxed();
     builder.set_raw_vertices(vec![0; vertex_count * 4], vertex_count, AttributeDataType::Short2);
     builder.set_segments_shared(
         DrawMode::Triangles(),
@@ -469,7 +448,7 @@ fn symbol_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_upload_pass(|upload_pass| bucket.upload(upload_pass));
+    with_context(|context| bucket.upload(context));
     assert!(!bucket.needs_upload());
 }
 
@@ -483,7 +462,7 @@ fn raster_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_upload_pass(|upload_pass| bucket.upload(upload_pass));
+    with_context(|context| bucket.upload(context));
     assert!(!bucket.needs_upload());
 
     bucket.clear();
@@ -775,4 +754,52 @@ fn line_bucket_evaluates_cap_and_limits_per_feature() {
         );
         assert_eq!(data_driven, [first, second].concat(), "{property}");
     }
+}
+
+// A released vector frees its CPU copy once its vertices are in a buffer.
+#[test]
+fn released_vertex_vector_frees_its_data_once_it_has_a_buffer() {
+    with_context(|context| {
+        let before = Instant::now();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let vertices: VertexVectorBasePtr = Rc::new(VertexVector::from_vec_released(vec![[1i16, 2], [3, 4]]));
+        assert!(vertices.has_raw_data());
+        assert_eq!(vertices.get_raw_data().len(), 8);
+
+        vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
+        assert!(!vertices.has_raw_data());
+        assert!(vertices.get_raw_data().is_empty());
+        assert_eq!(vertices.get_raw_count(), 2);
+        // A drawable that bound its attributes before the vector was made
+        // still sees it as new.
+        assert!(vertices.is_modified_after(before));
+    });
+}
+
+#[test]
+fn vertex_vector_that_is_not_released_keeps_its_data() {
+    with_context(|context| {
+        let vertices: VertexVectorBasePtr = Rc::new(VertexVector::from_vec(vec![[1i16, 2]]));
+        vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
+        assert!(vertices.has_raw_data());
+        assert_eq!(vertices.get_raw_data().len(), 4);
+    });
+}
+
+// Rewriting a vector's buffer counts as a buffer update, and makes no new
+// buffer.
+#[test]
+fn rewriting_a_vertex_buffer_counts_an_update() {
+    with_context(|context| {
+        let vertices: VertexVectorBasePtr = Rc::new(VertexVector::from_vec(vec![[1i16, 2]]));
+        let buffer = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
+        let before = context.rendering_stats().clone();
+        let rewritten = vertex_buffer(context, &vertices, true).expect("uploads").expect("a buffer");
+        assert!(Rc::ptr_eq(&buffer, &rewritten));
+        let after = context.rendering_stats().clone();
+        assert_eq!(after.buffer_updates, before.buffer_updates + 1);
+        assert_eq!(after.buffer_update_bytes, before.buffer_update_bytes + 4);
+        assert_eq!(after.vertex_update_bytes, before.vertex_update_bytes + 4);
+        assert_eq!(after.num_vertex_buffers, before.num_vertex_buffers);
+    });
 }

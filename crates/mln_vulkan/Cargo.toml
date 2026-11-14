@@ -9,8 +9,6 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
-# The [[test]]s below.
-autotests = false
 
 [lib]
 name = "mln_vulkan"
@@ -35,6 +33,10 @@ windows.workspace = true
 # Polls the host's sync files.
 [target.'cfg(all(unix, not(any(target_vendor = "apple", target_family = "wasm"))))'.dependencies]
 libc.workspace = true
+
+# The conformance suite that `VulkanGpu`'s tests run.
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
+mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 
 [lints]
 workspace = true
