@@ -7,6 +7,7 @@ use std::rc::{Rc, Weak};
 use ash::vk;
 use gpu_allocator::MemoryLocation;
 use mln_gfx::color_mode::BlendFunction;
+use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::validation::{self, Resources, ShaderBinding};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
@@ -764,6 +765,11 @@ impl VulkanGpu {
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_binding_descriptions(&input_bindings)
             .vertex_attribute_descriptions(&input_attributes);
+        // Vulkan has no line loops; the drawable path's mapping draws them
+        // as strips, which leave the loop open.
+        if state.primitive == DrawModeType::LineLoop {
+            return Err(GpuError::Unsupported(format!("{:?} primitives", state.primitive)));
+        }
         let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
             .topology(PipelineInfo::vulkan_primitive_topology(state.primitive));
         let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
