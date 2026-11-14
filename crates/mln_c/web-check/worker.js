@@ -130,8 +130,9 @@ check(await created.done, "the map");
 log("map", map);
 
 // Red, with a blue polygon over most of the world that tile workers lay out,
-// and a white CJK label below the center, which the browser draws: the map
-// has system fonts by default, and no glyph PBF is fetched for it.
+// and a white CJK label below the center, which the browser draws in its
+// sans-serif font: the map has system fonts by default, and no glyph PBF is
+// fetched for it. The label needs a CJK font on the system.
 const style = {
   version: 8,
   glyphs: "https://glyphs.invalid/{fontstack}/{range}.pbf",

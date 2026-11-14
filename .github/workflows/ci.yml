@@ -245,6 +245,13 @@ jobs:
           node examples/web/check/check.mjs --backend webgl2 --out
           "$RUNNER_TEMP/web-check-webgl2"
 
+      # A CJK font for the browser's sans-serif, in which the C library's
+      # check draws its CJK label: the runner has none.
+      - name: Install a CJK font
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-wqy-microhei
+
       # The C library's browser package, one per backend, driven through its
       # raw C ABI from a Web Worker (crates/mln_c/web-check). The dev profile:
       # the check needs no release build, and two more would outlast the job.
