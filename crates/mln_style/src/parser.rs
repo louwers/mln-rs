@@ -259,7 +259,10 @@ impl Parser {
             let Some(default) = member(member_object, "default") else {
                 continue;
             };
-            self.global_state_defaults.insert(property_name.to_owned(), borrowed_json_to_value(default));
+            // emplace: the first definition wins.
+            self.global_state_defaults
+                .entry(property_name.to_owned())
+                .or_insert_with(|| borrowed_json_to_value(default));
         }
     }
 
