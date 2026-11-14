@@ -9,8 +9,8 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, PipelineState, RenderCommand, SamplerId, ShaderKey, TextureDesc, TextureFormat, TextureId,
-    TextureRegion, TextureUsage, VertexStep,
+    PipelineId, PipelineKey, PipelineState, RenderCommand, SamplerId, ShaderKey, SlotMap, TextureDesc, TextureFormat,
+    TextureId, TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
@@ -19,7 +19,6 @@ use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::range::Range;
 use mln_util::size::Size;
-use slotmap::SlotMap;
 
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::PlatformContext;

@@ -2735,7 +2735,6 @@ dependencies = [
  "mln-rs-util",
  "parking_lot",
  "raw-window-handle",
- "slotmap",
  "wasm-bindgen",
  "web-sys",
  "windows-sys 0.61.2",
