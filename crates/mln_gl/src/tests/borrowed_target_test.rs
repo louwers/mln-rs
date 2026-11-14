@@ -61,8 +61,8 @@ fn a_ring_keeps_each_slots_framebuffer() {
         return;
     };
     let size = Size::new(4, 4);
-    let target = BorrowedTarget::new(Rc::clone(&backend), textures(&backend, 2, size), SyncKind::CpuComplete)
-        .expect("a ring");
+    let target =
+        BorrowedTarget::new(Rc::clone(&backend), textures(&backend, 2, size), SyncKind::CpuComplete).expect("a ring");
     let first: Vec<_> = (0..2).map(|slot| draw(&backend, &target, slot)).collect();
     assert_eq!(backend.gpu().framebuffer_count(), 2);
     let second: Vec<_> = (0..2).map(|slot| draw(&backend, &target, slot)).collect();

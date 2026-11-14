@@ -78,7 +78,11 @@ fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&
 /// A frontend on `backend` and a map of the style with `host`'s layer below
 /// the layer named `before`, or above every layer, on the thread's run loop.
 /// `None` where the machine has no device of `backend`.
-fn session(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&str>) -> Option<(HeadlessFrontend, Map)> {
+fn session(
+    backend: BackendType,
+    host: Arc<dyn CustomLayerHost>,
+    before: Option<&str>,
+) -> Option<(HeadlessFrontend, Map)> {
     let size = Size::new(SIDE, SIDE);
     let device = match Device::with_backend(backend, DeviceOptions::default()) {
         Ok(device) => device,
@@ -357,16 +361,14 @@ mod vulkan {
 #[cfg(all(unix, not(target_vendor = "apple")))]
 #[expect(unsafe_code, reason = "the host draws through glow")]
 mod gl {
-    use glow::HasContext as _;
-    use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
-
     use std::sync::OnceLock;
 
+    use glow::HasContext as _;
     use khronos_egl as egl;
     use mln_actor::RunLoop;
-
     use mln_headless::HeadlessFrontend;
     use mln_map::Map;
+    use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
     use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check, session};
 

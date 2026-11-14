@@ -251,8 +251,10 @@ impl FrameTarget for BorrowedTarget {
     fn begin_frame(&self) -> Option<FrameImage> {
         let slot = self.selected.get();
         self.begun.set(None);
-        let image =
-            self.slot_image(slot).inspect_err(|error| Log::error(Event::GraphicsBackend, error.message.clone())).ok()?;
+        let image = self
+            .slot_image(slot)
+            .inspect_err(|error| Log::error(Event::GraphicsBackend, error.message.clone()))
+            .ok()?;
         self.begun.set(Some(slot));
         Some(image)
     }

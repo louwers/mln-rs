@@ -30,8 +30,8 @@ fn a_target_dropped_in_a_frame_forgets_its_imports() {
     let backend = Rc::new(RendererBackend::new(&device));
     let size = Size::new(4, 4);
     let before = backend.gpu().texture_count();
-    let target = BorrowedTarget::new(Rc::clone(&backend), textures(&device, size), SyncKind::CpuComplete)
-        .expect("a ring");
+    let target =
+        BorrowedTarget::new(Rc::clone(&backend), textures(&device, size), SyncKind::CpuComplete).expect("a ring");
     target.begin_frame().expect("a frame");
     assert!(backend.gpu().texture_count() > before, "the frame imports its textures");
     drop(target);

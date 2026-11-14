@@ -41,14 +41,14 @@ fn knob() -> Option<String> {
 /// a context of [`api`] with: the test is skipped there, unless
 /// `MLN_RENDER_BACKEND` asks for this backend (`gl` or `gl-desktop`).
 fn gpu() -> Option<GlGpu> {
-    with_device(|device| GlGpu::new(device))
+    with_device(GlGpu::new)
 }
 
 /// What `make` makes on a device of its own, or none where there is no EGL
 /// to make a context of [`api`] with, as for [`gpu`].
 pub(super) fn with_device<T>(make: impl FnOnce(&Device) -> Result<T, mln_util::error::Error>) -> Option<T> {
-    let made = Device::with_options(DeviceOptions { api: api(), ..DeviceOptions::default() })
-        .and_then(|device| make(&device));
+    let made =
+        Device::with_options(DeviceOptions { api: api(), ..DeviceOptions::default() }).and_then(|device| make(&device));
     match made {
         Ok(made) => Some(made),
         Err(error)
