@@ -427,3 +427,112 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
         });
     }
 }
+
+#[cfg(target_vendor = "apple")]
+#[expect(unsafe_code, reason = "the host draws through objc2-metal")]
+mod metal {
+    use std::sync::atomic::AtomicUsize;
+
+    use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use objc2::rc::Retained;
+    use objc2::runtime::ProtocolObject;
+    use objc2_foundation::NSString;
+    use objc2_metal::{
+        MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCompareFunction, MTLCullMode,
+        MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLLibrary, MTLPrimitiveType,
+        MTLRenderCommandEncoder, MTLRenderPipelineDescriptor, MTLRenderPipelineState,
+    };
+
+    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check};
+
+    /// The quad of `QUAD_WGSL`, in MSL.
+    const QUAD_MSL: &str = "
+#include <metal_stdlib>
+using namespace metal;
+
+vertex float4 vs(uint index [[vertex_id]]) {
+    const float2 corners[6] = { float2(-0.5, -0.5), float2(0.5, -0.5), float2(-0.5, 0.5),
+                                float2(-0.5, 0.5), float2(0.5, -0.5), float2(0.5, 0.5) };
+    return float4(corners[index], 0.0, 1.0);
+}
+
+fragment float4 fs() { return float4(0.0, 1.0, 0.0, 1.0); }
+";
+
+    /// The host's objects, made on the session's device.
+    struct Objects {
+        pipeline: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+        depth: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
+    }
+
+    #[derive(Default)]
+    struct Host {
+        calls: Arc<Calls>,
+        objects: Mutex<Option<Objects>>,
+        /// The blits `prerender` encoded on the frame's command buffer.
+        prerender_blits: AtomicUsize,
+    }
+
+    fn make(pass: &mln_mtl::CustomLayerPass) -> Objects {
+        let device = pass.encoder.device();
+        let library = device.newLibraryWithSource_options_error(&NSString::from_str(QUAD_MSL), None).expect("MSL");
+        let function = |name: &str| library.newFunctionWithName(&NSString::from_str(name));
+        let descriptor = MTLRenderPipelineDescriptor::new();
+        descriptor.setVertexFunction(function("vs").as_deref());
+        descriptor.setFragmentFunction(function("fs").as_deref());
+        // SAFETY: index 0 of the 8 color attachments.
+        unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) }.setPixelFormat(pass.formats.color);
+        descriptor.setRasterSampleCount(pass.sample_count);
+        if let Some(depth) = pass.formats.depth {
+            descriptor.setDepthAttachmentPixelFormat(depth);
+        }
+        if let Some(stencil) = pass.formats.stencil {
+            descriptor.setStencilAttachmentPixelFormat(stencil);
+        }
+        let pipeline = device.newRenderPipelineStateWithDescriptor_error(&descriptor).expect("a pipeline");
+        let depth_descriptor = MTLDepthStencilDescriptor::new();
+        depth_descriptor.setDepthCompareFunction(MTLCompareFunction::Always);
+        depth_descriptor.setDepthWriteEnabled(false);
+        let depth = device.newDepthStencilStateWithDescriptor(&depth_descriptor).expect("a depth-stencil state");
+        Objects { pipeline, depth }
+    }
+
+    impl CustomLayerHost for Host {
+        fn prerender(&self, parameters: &mut CustomLayerPrerenderParameters<'_>) {
+            let encoder = parameters.encoder.downcast_ref::<mln_mtl::CustomLayerEncoder>().expect("a Metal encoder");
+            let command_buffer = &encoder.command_buffer;
+            assert_eq!(command_buffer.status(), MTLCommandBufferStatus::NotEnqueued, "an open command buffer");
+            let blit = command_buffer.blitCommandEncoder().expect("a blit encoder on the frame's command buffer");
+            blit.setLabel(Some(&NSString::from_str("custom layer prerender")));
+            blit.endEncoding();
+            self.prerender_blits.fetch_add(1, Ordering::Relaxed);
+            self.calls.prerender(parameters);
+        }
+
+        fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
+            self.calls.render(parameters);
+            assert_eq!(self.prerender_blits.load(Ordering::Relaxed), self.calls.prerenders.load(Ordering::Relaxed));
+            let pass = parameters.pass.downcast_ref::<mln_mtl::CustomLayerPass>().expect("a Metal pass");
+            let mut objects = self.objects.lock();
+            let objects = objects.get_or_insert_with(|| make(pass));
+            pass.encoder.setRenderPipelineState(&objects.pipeline);
+            pass.encoder.setDepthStencilState(Some(&objects.depth));
+            pass.encoder.setCullMode(MTLCullMode::None);
+            // SAFETY: the pipeline's vertex function reads 6 vertices.
+            unsafe { pass.encoder.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 6) };
+        }
+
+        fn deinitialize(&self) {
+            self.objects.lock().take();
+            self.calls.deinitializations.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn a_quad_draws_at_its_place_among_the_layers() {
+        check(BackendType::Metal, || {
+            let host = Arc::new(Host::default());
+            (Arc::<Host>::clone(&host), Arc::clone(&host.calls))
+        });
+    }
+}
