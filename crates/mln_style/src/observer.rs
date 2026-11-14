@@ -22,6 +22,9 @@ pub trait Observer: SourceObserver {
     fn on_style_loading(&self) {}
     fn on_style_loaded(&self) {}
     fn on_update(&self) {}
+    /// The style's projection changed: set, edited, or replaced with the
+    /// style it loaded.
+    fn on_projection_changed(&self) {}
     fn on_style_error(&self, _error: StyleLoadError) {}
     fn on_resource_error(&self, _error: Error) {}
 

@@ -934,7 +934,9 @@ impl Impl {
     // ProjectionObserver implementation.
 
     pub(crate) fn on_projection_changed(&mut self) {
-        self.observer().on_update();
+        let observer = self.observer();
+        observer.on_projection_changed();
+        observer.on_update();
     }
 }
 

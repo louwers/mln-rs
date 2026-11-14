@@ -9,6 +9,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use mln_actor::RunLoop;
 use mln_renderer::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_storage::{Kind, Response};
+use mln_style::PropertyValue;
+use mln_style_types::ProjectionDefinition;
+use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -73,6 +77,56 @@ fn a_camera_command_after_a_style_load_wins_over_the_style_camera() {
     assert_eq!(camera.zoom, Some(5.0));
     let center = camera.center.expect("center");
     assert!((center.latitude() - 20.0).abs() < 1e-9 && (center.longitude() - 10.0).abs() < 1e-9, "{center:?}");
+}
+
+/// A style that draws the globe below zoom 3 and Mercator above.
+const GLOBE_BELOW_3: &str = r#"{"version": 8, "sources": {}, "layers": [],
+    "projection": {"type": ["step", ["zoom"], "vertical-perspective", 3, "mercator"]}}"#;
+
+/// The zoom that a jump from zoom 5 to -0.5 at 60° N lands on. A viewport
+/// taller than the world keeps Mercator above zoom 1, which the globe
+/// doesn't, so the jump lands on -0.5 only when the transform has the
+/// projection that the style gives at -0.5.
+fn lowest_jump(map: &mut Map) -> f64 {
+    let center = LatLng::new(60.0, 0.0).expect("LatLng");
+    map.jump_to(&CameraOptions { center: Some(center), zoom: Some(5.0), ..Default::default() });
+    map.jump_to(&CameraOptions { zoom: Some(-0.5), ..Default::default() });
+    map.get_camera_options(None).zoom.expect("zoom")
+}
+
+#[test]
+fn each_change_to_the_style_projection_reaches_the_transform() {
+    let run_loop = RunLoop::new();
+    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    file_source.set_response(Kind::Style, |_| {
+        let mut response = Response::new();
+        response.data = Some(Arc::new(GLOBE_BELOW_3.as_bytes().to_vec()));
+        Some(response)
+    });
+    let options = MapOptions { size: Size::new(512, 1024), ..Default::default() };
+    let mut map = Map::with_file_source(Arc::new(file_source), options).expect("map");
+    assert!(lowest_jump(&mut map) >= 1.0);
+
+    // A style load.
+    map.style_mut().load_url("http://style");
+    map.process_events();
+    run_loop.run_once();
+    map.process_events();
+    assert!(map.style().is_loaded());
+    assert!((lowest_jump(&mut map) + 0.5).abs() < 1e-9);
+    let globe_below_3 = map.style().get_projection().clone();
+
+    // A style's JSON that replaces it.
+    map.style_mut().load_json(STYLE);
+    assert!(lowest_jump(&mut map) >= 1.0);
+
+    // The setter.
+    map.style_mut().set_projection(globe_below_3);
+    assert!((lowest_jump(&mut map) + 0.5).abs() < 1e-9);
+
+    // An edit.
+    map.style_mut().get_projection_mut().set_type(PropertyValue::Constant(ProjectionDefinition::from_name("mercator")));
+    assert!(lowest_jump(&mut map) >= 1.0);
 }
 
 #[test]
