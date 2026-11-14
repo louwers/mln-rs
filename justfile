@@ -92,9 +92,9 @@ desktop *args:
 docs *args:
     if [ $# -eq 0 ]; then mise run docs --open; else mise run docs "$@"; fi
 
-# `mise run fmt`
+# `mise run fix`
 fmt *args:
-    mise run fmt "$@"
+    mise run fix "$@"
 
 # `mise run generate:c-abi`
 generate-c-abi *args:
@@ -136,9 +136,9 @@ test-asan *args:
 test-doc *args:
     mise run docs "$@"
 
-# `mise run fmt --check`
+# Check the formatting (dprint)
 test-fmt *args:
-    mise run fmt --check "$@"
+    mise x -- dprint check "$@"
 
 # `mise run test:msrv`
 test-msrv *args:
