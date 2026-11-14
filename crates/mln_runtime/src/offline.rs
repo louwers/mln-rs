@@ -8,7 +8,6 @@ use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
     OfflineRegionStatus,
 };
-use mln_storage::sqlite3::{Database, OpenFlag};
 use mln_storage_offline::DatabaseFileSourceExt;
 use mln_util::error::Error;
 
@@ -136,15 +135,14 @@ impl<'a> Offline<'a> {
     }
 }
 
-/// Checks that `path` names an existing database file that opens for
-/// reading. SQLite would otherwise take an empty path, `:memory:` or a
+/// Checks that `path` names an existing file that opens for reading. SQLite would otherwise take an empty path, `:memory:` or a
 /// `file:` URI for an in-memory database, and create a missing file.
 fn check_side_database(path: &str) -> Result<(), Error> {
     let unreadable = || Error::invalid_argument("side database path must name an existing readable database file");
     if path.is_empty() || path.starts_with(':') || path.starts_with("file:") || !Path::new(path).is_file() {
         return Err(unreadable());
     }
-    Database::try_open(path, OpenFlag::ReadOnly).map(drop).map_err(|_| unreadable())
+    std::fs::File::open(path).map(drop).map_err(|_| unreadable())
 }
 
 /// Sends an observed region's download events to the runtime's handler, on

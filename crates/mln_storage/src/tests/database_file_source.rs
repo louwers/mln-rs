@@ -15,7 +15,6 @@ use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
-use crate::sqlite3::{Database, OpenFlag, Query, Statement};
 
 fn dbfs() -> Arc<dyn FileSource> {
     FileSourceManager::new()
@@ -199,9 +198,9 @@ fn failed_accessed_flush_waits_for_next_read() {
     OfflineDatabase::new(&path).put(&resource, &response);
 
     let marker = format!("accessed failure {path}");
-    let sql = Database::open(&path, OpenFlag::ReadWriteCreate).unwrap();
-    sql.exec("UPDATE resources SET accessed = 0").unwrap();
-    sql.exec(&format!(
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch("UPDATE resources SET accessed = 0").unwrap();
+    sql.execute_batch(&format!(
         "CREATE TRIGGER fail_accessed BEFORE UPDATE OF accessed ON resources \
          BEGIN SELECT RAISE(ABORT, '{marker}'); END"
     ))
@@ -222,15 +221,11 @@ fn failed_accessed_flush_waits_for_next_read() {
     std::thread::sleep(std::time::Duration::from_millis(800));
     assert_eq!(1, failures.load(Ordering::SeqCst), "failed flush retried while idle");
 
-    sql.exec("DROP TRIGGER fail_accessed").unwrap();
+    sql.execute_batch("DROP TRIGGER fail_accessed").unwrap();
     let cached = cached_request(&run_loop, &source, &resource);
     assert!(cached.error.is_none());
     wait_until("the retried flush", || {
-        let conn = sql.conn();
-        let mut stmt = Statement::new(&conn, "SELECT accessed FROM resources").unwrap();
-        let mut query = Query::new(&mut stmt);
-        assert!(query.run().unwrap());
-        query.get_i64(0).unwrap() > 0
+        sql.query_row("SELECT accessed FROM resources", [], |row| row.get::<_, i64>(0)).unwrap() > 0
     });
     assert_eq!(1, failures.load(Ordering::SeqCst));
 }
