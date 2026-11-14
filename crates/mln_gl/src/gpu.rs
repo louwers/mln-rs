@@ -11,9 +11,9 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
 use mln_gfx::gpu::{
-    BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, PipelineState, ReadbackId, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats,
-    TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexStep,
+    BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, DepthState, Gpu, GpuError, Limits,
+    LoadOp, Pass, PipelineId, PipelineKey, PipelineState, ReadbackId, RenderCommand, SamplerId, ShaderKey, SlotMap,
+    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
@@ -28,7 +28,7 @@ use crate::renderer_backend::PlatformContext;
 use crate::shaders::glsl_sources::PRELUDE;
 use crate::shaders::shader_source::shader_source;
 use crate::state::{Rect, State};
-use crate::types::{BufferID, FramebufferID, Gl, ProgramID, SamplerID, ShaderID, TextureID, VertexArrayID};
+use crate::types::{BufferID, FenceID, FramebufferID, Gl, ProgramID, SamplerID, ShaderID, TextureID, VertexArrayID};
 
 /// `GL_TEXTURE_MAX_ANISOTROPY_EXT` (`EXT_texture_filter_anisotropic`).
 const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
@@ -57,8 +57,19 @@ struct Buffer {
     elements: Option<Elements>,
 }
 
+/// What a texture is to GL.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Object {
+    /// A texture, which goes with the backend's texture if the backend made
+    /// it (`owned`).
+    Texture { name: TextureID, owned: bool },
+    /// An attachment of a framebuffer made elsewhere, `None` for the
+    /// default framebuffer, which passes draw into as it is.
+    Framebuffer(Option<FramebufferID>),
+}
+
 struct Texture {
-    object: TextureID,
+    object: Object,
     size: Size,
     format: TextureFormat,
     usage: TextureUsage,
@@ -88,6 +99,32 @@ pub(crate) struct Program {
     pub(crate) vertex_locations: Vec<(u32, u32)>,
     /// The location of each per-instance attribute, by id.
     instance_locations: Vec<(u32, u32)>,
+}
+
+impl Texture {
+    /// The GL texture, unless it is a framebuffer's attachment.
+    fn name(&self) -> Option<TextureID> {
+        match self.object {
+            Object::Texture { name, .. } => Some(name),
+            Object::Framebuffer(_) => None,
+        }
+    }
+
+    /// The GL texture, if this backend made it.
+    fn owned_name(&self) -> Option<TextureID> {
+        match self.object {
+            Object::Texture { name, owned: true } => Some(name),
+            _ => None,
+        }
+    }
+}
+
+/// The textures of a framebuffer made elsewhere, which
+/// [`GlGpu::import_framebuffer`] takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FramebufferTextures {
+    pub color: Option<TextureId>,
+    pub depth_stencil: Option<TextureId>,
 }
 
 impl Program {
@@ -443,9 +480,99 @@ impl GlGpu {
         result
     }
 
-    /// The GL texture of `texture`.
+    /// The GL texture of `texture`, `None` for a framebuffer's attachment.
     pub(crate) fn native_texture(&self, texture: TextureId) -> Option<TextureID> {
-        self.textures.get(texture).map(|texture| texture.object)
+        self.textures.get(texture)?.name()
+    }
+
+    /// Takes a `GL_TEXTURE_2D` texture made elsewhere, such as a host's in
+    /// the context's share group, of `desc`'s size, format and usage, as a
+    /// texture of this backend. Destroying it forgets it; the texture stays
+    /// the caller's.
+    pub fn import_texture(&mut self, texture: TextureID, desc: &TextureDesc<'_>) -> TextureId {
+        self.textures.insert(Texture {
+            object: Object::Texture { name: texture, owned: false },
+            size: desc.size,
+            format: desc.format,
+            usage: desc.usage,
+        })
+    }
+
+    /// Takes a framebuffer made elsewhere, of `size` pixels, such as a
+    /// window surface's default framebuffer (`None`) or a host's, as
+    /// textures of this backend: its color attachment of the format
+    /// `color`, which readbacks read, and its depth and stencil attachment
+    /// of the format `depth_stencil`. A pass draws into them together, or
+    /// into one of them alone. Destroying them forgets them; the framebuffer
+    /// stays the caller's.
+    pub fn import_framebuffer(
+        &mut self,
+        framebuffer: Option<FramebufferID>,
+        size: Size,
+        color: Option<TextureFormat>,
+        depth_stencil: Option<TextureFormat>,
+    ) -> FramebufferTextures {
+        let mut attachment = |format, copy_src| {
+            self.textures.insert(Texture {
+                object: Object::Framebuffer(framebuffer),
+                size,
+                format,
+                usage: TextureUsage { render_target: true, copy_src, ..TextureUsage::default() },
+            })
+        };
+        FramebufferTextures {
+            color: color.map(|format| attachment(format, true)),
+            depth_stencil: depth_stencil.map(|format| attachment(format, false)),
+        }
+    }
+
+    /// An import of the GL texture of `texture`, which this backend made.
+    #[cfg(test)]
+    pub(crate) fn import_again(&mut self, texture: TextureId) -> Option<TextureId> {
+        let entry = self.textures.get(texture)?;
+        let desc = TextureDesc { label: "imported", size: entry.size, format: entry.format, usage: entry.usage };
+        Some(self.import_texture(entry.name()?, &desc))
+    }
+
+    /// Runs `f` with the context current, and forgets the GL state after.
+    #[cfg(test)]
+    pub(crate) fn with_gl<T>(&mut self, f: impl FnOnce(&Gl) -> T) -> T {
+        self.current(|gpu| {
+            let result = f(&gpu.gl);
+            gpu.state.set_dirty();
+            result
+        })
+    }
+
+    /// Has the commands that follow wait, on the GPU, for `fence`, a
+    /// `GLsync` in the context's share group such as a host's, which it
+    /// then deletes.
+    pub fn wait_sync(&mut self, fence: FenceID) {
+        // SAFETY: the caller's fence, in the share group, which the call
+        // takes.
+        self.current(|gpu| unsafe {
+            gpu.gl.wait_sync(fence, 0, glow::TIMEOUT_IGNORED);
+            gpu.gl.delete_sync(fence);
+        });
+    }
+
+    /// A `GLsync` that signals once the commands so far finish, flushed so
+    /// that a wait for it in another context of the share group ends. The
+    /// caller deletes it with [`delete_sync`](Self::delete_sync).
+    pub fn fence_sync(&mut self) -> Result<FenceID, GpuError> {
+        // SAFETY: the context is current; the flush sends the fence to the
+        // GPU.
+        self.current(|gpu| unsafe {
+            let fence = gpu.gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0).map_err(GpuError::Invalid)?;
+            gpu.gl.flush();
+            Ok(fence)
+        })
+    }
+
+    /// Deletes `fence`, which [`fence_sync`](Self::fence_sync) made.
+    pub fn delete_sync(&mut self, fence: FenceID) {
+        // SAFETY: the fence is alive, and the call takes it.
+        self.current(|gpu| unsafe { gpu.gl.delete_sync(fence) });
     }
 
     /// Deletes this backend's objects, leaving it with none. The context
@@ -465,8 +592,12 @@ impl GlGpu {
                 }
             }
             for texture in self.textures.drain().map(|(_, texture)| texture) {
-                self.state.forget_texture(texture.object);
-                gl.delete_texture(texture.object);
+                if let Some(name) = texture.name() {
+                    self.state.forget_texture(name);
+                }
+                if let Some(name) = texture.owned_name() {
+                    gl.delete_texture(name);
+                }
             }
             for sampler in self.samplers.drain().map(|(_, sampler)| sampler) {
                 self.state.forget_sampler(sampler);
@@ -794,23 +925,39 @@ impl GlGpu {
         self.pipelines.get(id).ok_or(GpuError::UnknownId("pipeline"))
     }
 
-    /// The framebuffer of `pass`'s attachments, made on first use.
-    fn framebuffer(&mut self, pass: &Pass) -> Result<FramebufferID, GpuError> {
+    /// The framebuffer of `pass`'s attachments, made on first use: `None`
+    /// for the default framebuffer.
+    fn framebuffer(&mut self, pass: &Pass) -> Result<Option<FramebufferID>, GpuError> {
         let color = pass.color.map(|attachment| attachment.texture);
         let depth_stencil = pass.depth_stencil.map(|attachment| attachment.texture);
         self.framebuffer_of(color, depth_stencil, &pass.label)
     }
 
     /// The framebuffer of `color` and `depth_stencil`, made on first use,
-    /// for what `label` names.
+    /// for what `label` names, or the imported framebuffer they are of.
     fn framebuffer_of(
         &mut self,
         color: Option<TextureId>,
         depth_stencil: Option<TextureId>,
         label: &str,
-    ) -> Result<FramebufferID, GpuError> {
+    ) -> Result<Option<FramebufferID>, GpuError> {
+        let imported = |id: Option<TextureId>| match id.and_then(|id| self.textures.get(id))?.object {
+            Object::Framebuffer(framebuffer) => Some(framebuffer),
+            Object::Texture { .. } => None,
+        };
+        match (imported(color), imported(depth_stencil)) {
+            (None, None) => {}
+            (Some(framebuffer), None) if depth_stencil.is_none() => return Ok(framebuffer),
+            (None, Some(framebuffer)) if color.is_none() => return Ok(framebuffer),
+            (Some(color), Some(depth_stencil)) if color == depth_stencil => return Ok(color),
+            _ => {
+                return Err(GpuError::Invalid(format!(
+                    "{label}: an attachment of an imported framebuffer with another framebuffer's"
+                )));
+            }
+        }
         if let Some(&framebuffer) = self.framebuffers.get(&(color, depth_stencil)) {
-            return Ok(framebuffer);
+            return Ok(Some(framebuffer));
         }
         let gl = &self.gl;
         // SAFETY: the framebuffer is new, the textures are alive, and the
@@ -818,14 +965,8 @@ impl GlGpu {
         let framebuffer = unsafe {
             let framebuffer = gl.create_framebuffer().map_err(GpuError::Invalid)?;
             self.state.bind_framebuffer(gl, Some(framebuffer));
-            if let Some(texture) = color.and_then(|id| self.textures.get(id)) {
-                gl.framebuffer_texture_2d(
-                    glow::FRAMEBUFFER,
-                    glow::COLOR_ATTACHMENT0,
-                    glow::TEXTURE_2D,
-                    Some(texture.object),
-                    0,
-                );
+            if let Some(name) = color.and_then(|id| self.textures.get(id)).and_then(Texture::name) {
+                gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(name), 0);
             } else {
                 // Desktop OpenGL 3.3 finds a framebuffer incomplete where a
                 // draw or read buffer has no attachment.
@@ -835,7 +976,7 @@ impl GlGpu {
             if let Some(texture) = depth_stencil.and_then(|id| self.textures.get(id)) {
                 let attachment =
                     if texture.format.has_stencil() { glow::DEPTH_STENCIL_ATTACHMENT } else { glow::DEPTH_ATTACHMENT };
-                gl.framebuffer_texture_2d(glow::FRAMEBUFFER, attachment, glow::TEXTURE_2D, Some(texture.object), 0);
+                gl.framebuffer_texture_2d(glow::FRAMEBUFFER, attachment, glow::TEXTURE_2D, texture.name(), 0);
             }
             let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
             if status != glow::FRAMEBUFFER_COMPLETE {
@@ -846,7 +987,7 @@ impl GlGpu {
             framebuffer
         };
         self.framebuffers.insert((color, depth_stencil), framebuffer);
-        Ok(framebuffer)
+        Ok(Some(framebuffer))
     }
 
     /// Deletes the framebuffers that draw into `texture`.
@@ -913,7 +1054,7 @@ impl GlGpu {
         let size = self.pass_size(pass)?;
         let framebuffer = self.framebuffer(pass)?;
         let gl = &self.gl;
-        self.state.bind_framebuffer(gl, Some(framebuffer));
+        self.state.bind_framebuffer(gl, framebuffer);
         let clear_color = pass.color.and_then(|attachment| match attachment.load {
             LoadOp::Clear(color) => Some(color),
             LoadOp::Load => None,
@@ -931,7 +1072,8 @@ impl GlGpu {
             (depth, stencil)
         });
         self.state.clear(gl, clear_color, clear_depth, clear_stencil);
-        self.encode_commands(&pass.label, size, &pass.commands)
+        let attachments = (pass.color.is_some(), pass.depth_stencil.is_some());
+        self.encode_commands(&pass.label, size, attachments, &pass.commands)
     }
 
     /// Records `commands` into the bound framebuffer, of `size` and with
@@ -948,12 +1090,20 @@ impl GlGpu {
     ) -> Result<(), GpuError> {
         validation::check_commands(self, "render pass", targets, commands)?;
         self.check_gl("render pass", commands)?;
-        self.current(|gpu| gpu.encode_commands("render pass", size, commands))
+        let attachments = (targets.color.is_some(), targets.depth_stencil.is_some());
+        self.current(|gpu| gpu.encode_commands("render pass", size, attachments, commands))
     }
 
     /// Records `commands`, which the checks passed, into the bound
-    /// framebuffer of `size`.
-    fn encode_commands(&mut self, label: &str, size: Size, commands: &[RenderCommand]) -> Result<(), GpuError> {
+    /// framebuffer of `size`, of whose color and depth-stencil attachments
+    /// the pass names those that `attachments` says.
+    fn encode_commands(
+        &mut self,
+        label: &str,
+        size: Size,
+        attachments: (bool, bool),
+        commands: &[RenderCommand],
+    ) -> Result<(), GpuError> {
         let gl = &self.gl;
         let height = size.height as i32;
         // A rectangle counted from the top, from the bottom as GL counts it.
@@ -990,40 +1140,55 @@ impl GlGpu {
             if state.set(command) {
                 continue;
             }
-            self.draw(label, &mut state, command)?;
+            self.draw(label, attachments, &mut state, command)?;
         }
         Ok(())
     }
 
     /// Sets the pipeline state, bindings and vertex attributes of a draw
-    /// and draws.
-    fn draw(&mut self, label: &str, state: &mut PassState, command: &RenderCommand) -> Result<(), GpuError> {
+    /// and draws, leaving alone the attachments, of `(color,
+    /// depth_stencil)`, that the pass doesn't name.
+    fn draw(
+        &mut self,
+        label: &str,
+        (color, depth_stencil): (bool, bool),
+        state: &mut PassState,
+        command: &RenderCommand,
+    ) -> Result<(), GpuError> {
         let pipeline = self.draw_pipeline(label, state.pipeline)?;
         let program = Rc::clone(&pipeline.program);
         let fixed = &pipeline.state;
         let gl = &self.gl;
+        // An imported framebuffer keeps the attachment that a pass leaves
+        // out bound, which the draw leaves alone.
+        let (depth, stencil) = if depth_stencil {
+            (fixed.depth, fixed.stencil)
+        } else {
+            (DepthState::from(&DepthMode::disabled()), StencilState::from(&StencilMode::disabled()))
+        };
+        let color_mask = if color { fixed.color_mask } else { ColorMode::disabled().mask };
         self.state.set_depth_mode(
             gl,
             &DepthMode {
-                func: fixed.depth.compare,
-                mask: if fixed.depth.write { DepthMaskType::ReadWrite } else { DepthMaskType::ReadOnly },
+                func: depth.compare,
+                mask: if depth.write { DepthMaskType::ReadWrite } else { DepthMaskType::ReadOnly },
                 range: state.depth_range,
             },
         );
         self.state.set_stencil_mode(
             gl,
             &StencilMode {
-                test: fixed.stencil.test,
+                test: stencil.test,
                 ref_: state.stencil_reference as i32,
-                mask: fixed.stencil.write_mask,
-                fail: fixed.stencil.fail,
-                depth_fail: fixed.stencil.depth_fail,
-                pass: fixed.stencil.pass,
+                mask: stencil.write_mask,
+                fail: stencil.fail,
+                depth_fail: stencil.depth_fail,
+                pass: stencil.pass,
             },
         );
         self.state.set_color_mode(
             gl,
-            &ColorMode { blend_function: fixed.blend, blend_color: state.blend_constant, mask: fixed.color_mask },
+            &ColorMode { blend_function: fixed.blend, blend_color: state.blend_constant, mask: color_mask },
         );
         self.state.set_cull_face_mode(gl, fixed.cull);
         let line_width = state.line_width.clamp(*self.line_widths.start(), *self.line_widths.end());
@@ -1053,7 +1218,7 @@ impl GlGpu {
                 self.state.bind_uniform_buffer_range(&self.gl, block.id, object, offset as i32, size as i32);
             }
             for binding in textures {
-                let texture = self.textures.get(binding.texture).map(|texture| texture.object);
+                let texture = self.textures.get(binding.texture).and_then(Texture::name);
                 self.state.bind_texture(&self.gl, binding.unit, texture);
                 self.state.bind_sampler(&self.gl, binding.unit, self.samplers.get(binding.sampler).copied());
             }
@@ -1302,7 +1467,12 @@ impl Gpu for GlGpu {
                 Ok::<_, GpuError>(object)
             }
         })?;
-        Ok(self.textures.insert(Texture { object, size: desc.size, format: desc.format, usage: desc.usage }))
+        Ok(self.textures.insert(Texture {
+            object: Object::Texture { name: object, owned: true },
+            size: desc.size,
+            format: desc.format,
+            usage: desc.usage,
+        }))
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
@@ -1311,7 +1481,8 @@ impl Gpu for GlGpu {
             return Err(GpuError::Invalid("a write to a texture that isn't sampled".to_owned()));
         }
         region.write_bytes_per_row(entry.size, entry.format, data)?;
-        let (object, format) = (entry.object, entry.format);
+        let object = entry.name().ok_or_else(|| GpuError::Invalid("a write to a framebuffer".to_owned()))?;
+        let format = entry.format;
         let (_, gl_format, type_) = texture_format(format, self.desktop).ok_or(GpuError::UnknownId("texture"))?;
         self.current(|gpu| {
             let gl = &gpu.gl;
@@ -1340,9 +1511,14 @@ impl Gpu for GlGpu {
         if let Some(entry) = self.textures.remove(texture) {
             self.current(|gpu| {
                 gpu.forget_framebuffers(texture);
-                gpu.state.forget_texture(entry.object);
-                // SAFETY: the texture is alive, and only this backend has it.
-                unsafe { gpu.gl.delete_texture(entry.object) };
+                if let Some(name) = entry.name() {
+                    gpu.state.forget_texture(name);
+                }
+                if let Some(name) = entry.owned_name() {
+                    // SAFETY: the texture is alive, and only this backend
+                    // has it.
+                    unsafe { gpu.gl.delete_texture(name) };
+                }
             });
         }
     }
@@ -1449,7 +1625,7 @@ impl Gpu for GlGpu {
         };
         let rgba = self.current(|gpu| {
             let framebuffer = gpu.framebuffer_of(Some(texture), None, "readback")?;
-            gpu.state.bind_framebuffer(&gpu.gl, Some(framebuffer));
+            gpu.state.bind_framebuffer(&gpu.gl, framebuffer);
             Ok::<_, GpuError>(read_pixels(&gpu.gl, &gpu.state, height, region))
         })?;
         let texels = if red { rgba.as_chunks::<4>().0.iter().map(|&[red, ..]| red).collect() } else { rgba };
@@ -1488,7 +1664,7 @@ impl Gpu for GlGpu {
             let gl = &gpu.gl;
             gpu.state.set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
             gpu.state.set_scissor(gl, None);
-            let mut lent = CustomLayerPass { gl: Arc::clone(gl), framebuffer: Some(framebuffer), size };
+            let mut lent = CustomLayerPass { gl: Arc::clone(gl), framebuffer, size };
             lend_context(gl, &gpu.state, || f(&mut lent));
             Ok(())
         })

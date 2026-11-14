@@ -52,7 +52,7 @@ pub use context::Context;
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::{AdapterId, Device, HostDevice, QueueLease, QueueLock, RawDevice};
 pub use exported_target::ExportedTarget;
-pub use gpu::VulkanGpu;
+pub use gpu::{ImportedImage, VulkanGpu};
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
 pub use shaders::compiler::{Stage as ShaderStage, compile as compile_glsl};

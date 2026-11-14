@@ -5,11 +5,11 @@
 //! it. The mask covers the left half, so the background colors only that
 //! half. [`invalid_calls`] checks the calls that every backend rejects, and
 //! [`foreign_ids`] that a backend takes no other backend's ids,
-//! [`readbacks`] what a readback copies, and [`custom_layers`] what a
-//! custom layer is lent. [`instanced_walls`] draws fill extrusion walls
-//! over the left half. The other cases draw one color over the whole
-//! target, as [`transparent_replace`] does to check that `Replace` doesn't
-//! blend.
+//! [`readbacks`] what a readback copies, [`custom_layers`] what a custom
+//! layer is lent, and [`imported_textures`] textures made elsewhere.
+//! [`instanced_walls`] draws fill extrusion walls over the left half. The
+//! other cases draw one color over the whole target, as
+//! [`transparent_replace`] does to check that `Replace` doesn't blend.
 
 mod cases;
 
@@ -18,10 +18,10 @@ use mln_util::size::Size;
 
 pub use self::cases::*;
 use super::{
-    BindGroupDesc, BindGroupEntry, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
+    BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Gpu, GpuError, LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey,
-    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureUsage, VertexAttribute, VertexBufferLayout,
-    VertexStep,
+    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute,
+    VertexBufferLayout, VertexStep,
 };
 use crate::color_mode::ColorMode;
 use crate::cull_face_mode::CullFaceMode;
@@ -68,9 +68,9 @@ fn position_layout(id: usize) -> VertexBufferLayout {
 }
 
 /// Draws the frame through `gpu` into an [`Rgba8Unorm`](TextureFormat)
-/// texture of [`SIZE`], and checks the texels it reads back. Then checks that a draw missing its
-/// shader's buffers and a pass naming a destroyed buffer fail. Returns the
-/// error of a call that should succeed.
+/// texture of [`SIZE`], and checks the texels it reads back. Then checks
+/// that a draw missing its shader's buffers and a pass naming a destroyed
+/// buffer fail. Returns the error of a call that should succeed.
 ///
 /// # Panics
 ///
@@ -88,6 +88,34 @@ pub fn clip_mask_and_background(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         format: TextureFormat::Depth24PlusStencil8,
         usage: TextureUsage { render_target: true, ..TextureUsage::default() },
     })?;
+    let ClippedFrame { pass, layer_group, quad } = clipped_frame(gpu, color, depth_stencil)?;
+    gpu.submit(std::slice::from_ref(&pass))?;
+    check_clipped(&read(gpu, color)?);
+
+    let mut unbound = pass.clone();
+    unbound
+        .commands
+        .retain(|command| !matches!(command, RenderCommand::SetBindGroup { group, .. } if *group == layer_group));
+    assert!(matches!(gpu.submit(&[unbound]), Err(GpuError::Invalid(_))));
+    gpu.destroy_buffer(quad);
+    assert!(matches!(gpu.submit(&[pass]), Err(GpuError::UnknownId("buffer"))));
+    assert!(matches!(gpu.write_buffer(quad, 0, &[0; 4]), Err(GpuError::UnknownId("buffer"))));
+    Ok(())
+}
+
+/// The pass of [`clip_mask_and_background`]'s frame, and what it binds.
+struct ClippedFrame {
+    /// Draws the mask into the stencil, then the background where the
+    /// stencil is 1.
+    pass: Pass,
+    layer_group: BindGroupId,
+    quad: BufferId,
+}
+
+/// The frame of [`clip_mask_and_background`], into an
+/// [`Rgba8Unorm`](TextureFormat) `color` texture and a
+/// [`Depth24PlusStencil8`](TextureFormat) `depth_stencil` one, of [`SIZE`].
+fn clipped_frame(gpu: &mut impl Gpu, color: TextureId, depth_stencil: TextureId) -> Result<ClippedFrame, GpuError> {
     let targets = TargetFormats {
         color: Some(TextureFormat::Rgba8Unorm),
         depth_stencil: Some(TextureFormat::Depth24PlusStencil8),
@@ -190,24 +218,74 @@ pub fn clip_mask_and_background(gpu: &mut impl Gpu) -> Result<(), GpuError> {
             draw_quad.clone(),
         ],
     };
-    gpu.submit(std::slice::from_ref(&pass))?;
+    Ok(ClippedFrame { pass, layer_group, quad })
+}
 
-    let pixels = read(gpu, color)?;
-    let pixel = |x, y| texel(&pixels, x, y);
+/// Checks the texels of [`clip_mask_and_background`]'s frame: the
+/// background over the left half, which the mask covers, and the clear
+/// color over the right.
+fn check_clipped(pixels: &[u8]) {
+    let pixel = |x, y| texel(pixels, x, y);
     for y in [0, SIZE.height / 2, SIZE.height - 1] {
         assert_eq!(pixel(0, y), [255, 0, 0, 255], "the mask's half has the background");
         assert_eq!(pixel(SIZE.width / 2 - 1, y), [255, 0, 0, 255]);
         assert_eq!(pixel(SIZE.width / 2, y), [0, 0, 0, 255], "the other half keeps the clear color");
         assert_eq!(pixel(SIZE.width - 1, y), [0, 0, 0, 255]);
     }
+}
 
-    let mut unbound = pass.clone();
-    unbound
-        .commands
-        .retain(|command| !matches!(command, RenderCommand::SetBindGroup { group, .. } if *group == layer_group));
-    assert!(matches!(gpu.submit(&[unbound]), Err(GpuError::Invalid(_))));
-    gpu.destroy_buffer(quad);
-    assert!(matches!(gpu.submit(&[pass]), Err(GpuError::UnknownId("buffer"))));
-    assert!(matches!(gpu.write_buffer(quad, 0, &[0; 4]), Err(GpuError::UnknownId("buffer"))));
+/// Checks textures that `gpu` imports, as a backend takes a surface's or a
+/// host's: `import` makes a texture of `gpu` of the native texture of a
+/// texture that `gpu` made, and its format, size and usage. The frame of
+/// [`clip_mask_and_background`] draws into an imported color texture and
+/// depth-stencil texture alike. Destroying an imported texture leaves its
+/// native texture, whose color an import of it again reads back, and whose
+/// stencil a pass that loads it tests against. Returns the error of a call
+/// that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn imported_textures<G: Gpu>(
+    gpu: &mut G,
+    mut import: impl FnMut(&mut G, TextureId) -> Result<TextureId, GpuError>,
+) -> Result<(), GpuError> {
+    let color = gpu.create_texture(&TextureDesc {
+        label: "native color",
+        size: SIZE,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+    })?;
+    let depth_stencil = gpu.create_texture(&TextureDesc {
+        label: "native depth-stencil",
+        size: SIZE,
+        format: TextureFormat::Depth24PlusStencil8,
+        usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+    })?;
+    let (imported_color, imported_depth_stencil) = (import(gpu, color)?, import(gpu, depth_stencil)?);
+    let frame = clipped_frame(gpu, imported_color, imported_depth_stencil)?;
+    gpu.submit(std::slice::from_ref(&frame.pass))?;
+    check_clipped(&read(gpu, imported_color)?);
+    gpu.destroy_texture(imported_color);
+    gpu.destroy_texture(imported_depth_stencil);
+    gpu.finish()?;
+    assert!(matches!(gpu.submit(std::slice::from_ref(&frame.pass)), Err(GpuError::UnknownId("texture"))));
+
+    let (color, depth_stencil) = (import(gpu, color)?, import(gpu, depth_stencil)?);
+    check_clipped(&read(gpu, color)?);
+    // The background over a cleared color, where the loaded stencil is 1:
+    // the frame's pass without its mask's draw.
+    let mut reloaded = frame.pass;
+    reloaded.color =
+        Some(ColorAttachment { texture: color, load: LoadOp::Clear(Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }) });
+    reloaded.depth_stencil =
+        Some(DepthStencilAttachment { texture: depth_stencil, depth: LoadOp::Load, stencil: LoadOp::Load });
+    let mask = reloaded.commands.iter().position(|command| matches!(command, RenderCommand::SetPipeline(_)));
+    let mask = mask.ok_or_else(|| GpuError::Invalid("the frame sets no pipeline".to_owned()))?;
+    reloaded.commands.drain(mask..mask + 2);
+    let draw = reloaded.commands.iter().position(|command| matches!(command, RenderCommand::DrawIndexed { .. }));
+    reloaded.commands.remove(draw.ok_or_else(|| GpuError::Invalid("the frame draws nothing".to_owned()))?);
+    gpu.submit(&[reloaded])?;
+    check_clipped(&read(gpu, color)?);
     Ok(())
 }

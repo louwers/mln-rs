@@ -79,7 +79,7 @@ pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::{Api, Device, DeviceOptions};
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use exported_target::ExportedTarget;
-pub use gpu::GlGpu;
+pub use gpu::{FramebufferTextures, GlGpu};
 #[cfg(not(target_arch = "wasm32"))]
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;

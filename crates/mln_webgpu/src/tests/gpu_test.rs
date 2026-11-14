@@ -1,6 +1,6 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks,
-    topologies, transparent_replace, vertex_layouts,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
+    invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
 };
 
 use crate::{CustomLayerEncoder, CustomLayerPass, Device, WebGpu};
@@ -71,5 +71,16 @@ fn custom_layers_through_gpu() {
             assert_eq!(lent.color_format, wgpu::TextureFormat::Rgba8Unorm);
         },
     )
+    .expect("the frames");
+}
+
+#[test]
+fn imported_textures_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    imported_textures(&mut WebGpu::new(&device), |gpu, texture| {
+        let (native, _) = gpu.native_texture(texture).expect("a texture of the backend's");
+        let native = native.clone();
+        Ok(gpu.import_texture(&native))
+    })
     .expect("the frames");
 }

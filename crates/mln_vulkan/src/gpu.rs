@@ -48,8 +48,43 @@ struct Buffer {
     usage: BufferUsage,
 }
 
+/// A texture's image: one this backend made, or one it imported, which
+/// stays the caller's.
+enum Image {
+    Owned(ImageAllocation),
+    Imported {
+        image: vk::Image,
+        view: vk::ImageView,
+        /// A `buffer_resource::unique_id`, as an allocation has.
+        id: u64,
+    },
+}
+
+impl Image {
+    fn image(&self) -> vk::Image {
+        match self {
+            Image::Owned(allocation) => allocation.image(),
+            Image::Imported { image, .. } => *image,
+        }
+    }
+
+    fn image_view(&self) -> vk::ImageView {
+        match self {
+            Image::Owned(allocation) => allocation.image_view(),
+            Image::Imported { view, .. } => *view,
+        }
+    }
+
+    fn id(&self) -> u64 {
+        match self {
+            Image::Owned(allocation) => allocation.id(),
+            Image::Imported { id, .. } => *id,
+        }
+    }
+}
+
 struct Texture {
-    image: ImageAllocation,
+    image: Image,
     format: TextureFormat,
     vk_format: vk::Format,
     size: Size,
@@ -57,6 +92,36 @@ struct Texture {
     aspect: vk::ImageAspectFlags,
     /// The layout the image is in between commands.
     layout: vk::ImageLayout,
+    /// The queue family that each submit that draws into the image releases
+    /// it to.
+    release_to: Option<u32>,
+    /// Whether it is in `release_to`'s hands.
+    released: bool,
+}
+
+/// An image made elsewhere, such as a swapchain's or a host's, for
+/// [`VulkanGpu::import_image`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportedImage {
+    pub image: vk::Image,
+    /// A 2D view of its one mip level and layer, of each of its aspects.
+    pub view: vk::ImageView,
+    pub format: vk::Format,
+    pub size: Size,
+    /// What its `VkImageUsageFlags` allow: `sampled` with `SAMPLED`,
+    /// `render_target` with a color or depth-stencil attachment's,
+    /// `copy_src` with `TRANSFER_SRC`.
+    pub usage: TextureUsage,
+    /// The layout it is in when imported, which commands that use it leave
+    /// it in again. A pass that clears it reads nothing of it, so its first
+    /// pass may also find it `UNDEFINED`, such as a swapchain image's.
+    pub layout: vk::ImageLayout,
+    /// The queue family that holds it, such as `VK_QUEUE_FAMILY_EXTERNAL`,
+    /// and that each submit that draws into it releases it to again; `None`
+    /// for one that stays with the device's queue. A pass or readback that
+    /// reads it acquires it first; one that clears it doesn't need to. Such
+    /// an image isn't sampled.
+    pub release_to: Option<u32>,
 }
 
 /// What a shader binding reads, by the shaders' ids.
@@ -172,10 +237,12 @@ enum Garbage {
 
 /// A [`Gpu`] on a Vulkan [`Device`].
 ///
-/// Each submit is one batch on the device's queue. Writes and new textures
-/// record their commands into a command buffer that runs before the next
-/// submit's passes. A destroyed resource goes once the submits that may use
-/// it have finished, which the next submit checks for.
+/// Each submit is one batch on the device's queue, made holding the host's
+/// lock on it where the host submits to it too
+/// ([`Device::with_queue_lock`]). Writes and new textures record their
+/// commands into a command buffer that runs before the next submit's
+/// passes. A destroyed resource goes once the submits that may use it have
+/// finished, which the next submit checks for.
 ///
 /// A draw binds a descriptor set for each set of the shared pipeline
 /// layout that its shader uses (`shaders::layout`), made at the first draw
@@ -217,6 +284,14 @@ pub struct VulkanGpu {
     /// What to destroy once the submit of each serial has finished.
     garbage: Vec<(u64, Garbage)>,
     readbacks: SlotMap<ReadbackId, Readback>,
+    /// The semaphores that the next submit waits for, with the value a
+    /// timeline reaches (0 for a binary semaphore) and the stages that wait.
+    waits: Vec<(vk::Semaphore, u64, vk::PipelineStageFlags)>,
+    /// The semaphores that the next submit signals, with a timeline's
+    /// value.
+    signals: Vec<(vk::Semaphore, u64)>,
+    /// Whether a wait or signal of the next submit is of a timeline.
+    timeline: bool,
 }
 
 fn vk_error(what: &str) -> impl FnOnce(vk::Result) -> GpuError + '_ {
@@ -423,6 +498,9 @@ impl VulkanGpu {
             free_fences: Vec::new(),
             garbage: Vec::new(),
             readbacks: SlotMap::with_key(),
+            waits: Vec::new(),
+            signals: Vec::new(),
+            timeline: false,
         };
         for type_ in DescriptorSetType::ALL {
             gpu.set_layouts[type_ as usize] =
@@ -456,6 +534,169 @@ impl VulkanGpu {
     /// sampled texture is in `SHADER_READ_ONLY_OPTIMAL`.
     pub(crate) fn native_texture(&self, texture: TextureId) -> Option<(vk::ImageView, vk::Format, u64)> {
         self.textures.get(texture).map(|entry| (entry.image.image_view(), entry.vk_format, entry.image.id()))
+    }
+
+    /// Takes an image made elsewhere, such as a swapchain's or a host's, as
+    /// a texture of this backend. Its format is one that a
+    /// [`TextureFormat`] names, as this backend makes it. Destroying the
+    /// texture forgets the image, which stays the caller's: the caller keeps
+    /// it alive until the submits that use it have finished
+    /// ([`Gpu::finish`], or a semaphore of
+    /// [`signal_after_next_submit`](Self::signal_after_next_submit)).
+    ///
+    /// Fails with [`GpuError::Unsupported`] for a format that no
+    /// [`TextureFormat`] names, and with [`GpuError::Invalid`] for a sampled
+    /// image of another queue family.
+    pub fn import_image(&mut self, imported: &ImportedImage) -> Result<TextureId, GpuError> {
+        if imported.usage.sampled && imported.release_to.is_some() {
+            return Err(GpuError::Invalid("a sampled image of another queue family".to_owned()));
+        }
+        let format = self
+            .texture_format(imported.format)
+            .ok_or_else(|| GpuError::Unsupported(format!("importing an image of {:?}", imported.format)))?;
+        Ok(self.textures.insert(Texture {
+            image: Image::Imported {
+                image: imported.image,
+                view: imported.view,
+                id: crate::buffer_resource::unique_id(),
+            },
+            format,
+            vk_format: imported.format,
+            size: imported.size,
+            usage: imported.usage,
+            aspect: aspect(format),
+            layout: imported.layout,
+            release_to: imported.release_to,
+            released: imported.release_to.is_some(),
+        }))
+    }
+
+    /// `texture`, as an import of its image would describe it.
+    #[cfg(test)]
+    pub(crate) fn as_imported(&self, texture: TextureId) -> Option<ImportedImage> {
+        let texture = self.textures.get(texture)?;
+        Some(ImportedImage {
+            image: texture.image.image(),
+            view: texture.image.image_view(),
+            format: texture.vk_format,
+            size: texture.size,
+            usage: texture.usage,
+            layout: texture.layout,
+            release_to: texture.release_to,
+        })
+    }
+
+    /// Has the next submit, or the next lend to a custom layer, wait for
+    /// `semaphore` before the commands of `stages` run: a timeline until it
+    /// reaches `value`, or a binary semaphore, whose `value` is `None`, until
+    /// it is signaled. A submit without passes waits too, and so delays
+    /// those after it.
+    pub fn wait_before_next_submit(
+        &mut self,
+        semaphore: vk::Semaphore,
+        value: Option<u64>,
+        stages: vk::PipelineStageFlags,
+    ) {
+        self.timeline |= value.is_some();
+        self.waits.push((semaphore, value.unwrap_or(0), stages));
+    }
+
+    /// Has the next submit, or the next lend to a custom layer, signal
+    /// `semaphore` once its commands and those submitted before it finish:
+    /// a timeline with `value`, or a binary semaphore, whose `value` is
+    /// `None`. A submit without passes signals it too.
+    pub fn signal_after_next_submit(&mut self, semaphore: vk::Semaphore, value: Option<u64>) {
+        self.timeline |= value.is_some();
+        self.signals.push((semaphore, value.unwrap_or(0)));
+    }
+
+    /// Acquires the attachments of `pass` that it loads back from the
+    /// queue family that a submit released them to.
+    fn acquire_attachments(&mut self, command_buffer: vk::CommandBuffer, pass: &Pass) {
+        let loads = [
+            pass.color.map(|attachment| (attachment.texture, attachment.load == LoadOp::Load)),
+            pass.depth_stencil.map(|attachment| {
+                (attachment.texture, attachment.depth == LoadOp::Load || attachment.stencil == LoadOp::Load)
+            }),
+        ];
+        self.acquire(command_buffer, loads.into_iter().flatten());
+    }
+
+    /// Acquires each texture of `uses` whose contents are read, the `bool`,
+    /// back from the queue family that a submit released it to. A use that
+    /// reads nothing of it needs it in no queue family's hands.
+    fn acquire(&mut self, command_buffer: vk::CommandBuffer, uses: impl IntoIterator<Item = (TextureId, bool)>) {
+        let queue = self.backend.get_graphics_queue_index();
+        let mut barriers = Vec::new();
+        for (id, load) in uses {
+            let Some(texture) = self.textures.get_mut(id) else { continue };
+            let (Some(from), true) = (texture.release_to.filter(|_| texture.released), load) else {
+                texture.released = false;
+                continue;
+            };
+            texture.released = false;
+            let access = if has_depth(texture.format) {
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+            } else {
+                vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+            };
+            barriers.push(ownership_barrier(texture, (from, queue), (vk::AccessFlags::empty(), access)));
+        }
+        if barriers.is_empty() {
+            return;
+        }
+        // SAFETY: the command buffer is recording outside a render pass, and
+        // the images are in their resting layouts.
+        unsafe {
+            self.device().cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                    | vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &barriers,
+            );
+        }
+    }
+
+    /// Releases the attachments of `passes` that go to another queue family
+    /// after the passes that drew into them.
+    fn release(&mut self, command_buffer: vk::CommandBuffer, passes: &[&Pass]) {
+        let queue = self.backend.get_graphics_queue_index();
+        let attachments = passes.iter().flat_map(|pass| {
+            [pass.color.map(|attachment| attachment.texture), pass.depth_stencil.map(|attachment| attachment.texture)]
+        });
+        let mut barriers = Vec::new();
+        for id in attachments.flatten() {
+            let Some(texture) = self.textures.get_mut(id) else { continue };
+            let Some(to) = texture.release_to.filter(|_| !texture.released) else { continue };
+            texture.released = true;
+            let access = if has_depth(texture.format) {
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+            } else {
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+            };
+            barriers.push(ownership_barrier(texture, (queue, to), (access, vk::AccessFlags::empty())));
+        }
+        if barriers.is_empty() {
+            return;
+        }
+        // SAFETY: the command buffer is recording outside a render pass, and
+        // the images are in their resting layouts.
+        unsafe {
+            self.device().cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &barriers,
+            );
+        }
     }
 
     fn vk_format(&self, format: TextureFormat) -> vk::Format {
@@ -1068,6 +1309,7 @@ impl VulkanGpu {
     /// Records `pass`, which the shared validation passed, into
     /// `command_buffer`.
     fn encode(&mut self, command_buffer: vk::CommandBuffer, pass: &Pass) -> Result<(), GpuError> {
+        self.acquire_attachments(command_buffer, pass);
         let (_, extent) = self.begin_pass(command_buffer, pass)?;
         let result = self.encode_commands(command_buffer, &pass.label, &pass.commands, extent);
         self.end_pass(command_buffer);
@@ -1424,13 +1666,32 @@ impl VulkanGpu {
         // name live resources.
         let ended =
             command_buffers.iter().try_for_each(|&command_buffer| unsafe { device.end_command_buffer(command_buffer) });
-        let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
+        let wait_semaphores: Vec<vk::Semaphore> = self.waits.iter().map(|&(semaphore, ..)| semaphore).collect();
+        let wait_values: Vec<u64> = self.waits.iter().map(|&(_, value, _)| value).collect();
+        let wait_stages: Vec<vk::PipelineStageFlags> = self.waits.iter().map(|&(.., stages)| stages).collect();
+        let signal_semaphores: Vec<vk::Semaphore> = self.signals.iter().map(|&(semaphore, _)| semaphore).collect();
+        let signal_values: Vec<u64> = self.signals.iter().map(|&(_, value)| value).collect();
+        let mut timeline_info = vk::TimelineSemaphoreSubmitInfo::default()
+            .wait_semaphore_values(&wait_values)
+            .signal_semaphore_values(&signal_values);
+        let mut submit_info = vk::SubmitInfo::default()
+            .command_buffers(&command_buffers)
+            .wait_semaphores(&wait_semaphores)
+            .wait_dst_stage_mask(&wait_stages)
+            .signal_semaphores(&signal_semaphores);
+        // A timeline semaphore needs its value, even zero.
+        if self.timeline {
+            submit_info = submit_info.push_next(&mut timeline_info);
+        }
         let submitted = ended.and_then(|()| self.backend.submit(&[submit_info], fence));
         if let Err(error) = submitted {
             self.free_fences.push(fence);
             self.free_command_buffers.extend(command_buffers);
             return Err(vk_error("submitting")(error));
         }
+        self.waits.clear();
+        self.signals.clear();
+        self.timeline = false;
         self.in_flight.push_back(Submission { serial: self.next_serial, fence, command_buffers });
         self.next_serial += 1;
         Ok(())
@@ -1452,6 +1713,24 @@ impl VulkanGpu {
         self.collect_garbage();
         Ok(())
     }
+}
+
+/// A barrier that moves `texture` between queue families, in its resting
+/// layout.
+fn ownership_barrier(
+    texture: &Texture,
+    (from, to): (u32, u32),
+    (src_access, dst_access): (vk::AccessFlags, vk::AccessFlags),
+) -> vk::ImageMemoryBarrier<'static> {
+    vk::ImageMemoryBarrier::default()
+        .src_access_mask(src_access)
+        .dst_access_mask(dst_access)
+        .old_layout(texture.layout)
+        .new_layout(texture.layout)
+        .src_queue_family_index(from)
+        .dst_queue_family_index(to)
+        .image(texture.image.image())
+        .subresource_range(whole_range(texture.aspect))
 }
 
 /// Records a barrier between all memory accesses of `stages`.
@@ -1705,7 +1984,17 @@ impl Gpu for VulkanGpu {
             (vk::AccessFlags::empty(), vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE),
             (vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::ALL_COMMANDS),
         );
-        Ok(self.textures.insert(Texture { image, format, vk_format, size, usage, aspect, layout }))
+        Ok(self.textures.insert(Texture {
+            image: Image::Owned(image),
+            format,
+            vk_format,
+            size,
+            usage,
+            aspect,
+            layout,
+            release_to: None,
+            released: false,
+        }))
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
@@ -1793,7 +2082,9 @@ impl Gpu for VulkanGpu {
         for framebuffer in forgotten {
             self.discard(Garbage::Framebuffer(framebuffer));
         }
-        self.discard(Garbage::Image(entry.image));
+        if let Image::Owned(image) = entry.image {
+            self.discard(Garbage::Image(image));
+        }
     }
 
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError> {
@@ -1862,6 +2153,8 @@ impl Gpu for VulkanGpu {
     /// writes made so far.
     fn read_texture(&mut self, texture: TextureId, region: TextureRegion) -> Result<ReadbackId, GpuError> {
         let readback = validation::check_readback(self, texture, region)?;
+        let uploads = self.uploads()?;
+        self.acquire(uploads, [(texture, true)]);
         let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
         let (image, layout) = (entry.image.image(), entry.layout);
         let staging = BufferAllocation::create(
@@ -1873,7 +2166,6 @@ impl Gpu for VulkanGpu {
         )
         .filter(|staging| !staging.mapped_buffer().is_null())
         .ok_or_else(|| GpuError::Invalid("Vulkan couldn't make a readback buffer".to_owned()))?;
-        let uploads = self.uploads()?;
         let device = self.backend.get_device();
         let range = whole_range(vk::ImageAspectFlags::COLOR);
         transition_image(
@@ -1958,7 +2250,9 @@ impl Gpu for VulkanGpu {
             return self.submit_recorded(None::<fn(&mut VulkanGpu, vk::CommandBuffer) -> Result<(), GpuError>>);
         }
         self.submit_recorded(Some(|gpu: &mut VulkanGpu, command_buffer| {
-            passes.iter().try_for_each(|pass| gpu.encode(command_buffer, pass))
+            passes.iter().try_for_each(|pass| gpu.encode(command_buffer, pass))?;
+            gpu.release(command_buffer, &passes.iter().collect::<Vec<_>>());
+            Ok(())
         }))
     }
 
@@ -1988,6 +2282,7 @@ impl Gpu for VulkanGpu {
             };
             let color_format = format(pass.color.map(|attachment| attachment.texture));
             let depth_stencil_format = format(pass.depth_stencil.map(|attachment| attachment.texture));
+            gpu.acquire_attachments(command_buffer, pass);
             let (render_pass, extent) = gpu.begin_pass(command_buffer, pass)?;
             let result = gpu.encode_commands(command_buffer, &pass.label, &pass.commands, extent);
             if result.is_ok() {
@@ -2003,6 +2298,7 @@ impl Gpu for VulkanGpu {
                 });
             }
             gpu.end_pass(command_buffer);
+            gpu.release(command_buffer, &[pass]);
             result
         }))
     }

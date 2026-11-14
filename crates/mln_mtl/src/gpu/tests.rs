@@ -1,10 +1,11 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks,
-    topologies, transparent_replace, vertex_layouts,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
+    invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_util::Color;
+use objc2_metal::MTLSharedEvent as _;
 
 use super::*;
 
@@ -156,4 +157,34 @@ fn custom_layers_through_gpu() {
         },
     )
     .expect("the frames");
+}
+
+#[test]
+fn imported_textures_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    imported_textures(&mut MetalGpu::new(&device), |gpu, texture| {
+        let Texture { texture, format } = gpu.texture(texture)?;
+        let (texture, format) = (texture.clone(), *format);
+        gpu.import_texture(&texture, format)
+    })
+    .expect("the frames");
+}
+
+// A submit waits for an event's value and signals it, and a submit
+// without passes does too.
+#[test]
+fn submits_wait_for_and_signal_events() {
+    let device = Device::new(None).expect("Metal device");
+    let mut gpu = MetalGpu::new(&device);
+    let shared = device.device().newSharedEvent().expect("a shared event");
+    let event = ProtocolObject::<dyn MTLEvent>::from_ref(&*shared);
+    gpu.signal_after_next_submit(event, 1);
+    gpu.submit(&[]).unwrap();
+    gpu.finish().unwrap();
+    assert_eq!(shared.signaledValue(), 1);
+    gpu.wait_before_next_submit(event, 1);
+    gpu.signal_after_next_submit(event, 2);
+    gpu.submit(&[]).unwrap();
+    gpu.finish().unwrap();
+    assert_eq!(shared.signaledValue(), 2);
 }
