@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use mln_actor::RunLoop;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::ErrorKind;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -189,6 +190,27 @@ fn generation_grows_with_each_change() {
     assert_changed(&map, true, "load_json");
     map.set_free_camera_options(&FreeCameraOptions { position: Some([0.4, 0.4, 0.1]), orientation: None });
     assert_changed(&map, true, "set_free_camera_options");
+}
+
+/// A source changes through the style that the map shares, as a host's
+/// command changes it: the map counts the change once it handles the
+/// style's report.
+#[test]
+fn a_source_that_reloads_its_description_changes_the_generation() {
+    let _loop = RunLoop::new();
+    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() });
+    map.style_mut().load_json(
+        r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
+    );
+    map.process_events();
+    assert!(map.style().impl_.is_loaded());
+    let generation = map.generation();
+
+    let source = map.style().get_source("points").expect("the source");
+    source.downcast_ref::<GeoJSONSource>().expect("a GeoJSON source").set_url("http://points");
+    map.process_events();
+    assert!(!map.style().impl_.is_loaded());
+    assert!(map.generation() > generation);
 }
 
 /// A reader of `map`'s updates, and the times that it woke.

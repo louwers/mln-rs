@@ -49,6 +49,8 @@ pub(crate) type StillImageCallback = Box<dyn FnOnce(Result<(), Error>)>;
 /// A call of the style's observer.
 enum StyleEvent {
     SourceChanged(String),
+    /// A source reloads its description, and isn't loaded meanwhile.
+    SourceDescriptionChanged,
     Update,
     StyleLoading,
     StyleLoaded,
@@ -68,6 +70,9 @@ struct StyleEvents(EventQueue<StyleEvent>);
 impl SourceObserver for StyleEvents {
     fn on_source_changed(&self, source: &dyn Source) {
         self.0.push(StyleEvent::SourceChanged(source.get_id()));
+    }
+    fn on_source_description_changed(&self, _source: &dyn Source) {
+        self.0.push(StyleEvent::SourceDescriptionChanged);
     }
 }
 
@@ -362,6 +367,8 @@ impl Map {
     fn handle_style_event(&mut self, event: StyleEvent) {
         match event {
             StyleEvent::SourceChanged(source_id) => self.emit(MapEvent::SourceChanged { source_id }),
+            // The style is no longer loaded, which the map's state shows.
+            StyleEvent::SourceDescriptionChanged => self.changed(),
             StyleEvent::Update => self.on_update(),
             StyleEvent::StyleLoading => {
                 self.changed();
