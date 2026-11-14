@@ -103,6 +103,10 @@ pub trait Layer: Any + Send + Sync {
     /// The `baseImpl` member.
     fn base_impl(&self) -> Arc<dyn Impl>;
 
+    /// The `baseImpl` member, borrowed: reading it this way skips the
+    /// reference count.
+    fn base_impl_ref(&self) -> &dyn Impl;
+
     /// Calls `f` on a copy of the base members and stores the result as the
     /// new impl.
     fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase));
@@ -126,15 +130,15 @@ pub trait Layer: Any + Send + Sync {
     // --- non-virtual members ---
 
     fn get_id(&self) -> String {
-        self.base_impl().id.clone()
+        self.base_impl_ref().id.clone()
     }
 
     fn get_source_id(&self) -> String {
-        self.base_impl().source.clone()
+        self.base_impl_ref().source.clone()
     }
 
     fn get_source_layer(&self) -> String {
-        self.base_impl().source_layer.clone()
+        self.base_impl_ref().source_layer.clone()
     }
 
     fn set_source_layer(&mut self, source_layer: &str) {
@@ -152,7 +156,7 @@ pub trait Layer: Any + Send + Sync {
     }
 
     fn get_filter(&self) -> Filter {
-        self.base_impl().filter.clone()
+        self.base_impl_ref().filter.clone()
     }
 
     fn set_filter(&mut self, filter: &Filter) {
@@ -163,11 +167,11 @@ pub trait Layer: Any + Send + Sync {
     }
 
     fn get_visibility(&self) -> VisibilityType {
-        self.base_impl().visibility
+        self.base_impl_ref().visibility
     }
 
     fn set_visibility(&mut self, value: VisibilityType) {
-        if value == self.get_visibility() && self.base_impl().visibility_expression.is_none() {
+        if value == self.get_visibility() && self.base_impl_ref().visibility_expression.is_none() {
             return;
         }
         self.mutate_base_impl(&mut |impl_| {
@@ -180,11 +184,12 @@ pub trait Layer: Any + Send + Sync {
     /// Re-evaluates the layer's visibility expression (a "visibility" layout
     /// value using "global-state"), if any, against the given global state.
     fn reevaluate_visibility(&mut self, global_state: &GlobalStateMap) {
-        let Some(expression) = self.base_impl().visibility_expression.clone() else {
+        let impl_ = self.base_impl_ref();
+        let Some(expression) = &impl_.visibility_expression else {
             return;
         };
         let value = evaluate_visibility_expression(expression.as_ref(), global_state);
-        if value == self.base_impl().visibility {
+        if value == impl_.visibility {
             return;
         }
         self.mutate_base_impl(&mut |impl_| impl_.visibility = value);
@@ -193,18 +198,18 @@ pub trait Layer: Any + Send + Sync {
     /// The serialized visibility expression, or a null value when the
     /// visibility is a constant.
     fn get_visibility_expression(&self) -> Value {
-        match &self.base_impl().visibility_expression {
+        match &self.base_impl_ref().visibility_expression {
             Some(expression) => expression.serialize(),
             None => Value::Null,
         }
     }
 
     fn get_min_zoom(&self) -> f32 {
-        self.base_impl().min_zoom
+        self.base_impl_ref().min_zoom
     }
 
     fn get_max_zoom(&self) -> f32 {
-        self.base_impl().max_zoom
+        self.base_impl_ref().max_zoom
     }
 
     fn set_min_zoom(&mut self, min_zoom: f32) {
@@ -222,12 +227,12 @@ pub trait Layer: Any + Send + Sync {
     }
 
     fn get_type_info(&self) -> &'static LayerTypeInfo {
-        self.base_impl().get_type_info()
+        self.base_impl_ref().get_type_info()
     }
 
     /// Collect dependencies
     fn get_dependencies(&self) -> Dependency {
-        self.base_impl().get_dependencies()
+        self.base_impl_ref().get_dependencies()
     }
 }
 

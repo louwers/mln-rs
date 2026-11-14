@@ -174,6 +174,10 @@ impl Layer for CustomLayer {
         Arc::<Impl>::clone(&self.base_impl)
     }
 
+    fn base_impl_ref(&self) -> &dyn layer::Impl {
+        &*self.base_impl
+    }
+
     fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase)) {
         let mut impl_ = (*self.base_impl).clone();
         f(&mut impl_.base);
