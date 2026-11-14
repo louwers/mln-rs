@@ -55,12 +55,11 @@ impl OffscreenResource {
     }
 
     fn read_still_image(&self) -> PremultipliedImage {
-        let mut image = PremultipliedImage::new(self.size);
-        if let Some(context) = self.context.upgrade() {
-            context.bind_framebuffer(Some(self.framebuffer), self.size, true);
-            image.data = context.read_framebuffer(self.size);
-        }
-        image
+        let Some(context) = self.context.upgrade() else {
+            return PremultipliedImage::new(self.size);
+        };
+        context.bind_framebuffer(Some(self.framebuffer), self.size, true);
+        PremultipliedImage::from_vec(self.size, context.read_framebuffer(self.size))
     }
 }
 

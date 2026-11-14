@@ -635,8 +635,7 @@ impl FrameTarget for SurfaceTarget {
         }
         if self.presentation.readback_requested.replace(false) {
             context.bind_framebuffer(None, size, true);
-            let mut image = PremultipliedImage::new(size);
-            image.data = context.read_framebuffer(size);
+            let image = PremultipliedImage::from_vec(size, context.read_framebuffer(size));
             *self.presentation.readback.borrow_mut() = Some(image);
         }
         if self.window.swap() { Handoff::Presented } else { Handoff::Dropped }
