@@ -1,5 +1,7 @@
 use mln_gfx::gpu::TextureId;
-use mln_gfx::gpu::conformance::{SIZE, clip_mask_and_background, foreign_ids, invalid_calls, transparent_replace};
+use mln_gfx::gpu::conformance::{
+    SIZE, clip_mask_and_background, foreign_ids, invalid_calls, topologies, transparent_replace,
+};
 
 use crate::{Device, WebGpu};
 
@@ -59,4 +61,11 @@ fn transparent_replace_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     let mut gpu = WebGpu::new(&device);
     transparent_replace(&mut gpu, |gpu, texture| read_back(&device, gpu, texture)).expect("the frame");
+}
+
+#[test]
+fn topologies_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    let mut gpu = WebGpu::new(&device);
+    topologies(&mut gpu, |gpu, texture| read_back(&device, gpu, texture)).expect("the frames");
 }

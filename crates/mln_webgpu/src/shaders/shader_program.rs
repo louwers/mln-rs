@@ -159,15 +159,17 @@ fn webgpu_blend_factor(factor: ColorBlendFactorType) -> wgpu::BlendFactor {
     }
 }
 
-fn to_primitive_topology(draw_mode_type: DrawModeType) -> wgpu::PrimitiveTopology {
-    match draw_mode_type {
+/// The topology of `draw_mode_type`; `None` for the loops and fans WebGPU
+/// lacks.
+fn to_primitive_topology(draw_mode_type: DrawModeType) -> Option<wgpu::PrimitiveTopology> {
+    Some(match draw_mode_type {
         DrawModeType::Points => wgpu::PrimitiveTopology::PointList,
-        DrawModeType::Lines | DrawModeType::LineLoop => wgpu::PrimitiveTopology::LineList,
+        DrawModeType::Lines => wgpu::PrimitiveTopology::LineList,
         DrawModeType::LineStrip => wgpu::PrimitiveTopology::LineStrip,
         DrawModeType::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
-        // WebGPU does not support triangle fan directly; approximate with triangle list
-        DrawModeType::TriangleFan | DrawModeType::Triangles => wgpu::PrimitiveTopology::TriangleList,
-    }
+        DrawModeType::Triangles => wgpu::PrimitiveTopology::TriangleList,
+        DrawModeType::LineLoop | DrawModeType::TriangleFan => return None,
+    })
 }
 
 fn depth_compare_function(func: DepthFunctionType) -> wgpu::CompareFunction {
@@ -358,7 +360,8 @@ impl ShaderProgram {
 
     /// The pipeline of this program with `state`, drawing into a `color`
     /// attachment and a `depth_stencil` one, made on the first call with
-    /// them.
+    /// them. Fails with [`GpuError::Unsupported`] for a primitive WebGPU
+    /// lacks: a line loop or a triangle fan.
     pub(crate) fn render_pipeline(
         &self,
         state: &PipelineState,
@@ -523,14 +526,12 @@ impl ShaderProgram {
         write_mask.set(wgpu::ColorWrites::GREEN, state.color_mask.g);
         write_mask.set(wgpu::ColorWrites::BLUE, state.color_mask.b);
         write_mask.set(wgpu::ColorWrites::ALPHA, state.color_mask.a);
-        let targets = [Some(wgpu::ColorTargetState {
-            format: color_format,
-            blend,
-            write_mask,
-        })];
+        let targets = [Some(wgpu::ColorTargetState { format: color_format, blend, write_mask })];
 
+        let topology = to_primitive_topology(state.primitive)
+            .ok_or_else(|| GpuError::Unsupported(format!("{:?} primitives", state.primitive)))?;
         let primitive = wgpu::PrimitiveState {
-            topology: to_primitive_topology(state.primitive),
+            topology,
             strip_index_format: matches!(state.primitive, DrawModeType::LineStrip | DrawModeType::TriangleStrip)
                 .then_some(wgpu::IndexFormat::Uint16),
             front_face: if state.cull.winding == CullFaceWindingType::CounterClockwise {

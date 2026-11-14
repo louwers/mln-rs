@@ -251,3 +251,55 @@ pub fn transparent_replace<G: Gpu>(
     assert_eq!(texel(&pixels, SIZE.width / 2, SIZE.height / 2), [255, 0, 0, 153], "not blended with the black");
     Ok(())
 }
+
+/// Checks that a backend draws a triangle strip, a triangle fan and a line
+/// loop as they are, or fails to make the pipeline with
+/// [`GpuError::Unsupported`]: the fan covers the target, as the strip
+/// does, and the loop's last segment closes it. Returns the error of a call
+/// that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn topologies<G: Gpu>(
+    gpu: &mut G,
+    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
+) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    let e = EXTENT as i16;
+    let fan: [[i16; 2]; 4] = [[0, 0], [e, 0], [e, e], [0, e]];
+    let fan = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&fan))?;
+    // Through the centers of pixels (32, 8), (48, 16) and (32, 24), so that
+    // the closing segment lights column 32 and nothing else does.
+    let line_loop: [[i16; 2]; 3] = [[4160, 2176], [6208, 4224], [4160, 6272]];
+    let line_loop = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&line_loop))?;
+    let red = [255, 0, 0, 255];
+    for (primitive, vertices, count) in [
+        (DrawModeType::TriangleStrip, frame.quad, 4),
+        (DrawModeType::TriangleFan, fan, 4),
+        (DrawModeType::LineLoop, line_loop, 3),
+    ] {
+        let mut key = background();
+        key.state.primitive = primitive;
+        let pipeline = match gpu.create_pipeline(&key) {
+            Ok(pipeline) => pipeline,
+            Err(GpuError::Unsupported(_)) => continue,
+            Err(error) => return Err(error),
+        };
+        let commands = [
+            RenderCommand::SetVertexBuffer { slot: 0, buffer: vertices, offset: 0 },
+            RenderCommand::Draw { vertices: 0..count, instances: 0..1 },
+        ];
+        gpu.submit(&[frame.pass(pipeline, commands)])?;
+        let pixels = read_back(gpu, frame.target);
+        if primitive == DrawModeType::LineLoop {
+            assert_eq!(texel(&pixels, 32, 16), red, "the segment that closes the loop");
+            continue;
+        }
+        let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
+        for (x, y) in [(0, 0), (right, 0), (0, bottom), (right, bottom), (right / 2, bottom / 2)] {
+            assert_eq!(texel(&pixels, x, y), red, "{primitive:?} covers ({x}, {y})");
+        }
+    }
+    Ok(())
+}
