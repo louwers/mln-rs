@@ -218,13 +218,12 @@ pub struct HostDevice {
 /// The library's instance, with the extensions its devices use and, when the
 /// validation layer is on, its messenger.
 //
-// Deviation: C++'s renderer backend makes an instance of its own
-// (`RendererBackend::initInstance`). The library's devices share one, made
-// with the first of them and kept for the life of the process: the Vulkan
-// loader crashes when one thread names an object (`vkSetDebugUtilsObjectNameEXT`,
-// which renderers call with the validation layer on) while another destroys
-// an instance, which renderers on many threads did whenever a device's last
-// renderer let go.
+// The library's devices share one instance, made with the first of them and
+// kept for the life of the process: the Vulkan loader crashes when one
+// thread names an object (`vkSetDebugUtilsObjectNameEXT`, which renderers
+// call with the validation layer on) while another destroys an instance,
+// which renderers on many threads would do whenever a device's last renderer
+// let go.
 struct LibraryInstance {
     entry: ash::Entry,
     instance: ash::Instance,

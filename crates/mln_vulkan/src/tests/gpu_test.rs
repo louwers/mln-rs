@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use ash::vk;
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
@@ -75,6 +78,28 @@ fn depth_only_through_gpu() {
 // Every program compiles for `Gpu`, which maps each binding to an id, with
 // every property per vertex and every property as a uniform, in both
 // projections.
+// What `destroy_later` destroys waits for the next submit, or goes with the
+// `Gpu`.
+#[test]
+fn destroy_later_waits_for_the_next_submit() {
+    let device = Device::new(None).expect("Vulkan device");
+    let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
+    let destroyed = Rc::new(Cell::new(0));
+    let count = |destroyed: &Rc<Cell<u32>>| {
+        let destroyed = Rc::clone(destroyed);
+        move |_: &ash::Device| destroyed.set(destroyed.get() + 1)
+    };
+    gpu.destroy_later(count(&destroyed));
+    gpu.finish().expect("no submits");
+    assert_eq!(destroyed.get(), 0, "before the submit");
+    gpu.submit(&[]).expect("the submit");
+    gpu.finish().expect("the submit");
+    assert_eq!(destroyed.get(), 1, "after the submit");
+    gpu.destroy_later(count(&destroyed));
+    drop(gpu);
+    assert_eq!(destroyed.get(), 2, "with the Gpu");
+}
+
 #[test]
 fn every_program_compiles_for_gpu() {
     let device = Device::new(None).expect("Vulkan device");

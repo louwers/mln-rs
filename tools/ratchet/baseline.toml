@@ -232,10 +232,10 @@
 "crates/mln_util/src/serialization/payload.rs" = 6
 "crates/mln_util/src/serialization/shared.rs" = 3
 "crates/mln_vulkan/src/borrowed_target.rs" = 15
-"crates/mln_vulkan/src/context.rs" = 10
+"crates/mln_vulkan/src/context.rs" = 2
 "crates/mln_vulkan/src/exported_target.rs" = 8
 "crates/mln_vulkan/src/renderer_backend.rs" = 2
-"crates/mln_vulkan/src/surface_resource.rs" = 25
+"crates/mln_vulkan/src/surface_resource.rs" = 24
 "crates/mln_web_host/src/pump.rs" = 3
 "crates/mln_web_host/src/shaper.rs" = 6
 "crates/mln_web_host/src/tile_worker.rs" = 2
