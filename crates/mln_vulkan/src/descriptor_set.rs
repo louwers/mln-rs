@@ -16,12 +16,12 @@ use std::rc::Weak;
 
 use ash::vk;
 use mln_gfx::drawable::Textures;
+use mln_gfx::gpu::SamplerId;
 use mln_gfx::shaders::shader_defines::{
     ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO, LAYER_SSBO_START_ID,
 };
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
 use mln_gfx::uniform_buffer::UniformBufferArray;
-use slotmap::Key as _;
 
 use crate::context::Context;
 use crate::shaders::layout::{
@@ -387,7 +387,7 @@ impl UniformDescriptorSet {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ImageBinding {
     pub(crate) image_id: u64,
-    pub(crate) sampler_id: u64,
+    pub(crate) sampler_id: Option<SamplerId>,
     pub(crate) image_view: vk::ImageView,
     pub(crate) image_layout: vk::ImageLayout,
     pub(crate) sampler: vk::Sampler,
@@ -395,7 +395,7 @@ pub(crate) struct ImageBinding {
 
 const NO_IMAGE: ImageBinding = ImageBinding {
     image_id: u64::MAX,
-    sampler_id: u64::MAX,
+    sampler_id: None,
     image_view: vk::ImageView::null(),
     image_layout: vk::ImageLayout::UNDEFINED,
     sampler: vk::Sampler::null(),
@@ -444,8 +444,7 @@ impl ImageDescriptorSet {
             };
             bindings[index] = ImageBinding {
                 image_id,
-                // Samplers are never destroyed, so no other has this id.
-                sampler_id: sampler_id.data().as_ffi(),
+                sampler_id: Some(sampler_id),
                 image_view,
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 sampler,

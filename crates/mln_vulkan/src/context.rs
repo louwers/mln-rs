@@ -767,7 +767,7 @@ impl Context {
         let sampler = texture.get_vulkan_sampler();
         (image_view != vk::ImageView::null() && sampler != vk::Sampler::null()).then_some(ImageBinding {
             image_id: 0,
-            sampler_id: 0,
+            sampler_id: None,
             image_view,
             image_layout: texture.get_vulkan_image_layout(),
             sampler,
