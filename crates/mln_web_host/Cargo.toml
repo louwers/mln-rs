@@ -25,7 +25,14 @@ mln_util.workspace = true
 parking_lot.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["MessageChannel", "MessageEvent", "MessagePort", "Worker", "WorkerOptions", "WorkerType"] }
+web-sys = { workspace = true, features = [
+  "MessageChannel",
+  "MessageEvent",
+  "MessagePort",
+  "Worker",
+  "WorkerOptions",
+  "WorkerType",
+] }
 
 [lints]
 workspace = true

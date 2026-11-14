@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Measure the tests' coverage and open the report"
+#USAGE arg "[args]..." var=#true help="Arguments to `cargo llvm-cov report` (default `--open`)"
+set -euo pipefail
+source tools/dev-shell.sh
+eval "set -- ${usage_args:-}"
+[[ $# -gt 0 ]] || set -- --open
+cargo llvm-cov clean --workspace
+dev_shell cargo llvm-cov nextest --no-report --workspace
+cargo llvm-cov report --workspace "$@"

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="Test the C library's browser package in headless Chromium"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile, as for `web:build`"
+#USAGE arg "[backend]" default="webgpu" help="webgpu, or gl (WebGL2)"
+# Drives the package's C ABI from a Web Worker, as a JavaScript host does,
+# until a map with a GeoJSON layer shows on an OffscreenCanvas, for several
+# sessions in a row (crates/mln_c/web-check). Needs Node 24 and Playwright's
+# Chromium (`npx playwright@1.61.1 install chromium`).
+set -euo pipefail
+mise run c-web:build --profile "$usage_profile" "$usage_backend"
+node crates/mln_c/web-check/check.mjs "${CARGO_TARGET_DIR:-target}/c-web/$usage_backend" "$usage_backend"

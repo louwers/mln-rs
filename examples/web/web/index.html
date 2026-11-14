@@ -1,73 +1,153 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>mln-rs</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1 11 8H5z' fill='%23d2392b'/%3E%3Cpath d='M8 15 5 8h6z' fill='%235d6874'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./page.css">
-</head>
-<body>
-  <div id="map-box"><canvas id="map" aria-label="Map"></canvas></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>mln-rs</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1 11 8H5z' fill='%23d2392b'/%3E%3Cpath d='M8 15 5 8h6z' fill='%235d6874'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./page.css" />
+  </head>
+  <body>
+    <div id="map-box"><canvas id="map" aria-label="Map"></canvas></div>
 
-  <div class="corner top-left">
-    <button class="control style-button" id="style-button" type="button" popovertarget="styles" aria-haspopup="dialog">
-      <span class="style-text">
-        <span class="style-name" id="style-name">Map</span>
-        <span class="style-detail" id="style-detail">Loading…</span>
-      </span>
-      <svg class="chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>
-    </button>
-  </div>
-
-  <div class="corner top-right">
-    <button class="control icon-button" type="button" popovertarget="about" aria-label="About this map" title="About this map">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.6 7.6a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6"/><circle cx="10" cy="14.6" r=".4"/></svg>
-    </button>
-  </div>
-
-  <div class="corner bottom-right">
-    <div class="control group" role="group" aria-label="Zoom">
-      <button class="icon-button" id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 5v10M5 10h10"/></svg>
-      </button>
-      <button class="icon-button" id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10h10"/></svg>
+    <div class="corner top-left">
+      <button
+        class="control style-button"
+        id="style-button"
+        type="button"
+        popovertarget="styles"
+        aria-haspopup="dialog"
+      >
+        <span class="style-text">
+          <span class="style-name" id="style-name">Map</span>
+          <span class="style-detail" id="style-detail">Loading…</span>
+        </span>
+        <svg class="chevron" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M3 4.5 6 7.5 9 4.5" />
+        </svg>
       </button>
     </div>
-    <button class="control icon-button compass" id="compass" type="button" aria-label="Reset north and tilt" title="Reset north and tilt">
-      <svg viewBox="0 0 20 20" aria-hidden="true" id="needle"><path class="north" d="M10 2.5 13 10H7z"/><path class="south" d="M10 17.5 7 10h6z"/></svg>
-    </button>
-    <div class="attribution" id="attribution" hidden>
-      <span class="attribution-text" id="attribution-text"></span>
-      <button class="attribution-toggle" id="attribution-toggle" type="button" aria-expanded="false" aria-controls="attribution-text" aria-label="Map data sources" title="Map data sources">i</button>
+
+    <div class="corner top-right">
+      <button
+        class="control icon-button"
+        type="button"
+        popovertarget="about"
+        aria-label="About this map"
+        title="About this map"
+      >
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M7.6 7.6a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6" />
+          <circle cx="10" cy="14.6" r=".4" />
+        </svg>
+      </button>
     </div>
-  </div>
 
-  <div class="panel styles" id="styles" popover aria-label="Map styles">
-    <ul class="style-list" id="style-list"></ul>
-    <p class="note">Or open any style with <code>?style=</code> and its URL.</p>
-  </div>
+    <div class="corner bottom-right">
+      <div class="control group" role="group" aria-label="Zoom">
+        <button
+          class="icon-button"
+          id="zoom-in"
+          type="button"
+          aria-label="Zoom in"
+          title="Zoom in"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 5v10M5 10h10" />
+          </svg>
+        </button>
+        <button
+          class="icon-button"
+          id="zoom-out"
+          type="button"
+          aria-label="Zoom out"
+          title="Zoom out"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M5 10h10" />
+          </svg>
+        </button>
+      </div>
+      <button
+        class="control icon-button compass"
+        id="compass"
+        type="button"
+        aria-label="Reset north and tilt"
+        title="Reset north and tilt"
+      >
+        <svg viewBox="0 0 20 20" aria-hidden="true" id="needle">
+          <path class="north" d="M10 2.5 13 10H7z" />
+          <path class="south" d="M10 17.5 7 10h6z" />
+        </svg>
+      </button>
+      <div class="attribution" id="attribution" hidden>
+        <span class="attribution-text" id="attribution-text"></span>
+        <button
+          class="attribution-toggle"
+          id="attribution-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="attribution-text"
+          aria-label="Map data sources"
+          title="Map data sources"
+        >
+          i
+        </button>
+      </div>
+    </div>
 
-  <div class="panel about" id="about" popover aria-labelledby="about-title">
-    <h2 id="about-title">mln-rs</h2>
-    <p>A map renderer in Rust, drawing MapLibre styles with WebGPU, or with WebGL2 where the browser has no WebGPU. This page runs it in Web Workers through WebAssembly.</p>
-    <dl class="gestures">
-      <dt>Pan</dt><dd>Drag, or the arrow keys</dd>
-      <dt>Zoom</dt><dd>Scroll, pinch, double-click, or <kbd>+</kbd> and <kbd>−</kbd></dd>
-      <dt>Zoom out</dt><dd>Shift-double-click</dd>
-      <dt>Zoom to a box</dt><dd>Shift-drag</dd>
-      <dt>Rotate and tilt</dt><dd>Right-drag, Ctrl-drag, two fingers, or Shift and the arrow keys</dd>
-    </dl>
-    <label class="toggle" title="Drags and zooms on the globe turn the bearing with the planet, and a drag carries on over a pole"><input type="checkbox" id="free-bearing-toggle"> Free bearing on the globe</label>
-    <label class="toggle"><input type="checkbox" id="compare-toggle"> Compare with MapLibre GL JS</label>
-    <label class="toggle"><input type="checkbox" id="debug-toggle"> Debug overlay <kbd>D</kbd></label>
-    <p class="status" id="status">Loading…</p>
-    <p><a href="https://github.com/louwers/mln-rs">Source on GitHub</a></p>
-  </div>
+    <div class="panel styles" id="styles" popover aria-label="Map styles">
+      <ul class="style-list" id="style-list"></ul>
+      <p class="note">
+        Or open any style with <code>?style=</code> and its URL.
+      </p>
+    </div>
 
-  <p class="notice" id="error" role="alert" hidden></p>
-  <div id="box" hidden></div>
-  <script type="module" src="./main.ts"></script>
-</body>
+    <div class="panel about" id="about" popover aria-labelledby="about-title">
+      <h2 id="about-title">mln-rs</h2>
+      <p>
+        A map renderer in Rust, drawing MapLibre styles with WebGPU, or with
+        WebGL2 where the browser has no WebGPU. This page runs it in Web Workers
+        through WebAssembly.
+      </p>
+      <dl class="gestures">
+        <dt>Pan</dt>
+        <dd>Drag, or the arrow keys</dd>
+        <dt>Zoom</dt>
+        <dd>Scroll, pinch, double-click, or <kbd>+</kbd> and <kbd>−</kbd></dd>
+        <dt>Zoom out</dt>
+        <dd>Shift-double-click</dd>
+        <dt>Zoom to a box</dt>
+        <dd>Shift-drag</dd>
+        <dt>Rotate and tilt</dt>
+        <dd>Right-drag, Ctrl-drag, two fingers, or Shift and the arrow keys</dd>
+      </dl>
+      <label
+        class="toggle"
+        title="Drags and zooms on the globe turn the bearing with the planet, and a drag carries on over a pole"
+        ><input type="checkbox" id="free-bearing-toggle" /> Free bearing on the
+        globe</label
+      >
+      <label class="toggle"
+        ><input type="checkbox" id="compare-toggle" /> Compare with MapLibre GL
+        JS</label
+      >
+      <label class="toggle"
+        ><input type="checkbox" id="debug-toggle" /> Debug overlay
+        <kbd>D</kbd></label
+      >
+      <p class="status" id="status">Loading…</p>
+      <p><a href="https://github.com/louwers/mln-rs">Source on GitHub</a></p>
+    </div>
+
+    <p class="notice" id="error" role="alert" hidden></p>
+    <div id="box" hidden></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
 </html>

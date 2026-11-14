@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#MISE description="Refresh the C headers and ABI tests copied from maplibre-native-ffi, and regenerate the bindings"
+#USAGE arg "[checkout]" help="A maplibre-native-ffi checkout (default ../maplibre-native-ffi)"
+# The headers go to crates/mln_c/include and the ABI suite and exit programs,
+# with the support files, fixtures and GPU fixtures they build with, to
+# tools/c-abi-test/testdata, each directory whole, so new files come along;
+# then the declarations are regenerated. The copies are from
+# maplibre/maplibre-native-ffi's t3/build-on-mln-rs branch at 8d3304342e61,
+# which reshapes the API around mln-rs and builds the C library from it, ahead
+# of its merge (maplibre/maplibre-native-ffi#1801).
+set -euo pipefail
+checkout="${usage_checkout:-$PWD/../maplibre-native-ffi}"
+rsync -a --delete "$checkout/include/maplibre_native_c/" crates/mln_c/include/maplibre_native_c/
+cp "$checkout/include/maplibre_native_c.h" "$checkout/LICENSE" crates/mln_c/include/
+for dir in tests/native/abi tests/native/exit tests/native/support tests/native/fixtures tests/graphics; do
+    mkdir -p "tools/c-abi-test/testdata/$dir"
+    rsync -a --delete "$checkout/$dir"/ "tools/c-abi-test/testdata/$dir"/
+done
+cp "$checkout/LICENSE" tools/c-abi-test/testdata/
+mise run generate:c-abi
+echo "copied from $checkout ($(git -C "$checkout" describe --always --dirty 2>/dev/null || echo "not a git checkout"))"

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Compare the browser demo's frames with native renders in headless Chromium"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile, as for `web:build`"
+#USAGE arg "[args]..." var=#true help="Arguments to examples/web/check/check.mjs, such as `--filter real-world`"
+# Offline, from the render suite's cache database. Needs Node 24, Playwright's
+# Chromium (`npx playwright@1.61.1 install chromium`) and lavapipe
+# (VK_DRIVER_FILES). CI runs it with `--profile release`.
+set -euo pipefail
+eval "set -- ${usage_args:-}"
+mise run web:build --profile "$usage_profile"
+cargo build -p mln-rs-render-test --bin render-test
+node examples/web/check/check.mjs "$@"

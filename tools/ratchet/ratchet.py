@@ -165,7 +165,7 @@ def scan() -> dict[str, dict[str, int]]:
 def write_baseline(baseline: dict[str, dict[str, int]]) -> None:
     lines = [
         "# Library panic sites and RefCell borrows per file (tools/ratchet/ratchet.py).",
-        "# Counts only fall: `just ratchet --update` lowers them. Raise one by hand",
+        "# Counts only fall: `mise run ratchet --update` lowers them. Raise one by hand",
         "# in the change that needs it.",
     ]
     for rule in RULES:
@@ -196,7 +196,7 @@ def main() -> int:
             if have > limit:
                 errors.append(f"{path}: {have} {rule}, baseline {limit}")
             elif have < limit and not args.update:
-                errors.append(f"{path}: {have} {rule}, baseline {limit}; run `just ratchet --update`")
+                errors.append(f"{path}: {have} {rule}, baseline {limit}; run `mise run ratchet --update`")
     if args.update:
         write_baseline(lowered)
     for error in errors:

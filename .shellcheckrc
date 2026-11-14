@@ -1,0 +1,6 @@
+# The tasks in mise-tasks/ source their helpers by paths from the repository's
+# root, where mise runs them.
+source-path=SCRIPTDIR/..
+external-sources=true
+# mise sets a task's usage_* variables from its #USAGE lines.
+disable=SC2154

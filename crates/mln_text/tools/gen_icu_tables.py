@@ -7,7 +7,7 @@
 that ICU compiles into libicuuc, so the table is the data the C++ oracle
 uses, not a re-derivation from the UCD.
 
-`just generate-icu-tables <dir>/icu/source/common` writes the table.
+`mise run generate:icu-tables <dir>/icu/source/common` writes the table.
 
 Usage, from crates/mln_text:
   nix-store --realise /nix/store/...-icu4c-78.3-sources.tgz.drv   # or any ICU 78.3 source tree

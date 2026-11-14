@@ -13,8 +13,8 @@
     in
     {
       devShells = forAllSystems (pkgs: {
-        # `nix develop` enters it on any Linux with Nix, and the justfile's
-        # recipes run in it on NixOS, which has no system-wide libraries for
+        # `nix develop` enters it on any Linux with Nix, and the tasks in
+        # mise-tasks/ run in it on NixOS, which has no system-wide libraries for
         # a build or a dlopen() to find. Rust and the other tools come from
         # mise (mise.toml); this adds the C toolchain, for the crates that
         # compile C, and the libraries.
@@ -24,7 +24,7 @@
           # preset EGL and OpenGL ES (libglvnd).
           packages = [ pkgs.cmake ];
 
-          # sqlite-wasm-rs compiles SQLite for wasm32 (`just check-wasm`)
+          # sqlite-wasm-rs compiles SQLite for wasm32 (`mise run check:wasm`)
           # through the cc crate, which reads these before CC (gcc here).
           # Unwrapped clang, since the Nix wrapper adds the host's flags.
           CC_wasm32_unknown_unknown = "${pkgs.llvmPackages.clang-unwrapped}/bin/clang";

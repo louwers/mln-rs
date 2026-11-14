@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Run every test, including the render, query and expression suites"
+# The tests' headless frontends render with WebGPU, or with the backend
+# MLN_RENDER_BACKEND names: webgpu, metal, vulkan, gl (OpenGL ES) or gl-desktop
+# (desktop OpenGL). A test that hangs is ended after ten minutes
+# (.config/nextest.toml).
+set -euo pipefail
+source tools/dev-shell.sh
+dev_shell cargo nextest run --workspace "$@"

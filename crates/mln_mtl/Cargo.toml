@@ -24,8 +24,17 @@ mln_gfx.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 objc2.workspace = true
-objc2-core-foundation = { workspace = true, features = ["CFDictionary", "CFNumber", "CFString"] }
-objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSObject", "NSRange"] }
+objc2-core-foundation = { workspace = true, features = [
+  "CFDictionary",
+  "CFNumber",
+  "CFString",
+] }
+objc2-foundation = { workspace = true, features = [
+  "NSArray",
+  "NSDictionary",
+  "NSObject",
+  "NSRange",
+] }
 objc2-io-surface.workspace = true
 objc2-metal = { workspace = true, features = ["objc2-io-surface"] }
 objc2-quartz-core.workspace = true

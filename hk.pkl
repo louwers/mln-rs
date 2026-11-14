@@ -1,0 +1,55 @@
+amends "package://github.com/jdx/hk/releases/download/v2.12.0/hk@2.12.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.12.0/hk@2.12.0#/Builtins.pkl"
+
+// hk (https://hk.jdx.dev) runs the formatters and linters: `mise run check`
+// checks every file and `mise run fix` fixes what they can. The pre-commit
+// hook, which `hk install --mise` installs if you want it, fixes the staged
+// files.
+
+// Quick, and only on the files they're given: every hook.
+local fileSteps = new Mapping<String, Step> {
+  // dprint.jsonc: rustfmt for Rust, oxc for the rest.
+  ["dprint"] = Builtins.dprint
+  // .github/jactionlint.yaml
+  ["jactionlint"] = Builtins.jactionlint
+  // The tasks in mise-tasks/ and the scripts they source.
+  ["shellcheck"] = Builtins.shellcheck
+}
+
+// The whole workspace at once: `check` and `fix` only.
+local workspaceSteps = new Mapping<String, Step> {
+  ["ratchet"] {
+    glob = List("**/*.rs", "tools/ratchet/**")
+    check = "mise run ratchet"
+  }
+  ["clippy"] {
+    glob = List("**/*.rs", "**/Cargo.toml", "Cargo.lock", "clippy.toml")
+    check = "mise run clippy"
+    fix = "mise run clippy --fix --allow-dirty --allow-staged"
+  }
+  ["licenses"] {
+    glob = List("**/Cargo.toml", "Cargo.lock", "deny.toml")
+    check = "mise run licenses"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps = fileSteps
+  }
+  ["check"] {
+    steps {
+      ...fileSteps
+      ...workspaceSteps
+    }
+  }
+  ["fix"] {
+    fix = true
+    steps {
+      ...fileSteps
+      ...workspaceSteps
+    }
+  }
+}

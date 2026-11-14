@@ -9,8 +9,8 @@ repository.workspace = true
 include.workspace = true
 # The browser build: the map and its tile workers in Web Workers, each a
 # wasm instance of the same module with its own memory
-# (wasm32-unknown-unknown, no atomics). `just web` builds it into web/pkg,
-# with the font-face shaper the map loads for styles with font faces
+# (wasm32-unknown-unknown, no atomics). `mise run web:build` builds it into
+# web/pkg, with the font-face shaper the map loads for styles with font faces
 # (crates/mln_web_shaper; mln_renderer's in-process shaper stays off here); never
 # released.
 publish = false
@@ -22,8 +22,8 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 # The module for browsers without WebGPU, which draws with WebGL2 through
-# mln_gl (src/map_webgl.rs). `just web` builds it beside the WebGPU one; the
-# page loads one of the two. Nothing in it calls mln_webgpu or wgpu, so the
+# mln_gl (src/map_webgl.rs). `mise run web:build` builds it beside the WebGPU
+# one; the page loads one of the two. Nothing in it calls mln_webgpu or wgpu, so the
 # linker leaves them out of it.
 webgl = ["dep:mln_gl"]
 

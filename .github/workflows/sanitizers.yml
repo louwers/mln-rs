@@ -1,18 +1,18 @@
 name: sanitizers
 
 # The runtime's, the Vulkan backend's and the C library's tests under
-# AddressSanitizer (`just test-asan`), nightly and on demand. They run round
+# AddressSanitizer (`mise run test:asan`), nightly and on demand. They run round
 # after round for a while: a race between threads can fail one run in a
 # hundred, which the ci workflow's one run per push rarely shows.
 
 on:
   schedule:
-    - cron: '17 3 * * *'
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       minutes:
         description: How long to keep starting rounds of the tests, in minutes
-        default: '20'
+        default: "20"
 
 permissions:
   contents: read
@@ -36,8 +36,9 @@ jobs:
         with:
           validation-layer: true
 
-      - uses: taiki-e/install-action@v2
-        with: { tool: just }
+      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
+      # them, at the versions mise.lock records.
+      - uses: jdx/mise-action@v5
 
       - name: Test
-        run: just test-asan "$MINUTES"
+        run: mise run test:asan "$MINUTES"

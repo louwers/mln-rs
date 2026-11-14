@@ -2,13 +2,13 @@
   "base_test_path": "../testdata/metrics/integration",
   "cache_path": "../testdata/metrics/cache-style.db",
   "expectation_paths": [
-      "../testdata/metrics/expectations/platform-macos",
-      "../testdata/metrics/expectations/platform-linux"
+    "../testdata/metrics/expectations/platform-macos",
+    "../testdata/metrics/expectations/platform-linux"
   ],
   "ignore_paths": [
-      "../testdata/metrics/ignores/platform-all.json",
-      "../testdata/metrics/ignores/platform-linux.json",
-      "../ignores/rust-port.json"
+    "../testdata/metrics/ignores/platform-all.json",
+    "../testdata/metrics/ignores/platform-linux.json",
+    "../ignores/rust-port.json"
   ],
   "metric_path": "../testdata/metrics/linux-gcc8-release"
 }

@@ -1,5 +1,5 @@
-# cargo-nextest's configuration (https://nexte.st/docs/configuration/): `just test` and CI's
-# `just ci-coverage` run the tests with it.
+# cargo-nextest's configuration (https://nexte.st/docs/configuration/):
+# `mise run test` and CI's `mise run ci:coverage` run the tests with it.
 
 [profile.default]
 # A test that runs for over a minute is reported as slow, and one still running after ten is ended
