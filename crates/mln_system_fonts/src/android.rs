@@ -3,6 +3,11 @@
 //! text in for the given languages. Its functions are looked up at run time,
 //! so that an app that runs on older versions falls back to the scan of
 //! `/system/fonts`. And the app's languages, from Java, through [`init`].
+//!
+//! The matcher draws on the system font collection that an app process
+//! inherits; in a process that isn't an app, such as a test binary run from
+//! `adb shell`, it has none and crashes. So it is used only once [`init`]
+//! ran, which every app that uses the library calls.
 
 #![expect(unsafe_code, reason = "the NDK's font API and JNI are the FFI here")]
 
@@ -18,7 +23,8 @@ use libloading::Library;
 use crate::scripts::Script;
 use crate::source::Source;
 
-/// The app's languages, most preferred first, once [`init`] read them.
+/// The app's languages, most preferred first, once [`init`] ran: empty
+/// when it couldn't read them.
 static LANGUAGES: OnceLock<Vec<String>> = OnceLock::new();
 
 /// Reads the app's languages (`LocaleList.getDefault()`), which the system
@@ -55,14 +61,16 @@ pub unsafe fn init(jni_env: *mut c_void) {
             read
         })
         .into_outcome();
-    if let Outcome::Ok(tags) = outcome {
-        let _ = LANGUAGES.set(tags.split(',').filter(|tag| !tag.is_empty()).map(str::to_owned).collect());
-    }
+    let languages = match outcome {
+        Outcome::Ok(tags) => tags.split(',').filter(|tag| !tag.is_empty()).map(str::to_owned).collect(),
+        Outcome::Err(_) | Outcome::Panic(_) => Vec::new(),
+    };
+    let _ = LANGUAGES.set(languages);
 }
 
 /// The app's languages, once [`init`] read them.
 pub(crate) fn languages() -> Option<Vec<String>> {
-    LANGUAGES.get().cloned()
+    LANGUAGES.get().filter(|languages| !languages.is_empty()).cloned()
 }
 
 /// The functions of the NDK's `font_matcher.h` and `font.h` that this uses.
@@ -79,8 +87,15 @@ pub(crate) struct FontMatcher {
 }
 
 impl FontMatcher {
-    /// The font matcher, or `None` before API level 29.
+    /// The font matcher in an app, once [`init`] ran: `None` before API level
+    /// 29, or outside an app.
     pub(crate) fn new() -> Option<FontMatcher> {
+        LANGUAGES.get()?;
+        Self::load()
+    }
+
+    /// The matcher's functions, or `None` before API level 29.
+    fn load() -> Option<FontMatcher> {
         // SAFETY: every app has libandroid loaded already.
         let library = unsafe { Library::new("libandroid.so") }.ok()?;
         macro_rules! symbol {
@@ -143,7 +158,6 @@ impl FontMatcher {
 #[cfg(test)]
 mod tests {
     use super::FontMatcher;
-    use crate::scripts::SCRIPTS;
 
     /// The device's API level, from `ro.build.version.sdk`.
     fn api_level() -> u32 {
@@ -153,18 +167,13 @@ mod tests {
 
     #[test]
     fn the_matcher_is_there_from_api_29() {
-        assert_eq!(FontMatcher::new().is_some(), api_level() >= 29);
+        assert_eq!(FontMatcher::load().is_some(), api_level() >= 29);
     }
 
+    /// A test binary is no app, whose system font collection the matcher
+    /// needs, so the fonts come from the scan.
     #[test]
-    fn ideographs_take_a_font_for_the_users_language() {
-        let Some(matcher) = FontMatcher::new() else { return };
-        let han = SCRIPTS.iter().find(|script| script.probe == '\u{4E2D}').unwrap();
-        let font = |language: &str| matcher.candidates(han, &[language.to_owned()]).remove(0);
-        let (japanese, chinese) = (font("ja-JP"), font("zh-CN"));
-        println!("ja-JP: {japanese:?}\nzh-CN: {chinese:?}");
-        assert!(japanese.1.drawn_weight(han.probe).is_some());
-        assert!(chinese.1.drawn_weight(han.probe).is_some());
-        assert_ne!(japanese.1, chinese.1);
+    fn outside_an_app_the_matcher_is_left_out() {
+        assert!(FontMatcher::new().is_none());
     }
 }
