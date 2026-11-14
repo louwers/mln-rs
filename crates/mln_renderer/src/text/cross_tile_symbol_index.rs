@@ -20,6 +20,7 @@ use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::render_layer::RenderLayer;
 use crate::render_tile::RenderTile;
+use crate::util::vec2::Vec2f;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct IndexedSymbolInstance {
@@ -133,7 +134,7 @@ impl TileLayerIndex {
     }
 }
 
-fn is_in_viewport(projector: &TileProjector<'_>, point: Point<f32>) -> bool {
+fn is_in_viewport(projector: &TileProjector<'_>, point: Vec2f) -> bool {
     // buffer covers area of the next zoom level (current zoom - 1 covered area).
     const BUFFER: f64 = 1.0;
     const EDGE: f64 = 1.0 + BUFFER;

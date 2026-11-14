@@ -60,6 +60,7 @@ use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
 use crate::text::glyph_manager::HBShapeResults;
 use crate::text::quads::{SymbolQuad, SymbolQuads};
+use crate::util::vec2::Vec2f;
 
 /// Whether `text-field` is set: a constant that is not empty, or an
 /// expression.
@@ -1151,7 +1152,7 @@ impl SymbolLayout {
             [tex.x, tex.y],
             size_data,
             symbol.is_sdf,
-            Point::new(pixel_offset_br.x, pixel_offset_tl.y),
+            Vec2f::new(pixel_offset_br.x, pixel_offset_tl.y),
             min_font_scale,
         ));
         buffer.attribute_data.get_mut().push(SymbolBucket::layout_attributes(
@@ -1163,7 +1164,7 @@ impl SymbolLayout {
             [tex.x, tex.y],
             size_data,
             symbol.is_sdf,
-            Point::new(pixel_offset_tl.x, pixel_offset_br.y),
+            Vec2f::new(pixel_offset_tl.x, pixel_offset_br.y),
             min_font_scale,
         ));
         buffer.attribute_data.get_mut().push(SymbolBucket::layout_attributes(
@@ -1246,10 +1247,10 @@ impl SymbolLayout {
                     const VERTEX_LENGTH: usize = 4;
                     let anchor = b.anchor;
 
-                    let tl = Point::new(b.x1, b.y1);
-                    let tr = Point::new(b.x2, b.y1);
-                    let bl = Point::new(b.x1, b.y2);
-                    let br = Point::new(b.x2, b.y2);
+                    let tl = Vec2f::new(b.x1, b.y1);
+                    let tr = Vec2f::new(b.x2, b.y1);
+                    let bl = Vec2f::new(b.x1, b.y2);
+                    let br = Vec2f::new(b.x2, b.y2);
 
                     let index_length = if feature.along_line { 6 } else { 8 };
 
@@ -1279,7 +1280,7 @@ impl SymbolLayout {
                     // Dynamic vertices are initialized so that the vertex
                     // count always agrees with the layout vertex buffer, but
                     // they will always be updated before rendering happens
-                    let dynamic_vertex = SymbolBucket::collision_dynamic_vertex(false, false, Point::new(0.0, 0.0));
+                    let dynamic_vertex = SymbolBucket::collision_dynamic_vertex(false, false, Vec2f::ZERO);
                     collision_buffer.dynamic_vertices.extend_from_slice(&[dynamic_vertex; 4]);
 
                     if feature.along_line {

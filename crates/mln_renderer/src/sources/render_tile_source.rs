@@ -51,6 +51,7 @@ use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayerGroupMap, DebugType, RenderItem};
 use crate::tile_pyramid::TilePyramid;
 use crate::util::subdivision::subdivide_vertex_line;
+use crate::util::vec2::Vec2f;
 
 pub(crate) struct TileSourceRenderItem {
     render_tiles: Rc<Vec<RenderTile>>,
@@ -475,12 +476,6 @@ impl LayerTweaker for PolylineLayerTweaker {
     }
 }
 
-fn rotate(a: Point<f32>, angle: f32) -> Point<f32> {
-    let cos = angle.cos();
-    let sin = angle.sin();
-    Point::new(cos * a.x - sin * a.y, sin * a.x + cos * a.y)
-}
-
 /// The base of the render sources that provide render tiles.
 pub(crate) struct RenderTileSource {
     pub(crate) base: RenderSourceBase,
@@ -633,11 +628,11 @@ impl RenderTileSource {
             indices.sort_by(|&a, &b| {
                 let a = &tiles[a];
                 let b = &tiles[b];
-                let pa = Point::new(a.id.canonical.x as f32, a.id.canonical.y as f32);
-                let pb = Point::new(b.id.canonical.x as f32, b.id.canonical.y as f32);
+                let pa = Vec2f::new(a.id.canonical.x as f32, a.id.canonical.y as f32);
+                let pb = Vec2f::new(b.id.canonical.x as f32, b.id.canonical.y as f32);
 
-                let par = rotate(pa, source_bearing);
-                let pbr = rotate(pb, source_bearing);
+                let par = pa.rotate(source_bearing);
+                let pbr = pb.rotate(source_bearing);
 
                 // std::tie(b.z, par.y, par.x) < std::tie(a.z, pbr.y, pbr.x)
                 b.id.canonical.z.cmp(&a.id.canonical.z).then(par.y.total_cmp(&pbr.y)).then(par.x.total_cmp(&pbr.x))

@@ -7,3 +7,4 @@ pub(crate) mod tile_cover_impl;
 pub(crate) mod tile_lod;
 pub(crate) mod tile_mesh;
 pub(crate) mod triangulate;
+pub(crate) mod vec2;

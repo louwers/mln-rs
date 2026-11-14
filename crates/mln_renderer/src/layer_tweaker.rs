@@ -24,6 +24,7 @@ use mln_util::mat4::{Mat4, matrix};
 use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
+use crate::util::vec2::Vec2f;
 
 pub(crate) type LayerTweakerPtr = Rc<RefCell<dyn LayerTweaker>>;
 
@@ -243,11 +244,7 @@ pub(crate) fn translate_vtx_matrix(
         0.0
     };
 
-    // util::rotate(Point<float>, float): computed in float.
-    let cos = angle.cos();
-    let sin = angle.sin();
-    let translate =
-        Point::new(cos * translation[0] - sin * translation[1], sin * translation[0] + cos * translation[1]);
+    let translate = Vec2f::new(translation[0], translation[1]).rotate(angle);
 
     if in_viewport_pixel_units {
         matrix::translate(&mut vtx_matrix, tile_matrix, f64::from(translate.x), f64::from(translate.y), 0.0);

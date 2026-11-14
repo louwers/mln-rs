@@ -24,6 +24,7 @@ use crate::layout::symbol_projection::{
     LabelPlaneProjector, LineProjectionCache, TileDistance, get_tile_skew_vectors, place_first_and_last_glyph,
 };
 use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
+use crate::util::vec2::Vec2f;
 
 /// A box's edges: [x1, y1, x2, y2].
 pub(crate) type CollisionBoundaries = [f32; 4];
@@ -114,7 +115,7 @@ pub(crate) struct PlacedFeatureResult {
 
 #[derive(Clone, Copy, Debug)]
 struct ProjectedAnchor {
-    point: Point<f32>,
+    point: Vec2f,
     perspective_ratio: f32,
     signed_distance_from_camera: f32,
     occluded: bool,
@@ -215,8 +216,8 @@ impl CollisionIndex {
     }
 
     pub(crate) fn project_tile_boundaries(&self, pos_matrix: &Mat4) -> CollisionBoundaries {
-        let top_left = self.project_point(pos_matrix, Point::new(0.0, 0.0));
-        let bottom_right = self.project_point(pos_matrix, Point::new(EXTENT as f32, EXTENT as f32));
+        let top_left = self.project_point(pos_matrix, Vec2f::ZERO);
+        let bottom_right = self.project_point(pos_matrix, Vec2f::new(EXTENT as f32, EXTENT as f32));
 
         [top_left.x, top_left.y, bottom_right.x, bottom_right.y]
     }
@@ -234,7 +235,7 @@ impl CollisionIndex {
     pub(crate) fn intersects_tile_edges(
         &self,
         box_: &CollisionBox,
-        shift: Point<f32>,
+        shift: Vec2f,
         pos_matrix: &Mat4,
         text_pixel_ratio: f32,
         tile_edges: &CollisionBoundaries,
@@ -286,8 +287,8 @@ impl CollisionIndex {
     pub(crate) fn place_feature(
         &self,
         feature: &CollisionFeature,
-        shift: Option<Point<f32>>,
-        translation: Point<f32>,
+        shift: Option<Vec2f>,
+        translation: Vec2f,
         tile_projector: &TileProjector<'_>,
         label_plane: &LabelPlaneProjector<'_>,
         text_pixel_ratio: f32,
@@ -322,7 +323,7 @@ impl CollisionIndex {
             )
         } else {
             let box_ = &feature.boxes[0];
-            let projected_point = self.project_and_get_perspective_ratio(tile_projector, add(box_.anchor, translation));
+            let projected_point = self.project_and_get_perspective_ratio(tile_projector, box_.anchor + translation);
             let tile_to_viewport = text_pixel_ratio * projected_point.perspective_ratio;
             let collision_boundaries: CollisionBoundaries;
             let mut occluded = projected_point.occluded;
@@ -343,7 +344,7 @@ impl CollisionIndex {
             } else {
                 collision_boundaries = Self::get_projected_collision_boundaries_for_anchor(
                     &projected_point,
-                    shift.unwrap_or(Point::new(0.0, 0.0)),
+                    shift.unwrap_or(Vec2f::ZERO),
                     text_pixel_ratio,
                     box_,
                 );
@@ -375,7 +376,7 @@ impl CollisionIndex {
     fn place_line_feature(
         &self,
         feature: &CollisionFeature,
-        translation: Point<f32>,
+        translation: Vec2f,
         tile_projector: &TileProjector<'_>,
         label_plane: &LabelPlaneProjector<'_>,
         text_pixel_ratio: f32,
@@ -413,7 +414,7 @@ impl CollisionIndex {
 
         let projected_label_plane_anchor = label_plane.project(tile_unit_anchor_point).point;
         let label_plane_anchor_point =
-            Point::new(projected_label_plane_anchor.x as f32, projected_label_plane_anchor.y as f32);
+            Vec2f::new(projected_label_plane_anchor.x as f32, projected_label_plane_anchor.y as f32);
 
         let mut projections = LineProjectionCache::default();
         projections.reset(symbol.line.len());
@@ -475,7 +476,7 @@ impl CollisionIndex {
                 continue;
             }
 
-            let projected_point = self.project_point_with_projector(tile_projector, add(circle.anchor, translation));
+            let projected_point = self.project_point_with_projector(tile_projector, circle.anchor + translation);
             let tile_unit_radius = (circle.x2 - circle.x1) / 2.0;
             let radius = tile_unit_radius * tile_to_viewport;
 
@@ -652,11 +653,7 @@ impl CollisionIndex {
         result
     }
 
-    fn project_and_get_perspective_ratio(
-        &self,
-        tile_projector: &TileProjector<'_>,
-        point: Point<f32>,
-    ) -> ProjectedAnchor {
+    fn project_and_get_perspective_ratio(&self, tile_projector: &TileProjector<'_>, point: Vec2f) -> ProjectedAnchor {
         self.to_viewport(&tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0))
     }
 
@@ -665,7 +662,7 @@ impl CollisionIndex {
         let viewport_padding = f64::from(self.viewport_padding);
         let distance = projected.signed_distance_from_camera as f32;
         ProjectedAnchor {
-            point: Point::new(
+            point: Vec2f::new(
                 (f64::midpoint(projected.point.x, 1.0) * f64::from(size.width) + viewport_padding) as f32,
                 (f64::midpoint(-projected.point.y, 1.0) * f64::from(size.height) + viewport_padding) as f32,
             ),
@@ -678,21 +675,21 @@ impl CollisionIndex {
         }
     }
 
-    fn project_point_with_projector(&self, tile_projector: &TileProjector<'_>, point: Point<f32>) -> Point<f32> {
+    fn project_point_with_projector(&self, tile_projector: &TileProjector<'_>, point: Vec2f) -> Vec2f {
         let projected = tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
         let size = self.transform_state.get_size();
         let viewport_padding = f64::from(self.viewport_padding);
-        Point::new(
+        Vec2f::new(
             ((f64::midpoint(projected.point.x, 1.0) * f64::from(size.width)) + viewport_padding) as f32,
             ((f64::midpoint(-projected.point.y, 1.0) * f64::from(size.height)) + viewport_padding) as f32,
         )
     }
 
-    fn project_point(&self, pos_matrix: &Mat4, point: Point<f32>) -> Point<f32> {
+    fn project_point(&self, pos_matrix: &Mat4, point: Vec2f) -> Vec2f {
         let p = transform(pos_matrix, point);
         let size = self.transform_state.get_size();
         let viewport_padding = f64::from(self.viewport_padding);
-        Point::new(
+        Vec2f::new(
             ((f64::midpoint(p[0] / p[3], 1.0) * f64::from(size.width)) + viewport_padding) as f32,
             ((f64::midpoint(-p[1] / p[3], 1.0) * f64::from(size.height)) + viewport_padding) as f32,
         )
@@ -701,7 +698,7 @@ impl CollisionIndex {
     fn get_projected_collision_boundaries(
         &self,
         pos_matrix: &Mat4,
-        shift: Point<f32>,
+        shift: Vec2f,
         text_pixel_ratio: f32,
         box_: &CollisionBox,
     ) -> CollisionBoundaries {
@@ -721,7 +718,7 @@ impl CollisionIndex {
 
     fn get_projected_collision_boundaries_for_anchor(
         projected_point: &ProjectedAnchor,
-        shift: Point<f32>,
+        shift: Vec2f,
         text_pixel_ratio: f32,
         box_: &CollisionBox,
     ) -> CollisionBoundaries {
@@ -750,29 +747,29 @@ impl CollisionIndex {
         pitch_with_map: bool,
         rotate_with_map: bool,
         projected_point: &ProjectedAnchor,
-        shift: Option<Point<f32>>,
-        translation: Point<f32>,
+        shift: Option<Vec2f>,
+        translation: Vec2f,
     ) -> ProjectedBox {
-        let anchor = add(box_.anchor, translation);
+        let anchor = box_.anchor + translation;
         // These vectors hold for screen-space texts aligned with the viewport
         // and for pitched texts aligned with the map.
-        let mut vec_east = Point::new(1.0f32, 0.0);
-        let mut vec_south = Point::new(0.0f32, 1.0);
+        let mut vec_east = Vec2f::new(1.0f32, 0.0);
+        let mut vec_south = Vec2f::new(0.0f32, 1.0);
 
         if rotate_with_map && !pitch_with_map {
             // Screen-space texts that stay east-west aligned.
             let projected_east =
-                self.project_and_get_perspective_ratio(tile_projector, Point::new(anchor.x + 1.0, anchor.y));
+                self.project_and_get_perspective_ratio(tile_projector, Vec2f::new(anchor.x + 1.0, anchor.y));
             let to_east_x = projected_east.point.x - projected_point.point.x;
             let to_east_y = projected_east.point.y - projected_point.point.y;
             let angle = (to_east_y / to_east_x).atan() + if to_east_x < 0.0 { std::f32::consts::PI } else { 0.0 };
-            vec_east = Point::new(angle.cos(), angle.sin());
-            vec_south = Point::new(-angle.sin(), angle.cos());
+            vec_east = Vec2f::new(angle.cos(), angle.sin());
+            vec_south = Vec2f::new(-angle.sin(), angle.cos());
         } else if !rotate_with_map && pitch_with_map {
             // Pitched texts that stay aligned with the viewport's X axis.
             let (east, south) = get_tile_skew_vectors(&self.transform_state);
-            vec_east = Point::new(east[0] as f32, east[1] as f32);
-            vec_south = Point::new(south[0] as f32, south[1] as f32);
+            vec_east = Vec2f::new(east[0] as f32, east[1] as f32);
+            vec_south = Vec2f::new(south[0] as f32, south[1] as f32);
         }
 
         let mut base_point = projected_point.point;
@@ -795,10 +792,7 @@ impl CollisionIndex {
         }
 
         if let Some(shift) = shift {
-            base_point = add(
-                base_point,
-                add(mul(vec_east, shift.x * distance_multiplier), mul(vec_south, shift.y * distance_multiplier)),
-            );
+            base_point += vec_east * (shift.x * distance_multiplier) + vec_south * (shift.y * distance_multiplier);
         }
 
         let x_min = box_.x1 * distance_multiplier;
@@ -827,7 +821,7 @@ impl CollisionIndex {
         let mut any_point_visible = !pitch_with_map;
         let mut bounds: CollisionBoundaries = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
         for (offset_x, offset_y) in offsets {
-            let mut point = add(add(base_point, mul(vec_east, offset_x)), mul(vec_south, offset_y));
+            let mut point = base_point + vec_east * offset_x + vec_south * offset_y;
             if pitch_with_map {
                 let projected = self.project_and_get_perspective_ratio(tile_projector, point);
                 any_point_visible = any_point_visible || !projected.occluded;
@@ -843,15 +837,7 @@ impl CollisionIndex {
     }
 }
 
-fn add(a: Point<f32>, b: Point<f32>) -> Point<f32> {
-    Point::new(a.x + b.x, a.y + b.y)
-}
-
-fn mul(a: Point<f32>, b: f32) -> Point<f32> {
-    Point::new(a.x * b, a.y * b)
-}
-
-fn transform(pos_matrix: &Mat4, point: Point<f32>) -> Vec4 {
+fn transform(pos_matrix: &Mat4, point: Vec2f) -> Vec4 {
     let a: Vec4 = [f64::from(point.x), f64::from(point.y), 0.0, 1.0];
     matrix::transform_mat4_value(&a, pos_matrix)
 }

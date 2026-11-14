@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use geometry::Point;
 use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
@@ -38,6 +37,7 @@ use crate::bucket::{Bucket, BucketBase, FeatureStates};
 use crate::bucket_geometry::GeometryVec;
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::paint_property_binder::PaintPropertyBinder;
+use crate::util::vec2::Vec2f;
 
 crate::paint_property_binders!(
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
@@ -254,7 +254,7 @@ impl SymbolSizeBinder {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct PlacedSymbol {
-    pub(crate) anchor_point: Point<f32>,
+    pub(crate) anchor_point: Vec2f,
     pub(crate) segment: usize,
     pub(crate) lower_size: f32,
     pub(crate) upper_size: f32,
@@ -281,7 +281,7 @@ impl PlacedSymbol {
     #[expect(clippy::too_many_arguments, reason = "each argument is a field of the placed symbol")]
     #[must_use]
     pub(crate) fn new(
-        anchor_point: Point<f32>,
+        anchor_point: Vec2f,
         segment: usize,
         lower_size: f32,
         upper_size: f32,
@@ -417,8 +417,8 @@ pub(crate) struct SymbolBucketState {
     pub(crate) has_uninitialized_symbols: bool,
     /// The tile-unit translations the leader's dynamic positions carry,
     /// which layers sharing the bucket compare.
-    pub(crate) dynamic_text_translation: Point<f32>,
-    pub(crate) dynamic_icon_translation: Point<f32>,
+    pub(crate) dynamic_text_translation: Vec2f,
+    pub(crate) dynamic_icon_translation: Vec2f,
 
     pub(crate) symbol_instances: Vec<SymbolInstance>,
 
@@ -718,16 +718,16 @@ impl SymbolBucket {
     #[expect(clippy::too_many_arguments, reason = "each argument is a component of the packed vertex")]
     #[must_use]
     pub(crate) fn layout_attributes(
-        label_anchor: Point<f32>,
-        o: Point<f32>,
+        label_anchor: Vec2f,
+        o: Vec2f,
         glyph_offset_y: f32,
         tx: u16,
         ty: u16,
         tex_origin: [u16; 2],
         size_data: Range<f32>,
         is_sdf: bool,
-        pixel_offset: Point<f32>,
-        min_font_scale: Point<f32>,
+        pixel_offset: Vec2f,
+        min_font_scale: Vec2f,
     ) -> SymbolLayoutVertex {
         let a_size_min = (MAX_PACKED_SIZE.min((size_data.min * f32::from(SIZE_PACK_FACTOR)) as u16) << 1)
             .wrapping_add(u16::from(is_sdf));
@@ -753,7 +753,7 @@ impl SymbolBucket {
     }
 
     #[must_use]
-    pub(crate) fn dynamic_layout_attributes(anchor_point: Point<f32>, label_angle: f32) -> SymbolDynamicLayoutVertex {
+    pub(crate) fn dynamic_layout_attributes(anchor_point: Vec2f, label_angle: f32) -> SymbolDynamicLayoutVertex {
         SymbolDynamicLayoutVertex { a1: [anchor_point.x, anchor_point.y, label_angle] }
     }
 
@@ -763,11 +763,7 @@ impl SymbolBucket {
     }
 
     #[must_use]
-    pub(crate) fn collision_layout_vertex(
-        a: Point<f32>,
-        anchor: Point<f32>,
-        o: Point<f32>,
-    ) -> CollisionBoxLayoutVertex {
+    pub(crate) fn collision_layout_vertex(a: Vec2f, anchor: Vec2f, o: Vec2f) -> CollisionBoxLayoutVertex {
         CollisionBoxLayoutVertex {
             a1: [a.x as i16, a.y as i16],
             a2: [anchor.x as i16, anchor.y as i16],
@@ -776,11 +772,7 @@ impl SymbolBucket {
     }
 
     #[must_use]
-    pub(crate) fn collision_dynamic_vertex(
-        placed: bool,
-        not_used: bool,
-        shift: Point<f32>,
-    ) -> CollisionBoxDynamicVertex {
+    pub(crate) fn collision_dynamic_vertex(placed: bool, not_used: bool, shift: Vec2f) -> CollisionBoxDynamicVertex {
         CollisionBoxDynamicVertex { a1: [u16::from(placed), u16::from(not_used)], a2: [shift.x, shift.y] }
     }
 }
