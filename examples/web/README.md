@@ -83,6 +83,16 @@ page (main thread, no wasm)
 - A panic traps the wasm instance it happens in. If that's the map's or a tile
   worker's, the map stops and the page shows the panic message.
 
+## Size
+
+`mise run web:size` reports how much of the release module each crate and
+function takes, and `mise run web:size main` how that changed from another
+commit. `--open` also opens a zoomable treemap of crate, module and function in
+the browser, colored by change in a comparison. The task builds the module as
+`web:build --profile release` does, keeping the function names that
+tools/wasm-size reads, and leaves out the name section, which the shipped module
+doesn't have. `--module` picks mln_web_webgl or mln_web_shaper instead.
+
 ## Check
 
 `mise run web:check` tests the browser build against the native renderer:

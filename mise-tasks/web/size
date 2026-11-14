@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#MISE description="Report the browser build's size by crate and function, or compare it with another commit's"
+#USAGE flag "--module <module>" default="mln_web" help="The module: mln_web, mln_web_webgl (its webgl feature) or mln_web_shaper"
+#USAGE flag "--top <n>" default="20" help="Rows per table"
+#USAGE flag "--open" help="Also open a zoomable treemap of it in the browser"
+#USAGE arg "[base]" help="A Git ref to compare with, uncommitted changes against it"
+# The module is built as `web:build --profile release` builds it, but keeps
+# its function names (wasm-opt -g), which tools/wasm-size reads. The base is
+# checked out in a worktree under target/web-size, which the next comparison
+# reuses, and is built with this checkout's wasm-bindgen and wasm-opt: a base
+# whose wasm-bindgen crate differs from the CLI's version fails to bind.
+set -euo pipefail
+source tools/web-wasm-opt.sh
+web_wasm_opt_require
+export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+case "$usage_module" in
+    mln_web) package=(-p mln-rs-web) crate=mln_web ;;
+    mln_web_webgl) package=(-p mln-rs-web --features webgl) crate=mln_web ;;
+    mln_web_shaper) package=(-p mln-rs-web-shaper) crate=mln_web_shaper ;;
+    *) echo "error: unknown module $usage_module" >&2; exit 1 ;;
+esac
+work=target/web-size
+
+# `build <checkout> <target dir> <out dir>`: the checkout's module, bound and
+# optimized, into the out directory.
+build() {
+    cargo build --release --target wasm32-unknown-unknown "${package[@]}" \
+        --manifest-path "$1/Cargo.toml" --target-dir "$2"
+    wasm-bindgen --target web --out-dir "$3" "$2/wasm32-unknown-unknown/release/$crate.wasm"
+    web_wasm_opt "$3/${crate}_bg.wasm" -g
+}
+
+build . target "$work/candidate"
+args=("$work/candidate/${crate}_bg.wasm" --top "$usage_top")
+if [[ "${usage_open:-}" == true ]]; then
+    # A directory of its own, which the browser can read after the task ends.
+    page="$(mktemp -d)/web-size.html"
+    args+=(--html "$page")
+fi
+if [[ -n "${usage_base:-}" ]]; then
+    commit=$(git rev-parse --verify "$usage_base^{commit}")
+    tree="$work/tree"
+    if [[ -e "$tree/.git" ]]; then
+        git -C "$tree" checkout -q --force --detach "$commit"
+    else
+        git worktree prune
+        git worktree add -q --detach "$tree" "$commit"
+    fi
+    build "$tree" "$work/target" "$work/base"
+    args+=(--base "$work/base/${crate}_bg.wasm")
+fi
+# Names are cut to the terminal's width.
+if [[ -t 1 ]]; then
+    COLUMNS=$(tput cols 2> /dev/null || echo 100)
+    export COLUMNS
+fi
+cargo run --release -q -p mln-rs-wasm-size -- "${args[@]}"
+if [[ -n "${page:-}" ]]; then
+    case "$(uname -s)" in
+        Darwin) open "$page" ;;
+        MINGW* | MSYS* | CYGWIN*) start "" "$page" ;;
+        *) xdg-open "$page" > /dev/null 2>&1 || echo "Open $page in a browser" >&2 ;;
+    esac
+fi

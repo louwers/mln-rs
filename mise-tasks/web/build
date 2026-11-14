@@ -7,10 +7,10 @@
 # for browsers without WebGPU, which alone download it. Vite then builds the
 # page around them.
 #
-# A release build is also made small: opt-level "s", then wasm-opt -Oz, which
-# inlines a function with one caller only when it is small. Its default, at
-# any size, made the module bigger after brotli and slower to start.
+# A release build is also made small: opt-level "s", then wasm-opt
+# (tools/web-wasm-opt.sh).
 set -euo pipefail
+source tools/web-wasm-opt.sh
 profile="$usage_profile"
 if [[ "$profile" == release ]]; then
     # For this build only: the wasm32 target has its own directory, so native release builds keep theirs.
@@ -18,16 +18,12 @@ if [[ "$profile" == release ]]; then
 fi
 target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/$([[ "$profile" == dev ]] && echo debug || echo "$profile")"
 pkg=examples/web/web/pkg
-if [[ "$profile" != dev ]]; then
-    command -v wasm-opt > /dev/null ||
-        { echo "error: wasm-opt not found: put binaryen's wasm-opt on the PATH (examples/web/README.md)" >&2; exit 1; }
-fi
+[[ "$profile" == dev ]] || web_wasm_opt_require
 # wasm-bindgen's output for a module cargo built, into a directory.
 bind() {
     wasm-bindgen --target web --out-dir "$2" "$target/$1.wasm"
     if [[ "$profile" != dev ]]; then
-        wasm-opt -Oz --converge --one-caller-inline-max-function-size=20 --zero-filled-memory --low-memory-unused \
-            --strip-debug --strip-producers --strip-target-features "$2/$1_bg.wasm" -o "$2/$1_bg.wasm"
+        web_wasm_opt "$2/$1_bg.wasm" --strip-debug
     fi
 }
 cargo build --profile "$profile" --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper

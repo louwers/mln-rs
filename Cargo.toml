@@ -15,6 +15,7 @@ members = [
   "tools/render-test",
   "tools/style-codegen",
   "tools/test-server",
+  "tools/wasm-size",
   "vendor/*",
 ]
 # Patched copies of crates.io packages ([patch.crates-io] below), not ours.
@@ -213,6 +214,10 @@ fastrand = { version = "2.5.0" }
 tempfile = "3.27.0"
 # Derives the libraries' `Display` and `std::error::Error` impls.
 thiserror = "2.0.21"
+# tools/wasm-size: the browser build's function sizes and names.
+wasmparser = { version = "0.263.0", default-features = false, features = [
+  "std",
+] }
 # Candidate for ICU's ubidi (platform/default/src/mln/text/bidi.cpp); kept only
 # if //difftest/shaping shows it matches ICU on the test corpus.
 unicode-bidi = { version = "0.3.18" }

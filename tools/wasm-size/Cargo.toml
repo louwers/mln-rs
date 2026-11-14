@@ -1,0 +1,21 @@
+[package]
+name = "mln-rs-wasm-size"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+# The browser build's size by crate (`mise run web:size`); never released.
+publish = false
+
+[[bin]]
+name = "wasm-size"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+wasmparser.workspace = true
+
+[lints]
+workspace = true

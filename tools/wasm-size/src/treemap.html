@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wasm Size</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f6f4;
+        --fg: #1d1d1b;
+        --muted: #6b6b66;
+        --line: #00000026;
+        --tip: #ffffff;
+        --l1: 82%;
+        --l2: 90%;
+        --grow: #c4372b;
+        --shrink: #2f8a4c;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #161615;
+          --fg: #ecece8;
+          --muted: #9a9a94;
+          --line: #00000066;
+          --tip: #262624;
+          --l1: 30%;
+          --l2: 22%;
+          --grow: #ef6a5c;
+          --shrink: #5cc47c;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          13px/1.35 ui-sans-serif,
+          system-ui,
+          sans-serif;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 12px 16px 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 16px;
+        align-items: baseline;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0;
+        font-weight: 600;
+      }
+      .summary {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .grow {
+        color: var(--grow);
+      }
+      .shrink {
+        color: var(--shrink);
+      }
+      nav {
+        padding: 0 16px 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px;
+        align-items: center;
+        min-height: 24px;
+      }
+      nav button {
+        font: inherit;
+        color: var(--fg);
+        background: none;
+        border: 0;
+        padding: 2px 4px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      nav button:hover {
+        background: var(--line);
+      }
+      nav button:last-child {
+        font-weight: 600;
+        cursor: default;
+      }
+      nav button:last-child:hover {
+        background: none;
+      }
+      nav span {
+        color: var(--muted);
+      }
+      .hint {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      #map {
+        position: relative;
+        flex: 1;
+        min-height: 420px;
+        margin: 0 16px 16px;
+        overflow: hidden;
+      }
+      .box {
+        position: absolute;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        background: hsl(var(--h) var(--s) var(--l1));
+        cursor: pointer;
+      }
+      .box.leaf {
+        cursor: default;
+      }
+      .box .inner {
+        position: absolute;
+        border: 1px solid var(--line);
+        background: hsl(var(--h) var(--s) var(--l2));
+      }
+      .box:hover {
+        outline: 2px solid var(--fg);
+        outline-offset: -2px;
+        z-index: 1;
+      }
+      .label {
+        position: absolute;
+        left: 4px;
+        right: 4px;
+        top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
+      }
+      .label b {
+        font-weight: 600;
+      }
+      .label small {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        margin-left: 6px;
+      }
+      .inner .label {
+        font-size: 11px;
+        top: 1px;
+        left: 3px;
+      }
+      #tip {
+        position: fixed;
+        pointer-events: none;
+        display: none;
+        max-width: min(560px, 90vw);
+        background: var(--tip);
+        color: var(--fg);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 8px 10px;
+        box-shadow: 0 4px 16px #0003;
+        z-index: 10;
+        font-variant-numeric: tabular-nums;
+      }
+      #tip code {
+        font:
+          12px ui-monospace,
+          monospace;
+        word-break: break-all;
+        display: block;
+        margin-bottom: 4px;
+      }
+      #tip div {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1 id="title"></h1>
+      <span class="summary" id="summary"></span>
+    </header>
+    <nav id="crumbs"></nav>
+    <div id="map"></div>
+    <div id="tip"></div>
+    <script>
+      const DATA = "__DATA__";
+      const root = DATA.tree;
+      const compare = DATA.compare;
+      document.title = DATA.title;
+
+      // Parents, depth, and a hue per top-level group, which its descendants share.
+      (function prepare(node, parent, hue) {
+        node.parent = parent;
+        if (parent === root)
+          hue = [...node.n].reduce(
+            (h, c) => (h * 31 + c.charCodeAt(0)) % 360,
+            7,
+          );
+        node.hue = hue;
+        for (const child of node.c || []) prepare(child, node, hue);
+        if (node.c) node.c.sort((a, b) => b.s - a.s);
+      })(root, null, 0);
+
+      const kib = (n) =>
+        (n / 1024).toLocaleString("en", {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        }) + " KiB";
+      const size = (n) => (n < 10240 ? n.toLocaleString("en") + " B" : kib(n));
+      const percent = (part, whole) =>
+        whole ? ((100 * part) / whole).toFixed(1) + "%" : "–";
+
+      function change(node) {
+        const d = node.s - node.b;
+        if (d === 0) return "<span>no change</span>";
+        const cls = d > 0 ? "grow" : "shrink";
+        const rel = node.b
+          ? ` (${d > 0 ? "+" : "−"}${percent(Math.abs(d), node.b)})`
+          : " (new)";
+        return `<span class="${cls}">${d > 0 ? "+" : "−"}${size(Math.abs(d))}${rel}</span>`;
+      }
+
+      function color(el, node) {
+        if (!compare) {
+          el.style.setProperty("--h", node.hue);
+          el.style.setProperty(
+            "--s",
+            node.parent === null || node.n.startsWith("(") ? "0%" : "45%",
+          );
+          return;
+        }
+        // Red for growth, green for shrinkage, stronger the larger the ratio.
+        const ratio = node.b ? node.s / node.b : 4;
+        const strength = Math.min(1, Math.abs(Math.log2(ratio)) * 2);
+        el.style.setProperty("--h", ratio >= 1 ? 4 : 140);
+        el.style.setProperty("--s", (strength * 65).toFixed(0) + "%");
+      }
+
+      // Squarified treemap: rectangles for `nodes` (largest first) in the rect.
+      function squarify(nodes, x, y, w, h) {
+        const out = [];
+        const items = nodes.filter((n) => n.s > 0);
+        const total = items.reduce((t, n) => t + n.s, 0);
+        if (!total || w <= 0 || h <= 0) return out;
+        const scale = (w * h) / total;
+        let i = 0;
+        while (i < items.length) {
+          const side = Math.min(w, h);
+          let row = [items[i]],
+            rowArea = items[i].s * scale,
+            best = worst(row, rowArea, side);
+          let j = i + 1;
+          for (; j < items.length; j++) {
+            const area = rowArea + items[j].s * scale;
+            const next = worst(row.concat(items[j]), area, side);
+            if (next > best) break;
+            row.push(items[j]);
+            rowArea = area;
+            best = next;
+          }
+          const thick = rowArea / side;
+          let offset = 0;
+          for (const node of row) {
+            const len = (node.s * scale) / thick;
+            if (w >= h) out.push({ node, x, y: y + offset, w: thick, h: len });
+            else out.push({ node, x: x + offset, y, w: len, h: thick });
+            offset += len;
+          }
+          if (w >= h) {
+            x += thick;
+            w -= thick;
+          } else {
+            y += thick;
+            h -= thick;
+          }
+          i = j;
+        }
+        return out;
+
+        function worst(row, area, side) {
+          let max = 0,
+            min = Infinity;
+          for (const n of row) {
+            const a = n.s * scale;
+            max = Math.max(max, a);
+            min = Math.min(min, a);
+          }
+          return Math.max(
+            (side * side * max) / (area * area),
+            (area * area) / (side * side * min),
+          );
+        }
+      }
+
+      const map = document.getElementById("map");
+      const tip = document.getElementById("tip");
+      let current = root;
+
+      function label(node, w, h, small) {
+        if (w < 36 || h < (small ? 14 : 18)) return "";
+        const text = node.n.replace(
+          /[&<>]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c],
+        );
+        return `<div class="label"><b>${text}</b>${w > 120 ? `<small>${size(node.s)}</small>` : ""}</div>`;
+      }
+
+      function render() {
+        map.textContent = "";
+        const { width, height } = map.getBoundingClientRect();
+        for (const r of squarify(current.c || [], 0, 0, width, height)) {
+          const el = document.createElement("div");
+          el.className = "box" + (r.node.c ? "" : " leaf");
+          Object.assign(el.style, {
+            left: r.x + "px",
+            top: r.y + "px",
+            width: r.w + "px",
+            height: r.h + "px",
+          });
+          color(el, r.node);
+          let html = label(r.node, r.w, r.h, false);
+          // One level inside, under the label.
+          if (r.node.c && r.w > 24 && r.h > 40) {
+            for (const c of squarify(r.node.c, 2, 20, r.w - 6, r.h - 24)) {
+              if (c.w < 3 || c.h < 3) continue;
+              const style =
+                `left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px;` +
+                (compare ? innerColor(c.node) : "");
+              html += `<div class="inner" style="${style}" data-i="${r.node.c.indexOf(c.node)}">${label(c.node, c.w, c.h, true)}</div>`;
+            }
+          }
+          el.innerHTML = html;
+          el.addEventListener("click", () => {
+            if (r.node.c) zoom(r.node);
+          });
+          el.addEventListener("mousemove", (e) => {
+            const inner = e.target.closest(".inner");
+            showTip(e, inner ? r.node.c[+inner.dataset.i] : r.node);
+          });
+          el.addEventListener("mouseleave", () => (tip.style.display = "none"));
+          map.appendChild(el);
+        }
+        crumbs();
+      }
+
+      function innerColor(node) {
+        const probe = document.createElement("div");
+        color(probe, node);
+        return `--h:${probe.style.getPropertyValue("--h")};--s:${probe.style.getPropertyValue("--s")};`;
+      }
+
+      function pathOf(node) {
+        const path = [];
+        for (let n = node; n; n = n.parent) path.unshift(n);
+        return path;
+      }
+
+      function showTip(e, node) {
+        const name =
+          node.f ||
+          pathOf(node)
+            .slice(1)
+            .map((n) => n.n)
+            .join(" › ");
+        const escaped = name.replace(
+          /[&<>]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c],
+        );
+        let html = `<code>${escaped}</code><div>${size(node.s)} · ${percent(node.s, root.s)} of the module`;
+        if (node.parent && node.parent !== root)
+          html += ` · ${percent(node.s, node.parent.s)} of ${node.parent.n}`;
+        html += "</div>";
+        if (compare)
+          html += `<div>base ${size(node.b)} → ${change(node)}</div>`;
+        if (node.c)
+          html += `<div>${node.c.length.toLocaleString("en")} inside; click to open</div>`;
+        tip.innerHTML = html;
+        tip.style.display = "block";
+        const pad = 14,
+          rect = tip.getBoundingClientRect();
+        tip.style.left =
+          Math.min(e.clientX + pad, innerWidth - rect.width - 8) + "px";
+        tip.style.top =
+          (e.clientY + pad + rect.height > innerHeight
+            ? e.clientY - rect.height - pad
+            : e.clientY + pad) + "px";
+      }
+
+      function crumbs() {
+        const nav = document.getElementById("crumbs");
+        nav.textContent = "";
+        pathOf(current).forEach((node, i, all) => {
+          if (i)
+            nav.append(
+              Object.assign(document.createElement("span"), {
+                textContent: "›",
+              }),
+            );
+          const b = document.createElement("button");
+          b.textContent = i ? node.n : "all";
+          if (i < all.length - 1) b.addEventListener("click", () => zoom(node));
+          nav.append(b);
+        });
+        const hint = document.createElement("span");
+        hint.className = "hint";
+        hint.textContent =
+          current === root ? "Click a box to open it" : "Esc goes up";
+        nav.append(hint);
+      }
+
+      function zoom(node) {
+        current = node;
+        tip.style.display = "none";
+        render();
+      }
+
+      document.getElementById("title").textContent = DATA.title;
+      document.getElementById("summary").innerHTML = compare
+        ? `${kib(root.s)}, ${change(root)} from ${kib(root.b)} · <span class="grow">■</span> grew <span class="shrink">■</span> shrank`
+        : `${kib(root.s)} without its name section`;
+      addEventListener("keydown", (e) => {
+        if ((e.key === "Escape" || e.key === "Backspace") && current.parent)
+          zoom(current.parent);
+      });
+      addEventListener("resize", render);
+      render();
+    </script>
+  </body>
+</html>
