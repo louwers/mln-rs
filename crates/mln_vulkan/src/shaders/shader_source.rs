@@ -140,9 +140,7 @@ const CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
 ];
 shader_source!(CIRCLE_SHADER, "CircleShader", CIRCLE_ATTRIBUTES, &[]);
 
-// src/mln/shaders/vulkan/clipping_mask.cpp. The globe variant also reads
-// the tile's projection vectors at the locations 1 to 3, which the context
-// binds as instance attributes itself.
+// src/mln/shaders/vulkan/clipping_mask.cpp
 const CLIPPING_MASK_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
 shader_source!(CLIPPING_MASK_PROGRAM, "ClippingMaskProgram", CLIPPING_MASK_ATTRIBUTES, &[]);
 

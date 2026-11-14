@@ -29,7 +29,6 @@ use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -126,9 +125,7 @@ impl PaintParameters for TestPaintParameters<'_> {
     fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
         DepthMode { func: mln_gfx::types::DepthFunctionType::LessEqual, mask, range: Range::new(0.0, DEPTH_RANGE_SIZE) }
     }
-    fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) -> bool {
-        true
-    }
+    fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) {}
     fn stencil_mode_for_clipping(&self, _tile_id: &UnwrappedTileID) -> StencilMode {
         self.clip_stencil
     }
@@ -416,10 +413,53 @@ fn full_matrix() -> [f32; 16] {
     ]
 }
 
+/// A clipping mask as the renderer draws one: the clipping mask shader over
+/// the tile square that `matrix` projects, writing `stencil_ref` to the
+/// stencil buffer and nothing else.
+fn clip_mask_drawable(
+    context: &dyn Context,
+    registry: &ShaderRegistry,
+    matrix: [f32; 16],
+    stencil_ref: i32,
+) -> mln_gfx::drawable::UniqueDrawable {
+    let shader = context
+        .get_generic_shader(registry, "ClippingMaskProgram", ProjectionVariant::Mercator)
+        .expect("ClippingMaskProgram");
+    let tile_vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
+    let mut builder = context.create_drawable_builder();
+    builder.set_shader(Some(shader));
+    builder.set_enable_color(false);
+    builder.set_color_mode(&ColorMode::disabled());
+    builder.set_enable_depth(false);
+    builder.set_vertex_attr_id(mln_gfx::shaders::shader_defines::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE);
+    builder.set_raw_vertices(
+        bytemuck::cast_slice(&tile_vertices).to_vec(),
+        tile_vertices.len(),
+        AttributeDataType::Short2,
+    );
+    builder.set_segments(DrawMode::Triangles(), vec![0, 1, 2, 1, 2, 3], &[SegmentBase::with_lengths(0, 0, 4, 6)]);
+    builder.flush(context);
+    let mut mask = builder.clear_drawables().pop().expect("a clipping mask drawable");
+    mask.mutable_uniform_buffers().create_or_update_pod(
+        ID_PROJECTION_UBO,
+        &ProjectionUBO { matrix, ..ProjectionUBO::default() },
+        context,
+    );
+    mask.base_mut().stencil_mode = Some(StencilMode {
+        test: Test::Always,
+        ref_: stencil_ref,
+        mask: 0b1111_1111,
+        fail: StencilOpType::Keep,
+        depth_fail: StencilOpType::Keep,
+        pass: StencilOpType::Replace,
+    });
+    mask
+}
+
 #[test]
 fn tile_clipping_masks_limit_stenciled_drawables() {
-    // mtl::Context::renderTileClippingMasks writes stencil ref 1 for a
-    // clip "tile" covering the left half; a full-viewport background
+    // A clipping mask drawable writes stencil ref 1 over a "tile"
+    // covering the left half; a full-viewport background
     // drawable with stencil enabled and PaintParameters::stencilModeForClipping
     // (Equal 1, as paint_parameters.cpp builds it) only lands there.
     let backend = headless_backend(Size { width: 32, height: 16 });
@@ -430,6 +470,8 @@ fn tile_clipping_masks_limit_stenciled_drawables() {
 
     let layer_group = build_layer_group(context, &registry, RenderPass::Opaque | RenderPass::Translucent);
     visit_layer_group_drawables(&mut *layer_group.borrow_mut(), |d| d.set_enable_stencil(true));
+
+    let mut mask = clip_mask_drawable(context, &registry, left_half_matrix(), 1);
 
     let image = backend.target.begin_frame().expect("a frame");
     let renderable = &*image;
@@ -461,6 +503,7 @@ fn tile_clipping_masks_limit_stenciled_drawables() {
             full_matrix(),
         );
         layer_group.borrow_mut().upload(&*upload_pass);
+        mask.upload(&*upload_pass);
     }
     parameters.render_pass = Some(parameters.encoder.create_render_pass(
         "main buffer",
@@ -471,8 +514,7 @@ fn tile_clipping_masks_limit_stenciled_drawables() {
             clear_stencil: Some(0),
         },
     ));
-    let clip = ClipUBO { matrix: left_half_matrix(), stencil_ref: 1, ..Default::default() };
-    assert!(context.render_tile_clipping_masks(parameters.render_pass.as_deref().unwrap(), &registry, &[clip]));
+    mask.draw(&mut parameters);
     for pass in [RenderPass::Opaque, RenderPass::Translucent] {
         parameters.pass = pass;
         layer_group.borrow_mut().render(&mut parameters);

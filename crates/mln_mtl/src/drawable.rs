@@ -65,7 +65,9 @@ struct DrawableImpl {
     /// The attachments of the pass the states were made for.
     attachment_formats: Option<AttachmentFormats>,
     depth_stencil_state: Option<MTLDepthStencilStatePtr>,
-    previous_stencil_mode: StencilMode,
+    /// The stencil mode `depth_stencil_state` was made with, less its
+    /// reference value.
+    stencil_state_mode: StencilMode,
 }
 
 pub(crate) struct Drawable {
@@ -171,7 +173,7 @@ impl Drawable {
                 pipeline_state: None,
                 attachment_formats: None,
                 depth_stencil_state: None,
-                previous_stencil_mode: StencilMode::default(),
+                stencil_state_mode: StencilMode::default(),
             },
         }
     }
@@ -180,7 +182,7 @@ impl Drawable {
         self.impl_.vertex_attr_id = id;
     }
 
-    pub(crate) fn upload(&mut self, upload_pass: &UploadPass) {
+    fn upload_in(&mut self, upload_pass: &UploadPass) {
         let Some(shader_ptr) = self.base.shader.clone() else {
             Log::warning(
                 Event::General,
@@ -390,6 +392,12 @@ impl drawable::Drawable for Drawable {
         &mut self.base
     }
 
+    fn upload(&mut self, upload_pass: &dyn mln_gfx::upload_pass::UploadPass) {
+        if let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() {
+            self.upload_in(upload_pass);
+        }
+    }
+
     fn draw(&mut self, parameters: &mut dyn PaintParameters) {
         let parameters: &dyn PaintParameters = parameters;
         let Some(context) = parameters.context().downcast_ref::<Context>() else {
@@ -480,45 +488,28 @@ impl drawable::Drawable for Drawable {
         if self.base.is_3d {
             render_pass.set_depth_range(parameters.depth_mode_for_3d(DepthMaskType::ReadWrite).range);
         } else {
-            let mut new_stencil_mode = None;
-            let tile_id = self.base.tile_id;
-
-            // If we have a stencil state, we may be able to reuse it, if the
-            // tile masks haven't changed. We assume that only the reference
-            // value needs to be compared.
-            if self.impl_.depth_stencil_state.is_some()
-                && self.base.enable_stencil
-                && let Some(tile_id) = tile_id
-            {
-                let mode = parameters.stencil_mode_for_clipping(&tile_id.to_unwrapped());
-                if mode.ref_ != self.impl_.previous_stencil_mode.ref_ {
-                    // No, need to rebuild it.
-                    self.impl_.depth_stencil_state = None;
+            let stencil_mode = match (self.base.stencil_mode, self.base.tile_id) {
+                (Some(mode), _) => mode,
+                (None, Some(tile_id)) if self.base.enable_stencil => {
+                    parameters.stencil_mode_for_clipping(&tile_id.to_unwrapped())
                 }
-                new_stencil_mode = Some(mode);
-            }
+                _ => StencilMode::disabled(),
+            };
             let depth_mode = if self.base.enable_depth {
                 parameters.depth_mode_for_sublayer(self.base.sub_layer_index as u8, self.base.depth_type)
             } else {
                 DepthMode::disabled()
             };
-            if self.impl_.depth_stencil_state.is_none() {
-                let stencil_mode = match tile_id {
-                    Some(tile_id) if self.base.enable_stencil => {
-                        let mode = parameters.stencil_mode_for_clipping(&tile_id.to_unwrapped());
-                        new_stencil_mode = Some(mode);
-                        mode
-                    }
-                    _ => StencilMode::disabled(),
-                };
+            // The reference value is the encoder's, so a state serves every
+            // mode that differs from its own in that value only.
+            let state_mode = StencilMode { ref_: 0, ..stencil_mode };
+            if self.impl_.depth_stencil_state.is_none() || self.impl_.stencil_state_mode != state_mode {
                 self.impl_.depth_stencil_state =
                     context.make_depth_stencil_state(&depth_mode, &stencil_mode, render_pass);
-                if let Some(mode) = new_stencil_mode {
-                    self.impl_.previous_stencil_mode = mode;
-                }
+                self.impl_.stencil_state_mode = state_mode;
             }
             render_pass.set_depth_stencil_state(self.impl_.depth_stencil_state.as_ref());
-            render_pass.set_stencil_reference(self.impl_.previous_stencil_mode.ref_);
+            render_pass.set_stencil_reference(stencil_mode.ref_);
             render_pass.set_depth_range(depth_mode.range);
         }
 

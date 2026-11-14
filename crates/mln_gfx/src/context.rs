@@ -10,14 +10,12 @@ use mln_util::size::Size;
 use crate::backend::Type as BackendType;
 use crate::command_encoder::CommandEncoder;
 use crate::drawable_builder::UniqueDrawableBuilder;
-use crate::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use crate::offscreen_texture::OffscreenTexture;
 use crate::projection_variant::ProjectionVariant;
 use crate::render_pass::RenderPass;
 use crate::renderer::layer_group::LayerGroupBasePtr;
 use crate::rendering_stats::RenderingStats;
 use crate::shader_registry::ShaderRegistry;
-use crate::shaders::clipping_mask_ubo::ClipUBO;
 use crate::shaders::shader_program_base::ShaderProgramBasePtr;
 use crate::texture2d::Texture2DPtr;
 use crate::types::TextureChannelDataType;
@@ -87,50 +85,6 @@ pub trait Context: Any {
     fn mutable_global_uniform_buffers(&self) -> RefMut<'_, UniformBufferArray>;
     fn bind_global_uniform_buffers(&self, render_pass: &dyn RenderPass);
     fn unbind_global_uniform_buffers(&self, render_pass: &dyn RenderPass);
-
-    /// Draws the tile clipping masks into the stencil buffer of the current
-    /// render pass, one draw per UBO (stencil reference `ubo.stencil_ref`).
-    ///
-    /// C++: `webgpu::Context::renderTileClippingMasks(renderPass, staticData,
-    /// tileUBOs)`, called by `PaintParameters::renderTileClippingMasks` under
-    /// `MLN_RENDER_BACKEND_WEBGPU` (Metal has the same method). On the trait
-    /// because `mln_renderer` can't name `mln_webgpu`; `staticData` is reduced to
-    /// the shader registry, the only member used. Backends without it return
-    /// false.
-    fn render_tile_clipping_masks(
-        &self,
-        _render_pass: &dyn RenderPass,
-        _shaders: &ShaderRegistry,
-        _tile_ubos: &[ClipUBO],
-    ) -> bool {
-        false
-    }
-
-    /// Drops the meshes and drawables kept for the globe's tile clipping
-    /// masks; a Mercator frame calls it. (C++ makes it pure virtual; here
-    /// backends without globe masks keep the empty default.)
-    fn release_globe_clip_masks(&self) {}
-
-    /// The globe's tile clipping masks, each drawn over the pole-capped mesh
-    /// of its tile, with a border and then without.
-    ///
-    /// C++: `webgpu::Context::renderGlobeTileClippingMasks(renderPass,
-    /// staticData, masks)`; on the trait for the reason
-    /// `render_tile_clipping_masks` is. C++ builds the meshes with
-    /// `rawGlobeTileMesh(tile, borders, SubdivisionGranularitySetting::globe().stencil)`,
-    /// which lives in `mln_renderer`, so the caller passes that call as
-    /// `mesh`, returning the mesh's raw `Short2` vertices and its indices; the
-    /// context still keeps one per zoom, pole row and border. Backends without
-    /// it return false.
-    fn render_globe_tile_clipping_masks(
-        &self,
-        _render_pass: &dyn RenderPass,
-        _shaders: &ShaderRegistry,
-        _masks: &[GlobeClipMask],
-        _mesh: &GlobeClipMeshFn<'_>,
-    ) -> bool {
-        false
-    }
 }
 
 impl dyn Context {

@@ -1,43 +1,27 @@
 // Resources hold `Rc<Context>`, so the context keeps no `Rc` to a resource
-// that points back at it (the cached tile buffers are raw wgpu buffers, the
-// clip mask shader a `Weak`). The exception is the placeholder vertex
-// buffers, which the backends release with `release_cached_buffers` when
+// that points back at it. The exception is the placeholder vertex buffers, which the backends release with `release_cached_buffers` when
 // they drop the context; otherwise the context, and with it the device,
 // would never be freed.
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use mln_gfx::backend::Type as BackendType;
-use mln_gfx::color_mode::ColorMode;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
-use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
-use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
-use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
-use mln_gfx::gpu::{
-    DepthState, GpuError, PipelineState, StencilState, VertexAttribute as GpuVertexAttribute, VertexBufferLayout,
-    VertexStep,
-};
+use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
-use mln_gfx::shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBasePtr};
-use mln_gfx::shaders::shader_source::BuiltIn;
-use mln_gfx::stencil_mode::{StencilMode, Test};
+use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::texture2d::Texture2DPtr;
-use mln_gfx::types::{DepthFunctionType, DepthMaskType, StencilOpType, TextureChannelDataType};
+use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
-use mln_util::logging::{Event, Log};
-use mln_util::range::Range;
 use mln_util::size::Size;
 
 use crate::bind_groups::{BindGroupCache, IndexTable};
@@ -47,52 +31,15 @@ use crate::layer_group::LayerGroup;
 use crate::offscreen_texture::OffscreenTexture;
 use crate::render_pass::RenderPass;
 use crate::renderer_backend::BackendImpl;
-use crate::shaders::shader_program::{BindingType, ShaderProgram, as_webgpu_shader};
-use crate::shaders::shader_source::shader_source;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
-use crate::uniform_buffer::{UNIFORM_BUFFER_ALIGNMENT, UniformBuffer};
-
-/// The uniforms of one clipping mask shader's draws: a buffer of slots
-/// [`UNIFORM_BUFFER_ALIGNMENT`] bytes apart, kept across submissions and
-/// replaced by a bigger one when a submission needs more, and a bind group
-/// per slot, made with `layout`.
-#[derive(Default)]
-struct ClipMaskSlots {
-    buffer: Option<wgpu::Buffer>,
-    layout: Option<wgpu::BindGroupLayout>,
-    bind_groups: Vec<wgpu::BindGroup>,
-    /// The submission (`Context::submissions`) that the used slots are
-    /// drawn in, and how many it uses.
-    used: (u64, usize),
-    /// The bytes of the last write, kept for their allocation.
-    data: Vec<u8>,
-}
-
-/// A globe clipping mask mesh's vertex and index buffers (with their sizes in
-/// bytes) and its index count.
-struct GlobeClipMesh {
-    vertices: (wgpu::Buffer, u64),
-    indices: (wgpu::Buffer, u64),
-    index_count: u32,
-}
+use crate::uniform_buffer::UniformBuffer;
 
 pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
     global_uniform_buffers: RefCell<UniformBufferArray>,
-    // Cached buffers (aligned with Metal): (buffer, size in bytes)
-    tile_vertex_buffer: RefCell<Option<(wgpu::Buffer, u64)>>,
-    tile_index_buffer: RefCell<Option<(wgpu::Buffer, u64)>>,
-    // Cached clipping resources
-    clip_mask_shader: RefCell<Option<Weak<dyn ShaderProgramBase>>>,
-    clip_mask_slots: RefCell<ClipMaskSlots>,
-    globe_clip_mask_shader: RefCell<Option<Weak<dyn ShaderProgramBase>>>,
-    globe_clip_mask_slots: RefCell<ClipMaskSlots>,
-    /// The globe clip meshes, by zoom, north pole row, south pole row and
-    /// border.
-    globe_clip_meshes: RefCell<BTreeMap<(u8, bool, bool, bool), GlobeClipMesh>>,
     // `defaultVertexBuffers`: the default attribute buffers of
     // UploadPass::build_attribute_bindings, one per attribute type, with the
     // vertex count each covers.
@@ -105,21 +52,6 @@ pub(crate) struct Context {
     bind_groups: BindGroupCache,
 }
 
-fn clip_mask_stencil_mode() -> StencilMode {
-    StencilMode {
-        test: Test::Always,
-        ref_: 0,
-        mask: 0xFF,
-        fail: StencilOpType::Keep,
-        depth_fail: StencilOpType::Keep,
-        pass: StencilOpType::Replace,
-    }
-}
-
-fn clip_mask_depth_mode() -> DepthMode {
-    DepthMode { func: DepthFunctionType::Always, mask: DepthMaskType::ReadOnly, range: Range::new(0.0, 1.0) }
-}
-
 impl Context {
     pub(crate) fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         Rc::new_cyclic(|weak| Context {
@@ -127,14 +59,7 @@ impl Context {
             backend,
             weak_self: Weak::clone(weak),
             global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
-            tile_vertex_buffer: RefCell::new(None),
             dummy_vertex_buffers: RefCell::default(),
-            tile_index_buffer: RefCell::new(None),
-            clip_mask_shader: RefCell::new(None),
-            clip_mask_slots: RefCell::default(),
-            globe_clip_mask_shader: RefCell::new(None),
-            globe_clip_mask_slots: RefCell::default(),
-            globe_clip_meshes: RefCell::new(BTreeMap::new()),
             submissions: Cell::new(0),
             index_table: RefCell::new(None),
             bind_groups: BindGroupCache::default(),
@@ -246,343 +171,6 @@ impl Context {
         &self,
     ) -> &RefCell<HashMap<AttributeDataType, (usize, UniqueVertexBufferResource)>> {
         &self.dummy_vertex_buffers
-    }
-
-    /// A buffer holding `data` (zero padded to 4 bytes), as `createBuffer`
-    /// makes one (usage | `CopyDst`, initial queue write).
-    fn create_raw_buffer(&self, data: &[u8], usage: wgpu::BufferUsages) -> (wgpu::Buffer, u64) {
-        let device = self.backend.device();
-        let padded_size = (data.len() + 3) & !3usize;
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Buffer Resource"),
-            size: padded_size as u64,
-            usage: usage | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut padded = data.to_vec();
-        padded.resize(padded_size, 0);
-        self.backend.write_buffer(&buffer, 0, &padded);
-        self.count_buffer_created(buffer.size());
-        (buffer, data.len() as u64)
-    }
-
-    /// The four corners of the tile extent as short2.
-    pub(crate) fn get_tile_vertex_buffer(&self) -> (wgpu::Buffer, u64) {
-        let mut cached = self.tile_vertex_buffer.borrow_mut();
-        cached
-            .get_or_insert_with(|| {
-                const EXTENT: i16 = 8192; // util::EXTENT
-                let vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
-                self.create_raw_buffer(bytemuck::cast_slice(&vertices), wgpu::BufferUsages::VERTEX)
-            })
-            .clone()
-    }
-
-    /// The indices of the two triangles of a tile quad.
-    pub(crate) fn get_tile_index_buffer(&self) -> (wgpu::Buffer, u64) {
-        let mut cached = self.tile_index_buffer.borrow_mut();
-        cached
-            .get_or_insert_with(|| {
-                let indices: [u16; 6] = [0, 1, 2, 1, 2, 3];
-                self.create_raw_buffer(bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX)
-            })
-            .clone()
-    }
-
-    /// Writes `ubos` to slots of `slots` that no draw of the coming
-    /// submission binds yet, and returns the first: the draw of `ubos[i]`
-    /// binds `slots.bind_groups[first + i]`, whose binding `binding` of
-    /// `layout` holds it.
-    ///
-    /// The writes land ahead of the next submission's commands and after
-    /// the earlier submissions' (see `BackendImpl::write_buffer`), so a slot
-    /// is written again only once the commands that read it have gone, and
-    /// masks drawn again before then take slots after these.
-    fn reserve_clip_mask_slots<'a, T: bytemuck::Pod>(
-        &self,
-        slots: &mut ClipMaskSlots,
-        layout: &wgpu::BindGroupLayout,
-        binding: u32,
-        ubos: impl ExactSizeIterator<Item = &'a T>,
-    ) -> usize {
-        let device = self.backend.device();
-        let size = size_of::<T>();
-        let stride = size.next_multiple_of(UNIFORM_BUFFER_ALIGNMENT);
-        let submission = self.submissions();
-        let first = if slots.used.0 == submission { slots.used.1 } else { 0 };
-        let needed = first + ubos.len();
-
-        let capacity = slots.buffer.as_ref().map_or(0, |buffer| buffer.size() as usize / stride);
-        let buffer = match &slots.buffer {
-            Some(buffer) if needed <= capacity => buffer.clone(),
-            _ => {
-                // Draws recorded already keep the old buffer and bind groups.
-                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("Clipping mask uniforms"),
-                    size: (needed.max(capacity * 2) * stride) as u64,
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                self.count_buffer_created(buffer.size());
-                if let Some(previous) = slots.buffer.replace(buffer.clone()) {
-                    self.count_buffer_released(previous.size());
-                }
-                slots.bind_groups.clear();
-                buffer
-            }
-        };
-        if slots.layout.as_ref() != Some(layout) {
-            slots.layout = Some(layout.clone());
-            slots.bind_groups.clear();
-        }
-        while slots.bind_groups.len() < needed {
-            let offset = (slots.bind_groups.len() * stride) as u64;
-            slots.bind_groups.push(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Clipping mask uniforms"),
-                layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &buffer,
-                        offset,
-                        size: wgpu::BufferSize::new(size as u64),
-                    }),
-                }],
-            }));
-        }
-
-        slots.data.clear();
-        slots.data.resize(stride * ubos.len(), 0);
-        for (ubo, slot) in ubos.zip(slots.data.chunks_exact_mut(stride)) {
-            slot[..size].copy_from_slice(bytemuck::bytes_of(ubo));
-        }
-        self.backend.write_buffer(&buffer, (first * stride) as u64, &slots.data);
-        slots.used = (submission, needed);
-        first
-    }
-
-    fn get_clip_mask_shader(&self, shaders: &ShaderRegistry) -> Option<ShaderProgramBasePtr> {
-        if let Some(shader) = self.clip_mask_shader.borrow().as_ref().and_then(Weak::upgrade) {
-            return Some(shader);
-        }
-        let group = shaders.get_shader_group("ClippingMaskProgram")?;
-        let shader =
-            group.get_or_create_shader(self, &StringIDSetsPair::default(), ProjectionVariant::Mercator, "a_pos")?;
-        *self.clip_mask_shader.borrow_mut() = Some(Rc::downgrade(&shader));
-        Some(shader)
-    }
-
-    fn get_globe_clip_mask_shader(&self, shaders: &ShaderRegistry) -> Option<ShaderProgramBasePtr> {
-        if let Some(shader) = self.globe_clip_mask_shader.borrow().as_ref().and_then(Weak::upgrade) {
-            return Some(shader);
-        }
-        let group = shaders.get_shader_group("ClippingMaskProgram")?;
-        let shader =
-            group.get_or_create_shader(self, &StringIDSetsPair::default(), ProjectionVariant::Globe, "a_pos")?;
-        *self.globe_clip_mask_shader.borrow_mut() = Some(Rc::downgrade(&shader));
-        Some(shader)
-    }
-
-    /// Draws the globe's tile clipping masks; `mesh` makes a tile's mesh (see
-    /// the trait method).
-    fn render_globe_tile_clipping_masks_impl(
-        &self,
-        render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        masks: &[GlobeClipMask],
-        mesh: &GlobeClipMeshFn<'_>,
-    ) -> bool {
-        if masks.is_empty() {
-            return true;
-        }
-
-        let Some(shader_ptr) = self.get_globe_clip_mask_shader(shaders) else {
-            Log::error(Event::Render, "WebGPU: Failed to acquire globe clipping mask shader");
-            return false;
-        };
-        let Some(shader) = as_webgpu_shader(&shader_ptr) else {
-            Log::error(Event::Render, "WebGPU: Failed to acquire globe clipping mask shader");
-            return false;
-        };
-        let Some(webgpu_render_pass) = render_pass.downcast_ref::<RenderPass>() else {
-            return false;
-        };
-        let mut encoder_guard = webgpu_render_pass.get_encoder();
-        let Some(encoder) = encoder_guard.as_mut() else {
-            return false;
-        };
-
-        // The far side of a limb tile projects inside the disc; cull it or it
-        // overwrites the tile in front.
-        let pipeline = match self.clip_mask_pipeline(shader, CullFaceMode::back_ccw()) {
-            Ok(pipeline) => pipeline,
-            Err(error) => {
-                Log::error(Event::Render, format!("WebGPU: globe clipping mask: {error}"));
-                return false;
-            }
-        };
-
-        encoder.set_pipeline(&pipeline);
-
-        let Some(&bind_group_index) = shader.bind_group_order().first() else {
-            return false;
-        };
-        let Some(layout) = shader.bind_group_layout(bind_group_index) else {
-            return false;
-        };
-        let Some(uniform_binding) = shader
-            .binding_infos(bind_group_index)
-            .iter()
-            .find(|info| info.type_ == BindingType::UniformBuffer)
-            .map(|info| info.binding)
-        else {
-            return false;
-        };
-
-        let mut slots = self.globe_clip_mask_slots.borrow_mut();
-        let first_slot = self.reserve_clip_mask_slots(
-            &mut slots,
-            layout,
-            uniform_binding,
-            masks.iter().map(|mask| &mask.projection),
-        );
-        let bind_groups = &slots.bind_groups[first_slot..first_slot + masks.len()];
-
-        // Each mask is drawn with a border first, then exactly, as GL JS does:
-        // where a tile meets finer ones, its coarser edge leaves a sliver
-        // between the masks that only a neighbor's border covers.
-        let mut draw_calls = 0;
-        let mut meshes = self.globe_clip_meshes.borrow_mut();
-        for borders in [true, false] {
-            for (mask, bind_group) in masks.iter().zip(bind_groups) {
-                let tile = &mask.tile;
-                let key = (tile.z, tile.y == 0, tile.y == (1u32 << tile.z) - 1, borders);
-                if let Entry::Vacant(entry) = meshes.entry(key) {
-                    let (vertices, indices) = mesh(tile, borders);
-                    entry.insert(GlobeClipMesh {
-                        vertices: self.create_raw_buffer(&vertices, wgpu::BufferUsages::VERTEX),
-                        indices: self.create_raw_buffer(bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX),
-                        index_count: indices.len() as u32,
-                    });
-                }
-                let mesh = &meshes[&key];
-
-                encoder.set_bind_group(bind_group_index, bind_group, &[]);
-                encoder.set_stencil_reference(mask.stencil_ref);
-                encoder.set_vertex_buffer(0, mesh.vertices.0.slice(0..mesh.vertices.1));
-                encoder.set_index_buffer(mesh.indices.0.slice(0..mesh.indices.1), wgpu::IndexFormat::Uint16);
-                encoder.draw_indexed(0..mesh.index_count, 0, 0..1);
-                draw_calls += 1;
-            }
-        }
-        drop(encoder_guard);
-
-        let mut stats = self.rendering_stats_mut();
-        stats.num_draw_calls += draw_calls;
-        stats.total_draw_calls += draw_calls;
-        true
-    }
-
-    fn render_tile_clipping_masks_impl(
-        &self,
-        render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        tile_ubos: &[ClipUBO],
-    ) -> bool {
-        if tile_ubos.is_empty() {
-            return false;
-        }
-        let Some(shader_ptr) = self.get_clip_mask_shader(shaders) else {
-            Log::error(Event::Render, "WebGPU: Failed to acquire clipping mask shader");
-            return false;
-        };
-        let Some(shader) = as_webgpu_shader(&shader_ptr) else {
-            Log::error(Event::Render, "WebGPU: Failed to acquire clipping mask shader");
-            return false;
-        };
-        let Some(webgpu_render_pass) = render_pass.downcast_ref::<RenderPass>() else {
-            return false;
-        };
-        let mut encoder_guard = webgpu_render_pass.get_encoder();
-        let Some(encoder) = encoder_guard.as_mut() else {
-            Log::error(Event::Render, "WebGPU: render pass encoder unavailable for clipping masks");
-            return false;
-        };
-
-        let (vertex_buffer, vertex_size) = self.get_tile_vertex_buffer();
-        let (index_buffer, index_size) = self.get_tile_index_buffer();
-
-        let pipeline = match self.clip_mask_pipeline(shader, CullFaceMode::disabled()) {
-            Ok(pipeline) => pipeline,
-            Err(error) => {
-                Log::error(Event::Render, format!("WebGPU: clipping mask: {error}"));
-                return false;
-            }
-        };
-
-        encoder.set_pipeline(&pipeline);
-        encoder.set_vertex_buffer(0, vertex_buffer.slice(0..vertex_size));
-        encoder.set_index_buffer(index_buffer.slice(0..index_size), wgpu::IndexFormat::Uint16);
-
-        let Some(&bind_group_index) = shader.bind_group_order().first() else {
-            Log::error(Event::Render, "WebGPU: No bind group layouts available for clipping mask shader");
-            return false;
-        };
-        let Some(layout) = shader.bind_group_layout(bind_group_index) else {
-            Log::error(Event::Render, "WebGPU: Bind group layout missing for clipping mask shader");
-            return false;
-        };
-        let Some(uniform_binding) = shader
-            .binding_infos(bind_group_index)
-            .iter()
-            .find(|info| info.type_ == BindingType::UniformBuffer)
-            .map(|info| info.binding)
-        else {
-            Log::error(Event::Render, "WebGPU: Uniform binding not found for clipping mask shader");
-            return false;
-        };
-
-        let mut slots = self.clip_mask_slots.borrow_mut();
-        let first_slot = self.reserve_clip_mask_slots(&mut slots, layout, uniform_binding, tile_ubos.iter());
-        for (ubo, bind_group) in tile_ubos.iter().zip(&slots.bind_groups[first_slot..]) {
-            encoder.set_bind_group(bind_group_index, bind_group, &[]);
-            encoder.set_stencil_reference(ubo.stencil_ref);
-            encoder.draw_indexed(0..6, 0, 0..1);
-        }
-        drop(encoder_guard);
-
-        let mut stats = self.rendering_stats_mut();
-        stats.num_draw_calls += tile_ubos.len() as i32;
-        stats.total_draw_calls += tile_ubos.len() as i32;
-        true
-    }
-
-    /// The clipping mask program's pipeline, culling `cull`, for the formats
-    /// of the pass being recorded: it writes `ref` to the stencil buffer
-    /// over each tile's mesh of short2 positions, and no color or depth.
-    fn clip_mask_pipeline(&self, shader: &ShaderProgram, cull: CullFaceMode) -> Result<wgpu::RenderPipeline, GpuError> {
-        let source = shader_source(BuiltIn::ClippingMaskProgram)
-            .ok_or_else(|| GpuError::Unsupported("no clipping mask program".to_owned()))?;
-        let color_mode = ColorMode::disabled();
-        let state = PipelineState {
-            vertex_buffers: vec![VertexBufferLayout {
-                stride: size_of::<[i16; 2]>() as u32,
-                step: VertexStep::Vertex,
-                attributes: vec![GpuVertexAttribute {
-                    id: source.attributes[0].id as u32,
-                    format: AttributeDataType::Short2,
-                    offset: 0,
-                }],
-            }],
-            primitive: DrawModeType::Triangles,
-            cull,
-            blend: color_mode.blend_function,
-            color_mask: color_mode.mask,
-            depth: DepthState::from(&clip_mask_depth_mode()),
-            stencil: StencilState::from(&clip_mask_stencil_mode()),
-        };
-        let (color, depth_stencil) = self.backend.target_formats();
-        shader.render_pipeline(&state, color, depth_stencil)
     }
 
     /// Creates a uniform buffer holding `data`, of the concrete type.
@@ -708,28 +296,5 @@ impl GfxContext for Context {
         if let Some(pass) = render_pass.downcast_ref::<RenderPass>() {
             pass.set_global_uniform_buffers(false);
         }
-    }
-
-    fn render_tile_clipping_masks(
-        &self,
-        render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        tile_ubos: &[ClipUBO],
-    ) -> bool {
-        self.render_tile_clipping_masks_impl(render_pass, shaders, tile_ubos)
-    }
-
-    fn release_globe_clip_masks(&self) {
-        self.globe_clip_meshes.borrow_mut().clear();
-    }
-
-    fn render_globe_tile_clipping_masks(
-        &self,
-        render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        masks: &[GlobeClipMask],
-        mesh: &GlobeClipMeshFn<'_>,
-    ) -> bool {
-        self.render_globe_tile_clipping_masks_impl(render_pass, shaders, masks, mesh)
     }
 }

@@ -7,6 +7,7 @@ mod bucket_geometry;
 mod bucket_parameters;
 mod buckets;
 mod change_request;
+mod clip_masks;
 mod frame_projection;
 mod geometry;
 mod gfx;

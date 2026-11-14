@@ -31,8 +31,6 @@ pub const ID_LINE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; //
 pub const ID_LINE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
 pub(crate) const LINE_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
 
-/// The clipping mask UBO, in the drawable's reserved vertex-only slot.
-pub const ID_CLIPPING_MASK_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
 /// The debug layer's UBO, the first slot after the reserved ones.
 pub const ID_DEBUG_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
 

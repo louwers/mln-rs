@@ -104,7 +104,7 @@ impl Drawable {
         self.impl_.vertex_attr_id = id;
     }
 
-    pub(crate) fn upload(&mut self, upload_pass: &UploadPass) {
+    fn upload_in(&mut self, upload_pass: &UploadPass) {
         const USAGE: BufferUsageType = BufferUsageType::StaticDraw;
 
         let Some(shader_ptr) = self.base.shader.clone() else {
@@ -234,6 +234,9 @@ impl Drawable {
     }
 
     fn make_stencil_mode(&self, parameters: &dyn PaintParameters) -> StencilMode {
+        if let Some(mode) = self.base.stencil_mode {
+            return mode;
+        }
         if self.base.enable_stencil
             && !self.base.is_3d
             && let Some(tile_id) = self.base.tile_id
@@ -264,6 +267,12 @@ impl drawable::Drawable for Drawable {
     }
     fn base_mut(&mut self) -> &mut DrawableBase {
         &mut self.base
+    }
+
+    fn upload(&mut self, upload_pass: &dyn mln_gfx::upload_pass::UploadPass) {
+        if let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() {
+            self.upload_in(upload_pass);
+        }
     }
 
     fn draw(&mut self, parameters: &mut dyn PaintParameters) {

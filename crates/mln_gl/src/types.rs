@@ -13,4 +13,3 @@ pub(crate) type TextureID = <Gl as HasContext>::Texture;
 pub(crate) type VertexArrayID = <Gl as HasContext>::VertexArray;
 pub(crate) type FramebufferID = <Gl as HasContext>::Framebuffer;
 pub(crate) type RenderbufferID = <Gl as HasContext>::Renderbuffer;
-pub(crate) type UniformLocation = <Gl as HasContext>::UniformLocation;

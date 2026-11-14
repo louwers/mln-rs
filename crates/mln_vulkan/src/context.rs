@@ -14,12 +14,8 @@
 // - The descriptor set layouts are the port's (`shaders::layout`), and they
 //   and the pipeline layouts are made with the context.
 // - The surface pre-rotation of Android (`GlobalPlatformParamsUBO`, the
-//   rotation of the clip masks' matrices, the polling for a new surface
-//   transform) is not ported.
+//   polling for a new surface transform) is not ported.
 // - `SurfaceNotReady` is not ported: acquiring a surface image waits.
-// - The globe's clip mask meshes come from the caller, which C++ makes with
-//   the renderer's `rawGlobeTileMesh` (see
-//   `gfx::Context::render_globe_tile_clipping_masks`).
 // - Errors C++ throws (a failed wait for a frame, a surface that stays out
 //   of date) are logged. A frame that acquires no image, for a swapchain or
 //   a surface that couldn't be made again, is recorded without a
@@ -33,23 +29,17 @@ use std::rc::{Rc, Weak};
 use ash::vk;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
-use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
-use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
-use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBasePtr};
-use mln_gfx::shaders::shader_source::BuiltIn;
+use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
-use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
+use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -60,16 +50,14 @@ use crate::device::Device;
 use crate::drawable_builder::DrawableBuilder;
 use crate::layer_group::LayerGroup;
 use crate::offscreen_texture::OffscreenTexture;
-use crate::pipeline::PipelineInfo;
 use crate::render_pass::RenderPass;
 use crate::renderer_backend::BackendImpl;
 use crate::shaders::compiler::{self, Stage};
 use crate::shaders::layout::{
-    CLIP_MASK_PUSH_CONSTANT_SIZE, DescriptorSetType, IMAGE_TEXTURE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
-    image_sampler_binding, image_texture_binding,
+    DescriptorSetType, IMAGE_TEXTURE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE, image_sampler_binding, image_texture_binding,
 };
-use crate::shaders::shader_program::{ShaderProgram, as_vulkan_shader};
-use crate::shaders::shader_source::{GlslShaderSource, shader_source};
+use crate::shaders::shader_program::ShaderProgram;
+use crate::shaders::shader_source::GlslShaderSource;
 use crate::surface_resource::SurfaceResource;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
@@ -81,16 +69,6 @@ const DRAWABLE_UNIFORM_DESCRIPTOR_POOL_SIZE: u32 = 2 * 1024;
 const DRAWABLE_IMAGE_DESCRIPTOR_POOL_SIZE: u32 = DRAWABLE_UNIFORM_DESCRIPTOR_POOL_SIZE / 2;
 
 const MAXIMUM_SURFACE_UPDATE_RETRIES: u8 = 3;
-
-/// The rest of a globe clip mask's projection block, which rides as
-/// per-instance vertex attributes: the push constants hold its two matrices.
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C)]
-struct GlobeClipMaskInstance {
-    tile_mercator_coords: [f32; 4],
-    clipping_plane: [f32; 4],
-    transition: [f32; 4],
-}
 
 /// Destroys something once the frame it was last used in is done.
 pub(crate) type DeletionTask = Box<dyn FnOnce(&Context)>;
@@ -120,31 +98,6 @@ pub(crate) struct RenderPassKey {
     pub(crate) depth_final_layout: Option<vk::ImageLayout>,
 }
 
-#[derive(Default)]
-struct Clipping {
-    shader: Option<Weak<dyn ShaderProgramBase>>,
-    vertex_buffer: Option<BufferResource>,
-    index_buffer: Option<BufferResource>,
-    index_count: u32,
-    pipeline_info: PipelineInfo,
-}
-
-/// A tile's pole-capped mesh for its globe clip mask.
-struct GlobeClipMesh {
-    vertices: BufferResource,
-    indices: BufferResource,
-    index_count: u32,
-}
-
-#[derive(Default)]
-struct GlobeClipping {
-    shader: Option<Weak<dyn ShaderProgramBase>>,
-    /// The meshes, by zoom, whether the tile is on the top or bottom row
-    /// (with a pole cap) and whether it has a border.
-    meshes: HashMap<(u8, bool, bool, bool), GlobeClipMesh>,
-    pipeline_info: PipelineInfo,
-}
-
 pub struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
@@ -158,7 +111,6 @@ pub struct Context {
     dummy_texture: RefCell<Option<Texture2D>>,
     descriptor_set_layouts: Cell<[vk::DescriptorSetLayout; DescriptorSetType::COUNT]>,
     general_pipeline_layout: Cell<vk::PipelineLayout>,
-    push_constant_pipeline_layout: Cell<vk::PipelineLayout>,
     render_passes: RefCell<HashMap<RenderPassKey, vk::RenderPass>>,
 
     frame_resource_index: Cell<u8>,
@@ -181,8 +133,6 @@ pub struct Context {
     surface_lost: Cell<bool>,
     surface_update_latency: Cell<i32>,
 
-    clipping: RefCell<Clipping>,
-    globe_clipping: RefCell<GlobeClipping>,
     destroyed: Cell<bool>,
     /// What the next frame's submission waits on and signals, besides a
     /// swapchain's semaphores.
@@ -292,7 +242,6 @@ impl Context {
             dummy_texture: RefCell::new(None),
             descriptor_set_layouts: Cell::new([vk::DescriptorSetLayout::null(); DescriptorSetType::COUNT]),
             general_pipeline_layout: Cell::new(vk::PipelineLayout::null()),
-            push_constant_pipeline_layout: Cell::new(vk::PipelineLayout::null()),
             render_passes: RefCell::new(HashMap::new()),
             frame_resource_index: Cell::new(0),
             frame_resources: RefCell::new(Vec::new()),
@@ -304,8 +253,6 @@ impl Context {
             surface_update_requested: Cell::new(false),
             surface_lost: Cell::new(false),
             surface_update_latency: Cell::new(0),
-            clipping: RefCell::new(Clipping::default()),
-            globe_clipping: RefCell::new(GlobeClipping::default()),
             destroyed: Cell::new(false),
             frame_sync: RefCell::new(FrameSync::default()),
             queue_wait: Cell::new(false),
@@ -360,12 +307,6 @@ impl Context {
             UBO_INDEX_PUSH_CONSTANT_SIZE,
             "PipelineLayout_general",
         )?);
-        self.push_constant_pipeline_layout.set(build_pipeline_layout(
-            backend,
-            &layouts,
-            CLIP_MASK_PUSH_CONSTANT_SIZE,
-            "PipelineLayout_pushConstants",
-        )?);
         Ok(())
     }
 
@@ -412,8 +353,6 @@ impl Context {
         *self.global_uniform_buffers.borrow_mut() = UniformBufferArray::new();
         *self.dummy_buffer.borrow_mut() = None;
         *self.dummy_texture.borrow_mut() = None;
-        *self.clipping.borrow_mut() = Clipping::default();
-        *self.globe_clipping.borrow_mut() = GlobeClipping::default();
 
         // A deletion can enqueue another.
         loop {
@@ -450,7 +389,6 @@ impl Context {
                 device.destroy_render_pass(render_pass, None);
             }
             device.destroy_pipeline_layout(self.general_pipeline_layout.get(), None);
-            device.destroy_pipeline_layout(self.push_constant_pipeline_layout.get(), None);
             for layout in self.descriptor_set_layouts.get() {
                 device.destroy_descriptor_set_layout(layout, None);
             }
@@ -852,12 +790,6 @@ impl Context {
         self.general_pipeline_layout.get()
     }
 
-    /// The layout of the clip mask pipelines, whose push constants are
-    /// matrices.
-    pub(crate) fn get_push_constant_pipeline_layout(&self) -> vk::PipelineLayout {
-        self.push_constant_pipeline_layout.get()
-    }
-
     /// The render pass over attachments of `key`'s formats, null if the
     /// device can't make it.
     ///
@@ -999,309 +931,6 @@ impl Context {
             .borrow()
             .get(usize::from(self.frame_resource_index.get()))
             .map_or(vk::CommandBuffer::null(), |frame| frame.command_buffer)
-    }
-
-    /// The clipping mask shader of `variant`, kept in `cached`.
-    fn get_clip_mask_shader(
-        &self,
-        shaders: &ShaderRegistry,
-        variant: ProjectionVariant,
-        cached: &mut Option<Weak<dyn ShaderProgramBase>>,
-    ) -> Option<ShaderProgramBasePtr> {
-        if let Some(shader) = cached.as_ref().and_then(Weak::upgrade) {
-            return Some(shader);
-        }
-        let group = shaders.get_shader_group("ClippingMaskProgram")?;
-        let shader = group.get_or_create_shader(self, &StringIDSetsPair::default(), variant, "")?;
-        *cached = Some(Rc::downgrade(&shader));
-        Some(shader)
-    }
-
-    /// The pipeline state both kinds of clip mask share: no color or depth,
-    /// and the stencil value replaced by the reference, with the position
-    /// attribute read from binding 0.
-    fn init_clip_mask_pipeline_info(pipeline_info: &mut PipelineInfo) -> bool {
-        let Some(attribute) = shader_source(BuiltIn::ClippingMaskProgram).and_then(|source| source.attributes.first())
-        else {
-            return false;
-        };
-        pipeline_info.use_push_constants = true;
-
-        pipeline_info.color_blend = false;
-        pipeline_info.color_mask = vk::ColorComponentFlags::empty();
-
-        pipeline_info.depth_test = false;
-        pipeline_info.depth_write = false;
-
-        pipeline_info.stencil_test = true;
-        pipeline_info.stencil_function = vk::CompareOp::ALWAYS;
-        pipeline_info.stencil_pass = vk::StencilOp::REPLACE;
-        pipeline_info.dynamic_values.stencil_write_mask = 0xFF;
-        pipeline_info.dynamic_values.stencil_ref = 0xFF;
-        pipeline_info.dynamic_values.stencil_compare_mask = 0xFF;
-
-        pipeline_info.input_bindings.push(
-            vk::VertexInputBindingDescription::default()
-                .binding(0)
-                .stride(VertexAttribute::get_stride_of(attribute.data_type) as u32)
-                .input_rate(vk::VertexInputRate::VERTEX),
-        );
-        pipeline_info.input_attributes.push(
-            vk::VertexInputAttributeDescription::default()
-                .binding(0)
-                .location(attribute.index as u32)
-                .format(PipelineInfo::vulkan_format(attribute.data_type)),
-        );
-        true
-    }
-
-    fn render_tile_clipping_masks_impl(
-        &self,
-        render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        tile_ubos: &[ClipUBO],
-    ) -> bool {
-        let mut clipping = self.clipping.borrow_mut();
-        let clipping = &mut *clipping;
-        let Some(shader_ptr) = self.get_clip_mask_shader(shaders, ProjectionVariant::Mercator, &mut clipping.shader)
-        else {
-            debug_assert!(false, "Failed to create shader for clip masking");
-            return false;
-        };
-        let Some(shader) = as_vulkan_shader(&shader_ptr) else {
-            return false;
-        };
-        let Some(render_pass) = render_pass.downcast_ref::<RenderPass>().filter(|pass| pass.is_encoding()) else {
-            return false;
-        };
-
-        // Create a vertex buffer from the fixed tile coordinates:
-        // `RenderStaticData::tileVertices()`, the four corners of the tile
-        // extent as short2 (inlined: RenderStaticData is a renderer type).
-        let vertex_buffer = clipping.vertex_buffer.get_or_insert_with(|| {
-            const EXTENT: i16 = 8192; // util::EXTENT
-            let vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
-            let bytes: &[u8] = bytemuck::cast_slice(&vertices);
-            self.create_buffer(Some(bytes), bytes.len(), vk::BufferUsageFlags::VERTEX_BUFFER, false)
-        });
-        // Create a buffer from the fixed tile indexes:
-        // `RenderStaticData::quadTriangleIndices()`.
-        let index_buffer = clipping.index_buffer.get_or_insert_with(|| {
-            let indices: [u16; 6] = [0, 1, 2, 1, 2, 3];
-            let bytes: &[u8] = bytemuck::cast_slice(&indices);
-            self.create_buffer(Some(bytes), bytes.len(), vk::BufferUsageFlags::INDEX_BUFFER, false)
-        });
-        clipping.index_count = 6;
-        if !vertex_buffer.is_valid() || !index_buffer.is_valid() {
-            return false;
-        }
-
-        // build pipeline
-        let pipeline_info = &mut clipping.pipeline_info;
-        if pipeline_info.input_attributes.is_empty() {
-            if !Self::init_clip_mask_pipeline_info(pipeline_info) {
-                return false;
-            }
-            pipeline_info.update_vertex_input_hash();
-        }
-        let extent = render_pass.get_extent();
-        pipeline_info.set_render_target(render_pass.get_vulkan_render_pass(), extent);
-        let Some(pipeline) = shader.get_pipeline(pipeline_info) else {
-            return false;
-        };
-
-        let device = self.backend.get_device();
-        let command_buffer = render_pass.get_command_buffer();
-        pipeline_info.set_scissor_rect(&ScissorRect { x: 0, y: 0, width: extent.width, height: extent.height });
-        // SAFETY: the command buffer is in the render pass the pipeline was
-        // made for, the buffers hold the quad's vertices and indexes, and a
-        // matrix fits the push constants of the clip masks' layout.
-        unsafe {
-            device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
-            pipeline_info.set_dynamic_values(&self.backend, command_buffer);
-            device.cmd_bind_vertex_buffers(command_buffer, 0, &[vertex_buffer.get_vulkan_buffer()], &[0]);
-            device.cmd_bind_index_buffer(command_buffer, index_buffer.get_vulkan_buffer(), 0, vk::IndexType::UINT16);
-            for tile_info in tile_ubos {
-                device.cmd_set_stencil_reference(
-                    command_buffer,
-                    vk::StencilFaceFlags::FRONT_AND_BACK,
-                    tile_info.stencil_ref,
-                );
-                device.cmd_push_constants(
-                    command_buffer,
-                    self.push_constant_pipeline_layout.get(),
-                    vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                    0,
-                    bytemuck::cast_slice(&tile_info.matrix),
-                );
-                device.cmd_draw_indexed(command_buffer, clipping.index_count, 1, 0, 0, 0);
-            }
-        }
-
-        let mut stats = self.rendering_stats();
-        stats.num_draw_calls += 1;
-        stats.total_draw_calls += 1;
-        true
-    }
-
-    /// Draws the globe's tile clipping masks, with `mesh` making a tile's
-    /// mesh in place of C++'s `rawGlobeTileMesh`.
-    fn render_globe_tile_clipping_masks_impl(
-        &self,
-        render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        masks: &[GlobeClipMask],
-        mesh: &GlobeClipMeshFn<'_>,
-    ) -> bool {
-        let mut globe_clipping = self.globe_clipping.borrow_mut();
-        let globe_clipping = &mut *globe_clipping;
-        let Some(shader_ptr) = self.get_clip_mask_shader(shaders, ProjectionVariant::Globe, &mut globe_clipping.shader)
-        else {
-            debug_assert!(false, "Failed to create shader for globe clip masking");
-            return false;
-        };
-        let Some(shader) = as_vulkan_shader(&shader_ptr) else {
-            return false;
-        };
-        let Some(render_pass) = render_pass.downcast_ref::<RenderPass>().filter(|pass| pass.is_encoding()) else {
-            return false;
-        };
-
-        let pipeline_info = &mut globe_clipping.pipeline_info;
-        if pipeline_info.input_attributes.is_empty() {
-            if !Self::init_clip_mask_pipeline_info(pipeline_info) {
-                return false;
-            }
-            pipeline_info.dynamic_values.stencil_ref = 0;
-            // The far side of a limb tile projects inside the disc; cull it
-            // or it overwrites the tile in front. The shader flips Y for
-            // Vulkan's downward framebuffer, so the far side is still
-            // clockwise on screen.
-            pipeline_info.set_cull_mode(CullFaceMode::back_ccw());
-            pipeline_info.input_bindings.push(
-                vk::VertexInputBindingDescription::default()
-                    .binding(1)
-                    .stride(size_of::<GlobeClipMaskInstance>() as u32)
-                    .input_rate(vk::VertexInputRate::INSTANCE),
-            );
-            for i in 0..3 {
-                pipeline_info.input_attributes.push(
-                    vk::VertexInputAttributeDescription::default()
-                        .binding(1)
-                        .location(1 + i)
-                        .format(PipelineInfo::vulkan_format(AttributeDataType::Float4))
-                        .offset(i * size_of::<[f32; 4]>() as u32),
-                );
-            }
-            pipeline_info.update_vertex_input_hash();
-        }
-        let extent = render_pass.get_extent();
-        pipeline_info.set_render_target(render_pass.get_vulkan_render_pass(), extent);
-        let Some(pipeline) = shader.get_pipeline(pipeline_info) else {
-            return false;
-        };
-
-        let device = self.backend.get_device();
-        let command_buffer = render_pass.get_command_buffer();
-        pipeline_info.set_scissor_rect(&ScissorRect { x: 0, y: 0, width: extent.width, height: extent.height });
-        // SAFETY: the command buffer is in the render pass the pipeline was
-        // made for.
-        unsafe {
-            device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
-            pipeline_info.set_dynamic_values(&self.backend, command_buffer);
-        }
-
-        let instances: Vec<GlobeClipMaskInstance> = masks
-            .iter()
-            .map(|mask| GlobeClipMaskInstance {
-                tile_mercator_coords: mask.projection.tile_mercator_coords,
-                clipping_plane: mask.projection.clipping_plane,
-                transition: [mask.projection.projection_transition, 0.0, 0.0, 0.0],
-            })
-            .collect();
-        let instance_bytes: &[u8] = bytemuck::cast_slice(&instances);
-        // Dropped after the draws are recorded, and destroyed when the
-        // frame is done.
-        let instance_buffer =
-            self.create_buffer(Some(instance_bytes), instance_bytes.len(), vk::BufferUsageFlags::VERTEX_BUFFER, false);
-        if !instance_buffer.is_valid() {
-            return false;
-        }
-
-        // Each mask is drawn with a border first, then exactly, as GL JS
-        // does: where a tile meets finer ones, its coarser edge leaves a
-        // sliver between the masks that only a neighbor's border covers.
-        for borders in [true, false] {
-            for (i, mask) in masks.iter().enumerate() {
-                let tile = &mask.tile;
-                let key = (tile.z, tile.y == 0, tile.y == (1u32 << tile.z) - 1, borders);
-                let clip_mesh = match globe_clipping.meshes.entry(key) {
-                    std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        let (vertices, indices) = mesh(tile, borders);
-                        let index_bytes: &[u8] = bytemuck::cast_slice(&indices);
-                        let vertex_buffer = self.create_buffer(
-                            Some(&vertices),
-                            vertices.len(),
-                            vk::BufferUsageFlags::VERTEX_BUFFER,
-                            false,
-                        );
-                        let index_buffer = self.create_buffer(
-                            Some(index_bytes),
-                            index_bytes.len(),
-                            vk::BufferUsageFlags::INDEX_BUFFER,
-                            false,
-                        );
-                        if !vertex_buffer.is_valid() || !index_buffer.is_valid() {
-                            return false;
-                        }
-                        entry.insert(GlobeClipMesh {
-                            vertices: vertex_buffer,
-                            indices: index_buffer,
-                            index_count: indices.len() as u32,
-                        })
-                    }
-                };
-
-                let constants: [[f32; 16]; 2] = [mask.projection.matrix, mask.projection.fallback_matrix];
-                // SAFETY: the mesh's buffers hold its vertices and indexes,
-                // the instance buffer the mask's instance, and the two
-                // matrices fill the push constants of the clip masks'
-                // layout.
-                unsafe {
-                    device.cmd_set_stencil_reference(
-                        command_buffer,
-                        vk::StencilFaceFlags::FRONT_AND_BACK,
-                        mask.stencil_ref,
-                    );
-                    device.cmd_bind_vertex_buffers(
-                        command_buffer,
-                        0,
-                        &[clip_mesh.vertices.get_vulkan_buffer(), instance_buffer.get_vulkan_buffer()],
-                        &[0, (i * size_of::<GlobeClipMaskInstance>()) as vk::DeviceSize],
-                    );
-                    device.cmd_bind_index_buffer(
-                        command_buffer,
-                        clip_mesh.indices.get_vulkan_buffer(),
-                        0,
-                        vk::IndexType::UINT16,
-                    );
-                    device.cmd_push_constants(
-                        command_buffer,
-                        self.push_constant_pipeline_layout.get(),
-                        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                        0,
-                        bytemuck::cast_slice(&constants),
-                    );
-                    device.cmd_draw_indexed(command_buffer, clip_mesh.index_count, 1, 0, 0, 0);
-                }
-            }
-        }
-
-        let mut stats = self.rendering_stats();
-        stats.num_draw_calls += 1;
-        stats.total_draw_calls += 1;
-        true
     }
 }
 
@@ -1541,27 +1170,4 @@ impl GfxContext for Context {
     }
 
     fn unbind_global_uniform_buffers(&self, _render_pass: &dyn mln_gfx::render_pass::RenderPass) {}
-
-    fn render_tile_clipping_masks(
-        &self,
-        render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        tile_ubos: &[ClipUBO],
-    ) -> bool {
-        self.render_tile_clipping_masks_impl(render_pass, shaders, tile_ubos)
-    }
-
-    fn release_globe_clip_masks(&self) {
-        self.globe_clipping.borrow_mut().meshes.clear();
-    }
-
-    fn render_globe_tile_clipping_masks(
-        &self,
-        render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        masks: &[GlobeClipMask],
-        mesh: &GlobeClipMeshFn<'_>,
-    ) -> bool {
-        self.render_globe_tile_clipping_masks_impl(render_pass, shaders, masks, mesh)
-    }
 }

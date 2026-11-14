@@ -13,6 +13,7 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gpu::StencilState;
 use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::{
@@ -37,9 +38,6 @@ pub(crate) struct DynamicValues {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PipelineInfo {
-    /// Used to select the pipeline layout.
-    pub(crate) use_push_constants: bool,
-
     pub(crate) topology: vk::PrimitiveTopology,
     pub(crate) cull_mode: vk::CullModeFlags,
     pub(crate) front_face: vk::FrontFace,
@@ -79,7 +77,6 @@ pub(crate) struct PipelineInfo {
 impl Default for PipelineInfo {
     fn default() -> Self {
         PipelineInfo {
-            use_push_constants: false,
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
             cull_mode: vk::CullModeFlags::NONE,
             front_face: vk::FrontFace::CLOCKWISE,
@@ -327,7 +324,8 @@ impl PipelineInfo {
     }
 
     pub(crate) fn set_stencil_mode(&mut self, value: &StencilMode) {
-        if value.test == Test::Always {
+        // A test that always passes still writes where the mode replaces.
+        if StencilState::from(value).is_disabled() {
             self.stencil_test = false;
             self.stencil_function = vk::CompareOp::NEVER;
             return;
@@ -394,7 +392,6 @@ impl PipelineInfo {
     pub(crate) fn hash(&self) -> u64 {
         use ash::vk::Handle;
         hash(&[
-            u64::from(self.use_push_constants),
             self.topology.as_raw() as u64,
             u64::from(self.cull_mode.as_raw()),
             self.front_face.as_raw() as u64,

@@ -45,10 +45,9 @@ use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, 
 use crate::shaders::compiler::{Stage, compile, compose, parse};
 use crate::shaders::glsl_sources;
 use crate::shaders::layout::{
-    CLIP_MASK_PUSH_CONSTANT_SIZE, DRAWABLE_UNIFORM_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START,
-    IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
-    drawable_uniform_binding, global_uniform_binding, image_sampler_binding, image_texture_binding,
-    layer_storage_binding, layer_uniform_binding,
+    DRAWABLE_UNIFORM_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT,
+    LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE, drawable_uniform_binding,
+    global_uniform_binding, image_sampler_binding, image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::shaders::shader_source::{AttributeInfo, ShaderSource, shader_source};
 
@@ -147,7 +146,6 @@ struct Variant {
     name: String,
     /// No property is a uniform: the vertex stage reads every attribute.
     per_vertex: bool,
-    globe: bool,
     defines: String,
 }
 
@@ -159,7 +157,7 @@ fn variants(source: &ShaderSource, all: bool) -> Vec<Variant> {
     let mut variants = Vec::new();
     for (projection, globe) in PROJECTIONS {
         let mut push = |name: &str, per_vertex: bool, defines: String| {
-            variants.push(Variant { name: format!("{projection}, {name}"), per_vertex, globe, defines });
+            variants.push(Variant { name: format!("{projection}, {name}"), per_vertex, defines });
         };
         push("no uniforms", true, defines(false, globe, []));
         push("all uniforms", false, defines(false, globe, &properties));
@@ -255,7 +253,7 @@ fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
             projection,
             (LayerUniform(ID_CIRCLE_EVALUATED_PROPS_UBO), size_of::<CircleEvaluatedPropsUBO>()),
         ],
-        "ClippingMaskProgram" => vec![],
+        "ClippingMaskProgram" => vec![(DrawableUniform(ID_PROJECTION_UBO), size_of::<ProjectionUBO>())],
         "CollisionBoxShader" | "CollisionCircleShader" => vec![
             (DrawableUniform(ID_COLLISION_DRAWABLE_UBO), size_of::<CollisionDrawableUBO>()),
             (DrawableUniform(ID_COLLISION_TILE_PROPS_UBO), size_of::<CollisionTilePropsUBO>()),
@@ -476,11 +474,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
                     fail(format!("samplers at {samplers:?}, the table has {:?}", table(image_sampler_binding)));
                 }
 
-                let expected_push_constants = match (source.name, stage, variant.globe) {
-                    ("ClippingMaskProgram", Stage::Vertex, true) => Some(CLIP_MASK_PUSH_CONSTANT_SIZE),
-                    ("ClippingMaskProgram", Stage::Vertex, false) => Some(CLIP_MASK_PUSH_CONSTANT_SIZE / 2),
-                    _ => push_constants.map(|_| UBO_INDEX_PUSH_CONSTANT_SIZE),
-                };
+                let expected_push_constants = push_constants.map(|_| UBO_INDEX_PUSH_CONSTANT_SIZE);
                 if push_constants != expected_push_constants {
                     fail(format!("push constants of {push_constants:?} bytes, not {expected_push_constants:?}"));
                 }
@@ -619,8 +613,7 @@ const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
 // The inputs of a vertex stage are the vertex and instance attributes of the
 // shader's tables, at the locations of their indices and in the types that
 // read their formats. With a property as a uniform, the stage reads a subset
-// of them. The globe clipping mask also reads the three per-tile vectors the
-// context binds as instance attributes itself.
+// of them.
 #[test]
 fn vertex_inputs_are_the_attribute_tables() {
     let mut failures = Vec::new();
@@ -628,13 +621,10 @@ fn vertex_inputs_are_the_attribute_tables() {
         let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
         assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", source.name);
         for variant in variants(source, true) {
-            let mut table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
+            let table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
                 .filter(|attr| !UNREAD_ATTRIBUTES.contains(&(source.name, attr.index)))
                 .map(|attr| (attr.index as u32, input_type(attr.data_type)))
                 .collect();
-            if source.name == "ClippingMaskProgram" && variant.globe {
-                table.extend((1..=3).map(|location| (location, (ScalarKind::Float, 4))));
-            }
             let inputs: BTreeMap<u32, (ScalarKind, u32)> =
                 stage_inputs(&module(source, Stage::Vertex, &variant.defines))
                     .into_iter()

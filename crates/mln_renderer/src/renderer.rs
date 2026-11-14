@@ -1,6 +1,7 @@
 // C++ keeps a `gfx::RendererBackend&`; the frontend owns the backend, so the
 // renderer shares it through an `Rc`.
 
+use std::collections::BTreeSet;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -18,7 +19,9 @@ use mln_text::GlyphCache;
 use mln_util::Color;
 use mln_util::time::Instant;
 
+use crate::clip_masks::ClipMasks;
 use crate::frame_projection::{self, FrameProjection};
+use crate::layer_tweaker::to_projection_ubo;
 use crate::paint_parameters::PaintParameters;
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
@@ -64,6 +67,8 @@ pub struct Renderer {
     pixel_ratio: f32,
     /// Dropped in `drop` inside the `BackendScope`, after the orchestrator.
     static_data: Option<RenderStaticData>,
+    /// Kept across frames; dropped in `drop` inside the `BackendScope`.
+    clip_masks: ClipMasks,
     render_state: RenderState,
     frame_count: u64,
     style_loaded: bool,
@@ -92,6 +97,7 @@ impl Renderer {
             backend,
             pixel_ratio,
             static_data: None,
+            clip_masks: ClipMasks::default(),
             render_state: RenderState::Never,
             frame_count: 0,
             style_loaded: false,
@@ -114,6 +120,7 @@ impl Renderer {
         // ratio takes new shaders, and new drawables that use them.
         self.pixel_ratio = pixel_ratio;
         self.static_data = None;
+        self.clip_masks = ClipMasks::default();
         self.orchestrator.release_shaders();
     }
 
@@ -462,7 +469,25 @@ impl Renderer {
             for layer_group in orchestrator.debug_layer_groups() {
                 layer_group.borrow_mut().upload(&*upload_pass);
             }
+
+            // The masks of the tiles the layer groups clip to and, when any
+            // of them uses the stencil buffer, of the tile that clears it.
+            let mut clip_tiles = BTreeSet::new();
+            orchestrator.visit_layer_groups(|layer_group| {
+                if let Some(tiles) = layer_group.as_tile_layer_group().and_then(|group| group.stencil_tiles.as_ref()) {
+                    clip_tiles.extend(tiles.iter().copied().chain(parameters.stencil_clear_tile()));
+                }
+            });
+            self.clip_masks.update(
+                context,
+                &static_data.shaders,
+                parameters.state.is_globe_rendering(),
+                &clip_tiles,
+                |tile| to_projection_ubo(&parameters.projection_data_for_tile(tile, false)),
+                &*upload_pass,
+            );
         }
+        parameters.clip_masks = std::mem::take(&mut self.clip_masks);
 
         let layers_uploaded = Instant::now();
         let atlas_size = parameters.pattern_atlas.borrow().get_pixel_size();
@@ -647,6 +672,7 @@ impl Renderer {
 
         parameters.encoder = None;
         context.end_frame();
+        self.clip_masks = std::mem::take(&mut parameters.clip_masks);
 
         let rendering_time = context.rendering_stats().rendering_time;
         context.rendering_stats().encoding_time = render_tree.get_elapsed_time() - rendering_time;
@@ -696,6 +722,7 @@ impl Drop for Renderer {
         unsafe {
             ManuallyDrop::drop(&mut self.orchestrator);
         }
+        self.clip_masks = ClipMasks::default();
         self.static_data = None;
     }
 }

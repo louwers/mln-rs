@@ -3,7 +3,6 @@
 
 pub mod background_layer_ubo;
 pub mod circle_layer_ubo;
-pub mod clipping_mask_ubo;
 pub mod color_relief_layer_ubo;
 pub mod fill_extrusion_layer_ubo;
 pub mod fill_layer_ubo;

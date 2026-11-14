@@ -33,7 +33,6 @@ pub mod drawable_tweaker;
 pub mod export;
 pub mod frame;
 pub mod gfx_types;
-pub mod globe_clip_mask;
 pub mod gpu;
 pub mod index_vector;
 pub mod offscreen_texture;

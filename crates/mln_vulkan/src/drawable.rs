@@ -141,7 +141,7 @@ impl Drawable {
         self.impl_.stencil_for_3d = Some(*value);
     }
 
-    pub(crate) fn upload(&mut self, upload_pass: &UploadPass) {
+    fn upload_in(&mut self, upload_pass: &UploadPass) {
         let Some(shader_ptr) = self.base.shader.clone() else {
             Log::warning(
                 Event::General,
@@ -415,6 +415,12 @@ impl drawable::Drawable for Drawable {
         &mut self.base
     }
 
+    fn upload(&mut self, upload_pass: &dyn mln_gfx::upload_pass::UploadPass) {
+        if let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() {
+            self.upload_in(upload_pass);
+        }
+    }
+
     fn draw(&mut self, parameters: &mut dyn PaintParameters) {
         let parameters: &dyn PaintParameters = parameters;
         let Some(context) = parameters.context().downcast_ref::<Context>() else {
@@ -478,7 +484,9 @@ impl drawable::Drawable for Drawable {
         }
 
         let mut stencil_mode = StencilMode::disabled();
-        if self.base.enable_stencil {
+        if let Some(mode) = self.base.stencil_mode.filter(|_| !self.base.is_3d) {
+            stencil_mode = mode;
+        } else if self.base.enable_stencil {
             if let Some(mode) = self.impl_.stencil_for_3d {
                 stencil_mode = mode;
             } else if !self.base.is_3d

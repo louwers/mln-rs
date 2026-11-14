@@ -623,30 +623,13 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-struct ClipUBO {
-    matrix: mat4x4<f32>,
-    stencil_ref: u32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-#ifdef PROJECTION_GLOBE
-@group(0) @binding(2) var<uniform> clip: ProjectionUBO;
-#else
-@group(0) @binding(2) var<uniform> clip: ClipUBO;
-#endif
+@group(0) @binding(4) var<uniform> projection: ProjectionUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-#ifdef PROJECTION_GLOBE
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    let clip_pos = projectTileWithPoles(pos, pos, clip);
-#else
-    let clip_pos = clip.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
-#endif
-    out.position = vec4<f32>(clip_pos.x, clip_pos.y, clip_pos.z, clip_pos.w);
+    out.position = projectTileWithPoles(pos, pos, projection);
     return out;
 }
 ",

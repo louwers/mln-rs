@@ -102,9 +102,7 @@ impl PaintParameters for TestPaintParameters<'_> {
     fn depth_mode_for_3d(&self, _mask: DepthMaskType) -> DepthMode {
         DepthMode::disabled()
     }
-    fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) -> bool {
-        true
-    }
+    fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) {}
     fn stencil_mode_for_clipping(&self, _tile_id: &UnwrappedTileID) -> StencilMode {
         StencilMode::disabled()
     }
