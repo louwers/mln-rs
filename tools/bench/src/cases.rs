@@ -133,6 +133,8 @@ pub fn all() -> Vec<Case> {
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
     }
     cases.push(Case::new("Style/Replace600", style_replace));
+    cases.push(Case::new("Style/Replace600/OnDemand", style_replace_on_demand));
+    cases.push(Case::new("Style/AddLayer600", style_add_layer));
     cases.push(Case::new("Load/Concurrent", load_concurrent));
     cases.push(Case::new("Load/GlyphCache/Private", |cx| load_glyph_cache(cx, false)));
     cases.push(Case::new("Load/GlyphCache/Shared", |cx| load_glyph_cache(cx, true)));
@@ -931,15 +933,20 @@ fn partitioned_style(layers: usize, variant: usize) -> String {
     )
 }
 
+/// A scene showing `partitioned_style`'s 100 points, which span four tiles.
+fn partitioned_scene(mode: Mode) -> Scene {
+    let mut scene = Scene::new(Size::new(512, 512), mode);
+    scene.jump(LatLng::new(0.045, 0.045).expect("a center"), 12.0);
+    scene
+}
+
 /// Replacing a style of 600 layers with its other variant, to the new
 /// style's first complete still, as maplibre-compose's style-publication
 /// case replaces one through maplibre-native-ffi. `load_json_cpu_ms` is the
 /// part `load_json` takes before the map renders.
 fn style_replace(cx: &Context) -> Metrics {
     let styles = [partitioned_style(600, 0), partitioned_style(600, 1)];
-    let center = LatLng::new(0.045, 0.045).expect("a center");
-    let mut scene = Scene::new(Size::new(512, 512), Mode::Still);
-    scene.jump(center, 12.0);
+    let mut scene = partitioned_scene(Mode::Still);
     scene.load_json(&styles[0]);
     scene.render_still();
     let mut meter = Meter::new();
@@ -957,5 +964,61 @@ fn style_replace(cx: &Context) -> Metrics {
     }
     let mut metrics = meter.finish();
     metrics.lead("load_json_cpu_ms", median(&load_json));
+    metrics
+}
+
+/// As `Style/Replace600`, on a continuous map drawn on a 60 Hz display's
+/// clock, as maplibre-compose's host draws, until it settles complete.
+/// `frames` is the frames drawn per replacement.
+fn style_replace_on_demand(cx: &Context) -> Metrics {
+    let styles = [partitioned_style(600, 0), partitioned_style(600, 1)];
+    let mut scene = partitioned_scene(Mode::OnDemand);
+    scene.load_json(&styles[0]);
+    scene.settle();
+    let mut meter = Meter::new();
+    let mut frames = Vec::new();
+    for i in 0..cx.iterations(20) {
+        meter.start();
+        scene.load_json(&styles[(i + 1) % 2]);
+        frames.push(scene.settle() as f64);
+        meter.stop();
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Style/Replace600/OnDemand", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("frames", median(&frames));
+    metrics
+}
+
+/// The layer that maplibre-compose's overlay-update case adds over the 600
+/// layers.
+const OVERLAY_LAYER: &str =
+    r##"{"id":"overlay","type":"circle","source":"data","paint":{"circle-radius":8,"circle-color":"#457b9d"}}"##;
+
+/// A circle layer added above the first of `Style/Replace600`'s 600 layers
+/// until the continuous map settles complete, then removed until it
+/// settles, as maplibre-compose's overlay-update case toggles one. Each
+/// change lays out the source's tiles again with all of their layers.
+/// `frames` is the frames drawn per change.
+fn style_add_layer(cx: &Context) -> Metrics {
+    let mut scene = partitioned_scene(Mode::OnDemand);
+    scene.load_json(&partitioned_style(600, 0));
+    scene.settle();
+    let mut meter = Meter::new();
+    let mut frames = Vec::new();
+    for _ in 0..cx.iterations(10) {
+        meter.start();
+        scene.add_layer_json(OVERLAY_LAYER, Some("workload-1"));
+        frames.push(scene.settle() as f64);
+        scene.remove_layer("overlay");
+        frames.push(scene.settle() as f64);
+        meter.stop();
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Style/AddLayer600", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("frames", median(&frames));
     metrics
 }
