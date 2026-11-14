@@ -321,6 +321,9 @@ impl WebMap {
     pub fn frame(&mut self, budget_ms: f64, now: f64) -> bool {
         let [between, between_tiles] = self.between_frames_ms.replace([0.0; 2]);
         let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
+        // The scheduler's tasks that the pump ran between frames: with no
+        // tile workers, the tiles' parsing and layout among them.
+        let between_tasks = ms(pump::take_scheduler_time());
         let start = Instant::now();
         // The map samples its animations at this frame's time.
         self.map.set_frame_time(Some(start));
@@ -345,7 +348,7 @@ impl WebMap {
             ms(render.layers),
             ms(render.upload),
             ms(render.draw),
-            tasks,
+            tasks + between_tasks,
         ];
         for (pending, ms) in self.pending.iter_mut().zip(frame) {
             *pending += ms;
@@ -360,7 +363,9 @@ impl WebMap {
     /// before the last one that drew, up to its end, by phase: the gestures
     /// and the `RunLoop`, but for tile replies; receiving the tile workers'
     /// replies; then the renderer's `RenderTimings` (sources, symbols,
-    /// layers, upload, draw); and the cooperative scheduler's tasks.
+    /// layers, upload, draw); and the cooperative scheduler's tasks, in the
+    /// frames and between them (with no tile workers, the tiles' parsing and
+    /// layout).
     pub fn frame_timings(&self) -> Vec<f64> {
         self.phases.to_vec()
     }

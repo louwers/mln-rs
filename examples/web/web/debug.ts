@@ -55,7 +55,7 @@ const PHASE_INFO: Record<Phase, { color: string; title: string }> = {
   tasks: {
     color: "#ff9b5e",
     title:
-      "The cooperative scheduler's tasks, such as glyphs and sprites (8 ms budget a frame)",
+      "The cooperative scheduler's tasks, in the frame (8 ms budget) and between frames: glyphs and sprites, and with no tile workers the tiles' parsing and layout",
   },
 };
 

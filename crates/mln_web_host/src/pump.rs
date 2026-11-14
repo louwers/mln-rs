@@ -38,6 +38,9 @@ struct Pump {
     running: Cell<bool>,
     stopped: Cell<bool>,
     slice: Cell<Duration>,
+    /// The time the slices spent on the scheduler's tasks since
+    /// [`take_scheduler_time`] last took it.
+    scheduler_time: Cell<Duration>,
     steps: RefCell<Vec<Rc<Entry>>>,
     _on_message: Closure<dyn FnMut()>,
 }
@@ -69,6 +72,7 @@ impl Pump {
                 running: Cell::new(false),
                 stopped: Cell::new(false),
                 slice: Cell::new(Duration::from_millis(4)),
+                scheduler_time: Cell::new(Duration::ZERO),
                 steps: RefCell::new(Vec::new()),
                 _on_message: on_message,
             }
@@ -91,7 +95,9 @@ impl Pump {
         }
         let deadline = Instant::now() + self.slice.get();
         self.run_steps();
+        let tasks = Instant::now();
         let more = scheduler::cooperative().is_some_and(|scheduler| scheduler.run_until(Some(deadline)));
+        self.scheduler_time.set(self.scheduler_time.get() + tasks.elapsed());
         self.run_steps();
         self.running.set(false);
         if more {
@@ -169,6 +175,13 @@ pub fn waker() -> Arc<dyn Fn() + Send + Sync> {
 /// The steps run in every slice, however long they take.
 pub(crate) fn set_slice(slice: Duration) {
     PUMP.with(|pump| pump.slice.set(slice));
+}
+
+/// The time the slices spent on the scheduler's tasks since the last call,
+/// for a host that reports the instance's work between its frames.
+#[must_use]
+pub fn take_scheduler_time() -> Duration {
+    PUMP.with(|pump| pump.scheduler_time.take())
 }
 
 /// Stops running slices, for good: for the JavaScript that runs an instance
