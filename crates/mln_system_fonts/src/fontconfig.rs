@@ -155,8 +155,8 @@ impl Fontconfig {
                 let path = PathBuf::from(std::ffi::OsStr::from_bytes(CStr::from_ptr(file).to_bytes()));
                 let mut index = 0;
                 (api.pattern_get_integer)(font, c"index".as_ptr(), 0, &raw mut index);
-                // The high 16 bits number a variable font's named instance,
-                // which the map can't draw: it draws the default instance.
+                // The high 16 bits number a variable font's named instance;
+                // the map picks the font's weight itself.
                 let source = Source::File { path, index: (index as u32) & 0xFFFF };
                 let mut family = ptr::null();
                 let family =

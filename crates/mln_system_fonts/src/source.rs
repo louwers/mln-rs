@@ -10,6 +10,7 @@ use std::sync::{Arc, OnceLock};
 
 use memmap2::Mmap;
 use mln_text::glyph::FontData;
+use mln_text::weight::REGULAR_WEIGHT;
 use mln_util::logging::{Event, Log};
 use skrifa::raw::tables::cmap::Cmap;
 use skrifa::raw::tables::fvar::Fvar;
@@ -78,10 +79,8 @@ pub(crate) fn near_regular(weight: u16) -> bool {
 /// The weight the map draws a font with `tables` at, if it has a glyph for
 /// `probe`.
 ///
-/// The map's font engine has no font variations, so a variable font draws
-/// at its default instance: the default of its `wght` axis, which can be far
-/// from its family's regular weight (Fedora's Noto Sans CJK variable font
-/// defaults to Thin, 100).
+/// A variable font draws at regular weight within the range of its `wght`
+/// axis (`mln_text::weight`), a static font at its own.
 pub(crate) fn drawn_weight(tables: &[Table], probe: char) -> Option<u16> {
     let table = |tag: &[u8; 4]| tables.iter().find(|(t, _)| t == tag).map(|(_, data)| RawData::new(data));
     let cmap = Cmap::read(table(b"cmap")?).ok()?;
@@ -89,7 +88,8 @@ pub(crate) fn drawn_weight(tables: &[Table], probe: char) -> Option<u16> {
     let wght = table(b"fvar").and_then(|data| Fvar::read(data).ok()).and_then(|fvar| {
         let axes = fvar.axes().ok()?;
         let axis = axes.iter().find(|axis| axis.axis_tag() == skrifa::Tag::new(b"wght"))?;
-        Some(axis.default_value().to_f64().round() as u16)
+        let range = axis.min_value().to_f64() as f32..=axis.max_value().to_f64() as f32;
+        Some(REGULAR_WEIGHT.clamp(*range.start(), *range.end()).round() as u16)
     });
     Some(
         wght.or_else(|| table(b"OS/2").and_then(|data| Os2::read(data).ok()).map(|os2| os2.us_weight_class()))
@@ -135,8 +135,8 @@ mod tests {
         (*b"OS/2", table)
     }
 
-    /// An `fvar` with a `wght` axis that defaults to `default`.
-    fn fvar(default: u16) -> Table {
+    /// An `fvar` with a `wght` axis from `min` to `max`.
+    fn fvar(min: u16, max: u16) -> Table {
         let mut table = Vec::new();
         // version 1.0, axesArrayOffset 16, reserved, axisCount 1, axisSize
         // 20, instanceCount 0, instanceSize 8.
@@ -144,7 +144,7 @@ mod tests {
             table.extend_from_slice(&word.to_be_bytes());
         }
         table.extend_from_slice(b"wght");
-        for value in [100u16, default, 900] {
+        for value in [min, min, max] {
             table.extend_from_slice(&(u32::from(value) << 16).to_be_bytes());
         }
         table.extend_from_slice(&[0; 4]);
@@ -174,9 +174,10 @@ mod tests {
     }
 
     #[test]
-    fn a_variable_font_draws_at_its_default_weight() {
-        assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(100)], 'A'), Some(100));
-        assert_eq!(drawn_weight(&[cmap(), os2(100), fvar(400)], 'A'), Some(400));
+    fn a_variable_font_draws_at_regular_weight_within_its_range() {
+        assert_eq!(drawn_weight(&[cmap(), os2(100), fvar(100, 900)], 'A'), Some(400));
+        assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(100, 200)], 'A'), Some(200));
+        assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(700, 900)], 'A'), Some(700));
     }
 
     #[test]

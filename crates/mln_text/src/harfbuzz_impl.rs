@@ -4,10 +4,12 @@
 //   ported FreeType face, at hb-ft's scale (26.6 at 24 px);
 // - a view of the font that hides what HB_TINY compiles out, so HarfRust
 //   takes the same code paths: the AAT tables (HB_NO_AAT: morx, mort, kerx,
-//   ankr, trak, feat), `kern` (HB_NO_OT_KERN, and HB_NO_AAT for the AAT
-//   flavour) and the GSUB/GPOS FeatureVariations (HB_NO_VAR); and user
-//   features `frac=0`, `numr=0`, `dnom=0` (HB_NO_OT_SHAPE_FRACTIONS:
-//   HB_TINY never adds the automatic fraction features).
+//   ankr, trak, feat) and `kern` (HB_NO_OT_KERN, and HB_NO_AAT for the AAT
+//   flavour); and user features `frac=0`, `numr=0`, `dnom=0`
+//   (HB_NO_OT_SHAPE_FRACTIONS: HB_TINY never adds the automatic fraction
+//   features).
+// Unlike HB_TINY's HB_NO_VAR, a variable font shapes at regular weight
+// (`weight::at_regular_weight`), with its GSUB/GPOS feature variations.
 // HarfRust has no switch for some HB_TINY options (HB_NO_OT_SHAPE_FALLBACK,
 // HB_NO_OT_SHAPER_VOWEL_CONSTRAINTS, HB_NO_UCD_UNASSIGNED), so a few texts
 // shape differently: fallback mark positioning, an inserted U+25CC, and
@@ -25,6 +27,7 @@ use crate::freetype::{FreeTypeFace, FreeTypeLibrary};
 use crate::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 use crate::harfbuzz::HBShapeAdjust;
 use crate::hb_ft::HbFtFont;
+use crate::weight;
 
 /// Tables HarfBuzz never reads when built with `HB_TINY`.
 const HB_TINY_HIDDEN_TABLES: [&[u8; 4]; 7] = [b"morx", b"mort", b"kerx", b"kern", b"ankr", b"trak", b"feat"];
@@ -94,21 +97,11 @@ fn hb_tiny_font(face: &FreeTypeFace) -> Option<Font> {
         }
         let &(offset, length) = tables.get(&bytes)?;
         let range = offset..offset + length;
-        let table = data.as_bytes().get(range.clone())?;
-        if (&bytes == b"GSUB" || &bytes == b"GPOS") && table.len() >= 4 {
-            // HB_NO_VAR: find_variations_index never finds one. Version 1.0
-            // headers have no FeatureVariations offset.
-            if table[0..2] == [0, 1] && table[2..4] != [0, 0] {
-                let mut table = table.to_vec();
-                table[2] = 0;
-                table[3] = 0;
-                return Some(Blob::from(table));
-            }
-        }
+        data.as_bytes().get(range.clone())?;
         let table: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(TableBytes { data: data.clone(), range });
         Some(Blob::from(table))
     };
-    Font::new(TableFunction::new(Arc::new(table_fn)), 0)
+    Font::new(TableFunction::new(Arc::new(table_fn)), 0).map(weight::at_regular_weight)
 }
 
 impl Impl {

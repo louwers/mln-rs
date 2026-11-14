@@ -24,6 +24,8 @@ pub(crate) struct HbFtFont<'a> {
     font_page: u16,
     /// -1 when the font's x scale is negative, +1 otherwise.
     x_mult: f32,
+    /// The x scale (`scale`): 26.6 pixels per em.
+    x_scale: i32,
 }
 
 impl<'a> HbFtFont<'a> {
@@ -36,7 +38,7 @@ impl<'a> HbFtFont<'a> {
         // HarfBuzz reads a missing or broken table as zeros.
         let font_page = if ft.os2_version == 0 { ft.os2_fs_selection & 0xFF00 } else { 0 };
         let (x_scale, _) = Self::scale(face);
-        HbFtFont { face, symbol, font_page, x_mult: if x_scale < 0 { -1.0 } else { 1.0 } }
+        HbFtFont { face, symbol, font_page, x_mult: if x_scale < 0 { -1.0 } else { 1.0 }, x_scale }
     }
 
     /// `hb_ft_font_changed`: `hb_font_set_scale` from the FreeType size,
@@ -94,8 +96,15 @@ impl FontFuncs for HbFtFont<'_> {
         if g == 0 { None } else { Some(GlyphId::new(g)) }
     }
 
-    /// `hb_ft_get_glyph_h_advances` for one glyph.
-    fn glyph_h_advance(&self, _font: &ShaperFont, glyph: GlyphId) -> i32 {
+    /// `hb_ft_get_glyph_h_advances` for one glyph. A variable font away
+    /// from its default location takes the advance there from the font's
+    /// metrics (`HVAR`, or `gvar`'s phantom points), which the FreeType port
+    /// doesn't read.
+    fn glyph_h_advance(&self, font: &ShaperFont, glyph: GlyphId) -> i32 {
+        if !font.normalized_coords().is_empty() {
+            let units = font.glyph_metrics().h_advance(glyph);
+            return (units * self.x_scale as f32 / f32::from(font.units_per_em())).round() as i32;
+        }
         // FT_Fixed v = 0; FT_Get_Advance (ft_face, glyph, load_flags, &v);
         let v = self.face.get_advance(glyph.to_u32()).unwrap_or(0);
         // Work around bug that FreeType seems to return negative advance

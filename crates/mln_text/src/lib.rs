@@ -24,6 +24,7 @@ pub mod shaping;
 #[cfg(test)]
 mod shaping_test;
 pub mod tagged_string;
+pub mod weight;
 mod woff;
 
 pub use bidi::{BiDi, apply_arabic_shaping, starts_right_to_left};
