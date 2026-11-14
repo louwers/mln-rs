@@ -2,7 +2,8 @@
 // latter is itself stored in an `Arc`. Using immutability at the
 // collection level allows us to short-circuit significant portions of the
 // RenderStyle update logic via a simple pointer equality check, greatly
-// improving performance.
+// improving performance. A change copies the vector of impls only while a
+// snapshot from `get_impls` shares it, so a snapshot never changes.
 
 use std::sync::Arc;
 
@@ -12,6 +13,8 @@ pub(crate) trait CollectionElement {
     type Impl: ?Sized;
     fn base_impl(&self) -> Arc<Self::Impl>;
     fn get_id(&self) -> String;
+    /// Whether the element's id is `id`, read without copying its impl.
+    fn has_id(&self, id: &str) -> bool;
     /// The id of an impl, which orders the impls of a persistent-order
     /// collection.
     fn impl_id(impl_: &Self::Impl) -> &str;
@@ -25,6 +28,9 @@ impl CollectionElement for dyn crate::layer::Layer {
     fn get_id(&self) -> String {
         crate::layer::Layer::get_id(self)
     }
+    fn has_id(&self, id: &str) -> bool {
+        crate::layer::Layer::base_impl_ref(self).id == id
+    }
     fn impl_id(impl_: &Self::Impl) -> &str {
         &impl_.id
     }
@@ -37,6 +43,9 @@ impl CollectionElement for dyn crate::source::Source {
     }
     fn get_id(&self) -> String {
         crate::source::Source::get_id(self)
+    }
+    fn has_id(&self, id: &str) -> bool {
+        self.base().has_id(id)
     }
     fn impl_id(impl_: &Self::Impl) -> &str {
         &impl_.id
@@ -98,15 +107,13 @@ impl<T: CollectionElement + ?Sized> CollectionBase<T> {
 
     #[must_use]
     pub(crate) fn index(&self, id: &str) -> usize {
-        self.wrappers.iter().position(|e| T::impl_id(&e.base_impl()) == id).unwrap_or(self.wrappers.len())
+        self.wrappers.iter().position(|e| e.has_id(id)).unwrap_or(self.wrappers.len())
     }
 
     fn add_at(&mut self, wrapper_index: usize, impl_index: usize, wrapper: Box<T>) -> &mut T {
         debug_assert!(wrapper_index <= self.size());
         debug_assert!(impl_index <= self.size());
-        let mut impls = (*self.impls).clone();
-        impls.insert(impl_index, wrapper.base_impl());
-        self.impls = Arc::new(impls);
+        Arc::make_mut(&mut self.impls).insert(impl_index, wrapper.base_impl());
 
         self.wrappers.insert(wrapper_index, wrapper);
         self.wrappers[wrapper_index].as_mut()
@@ -118,9 +125,7 @@ impl<T: CollectionElement + ?Sized> CollectionBase<T> {
         }
         debug_assert!(impl_index < self.size());
 
-        let mut impls = (*self.impls).clone();
-        impls.remove(impl_index);
-        self.impls = Arc::new(impls);
+        Arc::make_mut(&mut self.impls).remove(impl_index);
 
         Some(self.wrappers.remove(wrapper_index))
     }
@@ -132,9 +137,7 @@ impl<T: CollectionElement + ?Sized> CollectionBase<T> {
             debug_assert!(false);
             return;
         }
-        let mut impls = (*self.impls).clone();
-        impls[impl_index] = base_impl;
-        self.impls = Arc::new(impls);
+        Arc::make_mut(&mut self.impls)[impl_index] = base_impl;
     }
 }
 
@@ -169,6 +172,33 @@ impl<T: CollectionElement + ?Sized> Collection<T> {
             None => self.base.size(),
         };
         self.base.add_at(idx, idx, wrapper)
+    }
+
+    /// Adds `wrapper` as `add` does, unless an element has its id: then
+    /// returns it back. Looks through the collection once.
+    pub(crate) fn add_unique(&mut self, wrapper: Box<T>, before: Option<&str>) -> Result<&mut T, Box<T>> {
+        let id = wrapper.get_id();
+        let size = self.base.size();
+        let mut idx = size;
+        for (i, element) in self.base.wrappers.iter().enumerate() {
+            if element.has_id(&id) {
+                return Err(wrapper);
+            }
+            if idx == size && before.is_some_and(|before| element.has_id(before)) {
+                idx = i;
+            }
+        }
+        Ok(self.base.add_at(idx, idx, wrapper))
+    }
+
+    /// Adds `wrappers` in order above every element. Their ids must differ
+    /// from each other and from the collection's.
+    pub(crate) fn extend(&mut self, wrappers: impl IntoIterator<Item = Box<T>>) {
+        let impls = Arc::make_mut(&mut self.base.impls);
+        for wrapper in wrappers {
+            impls.push(wrapper.base_impl());
+            self.base.wrappers.push(wrapper);
+        }
     }
 
     pub(crate) fn remove(&mut self, id: &str) -> Option<Box<T>> {
