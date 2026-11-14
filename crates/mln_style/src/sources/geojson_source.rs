@@ -17,13 +17,13 @@ use mln_vec_map::VecMap;
 use super::geojson_source_impl::{self, Impl};
 use crate::conversion::Error;
 use crate::conversion::geojson::convert_json_geojson;
-use crate::expression::Expression;
+use crate::expression::Expr;
 use crate::layer::LayerTypeInfo;
 use crate::layer::layer_type_info::TileKind;
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl;
 
-pub(crate) type ClusterExpression = (Arc<dyn Expression>, Arc<dyn Expression>);
+pub(crate) type ClusterExpression = (Arc<Expr>, Arc<Expr>);
 pub type ClusterProperties = VecMap<String, ClusterExpression>;
 
 #[derive(Clone)]

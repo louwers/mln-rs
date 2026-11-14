@@ -16,10 +16,8 @@ use mln_util::constants::{DEGREES_MAX, EXTENT, LONGITUDE_MAX};
 use mln_util::geometry::{FeatureType, to_feature_type};
 use mln_util::logging::{Event, Log};
 
-use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
+use crate::expression::{EvaluationContext, Expr, Node};
 use crate::parsing_context::{ParseResult, ParsingContext};
-use crate::type_::Type;
-use crate::value::Value;
 
 // --- util/geometry_util ---
 
@@ -353,22 +351,14 @@ pub(crate) fn geojson_geometries(geojson: &GeoJson) -> Vec<Option<&geojson::Geom
     }
 }
 
+/// `["within", geojson]`: whether the feature lies inside the polygons.
+#[derive(Clone, PartialEq)]
 pub(crate) struct Within {
-    base: ExpressionBase,
     geojson_source: GeoJson,
     geometries: Geometry<f64>,
 }
 
 impl Within {
-    #[must_use]
-    pub(crate) fn new(geojson: GeoJson, geometries: Geometry<f64>) -> Self {
-        Within {
-            base: ExpressionBase::new(Kind::Within, Type::Boolean, Dependency::FEATURE),
-            geojson_source: geojson,
-            geometries,
-        }
-    }
-
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         if value.is_array() {
             // object value, quoted with ["within", value]
@@ -387,7 +377,10 @@ impl Within {
             // error.
             for geometry in &geometries {
                 if let Some(ret) = get_polygon_info(*geometry, ctx) {
-                    return Some(Box::new(Within::new(parsed_value.clone(), ret)));
+                    return Some(Expr::new(Node::Within(Box::new(Within {
+                        geojson_source: parsed_value.clone(),
+                        geometries: ret,
+                    }))));
                 }
             }
             // C++ reports nothing for an empty collection, and its parser
@@ -424,41 +417,22 @@ fn value_converter(v: &serde_json::Value) -> MbglValue {
     }
 }
 
-impl Expression for Within {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
-    }
-
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+impl Within {
+    pub(crate) fn eval_bool(&self, params: &EvaluationContext<'_>) -> bool {
         let (Some(feature), Some(canonical)) = (params.feature, params.canonical) else {
-            return Ok(Value::Bool(false));
+            return false;
         };
         let geometry_type = feature.get_type();
         // Currently only support Point and LineString types in Polygon/Polygons
         if geometry_type == FeatureType::Point || geometry_type == FeatureType::LineString {
-            return Ok(Value::Bool(feature_within_polygons(feature, canonical, &self.geometries)));
+            return feature_within_polygons(feature, canonical, &self.geometries);
         }
         Log::warning(Event::General, "within expression currently only support Point/LineString geometry type.");
 
-        Ok(Value::Bool(false))
-    }
-
-    fn each_child<'a>(&'a self, _visit: &mut dyn FnMut(&'a dyn Expression)) {}
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Within
-            && let Some(rhs) = downcast::<Within>(e)
-        {
-            return self.geojson_source == rhs.geojson_source && self.geometries == rhs.geometries;
-        }
         false
     }
 
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        vec![Some(Value::Bool(true)), Some(Value::Bool(false))]
-    }
-
-    fn serialize(&self) -> MbglValue {
+    pub(crate) fn serialize(&self) -> MbglValue {
         let value = serde_json::to_value(&self.geojson_source).unwrap_or_default();
         let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
             o.iter().map(|(k, v)| (k.clone(), value_converter(v))).collect()
@@ -466,17 +440,14 @@ impl Expression for Within {
             Log::error(Event::General, "Failed to serialize 'within' expression, converted rapidJSON is not an object");
             ValueObject::new()
         };
-        MbglValue::Array(vec![MbglValue::String(self.get_operator()), MbglValue::Object(serialized)])
-    }
-
-    fn get_operator(&self) -> String {
-        "within".to_owned()
+        MbglValue::Array(vec![MbglValue::String("within".to_owned()), MbglValue::Object(serialized)])
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::Value;
 
     #[test]
     fn empty_feature_collection_is_a_parse_error() {

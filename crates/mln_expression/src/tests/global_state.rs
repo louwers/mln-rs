@@ -3,15 +3,14 @@ use mln_conversion::Convertible;
 use mln_vec_map::VecSet;
 
 use crate::expression::{
-    Dependency, EvaluationContext, Expression, GlobalStateMap, Kind, collect_global_state_refs,
-    global_state_refs_intersect,
+    Dependency, EvaluationContext, Expr, GlobalStateMap, collect_global_state_refs, global_state_refs_intersect,
 };
 use crate::is_constant::{is_feature_constant, is_runtime_constant, is_zoom_constant};
 use crate::parsing_context::ParsingContext;
 use crate::type_::Type;
 use crate::value::Value;
 
-fn parse_expression(json: &str, expected: Option<Type>) -> Option<Box<dyn Expression>> {
+fn parse_expression(json: &str, expected: Option<Type>) -> Option<Expr> {
     let document: serde_json::Value = serde_json::from_str(json).unwrap();
     let mut ctx = match expected {
         Some(t) => ParsingContext::with_expected(t),
@@ -28,9 +27,9 @@ fn state(entries: &[(&str, MbglValue)]) -> GlobalStateMap {
 #[test]
 fn parse() {
     let expr = parse_expression(r#"["global-state", "showLabels"]"#, None).unwrap();
-    assert_eq!(Kind::CompoundExpression, expr.get_kind());
+    assert!(expr.as_compound().is_some());
     assert_eq!("global-state", expr.get_operator());
-    assert_eq!(*expr.get_type(), Type::Value);
+    assert_eq!(expr.get_type(), Type::Value);
     assert!(expr.has(Dependency::GLOBAL_STATE));
 }
 
@@ -55,10 +54,10 @@ fn is_not_constant() {
     let expr = parse_expression(r#"["global-state", "showLabels"]"#, None).unwrap();
     // A global-state expression with constant arguments must not be folded
     // into a literal at parse time.
-    assert_ne!(Kind::Literal, expr.get_kind());
-    assert!(is_feature_constant(&*expr));
-    assert!(is_zoom_constant(&*expr));
-    assert!(!is_runtime_constant(&*expr));
+    assert!(expr.literal_value().is_none());
+    assert!(is_feature_constant(&expr));
+    assert!(is_zoom_constant(&expr));
+    assert!(!is_runtime_constant(&expr));
 }
 
 // gtest: GlobalStateExpression.Evaluate
@@ -133,13 +132,13 @@ fn collect_global_state_refs_() {
     .unwrap();
 
     let mut refs = VecSet::new();
-    collect_global_state_refs(&*expr, &mut refs);
+    collect_global_state_refs(&expr, &mut refs);
     assert_eq!(VecSet::from(["a".to_owned(), "b".to_owned()]), refs);
 
     // Expressions without global-state references collect nothing.
     let plain = parse_expression(r#"["to-number", ["get", "width"]]"#, Some(Type::Number)).unwrap();
     refs.clear();
-    collect_global_state_refs(&*plain, &mut refs);
+    collect_global_state_refs(&plain, &mut refs);
     assert!(refs.is_empty());
 }
 

@@ -3260,7 +3260,7 @@ fn style_update_zoom_dependency() {
         let style = map.style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
         layer.downcast_mut::<BackgroundLayer>().expect("BackgroundLayer").set_background_color(
-            &PropertyValue::Expression(PropertyExpression::from_box(
+            &PropertyValue::Expression(PropertyExpression::from_expr(
                 interpolate(
                     linear(),
                     zoom(),

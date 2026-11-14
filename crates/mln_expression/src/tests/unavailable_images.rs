@@ -4,18 +4,18 @@
 use mln_conversion::Convertible;
 use mln_vec_map::VecSet;
 
-use crate::expression::{EvaluationContext, Expression};
+use crate::expression::{EvaluationContext, Expr};
 use crate::image_expression::UnavailableImages;
 use crate::parsing_context::ParsingContext;
 use crate::type_::Type;
 
-fn coalesce() -> Box<dyn Expression> {
+fn coalesce() -> Expr {
     let document: serde_json::Value =
         serde_json::from_str(r#"["coalesce", ["image", "late"], ["image", ""], ["image", "fallback"]]"#).unwrap();
     ParsingContext::with_expected(Type::Image).parse_expression(&Convertible::from(&document), None).unwrap()
 }
 
-fn evaluate(expression: &dyn Expression, available: &VecSet<String>) {
+fn evaluate(expression: &Expr, available: &VecSet<String>) {
     expression.evaluate(&EvaluationContext::new(0.0).with_available_images(Some(available))).unwrap();
 }
 
@@ -25,14 +25,14 @@ fn records_images_coalesce_passes_over() {
     let available: VecSet<String> = ["fallback".to_owned()].into_iter().collect();
 
     let recorder = UnavailableImages::start();
-    evaluate(&*expression, &available);
+    evaluate(&expression, &available);
     assert_eq!(recorder.finish().into_iter().collect::<Vec<_>>(), ["late"]);
 }
 
 #[test]
 fn records_nothing_outside_a_recorder() {
     let expression = coalesce();
-    evaluate(&*expression, &VecSet::new());
+    evaluate(&expression, &VecSet::new());
 
     let recorder = UnavailableImages::start();
     assert!(recorder.finish().is_empty());
@@ -52,7 +52,7 @@ fn an_inner_recorder_hides_its_images_from_the_outer() {
     let outer = UnavailableImages::start();
     {
         let inner = UnavailableImages::start();
-        evaluate(&*expression, &VecSet::new());
+        evaluate(&expression, &VecSet::new());
         assert_eq!(inner.finish().len(), 2);
     }
     assert!(outer.finish().is_empty());

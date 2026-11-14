@@ -5,9 +5,7 @@ use mln_text::glyph::{FontFace, FontFaces};
 use mln_tile_id::CanonicalTileID;
 
 use crate::dsl;
-use crate::expression::{
-    EvaluationContext, Expression, FeatureState, GlobalStateMap, Kind, evaluate_feature_with_context,
-};
+use crate::expression::{EvaluationContext, Expr, FeatureState, GlobalStateMap, evaluate_feature_with_context};
 use crate::is_expression::is_expression;
 use crate::parsing_context::ParsingContext;
 use crate::value::Value;
@@ -39,7 +37,7 @@ fn is_expression_() {
 }
 
 /// `parse(filename, error)` of `ExpressionEquality`.
-fn parse(filename: &str) -> Result<Box<dyn Expression>, String> {
+fn parse(filename: &str) -> Result<Expr, String> {
     let document: serde_json::Value = serde_json::from_str(&read_file(filename)).unwrap();
     let mut ctx = ParsingContext::new();
     let parsed = ctx.parse_expression(&Convertible::from(&document), None);
@@ -71,16 +69,16 @@ fn expression_equality_case(param: &str) -> Result<(), String> {
     let expression_a2 = parse(&format!("{base}.a.json")).map_err(|e| format!("{param}: {e}"))?;
     let expression_b = parse(&format!("{base}.b.json")).map_err(|e| format!("{param}: {e}"))?;
 
-    if !(*expression_a1 == *expression_a2) {
+    if !(expression_a1 == expression_a2) {
         return Err(format!("{param}: a1 != a2"));
     }
-    if *expression_a1 == *expression_b {
+    if expression_a1 == expression_b {
         return Err(format!("{param}: a1 == b"));
     }
 
     // Exercise the type-not-equal branches
-    let other = if expression_b.get_kind() == Kind::Literal { dsl::id() } else { dsl::literal(Value::Number(0.0)) };
-    if *expression_b == *other {
+    let other = if expression_b.literal_value().is_some() { dsl::id() } else { dsl::literal(Value::Number(0.0)) };
+    if expression_b == other {
         return Err(format!("{param}: b == {}", other.get_operator()));
     }
     Ok(())
@@ -146,7 +144,7 @@ fn evaluate_feature_with_context_uses_every_input() {
         ["==", ["zoom"], 3],
         ["==", ["elevation"], 10],
     ]));
-    assert_eq!(evaluate_feature_with_context(&*all, &feature, params), Ok(Value::Bool(true)));
+    assert_eq!(evaluate_feature_with_context(&all, &feature, params), Ok(Value::Bool(true)));
 
     let polygon = serde_json::json!({
         "type": "Polygon",
@@ -154,11 +152,11 @@ fn evaluate_feature_with_context_uses_every_input() {
     });
     let within = parse(serde_json::json!(["within", polygon]));
     assert_eq!(
-        evaluate_feature_with_context(&*within, &feature, params.with_canonical_tile_id(Some(&canonical))),
+        evaluate_feature_with_context(&within, &feature, params.with_canonical_tile_id(Some(&canonical))),
         Ok(Value::Bool(true))
     );
     // Without a canonical tile, the feature has no tile geometry to test.
-    assert_eq!(evaluate_feature_with_context(&*within, &feature, params), Ok(Value::Bool(false)));
+    assert_eq!(evaluate_feature_with_context(&within, &feature, params), Ok(Value::Bool(false)));
 }
 
 // `upcase` and `downcase` map case as JS's `toUpperCase` and `toLowerCase`

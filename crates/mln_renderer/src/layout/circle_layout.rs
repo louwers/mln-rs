@@ -81,14 +81,13 @@ impl CircleLayout {
 
         let mut features: Vec<CircleFeature> = Vec::new();
         let feature_count = source_layer.feature_count();
+        let context = EvaluationContext::new(zoom)
+            .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
+            .with_global_state(parameters.global_state.as_deref());
         let passes = |feature: &dyn GeometryTileFeature| {
-            leader_impl.filter.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                    .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
-                    .with_global_state(parameters.global_state.as_deref()),
-            )
+            leader_impl.filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
         };
-        let selected = filter_groups.select(&source_layer_id, source_layer, &leader_impl.filter, passes);
+        let selected = filter_groups.select(&source_layer_id, source_layer, &leader_impl.filter, &context, passes);
         for i in 0..feature_count {
             if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;

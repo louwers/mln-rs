@@ -20,7 +20,7 @@ use mln_util::logging::{Event, Log};
 
 use crate::conversion::{Converter, convert};
 use crate::expression::{
-    Dependency, EvaluationContext, Expression, GlobalStateMap, ParsingContext, Type, from_expression_value,
+    Dependency, EvaluationContext, Expr, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
 use crate::filter::Filter;
 pub(crate) use crate::layer_impl::FontStack;
@@ -249,7 +249,7 @@ impl dyn Layer {
     }
 }
 
-fn evaluate_visibility_expression(expression: &dyn Expression, global_state: &GlobalStateMap) -> VisibilityType {
+fn evaluate_visibility_expression(expression: &Expr, global_state: &GlobalStateMap) -> VisibilityType {
     let result = expression.evaluate(&EvaluationContext::default().with_global_state(Some(global_state)));
     if let Ok(result) = result
         && let Some(string) = from_expression_value::<String>(&result)
@@ -400,7 +400,7 @@ fn set_visibility_value(layer: &mut (impl Layer + ?Sized), value: &Convertible<'
         // The layer may not belong to a style yet, so its global state is not
         // available here. The style reevaluates the expression when the layer
         // is added or when this change reaches its observer.
-        let expression: Arc<dyn Expression> = Arc::from(parsed);
+        let expression: Arc<Expr> = Arc::from(parsed);
         layer.mutate_base_impl(&mut |impl_| impl_.visibility_expression = Some(Arc::clone(&expression)));
         return None;
     }

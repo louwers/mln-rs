@@ -5,7 +5,7 @@ use mln_util::Color;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
-use crate::expression::{Dependency, EvaluationContext, Expression, GlobalStateMap, collect_global_state_refs};
+use crate::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap, collect_global_state_refs};
 use crate::properties::PropertyValueLike;
 use crate::renderer::property_evaluator::Evaluator;
 use crate::serialization::shared_expression;
@@ -24,7 +24,7 @@ use crate::serialization::shared_expression;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(from = "ColorRampParts", into = "ColorRampParts")]
 pub struct ColorRampPropertyValue {
-    value: Option<Arc<dyn Expression>>,
+    value: Option<Arc<Expr>>,
     global_state_refs: Option<Arc<VecSet<String>>>,
 }
 
@@ -32,14 +32,14 @@ impl PartialEq for ColorRampPropertyValue {
     fn eq(&self, other: &Self) -> bool {
         (self.is_undefined() && other.is_undefined())
             || match (&self.value, &other.value) {
-                (Some(lhs), Some(rhs)) => lhs.equals(rhs.as_ref()),
+                (Some(lhs), Some(rhs)) => lhs == rhs,
                 _ => false,
             }
     }
 }
 
 #[derive(Serialize, Deserialize)]
-struct ColorRampParts(#[serde(with = "shared_expression::option")] Option<Arc<dyn Expression>>);
+struct ColorRampParts(#[serde(with = "shared_expression::option")] Option<Arc<Expr>>);
 
 impl From<ColorRampParts> for ColorRampPropertyValue {
     fn from(parts: ColorRampParts) -> Self {
@@ -55,7 +55,7 @@ impl From<ColorRampPropertyValue> for ColorRampParts {
 
 impl ColorRampPropertyValue {
     #[must_use]
-    pub(crate) fn new(value: Option<Arc<dyn Expression>>) -> Self {
+    pub(crate) fn new(value: Option<Arc<Expr>>) -> Self {
         let global_state_refs = match &value {
             Some(expression) if expression.has(Dependency::GLOBAL_STATE) => {
                 let mut refs = VecSet::new();
@@ -93,7 +93,7 @@ impl ColorRampPropertyValue {
 
     /// The expression of a defined value. Panics when the value is undefined.
     #[must_use]
-    pub fn get_expression(&self) -> &dyn Expression {
+    pub fn get_expression(&self) -> &Expr {
         self.value.as_deref().expect("ColorRampPropertyValue::get_expression on an undefined value")
     }
 

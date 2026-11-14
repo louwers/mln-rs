@@ -1,14 +1,9 @@
-// C++ `InterpolateImpl<T>` (a template over the output type) is the
-// `InterpolateOutput` tag here; there is one `Interpolate` struct.
-
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 use mln_style_types::VariableAnchorOffsetCollection;
 use mln_util::{Color, ColorSpace, Padding};
 
-use crate::expression::{
-    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
-};
+use crate::expression::{EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
 use crate::interpolator::{CubicBezierInterpolator, ExponentialInterpolator, Interpolator};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::range::Range;
@@ -61,39 +56,32 @@ fn interpolate_double(a: f64, b: f64, t: f64) -> f64 {
     a * (1.0 - t) + b * t
 }
 
+/// `["interpolate", interpolation, input, label, output, ...]` and its color
+/// space variants.
+#[derive(Clone, PartialEq)]
 pub struct Interpolate {
-    base: ExpressionBase,
+    type_: Type,
     interpolator: Interpolator,
     color_space: ColorSpace,
-    input: Box<dyn Expression>,
+    input: Expr,
     stops: Stops,
     output: InterpolateOutput,
 }
 
+/// The stops an input falls between.
+enum Located<'a> {
+    At(&'a Expr),
+    Between(&'a Expr, &'a Expr, f64),
+}
+
 impl Interpolate {
-    fn new(
-        type_: Type,
-        interpolator: Interpolator,
-        color_space: ColorSpace,
-        input: Box<dyn Expression>,
-        stops: Stops,
-        output: InterpolateOutput,
-    ) -> Self {
-        assert_eq!(*input.get_type(), Type::Number);
-        let deps = input.dependencies() | stops.values().fold(Dependency::NONE, |a, e| a | e.dependencies());
-        Interpolate {
-            base: ExpressionBase::new(Kind::Interpolate, type_, deps),
-            interpolator,
-            color_space,
-            input,
-            stops,
-            output,
-        }
+    pub(crate) fn get_type(&self) -> &Type {
+        &self.type_
     }
 
     #[must_use]
-    pub(crate) fn get_input(&self) -> &dyn Expression {
-        &*self.input
+    pub(crate) fn get_input(&self) -> &Expr {
+        &self.input
     }
 
     #[must_use]
@@ -101,7 +89,7 @@ impl Interpolate {
         self.stops.len()
     }
 
-    pub fn each_stop(&self, mut visit: impl FnMut(f64, &dyn Expression)) {
+    pub fn each_stop(&self, mut visit: impl FnMut(f64, &Expr)) {
         for (k, v) in self.stops.iter() {
             visit(k, v);
         }
@@ -117,6 +105,95 @@ impl Interpolate {
     #[must_use]
     pub fn interpolation_factor(&self, input_levels: Range<f64>, input_value: f64) -> f64 {
         self.interpolator.interpolation_factor(input_levels, input_value)
+    }
+
+    pub(crate) fn get_operator(&self) -> &'static str {
+        match self.color_space {
+            ColorSpace::Lab => "interpolate-lab",
+            ColorSpace::Hcl => "interpolate-hcl",
+            ColorSpace::Oklch => "interpolate-oklch",
+            ColorSpace::Oklab => "interpolate-oklab",
+            ColorSpace::Rgb => "interpolate",
+        }
+    }
+
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        visit(&self.input);
+        self.stops.values().for_each(visit);
+    }
+
+    /// The stop outputs the input selects, and how far it is between them.
+    fn locate(&self, params: &EvaluationContext<'_>) -> EvalResult<Located<'_>> {
+        let x = self.input.eval_num(params)? as f32;
+        if x.is_nan() {
+            return Err(EvaluationError::new("Input is not a number."));
+        }
+
+        if self.stops.is_empty() {
+            return Err(EvaluationError::new("No stops in exponential curve."));
+        }
+
+        let it = self.stops.upper_bound(f64::from(x));
+        if it == self.stops.len() {
+            return Ok(Located::At(self.stops.output(self.stops.len() - 1)));
+        }
+        if it == 0 {
+            return Ok(Located::At(self.stops.output(0)));
+        }
+        let t = self.interpolation_factor(Range::new(self.stops.key(it - 1), self.stops.key(it)), f64::from(x));
+        let (lower, upper) = (self.stops.output(it - 1), self.stops.output(it));
+        Ok(if t == 0.0 {
+            Located::At(lower)
+        } else if t == 1.0 {
+            Located::At(upper)
+        } else {
+            Located::Between(lower, upper, t)
+        })
+    }
+
+    pub(crate) fn eval_num(&self, params: &EvaluationContext<'_>) -> EvalResult<f64> {
+        match self.locate(params)? {
+            Located::At(output) => output.eval_num(params),
+            Located::Between(lower, upper, t) => {
+                Ok(interpolate_double(lower.eval_num(params)?, upper.eval_num(params)?, t))
+            }
+        }
+    }
+
+    pub(crate) fn eval_color(&self, params: &EvaluationContext<'_>) -> EvalResult<Color> {
+        match self.locate(params)? {
+            Located::At(output) => output.eval_color(params),
+            Located::Between(lower, upper, t) => {
+                let (lower, upper) = (lower.eval_color(params)?, upper.eval_color(params)?);
+                Ok(Color::interpolate(&lower, &upper, t, self.color_space))
+            }
+        }
+    }
+
+    pub(crate) fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+        let (lower_expr, upper_expr, t) = match self.locate(params)? {
+            Located::At(output) => return output.evaluate(params),
+            Located::Between(lower, upper, t) => (lower, upper, t),
+        };
+        let lower = lower_expr.evaluate(params)?;
+        let upper = upper_expr.evaluate(params)?;
+
+        if !self.output.holds(&lower) {
+            return Err(EvaluationError::new(format!(
+                "Expected value to be of type {}, but found {} instead.",
+                type_::to_string(&self.output.expression_type()),
+                type_::to_string(&type_of(&lower))
+            )));
+        }
+
+        if !self.output.holds(&upper) {
+            return Err(EvaluationError::new(format!(
+                "Expected value to be of type {}, but found {} instead.",
+                type_::to_string(&self.output.expression_type()),
+                type_::to_string(&type_of(&upper))
+            )));
+        }
+        self.interpolate_outputs(&lower, &upper, t)
     }
 
     fn interpolate_outputs(&self, lower: &Value, upper: &Value, t: f64) -> EvaluationResult {
@@ -159,97 +236,9 @@ impl Interpolate {
             _ => unreachable!("interpolate_outputs on mismatched types"),
         })
     }
-}
 
-impl Expression for Interpolate {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
-    }
-
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
-        let evaluated_input = self.input.evaluate(params)?;
-
-        let x: f32 = evaluated_input.as_number().map(|d| d as f32).expect("numeric interpolation input");
-        if x.is_nan() {
-            return Err(EvaluationError::new("Input is not a number."));
-        }
-
-        if self.stops.is_empty() {
-            return Err(EvaluationError::new("No stops in exponential curve."));
-        }
-
-        let it = self.stops.upper_bound(f64::from(x));
-        if it == self.stops.len() {
-            self.stops.get(self.stops.len() - 1).1.evaluate(params)
-        } else if it == 0 {
-            self.stops.get(0).1.evaluate(params)
-        } else {
-            let (lower_key, lower_expr) = self.stops.get(it - 1);
-            let (upper_key, upper_expr) = self.stops.get(it);
-            let t = self.interpolation_factor(Range::new(lower_key, upper_key), f64::from(x));
-
-            if t == 0.0 {
-                return lower_expr.evaluate(params);
-            }
-            if t == 1.0 {
-                return upper_expr.evaluate(params);
-            }
-
-            let lower = lower_expr.evaluate(params)?;
-            let upper = upper_expr.evaluate(params)?;
-
-            if !self.output.holds(&lower) {
-                return Err(EvaluationError::new(format!(
-                    "Expected value to be of type {}, but found {} instead.",
-                    type_::to_string(&self.output.expression_type()),
-                    type_::to_string(&type_of(&lower))
-                )));
-            }
-
-            if !self.output.holds(&upper) {
-                return Err(EvaluationError::new(format!(
-                    "Expected value to be of type {}, but found {} instead.",
-                    type_::to_string(&self.output.expression_type()),
-                    type_::to_string(&type_of(&upper))
-                )));
-            }
-            self.interpolate_outputs(&lower, &upper, t)
-        }
-    }
-
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        visit(&*self.input);
-        for v in self.stops.values() {
-            visit(&**v);
-        }
-    }
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Interpolate {
-            let rhs = downcast::<Interpolate>(e).expect("Interpolate");
-            if self.interpolator != rhs.interpolator
-                || self.color_space != rhs.color_space
-                || !self.input.equals(&*rhs.input)
-                || self.stops.len() != rhs.stops.len()
-            {
-                return false;
-            }
-
-            return self.stops.children_equal(&rhs.stops);
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        let mut result = Vec::new();
-        for stop in self.stops.values() {
-            result.extend(stop.possible_outputs());
-        }
-        result
-    }
-
-    fn serialize(&self) -> MbglValue {
-        let mut serialized = vec![MbglValue::String(self.get_operator())];
+    pub(crate) fn serialize(&self) -> MbglValue {
+        let mut serialized = vec![MbglValue::String(self.get_operator().to_owned())];
 
         match &self.interpolator {
             Interpolator::Exponential(exponential) => {
@@ -280,17 +269,6 @@ impl Expression for Interpolate {
             serialized.push(v.serialize());
         }
         MbglValue::Array(serialized)
-    }
-
-    fn get_operator(&self) -> String {
-        match self.color_space {
-            ColorSpace::Lab => "interpolate-lab",
-            ColorSpace::Hcl => "interpolate-hcl",
-            ColorSpace::Oklch => "interpolate-oklch",
-            ColorSpace::Oklab => "interpolate-oklab",
-            ColorSpace::Rgb => "interpolate",
-        }
-        .to_owned()
     }
 }
 
@@ -423,7 +401,7 @@ pub(crate) fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContex
 
         let output = ctx.parse(&value.array_member(i + 1), i + 1, output_type.clone(), None)?;
         if output_type.is_none() {
-            output_type = Some(output.get_type().clone());
+            output_type = Some(output.get_type());
         }
 
         stops.emplace(label, output);
@@ -439,7 +417,7 @@ pub fn create_interpolate(
     type_: Type,
     interpolator: Interpolator,
     color_space: ColorSpace,
-    input: Box<dyn Expression>,
+    input: Expr,
     stops: Stops,
     ctx: &mut ParsingContext,
 ) -> ParseResult {
@@ -462,5 +440,6 @@ pub fn create_interpolate(
             return None;
         }
     };
-    Some(Box::new(Interpolate::new(type_, interpolator, color_space, input, stops, output)))
+    assert_eq!(input.get_type(), Type::Number);
+    Some(Expr::new(Node::Interpolate(Box::new(Interpolate { type_, interpolator, color_space, input, stops, output }))))
 }

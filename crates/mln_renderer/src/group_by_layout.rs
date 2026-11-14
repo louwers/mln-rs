@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use mln_style::expression::Expression;
+use mln_style::expression::Expr;
 use mln_style::layer;
 use mln_style::layer::LayerTypeInfo;
 use mln_style::layer_properties::LayerProperties;
@@ -26,7 +26,7 @@ pub(crate) struct LayoutGroupKey {
     pub(crate) visibility: VisibilityType,
 
     // Filter - compared by pointer, then by expression
-    pub(crate) filter_expression: Option<Arc<dyn Expression>>,
+    pub(crate) filter_expression: Option<Arc<Expr>>,
 
     // Reference to impl for layout comparison
     pub(crate) impl_: Arc<dyn layer::Impl>,
@@ -245,14 +245,14 @@ mod tests {
             raster("a", r#"["==", ["get", "rank"], 0]"#),
             raster("b", r#"["==", ["get", "rank"], 1]"#),
             raster("c", r#"["==", ["get", "rank"], -0.0]"#),
-            // `let` compares its result alone.
+            // A `let` compares its bindings too.
             raster("d", r#"["let", "x", 1, ["==", ["get", "rank"], 2]]"#),
             raster("e", r#"["let", "x", 2, ["==", ["get", "rank"], 2]]"#),
             raster("f", r#"["==", ["get", "rank"], 2]"#),
             raster("g", r#"["==", ["get", "rank"], 1]"#),
         ];
         let groups = ids(&group_layers(&layers));
-        assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d", "e"], vec!["f"]]);
+        assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d"], vec!["e"], vec!["f"]]);
         assert_eq!(groups, grouped_by_comparison(&layers));
     }
 

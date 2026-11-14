@@ -1,18 +1,24 @@
+use std::borrow::Cow;
+
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 
 use crate::check_subtype::check_subtype;
-use crate::expression::{
-    EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, children_equal,
-    collect_dependencies, downcast,
-};
+use crate::compound_expression::Op;
+use crate::expression::{EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, Node, Output};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
 use crate::value::{Value, type_of};
 
+/// `["number", ...]` and the other type assertions: the first input whose
+/// value has the type, or an error.
+#[derive(Clone, PartialEq)]
 pub(crate) struct Assertion {
-    base: ExpressionBase,
-    inputs: Vec<Box<dyn Expression>>,
+    type_: Type,
+    inputs: Box<[Expr]>,
+    /// Whether each input has the asserted type, so its typed evaluation
+    /// needs no check.
+    typed: Box<[bool]>,
 }
 
 fn assertion_type(name: &str) -> Option<Type> {
@@ -27,10 +33,18 @@ fn assertion_type(name: &str) -> Option<Type> {
 }
 
 impl Assertion {
-    #[must_use]
-    pub(crate) fn new(type_: Type, inputs: Vec<Box<dyn Expression>>) -> Self {
-        assert_ne!(inputs, Vec::<Box<dyn Expression>>::new());
-        Assertion { base: ExpressionBase::new(Kind::Assertion, type_, collect_dependencies(&inputs)), inputs }
+    pub(crate) fn new_expr(type_: Type, inputs: Vec<Expr>) -> Expr {
+        assert!(!inputs.is_empty(), "Assertion without inputs");
+        let typed = inputs.iter().map(|input| input.get_type() == type_).collect();
+        Expr::new(Node::Assertion(Box::new(Assertion { type_, inputs: inputs.into(), typed })))
+    }
+
+    pub(crate) fn get_type(&self) -> &Type {
+        &self.type_
+    }
+
+    pub(crate) fn inputs(&self) -> &[Expr] {
+        &self.inputs
     }
 
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -90,58 +104,89 @@ impl Assertion {
             i += 1;
         }
 
-        Some(Box::new(Assertion::new(type_, parsed)))
-    }
-}
-
-impl Expression for Assertion {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Assertion::new_expr(type_, parsed))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
-        for (i, input) in self.inputs.iter().enumerate() {
+    pub(crate) fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+        // The parser makes an assertion of at least one input.
+        let mut mismatch = Value::Null;
+        for input in &self.inputs {
             let value = input.evaluate(params)?;
-            if check_subtype(self.get_type(), &type_of(&value)).is_none() {
+            if check_subtype(&self.type_, &type_of(&value)).is_none() {
                 return Ok(value);
-            } else if i == self.inputs.len() - 1 {
-                return Err(EvaluationError::new(format!(
-                    "Expected value to be of type {}, but found {} instead.",
-                    type_::to_string(self.get_type()),
-                    type_::to_string(&type_of(&value))
-                )));
             }
+            mismatch = value;
         }
-
-        unreachable!("Assertion without inputs")
+        Err(self.mismatch(&mismatch))
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        for input in &self.inputs {
-            visit(&**input);
-        }
+    fn mismatch(&self, value: &Value) -> EvaluationError {
+        EvaluationError::new(format!(
+            "Expected value to be of type {}, but found {} instead.",
+            type_::to_string(&self.type_),
+            type_::to_string(&type_of(value))
+        ))
     }
 
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Assertion {
-            let rhs = downcast::<Assertion>(e).expect("Assertion");
-            return self.get_type() == rhs.get_type() && children_equal(&self.inputs, &rhs.inputs);
+    /// The typed evaluations: an input of the asserted type evaluates typed,
+    /// and a feature accessor (`["get", k]`, `["id"]`) is read without
+    /// building a value first.
+    fn eval_typed<'e, T: Output<'e>>(
+        &'e self,
+        params: &EvaluationContext<'_>,
+        from_feature: impl Fn(&MbglValue) -> Option<T>,
+    ) -> EvalResult<T> {
+        let mut mismatch = Value::Null;
+        for (input, &typed) in self.inputs.iter().zip(&self.typed) {
+            if typed {
+                return T::eval(input, params);
+            }
+            if let Some(read) = read_feature(input, params) {
+                match read? {
+                    Some(value) => match from_feature(&value) {
+                        Some(typed) => return Ok(typed),
+                        None => mismatch = crate::value::from_mbgl_value_owned(value),
+                    },
+                    None => mismatch = Value::Null,
+                }
+                continue;
+            }
+            let value = input.evaluate(params)?;
+            if check_subtype(&self.type_, &type_of(&value)).is_none() {
+                return T::from_value(value);
+            }
+            mismatch = value;
         }
-        false
+        Err(self.mismatch(&mismatch))
     }
 
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        let mut result = Vec::new();
-        for input in &self.inputs {
-            result.extend(input.possible_outputs());
-        }
-        result
+    pub(crate) fn eval_num(&self, params: &EvaluationContext<'_>) -> EvalResult<f64> {
+        self.eval_typed(params, |v| match *v {
+            MbglValue::Double(n) => Some(n),
+            MbglValue::Uint(n) => Some(n as f64),
+            MbglValue::Int(n) => Some(n as f64),
+            _ => None,
+        })
     }
 
-    fn serialize(&self) -> MbglValue {
-        let mut serialized = vec![MbglValue::String(self.get_operator())];
+    pub(crate) fn eval_bool(&self, params: &EvaluationContext<'_>) -> EvalResult<bool> {
+        self.eval_typed(params, |v| match *v {
+            MbglValue::Bool(b) => Some(b),
+            _ => None,
+        })
+    }
 
-        if let Type::Array(array) = self.get_type()
+    pub(crate) fn eval_str<'e>(&'e self, params: &EvaluationContext<'_>) -> EvalResult<Cow<'e, str>> {
+        self.eval_typed(params, |v| match v {
+            MbglValue::String(s) => Some(Cow::Owned(s.clone())),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn serialize(&self) -> MbglValue {
+        let mut serialized = vec![MbglValue::String(self.get_operator().to_owned())];
+
+        if let Type::Array(array) = &self.type_
             && matches!(array.item_type, Type::String | Type::Number | Type::Boolean)
         {
             serialized.push(MbglValue::String(type_::to_string(&array.item_type)));
@@ -159,7 +204,35 @@ impl Expression for Assertion {
         MbglValue::Array(serialized)
     }
 
-    fn get_operator(&self) -> String {
-        if self.get_type().is_array() { "array".to_owned() } else { type_::to_string(self.get_type()) }
+    pub(crate) fn get_operator(&self) -> &'static str {
+        match self.type_ {
+            Type::Array(_) => "array",
+            Type::String => "string",
+            Type::Number => "number",
+            Type::Boolean => "boolean",
+            Type::Object => "object",
+            _ => unreachable!("assertion to {}", self.type_),
+        }
+    }
+}
+
+/// The feature value or id that `input` reads, when it is `["get", key]`
+/// with a literal key or `["id"]`: `Some(Ok(None))` when the feature lacks
+/// it, and `None` when `input` is another expression.
+fn read_feature(input: &Expr, params: &EvaluationContext<'_>) -> Option<EvalResult<Option<MbglValue>>> {
+    let compound = input.as_compound()?;
+    match compound.signature().op {
+        Op::Get => {
+            let key = compound.args()[0].literal_value()?.as_str()?;
+            Some(match params.feature {
+                Some(feature) => Ok(feature.get_value(key)),
+                None => Err(crate::compound_expression::feature_unavailable()),
+            })
+        }
+        Op::Id => Some(match params.feature {
+            Some(feature) => Ok(crate::compound_expression::identifier_to_mbgl(feature.get_id())),
+            None => Err(crate::compound_expression::feature_unavailable()),
+        }),
+        _ => None,
     }
 }

@@ -1,33 +1,132 @@
-//! Port-only: evaluates a layer filter once per group of features it can't
-//! tell apart, rather than once per feature.
+//! Port-only: evaluates layer filters once per group of features they can't
+//! tell apart, or once per feature for all the layers that compare the same
+//! value, rather than once per feature for each layer.
 
+use std::collections::HashMap;
+
+use mln_style::expression::{EvaluationContext, Expr, Value};
 use mln_style::filter::Filter;
 use mln_tile_id::geometry_tile_data::{FeatureGroups, GeometryTileFeature, GeometryTileLayer};
 
-/// A tile's feature groups ([`GeometryTileLayer::group_features`]), made on
-/// first use and shared by the filters over the same source layer that read
-/// the same keys.
+/// A scalar value that an equality filter compares, as a key that equal
+/// values share.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum Key {
+    Null,
+    Bool(bool),
+    /// The bits of a number other than NaN, with -0 as 0.
+    Number(u64),
+    String(String),
+}
+
+impl Key {
+    /// The key of `value`; `None` for a value no literal equals: NaN, or
+    /// anything but a scalar.
+    fn of(value: &Value) -> Option<Key> {
+        Some(match value {
+            Value::Null => Key::Null,
+            Value::Bool(b) => Key::Bool(*b),
+            Value::Number(n) if n.is_nan() => return None,
+            Value::Number(n) => Key::Number(if *n == 0.0 { 0 } else { n.to_bits() }),
+            Value::String(s) => Key::String(s.clone()),
+            _ => return None,
+        })
+    }
+}
+
+/// The inputs apart from the feature that an operand is evaluated with:
+/// layouts evaluate with different ones (only symbols pass font faces), so
+/// an index serves only evaluations with the same ones.
+#[derive(Clone, Copy, PartialEq)]
+struct Inputs {
+    zoom: Option<f32>,
+    canonical: Option<(u8, u32, u32)>,
+    global_state: Option<*const ()>,
+    font_faces: Option<*const ()>,
+    available_images: Option<*const ()>,
+}
+
+impl Inputs {
+    fn of(context: &EvaluationContext<'_>) -> Inputs {
+        Inputs {
+            zoom: context.zoom,
+            canonical: context.canonical.map(|c| (c.z, c.x, c.y)),
+            global_state: context.global_state.map(|s| std::ptr::from_ref(s).cast()),
+            font_faces: context.font_faces.map(|f| std::ptr::from_ref(f).cast()),
+            available_images: context.available_images.map(|i| std::ptr::from_ref(i).cast()),
+        }
+    }
+}
+
+/// The features of a source layer by the value an operand gives each.
+struct Index {
+    layer: String,
+    inputs: Inputs,
+    operand: Expr,
+    operand_hash: u64,
+    /// `None` when the layer can't be indexed: a feature was malformed.
+    features: Option<HashMap<Key, Vec<u32>>>,
+}
+
+/// A tile's feature groups ([`GeometryTileLayer::group_features`]) and
+/// equality indexes, made on first use and shared by the filters over the
+/// same source layer that read the same keys or compare the same operand.
 #[derive(Default)]
 pub(crate) struct FilterGroups {
     /// Per source layer and set of keys: its groups, or none when the layer
     /// gave none.
     sets: Vec<(String, Box<[String]>, Option<FeatureGroups>)>,
+    indexes: Vec<Index>,
 }
 
 impl FilterGroups {
     /// Whether `filter` selects each feature of `layer`, the source layer
-    /// `name`, with `passes` evaluating it for one feature. A filter that
-    /// reads only property keys and the geometry type evaluates once per
-    /// group. `None` if the filter must evaluate each feature: it reads
-    /// more of a feature, the layer has no groups, or evaluating a group's
-    /// first feature found it malformed.
+    /// `name`, with `passes` evaluating it for one feature and `context`
+    /// the inputs it evaluates with, apart from the feature.
+    ///
+    /// A filter `["==", operand, literal]` evaluates its operand once per
+    /// feature, for every filter of the layer that compares that operand. A
+    /// filter that reads only property keys and the geometry type evaluates
+    /// once per group. `None` if the filter must evaluate each feature: it
+    /// is neither, the layer has no groups, or a feature it evaluated was
+    /// malformed.
     pub(crate) fn select(
         &mut self,
         name: &str,
         layer: &dyn GeometryTileLayer,
         filter: &Filter,
+        context: &EvaluationContext<'_>,
         passes: impl Fn(&dyn GeometryTileFeature) -> bool,
     ) -> Option<Vec<bool>> {
+        if let Some(equality) = filter.equality() {
+            // A literal that no value equals (NaN) is left to the filter.
+            let key = Key::of(equality.value)?;
+            let inputs = Inputs::of(context);
+            let at = if let Some(at) = self.indexes.iter().position(|index| {
+                index.layer == name
+                    && index.inputs == inputs
+                    && index.operand_hash == equality.operand_hash
+                    && index.operand == *equality.operand
+            }) {
+                at
+            } else {
+                self.indexes.push(Index {
+                    layer: name.to_owned(),
+                    inputs,
+                    operand: equality.operand.clone(),
+                    operand_hash: equality.operand_hash,
+                    features: index(layer, equality.operand, context),
+                });
+                self.indexes.len() - 1
+            };
+            let features = self.indexes[at].features.as_ref()?;
+            let mut selected = vec![false; layer.feature_count()];
+            for &i in features.get(&key).map_or(&[][..], Vec::as_slice) {
+                selected[i as usize] = true;
+            }
+            return Some(selected);
+        }
+
         let keys = filter.property_keys()?;
         let at = if let Some(at) = self.sets.iter().position(|(n, k, _)| n == name && **k == *keys) {
             at
@@ -46,6 +145,28 @@ impl FilterGroups {
         }
         Some(groups.of_feature.iter().map(|&group| group_passes[group as usize]).collect())
     }
+}
+
+/// The features of `layer` by the value `operand` gives each; a feature
+/// whose operand fails, or gives a value no literal equals, is in none.
+/// `None` if a feature is malformed.
+fn index(
+    layer: &dyn GeometryTileLayer,
+    operand: &Expr,
+    context: &EvaluationContext<'_>,
+) -> Option<HashMap<Key, Vec<u32>>> {
+    let mut features: HashMap<Key, Vec<u32>> = HashMap::new();
+    for i in 0..layer.feature_count() {
+        let feature = layer.get_feature(i).ok()?;
+        let value = operand.evaluate(&EvaluationContext { feature: Some(&*feature), ..*context });
+        if feature.error().is_some() {
+            return None;
+        }
+        if let Some(key) = value.ok().as_ref().and_then(Key::of) {
+            features.entry(key).or_default().push(i as u32);
+        }
+    }
+    Some(features)
 }
 
 #[cfg(test)]
@@ -189,9 +310,10 @@ mod tests {
     }
 
     /// Asserts that filters select the same features of `layer`, the source
-    /// layer `name`, in groups as one by one, at each zoom: the `grouped`
-    /// ones in groups, the `per_feature` ones (which read more of a feature)
-    /// one by one. Returns the groups.
+    /// layer `name`, in groups or by index as one by one, at each zoom: the
+    /// `grouped` ones in groups or by index, the `per_feature` ones (which
+    /// read more of a feature) by index if they are equalities, and one by
+    /// one otherwise. Returns the groups.
     fn check_selection(
         name: &str,
         layer: &dyn GeometryTileLayer,
@@ -216,8 +338,11 @@ mod tests {
                     (0..layer.feature_count()).map(|i| passes(&*layer.get_feature(i).unwrap())).collect();
                 let selects_none = ["nothing", "within", "zoom"].iter().any(|t| text.contains(t));
                 assert!(one_by_one.contains(&true) || selects_none, "{text}");
-                let selected = groups.select(name, layer, &filter, passes);
-                if expect_grouped {
+                let context = EvaluationContext::new(zoom)
+                    .with_canonical_tile_id(Some(&canonical))
+                    .with_global_state(Some(&global_state));
+                let selected = groups.select(name, layer, &filter, &context, passes);
+                if expect_grouped || filter.equality().is_some() {
                     assert_eq!(selected.as_ref(), Some(&one_by_one), "{text} at {zoom}");
                 } else {
                     assert_eq!(selected, None, "{text}");
@@ -270,6 +395,8 @@ mod tests {
             r#"["==", ["get", "name"], "road 7"]"#,
             r#"["within", {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}]"#,
             r#"[">", ["distance", {"type": "Point", "coordinates": [0, 0]}], 0]"#,
+            r#"["<", ["get", "name"], "road 7"]"#,
+            r#"["==", ["%", ["number", ["id"]], 7], 3]"#,
         ];
         let groups = check_selection("roads", &*layer, &grouped, &per_feature);
         // 400 roads in about 4 classes by 4 geometry types, plus the few
@@ -278,6 +405,31 @@ mod tests {
         assert!(classes.is_some_and(|n| n < 50), "{classes:?}");
         // A key unique to each feature gives no groups.
         assert_eq!(group_count(&groups, &["name"]), None);
+    }
+
+    /// An equality index serves only evaluations with the same inputs: the
+    /// layouts of one tile evaluate with different ones.
+    #[test]
+    fn equality_index_is_per_context() {
+        let data = VectorMVTTileData::new(Arc::new(roads()));
+        let layer = data.get_layer("roads").unwrap().unwrap();
+        let filter = parse_filter(r#"["==", ["concat", ["get", "class"], ["global-state", "suffix"]], "minor-a"]"#);
+        let state = |suffix: &str| GlobalStateMap::from([("suffix".to_owned(), Value::String(suffix.into()))]);
+        let (a, b) = (state("-a"), state("-b"));
+        let canonical = CanonicalTileID::new(0, 0, 0);
+        let mut groups = FilterGroups::default();
+        for global_state in [&a, &b, &a] {
+            let context = EvaluationContext::new(14.0)
+                .with_canonical_tile_id(Some(&canonical))
+                .with_global_state(Some(global_state));
+            let passes = |feature: &dyn GeometryTileFeature| {
+                filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
+            };
+            let one_by_one: Vec<bool> =
+                (0..layer.feature_count()).map(|i| passes(&*layer.get_feature(i).unwrap())).collect();
+            assert_eq!(groups.select("roads", &*layer, &filter, &context, passes), Some(one_by_one));
+        }
+        assert_eq!(groups.indexes.len(), 2);
     }
 
     /// A road network as one MLT layer "roads", a column per key and type:
@@ -377,6 +529,8 @@ mod tests {
             r#"["==", ["get", "name"], "road 7"]"#,
             r#"["within", {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}]"#,
             r#"[">", ["distance", {"type": "Point", "coordinates": [0, 0]}], 0]"#,
+            r#"["<", ["get", "name"], "road 7"]"#,
+            r#"["==", ["%", ["number", ["id"]], 7], 3]"#,
         ];
         let groups = check_selection("roads", &*layer, &grouped, &per_feature);
         // 400 roads in 4 classes or none, by 3 geometry types.

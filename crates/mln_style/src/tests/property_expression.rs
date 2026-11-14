@@ -39,7 +39,7 @@ fn evaluate(value: &PropertyValue<f32>, zoom: f32) -> f32 {
     value.evaluate(&PropertyEvaluator::new(&parameters, 0.0))
 }
 
-fn num(v: f64) -> Box<dyn crate::expression::Expression> {
+fn num(v: f64) -> crate::expression::Expr {
     literal(Value::Number(v))
 }
 
@@ -62,7 +62,7 @@ fn constant() {
 // gtest: PropertyExpression.Expression
 #[test]
 fn expression() {
-    let expression = PropertyExpression::<f32>::from_box(
+    let expression = PropertyExpression::<f32>::from_expr(
         interpolate(linear(), zoom(), vec![(0.0, num(0.0)), (1.0, num(1.0))]),
         None,
     );
@@ -74,8 +74,8 @@ fn expression() {
 // gtest: PropertyExpression.Defaults
 #[test]
 fn defaults() {
-    let no_default = PropertyExpression::<f32>::from_box(number(get_str("property"), None), None);
-    let with_default = PropertyExpression::<f32>::from_box(number(get_str("property"), None), Some(0.0));
+    let no_default = PropertyExpression::<f32>::from_expr(number(get_str("property"), None), None);
+    let with_default = PropertyExpression::<f32>::from_expr(number(get_str("property"), None), Some(0.0));
     assert_eq!(1.0_f32, with_default.evaluate_feature(&one_integer(), 2.0));
     assert_eq!(1.0_f32, with_default.evaluate_feature(&one_double(), 2.0));
     assert_eq!(0.0_f32, with_default.evaluate_feature(&one_string(), 2.0));
@@ -85,7 +85,7 @@ fn defaults() {
 }
 
 /// `["interpolate", ["linear"], ["number", ["get", "property"]], 1, v]`.
-fn inner(v: f64) -> Box<dyn crate::expression::Expression> {
+fn inner(v: f64) -> crate::expression::Expr {
     interpolate(linear(), number(get_str("property"), None), vec![(1.0, num(v))])
 }
 
@@ -94,7 +94,7 @@ fn inner(v: f64) -> Box<dyn crate::expression::Expression> {
 fn zoom_interpolation() {
     assert_eq!(
         40.0_f32,
-        PropertyExpression::<f32>::from_box(
+        PropertyExpression::<f32>::from_expr(
             interpolate(linear(), zoom(), vec![(0.0, inner(24.0)), (1.5, inner(36.0)), (3.0, inner(48.0))]),
             Some(0.0),
         )
@@ -104,7 +104,7 @@ fn zoom_interpolation() {
 
     assert_eq!(
         33.0_f32,
-        PropertyExpression::<f32>::from_box(
+        PropertyExpression::<f32>::from_expr(
             interpolate(linear(), zoom(), vec![(5.0, inner(33.0)), (10.0, inner(66.0))]),
             Some(0.0),
         )
@@ -114,7 +114,7 @@ fn zoom_interpolation() {
 
     assert_eq!(
         66.0_f32,
-        PropertyExpression::<f32>::from_box(
+        PropertyExpression::<f32>::from_expr(
             interpolate(linear(), zoom(), vec![(0.0, inner(33.0)), (10.0, inner(66.0))]),
             Some(0.0),
         )
@@ -124,7 +124,7 @@ fn zoom_interpolation() {
 
     assert_eq!(
         66.0_f32,
-        PropertyExpression::<f32>::from_box(
+        PropertyExpression::<f32>::from_expr(
             interpolate(linear(), zoom(), vec![(0.0, inner(33.0)), (10.0, inner(66.0))]),
             Some(0.0),
         )
@@ -134,7 +134,7 @@ fn zoom_interpolation() {
 
     assert_eq!(
         33.0_f32,
-        PropertyExpression::<f32>::from_box(
+        PropertyExpression::<f32>::from_expr(
             interpolate(linear(), zoom(), vec![(0.0, inner(33.0)), (10.0, inner(66.0))]),
             Some(0.0),
         )
@@ -150,7 +150,7 @@ fn assert_near(expected: f32, actual: f32, tolerance: f32) {
 // gtest: PropertyExpression.Issue8460
 #[test]
 fn issue8460() {
-    let fn1 = PropertyExpression::<f32>::from_box(
+    let fn1 = PropertyExpression::<f32>::from_expr(
         interpolate(linear(), zoom(), vec![(15.0, inner(0.0)), (15.2, inner(600.0))]),
         Some(0.0),
     );
@@ -160,7 +160,7 @@ fn issue8460() {
     assert_near(600.0, fn1.evaluate_zoom_feature(15.2, &one_integer(), -1.0), 0.00);
     assert_near(600.0, fn1.evaluate_zoom_feature(16.0, &one_integer(), -1.0), 0.00);
 
-    let fn2 = PropertyExpression::<f32>::from_box(
+    let fn2 = PropertyExpression::<f32>::from_expr(
         interpolate(linear(), zoom(), vec![(15.0, inner(0.0)), (15.2, inner(300.0)), (18.0, inner(600.0))]),
         Some(0.0),
     );
@@ -182,14 +182,14 @@ fn image_expression() {
 
     // evaluation test without available images
     {
-        let prop_expr = PropertyExpression::<Image>::from_box(image(literal_str("airport-11")), None);
+        let prop_expr = PropertyExpression::<Image>::from_expr(image(literal_str("airport-11")), None);
         let evaluated_image = prop_expr.evaluate_feature_images(&empty_tile_feature(), &empty_set, Image::default());
         assert!(!evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "airport-11");
 
         assert_eq!(Dependency::IMAGE, prop_expr.get_dependencies());
 
-        let dd_prop_expr = PropertyExpression::<Image>::from_box(image(get(literal_str("image_name"))), None);
+        let dd_prop_expr = PropertyExpression::<Image>::from_expr(image(get(literal_str("image_name"))), None);
         let evaluated_image = dd_prop_expr.evaluate_feature_images(&one_image(), &empty_set, Image::default());
         assert!(!evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "maki-11");
@@ -200,13 +200,13 @@ fn image_expression() {
     }
     // evaluation test with available images
     {
-        let prop_expr = PropertyExpression::<Image>::from_box(image(literal_str("airport-11")), None);
+        let prop_expr = PropertyExpression::<Image>::from_expr(image(literal_str("airport-11")), None);
         let evaluated_image =
             prop_expr.evaluate_feature_images(&empty_tile_feature(), &available_images, Image::default());
         assert!(evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "airport-11");
         assert_eq!(Dependency::IMAGE, prop_expr.get_dependencies());
-        let dd_prop_expr = PropertyExpression::<Image>::from_box(image(get(literal_str("image_name"))), None);
+        let dd_prop_expr = PropertyExpression::<Image>::from_expr(image(get(literal_str("image_name"))), None);
         let evaluated_image = dd_prop_expr.evaluate_feature_images(&one_image(), &available_images, Image::default());
         assert!(evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "maki-11");
@@ -219,7 +219,7 @@ fn image_expression() {
     // evaluation with zoom
     {
         let expr = step(zoom(), image(literal_str("airport-11")), 18.0, image(literal_str("bicycle-15")));
-        let prop_expr = PropertyExpression::<Image>::from_box(expr, None);
+        let prop_expr = PropertyExpression::<Image>::from_expr(expr, None);
         let evaluated_image =
             prop_expr.evaluate_zoom_feature_images(0.0, &empty_tile_feature(), &available_images, Image::default());
         assert!(evaluated_image.is_available());
@@ -259,7 +259,7 @@ fn polygon(rings: Vec<LineString<f64>>) -> Geometry<f64> {
     Geometry::Polygon(Polygon::new(rings.next().expect("an exterior"), rings.collect()))
 }
 
-fn create_geo_expression(op: &str, geojson: &str) -> Option<Box<dyn crate::expression::Expression>> {
+fn create_geo_expression(op: &str, geojson: &str) -> Option<crate::expression::Expr> {
     create_expression_from_str(&format!(r#"["{op}", {geojson} ]"#))
 }
 
@@ -303,7 +303,7 @@ fn within_expression() {
     // evaluation test with valid geojson source
     let expression = create_geo_expression("within", valid_geo_source);
     assert!(expression.is_some());
-    let prop_expr = PropertyExpression::<bool>::from_box(expression.unwrap(), None);
+    let prop_expr = PropertyExpression::<bool>::from_expr(expression.unwrap(), None);
 
     assert_eq!(Dependency::FEATURE, prop_expr.get_dependencies());
 
@@ -399,7 +399,7 @@ fn within_expression_anti_meridian() {
         // evaluation test with valid geojson source
         let expression = create_geo_expression("within", polygon1);
         assert!(expression.is_some());
-        let prop_expr = PropertyExpression::<bool>::from_box(expression.unwrap(), None);
+        let prop_expr = PropertyExpression::<bool>::from_expr(expression.unwrap(), None);
 
         let geo_line0 =
             convert_geometry(&Geometry::LineString(pts(&[(-183.0, 5.0), (-179.0, 1.0)])), &canonical_tile_id);
@@ -422,7 +422,7 @@ fn within_expression_anti_meridian() {
         // evaluation test with valid geojson source
         let expression = create_geo_expression("within", polygon2);
         assert!(expression.is_some());
-        let prop_expr = PropertyExpression::<bool>::from_box(expression.unwrap(), None);
+        let prop_expr = PropertyExpression::<bool>::from_expr(expression.unwrap(), None);
 
         let get_point_feature = |x: f64, y: f64| {
             let geo_point = convert_geometry(&Geometry::Point(pt(x, y)), &canonical_tile_id);
@@ -460,7 +460,7 @@ fn distance_expression() {
     let distance_expr = |geojson: &str| {
         let expression = create_geo_expression("distance", geojson);
         assert!(expression.is_some(), "{geojson}");
-        PropertyExpression::<f64>::from_box(expression.unwrap(), None)
+        PropertyExpression::<f64>::from_expr(expression.unwrap(), None)
     };
     let feature = |type_: FeatureType, geometry: Geometry<f64>| {
         StubGeometryTileFeature::with_geometry(type_, convert_geometry(&geometry, &canonical_tile_id))

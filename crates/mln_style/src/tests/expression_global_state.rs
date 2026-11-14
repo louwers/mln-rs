@@ -13,11 +13,11 @@ use mln_vec_map::VecSet;
 use super::util::parse_json;
 use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::conversion::{Converter, Error, convert_property_value};
-use crate::expression::{Dependency, EvaluationContext, Expression, GlobalStateMap, ParsingContext, Type};
+use crate::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap, ParsingContext, Type};
 use crate::filter::Filter;
 use crate::property_expression::PropertyExpression;
 
-fn parse_expression(json: &str, expected: Option<Type>) -> Option<Box<dyn Expression>> {
+fn parse_expression(json: &str, expected: Option<Type>) -> Option<Expr> {
     let document = parse_json(json);
     let mut ctx = match expected {
         Some(t) => ParsingContext::with_expected(t),
@@ -35,7 +35,7 @@ fn state(entries: &[(&str, Value)]) -> GlobalStateMap {
 fn property_expression_captures_global_state() {
     let expr = parse_expression(r#"["to-number", ["global-state", "width"]]"#, Some(Type::Number)).unwrap();
 
-    let mut property_expression = PropertyExpression::<f32>::from_box(expr, None);
+    let mut property_expression = PropertyExpression::<f32>::from_expr(expr, None);
     assert!(property_expression.is_feature_constant());
     assert!(property_expression.is_zoom_constant());
     assert!(!property_expression.is_runtime_constant());
@@ -117,10 +117,10 @@ fn color_ramp() {
 #[test]
 fn property_expression_global_state_refs() {
     let expr = parse_expression(r#"["to-number", ["global-state", "width"]]"#, Some(Type::Number)).unwrap();
-    let property_expression = PropertyExpression::<f32>::from_box(expr, None);
+    let property_expression = PropertyExpression::<f32>::from_expr(expr, None);
     assert_eq!(Some(&VecSet::from(["width".to_owned()])), property_expression.get_global_state_refs());
 
     let plain = parse_expression(r#"["to-number", ["get", "width"]]"#, Some(Type::Number)).unwrap();
-    let plain_expression = PropertyExpression::<f32>::from_box(plain, None);
+    let plain_expression = PropertyExpression::<f32>::from_expr(plain, None);
     assert_eq!(None, plain_expression.get_global_state_refs());
 }

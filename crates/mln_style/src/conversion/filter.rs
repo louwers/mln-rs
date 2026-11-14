@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use feature::Value as MbglValue;
-use mln_expression::boolean_operator::{All, Any};
 use mln_expression::compound_expression::create_compound_expression;
 
 use super::{Converter, Convertible, Error};
-use crate::expression::{Expression, Literal, ParseResult, ParsingContext, Type, Value};
+use crate::expression::{Expr, ParseResult, ParsingContext, Type, Value};
 use crate::filter::Filter;
 
 impl Converter for Filter {
@@ -16,13 +15,13 @@ impl Converter for Filter {
                 error.message = parsing_context.get_combined_errors();
                 return None;
             };
-            Some(Filter::new(Some(Arc::from(parse_result)), None))
+            Some(Filter::new(Some(Arc::new(parse_result)), None))
         } else {
             let Some(expression) = convert_legacy_filter(value, error) else {
                 debug_assert_ne!(error.message, "");
                 return None;
             };
-            Some(Filter::new(Some(Arc::from(expression)), serialize_legacy_filter(value)))
+            Some(Filter::new(Some(Arc::new(expression)), serialize_legacy_filter(value)))
         }
     }
 }
@@ -65,13 +64,13 @@ fn is_expression(filter: &Convertible<'_>) -> bool {
     }
 }
 
-fn create_expression(op: &str, args: Option<Vec<Box<dyn Expression>>>, error: &mut Error) -> ParseResult {
+fn create_expression(op: &str, args: Option<Vec<Expr>>, error: &mut Error) -> ParseResult {
     let args = args?;
 
     if op == "any" {
-        Some(Box::new(Any::new(args)))
+        Some(Expr::any(args))
     } else if op == "all" {
-        Some(Box::new(All::new(args)))
+        Some(Expr::all(args))
     } else {
         let mut parsing_context = ParsingContext::with_expected(Type::Boolean);
         let parse_result = create_compound_expression(op, args, &mut parsing_context);
@@ -89,18 +88,14 @@ fn create_expression_1(op: &str, arg: ParseResult, error: &mut Error) -> ParseRe
 
 fn convert_literal(convertible: &Convertible<'_>, error: &mut Error) -> ParseResult {
     let mut parsing_context = ParsingContext::new();
-    let parse_result = Literal::parse(convertible, &mut parsing_context);
+    let parse_result = Expr::parse_literal(convertible, &mut parsing_context);
     if parse_result.is_none() {
         error.message = parsing_context.get_combined_errors();
     }
     parse_result
 }
 
-fn convert_literal_array(
-    input: &Convertible<'_>,
-    error: &mut Error,
-    start_index: usize,
-) -> Option<Vec<Box<dyn Expression>>> {
+fn convert_literal_array(input: &Convertible<'_>, error: &mut Error, start_index: usize) -> Option<Vec<Expr>> {
     let mut output = Vec::with_capacity(input.array_length());
     for i in start_index..input.array_length() {
         let literal = convert_literal(&input.array_member(i), error)?;
@@ -146,11 +141,11 @@ fn convert_legacy_has_filter(values: &Convertible<'_>, error: &mut Error) -> Par
         return None;
     };
     if property == "$type" {
-        Some(Box::new(Literal::new(Value::Bool(true))))
+        Some(Expr::literal(Value::Bool(true)))
     } else if property == "$id" {
         create_expression("filter-has-id", Some(Vec::new()), error)
     } else {
-        create_expression("filter-has", Some(vec![Box::new(Literal::new(Value::String(property)))]), error)
+        create_expression("filter-has", Some(vec![Expr::literal(Value::String(property))]), error)
     }
 }
 
@@ -162,7 +157,7 @@ fn convert_legacy_in_filter(values: &Convertible<'_>, error: &mut Error) -> Pars
         return None;
     };
     if values.array_length() == 0 {
-        Some(Box::new(Literal::new(Value::Bool(false))))
+        Some(Expr::literal(Value::Bool(false)))
     } else if property == "$type" {
         let args = convert_literal_array(values, error, 2);
         create_expression("filter-type-in", args, error)
@@ -175,11 +170,7 @@ fn convert_legacy_in_filter(values: &Convertible<'_>, error: &mut Error) -> Pars
     }
 }
 
-fn convert_legacy_filter_array(
-    input: &Convertible<'_>,
-    error: &mut Error,
-    start_index: usize,
-) -> Option<Vec<Box<dyn Expression>>> {
+fn convert_legacy_filter_array(input: &Convertible<'_>, error: &mut Error, start_index: usize) -> Option<Vec<Expr>> {
     let mut output = Vec::with_capacity(input.array_length());
     for i in start_index..input.array_length() {
         let child = convert_legacy_filter(&input.array_member(i), error)?;
@@ -190,7 +181,7 @@ fn convert_legacy_filter_array(
 
 pub(crate) fn convert_legacy_filter(values: &Convertible<'_>, error: &mut Error) -> ParseResult {
     if values.is_undefined() {
-        return Some(Box::new(Literal::new(Value::Bool(true))));
+        return Some(Expr::literal(Value::Bool(true)));
     }
 
     if !values.is_array() || values.array_length() == 0 {
@@ -203,7 +194,7 @@ pub(crate) fn convert_legacy_filter(values: &Convertible<'_>, error: &mut Error)
         return None;
     };
     if values.array_length() <= 1 {
-        return Some(Box::new(Literal::new(Value::Bool(op != "any"))));
+        return Some(Expr::literal(Value::Bool(op != "any")));
     }
     if op == "within" {
         let mut ctx = ParsingContext::new();
@@ -238,7 +229,7 @@ pub(crate) fn convert_legacy_filter(values: &Convertible<'_>, error: &mut Error)
             let inner = convert_legacy_has_filter(values, error);
             create_expression_1("!", inner, error)
         }
-        _ => Some(Box::new(Literal::new(Value::Bool(true)))),
+        _ => Some(Expr::literal(Value::Bool(true))),
     }
 }
 

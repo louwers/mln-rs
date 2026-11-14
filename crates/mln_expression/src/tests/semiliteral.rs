@@ -1,7 +1,7 @@
 use feature::Feature;
 use mln_conversion::Convertible;
 
-use crate::expression::{EvaluationContext, Kind, evaluate_feature};
+use crate::expression::{EvaluationContext, evaluate_feature};
 use crate::parsing_context::{ParseResult, ParsingContext, ParsingError};
 use crate::type_::Type;
 use crate::value::Value;
@@ -17,8 +17,8 @@ fn parse_semiliteral(json: &str, ctx: &mut ParsingContext, property: bool) -> Pa
 fn constant_folding() {
     let mut ctx = ParsingContext::new();
     let result = parse_semiliteral(r#"["semiliteral", [1, ["+", 2, 3]]]"#, &mut ctx, false).unwrap();
-    assert_eq!(result.get_kind(), Kind::Literal);
-    assert_eq!(*result.get_type(), Type::array_n(Type::Number, 2));
+    assert!(result.literal_value().is_some());
+    assert_eq!(result.get_type(), Type::array_n(Type::Number, 2));
     assert_eq!(
         result.evaluate(&EvaluationContext::default()).unwrap(),
         Value::Array(vec![Value::Number(1.0), Value::Number(5.0)])
@@ -59,7 +59,7 @@ fn first_error() {
         parse_semiliteral(r#"["semiliteral", [["number", ["get", "x"]], ["error", "second"]]]"#, &mut errors, false)
             .unwrap();
     let feature = Feature::<f64>::default();
-    let error = evaluate_feature(&*failing, Some(0.0), &feature, None).unwrap_err();
-    assert!(error.message.contains("number"));
-    assert!(!error.message.contains("second"));
+    let error = evaluate_feature(&failing, Some(0.0), &feature, None).unwrap_err();
+    assert!(error.message().contains("number"));
+    assert!(!error.message().contains("second"));
 }

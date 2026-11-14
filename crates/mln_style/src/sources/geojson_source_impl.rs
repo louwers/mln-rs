@@ -13,7 +13,7 @@ use mln_util::range::Range;
 use parking_lot::Mutex;
 
 use super::geojson_source::{Features, GeoJSONData, GeoJSONOptions, TileFeatures};
-use crate::expression::{Expression, from_expression_value};
+use crate::expression::{Expr, from_expression_value};
 use crate::source_impl::{self, ImplBase};
 
 /// The features of tile `id`. For a zoom above the maximum zoom or a missing
@@ -99,7 +99,7 @@ impl GeoJSONData for SuperclusterData {
     }
 }
 
-fn evaluate_feature(f: &Feature<f64>, expression: &Arc<dyn Expression>, accumulated: Option<&Value>) -> Value {
+fn evaluate_feature(f: &Feature<f64>, expression: &Arc<Expr>, accumulated: Option<&Value>) -> Value {
     if let Ok(result) = evaluate_accumulated(expression.as_ref(), accumulated, f)
         && let Some(typed) = from_expression_value::<Value>(&result)
     {
