@@ -268,6 +268,31 @@ fn group(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::module;
+
+    const PLAIN: Style = Style { width: None, color: false };
+
+    #[test]
+    fn reports_crates_and_functions() {
+        let sizes = Sizes::parse(&module([10, 4], true)).unwrap();
+        let report = report("m.wasm", &sizes, 2, PLAIN);
+        assert!(report.contains("0.0 KiB") && report.contains("mln_util\n"), "{report}");
+        assert!(report.lines().any(|line| line.split_whitespace().eq(["12", "B", "mln_util::f"])), "{report}");
+        assert!(report.contains("more\n"), "the rows past --top add up: {report}");
+    }
+
+    #[test]
+    fn compares_with_a_base() {
+        let base = Sizes::parse(&module([10, 4], true)).unwrap();
+        let sizes = Sizes::parse(&module([30, 4], true)).unwrap();
+        let report = compare("m.wasm", &base, &sizes, 5, PLAIN);
+        let row = ["12", "B", "32", "B", "+20", "B", "+166.7%", "mln_util::f"];
+        assert!(report.lines().any(|line| line.split_whitespace().eq(row)), "{report}");
+        assert!(!report.contains("drop_glue"), "unchanged functions are left out: {report}");
+        let same = compare("m.wasm", &base, &base, 5, PLAIN);
+        assert!(same.contains("no change"), "{same}");
+        assert!(paint("x", Tone::Grow, Style { width: None, color: true }).starts_with("\x1b[31m"));
+    }
 
     #[test]
     fn formats_numbers_and_bars() {

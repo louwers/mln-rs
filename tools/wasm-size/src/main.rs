@@ -280,8 +280,69 @@ fn changes<'a>(base: &BTreeMap<&'a str, u64>, sizes: &BTreeMap<&'a str, u64>) ->
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// A module importing one function and defining two, of `bodies` no-ops
+    /// each, with a 5-byte data segment, and with their names when `named`.
+    pub(crate) fn module(bodies: [usize; 2], named: bool) -> Vec<u8> {
+        fn section(id: u8, payload: &[u8]) -> Vec<u8> {
+            let mut out = vec![id, u8::try_from(payload.len()).expect("a short section")];
+            out.extend_from_slice(payload);
+            out
+        }
+        fn name(text: &str) -> Vec<u8> {
+            let mut out = vec![u8::try_from(text.len()).expect("a short name")];
+            out.extend_from_slice(text.as_bytes());
+            out
+        }
+        let mut out = b"\0asm\x01\0\0\0".to_vec();
+        out.extend(section(1, &[1, 0x60, 0, 0]));
+        out.extend(section(2, &[[1].as_slice(), &name("m"), &name("f"), &[0, 0]].concat()));
+        out.extend(section(3, &[2, 0, 0]));
+        out.extend(section(5, &[1, 0, 1]));
+        let code: Vec<u8> = bodies
+            .iter()
+            .flat_map(|&nops| {
+                [vec![u8::try_from(nops + 2).expect("a short body"), 0], vec![1; nops], vec![0x0b]].concat()
+            })
+            .collect();
+        out.extend(section(10, &[[2].as_slice(), &code].concat()));
+        out.extend(section(11, &[1, 0, 0x41, 0, 0x0b, 5, 1, 2, 3, 4, 5]));
+        if named {
+            let names = [
+                [3].as_slice(),
+                &[0],
+                &name("m::f"),
+                &[1],
+                &name("mln_util[0123abcd]::f"),
+                &[2],
+                &name("core[0011aabb]::ptr::drop_glue::<mln_map[abcdef01]::Map>"),
+            ]
+            .concat();
+            out.extend(section(0, &[name("name"), section(1, &names)].concat()));
+        }
+        out
+    }
+
+    #[test]
+    fn reads_function_sizes_past_the_imports() {
+        let bytes = module([10, 4], true);
+        let sizes = Sizes::parse(&bytes).unwrap();
+        assert_eq!(
+            sizes.functions(),
+            BTreeMap::from([("core::ptr::drop_glue::<mln_map::Map>", 6), ("mln_util::f", 12)])
+        );
+        let groups = sizes.groups();
+        assert_eq!((groups["mln_util"], groups["mln_map"], groups["(data segments)"]), (12, 6, 5));
+        assert_eq!(groups.values().sum::<u64>(), sizes.total, "the groups add up to the module");
+        assert!(sizes.total < bytes.len() as u64, "the name section is left out");
+    }
+
+    #[test]
+    fn a_module_without_names_is_an_error() {
+        assert!(Sizes::parse(&module([10, 4], false)).unwrap_err().contains("no function names"));
+    }
 
     #[test]
     fn drops_disambiguators_and_finds_the_crate() {
