@@ -1,6 +1,5 @@
 // The target of a browser canvas: a WebGL2 context, which is OpenGL ES 3.0,
-// on an OffscreenCanvas or an HTMLCanvasElement. After the GLFW app's backend
-// (platform/glfw/glfw_gl_backend.cpp), whose window is the canvas here.
+// on an OffscreenCanvas or an HTMLCanvasElement.
 //
 // The context belongs to the canvas and is always current, and the browser
 // presents the canvas after the task that drew into it, so there is nothing

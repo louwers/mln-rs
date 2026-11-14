@@ -24,7 +24,8 @@ use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
 use mln_util::size::Size;
 
-use crate::{Api, Device, DeviceOptions, GlGpu};
+use crate::gpu::GlGpu;
+use crate::{Api, Device, DeviceOptions};
 
 /// The API that `MLN_RENDER_BACKEND` asks for: desktop OpenGL for
 /// `gl-desktop`, and otherwise the platform's.

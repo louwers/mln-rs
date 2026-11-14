@@ -8,9 +8,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::Window;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::window::raw_window_handle::RawWindowHandle;
-use mln_gfx::{BackendScope, ScopeType, Window};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -172,6 +172,7 @@ impl FrameTarget for SurfaceTarget {
         if !self.image.release(&self.backend) {
             return Handoff::Dropped;
         }
+        let _current = self.backend.context().enter();
         if let Err(e) = wgl::swap_buffers(self.window.dc.dc()) {
             Log::error(Event::GraphicsBackend, e);
         }
@@ -181,7 +182,6 @@ impl FrameTarget for SurfaceTarget {
 
 impl Drop for SurfaceTarget {
     fn drop(&mut self) {
-        let _scope = BackendScope::new(&*self.backend, ScopeType::Explicit);
         self.image.release(&self.backend);
     }
 }

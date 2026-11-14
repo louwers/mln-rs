@@ -1,17 +1,13 @@
-// Differences from C++:
-// - The ids are the port's (shader_defines.rs, C++'s consolidated ones), so a
-//   shader's uniform blocks bind where the renderer puts their buffers.
+// Each shader's GLSL and the tables of where its uniform blocks, attributes
+// and textures bind:
+// - The ids are shader_defines.rs's, so a shader's uniform blocks bind where
+//   the renderer puts their buffers.
 // - A block's entry has the size of its UBO, which the compile test checks
 //   against the program, and, where the renderer writes the block for every
 //   drawable of a layer into one buffer, the size of that buffer's elements.
-// - The symbol shaders have the attribute the port adds (`a_tex_origin`).
 // - The fill extrusion shaders have the roofs' attributes, and the instanced
-//   ones, which the renderer draws the walls with, the instances' (C++'s
-//   OpenGL build has no instanced walls).
-// - FillOutlineTriangulatedShader and ClippingMaskProgram have tables: the
-//   port's renderer triangulates fill outlines, as C++ does for Metal and
-//   WebGPU, and draws the clipping masks as drawables.
-// - RasterShader's second texture has its own id (C++ gives both the first).
+//   ones, which the renderer draws the walls with, the instances'.
+// - RasterShader's second texture has an id of its own.
 // - Every block a shader's GLSL declares has an entry, the prelude's
 //   projection block too: WebGL2 rejects a draw whose program has a block
 //   without a buffer, whether or not the shader reads it.

@@ -19,16 +19,19 @@ use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
 use mln_util::Color;
+use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::size::Size;
 
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
-use crate::renderer_backend::PlatformContext;
+use crate::renderer_backend::GlContext;
 use crate::shaders::glsl_sources::PRELUDE;
 use crate::shaders::shader_source::shader_source;
 use crate::state::{Rect, State};
-use crate::types::{BufferID, FenceID, FramebufferID, Gl, ProgramID, SamplerID, ShaderID, TextureID, VertexArrayID};
+#[cfg(not(target_family = "wasm"))]
+use crate::types::FenceID;
+use crate::types::{BufferID, FramebufferID, Gl, ProgramID, SamplerID, ShaderID, TextureID, VertexArrayID};
 
 /// `GL_TEXTURE_MAX_ANISOTROPY_EXT` (`EXT_texture_filter_anisotropic`).
 const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
@@ -122,9 +125,9 @@ impl Texture {
 /// The textures of a framebuffer made elsewhere, which
 /// [`GlGpu::import_framebuffer`] takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FramebufferTextures {
-    pub color: Option<TextureId>,
-    pub depth_stencil: Option<TextureId>,
+pub(crate) struct FramebufferTextures {
+    pub(crate) color: Option<TextureId>,
+    pub(crate) depth_stencil: Option<TextureId>,
 }
 
 impl Program {
@@ -317,9 +320,8 @@ fn buffer_target(usage: BufferUsage) -> u32 {
     }
 }
 
-/// A [`Gpu`] on an OpenGL ES 3.0, WebGL2 or desktop OpenGL 3.3 context: one
-/// of its own, which it makes current inside each call, or a renderer
-/// backend's, which is current whenever the renderer calls it.
+/// A [`Gpu`] on an OpenGL ES 3.0, WebGL2 or desktop OpenGL 3.3 context,
+/// which it makes current inside each call.
 ///
 /// GL keeps a deleted object until the commands submitted so far are done
 /// with it, so a `destroy_*` call deletes at once.
@@ -335,11 +337,13 @@ fn buffer_target(usage: BufferUsage) -> u32 {
 ///
 /// A readback reads the texels at once, since GL runs the commands before
 /// it first: a texture of 8-bit red or RGBA texels, which GL reads as RGBA.
-pub struct GlGpu {
-    /// The GL state the context last set, which a renderer backend's
-    /// context shares.
-    state: Rc<State>,
+pub(crate) struct GlGpu {
+    context: Rc<GlContext>,
     desktop: bool,
+    /// Whether a half-float texture can be rendered into: on desktop
+    /// OpenGL, and elsewhere with `EXT_color_buffer_half_float` or
+    /// `EXT_color_buffer_float`.
+    half_float_renderable: bool,
     limits: Limits,
     anisotropic: bool,
     /// The widths that lines may be drawn at.
@@ -360,59 +364,24 @@ pub struct GlGpu {
     framebuffers: HashMap<(Option<TextureId>, Option<TextureId>), FramebufferID>,
     /// The texels each readback read.
     readbacks: SlotMap<ReadbackId, Vec<u8>>,
-    // Dropped before the platform's context, which the functions belong to.
-    gl: Arc<Gl>,
-    /// The context `gl` calls, for the calls that take a JS array.
-    #[cfg(target_family = "wasm")]
-    webgl2: web_sys::WebGl2RenderingContext,
-    /// The context the functions belong to, `None` for a renderer
-    /// backend's, which deletes this backend's objects with
-    /// [`release`](Self::release).
-    platform: Option<Box<dyn PlatformContext>>,
 }
 
 impl GlGpu {
-    /// A backend on a context of `device`'s share group.
-    ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL makes
-    /// no context.
-    #[cfg(not(target_family = "wasm"))]
-    pub fn new(device: &crate::device::Device) -> Result<GlGpu, mln_util::error::Error> {
+    /// A backend on a context of its own in `device`'s share group.
+    #[cfg(all(test, not(target_family = "wasm")))]
+    pub(crate) fn new(device: &crate::device::Device) -> Result<GlGpu, mln_util::error::Error> {
         let (gl, platform) = device.create_context()?;
-        platform.make_current();
-        let gpu = GlGpu::on(Arc::new(gl), Rc::default(), Some(platform));
-        if let Some(platform) = &gpu.platform {
-            platform.done_current();
-        }
-        Ok(gpu)
+        Ok(GlGpu::on(GlContext::new(gl, platform)))
     }
 
-    /// A backend on a renderer backend's context, which must be current
-    /// whenever this backend is called, sharing the cache of the GL state
-    /// that the context sets. Its objects go with
-    /// [`release`](Self::release), not with the backend.
-    pub(crate) fn hosted(
-        gl: Arc<Gl>,
-        state: Rc<State>,
-        #[cfg(target_family = "wasm")] webgl2: web_sys::WebGl2RenderingContext,
-    ) -> GlGpu {
-        #[cfg(target_family = "wasm")]
-        return GlGpu::on(gl, state, None, webgl2);
-        #[cfg(not(target_family = "wasm"))]
-        GlGpu::on(gl, state, None)
-    }
-
-    /// A backend on the current context of `gl`.
-    fn on(
-        gl: Arc<Gl>,
-        state: Rc<State>,
-        platform: Option<Box<dyn PlatformContext>>,
-        #[cfg(target_family = "wasm")] webgl2: web_sys::WebGl2RenderingContext,
-    ) -> GlGpu {
+    /// A backend on `context`.
+    pub(crate) fn on(context: Rc<GlContext>) -> GlGpu {
+        let current = context.enter();
+        let gl = context.gl();
         let desktop = !gl.version().is_embedded;
         // SAFETY: the context is current, and the parameters and the
         // capability are GL ES 3.0's or desktop OpenGL 3.0's.
-        let (limits, anisotropic, line_widths) = unsafe {
+        let (limits, anisotropic, half_float_renderable, line_widths) = unsafe {
             if desktop {
                 // OpenGL ES encodes what it writes to an sRGB framebuffer as
                 // sRGB; desktop OpenGL only with this.
@@ -421,8 +390,9 @@ impl GlGpu {
             let alignment = gl.get_parameter_i32(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT);
             let max_texture_size = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE);
             let extensions = gl.supported_extensions();
-            let anisotropic = extensions.contains("GL_EXT_texture_filter_anisotropic")
-                || extensions.contains("EXT_texture_filter_anisotropic");
+            let has = |name: &str| extensions.contains(name) || extensions.contains(&format!("GL_{name}"));
+            let anisotropic = has("EXT_texture_filter_anisotropic");
+            let half_float_renderable = desktop || has("EXT_color_buffer_half_float") || has("EXT_color_buffer_float");
             let mut line_widths = [1.0; 2];
             gl.get_parameter_f32_slice(glow::ALIASED_LINE_WIDTH_RANGE, &mut line_widths);
             // A forward-compatible desktop context draws no wide lines.
@@ -433,11 +403,13 @@ impl GlGpu {
                 buffer_offset_alignment: alignment.max(1) as u32,
                 max_texture_size: max_texture_size.max(0) as u32,
             };
-            (limits, anisotropic, line_widths[0].min(1.0)..=max_line_width)
+            (limits, anisotropic, half_float_renderable, line_widths[0].min(1.0)..=max_line_width)
         };
+        drop(current);
         GlGpu {
-            state,
+            context,
             desktop,
+            half_float_renderable,
             limits,
             anisotropic,
             line_widths,
@@ -451,40 +423,49 @@ impl GlGpu {
             bind_groups: SlotMap::with_key(),
             framebuffers: HashMap::new(),
             readbacks: SlotMap::with_key(),
-            gl,
-            #[cfg(target_family = "wasm")]
-            webgl2,
-            platform,
         }
     }
 
-    /// Runs `f` with the context current. Where something else used the
-    /// context since, the cached GL state is forgotten first.
+    /// Runs `f` with the context current.
     fn current<T>(&mut self, f: impl FnOnce(&mut GlGpu) -> T) -> T {
-        if let Some(platform) = &self.platform {
-            platform.make_current();
-            if platform.take_state_lost() {
-                self.state.set_dirty();
-            }
-        }
+        let _current = self.context.enter();
         if self.vertex_array.is_none() {
             // SAFETY: the context is current. A failure leaves no vertex
             // array bound, which GL reports at the draws.
-            self.vertex_array = unsafe { self.gl.create_vertex_array() }.ok();
+            self.vertex_array = unsafe { self.context.gl().create_vertex_array() }.ok();
         }
-        self.state.bind_vertex_array(&self.gl, self.vertex_array);
-        let result = f(self);
-        if let Some(platform) = &self.platform {
-            platform.done_current();
-        }
-        result
+        self.context.state().bind_vertex_array(self.context.gl(), self.vertex_array);
+        f(self)
     }
 
+    /// Whether a texture of half floats can be rendered into.
+    pub(crate) fn half_float_renderable(&self) -> bool {
+        self.half_float_renderable
+    }
+
+    /// Ends a frame: what draws on the context outside the frames samples
+    /// with its textures' own parameters. In debug builds, logs an error GL
+    /// recorded, which waits for GL to run every call so far.
+    pub(crate) fn end_frame(&mut self) {
+        self.current(|gpu| {
+            let gl = gpu.context.gl();
+            gpu.context.state().unbind_samplers(gl);
+            if cfg!(debug_assertions) {
+                // SAFETY: no preconditions.
+                let error = unsafe { gl.get_error() };
+                if error != glow::NO_ERROR {
+                    Log::error(Event::GraphicsBackend, format!("OpenGL error {error:#x} in this frame"));
+                }
+            }
+        });
+    }
+
+    #[cfg(not(target_family = "wasm"))]
     /// Takes a `GL_TEXTURE_2D` texture made elsewhere, such as a host's in
     /// the context's share group, of `desc`'s size, format and usage, as a
     /// texture of this backend. Destroying it forgets it; the texture stays
     /// the caller's.
-    pub fn import_texture(&mut self, texture: TextureID, desc: &TextureDesc<'_>) -> TextureId {
+    pub(crate) fn import_texture(&mut self, texture: TextureID, desc: &TextureDesc<'_>) -> TextureId {
         self.textures.insert(Texture {
             object: Object::Texture { name: texture, owned: false },
             size: desc.size,
@@ -500,7 +481,7 @@ impl GlGpu {
     /// of the format `depth_stencil`. A pass draws into them together, or
     /// into one of them alone. Destroying them forgets them; the framebuffer
     /// stays the caller's.
-    pub fn import_framebuffer(
+    pub(crate) fn import_framebuffer(
         &mut self,
         framebuffer: Option<FramebufferID>,
         size: Size,
@@ -522,7 +503,7 @@ impl GlGpu {
     }
 
     /// An import of the GL texture of `texture`, which this backend made.
-    #[cfg(test)]
+    #[cfg(all(test, not(target_family = "wasm")))]
     pub(crate) fn import_again(&mut self, texture: TextureId) -> Option<TextureId> {
         let entry = self.textures.get(texture)?;
         let desc = TextureDesc { label: "imported", size: entry.size, format: entry.format, usage: entry.usage };
@@ -530,85 +511,47 @@ impl GlGpu {
     }
 
     /// Runs `f` with the context current, and forgets the GL state after.
-    #[cfg(test)]
+    #[cfg(all(test, not(target_family = "wasm")))]
     pub(crate) fn with_gl<T>(&mut self, f: impl FnOnce(&Gl) -> T) -> T {
         self.current(|gpu| {
-            let result = f(&gpu.gl);
-            gpu.state.set_dirty();
+            let result = f(gpu.context.gl());
+            gpu.context.state().set_dirty();
             result
         })
     }
 
+    #[cfg(not(target_family = "wasm"))]
     /// Has the commands that follow wait, on the GPU, for `fence`, a
     /// `GLsync` in the context's share group such as a host's, which it
     /// then deletes.
-    pub fn wait_sync(&mut self, fence: FenceID) {
+    pub(crate) fn wait_sync(&mut self, fence: FenceID) {
         // SAFETY: the caller's fence, in the share group, which the call
         // takes.
         self.current(|gpu| unsafe {
-            gpu.gl.wait_sync(fence, 0, glow::TIMEOUT_IGNORED);
-            gpu.gl.delete_sync(fence);
+            gpu.context.gl().wait_sync(fence, 0, glow::TIMEOUT_IGNORED);
+            gpu.context.gl().delete_sync(fence);
         });
     }
 
+    #[cfg(not(target_family = "wasm"))]
     /// A `GLsync` that signals once the commands so far finish, flushed so
     /// that a wait for it in another context of the share group ends. The
     /// caller deletes it with [`delete_sync`](Self::delete_sync).
-    pub fn fence_sync(&mut self) -> Result<FenceID, GpuError> {
+    pub(crate) fn fence_sync(&mut self) -> Result<FenceID, GpuError> {
         // SAFETY: the context is current; the flush sends the fence to the
         // GPU.
         self.current(|gpu| unsafe {
-            let fence = gpu.gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0).map_err(GpuError::Invalid)?;
-            gpu.gl.flush();
+            let fence = gpu.context.gl().fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0).map_err(GpuError::Invalid)?;
+            gpu.context.gl().flush();
             Ok(fence)
         })
     }
 
+    #[cfg(not(target_family = "wasm"))]
     /// Deletes `fence`, which [`fence_sync`](Self::fence_sync) made.
-    pub fn delete_sync(&mut self, fence: FenceID) {
+    pub(crate) fn delete_sync(&mut self, fence: FenceID) {
         // SAFETY: the fence is alive, and the call takes it.
-        self.current(|gpu| unsafe { gpu.gl.delete_sync(fence) });
-    }
-
-    /// Deletes this backend's objects, leaving it with none. The context
-    /// must be current.
-    pub(crate) fn release(&mut self) {
-        let gl = &self.gl;
-        // SAFETY: the objects are alive, and only this backend has them.
-        unsafe {
-            for program in self.programs.drain().map(|(_, program)| program) {
-                self.state.forget_program(program.object);
-                gl.delete_program(program.object);
-            }
-            for buffer in self.buffers.drain().map(|(_, buffer)| buffer) {
-                if let Some(object) = buffer.object {
-                    self.state.forget_uniform_buffer(object);
-                    gl.delete_buffer(object);
-                }
-            }
-            for texture in self.textures.drain().map(|(_, texture)| texture) {
-                if let Some(name) = texture.name() {
-                    self.state.forget_texture(name);
-                }
-                if let Some(name) = texture.owned_name() {
-                    gl.delete_texture(name);
-                }
-            }
-            for sampler in self.samplers.drain().map(|(_, sampler)| sampler) {
-                self.state.forget_sampler(sampler);
-                gl.delete_sampler(sampler);
-            }
-            for framebuffer in self.framebuffers.drain().map(|(_, framebuffer)| framebuffer) {
-                self.state.forget_framebuffer(framebuffer);
-                gl.delete_framebuffer(framebuffer);
-            }
-            if let Some(vertex_array) = self.vertex_array.take() {
-                self.state.forget_vertex_array(vertex_array);
-                gl.delete_vertex_array(vertex_array);
-            }
-        }
-        self.pipelines.clear();
-        self.bind_groups.clear();
+        self.current(|gpu| unsafe { gpu.context.gl().delete_sync(fence) });
     }
 
     /// Compiles and links the program of `key`.
@@ -623,7 +566,7 @@ impl GlGpu {
         let version = if self.desktop { "#version 330 core\n" } else { "#version 300 es\n" };
         let defines: String =
             key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
-        let gl = &self.gl;
+        let gl = self.context.gl();
         let shader = |stage, prelude, glsl| {
             // SAFETY: the shader is new, and deleted if it doesn't compile.
             unsafe {
@@ -691,7 +634,7 @@ impl GlGpu {
                 Ok(())
             })?;
 
-            self.state.use_program(gl, Some(object));
+            self.context.state().use_program(gl, Some(object));
             for info in source.textures {
                 if let Some(location) = gl.get_uniform_location(object, info.name) {
                     if info.id >= MAX_ACTIVE_TEXTURE_UNITS as usize {
@@ -714,7 +657,7 @@ impl GlGpu {
             Ok(())
         };
         if let Err(error) = described {
-            self.state.forget_program(object);
+            self.context.state().forget_program(object);
             // SAFETY: the program is alive, and nothing else has it.
             unsafe { gl.delete_program(object) };
             return Err(error);
@@ -954,12 +897,12 @@ impl GlGpu {
         if let Some(&framebuffer) = self.framebuffers.get(&(color, depth_stencil)) {
             return Ok(Some(framebuffer));
         }
-        let gl = &self.gl;
+        let gl = self.context.gl();
         // SAFETY: the framebuffer is new, the textures are alive, and the
         // framebuffer is deleted if GL can't draw into them.
         let framebuffer = unsafe {
             let framebuffer = gl.create_framebuffer().map_err(GpuError::Invalid)?;
-            self.state.bind_framebuffer(gl, Some(framebuffer));
+            self.context.state().bind_framebuffer(gl, Some(framebuffer));
             if let Some(name) = color.and_then(|id| self.textures.get(id)).and_then(Texture::name) {
                 gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(name), 0);
             } else {
@@ -975,7 +918,7 @@ impl GlGpu {
             }
             let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
             if status != glow::FRAMEBUFFER_COMPLETE {
-                self.state.forget_framebuffer(framebuffer);
+                self.context.state().forget_framebuffer(framebuffer);
                 gl.delete_framebuffer(framebuffer);
                 return Err(GpuError::Invalid(format!("{label}: GL can't draw into its attachments ({status:#x})")));
             }
@@ -987,8 +930,8 @@ impl GlGpu {
 
     /// Deletes the framebuffers that draw into `texture`.
     fn forget_framebuffers(&mut self, texture: TextureId) {
-        let gl = &self.gl;
-        let state = &self.state;
+        let gl = self.context.gl();
+        let state = self.context.state();
         self.framebuffers.retain(|&(color, depth_stencil), &mut framebuffer| {
             if color != Some(texture) && depth_stencil != Some(texture) {
                 return true;
@@ -1007,7 +950,7 @@ impl GlGpu {
         let entry = self.buffers.get_mut(buffer).ok_or(GpuError::UnknownId("buffer"))?;
         let elements =
             entry.elements.as_mut().ok_or_else(|| GpuError::Invalid("a storage buffer without its bytes".into()))?;
-        let gl = &self.gl;
+        let gl = self.context.gl();
         if let Some(object) = entry.object
             && !elements.dirty
             && elements.element_size == element_size
@@ -1033,7 +976,7 @@ impl GlGpu {
                 Some(object) => object,
                 None => gl.create_buffer().map_err(GpuError::Invalid)?,
             };
-            self.state.forget_uniform_buffer(object);
+            self.context.state().forget_uniform_buffer(object);
             gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
             gl.buffer_data_u8_slice(glow::UNIFORM_BUFFER, bytes, glow::DYNAMIC_DRAW);
             object
@@ -1048,8 +991,8 @@ impl GlGpu {
     fn encode(&mut self, pass: &Pass) -> Result<(), GpuError> {
         let size = self.pass_size(pass)?;
         let framebuffer = self.framebuffer(pass)?;
-        let gl = &self.gl;
-        self.state.bind_framebuffer(gl, framebuffer);
+        let gl = self.context.gl();
+        self.context.state().bind_framebuffer(gl, framebuffer);
         let clear_color = pass.color.and_then(|attachment| match attachment.load {
             LoadOp::Clear(color) => Some(color),
             LoadOp::Load => None,
@@ -1066,7 +1009,7 @@ impl GlGpu {
             };
             (depth, stencil)
         });
-        self.state.clear(gl, clear_color, clear_depth, clear_stencil);
+        self.context.state().clear(gl, clear_color, clear_depth, clear_stencil);
         let attachments = (pass.color.is_some(), pass.depth_stencil.is_some());
         self.encode_commands(&pass.label, size, attachments, &pass.commands)
     }
@@ -1081,20 +1024,20 @@ impl GlGpu {
         attachments: (bool, bool),
         commands: &[RenderCommand],
     ) -> Result<(), GpuError> {
-        let gl = &self.gl;
+        let gl = self.context.gl();
         let height = size.height as i32;
         // A rectangle counted from the top, from the bottom as GL counts it.
         let flipped = |x: i32, y: i32, width: i32, rect_height: i32| -> Rect {
             (x, height - y - rect_height, width, rect_height)
         };
-        self.state.set_viewport(gl, flipped(0, 0, size.width as i32, height));
-        self.state.set_scissor(gl, None);
+        self.context.state().set_viewport(gl, flipped(0, 0, size.width as i32, height));
+        self.context.state().set_scissor(gl, None);
 
         let mut state = PassState::default();
         for command in commands {
             match *command {
-                RenderCommand::SetViewport(viewport) => self.state.set_viewport(
-                    &self.gl,
+                RenderCommand::SetViewport(viewport) => self.context.state().set_viewport(
+                    self.context.gl(),
                     flipped(
                         viewport.x.round() as i32,
                         viewport.y.round() as i32,
@@ -1102,15 +1045,15 @@ impl GlGpu {
                         viewport.height.round() as i32,
                     ),
                 ),
-                RenderCommand::SetScissor(scissor) => self.state.set_scissor(
-                    &self.gl,
+                RenderCommand::SetScissor(scissor) => self.context.state().set_scissor(
+                    self.context.gl(),
                     Some(flipped(scissor.x as i32, scissor.y as i32, scissor.width as i32, scissor.height as i32)),
                 ),
                 RenderCommand::SetIndexBuffer { buffer, .. } => {
                     let object = self.buffers.get(buffer).and_then(|buffer| buffer.object);
                     // SAFETY: the buffer is alive; the vertex array is bound
                     // and takes it.
-                    unsafe { self.gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, object) };
+                    unsafe { self.context.gl().bind_buffer(glow::ELEMENT_ARRAY_BUFFER, object) };
                 }
                 _ => {}
             }
@@ -1135,7 +1078,7 @@ impl GlGpu {
         let pipeline = self.draw_pipeline(label, state.pipeline)?;
         let program = Rc::clone(&pipeline.program);
         let fixed = &pipeline.state;
-        let gl = &self.gl;
+        let gl = self.context.gl();
         // An imported framebuffer keeps the attachment that a pass leaves
         // out bound, which the draw leaves alone.
         let (depth, stencil) = if depth_stencil {
@@ -1144,7 +1087,7 @@ impl GlGpu {
             (DepthState::from(&DepthMode::disabled()), StencilState::from(&StencilMode::disabled()))
         };
         let color_mask = if color { fixed.color_mask } else { ColorMode::disabled().mask };
-        self.state.set_depth_mode(
+        self.context.state().set_depth_mode(
             gl,
             &DepthMode {
                 func: depth.compare,
@@ -1152,7 +1095,7 @@ impl GlGpu {
                 range: state.depth_range,
             },
         );
-        self.state.set_stencil_mode(
+        self.context.state().set_stencil_mode(
             gl,
             &StencilMode {
                 test: stencil.test,
@@ -1163,15 +1106,15 @@ impl GlGpu {
                 pass: stencil.pass,
             },
         );
-        self.state.set_color_mode(
+        self.context.state().set_color_mode(
             gl,
             &ColorMode { blend_function: fixed.blend, blend_color: state.blend_constant, mask: color_mask },
         );
-        self.state.set_cull_face_mode(gl, fixed.cull);
+        self.context.state().set_cull_face_mode(gl, fixed.cull);
         let line_width = state.line_width.clamp(*self.line_widths.start(), *self.line_widths.end());
-        self.state.set_line_width(gl, line_width);
+        self.context.state().set_line_width(gl, line_width);
         let mode = enums::draw_mode(fixed.primitive);
-        self.state.use_program(gl, Some(program.object));
+        self.context.state().use_program(gl, Some(program.object));
 
         let bases = PassState::bases(command);
         if state.attribute_bases != Some(bases) {
@@ -1192,12 +1135,22 @@ impl GlGpu {
                         (object, index * stride, block.size as u64)
                     }
                 };
-                self.state.bind_uniform_buffer_range(&self.gl, block.id, object, offset as i32, size as i32);
+                self.context.state().bind_uniform_buffer_range(
+                    self.context.gl(),
+                    block.id,
+                    object,
+                    offset as i32,
+                    size as i32,
+                );
             }
             for binding in textures {
                 let texture = self.textures.get(binding.texture).and_then(Texture::name);
-                self.state.bind_texture(&self.gl, binding.unit, texture);
-                self.state.bind_sampler(&self.gl, binding.unit, self.samplers.get(binding.sampler).copied());
+                self.context.state().bind_texture(self.context.gl(), binding.unit, texture);
+                self.context.state().bind_sampler(
+                    self.context.gl(),
+                    binding.unit,
+                    self.samplers.get(binding.sampler).copied(),
+                );
             }
             state.groups_dirty = false;
         }
@@ -1209,8 +1162,8 @@ impl GlGpu {
                     let count = vertices.len() as i32;
                     match instances.len() {
                         0 => {}
-                        1 => self.gl.draw_arrays(mode, vertices.start as i32, count),
-                        n => self.gl.draw_arrays_instanced(mode, vertices.start as i32, count, n as i32),
+                        1 => self.context.gl().draw_arrays(mode, vertices.start as i32, count),
+                        n => self.context.gl().draw_arrays_instanced(mode, vertices.start as i32, count, n as i32),
                     }
                 }
                 RenderCommand::DrawIndexed { indices, instances, .. } => {
@@ -1219,8 +1172,14 @@ impl GlGpu {
                     let count = indices.len() as i32;
                     match instances.len() {
                         0 => {}
-                        1 => self.gl.draw_elements(mode, count, glow::UNSIGNED_SHORT, offset),
-                        n => self.gl.draw_elements_instanced(mode, count, glow::UNSIGNED_SHORT, offset, n as i32),
+                        1 => self.context.gl().draw_elements(mode, count, glow::UNSIGNED_SHORT, offset),
+                        n => self.context.gl().draw_elements_instanced(
+                            mode,
+                            count,
+                            glow::UNSIGNED_SHORT,
+                            offset,
+                            n as i32,
+                        ),
                     }
                 }
                 _ => {}
@@ -1232,7 +1191,7 @@ impl GlGpu {
     /// Points the vertex array's attributes at `pointers`, and disables the
     /// others.
     fn set_attribute_pointers(&mut self, pointers: &[AttributePointer]) {
-        let gl = &self.gl;
+        let gl = self.context.gl();
         let enabled = pointers.iter().fold(0u32, |mask, pointer| mask | 1 << pointer.location);
         // SAFETY: the vertex array is bound, the buffers are alive and the
         // locations are the program's.
@@ -1285,11 +1244,13 @@ pub(crate) fn read_pixels(gl: &Gl, state: &State, height: u32, region: TextureRe
             glow::PixelPackData::Slice(Some(&mut pixels)),
         );
     }
-    let mut flipped = Vec::with_capacity(pixels.len());
-    for line in pixels.chunks_exact(row).rev() {
-        flipped.extend_from_slice(line);
+    // GL's rows start at the bottom: swapped in place, top for bottom.
+    let rows = region.size.height as usize;
+    for top in 0..rows / 2 {
+        let (head, tail) = pixels.split_at_mut((rows - 1 - top) * row);
+        head[top * row..(top + 1) * row].swap_with_slice(&mut tail[..row]);
     }
-    flipped
+    pixels
 }
 
 impl Resources for GlGpu {
@@ -1337,9 +1298,9 @@ impl Gpu for GlGpu {
             // SAFETY: the buffer is new; the vertex array takes an index
             // buffer bound here until a pass binds its own.
             unsafe {
-                let object = gpu.gl.create_buffer().map_err(GpuError::Invalid)?;
-                gpu.gl.bind_buffer(target, Some(object));
-                gpu.gl.buffer_data_u8_slice(target, &zeros, glow::DYNAMIC_DRAW);
+                let object = gpu.context.gl().create_buffer().map_err(GpuError::Invalid)?;
+                gpu.context.gl().bind_buffer(target, Some(object));
+                gpu.context.gl().buffer_data_u8_slice(target, &zeros, glow::DYNAMIC_DRAW);
                 Ok::<_, GpuError>(object)
             }
         })?;
@@ -1362,8 +1323,8 @@ impl Gpu for GlGpu {
             let target = buffer_target(usage);
             // SAFETY: the buffer is alive and holds the bytes written.
             unsafe {
-                gpu.gl.bind_buffer(target, object);
-                gpu.gl.buffer_sub_data_u8_slice(target, offset as i32, data);
+                gpu.context.gl().bind_buffer(target, object);
+                gpu.context.gl().buffer_sub_data_u8_slice(target, offset as i32, data);
             }
         });
         Ok(())
@@ -1392,8 +1353,8 @@ impl Gpu for GlGpu {
         self.current(|gpu| {
             let target = buffer_target(usage);
             // SAFETY: the buffer is alive and holds the bytes written.
-            unsafe { gpu.gl.bind_buffer(target, Some(object)) };
-            gpu.webgl2.buffer_sub_data_with_f64_and_array_buffer_view(target, offset as f64, &array);
+            unsafe { gpu.context.gl().bind_buffer(target, Some(object)) };
+            gpu.context.webgl2().buffer_sub_data_with_f64_and_array_buffer_view(target, offset as f64, &array);
         });
         Ok(())
     }
@@ -1401,9 +1362,9 @@ impl Gpu for GlGpu {
     fn destroy_buffer(&mut self, buffer: BufferId) {
         if let Some(Buffer { object: Some(object), .. }) = self.buffers.remove(buffer) {
             self.current(|gpu| {
-                gpu.state.forget_uniform_buffer(object);
+                gpu.context.state().forget_uniform_buffer(object);
                 // SAFETY: the buffer is alive, and only this backend has it.
-                unsafe { gpu.gl.delete_buffer(object) };
+                unsafe { gpu.context.gl().delete_buffer(object) };
             });
         }
     }
@@ -1416,12 +1377,12 @@ impl Gpu for GlGpu {
             return Err(GpuError::Invalid(format!("{}: a texture of {:?}", desc.label, desc.size)));
         }
         let object = self.current(|gpu| {
-            let gl = &gpu.gl;
+            let gl = gpu.context.gl();
             // SAFETY: the texture is new, and its format, internal format
             // and type are a combination GL ES 3.0 takes.
             unsafe {
                 let object = gl.create_texture().map_err(GpuError::Invalid)?;
-                gpu.state.activate_texture(gl, 0, Some(object));
+                gpu.context.state().activate_texture(gl, 0, Some(object));
                 gl.tex_image_2d(
                     glow::TEXTURE_2D,
                     0,
@@ -1462,9 +1423,9 @@ impl Gpu for GlGpu {
         let format = entry.format;
         let (_, gl_format, type_) = texture_format(format, self.desktop).ok_or(GpuError::UnknownId("texture"))?;
         self.current(|gpu| {
-            let gl = &gpu.gl;
-            gpu.state.set_pixel_store_unpack_alignment(gl, 1);
-            gpu.state.activate_texture(gl, 0, Some(object));
+            let gl = gpu.context.gl();
+            gpu.context.state().set_pixel_store_unpack_alignment(gl, 1);
+            gpu.context.state().activate_texture(gl, 0, Some(object));
             // SAFETY: the texture is alive, and `data` holds the region's
             // texels, which are inside it.
             unsafe {
@@ -1489,12 +1450,12 @@ impl Gpu for GlGpu {
             self.current(|gpu| {
                 gpu.forget_framebuffers(texture);
                 if let Some(name) = entry.name() {
-                    gpu.state.forget_texture(name);
+                    gpu.context.state().forget_texture(name);
                 }
                 if let Some(name) = entry.owned_name() {
                     // SAFETY: the texture is alive, and only this backend
                     // has it.
-                    unsafe { gpu.gl.delete_texture(name) };
+                    unsafe { gpu.context.gl().delete_texture(name) };
                 }
             });
         }
@@ -1503,7 +1464,7 @@ impl Gpu for GlGpu {
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError> {
         let anisotropic = self.anisotropic;
         let sampler = self.current(|gpu| {
-            let gl = &gpu.gl;
+            let gl = gpu.context.gl();
             let min_filter = match (state.filter, state.mipmapped) {
                 (TextureFilterType::Nearest, false) => glow::NEAREST,
                 (TextureFilterType::Linear, false) => glow::LINEAR,
@@ -1530,9 +1491,9 @@ impl Gpu for GlGpu {
     fn destroy_sampler(&mut self, sampler: SamplerId) {
         if let Some(object) = self.samplers.remove(sampler) {
             self.current(|gpu| {
-                gpu.state.forget_sampler(object);
+                gpu.context.state().forget_sampler(object);
                 // SAFETY: the sampler is alive, and only this backend has it.
-                unsafe { gpu.gl.delete_sampler(object) };
+                unsafe { gpu.context.gl().delete_sampler(object) };
             });
         }
     }
@@ -1602,8 +1563,8 @@ impl Gpu for GlGpu {
         };
         let rgba = self.current(|gpu| {
             let framebuffer = gpu.framebuffer_of(Some(texture), None, "readback")?;
-            gpu.state.bind_framebuffer(&gpu.gl, framebuffer);
-            Ok::<_, GpuError>(read_pixels(&gpu.gl, &gpu.state, height, region))
+            gpu.context.state().bind_framebuffer(gpu.context.gl(), framebuffer);
+            Ok::<_, GpuError>(read_pixels(gpu.context.gl(), gpu.context.state(), height, region))
         })?;
         let texels = if red { rgba.as_chunks::<4>().0.iter().map(|&[red, ..]| red).collect() } else { rgba };
         Ok(self.readbacks.insert(texels))
@@ -1619,7 +1580,7 @@ impl Gpu for GlGpu {
 
     fn finish(&mut self) -> Result<(), GpuError> {
         // SAFETY: the context is current.
-        self.current(|gpu| unsafe { gpu.gl.finish() });
+        self.current(|gpu| unsafe { gpu.context.gl().finish() });
         Ok(())
     }
 
@@ -1628,8 +1589,8 @@ impl Gpu for GlGpu {
     fn lend_to_custom_layer(&mut self, pass: Option<&Pass>, f: &mut dyn FnMut(&mut dyn Any)) -> Result<(), GpuError> {
         let Some(pass) = pass else {
             return self.current(|gpu| {
-                let mut encoder = CustomLayerEncoder { gl: Arc::clone(&gpu.gl) };
-                lend_context(&gpu.gl, &gpu.state, || f(&mut encoder));
+                let mut encoder = CustomLayerEncoder { gl: Arc::clone(gpu.context.gl_shared()) };
+                lend_context(gpu.context.gl(), gpu.context.state(), || f(&mut encoder));
                 Ok(())
             });
         };
@@ -1638,24 +1599,53 @@ impl Gpu for GlGpu {
         self.current(|gpu| {
             let framebuffer = gpu.framebuffer(pass)?;
             gpu.encode(pass)?;
-            let gl = &gpu.gl;
-            gpu.state.set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
-            gpu.state.set_scissor(gl, None);
-            let mut lent = CustomLayerPass { gl: Arc::clone(gl), framebuffer, size };
-            lend_context(gl, &gpu.state, || f(&mut lent));
+            let gl = gpu.context.gl();
+            gpu.context.state().set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
+            gpu.context.state().set_scissor(gl, None);
+            let mut lent = CustomLayerPass { gl: Arc::clone(gpu.context.gl_shared()), framebuffer, size };
+            lend_context(gl, gpu.context.state(), || f(&mut lent));
             Ok(())
         })
     }
 }
 
 impl Drop for GlGpu {
+    /// Deletes the backend's objects.
     fn drop(&mut self) {
-        // Put back, so that the fields drop in their order.
-        if let Some(platform) = self.platform.take() {
-            platform.make_current();
-            self.release();
-            platform.done_current();
-            self.platform = Some(platform);
+        let context = Rc::clone(&self.context);
+        let _current = context.enter();
+        let (gl, state) = (context.gl(), context.state());
+        // SAFETY: the context is current, and the objects are alive and
+        // only this backend's.
+        unsafe {
+            for program in self.programs.values() {
+                state.forget_program(program.object);
+                gl.delete_program(program.object);
+            }
+            for object in self.buffers.values().filter_map(|buffer| buffer.object) {
+                state.forget_uniform_buffer(object);
+                gl.delete_buffer(object);
+            }
+            for texture in self.textures.values() {
+                if let Some(name) = texture.name() {
+                    state.forget_texture(name);
+                }
+                if let Some(name) = texture.owned_name() {
+                    gl.delete_texture(name);
+                }
+            }
+            for &sampler in self.samplers.values() {
+                state.forget_sampler(sampler);
+                gl.delete_sampler(sampler);
+            }
+            for &framebuffer in self.framebuffers.values() {
+                state.forget_framebuffer(framebuffer);
+                gl.delete_framebuffer(framebuffer);
+            }
+            if let Some(vertex_array) = self.vertex_array {
+                state.forget_vertex_array(vertex_array);
+                gl.delete_vertex_array(vertex_array);
+            }
         }
     }
 }

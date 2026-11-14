@@ -8,14 +8,11 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 
-use crate::context::Context;
 use crate::shaders::glsl_sources::PRELUDE;
 use crate::shaders::shader_source::{REGISTERED_SHADERS, ShaderSource, shader_source};
 use crate::{Api, Device, DeviceOptions, RendererBackend};
@@ -112,7 +109,7 @@ fn fragment_shaders_declare_shared_uniform_blocks_first() {
 #[test]
 fn every_program_links_and_matches_its_tables_on_open_gl_es() {
     if let Some(backend) = headless_backend(Api::Gles) {
-        assert!(glow::HasContext::version(backend.gl()).is_embedded);
+        assert!(glow::HasContext::version(backend.context().gl()).is_embedded);
         every_program_links_and_matches_its_tables(&backend);
     }
 }
@@ -121,17 +118,15 @@ fn every_program_links_and_matches_its_tables_on_open_gl_es() {
 #[test]
 fn every_program_links_and_matches_its_tables_on_desktop_open_gl() {
     if let Some(backend) = headless_backend(Api::Gl) {
-        assert!(!glow::HasContext::version(backend.gl()).is_embedded);
+        assert!(!glow::HasContext::version(backend.context().gl()).is_embedded);
         every_program_links_and_matches_its_tables(&backend);
     }
 }
 
 fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
-    let _scope = BackendScope::new(backend, ScopeType::Explicit);
-    let version = glow::HasContext::version(backend.gl());
+    let version = glow::HasContext::version(backend.context().gl());
     println!("GL_RENDERER: {}, GL_VERSION: {}", backend.get_renderer_name(), version.vendor_info);
     let registry = ShaderRegistry::new(&ProgramParameters::new(1.0, false));
-    let context = backend.get_context().downcast_ref::<Context>().expect("a GL context");
 
     let mut programs = 0;
     for &shader_id in REGISTERED_SHADERS {
@@ -148,8 +143,8 @@ fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
             for (i, property_set) in property_sets.iter().enumerate() {
                 let what = format!("{} ({variant:?}, {})", source.name, ["attributes", "uniforms"][i]);
                 let shader = group.shader(property_set, variant);
-                let program = context
-                    .gl_gpu_mut()
+                let program = backend
+                    .gpu()
                     .program(shader.key())
                     .unwrap_or_else(|error| panic!("{what} failed to compile or link: {error}"));
                 programs += 1;

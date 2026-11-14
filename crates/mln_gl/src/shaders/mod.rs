@@ -1,6 +1,6 @@
 //! The OpenGL shaders: their GLSL, sources, programs and shader groups.
 
-/// The C++ core's GLSL, with the port's changes.
+/// The GLSL of every shader.
 #[rustfmt::skip]
 pub(crate) mod glsl_sources;
 pub(crate) mod shader_source;

@@ -6,9 +6,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use glow::HasContext;
-use mln_gfx::attachment::Attachment;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
-use mln_gfx::gpu::{TargetFormats, TextureDesc, TextureUsage};
+use mln_gfx::gpu::{Gpu as _, TargetFormats, TextureDesc, TextureId, TextureUsage};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -74,8 +73,9 @@ pub struct BorrowedTarget {
     image: FrameImports,
     /// The slot that `image` is of.
     imported_slot: Cell<usize>,
-    /// The target's own depth and stencil texture, where the host gave none.
-    depth_stencil: RefCell<Option<Attachment>>,
+    /// The target's own depth and stencil texture, of the backend's
+    /// `GlGpu`, where the host gave none.
+    depth_stencil: Cell<Option<(TextureId, Size)>>,
     selected: Cell<usize>,
     producer: SyncKind,
     /// The fence of each slot's last frame, which the host may wait on
@@ -101,7 +101,7 @@ impl BorrowedTarget {
             textures: RefCell::new(textures),
             image: FrameImports::default(),
             imported_slot: Cell::new(0),
-            depth_stencil: RefCell::new(None),
+            depth_stencil: Cell::new(None),
             selected: Cell::new(0),
             producer,
             fences: RefCell::new(vec![None; depth]),
@@ -121,17 +121,21 @@ impl BorrowedTarget {
     fn delete_fence(&self, slot: usize) {
         let fence = self.fences.borrow_mut().get_mut(slot).and_then(Option::take);
         if let Some(fence) = fence {
-            // SAFETY: the fence is the target's, and the context is current
-            // (the caller's backend scope).
-            unsafe { self.backend.gl().delete_sync(fence) };
+            self.backend.gpu().delete_sync(fence);
+        }
+    }
+
+    /// Destroys the target's own depth and stencil texture.
+    fn delete_depth_stencil(&self) {
+        if let Some((texture, _)) = self.depth_stencil.take() {
+            self.backend.gpu().destroy_texture(texture);
         }
     }
 
     /// The host gave the texture at `slot` back: the context's commands from
     /// here on wait for `consumer`, a sync of one of
     /// [`BorrowedTextures::sync_kinds`]'s consumer kinds, and the target
-    /// deletes the fence it names. Call it with the backend's context
-    /// current.
+    /// deletes the fence it names.
     #[expect(
         clippy::needless_pass_by_value,
         reason = "the release takes the host's sync, as every backend's does, and drops it"
@@ -145,14 +149,9 @@ impl BorrowedTarget {
                 if sync.handle == 0 {
                     return Err(Error::invalid_argument("an OpenGL fence release names no fence"));
                 }
-                let fence = glow::NativeFence(sync.handle as usize as *mut _);
-                let gl = self.backend.gl();
-                // SAFETY: the host's fence, in the context's share group,
-                // which the release hands over.
-                unsafe {
-                    gl.wait_sync(fence, 0, glow::TIMEOUT_IGNORED);
-                    gl.delete_sync(fence);
-                }
+                // The host's fence, in the context's share group, which the
+                // release hands over.
+                self.backend.gpu().wait_sync(glow::NativeFence(sync.handle as usize as *mut _));
                 Ok(())
             }
             kind => Err(Error::unsupported(format!("the OpenGL target waits for no {kind:?}"))),
@@ -160,14 +159,13 @@ impl BorrowedTarget {
     }
 
     /// The host gave up the texture at `slot`, which is never drawn into
-    /// again. Call it with the backend's context current.
+    /// again.
     pub fn discard(&self, slot: usize) {
         self.delete_fence(slot);
     }
 
     /// Draws into `textures` from now on, which must be as many, with depth
-    /// textures when the ring has them. Call it with the backend's context
-    /// current.
+    /// textures when the ring has them.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
     /// another number of textures, and with
@@ -186,7 +184,7 @@ impl BorrowedTarget {
         }
         // A frame begun on the old ring draws into the new one.
         self.image.release(&self.backend);
-        self.depth_stencil.borrow_mut().take();
+        self.delete_depth_stencil();
         *self.textures.borrow_mut() = textures;
         Ok(())
     }
@@ -197,7 +195,6 @@ impl BorrowedTarget {
     /// imported into the backend's `GlGpu` or the target's own, and whether
     /// the depth is imported.
     fn import(&self) -> Result<(FrameImage, bool), Error> {
-        let context = self.backend.gl_context().ok_or_else(|| Error::native("the OpenGL backend has no context"))?;
         let textures = self.textures.borrow();
         let slot = self.selected.get();
         let size = textures.size;
@@ -209,16 +206,16 @@ impl BorrowedTarget {
         };
         let color = host_texture(*textures.textures.get(slot).ok_or_else(|| Error::invalid_argument("no such slot"))?)?;
         let host_depth = textures.depth_textures.get(slot).map(|&depth| host_texture(depth)).transpose()?;
-        let mut own_depth = self.depth_stencil.borrow_mut();
-        if host_depth.is_none() && own_depth.as_ref().is_none_or(|depth| depth.size() != size) {
-            let depth = Attachment::new(&*context, "borrowed ring depth and stencil", size, DEPTH_STENCIL, false);
-            *own_depth = Some(depth.map_err(|error| Error::native(error.to_string()))?);
+        if host_depth.is_none() && self.depth_stencil.get().is_none_or(|(_, own_size)| own_size != size) {
+            self.delete_depth_stencil();
+            let depth = self.backend.gpu().create_texture(&desc("borrowed ring depth and stencil", DEPTH_STENCIL));
+            self.depth_stencil.set(Some((depth.map_err(|error| Error::native(error.to_string()))?, size)));
         }
-        let mut gpu = context.gl_gpu_mut();
+        let mut gpu = self.backend.gpu();
         let color = gpu.import_texture(color, &desc("borrowed texture", COLOR));
-        let (depth_stencil, imported) = match (host_depth, own_depth.as_ref()) {
+        let (depth_stencil, imported) = match (host_depth, self.depth_stencil.get()) {
             (Some(depth), _) => (gpu.import_texture(depth, &desc("borrowed depth", DEPTH_STENCIL)), true),
-            (None, Some(depth)) => (depth.id(), false),
+            (None, Some((depth, _))) => (depth, false),
             (None, None) => return Err(Error::native("the ring has no depth and stencil texture")),
         };
         let targets = TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) };
@@ -244,39 +241,30 @@ impl FrameTarget for BorrowedTarget {
         }
         let slot = self.selected.get();
         self.delete_fence(slot);
-        let gl = self.backend.gl();
         // Mesa marks a depth texture that a framebuffer rendered into as
         // compressed, for another context that samples it to decompress it
         // first, only once the context applies a change of framebuffer,
         // which it does at its next draw or clear. Without that, radeonsi
         // hands the host's context the compressed data of its depth texture.
-        if !self.textures.borrow().depth_textures.is_empty()
-            && let Some(context) = self.backend.gl_context()
-        {
-            context.state().bind_framebuffer(gl, None);
-            // SAFETY: the context is current (the renderer's backend scope),
-            // on its own surface, whose color nothing reads.
-            unsafe { gl.clear(glow::COLOR_BUFFER_BIT) };
+        if !self.textures.borrow().depth_textures.is_empty() {
+            let context = self.backend.context();
+            let _current = context.enter();
+            context.state().bind_framebuffer(context.gl(), None);
+            // SAFETY: the context is current, on its own surface, whose
+            // color nothing reads.
+            unsafe { context.gl().clear(glow::COLOR_BUFFER_BIT) };
         }
+        let mut gpu = self.backend.gpu();
         let sync = if self.producer == SyncKind::OpenGlFence {
-            // SAFETY: the context is current (the renderer's backend
-            // scope).
-            let fence = unsafe { gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0) };
-            match fence {
-                Ok(fence) => {
-                    // SAFETY: as above; a flush makes the fence reach the
-                    // GPU, so that another context's wait ends.
-                    unsafe { gl.flush() };
-                    if let Some(entry) = self.fences.borrow_mut().get_mut(slot) {
-                        *entry = Some(fence);
-                    }
-                    GpuSync { kind: SyncKind::OpenGlFence, handle: fence.0 as usize as u64, value: 0 }
-                }
-                Err(_) => return Handoff::Dropped,
+            let Ok(fence) = gpu.fence_sync() else { return Handoff::Dropped };
+            if let Some(entry) = self.fences.borrow_mut().get_mut(slot) {
+                *entry = Some(fence);
             }
+            GpuSync { kind: SyncKind::OpenGlFence, handle: fence.0 as usize as u64, value: 0 }
         } else {
-            // SAFETY: as above.
-            unsafe { gl.finish() };
+            if let Err(error) = gpu.finish() {
+                Log::error(Event::GraphicsBackend, format!("Finishing a borrowed frame failed: {error}"));
+            }
             GpuSync::of(SyncKind::CpuComplete)
         };
         Handoff::GivenBack { slot, sync }
@@ -285,12 +273,11 @@ impl FrameTarget for BorrowedTarget {
 
 impl Drop for BorrowedTarget {
     fn drop(&mut self) {
-        let _scope = mln_gfx::BackendScope::new(&*self.backend, mln_gfx::ScopeType::Explicit);
         for slot in 0..self.depth() {
             self.delete_fence(slot);
         }
         self.image.release(&self.backend);
-        self.depth_stencil.borrow_mut().take();
+        self.delete_depth_stencil();
     }
 }
 
@@ -343,6 +330,7 @@ impl FrameTarget for HostSurfaceTarget {
         if !self.image.release(&self.backend) {
             return Handoff::Dropped;
         }
+        let _current = self.backend.context().enter();
         if self.swap.swap() { Handoff::Presented } else { Handoff::Dropped }
     }
 }

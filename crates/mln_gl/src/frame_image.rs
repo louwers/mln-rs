@@ -37,17 +37,15 @@ impl FrameImports {
     }
 
     /// Forgets the frame's imported textures, at its end. Returns whether
-    /// there were any. Call it with the context current.
+    /// there were any.
     pub(crate) fn release(&self, backend: &RendererBackend) -> bool {
         let Some((image, depth_imported)) = self.0.take() else {
             return false;
         };
-        if let Some(context) = backend.gl_context() {
-            let mut gpu = context.gl_gpu_mut();
-            let depth_stencil = image.depth_stencil.filter(|_| depth_imported);
-            for texture in [Some(image.color), depth_stencil].into_iter().flatten() {
-                gpu.destroy_texture(texture);
-            }
+        let mut gpu = backend.gpu();
+        let depth_stencil = image.depth_stencil.filter(|_| depth_imported);
+        for texture in [Some(image.color), depth_stencil].into_iter().flatten() {
+            gpu.destroy_texture(texture);
         }
         true
     }
@@ -59,8 +57,7 @@ pub(crate) fn default_framebuffer(backend: &RendererBackend, size: Size) -> Opti
     if size.width == 0 || size.height == 0 {
         return None;
     }
-    let context = backend.gl_context()?;
-    let imported = context.gl_gpu_mut().import_framebuffer(None, size, Some(COLOR), Some(DEPTH_STENCIL));
+    let imported = backend.gpu().import_framebuffer(None, size, Some(COLOR), Some(DEPTH_STENCIL));
     let image = FrameImage {
         size,
         color: imported.color?,

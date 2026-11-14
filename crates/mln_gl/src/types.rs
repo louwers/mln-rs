@@ -1,5 +1,5 @@
-// C++ names them by `GLuint`; glow by a type per kind of object, an integer
-// natively and a key to the browser's object on WebGL2.
+// glow names GL objects by a type per kind of object: an integer natively,
+// and a key to the browser's object on WebGL2.
 
 use glow::HasContext;
 
@@ -13,4 +13,5 @@ pub(crate) type TextureID = <Gl as HasContext>::Texture;
 pub(crate) type SamplerID = <Gl as HasContext>::Sampler;
 pub(crate) type VertexArrayID = <Gl as HasContext>::VertexArray;
 pub(crate) type FramebufferID = <Gl as HasContext>::Framebuffer;
+#[cfg(not(target_family = "wasm"))]
 pub(crate) type FenceID = <Gl as HasContext>::Fence;
