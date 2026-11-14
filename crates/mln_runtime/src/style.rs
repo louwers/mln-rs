@@ -497,21 +497,8 @@ fn check_clusterable(geojson: &GeoJson) -> Result<(), Error> {
         None => Ok(()),
         Some(index) => Err(Error::invalid_argument(format!(
             "clustered GeoJSON data requires point geometry on every feature; feature {index} has {} geometry",
-            geometry_name(features[index].geometry.as_ref().map(|g| &g.value))
+            features[index].geometry.as_ref().map_or("no", |g| g.value.type_name())
         ))),
-    }
-}
-
-fn geometry_name(geometry: Option<&GeometryValue>) -> &'static str {
-    match geometry {
-        None => "empty",
-        Some(GeometryValue::Point { .. }) => "point",
-        Some(GeometryValue::MultiPoint { .. }) => "multi-point",
-        Some(GeometryValue::LineString { .. }) => "line string",
-        Some(GeometryValue::MultiLineString { .. }) => "multi-line string",
-        Some(GeometryValue::Polygon { .. }) => "polygon",
-        Some(GeometryValue::MultiPolygon { .. }) => "multi-polygon",
-        Some(GeometryValue::GeometryCollection { .. }) => "geometry collection",
     }
 }
 
