@@ -19,7 +19,8 @@ use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_web_host::{pump, tile_workers};
 
-use crate::render::SessionId;
+use crate::render::{SessionId, SessionQueue};
+use crate::runtime::{CoreQueue, RuntimeCore};
 
 /// Makes the instance ready for runtimes: the cooperative scheduler, which
 /// the pump runs.
@@ -28,17 +29,20 @@ pub(crate) fn install() {
     scheduler.set_waker(Some(pump::waker()));
 }
 
-/// Runs `run_loop` in the pump's slices until it stops. Each slice calls
-/// `around` with the loop current and a function that runs it once, so
-/// that `around` can put what the loop's tasks need in place.
-pub(crate) fn drive(run_loop: RunLoop, mut around: impl FnMut(&dyn Fn()) + 'static) {
+/// Runs a runtime's `queue` with its `core` in the pump's slices until the
+/// queue stops, and with it this thread's loop, which the runtime's maps
+/// run their own work on.
+pub(crate) fn drive(queue: CoreQueue, mut core: Option<RuntimeCore>) {
+    let run_loop = RunLoop::get();
     run_loop.set_waker(Some(pump::waker()));
+    queue.set_waker(Some(pump::waker()));
     pump::add(move || {
-        let _current = run_loop.enter();
-        around(&|| {
-            run_loop.run_once();
-        });
-        !run_loop.is_stopped()
+        run_loop.run_once();
+        queue.run_once(&mut core);
+        if queue.is_stopped() {
+            drop(core.take());
+        }
+        !queue.is_stopped()
     })
     .detach();
 }
@@ -55,15 +59,17 @@ thread_local! {
     static SESSIONS: RefCell<HashMap<SessionId, Rc<SessionLoop>>> = RefCell::new(HashMap::default());
 }
 
-/// Runs a core worker session's loop in the pump's slices until it stops,
-/// with `run` once per slice, and lets [`run_session_now`] run it too.
-pub(crate) fn drive_session(id: SessionId, run_loop: RunLoop, run: impl Fn() + 'static) {
+/// Runs a core worker session in the pump's slices until its `queue`
+/// stops, with `run` once per slice, and lets [`run_session_now`] run it too.
+/// `run_loop` is the session's renderer's.
+pub(crate) fn drive_session(id: SessionId, run_loop: &RunLoop, queue: SessionQueue, run: impl Fn() + 'static) {
     run_loop.set_waker(Some(pump::waker()));
+    queue.set_waker(Some(pump::waker()));
     let session = Rc::new(SessionLoop { run: Box::new(run), running: Cell::new(false) });
     SESSIONS.with(|sessions| sessions.borrow_mut().insert(id, Rc::clone(&session)));
     pump::add(move || {
         run_session(&session);
-        let stopped = run_loop.is_stopped();
+        let stopped = queue.is_stopped();
         if stopped {
             SESSIONS.with(|sessions| sessions.borrow_mut().remove(&id));
         }
@@ -93,7 +99,7 @@ pub(crate) fn run_session_now(id: SessionId) {
 /// current loop in the instance's tile worker Web Workers, or `None` where
 /// none start, which leaves the workers on the cooperative scheduler, in the
 /// pump's slices.
-pub(crate) fn tile_worker_transport() -> Option<Rc<SerializingTransport>> {
+pub(crate) fn tile_worker_transport(scheduler: &mln_actor::SchedulerPtr) -> Option<Rc<SerializingTransport>> {
     let ports = match tile_workers::connect() {
         Ok(ports) => ports,
         Err(error) => {
@@ -108,5 +114,5 @@ pub(crate) fn tile_worker_transport() -> Option<Rc<SerializingTransport>> {
         let message = message.as_string().unwrap_or_else(|| format!("{message:?}"));
         Log::error(Event::General, format!("Tile worker {instance} panicked: {message}"));
     };
-    Some(tile_workers::transport(ports, |_| {}, fatal))
+    Some(tile_workers::transport(scheduler, ports, |_| {}, fatal))
 }

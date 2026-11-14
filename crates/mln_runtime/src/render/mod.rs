@@ -24,4 +24,4 @@ pub use target::{
     ExportedImage, ExportedRing, FrameDepth, FrameTexture, FrameTextureKind, GlApi, GpuSync, NativeTexture,
     RenderTarget, Surface, SurfaceType, SyncKind, SyncKinds, Wake,
 };
-pub(crate) use worker::{Worker, post as worker_post};
+pub(crate) use worker::{SessionQueue, Worker, post as worker_post};

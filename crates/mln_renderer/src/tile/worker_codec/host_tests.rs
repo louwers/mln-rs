@@ -80,7 +80,7 @@ impl Test {
         let run_loop = RunLoop::new();
         let corrupt = Rc::new(Cell::new(None));
         let next = Rc::clone(&corrupt);
-        let transport = SerializingTransport::new(move |replies| {
+        let transport = SerializingTransport::new(&scheduler::get_current(), move |replies| {
             Box::new(Corrupting { instances: ThreadWorkerInstances::new(1, &replies), next })
         });
         let transform_state = TransformState::default();
@@ -89,6 +89,7 @@ impl Test {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: &transform_state,
             file_source: None,
+            scheduler: scheduler::get_current(),
             mode,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,

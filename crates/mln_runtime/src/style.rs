@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use geojson::{GeoJson, GeometryValue};
-use mln_actor::scheduler;
 use mln_style::image::Impl as StyleImage;
 use mln_style::source::{Source, same_source, set_volatile};
 use mln_style::sources::custom_geometry_source::{self, TileOptions};
@@ -28,7 +27,7 @@ use mln_util::tileset::{RasterEncoding, Scheme, VectorEncoding};
 
 use crate::completion::{Completion, Resolver};
 use crate::map::{Applied, Map, MapEntry, MapId, apply_command, flush, missing_map, style_not_loaded};
-use crate::runtime::{Outbox, RuntimeCore, post};
+use crate::runtime::{Background, Outbox, RuntimeCore, post};
 
 /// The kind of a style source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -614,13 +613,13 @@ impl Map {
             if !core.maps.contains_key(&id) {
                 return outbox.resolve(resolver, Err(missing_map()));
             }
-            let run_loop = core.run_loop.clone();
+            let background = core.background();
             apply_command(
                 core,
                 id,
                 sequence,
                 outbox,
-                move |entry, outbox| match queue_geojson(entry, id, &source_id, &json, resolver, run_loop, outbox) {
+                move |entry, outbox| match queue_geojson(entry, id, &source_id, &json, resolver, background, outbox) {
                     Ok(installed) => installed,
                     Err((error, resolver)) => {
                         outbox.resolve(resolver, Err(error));
@@ -1039,7 +1038,7 @@ fn queue_geojson(
     source_id: &str,
     json: &str,
     resolver: Resolver<Applied>,
-    run_loop: mln_actor::RunLoopHandle,
+    background: Background,
     outbox: &mut Outbox,
 ) -> Result<Option<Resolver<Applied>>, (Error, Resolver<Applied>)> {
     let found = (|| {
@@ -1072,7 +1071,7 @@ fn queue_geojson(
     });
     if update.building.is_none() {
         update.source = source;
-        start_geojson(update, map_id, source_id.to_owned(), geojson, resolver, run_loop);
+        start_geojson(update, map_id, source_id.to_owned(), geojson, resolver, background);
     } else if let Some((_, replaced)) = update.waiting.replace((geojson, resolver)) {
         outbox.resolve(replaced, Err(Error::cancelled("newer data for the source replaced it")));
     }
@@ -1087,7 +1086,7 @@ fn start_geojson(
     source_id: String,
     geojson: GeoJson,
     resolver: Resolver<Applied>,
-    run_loop: mln_actor::RunLoopHandle,
+    background: Background,
 ) {
     // Numbers each build, so a build that something replaced finds no
     // completion of its own.
@@ -1096,10 +1095,10 @@ fn start_geojson(
     update.building = Some((build, resolver));
     let builder = update.source.data_builder();
     let generation = update.source.data_generation();
-    let next = run_loop.clone();
-    scheduler::get_background().schedule(Box::new(move || {
+    let next = background.clone();
+    background.pool.schedule(Box::new(move || {
         let data = builder.build(geojson);
-        post(&run_loop, move |core, outbox| {
+        post(&background.queue, move |core, outbox| {
             install_geojson(core, map_id, &source_id, (build, generation), data, next, outbox);
         });
     }));
@@ -1113,7 +1112,7 @@ fn install_geojson(
     source_id: &str,
     (build, generation): (u64, u64),
     data: Result<Arc<dyn GeoJSONData>, Error>,
-    run_loop: mln_actor::RunLoopHandle,
+    background: Background,
     outbox: &mut Outbox,
 ) {
     flush(core, map_id, outbox);
@@ -1133,7 +1132,7 @@ fn install_geojson(
     };
     match update.waiting.take() {
         Some((geojson, next)) if current => {
-            start_geojson(update, map_id, source_id.to_owned(), geojson, next, run_loop);
+            start_geojson(update, map_id, source_id.to_owned(), geojson, next, background);
         }
         Some((_, next)) => outbox.resolve(next, Err(Error::cancelled("the source left the style"))),
         None => {

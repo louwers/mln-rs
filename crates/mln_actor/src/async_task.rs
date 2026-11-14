@@ -12,7 +12,12 @@ pub struct AsyncTask {
 impl AsyncTask {
     /// Creates a task that runs `task` on the current thread's `RunLoop`.
     pub fn new(task: impl FnMut() + 'static) -> Self {
-        let run_loop = RunLoop::get();
+        Self::on(&RunLoop::get(), task)
+    }
+
+    /// Creates a task that runs `task` on `run_loop`, which runs on this
+    /// thread.
+    pub fn on(run_loop: &RunLoop, task: impl FnMut() + 'static) -> Self {
         let handle = Rc::new(AsyncHandle {
             pending: Arc::new(AtomicBool::new(false)),
             closed: Cell::new(false),

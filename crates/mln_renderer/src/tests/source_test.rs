@@ -67,6 +67,7 @@ fn tile_parameters<'a>(
         debug_options: MapDebugOptions::NO_DEBUG,
         transform_state,
         file_source,
+        scheduler: scheduler::get_current(),
         mode: map_mode,
         prefetch_zoom_delta: 0,
         tile_lod_min_radius: 3.0,

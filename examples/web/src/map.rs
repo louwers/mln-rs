@@ -558,10 +558,12 @@ impl WebMap {
             local_ideograph_font_family,
             Arc::default(),
             Arc::new(ShaperModuleEngine),
+            &run_loop,
         );
         let received = Rc::new(Cell::new(0));
         let count = Rc::clone(&received);
         let transport = tile_workers::transport(
+            &run_loop.scheduler(),
             ports.iter().map(JsCast::unchecked_into).collect(),
             move |_| count.set(count.get() + 1),
             move |instance, message| {

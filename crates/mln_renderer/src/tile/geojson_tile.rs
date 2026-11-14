@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_actor::SchedulerPtr;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::sources::geojson_source::{GeoJSONData, TileFeatures};
@@ -27,6 +28,8 @@ fn data_address(data: &Arc<dyn GeoJSONData>) -> *const () {
 pub(crate) struct GeoJSONTile {
     tile: GeometryTile,
     data: Rc<RefCell<Option<Arc<dyn GeoJSONData>>>>,
+    /// The renderer's loop, where the data's features arrive.
+    scheduler: SchedulerPtr,
 }
 
 impl GeoJSONTile {
@@ -40,6 +43,7 @@ impl GeoJSONTile {
         let tile = GeoJSONTile {
             tile: GeometryTile::new(overscaled_tile_id, source_id, parameters, observer),
             data: Rc::new(RefCell::new(None)),
+            scheduler: Arc::clone(&parameters.scheduler),
         };
         tile.update_data(data, false /*needsRelayout*/, parameters.is_update_synchronous);
         tile
@@ -68,6 +72,7 @@ impl GeoJSONTile {
                 }
             }),
             run_synchronously,
+            &self.scheduler,
         );
     }
 

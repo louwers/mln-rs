@@ -26,8 +26,13 @@ impl Drop for Recorder {
 #[test]
 fn drops_on_a_worker_and_the_orchestrator_waits_for_it() {
     let _run_loop = RunLoop::new();
-    let orchestrator =
-        RenderOrchestrator::new(true, None, Arc::default(), crate::text::font_face_engine::default_engine());
+    let orchestrator = RenderOrchestrator::new(
+        true,
+        None,
+        Arc::default(),
+        crate::text::font_face_engine::default_engine(),
+        &RunLoop::get(),
+    );
     let dropped_on = Arc::new(Mutex::new(None));
     let done = Arc::new(AtomicBool::new(false));
     orchestrator.drop_on_workers(Recorder { dropped_on: Arc::clone(&dropped_on), done: Arc::clone(&done) });

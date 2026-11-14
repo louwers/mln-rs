@@ -1,16 +1,16 @@
 //! A runtime: the thread that its maps live on, and the file sources, cache
 //! and offline regions that they share.
 
-use std::cell::{Cell, OnceCell, RefCell};
+use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-#[cfg(not(target_family = "wasm"))]
-use std::sync::mpsc;
 use std::thread::ThreadId;
 
-use mln_actor::{AsyncTask, RunLoop, RunLoopHandle};
+#[cfg(not(target_family = "wasm"))]
+use mln_actor::RunLoop;
+use mln_actor::{AsyncTask, SchedulerPtr, scheduler};
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 #[cfg(not(target_family = "wasm"))]
 use mln_storage::DatabaseFileSource;
@@ -27,6 +27,7 @@ use crate::completion::{Completion, Resolver};
 use crate::event::{EventHandler, RuntimeEvent};
 use crate::map::{Applied, Map, MapEntry, MapId, MapOptions, MapShared, Published};
 use crate::offline::Offline;
+use crate::queue::Queue;
 use crate::resources::{CacheDatabaseOperation, ProviderFileSource, ResourceHooks, ResourceProvider};
 
 /// Where a runtime keeps its assets and its cache.
@@ -82,7 +83,7 @@ struct Lifecycle {
 }
 
 pub(crate) struct RuntimeShared {
-    run_loop: RunLoopHandle,
+    queue: CoreQueue,
     /// The tasks that [`post`](Self::post) sent and the thread hasn't run.
     queued: Arc<AtomicUsize>,
     thread: ThreadId,
@@ -106,7 +107,7 @@ impl RuntimeShared {
     /// in the burst of the tasks queued with it.
     pub(crate) fn post(&self, task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static) {
         self.queued.fetch_add(1, Ordering::SeqCst);
-        self.run_loop.invoke(move || run(task, true));
+        self.queue.post(move |core| run(core, task, true));
     }
 
     /// Runs `task` with `value` on the runtime's thread, after everything
@@ -167,16 +168,15 @@ impl RuntimeShared {
 
     /// Tears the runtime down on its thread, after the commands sent before.
     fn shut_down(&self, done: Option<Resolver<()>>) {
-        let run_loop = self.run_loop.clone();
-        self.run_loop.invoke(move || {
-            let core = CORE.with(|core| core.borrow_mut().take());
+        let queue = self.queue.clone();
+        self.queue.post(move |core| {
             // Dropping the database waits for its work, whose results queue
             // up behind this task, so they resolve before `done`.
-            drop(core);
+            drop(core.take());
             if let Some(done) = done {
-                run_loop.invoke(move || done.resolve(Ok(())));
+                queue.post(move |_| done.resolve(Ok(())));
             }
-            run_loop.stop();
+            queue.stop();
         });
     }
 }
@@ -210,47 +210,51 @@ fn released() -> Error {
     Error::invalid_state("the runtime was released")
 }
 
-thread_local! {
-    /// The state of the runtime whose thread this is.
-    static CORE: RefCell<Option<RuntimeCore>> = const { RefCell::new(None) };
-    /// The buffer of the outbox that the next task takes, so that each task
-    /// reuses the last one's.
-    static DELIVERIES: Cell<Vec<Box<dyn FnOnce()>>> = const { Cell::new(Vec::new()) };
+/// The work of a runtime's thread, which owns the runtime's state: `None`
+/// once the runtime shut down.
+pub(crate) type CoreQueue = Queue<Option<RuntimeCore>>;
+
+/// Where a runtime's background work runs, and where its results come back.
+#[derive(Clone)]
+pub(crate) struct Background {
+    pub(crate) pool: SchedulerPtr,
+    pub(crate) queue: CoreQueue,
 }
 
-/// Posts `task` to the runtime thread whose loop is `run_loop`.
-pub(crate) fn post(run_loop: &RunLoopHandle, task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static) {
-    run_loop.invoke(move || run(task, false));
+/// Posts `task` to the runtime thread that runs `queue`.
+pub(crate) fn post(queue: &CoreQueue, task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static) {
+    queue.post(move |core| run(core, task, false));
 }
 
-/// An `AsyncTask` on the runtime's loop that runs `task` as [`post`] would,
-/// after the loop has run the tasks queued on it. Sends before it runs make
-/// one run. It must be made on the runtime's thread.
-pub(crate) fn async_task(task: impl Fn(&mut RuntimeCore, &mut Outbox) + 'static) -> AsyncTask {
-    AsyncTask::new(move || run(&task, false))
+/// An `AsyncTask` on the runtime's loop that posts `task` to `queue`, which
+/// runs it once the loop has run the tasks queued on it. Sends before it
+/// runs make one run. It must be made on the runtime's thread.
+pub(crate) fn async_task(
+    queue: &CoreQueue,
+    task: impl Fn(&mut RuntimeCore, &mut Outbox) + Send + Sync + 'static,
+) -> AsyncTask {
+    let (queue, task) = (queue.clone(), Arc::new(task));
+    AsyncTask::new(move || {
+        let task = Arc::clone(&task);
+        queue.post(move |core| run(core, |core, outbox| task(core, outbox), false));
+    })
 }
 
 /// Runs `task` on the runtime's state, then delivers what it sends to the
-/// host, with the state unborrowed. A task that comes after the runtime shut
-/// down drops, which cancels its completions. A task that
-/// [`RuntimeShared::post`] sent runs in its burst.
-fn run(task: impl FnOnce(&mut RuntimeCore, &mut Outbox), in_burst: bool) {
-    let mut outbox = Outbox { deliveries: DELIVERIES.take() };
-    let unrun = CORE.with(|core| match core.borrow_mut().as_mut() {
-        Some(core) => {
-            if in_burst {
-                core.begin_burst_task();
-            }
-            task(core, &mut outbox);
-            if in_burst {
-                core.end_burst_task(&mut outbox);
-            }
-            None
-        }
-        None => Some(task),
-    });
-    drop(unrun);
-    DELIVERIES.set(outbox.deliver());
+/// host. A task that comes after the runtime shut down drops, which cancels
+/// its completions. A task that [`RuntimeShared::post`] sent runs in its
+/// burst.
+fn run(core: &mut Option<RuntimeCore>, task: impl FnOnce(&mut RuntimeCore, &mut Outbox), in_burst: bool) {
+    let Some(core) = core.as_mut() else { return };
+    let mut outbox = Outbox { deliveries: std::mem::take(&mut core.spare_deliveries) };
+    if in_burst {
+        core.begin_burst_task();
+    }
+    task(core, &mut outbox);
+    if in_burst {
+        core.end_burst_task(&mut outbox);
+    }
+    core.spare_deliveries = outbox.deliver();
 }
 
 /// What a task sends to the host: event batches and results, in order. They
@@ -300,17 +304,25 @@ pub(crate) struct RuntimeCore {
     /// The library's own network loading, behind the host's provider.
     online: OnceCell<Arc<OnlineFileSource>>,
     network: OnceCell<Arc<dyn FileSource>>,
-    pub(crate) run_loop: RunLoopHandle,
+    /// The runtime's thread's work.
+    pub(crate) queue: CoreQueue,
+    /// The thread pool that the runtime's background work runs on, taken at
+    /// its first use: the process's, which a runtime shares with the others
+    /// and, in the browser, the instance's cooperative scheduler.
+    pool: OnceCell<SchedulerPtr>,
     /// [`RuntimeShared::queued`].
     queued: Arc<AtomicUsize>,
     /// The tasks of the burst in progress that haven't finished.
     burst_left: usize,
     /// Whether the maps hold their updates back for the burst.
     holding: bool,
+    /// The buffer of the outbox that the next task takes, so that each task
+    /// reuses the last one's.
+    spare_deliveries: Vec<Box<dyn FnOnce()>>,
 }
 
 impl RuntimeCore {
-    fn new(resource_options: ResourceOptions, run_loop: RunLoopHandle, queued: Arc<AtomicUsize>) -> Self {
+    fn new(resource_options: ResourceOptions, queue: CoreQueue, queued: Arc<AtomicUsize>) -> Self {
         RuntimeCore {
             maps: BTreeMap::new(),
             event_handler: None,
@@ -321,10 +333,12 @@ impl RuntimeCore {
             database: OnceCell::new(),
             online: OnceCell::new(),
             network: OnceCell::new(),
-            run_loop,
+            queue,
+            pool: OnceCell::new(),
             queued,
             burst_left: 0,
             holding: false,
+            spare_deliveries: Vec::new(),
         }
     }
 
@@ -364,8 +378,10 @@ impl RuntimeCore {
     /// The loader that the runtime's maps share.
     pub(crate) fn loader(&self) -> &Arc<dyn FileSource> {
         self.loader.get_or_init(|| {
-            let builder =
-                Loader::builder().asset_path(&self.resource_options.asset_path).network(Arc::clone(self.network()));
+            let builder = Loader::builder()
+                .asset_path(&self.resource_options.asset_path)
+                .network(Arc::clone(self.network()))
+                .pool(Arc::clone(self.pool()));
             #[cfg(not(target_family = "wasm"))]
             let builder = builder.database(Arc::clone(self.database()));
             Arc::new(builder.build())
@@ -382,6 +398,15 @@ impl RuntimeCore {
     fn network(&self) -> &Arc<dyn FileSource> {
         self.network
             .get_or_init(|| Arc::new(ProviderFileSource::new(Arc::clone(self.online()), Arc::clone(&self.hooks))))
+    }
+
+    /// Where the runtime's background work runs, and its results come back.
+    pub(crate) fn background(&self) -> Background {
+        Background { pool: Arc::clone(self.pool()), queue: self.queue.clone() }
+    }
+
+    fn pool(&self) -> &SchedulerPtr {
+        self.pool.get_or_init(scheduler::get_background)
     }
 
     /// Sends `events` to the event handler.
@@ -409,12 +434,12 @@ impl RuntimeCore {
 /// for the database's work, still resolves rather than being cancelled.
 #[cfg(not(target_family = "wasm"))]
 pub(crate) fn reply_on<T: Send + 'static, E: Into<Error>>(
-    run_loop: RunLoopHandle,
+    queue: CoreQueue,
     resolver: Resolver<T>,
 ) -> impl FnOnce(Result<T, E>) + Send + 'static {
     move |result| {
         let result = result.map_err(Into::into);
-        run_loop.invoke(move || resolver.resolve(result));
+        queue.post(move |_| resolver.resolve(result));
     }
 }
 
@@ -464,10 +489,11 @@ impl Runtime {
     pub fn new(options: &RuntimeOptions) -> Result<Runtime, Error> {
         let resource_options = resource_options(options)?;
         let queued = Arc::new(AtomicUsize::new(0));
-        let (run_loop, thread, thread_end) = Self::start(resource_options, Arc::clone(&queued))?;
+        let queue = CoreQueue::default();
+        let (thread, thread_end) = Self::start(resource_options, queue.clone(), Arc::clone(&queued))?;
         Ok(Runtime {
             shared: Arc::new(RuntimeShared {
-                run_loop,
+                queue,
                 queued,
                 thread,
                 lifecycle: Mutex::new(Lifecycle { released: false, live_maps: 0, shut_down: false }),
@@ -479,54 +505,39 @@ impl Runtime {
         })
     }
 
-    /// Builds the runtime's state on a thread of its own, which runs its loop
-    /// until the runtime shuts down.
+    /// Builds the runtime's state on a thread of its own, which owns it and
+    /// runs `queue` until the runtime shuts down.
     #[cfg(not(target_family = "wasm"))]
     fn start(
         resource_options: ResourceOptions,
+        queue: CoreQueue,
         queued: Arc<AtomicUsize>,
-    ) -> Result<(RunLoopHandle, ThreadId, Option<Joined>), Error> {
-        let (started, start) = mpsc::channel();
-        let core_queued = queued;
+    ) -> Result<(ThreadId, Option<Joined>), Error> {
         let thread = mln_util::thread::spawn("Runtime", move || {
             let run_loop = RunLoop::new();
-            let core = RuntimeCore::new(resource_options, run_loop.handle(), core_queued);
-            CORE.with(|cell| *cell.borrow_mut() = Some(core));
-            let _ = started.send(run_loop.handle());
-            run_loop.run();
-            let core = CORE.with(|cell| cell.borrow_mut().take());
+            let mut core = Some(RuntimeCore::new(resource_options, queue.clone(), queued));
+            queue.run_until_stopped(&run_loop, &mut core);
             drop(core);
         })
         .map_err(|error| Error::native(format!("can't start the runtime's thread: {error}")))?;
         let thread_id = thread.thread().id();
         // The thread ends by itself once the runtime shuts down.
-        let thread = Joined::new(thread);
-        let run_loop = start.recv().map_err(|_| Error::native("the runtime's thread stopped as it started"))?;
-        Ok((run_loop, thread_id, Some(thread)))
+        Ok((thread_id, Some(Joined::new(thread))))
     }
 
-    /// Builds the runtime's state on this thread, under a loop of its own
-    /// that the instance's pump runs until the runtime shuts down.
+    /// Builds the runtime's state on this thread, where the instance's pump
+    /// runs `queue` with it until the runtime shuts down.
     #[cfg(target_family = "wasm")]
+    #[expect(clippy::unnecessary_wraps, reason = "the threads of other builds can fail to start")]
     fn start(
         resource_options: ResourceOptions,
+        queue: CoreQueue,
         queued: Arc<AtomicUsize>,
-    ) -> Result<(RunLoopHandle, ThreadId, Option<Joined>), Error> {
+    ) -> Result<(ThreadId, Option<Joined>), Error> {
         crate::web::install();
-        let handle = RunLoopHandle::new();
-        let run_loop = RunLoop::adopt(&handle).ok_or_else(|| Error::native("the runtime's loop runs already"))?;
-        let core = {
-            let _current = run_loop.enter();
-            RuntimeCore::new(resource_options, handle.clone(), queued)
-        };
-        let mut core = Some(core);
-        crate::web::drive(run_loop, move |run| {
-            // The core is the thread's while its loop runs.
-            CORE.with(|cell| std::mem::swap(&mut *cell.borrow_mut(), &mut core));
-            run();
-            CORE.with(|cell| std::mem::swap(&mut *cell.borrow_mut(), &mut core));
-        });
-        Ok((handle, std::thread::current().id(), None))
+        let core = RuntimeCore::new(resource_options, queue.clone(), queued);
+        crate::web::drive(queue, Some(core));
+        Ok((std::thread::current().id(), None))
     }
 
     /// Sends a command to the runtime's thread.
@@ -703,7 +714,7 @@ impl Runtime {
     pub fn run_cache_database_operation(&self, operation: CacheDatabaseOperation) -> Result<Completion<()>, Error> {
         self.command(move |core, _, resolver| {
             let database = core.database();
-            let reply = reply_on(core.run_loop.clone(), resolver);
+            let reply = reply_on(core.queue.clone(), resolver);
             match operation {
                 CacheDatabaseOperation::Clear => database.clear_ambient_cache(reply),
                 CacheDatabaseOperation::Invalidate => database.invalidate_ambient_cache(reply),
@@ -729,7 +740,7 @@ impl Runtime {
     #[cfg(not(target_family = "wasm"))]
     pub fn set_maximum_ambient_cache_size(&self, size: u64) -> Result<Completion<()>, Error> {
         self.command(move |core, _, resolver| {
-            core.database().set_maximum_ambient_cache_size(size, reply_on(core.run_loop.clone(), resolver));
+            core.database().set_maximum_ambient_cache_size(size, reply_on(core.queue.clone(), resolver));
         })
     }
 

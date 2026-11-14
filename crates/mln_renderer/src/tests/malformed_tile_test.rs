@@ -153,6 +153,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: transform.get_state(),
             file_source: Some(file_source),
+            scheduler: scheduler::get_current(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,

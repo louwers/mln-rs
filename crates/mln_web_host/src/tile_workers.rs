@@ -21,11 +21,12 @@ use wasm_bindgen::prelude::*;
 /// `on_reply(instance)` is called as each reply arrives, and
 /// `on_fatal(instance, message)` when an instance panicked.
 pub fn transport(
+    scheduler: &mln_actor::SchedulerPtr,
     ports: Vec<web_sys::MessagePort>,
     on_reply: impl Fn(usize) + 'static,
     on_fatal: impl Fn(usize, JsValue) + 'static,
 ) -> Rc<SerializingTransport> {
-    SerializingTransport::new(move |sink| {
+    SerializingTransport::new(scheduler, move |sink| {
         let reply = move |instance, reply| {
             on_reply(instance);
             sink.send(instance, reply);

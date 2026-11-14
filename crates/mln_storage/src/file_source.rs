@@ -1,4 +1,4 @@
-use mln_actor::scheduler;
+use mln_actor::{SchedulerPtr, scheduler};
 
 use crate::request::{Request, Responder};
 use crate::resource::Resource;
@@ -28,7 +28,18 @@ pub trait FileSourceExt: FileSource {
     /// Requests `resource`. `callback` receives the responses on this
     /// thread, which runs a `RunLoop`, until the request drops.
     fn request(&self, resource: &Resource, callback: impl FnMut(Response) + 'static) -> Request {
-        let (request, responder) = Request::new(&scheduler::get_current(), callback);
+        self.request_on(&scheduler::get_current(), resource, callback)
+    }
+
+    /// Requests `resource`. `callback` receives the responses in tasks of
+    /// `queue`, which must run on this thread, until the request drops.
+    fn request_on(
+        &self,
+        queue: &SchedulerPtr,
+        resource: &Resource,
+        callback: impl FnMut(Response) + 'static,
+    ) -> Request {
+        let (request, responder) = Request::new(queue, callback);
         self.load(resource, responder);
         request
     }

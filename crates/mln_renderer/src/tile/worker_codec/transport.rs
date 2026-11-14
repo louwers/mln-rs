@@ -104,17 +104,17 @@ enum RouteTile {
 
 impl SerializingTransport {
     /// A transport over the instances `instances` creates, with the sink
-    /// for their replies. The replies are handled on the calling thread
-    /// (its scheduler runs them), which must be the one that uses the
+    /// for their replies. The replies are handled in tasks of `scheduler`,
+    /// the renderer's loop, which runs on this thread, the one that uses the
     /// transport.
-    pub fn new(instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>) -> Rc<Self> {
+    pub fn new(scheduler: &SchedulerPtr, instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>) -> Rc<Self> {
         Rc::new_cyclic(|self_weak: &Weak<SerializingTransport>| {
             let transport = Arc::new(LocalObject::new(Weak::clone(self_weak)));
-            let instances = instances(ReplySink { scheduler: scheduler::get_current(), transport });
+            let instances = instances(ReplySink { scheduler: Arc::clone(scheduler), transport });
             let count = instances.count();
             assert!(count > 0, "a SerializingTransport needs a worker instance");
             // Its workers are called directly, so it schedules nothing.
-            let synchronous = TaggedScheduler::new(scheduler::get_current(), SimpleIdentity::new());
+            let synchronous = TaggedScheduler::new(Arc::clone(scheduler), SimpleIdentity::new());
             SerializingTransport {
                 self_weak: Weak::clone(self_weak),
                 instances,

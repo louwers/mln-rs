@@ -171,7 +171,23 @@ pub fn schedule_and_reply_value<R, TaskFn, ReplyFn>(
     TaskFn: FnOnce() -> R + Send + 'static,
     ReplyFn: FnOnce(R) + 'static,
 {
-    schedule_and_reply_later(scheduler, tag, move |respond: Respond<R>| respond(task()), reply);
+    schedule_and_reply_value_on(scheduler, tag, &get_current(), task, reply);
+}
+
+/// [`schedule_and_reply_value`], with `reply` on `reply_to`, which runs its
+/// tasks on the calling thread.
+pub fn schedule_and_reply_value_on<R, TaskFn, ReplyFn>(
+    scheduler: &dyn Scheduler,
+    tag: Option<SimpleIdentity>,
+    reply_to: &SchedulerPtr,
+    task: TaskFn,
+    reply: ReplyFn,
+) where
+    R: Send + 'static,
+    TaskFn: FnOnce() -> R + Send + 'static,
+    ReplyFn: FnOnce(R) + 'static,
+{
+    schedule_and_reply_later_on(scheduler, tag, reply_to, move |respond: Respond<R>| respond(task()), reply);
 }
 
 /// Where a task of `schedule_and_reply_later` hands its result.
@@ -192,7 +208,23 @@ pub(crate) fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
     TaskFn: FnOnce(Respond<R>) + Send + 'static,
     ReplyFn: FnOnce(R) + 'static,
 {
-    let reply_scheduler = Arc::downgrade(&get_current());
+    schedule_and_reply_later_on(scheduler, tag, &get_current(), task, reply);
+}
+
+/// `schedule_and_reply_later`, with `reply` on `reply_to`, which runs its
+/// tasks on the calling thread.
+fn schedule_and_reply_later_on<R, TaskFn, ReplyFn>(
+    scheduler: &dyn Scheduler,
+    tag: Option<SimpleIdentity>,
+    reply_to: &SchedulerPtr,
+    task: TaskFn,
+    reply: ReplyFn,
+) where
+    R: Send + 'static,
+    TaskFn: FnOnce(Respond<R>) + Send + 'static,
+    ReplyFn: FnOnce(R) + 'static,
+{
+    let reply_scheduler = Arc::downgrade(reply_to);
     let reply = LocalObject::new(RefCell::new(Some(reply)));
     schedule_under(
         scheduler,

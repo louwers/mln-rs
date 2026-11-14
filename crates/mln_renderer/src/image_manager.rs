@@ -9,6 +9,8 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
+use mln_actor::SchedulerPtr;
+#[cfg(test)]
 use mln_actor::scheduler;
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
@@ -102,13 +104,25 @@ pub(crate) struct ImageManager {
     self_weak: Weak<ImageManager>,
     state: RefCell<State>,
     observer: RefCell<Rc<dyn ImageManagerObserver>>,
+    /// The renderer's loop, where the `done` callback of a missing image
+    /// runs; without one, it runs inside the call.
+    scheduler: Option<SchedulerPtr>,
 }
 
 impl ImageManager {
+    /// A manager whose callbacks run on this thread's loop, if it has one.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn create() -> Rc<ImageManager> {
+        Self::on(scheduler::try_get_current())
+    }
+
+    /// A manager whose callbacks run on `scheduler`'s loop.
+    #[must_use]
+    pub(crate) fn on(scheduler: Option<SchedulerPtr>) -> Rc<ImageManager> {
         Rc::new_cyclic(|self_weak| ImageManager {
             self_weak: Weak::clone(self_weak),
+            scheduler,
             state: RefCell::new(State {
                 loaded: false,
                 requestors: VecMap::new(),
@@ -455,7 +469,10 @@ impl ImageManager {
                     }
                 }
             };
-            observer.on_style_image_missing(&missing_image, bind_once_local(remove_pending_requests));
+            observer.on_style_image_missing(
+                &missing_image,
+                bind_once_local(self.scheduler.as_ref(), remove_pending_requests),
+            );
         }
     }
 
@@ -493,7 +510,7 @@ impl ImageManager {
 
 /// Wraps `f` in a callable that runs it on the current thread's scheduler
 /// (the render thread's run loop).
-fn bind_once_local(f: impl FnOnce() + 'static) -> Box<dyn FnOnce()> {
+fn bind_once_local(scheduler: Option<&SchedulerPtr>, f: impl FnOnce() + 'static) -> Box<dyn FnOnce()> {
     type Slot = RefCell<Option<Box<dyn FnOnce()>>>;
     let slot: Rc<Slot> = Rc::new(RefCell::new(Some(Box::new(f))));
     let run = |slot: &Rc<Slot>| {
@@ -502,7 +519,7 @@ fn bind_once_local(f: impl FnOnce() + 'static) -> Box<dyn FnOnce()> {
             f();
         }
     };
-    match scheduler::try_get_current() {
+    match scheduler.map(Arc::clone) {
         Some(scheduler) => {
             let object = mln_actor::LocalObject::from_rc(slot);
             Box::new(move || {

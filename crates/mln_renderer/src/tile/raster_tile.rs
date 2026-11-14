@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::{ActorRef, Mailbox, scheduler};
+use mln_actor::{ActorRef, Mailbox};
 use mln_image::decoder;
 use mln_storage::Data;
 use mln_style::layer_properties::LayerProperties;
@@ -223,7 +223,7 @@ impl RasterTile {
             worker,
             mailbox: Arc::clone(&mailbox),
         });
-        mailbox.open(&scheduler::get_current(), Rc::<RasterTileInner>::clone(&inner));
+        mailbox.open(&parameters.scheduler, Rc::<RasterTileInner>::clone(&inner));
         let weak: std::rc::Weak<RasterTileInner> = Rc::downgrade(&inner);
         let loader = TileLoader::new(weak, VectorTileEncoding::Mvt, &id, parameters, tileset);
         RasterTile { inner, loader: Some(loader) }

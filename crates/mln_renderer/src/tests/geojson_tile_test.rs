@@ -45,6 +45,7 @@ impl GeoJSONTileTest {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: self.transform.get_state(),
             file_source: None,
+            scheduler: scheduler::get_current(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -73,7 +74,13 @@ struct FakeGeoJSONData {
 }
 
 impl GeoJSONData for FakeGeoJSONData {
-    fn get_tile(&self, _id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, _run_synchronously: bool) {
+    fn get_tile(
+        &self,
+        _id: &CanonicalTileID,
+        callback: Box<dyn FnOnce(TileFeatures)>,
+        _run_synchronously: bool,
+        _reply_to: &mln_actor::SchedulerPtr,
+    ) {
         callback(self.features.clone());
     }
 
@@ -224,7 +231,9 @@ fn evaluated_circle_layer_properties() -> Arc<dyn LayerProperties> {
 
 /// A transport whose workers are in `count` worker instances on threads.
 fn serializing_transport(count: usize) -> Rc<SerializingTransport> {
-    SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
+    SerializingTransport::new(&scheduler::get_current(), |replies| {
+        Box::new(ThreadWorkerInstances::new(count, &replies))
+    })
 }
 
 // Port-only: GeoJSON.SynchronousUpdate with a `SerializingTransport`: the

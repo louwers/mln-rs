@@ -245,6 +245,7 @@ fn geojson_source_feature_count(source: &GeoJSONSource) -> usize {
             &CanonicalTileID::new(0, 0, 0),
             Box::new(move |features| *count.borrow_mut() = features.len()),
             true,
+            &mln_actor::scheduler::get_current(),
         );
     }
     *count.borrow()

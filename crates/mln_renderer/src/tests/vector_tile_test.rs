@@ -55,6 +55,7 @@ impl VectorTileTest {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: self.transform.get_state(),
             file_source: Some(file_source),
+            scheduler: scheduler::get_current(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,

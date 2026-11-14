@@ -104,7 +104,13 @@ pub type Features = Vec<Feature<f64>>;
 pub trait GeoJSONData: Send + Sync {
     /// Gets the features of tile `id`. `callback` runs on the calling thread,
     /// either right away or later from its `RunLoop`.
-    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, run_synchronously: bool);
+    fn get_tile(
+        &self,
+        id: &CanonicalTileID,
+        callback: Box<dyn FnOnce(TileFeatures)>,
+        run_synchronously: bool,
+        reply_to: &SchedulerPtr,
+    );
 
     // SuperclusterData: data that isn't clustered has no clusters, and
     // gives empty results. A cluster ID the data doesn't have fails with

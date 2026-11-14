@@ -25,7 +25,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_actor::{ActorRef, LocalObject, Mailbox, TaggedScheduler, scheduler};
+use mln_actor::{ActorRef, LocalObject, Mailbox, TaggedScheduler};
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
@@ -600,7 +600,7 @@ impl GeometryTile {
             }
         });
         // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        mailbox.open(&scheduler::get_current(), Rc::<GeometryTileInner>::clone(&inner));
+        mailbox.open(&parameters.scheduler, Rc::<GeometryTileInner>::clone(&inner));
         GeometryTile { inner }
     }
 
@@ -1028,7 +1028,7 @@ mod tests {
     /// workers and releases its atlases on the render thread.
     #[test]
     fn a_layout_frees_its_data_on_the_workers_and_its_atlases_here() {
-        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+        let thread_pool = TaggedScheduler::new(mln_actor::scheduler::get_background(), SimpleIdentity::new());
         let (data_drops, atlas_releases) = (Threads::default(), Threads::default());
         let result = LayoutResult::new(
             HashMap::default(),

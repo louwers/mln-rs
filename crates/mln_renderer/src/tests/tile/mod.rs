@@ -61,6 +61,7 @@ impl RasterTileTest {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: &self.transform_state,
             file_source: Some(file_source),
+            scheduler: scheduler::get_current(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -94,7 +95,9 @@ impl Default for RasterTileTest {
 #[must_use]
 pub(crate) fn serializing_transport(count: usize) -> std::rc::Rc<crate::tile::worker_codec::SerializingTransport> {
     use crate::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
-    SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
+    SerializingTransport::new(&scheduler::get_current(), |replies| {
+        Box::new(ThreadWorkerInstances::new(count, &replies))
+    })
 }
 
 /// Port-only: an opaque PNG whose pixels differ from their neighbours.

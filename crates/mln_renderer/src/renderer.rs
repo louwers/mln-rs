@@ -98,18 +98,21 @@ impl Renderer {
         glyph_cache: Arc<GlyphCache>,
     ) -> Self {
         let engine = crate::text::font_face_engine::default_engine();
-        Self::with_fonts(backend, pixel_ratio, local_font_family, glyph_cache, engine)
+        Self::with_fonts(backend, pixel_ratio, local_font_family, glyph_cache, engine, &mln_actor::RunLoop::get())
     }
 
-    /// A renderer that uses `glyph_cache`, and loads the font files of a
+    /// A renderer that uses `glyph_cache`, loads the font files of a
     /// style's font faces with `font_face_engine` instead of
-    /// `font_face_engine::default_engine()`.
+    /// `font_face_engine::default_engine()`, and takes its tiles' and
+    /// glyphs' responses on `run_loop`, which runs on this thread. The
+    /// others take this thread's current loop.
     pub fn with_fonts(
         backend: Rc<dyn RendererBackend>,
         pixel_ratio: f32,
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
         font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
+        run_loop: &mln_actor::RunLoop,
     ) -> Self {
         Renderer {
             orchestrator: ManuallyDrop::new(RenderOrchestrator::new(
@@ -117,6 +120,7 @@ impl Renderer {
                 local_font_family,
                 glyph_cache,
                 font_face_engine,
+                run_loop,
             )),
             context: Rc::new(Context::new(Rc::clone(&backend))),
             backend,

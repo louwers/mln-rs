@@ -48,7 +48,9 @@ impl Impl {
             HeadlessFrontend::with_options(metadata.size, metadata.pixel_ratio, true).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let transport = SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, &replies)));
+            let transport = SerializingTransport::new(&mln_actor::scheduler::get_current(), |replies| {
+                Box::new(ThreadWorkerInstances::new(count, &replies))
+            });
             frontend.with_renderer(|renderer| renderer.set_tile_worker_transport(transport));
         }
         let file_source = proxy_loader(&resource_options);

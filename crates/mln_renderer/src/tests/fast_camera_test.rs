@@ -233,6 +233,7 @@ impl Scene {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: self.transform.get_state(),
             file_source: Some(file_source),
+            scheduler: scheduler::get_current(),
             mode: MapMode::Continuous,
             // The map's default.
             prefetch_zoom_delta: 4,

@@ -23,7 +23,7 @@ pub use async_task::{AsyncTask, AsyncTaskSender};
 pub use cooperative_scheduler::CooperativeScheduler;
 pub use local_object::LocalObject;
 pub use mailbox::Mailbox;
-pub use run_loop::{EnteredRunLoop, RunLoop, RunLoopHandle};
+pub use run_loop::{RunLoop, RunLoopHandle};
 pub use scheduler::{Scheduler, SchedulerPtr, TaggedScheduler};
 pub use thread::Thread;
 pub use timer::Timer;
