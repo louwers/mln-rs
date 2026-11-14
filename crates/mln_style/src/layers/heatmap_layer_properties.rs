@@ -3,16 +3,12 @@
 
 use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::conversion::convert_color_ramp_property_value;
-use crate::expression::Dependency;
-use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
 use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
 use mln_conversion::{Convertible, Error};
-use mln_vec_map::VecSet;
-use std::sync::Arc;
 
 crate::properties!(
-    /// The properties, in field order.
+    /// The paint properties of a heatmap layer.
     #[expect(non_snake_case, reason = "named for the C++ `HeatmapPaintProperties` type list")]
     pub mod HeatmapPaintProperties: paint {
         heatmap_color: color_ramp Color = Color::default(),
@@ -24,74 +20,10 @@ crate::properties!(
     use mln_util::Color;
 );
 
-/// The evaluated properties of a heatmap layer.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct HeatmapLayerProperties {
-    pub base: LayerPropertiesBase,
-    // Data members.
-    pub evaluated: HeatmapPaintProperties::PossiblyEvaluated,
-}
-
-impl HeatmapLayerProperties {
-    pub fn new(impl_: Arc<HeatmapLayerImpl>) -> Self {
-        HeatmapLayerProperties {
-            base: LayerPropertiesBase::new(impl_),
-            evaluated: HeatmapPaintProperties::PossiblyEvaluated::default(),
-        }
-    }
-
-    pub fn with_evaluated(
-        impl_: Arc<HeatmapLayerImpl>,
-        evaluated: HeatmapPaintProperties::PossiblyEvaluated,
-    ) -> Self {
-        HeatmapLayerProperties {
-            base: LayerPropertiesBase::new(impl_),
-            evaluated,
-        }
-    }
-
-    #[must_use]
-    pub fn layer_impl(&self) -> &HeatmapLayerImpl {
-        self.base
-            .base_impl
-            .downcast_ref::<HeatmapLayerImpl>()
-            .expect("HeatmapLayerProperties: not a heatmap layer impl")
-    }
-}
-
-impl LayerProperties for HeatmapLayerProperties {
-    fn base(&self) -> &LayerPropertiesBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut LayerPropertiesBase {
-        &mut self.base
-    }
-
-    fn constants_mask(&self) -> u64 {
-        self.evaluated.constants_mask()
-    }
-
-    fn get_dependencies(&self) -> Dependency {
-        self.layer_impl().paint.get_dependencies()
-    }
-
-    fn get_evaluated_dependencies(&self) -> Dependency {
-        self.evaluated.get_dependencies()
-    }
-
-    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>) {
-        self.evaluated.collect_global_state_refs(refs);
-    }
-}
-
-impl HasEvaluated for HeatmapLayerProperties {
-    type Evaluated = HeatmapPaintProperties::PossiblyEvaluated;
-
-    fn evaluated(&self) -> &Self::Evaluated {
-        &self.evaluated
-    }
-}
+crate::layer_properties::layer_properties!(
+    /// The evaluated properties of a heatmap layer.
+    HeatmapLayerProperties for HeatmapLayerImpl, paint HeatmapPaintProperties
+);
 
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(

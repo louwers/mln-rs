@@ -32,6 +32,6 @@ pub(crate) fn emit(object_name: &str, properties: &[Property]) -> String {
         .iter()
         .map(|property| Entry { property, paint: true, field: field(object_name, property) })
         .collect();
-    crate::emit_table::emit(&mut w, "Impl", &entries, None);
+    crate::emit_table::emit(&mut w, "Impl", &entries);
     w.finish()
 }

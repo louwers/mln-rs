@@ -1,12 +1,9 @@
-//! A Rust port of the MapLibre Native style code generator
-//! (scripts/generate-style-code.mjs + scripts/style-code.mjs +
-//! scripts/style-spec.mjs and the .ejs templates). It reads the same
-//! `scripts/style-spec-reference/v8.json` and makes the same decisions
-//! (property order, data-driven / cross-faded / color-ramp kinds, type
-//! mapping, default values, enum names, the per-layer overrides) and emits
-//! Rust shaped like the C++ output into `crates/mln_style/src`. The output is
-//! checked in; the `generated_code_test` fails when it differs from fresh
-//! generator output.
+//! Writes the declarations of `mln-rs-style`'s properties from the style
+//! spec (v8.json): for each layer type, the light and the sky, each
+//! property's name, kind, type and default, as `properties!` sets and a
+//! property table. The macros in `mln-rs-style` write the code from those.
+//! The output is checked in; the `generated_code_test` fails when it differs
+//! from fresh generator output.
 
 mod defaults;
 mod emit_properties;

@@ -330,10 +330,16 @@ pub(crate) use __property_data_driven;
 /// `data_driven`, `cross_faded`, `cross_faded_data_driven` or `color_ramp`,
 /// or `integer_zoom` for a data-driven property that evaluates at the integer
 /// zoom below. A `paint` set transitions; a `layout` set doesn't.
+///
+/// A paint set's `derived { field: kind T = default => source, }` values
+/// aren't style properties: each takes `source`'s value, and transitions with
+/// the style's default transition.
 macro_rules! properties {
     ($(#[$meta:meta])* $vis:vis mod $module:ident: paint {
         $($field:ident: $kind:ident $t:ty = $default:expr),+ $(,)?
-    } $(use $($import:path),+;)?) => {
+    } $(derived {
+        $($dfield:ident: $dkind:ident $dt:ty = $ddefault:expr => $source:ident),+ $(,)?
+    })? $(use $($import:path),+;)?) => {
         $(#[$meta])*
         $vis mod $module {
             $($(use $import;)+)?
@@ -346,6 +352,10 @@ macro_rules! properties {
                 pub fn $field() -> $t {
                     $default
                 })+
+                $($(#[must_use]
+                pub fn $dfield() -> $dt {
+                    $ddefault
+                })+)?
             }
 
             #[derive(Clone, Debug, Default, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
@@ -356,11 +366,13 @@ macro_rules! properties {
             #[derive(Clone, Debug, Default)]
             pub struct Unevaluated {
                 $(pub $field: $crate::properties::Transitioning<$crate::__property_value!($kind, $t)>,)+
+                $($(pub $dfield: $crate::properties::Transitioning<$crate::__property_value!($dkind, $dt)>,)+)?
             }
 
             #[derive(Clone, Debug, Default, ::serde::Serialize, ::serde::Deserialize)]
             pub struct PossiblyEvaluated {
                 $(pub $field: $crate::evaluated::Evaluated<$t>,)+
+                $($(pub $dfield: $crate::evaluated::Evaluated<$dt>,)+)?
             }
 
             impl Transitionable {
@@ -371,12 +383,18 @@ macro_rules! properties {
                 ) -> Unevaluated {
                     Unevaluated {
                         $($field: self.$field.transition(parameters, prior.$field),)+
+                        $($($dfield: $crate::properties::Transitionable {
+                            value: self.$source.value.clone(),
+                            options: ::core::default::Default::default(),
+                        }
+                        .transition(parameters, prior.$dfield),)+)?
                     }
                 }
 
                 pub fn untransitioned(&self) -> Unevaluated {
                     Unevaluated {
                         $($field: $crate::properties::Transitioning::new(self.$field.value.clone()),)+
+                        $($($dfield: $crate::properties::Transitioning::new(self.$source.value.clone()),)+)?
                     }
                 }
 
@@ -393,7 +411,7 @@ macro_rules! properties {
 
             impl Unevaluated {
                 pub fn has_transition(&self) -> bool {
-                    false $(|| self.$field.has_transition())+
+                    false $(|| self.$field.has_transition())+ $($(|| self.$dfield.has_transition())+)?
                 }
 
                 pub fn evaluate(
@@ -406,6 +424,11 @@ macro_rules! properties {
                             parameters,
                             Defaults::$field(),
                         ),)+
+                        $($($dfield: self.$dfield.evaluate(
+                            $crate::__property_evaluation!($dkind),
+                            parameters,
+                            Defaults::$dfield(),
+                        ),)+)?
                     }
                 }
 
@@ -423,6 +446,12 @@ macro_rules! properties {
                             Defaults::$field(),
                             &previous.$field,
                         ),)+
+                        $($($dfield: self.$dfield.evaluate_with_previous(
+                            $crate::__property_evaluation!($dkind),
+                            parameters,
+                            Defaults::$dfield(),
+                            &previous.$dfield,
+                        ),)+)?
                     }
                 }
 
@@ -430,6 +459,7 @@ macro_rules! properties {
                 pub fn get_dependencies(&self) -> $crate::expression::Dependency {
                     let mut result = $crate::expression::Dependency::NONE;
                     $(result |= self.$field.get_value().get_dependencies();)+
+                    $($(result |= self.$dfield.get_value().get_dependencies();)+)?
                     result
                 }
 
@@ -437,10 +467,13 @@ macro_rules! properties {
                     $(if let Some(property_refs) = self.$field.get_value().get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
+                    $($(if let Some(property_refs) = self.$dfield.get_value().get_global_state_refs() {
+                        refs.extend(property_refs.iter().cloned());
+                    })+)?
                 }
             }
 
-            $crate::__possibly_evaluated_methods!($($field: $kind),+);
+            $crate::__possibly_evaluated_methods!($($field: $kind),+ $($(, $dfield: $dkind)+)?);
         }
     };
     ($(#[$meta:meta])* $vis:vis mod $module:ident: layout {

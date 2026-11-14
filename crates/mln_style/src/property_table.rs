@@ -148,9 +148,6 @@ pub(crate) trait Properties: Clone + 'static {
     /// Calls `visitor` with the field of the property in `slot`, or returns
     /// `None` for a slot past the table's end.
     fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output>;
-
-    /// Called after the property in `slot` changed.
-    fn property_changed(&mut self, _slot: usize) {}
 }
 
 /// Why [`set_property`] failed.
@@ -217,48 +214,42 @@ pub(crate) fn set_property<S: Properties>(
     }
 
     impl<S: Clone> PropertyVisitor<S> for Set<'_, '_, S> {
-        type Output = Result<bool, Error>;
+        type Output = Result<(), Error>;
 
         fn paint<V: StyleValue>(
             self,
             get: fn(&S) -> &Transitionable<V>,
             get_mut: fn(&mut S) -> &mut Transitionable<V>,
-        ) -> Result<bool, Error> {
+        ) -> Result<(), Error> {
             if self.transition {
                 let mut error = Error::default();
                 let options = <TransitionOptions as Converter>::convert(self.value, &mut error).ok_or(error)?;
-                if get(self.owner).options == options {
-                    return Ok(false);
+                if get(self.owner).options != options {
+                    get_mut(Arc::make_mut(self.owner)).options = options;
                 }
-                get_mut(Arc::make_mut(self.owner)).options = options;
             } else {
                 let value = V::convert(self.value, self.info)?;
-                if get(self.owner).value == value {
-                    return Ok(false);
+                if get(self.owner).value != value {
+                    get_mut(Arc::make_mut(self.owner)).value = value;
                 }
-                get_mut(Arc::make_mut(self.owner)).value = value;
             }
-            Ok(true)
+            Ok(())
         }
 
-        fn layout<V: StyleValue>(self, get: fn(&S) -> &V, get_mut: fn(&mut S) -> &mut V) -> Result<bool, Error> {
+        fn layout<V: StyleValue>(self, get: fn(&S) -> &V, get_mut: fn(&mut S) -> &mut V) -> Result<(), Error> {
             let value = V::convert(self.value, self.info)?;
-            if *get(self.owner) == value {
-                return Ok(false);
+            if *get(self.owner) != value {
+                *get_mut(Arc::make_mut(self.owner)) = value;
             }
-            *get_mut(Arc::make_mut(self.owner)) = value;
-            Ok(true)
+            Ok(())
         }
     }
 
     let (slot, transition) = S::TABLE.resolve(name).ok_or(SetPropertyError::Unknown)?;
     let info = &S::TABLE.properties[slot];
-    let changed = S::visit(slot, Set { owner, value, info, transition })
+    S::visit(slot, Set { owner, value, info, transition })
         .ok_or(SetPropertyError::Unknown)?
         .map_err(SetPropertyError::Invalid)?;
-    if changed && !transition {
-        Arc::make_mut(owner).property_changed(slot);
-    }
     Ok(())
 }
 

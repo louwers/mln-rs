@@ -154,7 +154,8 @@ fn line_properties() {
     paint!(layer, line_translate, "line-translate", "[0, 0]", c(TRANSLATE));
     paint!(layer, line_translate_anchor, "line-translate-anchor", r#""map""#, c(TRANSLATE_ANCHOR));
     paint!(layer, line_width, "line-width", "1", c(WIDTH));
-    assert_eq!(layer.impl_().paint.line_floor_width.value, c(WIDTH), "line-width sets the floor width");
+    let unevaluated = layer.impl_().paint.untransitioned();
+    assert_eq!(*unevaluated.line_floor_width.get_value(), c(WIDTH), "the floor width follows line-width");
     paint!(layer, line_gap_width, "line-gap-width", "1", c(GAP_WIDTH));
     paint!(layer, line_offset, "line-offset", "1", c(OFFSET));
     paint!(layer, line_blur, "line-blur", "1", c(BLUR));

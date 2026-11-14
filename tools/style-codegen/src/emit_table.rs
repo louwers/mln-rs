@@ -27,14 +27,10 @@ impl Entry<'_> {
     }
 }
 
-/// The entries of a layer type: paint properties, then layout properties,
-/// without the mock `line-floor-width`.
+/// The entries of a layer type: paint properties, then layout properties.
 pub(crate) fn layer_entries<'a>(paint: &'a [Property], layout: &'a [Property]) -> Vec<Entry<'a>> {
-    let paint = paint.iter().filter(|p| p.name != "line-floor-width").map(|property| Entry {
-        property,
-        paint: true,
-        field: format!("paint.{}", snake(&property.name)),
-    });
+    let paint =
+        paint.iter().map(|property| Entry { property, paint: true, field: format!("paint.{}", snake(&property.name)) });
     let layout = layout.iter().map(|property| Entry {
         property,
         paint: false,
@@ -48,9 +44,8 @@ pub(crate) fn imports() -> Vec<String> {
     vec!["crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor}".into()]
 }
 
-/// Writes `PROPERTIES` and `impl Properties for {owner}`. `changed` is the
-/// body of `property_changed`, if the owner reacts to a change.
-pub(crate) fn emit(w: &mut Writer, owner: &str, entries: &[Entry<'_>], changed: Option<&[String]>) {
+/// Writes `PROPERTIES` and `impl Properties for {owner}`.
+pub(crate) fn emit(w: &mut Writer, owner: &str, entries: &[Entry<'_>]) {
     w.line("/// The properties, by slot.");
     w.line("pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(");
     w.line("    &[");
@@ -100,13 +95,5 @@ pub(crate) fn emit(w: &mut Writer, owner: &str, entries: &[Entry<'_>], changed: 
     w.line("            _ => return None,");
     w.line("        })");
     w.line("    }");
-    if let Some(changed) = changed {
-        w.blank();
-        w.line("    fn property_changed(&mut self, slot: usize) {");
-        for line in changed {
-            w.line(&format!("        {line}"));
-        }
-        w.line("    }");
-    }
     w.line("}");
 }

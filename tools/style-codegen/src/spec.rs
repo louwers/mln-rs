@@ -51,14 +51,13 @@ pub(crate) struct LayerSpec {
     pub(crate) type_: String,
     /// Layout properties without `visibility`, sorted.
     pub(crate) layout_properties: Vec<Property>,
-    /// Paint properties, sorted (for `line` including the mock
-    /// `line-floor-width`).
+    /// Paint properties, sorted.
     pub(crate) paint_properties: Vec<Property>,
 }
 
 /// Parses the style spec and applies the generator's changes to it: removes
 /// or narrows the properties MapLibre Native doesn't support, and adds the
-/// internal `symbol-screen-space` and the mock `line-floor-width` properties.
+/// internal `symbol-screen-space` property.
 pub(crate) fn load(text: &str) -> Result<Value, String> {
     let mut spec: Value = serde_json::from_str(text).map_err(|e| format!("v8.json: {e}"))?;
 
@@ -90,15 +89,6 @@ pub(crate) fn load(text: &str) -> Result<Value, String> {
         "default": false,
         "property-type": "data-constant",
         "doc": "Internal use only"
-    });
-
-    // generate-style-code.mjs: "Add this mock property that our SDF line
-    // shader needs so that it gets added to the list of "data driven"
-    // properties."
-    spec["paint_line"]["line-floor-width"] = json!({
-        "type": "number",
-        "default": 1,
-        "property-type": "data-driven"
     });
 
     Ok(spec)
