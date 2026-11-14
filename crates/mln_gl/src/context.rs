@@ -13,8 +13,9 @@
 // renderbuffers, draw scopes and vertex array state, and the debugging and
 // timestamp query extensions.
 
-use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::cell::{Cell, RefCell, RefMut};
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
 use glow::HasContext;
 use mln_gfx::backend::Type as BackendType;
@@ -23,6 +24,7 @@ use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::scissor_rect::ScissorRect;
@@ -32,7 +34,7 @@ use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::TextureChannelDataType;
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
+use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::Color;
 use mln_util::logging::{Event, Log};
@@ -40,6 +42,7 @@ use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
 use crate::drawable_builder::DrawableBuilder;
+use crate::gpu::GlGpu;
 use crate::layer_group::{LayerGroup, TileLayerGroup};
 use crate::offscreen_texture::OffscreenTexture;
 use crate::renderer_backend::BackendImpl;
@@ -47,7 +50,6 @@ use crate::shaders::shader_program::ShaderProgram;
 use crate::state::State;
 use crate::texture2d::Texture2D;
 use crate::types::{BufferID, FramebufferID, Gl, ProgramID, RenderbufferID, ShaderID, TextureID, VertexArrayID};
-use crate::uniform_buffer::UniformBuffer;
 
 /// The objects whose owners are gone, deleted by `perform_cleanup` while the
 /// context is current (C++: `abandonedPrograms` and the others).
@@ -65,15 +67,15 @@ pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
-    state: State,
-    /// `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`
-    uniform_buffer_offset_alignment: usize,
+    state: Rc<State>,
+    /// The `Gpu` the renderer's uniform buffers belong to, on this context
+    /// and sharing its GL state.
+    gpu: RefCell<GlGpu>,
     /// Whether a half-float texture can be rendered into
     /// (`EXT_color_buffer_half_float` or `EXT_color_buffer_float`).
     half_float_renderable: bool,
     /// Whether the context is of desktop OpenGL rather than OpenGL ES.
     desktop: bool,
-    global_uniform_buffers: RefCell<UniformBufferArray>,
     /// The uniform buffers of the layer group being drawn.
     layer_uniform_buffers: RefCell<UniformBufferArray>,
     abandoned: RefCell<Abandoned>,
@@ -92,9 +94,7 @@ impl Context {
     #[must_use]
     pub(crate) fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         let gl = backend.gl();
-        // SAFETY: the parameters are GL ES 3.0's.
-        let (alignment, extensions) =
-            unsafe { (gl.get_parameter_i32(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT), gl.supported_extensions()) };
+        let extensions = gl.supported_extensions();
         let desktop = !gl.version().is_embedded;
         // Desktop OpenGL 3.0 renders into half-float textures without an
         // extension.
@@ -103,21 +103,18 @@ impl Context {
             || extensions.contains("GL_EXT_color_buffer_half_float")
             || extensions.contains("EXT_color_buffer_float")
             || extensions.contains("GL_EXT_color_buffer_float");
-        if desktop {
-            // OpenGL ES encodes what it writes to an sRGB framebuffer, such
-            // as the host's texture, as sRGB; desktop OpenGL only with this.
-            // SAFETY: a capability of OpenGL 3.0.
-            unsafe { gl.enable(glow::FRAMEBUFFER_SRGB) };
-        }
+        let state = Rc::new(State::default());
+        // On desktop OpenGL, this turns on the sRGB encoding of what is
+        // written to an sRGB framebuffer, such as the host's texture.
+        let gpu = GlGpu::hosted(Arc::clone(backend.gl_shared()), Rc::clone(&state));
         Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
             backend,
             weak_self: Weak::clone(weak),
-            state: State::default(),
-            uniform_buffer_offset_alignment: alignment.max(1) as usize,
+            state,
+            gpu: RefCell::new(gpu),
             half_float_renderable,
             desktop,
-            global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             layer_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             abandoned: RefCell::new(Abandoned::default()),
             framebuffer: Cell::new(None),
@@ -151,10 +148,6 @@ impl Context {
         &self.state
     }
 
-    pub(crate) fn uniform_buffer_offset_alignment(&self) -> usize {
-        self.uniform_buffer_offset_alignment
-    }
-
     /// Whether the context is of desktop OpenGL (3.3 or later) rather than
     /// OpenGL ES or WebGL2. Its shaders compile as GLSL 3.30, and it has no
     /// alpha or luminance textures.
@@ -165,12 +158,14 @@ impl Context {
     /// Port-only: deletes what the context caches and what is abandoned,
     /// before the backend lets go of it. The context must be current.
     pub(crate) fn release_resources(&self) {
-        *self.global_uniform_buffers.borrow_mut() = UniformBufferArray::new();
+        *self.mutable_global_uniform_buffers() = UniformBufferArray::new();
         *self.layer_uniform_buffers.borrow_mut() = UniformBufferArray::new();
         if let Some((buffer, _)) = self.zero_uniform_buffer.borrow_mut().take() {
             self.abandon_uncounted_buffer(buffer);
         }
         self.delete_abandoned();
+        self.destroy_released();
+        self.gpu.borrow_mut().release();
     }
 
     // --- objects ---
@@ -510,14 +505,16 @@ impl Context {
     ) {
         let gl = self.gl();
         let layer_buffers = self.layer_uniform_buffers.borrow();
-        let global_buffers = self.global_uniform_buffers.borrow();
+        let global_buffers = self.global_uniform_buffers();
+        let mut gpu = self.gpu.borrow_mut();
         for block in shader.uniform_blocks() {
             let buffer = drawable_buffers
                 .get(block.id)
                 .or_else(|| layer_buffers.get(block.id))
                 .or_else(|| global_buffers.get(block.id))
-                .and_then(|buffer| buffer.downcast_ref::<UniformBuffer>())
-                .and_then(|buffer| buffer.range(self, ubo_index, block.element_size, block.size));
+                .and_then(|buffer| {
+                    gpu.uniform_block_range(buffer.id(), buffer.size(), ubo_index, block.element_size, block.size)
+                });
             match buffer {
                 Some((buffer, offset, size)) => {
                     self.state.bind_uniform_buffer_range(gl, block.id, buffer, offset as i32, size as i32);
@@ -580,10 +577,12 @@ impl GfxContext for Context {
     /// the objects abandoned since the last one.
     fn perform_cleanup(&self) {
         self.delete_abandoned();
+        self.destroy_released();
     }
 
     fn reduce_memory_usage(&self) {
         self.delete_abandoned();
+        self.destroy_released();
         // Ensure that all pending actions are executed to ensure that they
         // happen before the app goes to the background.
         // SAFETY: no preconditions.
@@ -619,8 +618,8 @@ impl GfxContext for Context {
         Box::new(DrawableBuilder::new())
     }
 
-    fn create_uniform_buffer(&self, data: &[u8], _persistent: bool, ssbo: bool) -> UniformBufferPtr {
-        Rc::new(UniformBuffer::new(self, data, ssbo))
+    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
+        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
 
     fn get_generic_shader(
@@ -648,29 +647,6 @@ impl GfxContext for Context {
 
     fn create_texture_2d(&self) -> Texture2DPtr {
         self.create_gl_texture_2d()
-    }
-
-    fn emplace_or_update_uniform_buffer(
-        &self,
-        ptr: &mut Option<UniformBufferPtr>,
-        data: &[u8],
-        persistent: bool,
-    ) -> bool {
-        if let Some(buffer) = ptr {
-            buffer.update(data);
-            false
-        } else {
-            *ptr = Some(self.create_uniform_buffer(data, persistent, false));
-            true
-        }
-    }
-
-    fn get_global_uniform_buffers(&self) -> Ref<'_, UniformBufferArray> {
-        self.global_uniform_buffers.borrow()
-    }
-
-    fn mutable_global_uniform_buffers(&self) -> RefMut<'_, UniformBufferArray> {
-        self.global_uniform_buffers.borrow_mut()
     }
 
     /// A drawable binds the global buffers its shader reads

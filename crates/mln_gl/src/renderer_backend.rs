@@ -58,7 +58,6 @@ impl BackendImpl {
 
     /// The GL functions, to share with code that draws on the context's
     /// thread.
-    #[cfg(all(unix, not(target_vendor = "apple")))]
     #[must_use]
     pub(crate) fn gl_shared(&self) -> &Arc<Gl> {
         &self.gl

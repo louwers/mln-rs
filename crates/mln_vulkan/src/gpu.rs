@@ -318,6 +318,11 @@ impl VulkanGpu {
     /// layout or the placeholders it binds.
     pub fn new(device: &Device) -> Result<VulkanGpu, GpuError> {
         let backend = Rc::new(BackendImpl::new(device, 1).map_err(|error| GpuError::Invalid(error.to_string()))?);
+        VulkanGpu::on(backend)
+    }
+
+    /// A backend on a renderer backend's device and queue.
+    pub(crate) fn on(backend: Rc<BackendImpl>) -> Result<VulkanGpu, GpuError> {
         let placeholder_buffer = BufferAllocation::create(
             &backend,
             256,
@@ -431,6 +436,12 @@ impl VulkanGpu {
 
     fn device(&self) -> &ash::Device {
         self.backend.get_device()
+    }
+
+    /// The Vulkan buffer of `buffer`, and the id of its allocation
+    /// (`buffer_resource::unique_id`).
+    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<(vk::Buffer, u64)> {
+        self.buffers.get(buffer).map(|entry| (entry.allocation.buffer(), entry.allocation.id()))
     }
 
     fn vk_format(&self, format: TextureFormat) -> vk::Format {

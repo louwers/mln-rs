@@ -81,7 +81,7 @@ impl LayerTweaker for RasterLayerTweaker {
                 pad1: 0.0,
                 pad2: 0.0,
             };
-            context.emplace_or_update_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
+            context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
             self.base.properties_updated = false;
         }
         layer_group
@@ -122,12 +122,7 @@ impl LayerTweaker for RasterLayerTweaker {
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => {
-                self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true));
-            }
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         layer_group.mutable_uniform_buffers().set(ID_RASTER_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);

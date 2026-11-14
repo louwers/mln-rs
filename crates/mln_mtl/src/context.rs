@@ -3,7 +3,7 @@
 // context can be freed, it keeps no `Rc` to anything that points back at
 // it: its placeholder buffer is a plain `MTLBuffer`.
 
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::{RefCell, RefMut};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
@@ -11,6 +11,7 @@ use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::shader_group::StringIDSetsPair;
@@ -20,7 +21,7 @@ use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::{DepthMaskType, TextureChannelDataType};
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
+use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -38,7 +39,6 @@ use crate::renderer_backend::BackendImpl;
 use crate::shaders::shader_program::ShaderProgram;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
-use crate::uniform_buffer::{UniformBuffer, bind_uniform_buffer_array};
 
 /// The resource options of every buffer (`MTL::ResourceStorageModeShared`).
 const BUFFER_USAGE: MTLResourceOptions = MTLResourceOptions::StorageModeShared;
@@ -50,7 +50,6 @@ pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
-    global_uniform_buffers: RefCell<UniformBufferArray>,
     empty_vertex_buffer: RefCell<Option<MTLBufferPtr>>,
 }
 
@@ -58,10 +57,9 @@ impl Context {
     #[must_use]
     pub(crate) fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         Rc::new_cyclic(|weak| Context {
-            base: ContextBase::default(),
+            base: ContextBase::new(Rc::clone(backend.released())),
             backend,
             weak_self: Weak::clone(weak),
-            global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             empty_vertex_buffer: RefCell::new(None),
         })
     }
@@ -83,7 +81,8 @@ impl Context {
     /// Port-only: drops what the context caches, before the backend lets go
     /// of it.
     pub(crate) fn release_cached_resources(&self) {
-        *self.global_uniform_buffers.borrow_mut() = UniformBufferArray::new();
+        *self.mutable_global_uniform_buffers() = UniformBufferArray::new();
+        self.destroy_released();
     }
 
     pub(crate) fn create_buffer(
@@ -189,7 +188,9 @@ impl GfxContext for Context {
 
     fn begin_frame(&self) {}
 
-    fn end_frame(&self) {}
+    fn end_frame(&self) {
+        self.destroy_released();
+    }
 
     /// Called at the end of a frame.
     fn perform_cleanup(&self) {
@@ -222,8 +223,8 @@ impl GfxContext for Context {
         Box::new(DrawableBuilder::new())
     }
 
-    fn create_uniform_buffer(&self, data: &[u8], persistent: bool, _ssbo: bool) -> UniformBufferPtr {
-        Rc::new(UniformBuffer::create(self, data, persistent))
+    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
+        RefMut::map(self.backend.gpu().borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
 
     fn get_generic_shader(
@@ -253,32 +254,9 @@ impl GfxContext for Context {
         self.create_mtl_texture_2d()
     }
 
-    fn emplace_or_update_uniform_buffer(
-        &self,
-        ptr: &mut Option<UniformBufferPtr>,
-        data: &[u8],
-        persistent: bool,
-    ) -> bool {
-        if let Some(buffer) = ptr {
-            buffer.update(data);
-            false
-        } else {
-            *ptr = Some(self.create_uniform_buffer(data, persistent, false));
-            true
-        }
-    }
-
-    fn get_global_uniform_buffers(&self) -> Ref<'_, UniformBufferArray> {
-        self.global_uniform_buffers.borrow()
-    }
-
-    fn mutable_global_uniform_buffers(&self) -> RefMut<'_, UniformBufferArray> {
-        self.global_uniform_buffers.borrow_mut()
-    }
-
     fn bind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
         if let Some(render_pass) = render_pass.downcast_ref::<RenderPass>() {
-            bind_uniform_buffer_array(&self.global_uniform_buffers.borrow(), render_pass);
+            render_pass.bind_uniform_buffers(&self.global_uniform_buffers());
         }
     }
 

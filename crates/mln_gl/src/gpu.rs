@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use glow::HasContext;
 use mln_gfx::color_mode::ColorMode;
@@ -17,7 +18,6 @@ use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
 use mln_util::Color;
-use mln_util::error::Error;
 use mln_util::range::Range;
 use mln_util::size::Size;
 
@@ -267,8 +267,9 @@ fn buffer_target(usage: BufferUsage) -> u32 {
     }
 }
 
-/// A [`Gpu`] on an OpenGL ES 3.0 or desktop OpenGL 3.3 context of its own,
-/// which it makes current inside each call.
+/// A [`Gpu`] on an OpenGL ES 3.0, WebGL2 or desktop OpenGL 3.3 context: one
+/// of its own, which it makes current inside each call, or a renderer
+/// backend's, which is current whenever the renderer calls it.
 ///
 /// GL keeps a deleted object until the commands submitted so far are done
 /// with it, so a `destroy_*` call deletes at once.
@@ -281,15 +282,17 @@ fn buffer_target(usage: BufferUsage) -> u32 {
 /// shader's block reads, so a bind group binds one from a whole number of
 /// elements.
 pub struct GlGpu {
-    state: State,
+    /// The GL state the context last set, which a renderer backend's
+    /// drawable path shares.
+    state: Rc<State>,
     desktop: bool,
     limits: Limits,
     anisotropic: bool,
     /// The widths that lines may be drawn at.
     line_widths: RangeInclusive<f32>,
-    /// The vertex array every draw reads through, bound for the context's
-    /// whole life.
-    vertex_array: VertexArrayID,
+    /// The vertex array every draw reads through, made by the first call
+    /// that makes the context current.
+    vertex_array: Option<VertexArrayID>,
     /// The attribute locations the vertex array has enabled, a bit each.
     enabled_attributes: u32,
     buffers: SlotMap<BufferId, Buffer>,
@@ -301,8 +304,11 @@ pub struct GlGpu {
     /// The framebuffer of each pair of attachments a pass has drawn into.
     framebuffers: HashMap<(Option<TextureId>, Option<TextureId>), FramebufferID>,
     // Dropped before the platform's context, which the functions belong to.
-    gl: Gl,
-    platform: Box<dyn PlatformContext>,
+    gl: Arc<Gl>,
+    /// The context the functions belong to, `None` for a renderer
+    /// backend's, which deletes this backend's objects with
+    /// [`release`](Self::release).
+    platform: Option<Box<dyn PlatformContext>>,
 }
 
 impl GlGpu {
@@ -310,17 +316,31 @@ impl GlGpu {
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL makes
     /// no context.
-    pub fn new(device: &crate::device::Device) -> Result<GlGpu, Error> {
+    #[cfg(not(target_family = "wasm"))]
+    pub fn new(device: &crate::device::Device) -> Result<GlGpu, mln_util::error::Error> {
         let (gl, platform) = device.create_context()?;
-        GlGpu::from_parts(gl, platform)
+        platform.make_current();
+        let gpu = GlGpu::on(Arc::new(gl), Rc::default(), Some(platform));
+        if let Some(platform) = &gpu.platform {
+            platform.done_current();
+        }
+        Ok(gpu)
     }
 
-    fn from_parts(gl: Gl, platform: Box<dyn PlatformContext>) -> Result<GlGpu, Error> {
-        platform.make_current();
+    /// A backend on a renderer backend's context, which must be current
+    /// whenever this backend is called, sharing the cache of the GL state
+    /// that the context's drawable path sets. Its objects go with
+    /// [`release`](Self::release), not with the backend.
+    pub(crate) fn hosted(gl: Arc<Gl>, state: Rc<State>) -> GlGpu {
+        GlGpu::on(gl, state, None)
+    }
+
+    /// A backend on the current context of `gl`.
+    fn on(gl: Arc<Gl>, state: Rc<State>, platform: Option<Box<dyn PlatformContext>>) -> GlGpu {
         let desktop = !gl.version().is_embedded;
         // SAFETY: the context is current, and the parameters and the
         // capability are GL ES 3.0's or desktop OpenGL 3.0's.
-        let created = unsafe {
+        let (limits, anisotropic, line_widths) = unsafe {
             if desktop {
                 // OpenGL ES encodes what it writes to an sRGB framebuffer as
                 // sRGB; desktop OpenGL only with this.
@@ -337,24 +357,19 @@ impl GlGpu {
             let forward_compatible = desktop
                 && gl.get_parameter_i32(glow::CONTEXT_FLAGS) as u32 & glow::CONTEXT_FLAG_FORWARD_COMPATIBLE_BIT != 0;
             let max_line_width = if forward_compatible { 1.0 } else { line_widths[1].max(1.0) };
-            let line_widths = line_widths[0].min(1.0)..=max_line_width;
-            gl.create_vertex_array().map(|vertex_array| {
-                let limits = Limits {
-                    buffer_offset_alignment: alignment.max(1) as u32,
-                    max_texture_size: max_texture_size.max(0) as u32,
-                };
-                (vertex_array, limits, anisotropic, line_widths)
-            })
+            let limits = Limits {
+                buffer_offset_alignment: alignment.max(1) as u32,
+                max_texture_size: max_texture_size.max(0) as u32,
+            };
+            (limits, anisotropic, line_widths[0].min(1.0)..=max_line_width)
         };
-        platform.done_current();
-        let (vertex_array, limits, anisotropic, line_widths) = created.map_err(Error::native)?;
-        Ok(GlGpu {
-            state: State::default(),
+        GlGpu {
+            state,
             desktop,
             limits,
             anisotropic,
             line_widths,
-            vertex_array,
+            vertex_array: None,
             enabled_attributes: 0,
             buffers: SlotMap::with_key(),
             textures: SlotMap::with_key(),
@@ -365,20 +380,94 @@ impl GlGpu {
             framebuffers: HashMap::new(),
             gl,
             platform,
-        })
+        }
     }
 
     /// Runs `f` with the context current. Where something else used the
     /// context since, the cached GL state is forgotten first.
     fn current<T>(&mut self, f: impl FnOnce(&mut GlGpu) -> T) -> T {
-        self.platform.make_current();
-        if self.platform.take_state_lost() {
-            self.state.set_dirty();
+        if let Some(platform) = &self.platform {
+            platform.make_current();
+            if platform.take_state_lost() {
+                self.state.set_dirty();
+            }
         }
-        self.state.bind_vertex_array(&self.gl, Some(self.vertex_array));
+        if self.vertex_array.is_none() {
+            // SAFETY: the context is current. A failure leaves no vertex
+            // array bound, which GL reports at the draws.
+            self.vertex_array = unsafe { self.gl.create_vertex_array() }.ok();
+        }
+        self.state.bind_vertex_array(&self.gl, self.vertex_array);
         let result = f(self);
-        self.platform.done_current();
+        if let Some(platform) = &self.platform {
+            platform.done_current();
+        }
         result
+    }
+
+    /// The GL buffer of `buffer`, and the range of it that a uniform block
+    /// of `block_size` bytes reads: the first `size` bytes of a uniform
+    /// buffer, or the element `index` of a storage buffer of `element_size`
+    /// byte elements, uploaded if they changed. `None` for a storage buffer
+    /// read as one block. The context must be current.
+    pub(crate) fn uniform_block_range(
+        &mut self,
+        buffer: BufferId,
+        size: usize,
+        index: u32,
+        element_size: usize,
+        block_size: usize,
+    ) -> Option<(BufferID, usize, usize)> {
+        let entry = self.buffers.get(buffer)?;
+        let Some(elements) = &entry.elements else {
+            debug_assert!(block_size <= size, "uniform buffer smaller than its block");
+            return Some((entry.object?, 0, size));
+        };
+        if element_size == 0 || elements.data.len() < element_size {
+            debug_assert!(false, "a shader reads a buffer of elements as one block");
+            return None;
+        }
+        let count = elements.data.len() / element_size;
+        let (object, stride) = self.element_buffer(buffer, element_size).ok()?;
+        debug_assert!((index as usize) < count, "drawable UBO index out of range");
+        let index = (index as usize).min(count - 1);
+        Some((object, index * stride as usize, block_size.max(1)))
+    }
+
+    /// Deletes this backend's objects, leaving it with none. The context
+    /// must be current.
+    pub(crate) fn release(&mut self) {
+        let gl = &self.gl;
+        // SAFETY: the objects are alive, and only this backend has them.
+        unsafe {
+            for program in self.programs.drain().map(|(_, program)| program) {
+                self.state.forget_program(program.object);
+                gl.delete_program(program.object);
+            }
+            for buffer in self.buffers.drain().map(|(_, buffer)| buffer) {
+                if let Some(object) = buffer.object {
+                    self.state.forget_uniform_buffer(object);
+                    gl.delete_buffer(object);
+                }
+            }
+            for texture in self.textures.drain().map(|(_, texture)| texture) {
+                self.state.forget_texture(texture.object);
+                gl.delete_texture(texture.object);
+            }
+            for sampler in self.samplers.drain().map(|(_, sampler)| sampler) {
+                gl.delete_sampler(sampler);
+            }
+            for framebuffer in self.framebuffers.drain().map(|(_, framebuffer)| framebuffer) {
+                self.state.forget_framebuffer(framebuffer);
+                gl.delete_framebuffer(framebuffer);
+            }
+            if let Some(vertex_array) = self.vertex_array.take() {
+                self.state.forget_vertex_array(vertex_array);
+                gl.delete_vertex_array(vertex_array);
+            }
+        }
+        self.pipelines.clear();
+        self.bind_groups.clear();
     }
 
     /// Compiles and links the program of `key`.
@@ -1266,30 +1355,12 @@ impl Gpu for GlGpu {
 
 impl Drop for GlGpu {
     fn drop(&mut self) {
-        self.current(|gpu| {
-            let gl = &gpu.gl;
-            // SAFETY: the objects are alive, and only this backend has them.
-            unsafe {
-                for program in gpu.programs.values() {
-                    gl.delete_program(program.object);
-                }
-                for buffer in gpu.buffers.values() {
-                    if let Some(object) = buffer.object {
-                        gl.delete_buffer(object);
-                    }
-                }
-                for texture in gpu.textures.values() {
-                    gl.delete_texture(texture.object);
-                }
-                for &sampler in gpu.samplers.values() {
-                    gl.delete_sampler(sampler);
-                }
-                for &framebuffer in gpu.framebuffers.values() {
-                    gl.delete_framebuffer(framebuffer);
-                }
-                gl.delete_vertex_array(gpu.vertex_array);
-            }
-            gpu.state.set_dirty();
-        });
+        // Put back, so that the fields drop in their order.
+        if let Some(platform) = self.platform.take() {
+            platform.make_current();
+            self.release();
+            platform.done_current();
+            self.platform = Some(platform);
+        }
     }
 }
