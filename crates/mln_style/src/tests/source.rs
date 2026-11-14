@@ -7,22 +7,20 @@ use mln_conversion::Convertible;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
-use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
+use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding};
 
 use super::util::parse_json;
 use crate::conversion::Error;
 use crate::conversion::source::convert_source;
-use crate::conversion::tileset::SourceOptions;
 use crate::observer::SourceObserver;
 use crate::source::Source;
 use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::image_source::ImageSource;
-use crate::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
+use crate::sources::tile_source::TileSource;
 
 /// A test's handler for a source event.
 type SourceHandler = Box<dyn Fn(&dyn Source)>;
@@ -83,7 +81,7 @@ fn loading_fail() {
         }));
     }
 
-    let source = VectorSource::new("source", UrlOrTileset::Url("url".to_owned()), None, None, VectorEncoding::Mapbox);
+    let source = TileSource::vector("source", Some("url".to_owned()), PartialTileset::default());
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.load_description(&file_source);
 
@@ -115,7 +113,7 @@ fn loading_corrupt() {
         }));
     }
 
-    let source = VectorSource::new("source", UrlOrTileset::Url("url".to_owned()), None, None, VectorEncoding::Mapbox);
+    let source = TileSource::vector("source", Some("url".to_owned()), PartialTileset::default());
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.load_description(&file_source);
 
@@ -375,8 +373,8 @@ fn geojson_source_synchronous_update_override_publishes_a_new_impl() {
     assert!(!source.is_update_synchronous());
 }
 
-fn as_vector(source: &dyn Source) -> &VectorSource {
-    source.downcast_ref::<VectorSource>().expect("a VectorSource")
+fn as_tile_source(source: &dyn Source) -> &TileSource {
+    source.downcast_ref::<TileSource>().expect("a TileSource")
 }
 
 // gtest: Source.VectorSourceSetTiles
@@ -389,13 +387,13 @@ fn vector_source_set_tiles() {
     {
         let changed = Rc::clone(&changed);
         *observer.source_changed.borrow_mut() = Some(Box::new(move |source| {
-            assert_eq!(as_vector(source).get_tiles(), vec!["new".to_owned()]);
+            assert_eq!(as_tile_source(source).get_tiles(), vec!["new".to_owned()]);
             *changed.borrow_mut() = true;
         }));
     }
 
-    let tileset = Tileset { tiles: vec!["url".to_owned()], ..Default::default() };
-    let source = VectorSource::new("source", UrlOrTileset::Tileset(tileset), None, None, VectorEncoding::Mapbox);
+    let tileset = PartialTileset { tiles: Some(vec!["url".to_owned()]), ..Default::default() };
+    let source = TileSource::vector("source", None, tileset);
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_tiles(&["unused".to_owned()]); // make sure early setTiles does not crash
     source.load_description(&file_source);
@@ -419,8 +417,8 @@ fn vector_source_url_set_tiles() {
 
     let observer = Rc::new(StubStyleObserver::default());
     *observer.source_loaded.borrow_mut() = Some(Box::new(|source| {
-        assert_eq!(as_vector(source).get_tiles(), vec!["tiles".to_owned()]);
-        as_vector(source).set_tiles(&["new".to_owned()]);
+        assert_eq!(as_tile_source(source).get_tiles(), vec!["tiles".to_owned()]);
+        as_tile_source(source).set_tiles(&["new".to_owned()]);
     }));
     let count = Rc::new(RefCell::new(0));
     {
@@ -430,13 +428,13 @@ fn vector_source_url_set_tiles() {
             let n = *count.borrow();
             *count.borrow_mut() += 1;
             if n > 0 {
-                assert_eq!(as_vector(source).get_tiles(), vec!["new".to_owned()]);
+                assert_eq!(as_tile_source(source).get_tiles(), vec!["new".to_owned()]);
                 handle.stop();
             }
         }));
     }
 
-    let source = VectorSource::new("source", UrlOrTileset::Url("url".to_owned()), None, None, VectorEncoding::Mapbox);
+    let source = TileSource::vector("source", Some("url".to_owned()), PartialTileset::default());
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_tiles(&["unused".to_owned()]);
     source.load_description(&file_source);
@@ -479,15 +477,11 @@ fn tileset_loaded_from_tilejson(source: &dyn Source) -> Tileset {
 // gtest: Source.RasterDEMInlineZoomOverridesTileJSON
 #[test]
 fn raster_dem_inline_zoom_overrides_tile_json() {
-    let source = RasterDEMSource::new(
+    let source = TileSource::raster_dem(
         "source",
-        UrlOrTileset::Url("url".to_owned()),
+        Some("url".to_owned()),
+        PartialTileset { raster_encoding: Some(RasterEncoding::Terrarium), max_zoom: Some(15), ..Default::default() },
         512,
-        Some(SourceOptions {
-            raster_encoding: Some(RasterEncoding::Terrarium),
-            maxzoom: Some(15),
-            ..Default::default()
-        }),
     );
     let tileset = tileset_loaded_from_tilejson(&source);
     // The inline maxzoom wins over the TileJSON's; minzoom was not given inline, so the TileJSON
@@ -500,8 +494,12 @@ fn raster_dem_inline_zoom_overrides_tile_json() {
 // gtest: Source.RasterInlineZoomOverridesTileJSON
 #[test]
 fn raster_inline_zoom_overrides_tile_json() {
-    let source =
-        RasterSource::new("source", UrlOrTileset::Url("url".to_owned()), 512, SourceType::Raster, None, Some(16));
+    let source = TileSource::raster(
+        "source",
+        Some("url".to_owned()),
+        PartialTileset { max_zoom: Some(16), ..Default::default() },
+        512,
+    );
     let tileset = tileset_loaded_from_tilejson(&source);
     // The inline maxzoom wins; minzoom was not given inline, so the TileJSON's is kept.
     assert_eq!(4, tileset.zoom_range.min);
@@ -511,7 +509,7 @@ fn raster_inline_zoom_overrides_tile_json() {
 // gtest: Source.RasterDEMTileJSONZoomKeptWithoutInlineOverride
 #[test]
 fn raster_dem_tile_json_zoom_kept_without_inline_override() {
-    let source = RasterDEMSource::new("source", UrlOrTileset::Url("url".to_owned()), 512, None);
+    let source = TileSource::raster_dem("source", Some("url".to_owned()), PartialTileset::default(), 512);
     let tileset = tileset_loaded_from_tilejson(&source);
     assert_eq!(4, tileset.zoom_range.min);
     assert_eq!(12, tileset.zoom_range.max);
@@ -598,4 +596,11 @@ fn vector_sources_take_the_style_sparse() {
         panic!("an invalid sparse converts");
     };
     assert!(error.contains("sparse"), "{error}");
+}
+
+// A vector source's style encoding applies to the tileset from its TileJSON.
+#[test]
+fn vector_source_style_encoding_applies_to_tile_json() {
+    let source = converted_source(r#"{"type": "vector", "url": "url", "encoding": "mlt"}"#).unwrap();
+    assert_eq!(Some(VectorEncoding::MLT), tileset_loaded_from_tilejson(&*source).vector_encoding);
 }

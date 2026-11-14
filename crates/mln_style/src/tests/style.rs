@@ -9,6 +9,7 @@ use mln_style_types::{ProjectionDefinition, VisibilityType};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::size::Size;
+use mln_util::tileset::PartialTileset;
 use mln_util::{Color, LatLng};
 
 use super::util::{FixtureLog, parse_json, read_file};
@@ -21,7 +22,7 @@ use crate::projection::Projection;
 use crate::property_value::PropertyValue;
 use crate::sky::Sky;
 use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
-use crate::sources::tile_source::{UrlOrTileset, VectorSource};
+use crate::sources::tile_source::TileSource;
 use crate::style::{Impl, Style};
 use crate::transition_options::TransitionOptions;
 
@@ -610,14 +611,8 @@ fn sky_projection_and_global_state_coexist() {
     assert_eq!(Value::Bool(false), style.get_global_state()["showLabels"]);
 }
 
-fn vector_source(id: &str) -> VectorSource {
-    VectorSource::new(
-        id,
-        UrlOrTileset::Url("mptiler://tiles/contours".to_owned()),
-        None,
-        None,
-        mln_util::tileset::VectorEncoding::Mapbox,
-    )
+fn vector_source(id: &str) -> TileSource {
+    TileSource::vector(id, Some("mptiler://tiles/contours".to_owned()), PartialTileset::default())
 }
 
 // gtest: Style.DuplicateSource

@@ -10,4 +10,4 @@ pub mod tile_source;
 pub use custom_geometry_source::{CustomGeometrySource, CustomGeometrySourceHandle};
 pub use custom_vector_source::{CustomVectorSource, TileDataFormat};
 pub use geojson_source::{GeoJSONData, GeoJSONOptions, GeoJSONSource};
-pub use tile_source::{RasterDEMSource, RasterSource, TileSource, UrlOrTileset, VectorSource};
+pub use tile_source::TileSource;

@@ -1,212 +1,99 @@
 use mln_math::clamp_f64;
+use mln_style_types::SourceType;
 use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::tileset::{RasterEncoding, Scheme, Tileset, VectorEncoding};
+use mln_util::tileset::{PartialTileset, RasterEncoding, Scheme, VectorEncoding};
 
-use super::{Converter, Convertible, Error};
+use super::Convertible;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct SourceOptions {
-    pub(crate) raster_encoding: Option<RasterEncoding>,
-    pub(crate) vector_encoding: Option<VectorEncoding>,
-    /// The style's inline zoom range, which wins over a fetched TileJSON's, as in maplibre-gl-js:
-    /// <https://github.com/maplibre/maplibre-gl-js/blob/32e555b2c114d6b60da4acd824d272182c656bbe/src/source/load_tilejson.ts#L39>
-    pub(crate) minzoom: Option<u8>,
-    pub(crate) maxzoom: Option<u8>,
+/// The member `name` of `value` as `read` reads it, or `None` without one. The error names the
+/// member when `read` rejects it.
+pub(crate) fn optional_member<'v, T>(
+    value: &'v Convertible<'_>,
+    name: &str,
+    read: impl FnOnce(&Convertible<'v>) -> Option<T>,
+) -> Result<Option<T>, String> {
+    value.object_member(name).map(|member| read(&member).ok_or_else(|| format!("invalid {name}"))).transpose()
 }
 
-/// The zoom level member `name`, if present. `Err(())` means it is invalid.
-fn zoom_member(value: &Convertible<'_>, name: &str, error: &mut Error) -> Result<Option<u8>, ()> {
-    let Some(member) = value.object_member(name) else {
-        return Ok(None);
-    };
-    match member.to_number() {
-        Some(number) if !(number < 0.0 || number > f32::from(u8::MAX)) => Ok(Some(number as u8)),
-        _ => {
-            error.message = format!("invalid {name}");
-            Err(())
-        }
+/// The tileset members of `value`, a TileJSON document or a style source of type `source_type`,
+/// which decides the encodings it may have.
+pub(crate) fn convert_tileset(value: &Convertible<'_>, source_type: SourceType) -> Result<PartialTileset, String> {
+    let (raster_encoding, vector_encoding) = encoding(value, source_type)?;
+    Ok(PartialTileset {
+        tiles: optional_member(value, "tiles", strings)?,
+        min_zoom: optional_member(value, "minzoom", zoom)?,
+        max_zoom: optional_member(value, "maxzoom", zoom)?,
+        attribution: optional_member(value, "attribution", Convertible::to_string)?,
+        scheme: optional_member(value, "scheme", |scheme| match scheme.to_string()?.as_str() {
+            "xyz" => Some(Scheme::XYZ),
+            "tms" => Some(Scheme::TMS),
+            _ => None,
+        })?,
+        raster_encoding,
+        vector_encoding,
+        bounds: optional_member(value, "bounds", bounds)?,
+        sparse: optional_member(value, "sparse", Convertible::to_bool)?,
+    })
+}
+
+/// A zoom level from 0 to 255.
+fn zoom(value: &Convertible<'_>) -> Option<u8> {
+    value.to_number().filter(|zoom| (0.0..=f32::from(u8::MAX)).contains(zoom)).map(|zoom| zoom as u8)
+}
+
+fn strings(value: &Convertible<'_>) -> Option<Vec<String>> {
+    if !value.is_array() {
+        return None;
     }
+    (0..value.array_length()).map(|i| value.array_member(i).to_string()).collect()
 }
 
-/// A `custom` raster-dem encoding's number `name`, or `default` without one.
-/// `Err(())` is an invalid one, as in `zoom_member`.
-fn factor_member(value: &Convertible<'_>, name: &str, default: f32, error: &mut Error) -> Result<f32, ()> {
-    let Some(member) = value.object_member(name) else {
-        return Ok(default);
-    };
-    member.to_number().ok_or_else(|| error.message = format!("invalid {name}"))
-}
-
-impl Converter for SourceOptions {
-    fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self> {
-        let mut options = SourceOptions::default();
-        let mut any = false;
-
-        if let Some(encoding_value) = value.object_member("encoding") {
-            match encoding_value.to_string().as_deref() {
-                Some("terrarium") => options.raster_encoding = Some(RasterEncoding::Terrarium),
-                Some("mapbox") => options.raster_encoding = Some(RasterEncoding::Mapbox),
-                Some("custom") => {
-                    options.raster_encoding = Some(RasterEncoding::Custom {
-                        red_factor: factor_member(value, "redFactor", 1.0, error).ok()?,
-                        green_factor: factor_member(value, "greenFactor", 1.0, error).ok()?,
-                        blue_factor: factor_member(value, "blueFactor", 1.0, error).ok()?,
-                        base_shift: factor_member(value, "baseShift", 0.0, error).ok()?,
-                    });
-                }
-                Some("mvt") => options.vector_encoding = Some(VectorEncoding::Mapbox),
-                Some("mlt") => options.vector_encoding = Some(VectorEncoding::MLT),
-                _ => {
-                    error.message = "invalid encoding - valid types are 'mapbox', 'terrarium' and 'custom' for \
-                                     raster sources, 'mvt' and 'mlt' for vector sources"
-                        .to_owned();
-                    return None;
-                }
-            }
-            any = true;
-        }
-
-        options.minzoom = zoom_member(value, "minzoom", error).ok()?;
-        options.maxzoom = zoom_member(value, "maxzoom", error).ok()?;
-        any = any || options.minzoom.is_some() || options.maxzoom.is_some();
-
-        // gtests-data: C++ `return {};` is an empty optional, not a default
-        // SourceOptions (SourceOptions.Basic). Both callers treat the two alike.
-        if !any {
-            return None;
-        }
-        Some(options)
+/// `[west, south, east, north]`, clamped to the world's longitudes and latitudes.
+fn bounds(value: &Convertible<'_>) -> Option<LatLngBounds> {
+    if !value.is_array() || value.array_length() != 4 {
+        return None;
     }
-}
-
-/// A vector source's `sparse`, `false` when it has none. `Err(())` is an invalid value, with
-/// `error` set.
-pub(crate) fn sparse_member(value: &Convertible<'_>, error: &mut Error) -> Result<bool, ()> {
-    let Some(member) = value.object_member("sparse") else {
-        return Ok(false);
-    };
-    member.to_bool().ok_or_else(|| error.message = "invalid sparse".to_owned())
-}
-
-impl Converter for Tileset {
-    fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self> {
-        let mut result = Tileset::default();
-
-        let Some(tiles) = value.object_member("tiles") else {
-            error.message = "source must have tiles".to_owned();
-            return None;
-        };
-
-        if !tiles.is_array() {
-            error.message = "source tiles must be an array".to_owned();
-            return None;
-        }
-
-        for i in 0..tiles.array_length() {
-            let Some(url_template) = tiles.array_member(i).to_string() else {
-                error.message = "source tiles member must be a string".to_owned();
-                return None;
-            };
-            result.tiles.push(url_template);
-        }
-
-        if let Some(scheme_value) = value.object_member("scheme")
-            && scheme_value.to_string().as_deref() == Some("tms")
-        {
-            result.scheme = Scheme::TMS;
-        }
-
-        if let Some(options) = SourceOptions::convert(value, error) {
-            if let Some(encoding) = options.raster_encoding {
-                result.raster_encoding = Some(encoding);
-            }
-            if let Some(encoding) = options.vector_encoding {
-                result.vector_encoding = Some(encoding);
-            }
-        }
-
-        if let Some(minzoom_value) = value.object_member("minzoom") {
-            match minzoom_value.to_number() {
-                Some(minzoom) if !(minzoom < 0.0 || minzoom > f32::from(u8::MAX)) => {
-                    result.zoom_range.min = minzoom as u8;
-                }
-                _ => {
-                    error.message = "invalid minzoom".to_owned();
-                    return None;
-                }
-            }
-        }
-
-        if let Some(maxzoom_value) = value.object_member("maxzoom") {
-            match maxzoom_value.to_number() {
-                Some(maxzoom) if !(maxzoom < 0.0 || maxzoom > f32::from(u8::MAX)) => {
-                    result.zoom_range.max = maxzoom as u8;
-                }
-                _ => {
-                    error.message = "invalid maxzoom".to_owned();
-                    return None;
-                }
-            }
-        }
-
-        if let Some(attribution_value) = value.object_member("attribution") {
-            let Some(attribution) = attribution_value.to_string() else {
-                error.message = "source attribution must be a string".to_owned();
-                return None;
-            };
-            result.attribution = attribution;
-        }
-
-        if let Some(bounds_value) = value.object_member("bounds") {
-            if !bounds_value.is_array() || bounds_value.array_length() != 4 {
-                error.message = "bounds must be an array with left, bottom, top, and right values".to_owned();
-                return None;
-            }
-            let left = bounds_value.array_member(0).to_double();
-            let bottom = bounds_value.array_member(1).to_double();
-            let right = bounds_value.array_member(2).to_double();
-            let top = bounds_value.array_member(3).to_double();
-
-            let (Some(left), Some(bottom), Some(right), Some(top)) = (left, bottom, right, top) else {
-                error.message = "bounds array must contain numeric longitude and latitude values".to_owned();
-                return None;
-            };
-
-            let bottom = clamp_f64(bottom, -90.0, 90.0);
-            let top = clamp_f64(top, -90.0, 90.0);
-            if top < bottom {
-                error.message = "bounds bottom latitude must be less than or equal to top latitude".to_owned();
-                return None;
-            }
-
-            if left > right {
-                error.message = "bounds left longitude must be less than or equal to right longitude".to_owned();
-                return None;
-            }
-            // `util::max(-180.0, left)`, `util::min(180.0, right)` (no NaN
-            // in JSON numbers).
-            let left = if left < -180.0 { -180.0 } else { left };
-            let right = if right > 180.0 { 180.0 } else { right };
-            let (Ok(sw), Ok(ne)) = (LatLng::new(bottom, left), LatLng::new(top, right)) else {
-                error.message = "bounds array must contain numeric longitude and latitude values".to_owned();
-                return None;
-            };
-            result.bounds = Some(LatLngBounds::hull(sw, ne));
-        }
-
-        Some(result)
+    let [west, south, east, north] = std::array::from_fn(|i| value.array_member(i).to_double());
+    let (west, east) = (west?, east?);
+    let (south, north) = (clamp_f64(south?, -90.0, 90.0), clamp_f64(north?, -90.0, 90.0));
+    if west > east || south > north {
+        return None;
     }
+    let southwest = LatLng::new(south, west.max(-180.0)).ok()?;
+    let northeast = LatLng::new(north, east.min(180.0)).ok()?;
+    Some(LatLngBounds::hull(southwest, northeast))
 }
 
-/// Parses JSON bytes, then converts them to a tileset (see
-/// conversion/geojson.rs for the JSON syntax error message).
-pub fn convert_json_tileset(json: &[u8], error: &mut Error) -> Option<Tileset> {
-    let document: serde_json::Value = match serde_json::from_slice(json) {
-        Ok(document) => document,
-        Err(e) => {
-            error.message = e.to_string();
-            return None;
-        }
+/// The `encoding` of a raster-dem or vector source; other sources have none. A `custom`
+/// encoding's factors belong to it, so an object that sets `encoding` replaces another's whole,
+/// factors included, and factors without an `encoding` beside them do nothing.
+fn encoding(
+    value: &Convertible<'_>,
+    source_type: SourceType,
+) -> Result<(Option<RasterEncoding>, Option<VectorEncoding>), String> {
+    let Some(encoding) = optional_member(value, "encoding", Convertible::to_string)? else {
+        return Ok((None, None));
     };
-    Tileset::convert(&Convertible::from(&document), error)
+    let factor =
+        |name, default| Ok::<_, String>(optional_member(value, name, Convertible::to_number)?.unwrap_or(default));
+    Ok(match (source_type, encoding.as_str()) {
+        (SourceType::Vector, "mvt") => (None, Some(VectorEncoding::Mapbox)),
+        (SourceType::Vector, "mlt") => (None, Some(VectorEncoding::MLT)),
+        (SourceType::RasterDEM, "mapbox") => (Some(RasterEncoding::Mapbox), None),
+        (SourceType::RasterDEM, "terrarium") => (Some(RasterEncoding::Terrarium), None),
+        (SourceType::RasterDEM, "custom") => (
+            Some(RasterEncoding::Custom {
+                red_factor: factor("redFactor", 1.0)?,
+                green_factor: factor("greenFactor", 1.0)?,
+                blue_factor: factor("blueFactor", 1.0)?,
+                base_shift: factor("baseShift", 0.0)?,
+            }),
+            None,
+        ),
+        (SourceType::Vector, _) => return Err("invalid encoding: a vector source's is 'mvt' or 'mlt'".to_owned()),
+        (SourceType::RasterDEM, _) => {
+            return Err("invalid encoding: a raster-dem source's is 'mapbox', 'terrarium' or 'custom'".to_owned());
+        }
+        _ => (None, None),
+    })
 }

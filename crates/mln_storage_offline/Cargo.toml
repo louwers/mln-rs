@@ -20,7 +20,6 @@ doctest = false
 [dependencies]
 feature.workspace = true
 mln_actor.workspace = true
-mln_conversion.workspace = true
 mln_renderer.workspace = true
 # OfflineDownload writes the region into OfflineDatabase.
 mln_storage = { workspace = true, features = ["sqlite"] }

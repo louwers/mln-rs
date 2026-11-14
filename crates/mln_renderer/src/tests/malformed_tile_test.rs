@@ -18,7 +18,7 @@ use mln_style::layers::{
     CircleLayerProperties, FillExtrusionLayerProperties, FillLayerProperties, LineLayerProperties,
     SymbolLayerProperties,
 };
-use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
+use mln_style::sources::tile_source::TileSource;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
@@ -27,7 +27,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::{Tileset, VectorEncoding};
+use mln_util::tileset::PartialTileset;
 use proptest::prelude::*;
 use serde_json::json;
 
@@ -91,7 +91,7 @@ fn layer(json: &serde_json::Value) -> Arc<dyn LayerProperties> {
 /// Loads the z0 tile of a vector source whose tiles are `tile`, with
 /// `layers`, and returns what the render source reports.
 fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
-    let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
+    let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..Default::default() };
     let run_loop = RunLoop::new();
     let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
     let mut transform =
@@ -118,7 +118,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
         });
     }
 
-    let source = VectorSource::new("source", UrlOrTileset::Tileset(tileset), None, None, VectorEncoding::Mapbox);
+    let source = TileSource::vector("source", None, tileset);
     mln_style::source::Source::load_description(&source, &*file_source);
     let base_impl = mln_style::source::Source::base_impl(&source);
     let mut render_source = render_source::create(&base_impl);

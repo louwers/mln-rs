@@ -45,7 +45,7 @@ use mln_style::sources::custom_geometry_source::{
 };
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_style::sources::image_source::ImageSource;
-use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
+use mln_style::sources::tile_source::TileSource;
 use mln_style::sprite::Sprite;
 use mln_style::style_property::Kind as StylePropertyKind;
 use mln_style::{PropertyValue, TransitionOptions, source};
@@ -59,7 +59,7 @@ use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::size::Size;
-use mln_util::tileset::{Scheme, Tileset, VectorEncoding};
+use mln_util::tileset::{PartialTileset, Scheme};
 use support::*;
 
 fn ll(lat: f64, lon: f64) -> LatLng {
@@ -84,14 +84,8 @@ fn red_background(id: &str) -> BackgroundLayer {
     layer
 }
 
-fn vector_source(id: &str, tiles: &str) -> VectorSource {
-    VectorSource::new(
-        id,
-        UrlOrTileset::Tileset(Tileset { tiles: vec![tiles.to_owned()], ..Tileset::default() }),
-        None,
-        None,
-        VectorEncoding::Mapbox,
-    )
+fn vector_source(id: &str, tiles: &str) -> TileSource {
+    TileSource::vector(id, None, PartialTileset { tiles: Some(vec![tiles.to_owned()]), ..PartialTileset::default() })
 }
 
 fn no_content() -> Response {

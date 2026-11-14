@@ -23,15 +23,13 @@ use mln_style::layers::fill_layer::Impl as FillLayerImpl;
 use mln_style::layers::raster_layer::Impl as RasterLayerImpl;
 use mln_style::layers::{FillLayer, FillLayerProperties, RasterLayer, RasterLayerProperties};
 use mln_style::source::{self, Source};
-use mln_style::sources::tile_source::{RasterSource, UrlOrTileset, VectorSource};
-use mln_style_types::SourceType;
+use mln_style::sources::tile_source::TileSource;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
-use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::{Tileset, VectorEncoding};
+use mln_util::tileset::PartialTileset;
 
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_manager::ImageManager;
@@ -181,8 +179,8 @@ struct Scene {
     thread_pool: TaggedScheduler,
     network: Arc<Network>,
     transform: Transform,
-    vector: VectorSource,
-    raster: RasterSource,
+    vector: TileSource,
+    raster: TileSource,
     fill_layers: Vec<Arc<dyn LayerProperties>>,
     raster_layers: Vec<Arc<dyn LayerProperties>>,
     vector_render_source: RenderVectorSource,
@@ -201,15 +199,13 @@ impl Scene {
         let network = Arc::new(Network::new());
         let file_source: Arc<dyn FileSource> = Arc::<Network>::clone(&network);
 
-        let tileset = |url: &str, max_zoom| {
-            UrlOrTileset::Tileset(Tileset {
-                tiles: vec![url.to_owned()],
-                zoom_range: Range::new(0, max_zoom),
-                ..Default::default()
-            })
+        let tileset = |url: &str, max_zoom| PartialTileset {
+            tiles: Some(vec![url.to_owned()]),
+            max_zoom: Some(max_zoom),
+            ..Default::default()
         };
-        let vector = VectorSource::new("vector", tileset("vector/{z}/{x}/{y}", 14), None, None, VectorEncoding::Mapbox);
-        let raster = RasterSource::new("raster", tileset("raster/{z}/{x}/{y}", 6), 256, SourceType::Raster, None, None);
+        let vector = TileSource::vector("vector", None, tileset("vector/{z}/{x}/{y}", 14));
+        let raster = TileSource::raster("raster", None, tileset("raster/{z}/{x}/{y}", 6), 256);
         vector.load_description(&*file_source);
         raster.load_description(&*file_source);
 

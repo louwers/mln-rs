@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use feature::Value;
 use mln_actor::{LocalObject, RunLoop};
-use mln_conversion::Error as ConversionError;
 use mln_renderer::util::tile_cover::{TileCover, covering_zoom_level, tile_count_bounds, tile_count_geometry};
 use mln_storage::file_source::MAX_CONCURRENT_REQUESTS_KEY;
 use mln_storage::offline::{
@@ -29,17 +28,16 @@ use mln_storage::offline_database::OfflineDatabase;
 use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{AsyncRequest, FileSource, Kind, LoadingMethod, Resource, Response};
-use mln_style::conversion::tileset::convert_json_tileset;
 use mln_style::parser::Parser;
 use mln_style::sources::image_source::ImageSource;
-use mln_style::sources::{GeoJSONSource, RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
+use mln_style::sources::{GeoJSONSource, TileSource};
 use mln_style_types::SourceType;
 use mln_text::glyph::{
     GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, GlyphID, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
     get_glyph_range,
 };
 use mln_tile_id::tile_id::CanonicalTileID;
-use mln_util::constants::{DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, TILE_SIZE_I};
+use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::i18n::glyph_range_is_entirely_locally_generated;
 use mln_util::range::Range;
 use mln_util::tileset::Tileset;
@@ -340,54 +338,36 @@ impl Inner {
         for source in &parser.sources {
             let type_ = source.get_type();
 
-            let mut handle_tiled_source = |url_or_tileset: &UrlOrTileset, tile_size: u16| match url_or_tileset {
-                UrlOrTileset::Tileset(tileset) => {
+            let mut handle_tiled_source = |tile_source: &TileSource| {
+                let tileset = match tile_source.get_url() {
                     // A source without tile URLs has no tiles to download.
-                    if !tileset.tiles.is_empty() {
-                        let tile_source_count = tile_count(&self.definition, type_, tile_size, tileset.zoom_range);
-                        result.required_tile_count += tile_source_count;
-                        result.required_resource_count += tile_source_count;
-                    }
-                }
-                UrlOrTileset::Url(url) => {
-                    result.required_resource_count += 1;
-                    let source_response = self.offline_database.borrow_mut().get(&Resource::source(url));
-                    let tileset = source_response.and_then(|response| response.data).and_then(|data| {
-                        let mut error = ConversionError::default();
-                        convert_json_tileset(&data, &mut error)
-                    });
-                    // As a download does, count no tiles for a TileJSON that
-                    // is missing, can't be read, or has no tile URLs, and
-                    // leave the count imprecise.
-                    match tileset {
-                        Some(tileset) if !tileset.tiles.is_empty() => {
-                            let tile_source_count = tile_count(&self.definition, type_, tile_size, tileset.zoom_range);
-                            result.required_tile_count += tile_source_count;
-                            result.required_resource_count += tile_source_count;
+                    None => tile_source.inline_tileset(),
+                    Some(url) => {
+                        result.required_resource_count += 1;
+                        let source_response = self.offline_database.borrow_mut().get(&Resource::source(&url));
+                        let tileset = source_response
+                            .and_then(|response| response.data)
+                            .and_then(|data| tile_source.tileset_with_tilejson(&data).ok());
+                        // As a download does, count no tiles for a TileJSON that
+                        // is missing, can't be read, or has no tile URLs, and
+                        // leave the count imprecise.
+                        if tileset.as_ref().is_none_or(|tileset| tileset.tiles.is_empty()) {
+                            result.required_resource_count_is_precise = false;
                         }
-                        _ => result.required_resource_count_is_precise = false,
+                        tileset
                     }
+                };
+                if let Some(tileset) = tileset.filter(|tileset| !tileset.tiles.is_empty()) {
+                    let count = tile_count(&self.definition, type_, tile_source.get_tile_size(), tileset.zoom_range);
+                    result.required_tile_count += count;
+                    result.required_resource_count += count;
                 }
             };
 
             match type_ {
-                SourceType::Vector => {
-                    if let Some(vector_source) = source.downcast_ref::<VectorSource>() {
-                        handle_tiled_source(vector_source.tile_source().get_url_or_tileset(), TILE_SIZE_I);
-                    }
-                }
-
-                SourceType::Raster => {
-                    if let Some(raster_source) = source.downcast_ref::<RasterSource>() {
-                        let tile_source = raster_source.tile_source();
-                        handle_tiled_source(tile_source.get_url_or_tileset(), tile_source.get_tile_size());
-                    }
-                }
-
-                SourceType::RasterDEM => {
-                    if let Some(raster_dem_source) = source.downcast_ref::<RasterDEMSource>() {
-                        let tile_source = raster_dem_source.tile_source();
-                        handle_tiled_source(tile_source.get_url_or_tileset(), tile_source.get_tile_size());
+                SourceType::Vector | SourceType::Raster | SourceType::RasterDEM => {
+                    if let Some(tile_source) = source.downcast_ref::<TileSource>() {
+                        handle_tiled_source(tile_source);
                     }
                 }
 
@@ -463,11 +443,13 @@ impl Inner {
         for source in &parser.sources {
             let type_ = source.get_type();
 
-            let handle_tiled_source = |url_or_tileset: &UrlOrTileset, tile_size: u16| match url_or_tileset {
-                UrlOrTileset::Tileset(tileset) => self.queue_tiles(type_, tile_size, tileset),
-                UrlOrTileset::Url(raw_url) => {
-                    let url = raw_url.clone();
-
+            let handle_tiled_source = |tile_source: &TileSource| match tile_source.get_url() {
+                None => {
+                    if let Some(tileset) = tile_source.inline_tileset() {
+                        self.queue_tiles(type_, tile_source.get_tile_size(), &tileset);
+                    }
+                }
+                Some(url) => {
                     {
                         let mut status = self.status.borrow_mut();
                         status.required_resource_count_is_precise = false;
@@ -480,6 +462,7 @@ impl Inner {
                     source_resource.set_usage(Usage::Offline);
 
                     let weak = Rc::downgrade(self);
+                    let tile_source = tile_source.clone();
                     self.ensure_resource(
                         source_resource,
                         Some(Rc::new(move |source_response: &Response| {
@@ -489,14 +472,11 @@ impl Inner {
                             let Some(data) = &source_response.data else {
                                 return Err("the TileJSON has no content".to_owned());
                             };
-                            let mut error = ConversionError::default();
-                            let Some(tileset) = convert_json_tileset(data, &mut error) else {
-                                return Err(error.message);
-                            };
+                            let tileset = tile_source.tileset_with_tilejson(data)?;
                             if tileset.tiles.is_empty() {
                                 return Err("the TileJSON has no tile URLs".to_owned());
                             }
-                            this.queue_tiles(type_, tile_size, &tileset);
+                            this.queue_tiles(type_, tile_source.get_tile_size(), &tileset);
 
                             this.required_source_urls.borrow_mut().remove(&url);
                             if this.required_source_urls.borrow().is_empty() {
@@ -509,23 +489,9 @@ impl Inner {
             };
 
             match type_ {
-                SourceType::Vector => {
-                    if let Some(vector_source) = source.downcast_ref::<VectorSource>() {
-                        handle_tiled_source(vector_source.tile_source().get_url_or_tileset(), TILE_SIZE_I);
-                    }
-                }
-
-                SourceType::Raster => {
-                    if let Some(raster_source) = source.downcast_ref::<RasterSource>() {
-                        let tile_source = raster_source.tile_source();
-                        handle_tiled_source(tile_source.get_url_or_tileset(), tile_source.get_tile_size());
-                    }
-                }
-
-                SourceType::RasterDEM => {
-                    if let Some(raster_dem_source) = source.downcast_ref::<RasterDEMSource>() {
-                        let tile_source = raster_dem_source.tile_source();
-                        handle_tiled_source(tile_source.get_url_or_tileset(), tile_source.get_tile_size());
+                SourceType::Vector | SourceType::Raster | SourceType::RasterDEM => {
+                    if let Some(tile_source) = source.downcast_ref::<TileSource>() {
+                        handle_tiled_source(tile_source);
                     }
                 }
 

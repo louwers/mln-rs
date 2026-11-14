@@ -14,10 +14,11 @@ use mln_style::sources::custom_geometry_source::{self, TileOptions};
 use mln_style::sources::geojson_source::GeoJSONData;
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::{
-    CustomGeometrySource, CustomVectorSource, GeoJSONOptions, GeoJSONSource, RasterDEMSource, RasterSource,
-    TileDataFormat, TileSource, UrlOrTileset, VectorSource, custom_vector_source,
+    CustomGeometrySource, CustomVectorSource, GeoJSONOptions, GeoJSONSource, TileDataFormat, TileSource,
+    custom_vector_source,
 };
 use mln_style::{Style, TransitionOptions};
+use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
@@ -370,36 +371,16 @@ fn require_new_source(style: &Style, id: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn tile_source(source: &dyn Source) -> Option<&TileSource> {
-    let any: &dyn Any = source;
-    if let Some(vector) = any.downcast_ref::<VectorSource>() {
-        Some(vector.tile_source())
-    } else if let Some(raster) = any.downcast_ref::<RasterSource>() {
-        Some(raster.tile_source())
-    } else {
-        any.downcast_ref::<RasterDEMSource>().map(RasterDEMSource::tile_source)
+fn source_kind(source: &dyn Source) -> SourceKind {
+    match source.get_type() {
+        SourceType::Vector => SourceKind::Vector,
+        SourceType::Raster => SourceKind::Raster,
+        SourceType::RasterDEM => SourceKind::RasterDem,
+        SourceType::GeoJSON => SourceKind::GeoJson,
+        SourceType::Image => SourceKind::Image,
+        SourceType::CustomVector => SourceKind::CustomGeometry,
+        SourceType::CustomMVTVector => SourceKind::CustomVector,
     }
-}
-
-fn source_kind(source: &dyn Source) -> Option<SourceKind> {
-    let any: &dyn Any = source;
-    Some(if any.is::<VectorSource>() {
-        SourceKind::Vector
-    } else if any.is::<RasterSource>() {
-        SourceKind::Raster
-    } else if any.is::<RasterDEMSource>() {
-        SourceKind::RasterDem
-    } else if any.is::<GeoJSONSource>() {
-        SourceKind::GeoJson
-    } else if any.is::<ImageSource>() {
-        SourceKind::Image
-    } else if any.is::<CustomGeometrySource>() {
-        SourceKind::CustomGeometry
-    } else if any.is::<CustomVectorSource>() {
-        SourceKind::CustomVector
-    } else {
-        return None;
-    })
 }
 
 /// The `clusterProperties` of `options` as a JSON object.
@@ -418,10 +399,10 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
     Some(serde_json::Value::Object(members).to_string())
 }
 
-fn source_info(source: &dyn Source) -> Option<SourceInfo> {
-    let kind = source_kind(source)?;
+fn source_info(source: &dyn Source) -> SourceInfo {
+    let kind = source_kind(source);
     let any: &dyn Any = source;
-    let url = if let Some(tiles) = tile_source(source) {
+    let url = if let Some(tiles) = any.downcast_ref::<TileSource>() {
         tiles.get_url()
     } else if let Some(geojson) = any.downcast_ref::<GeoJSONSource>() {
         geojson.get_url()
@@ -441,13 +422,12 @@ fn source_info(source: &dyn Source) -> Option<SourceInfo> {
         vector_encoding: None,
         geojson,
     };
-    if let Some(tile_source) = tile_source(source) {
+    if let Some(tile_source) = any.downcast_ref::<TileSource>() {
         info.tile_size = Some(tile_source.get_tile_size());
-        info.vector_encoding = any.downcast_ref::<VectorSource>().map(VectorSource::get_encoding);
-        if let UrlOrTileset::Tileset(tileset) = tile_source.get_url_or_tileset() {
-            info.vector_encoding = tileset.vector_encoding.or(info.vector_encoding);
+        info.vector_encoding = (kind == SourceKind::Vector).then(|| tile_source.get_vector_encoding());
+        if let Some(tileset) = tile_source.inline_tileset() {
             info.tiles = Some(SourceTiles {
-                urls: tileset.tiles.clone(),
+                urls: tileset.tiles,
                 zoom_range: tileset.zoom_range,
                 scheme: tileset.scheme,
                 bounds: tileset.bounds,
@@ -456,7 +436,7 @@ fn source_info(source: &dyn Source) -> Option<SourceInfo> {
             });
         }
     }
-    Some(info)
+    info
 }
 
 fn layer_info(layer: &dyn mln_style::Layer) -> LayerInfo {
@@ -549,12 +529,12 @@ impl Map {
     /// A source of the style, or `None` when the style has no such source.
     pub fn style_source(&self, source_id: impl Into<String>) -> Result<Completion<Option<SourceInfo>>, Error> {
         let source_id = source_id.into();
-        self.query(move |map| Ok(map.style().get_source(&source_id).and_then(source_info)))
+        self.query(move |map| Ok(map.style().get_source(&source_id).map(source_info)))
     }
 
     /// The style's sources, in style order.
     pub fn style_sources(&self) -> Result<Completion<Vec<SourceInfo>>, Error> {
-        self.query(|map| Ok(map.style().get_sources().into_iter().filter_map(source_info).collect()))
+        self.query(|map| Ok(map.style().get_sources().into_iter().map(source_info).collect()))
     }
 
     /// Sets whether a source keeps its tiles out of the persistent cache.

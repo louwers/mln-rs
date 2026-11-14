@@ -30,17 +30,16 @@ use mln_style::sources::custom_vector_source::{
 };
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource, create_geojson_data};
 use mln_style::sources::geojson_source_impl;
-use mln_style::sources::tile_source::{self, RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
+use mln_style::sources::tile_source::{self, TileSource};
 use mln_style_types::{ProjectionDefinition, SourceType};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, EventSeverity, Log, Observer as LogObserver};
-use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::{Tileset, VectorEncoding};
+use mln_util::tileset::PartialTileset;
 use parking_lot::Mutex;
 
 use crate::render_source::{self as render_source, RenderSource, RenderSourceObserver};
@@ -194,13 +193,13 @@ impl Tiled {
         vec![properties]
     }
 
-    /// The source "source" for `url_or_tileset`: raster or raster-dem with
-    /// tile size 512, or vector.
-    fn source(self, url_or_tileset: UrlOrTileset) -> Box<dyn Source> {
+    /// The source "source" for `url` and `tileset`: raster or raster-dem
+    /// with tile size 512, or vector.
+    fn source(self, url: Option<String>, tileset: PartialTileset) -> Box<dyn Source> {
         match self {
-            Tiled::Raster => Box::new(RasterSource::new("source", url_or_tileset, 512, SourceType::Raster, None, None)),
-            Tiled::RasterDEM => Box::new(RasterDEMSource::new("source", url_or_tileset, 512, None)),
-            Tiled::Vector => Box::new(VectorSource::new("source", url_or_tileset, None, None, VectorEncoding::Mapbox)),
+            Tiled::Raster => Box::new(TileSource::raster("source", url, tileset, 512)),
+            Tiled::RasterDEM => Box::new(TileSource::raster_dem("source", url, tileset, 512)),
+            Tiled::Vector => Box::new(TileSource::vector("source", url, tileset)),
         }
     }
 
@@ -213,8 +212,8 @@ impl Tiled {
     }
 }
 
-fn tiles_tileset() -> UrlOrTileset {
-    UrlOrTileset::Tileset(Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() })
+fn tiles_tileset() -> PartialTileset {
+    PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..Default::default() }
 }
 
 /// The shared body of the `<Type>Tile<Case>` tests: a source of `kind`
@@ -227,7 +226,7 @@ fn run_tile_case(
     observer: Rc<StubRenderSourceObserver>,
 ) -> SourceType {
     let layers = kind.layers();
-    let source = kind.source(tiles_tileset());
+    let source = kind.source(None, tiles_tileset());
     source.load_description(&*file_source);
 
     let mut render_source = render_source::create(&source.base_impl());
@@ -407,7 +406,7 @@ fn tile_out_of_view_keeps_loading() {
     let file_source = Arc::new(PendingTileSource::default());
     let (requested, cancelled) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.cancelled));
     let layers = Tiled::Vector.layers();
-    let source = Tiled::Vector.source(tiles_tileset());
+    let source = Tiled::Vector.source(None, tiles_tileset());
     source.load_description(&*file_source);
     let mut render_source = render_source::create(&source.base_impl());
     let fs: Arc<dyn FileSource> = file_source;
@@ -446,7 +445,7 @@ fn tile_requests_follow_the_view() {
     let file_source = Arc::new(PendingTileSource::default());
     let (requested, orders) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.orders));
     let layers = Tiled::Vector.layers();
-    let source = Tiled::Vector.source(tiles_tileset());
+    let source = Tiled::Vector.source(None, tiles_tileset());
     source.load_description(&*file_source);
     let mut render_source = render_source::create(&source.base_impl());
     let fs: Arc<dyn FileSource> = file_source;
@@ -595,7 +594,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
         }));
     }
 
-    let source = kind.source(UrlOrTileset::Url("url".to_owned()));
+    let source = kind.source(Some("url".to_owned()), PartialTileset::default());
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.load_description(&*file_source);
 
@@ -746,8 +745,7 @@ fn custom_vector_source_set_tile_data() {
 fn empty_tileset() {
     let test = SourceTest::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
-    let source =
-        VectorSource::new("source", UrlOrTileset::Tileset(Tileset::default()), None, None, VectorEncoding::Mapbox);
+    let source = TileSource::vector("source", None, PartialTileset::default());
     source.load_description(&*file_source);
     let mut render_source = render_source::create(&source.base_impl());
     let errors = observe_tile_errors(&mut *render_source);
@@ -780,7 +778,7 @@ fn empty_raster_tilesets_make_no_tiles() {
     for kind in [Tiled::Raster, Tiled::RasterDEM] {
         let test = SourceTest::new();
         let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
-        let source = kind.source(UrlOrTileset::Tileset(Tileset::default()));
+        let source = kind.source(None, PartialTileset::default());
         source.load_description(&*file_source);
         let mut render_source = render_source::create(&source.base_impl());
         let errors = observe_tile_errors(&mut *render_source);
@@ -1053,7 +1051,7 @@ fn set_max_parent_overscale_factor() {
     }
 
     let layers = Tiled::Raster.layers();
-    let source = Tiled::Raster.source(tiles_tileset());
+    let source = Tiled::Raster.source(None, tiles_tileset());
     assert_eq!(None, source.get_max_overscale_factor_for_parent_tiles());
     source::set_max_overscale_factor_for_parent_tiles(&*source, Some(3));
     assert_eq!(Some(3), source.get_max_overscale_factor_for_parent_tiles());
@@ -1112,7 +1110,7 @@ fn raster_dem_tile_rounds_covering_zoom() {
     }
 
     let layers = Tiled::RasterDEM.layers();
-    let source = Tiled::RasterDEM.source(tiles_tileset());
+    let source = Tiled::RasterDEM.source(None, tiles_tileset());
     source.load_description(&*file_source);
 
     let observer = Rc::new(StubRenderSourceObserver::default());
@@ -1168,11 +1166,15 @@ impl TurningSource {
                 Some(response)
             });
         }
-        let source = Tiled::Vector.source(UrlOrTileset::Tileset(Tileset {
-            tiles: vec!["tiles".to_owned()],
-            zoom_range: Range::new(min_zoom, 14),
-            ..Default::default()
-        }));
+        let source = Tiled::Vector.source(
+            None,
+            PartialTileset {
+                tiles: Some(vec!["tiles".to_owned()]),
+                min_zoom: Some(min_zoom),
+                max_zoom: Some(14),
+                ..Default::default()
+            },
+        );
         source.load_description(&*file_source);
         let render_source = RenderVectorSource::new(source::downcast_arc::<tile_source::Impl>(&source.base_impl()));
         TurningSource {
