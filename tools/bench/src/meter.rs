@@ -128,7 +128,7 @@ pub(crate) fn process_counters() -> Option<Counters> {
         .then_some(Counters { instructions: info.ri_instructions, cycles: info.ri_cycles })
 }
 
-/// Opens the counters of [`process_counters`] where they count only the
+/// Opens the counters of `process_counters` where they count only the
 /// threads that start after them, as on Linux, so that `main` calls it
 /// before any thread starts; elsewhere it does nothing.
 pub fn start_counters() {
