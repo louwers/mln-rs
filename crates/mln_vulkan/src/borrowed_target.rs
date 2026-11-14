@@ -72,9 +72,17 @@ impl BorrowedImages {
     /// images that go to the foreign queue family on a device without
     /// `VK_EXT_queue_family_foreign`, or depth images of a format that the
     /// device draws no depth into, and with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for depth images
-    /// that aren't one for each image.
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a size
+    /// that is zero or larger than the device's largest image, or for depth
+    /// images that aren't one for each image.
     pub fn check(&self, device: &Device) -> Result<(), Error> {
+        let max = device.shared.properties().limits.max_image_dimension2_d;
+        let Size { width, height } = self.size;
+        if width == 0 || height == 0 || width > max || height > max {
+            return Err(Error::invalid_argument(format!(
+                "a ring's images of {width}x{height}, where the Vulkan device's are 1 to {max} on a side"
+            )));
+        }
         if self.owner == ImageOwner::Foreign && !device.features().foreign_queue_family {
             return Err(Error::unsupported("the Vulkan device has no foreign queue family"));
         }
@@ -97,7 +105,7 @@ impl BorrowedImages {
 
 /// The ring's images as textures of the backend's `Gpu`, with their depth
 /// and stencil attachments: the host's, or one of the target's own.
-struct Imports {
+pub(crate) struct Imports {
     backend: Rc<RendererBackend>,
     size: Size,
     targets: TargetFormats,
@@ -113,27 +121,27 @@ impl Imports {
     /// format the `Gpu` has no texture of, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when it can't make the
     /// depth and stencil texture.
-    fn new(backend: &Rc<RendererBackend>, images: &BorrowedImages) -> Result<Imports, Error> {
+    pub(crate) fn new(backend: &Rc<RendererBackend>, images: &BorrowedImages) -> Result<Imports, Error> {
         let release_to = match images.owner {
             ImageOwner::GraphicsQueue => None,
             ImageOwner::External => Some(vk::QUEUE_FAMILY_EXTERNAL),
             ImageOwner::Foreign => Some(vk::QUEUE_FAMILY_FOREIGN_EXT),
         };
-        let mut gpu = backend.gpu();
-        let color_format = gpu
-            .texture_format(images.format)
-            .ok_or_else(|| Error::unsupported(format!("the Vulkan target draws into no {:?}", images.format)))?;
+        // Made before the borrow of the `Gpu`, which then ends first where
+        // an error drops the imports, whose drop borrows it again.
         let mut imports = Imports {
             backend: Rc::clone(backend),
             size: images.size,
-            targets: TargetFormats {
-                color: Some(color_format),
-                depth_stencil: Some(TextureFormat::Depth24PlusStencil8),
-            },
+            targets: TargetFormats { color: None, depth_stencil: Some(TextureFormat::Depth24PlusStencil8) },
             color: Vec::new(),
             depth: Vec::new(),
             own_depth: None,
         };
+        let mut gpu = backend.gpu();
+        imports.targets.color = Some(
+            gpu.texture_format(images.format)
+                .ok_or_else(|| Error::unsupported(format!("the Vulkan target draws into no {:?}", images.format)))?,
+        );
         let attachment = TextureUsage { sampled: false, render_target: true, copy_src: false };
         let import = |gpu: &mut crate::gpu::VulkanGpu, image: &BorrowedImage, format, layout| {
             gpu.import_image(&ImportedImage {
@@ -521,8 +529,9 @@ impl BorrowedTarget {
     /// Draws into `images` from now on, which must have as many images, and
     /// the format, final layout and owner of the ring's.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
-    /// another number of images, with
+    /// Fails as [`BorrowedImages::check`] does, with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for another
+    /// number of images, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another format,
     /// final layout or owner, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan call fails.

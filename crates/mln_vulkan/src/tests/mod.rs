@@ -11,3 +11,6 @@ mod gpu_test;
 // A library device logs the GPU it is on, as maplibre-native-ffi's graphics
 // devices do.
 mod log_test;
+// A borrowed ring's checks of its images, and what its construction leaves
+// behind when it fails.
+mod borrowed_target_test;
