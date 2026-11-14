@@ -1,10 +1,10 @@
 // Differences from C++:
-// - C++ records every upload into the frame's command buffer. The port does
-//   too between a frame's passes; an upload outside a frame or inside a
-//   render pass, where Vulkan allows no copies, goes through a command
-//   buffer of its own, submitted at once (`Context::record_upload`).
-// - Reading an attachment back leaves it in the layout it is sampled in;
-//   C++ leaves it in the transfer layout.
+// - C++ records every upload into the frame's command buffer. The port
+//   records it into a command buffer of its own, which the context's `Gpu`
+//   submits at once, after the work submitted before it
+//   (`Context::record_upload`).
+// - Only textures that shaders sample are made: the renderer's attachments
+//   are `Gpu` textures.
 // - A sampler configuration is new when any of its fields changes; C++
 //   compares the filter and the wrap modes.
 // - The memory comes from gpu-allocator, as the buffers' does
@@ -18,7 +18,6 @@ use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme};
 use mln_gfx::context::Context as _;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
-use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -121,12 +120,6 @@ impl ImageAllocation {
     pub(crate) fn image_view(&self) -> vk::ImageView {
         self.image_view
     }
-
-    /// The image's memory, if the CPU can read it.
-    #[must_use]
-    pub(crate) fn mapped_ptr(&self) -> Option<*const u8> {
-        self.allocation.as_ref()?.mapped_ptr().map(|p| p.as_ptr().cast::<u8>().cast_const())
-    }
 }
 
 impl Drop for ImageAllocation {
@@ -146,17 +139,8 @@ impl Drop for ImageAllocation {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Texture2DUsage {
-    ShaderInput,
-    Attachment,
-    Read,
-    Blit,
-}
-
-/// A texture of the context itself, outside its `Gpu`: the placeholder that
-/// unbound texture slots read, the copy that frames are read back from, and
-/// the textures of an overlay (`OverlayTarget`).
+/// A texture of the context itself, outside its `Gpu`, that shaders sample:
+/// an overlay's (`OverlayTarget`).
 pub struct Texture2D {
     context: Weak<Context>,
     backend: Rc<BackendImpl>,
@@ -169,8 +153,6 @@ pub struct Texture2D {
     image_allocation: Option<Rc<ImageAllocation>>,
     image_layout: vk::ImageLayout,
     sampler: vk::Sampler,
-    /// The id of `sampler` (`unique_id`).
-    texture_usage: Texture2DUsage,
 }
 
 const COLOR_LAYER: vk::ImageSubresourceLayers = vk::ImageSubresourceLayers {
@@ -238,13 +220,7 @@ impl Texture2D {
             image_allocation: None,
             image_layout: vk::ImageLayout::UNDEFINED,
             sampler: vk::Sampler::null(),
-            texture_usage: Texture2DUsage::ShaderInput,
         }
-    }
-
-    pub(crate) fn set_usage(&mut self, value: Texture2DUsage) {
-        self.texture_usage = value;
-        self.texture_dirty = true;
     }
 
     #[must_use]
@@ -318,23 +294,8 @@ impl Texture2D {
         self.destroy_texture();
 
         let format = self.get_vulkan_format();
-        let (mut image_usage, image_tiling) = match self.texture_usage {
-            Texture2DUsage::ShaderInput => {
-                (vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED, vk::ImageTiling::OPTIMAL)
-            }
-            Texture2DUsage::Attachment => (
-                vk::ImageUsageFlags::COLOR_ATTACHMENT
-                    | vk::ImageUsageFlags::SAMPLED
-                    | vk::ImageUsageFlags::TRANSFER_SRC,
-                vk::ImageTiling::OPTIMAL,
-            ),
-            Texture2DUsage::Read => (vk::ImageUsageFlags::TRANSFER_DST, vk::ImageTiling::LINEAR),
-            Texture2DUsage::Blit => (
-                vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC,
-                vk::ImageTiling::LINEAR,
-            ),
-        };
-        if self.texture_usage == Texture2DUsage::ShaderInput && self.sampler_state.mipmapped {
+        let mut image_usage = vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED;
+        if self.sampler_state.mipmapped {
             image_usage |= vk::ImageUsageFlags::TRANSFER_SRC;
         }
         let mip_levels = self.get_mip_levels();
@@ -345,13 +306,13 @@ impl Texture2D {
             .mip_levels(mip_levels)
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
-            .tiling(image_tiling)
+            .tiling(vk::ImageTiling::OPTIMAL)
             .usage(image_usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
-        let location =
-            if self.texture_usage == Texture2DUsage::Read { MemoryLocation::GpuToCpu } else { MemoryLocation::GpuOnly };
-        let Some(mut allocation) = ImageAllocation::create(&self.backend, &image_info, location, "texture") else {
+        let Some(mut allocation) =
+            ImageAllocation::create(&self.backend, &image_info, MemoryLocation::GpuOnly, "texture")
+        else {
             Log::error(Event::Render, "Vulkan texture allocation failed");
             return;
         };
@@ -368,21 +329,13 @@ impl Texture2D {
         } else {
             vk::ComponentMapping::default()
         };
-        if self.texture_usage != Texture2DUsage::Read
-            && !allocation.create_view(format, image_swizzle, vk::ImageAspectFlags::COLOR, mip_levels)
-        {
+        if !allocation.create_view(format, image_swizzle, vk::ImageAspectFlags::COLOR, mip_levels) {
             Log::error(Event::Render, "Vulkan texture view creation failed");
             return;
         }
         self.image_allocation = Some(Rc::new(allocation));
 
-        // If the image is used as an attachment, its layout is managed by
-        // the render pass.
-        self.image_layout = if self.texture_usage == Texture2DUsage::Attachment {
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
-        } else {
-            vk::ImageLayout::UNDEFINED
-        };
+        self.image_layout = vk::ImageLayout::UNDEFINED;
 
         if let Some(context) = self.context.upgrade() {
             let mut stats = context.rendering_stats();
@@ -523,23 +476,6 @@ impl Texture2D {
         self.image_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
     }
 
-    fn transition_to_general_layout(&mut self, command_buffer: vk::CommandBuffer) {
-        let Some(allocation) = &self.image_allocation else {
-            return;
-        };
-        debug_assert_eq!(self.image_layout, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
-        transition_image(
-            self.backend.get_device(),
-            command_buffer,
-            allocation.image(),
-            color_range(0, 1),
-            (self.image_layout, vk::ImageLayout::GENERAL),
-            (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::MEMORY_READ),
-            (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::TRANSFER),
-        );
-        self.image_layout = vk::ImageLayout::GENERAL;
-    }
-
     /// Blits each mip level from the one above.
     fn generate_mips(&mut self, command_buffer: vk::CommandBuffer) {
         let mip_levels = self.get_mip_levels();
@@ -629,187 +565,11 @@ impl Texture2D {
             );
         }
 
-        if self.sampler_state.mipmapped && self.texture_usage == Texture2DUsage::ShaderInput {
+        if self.sampler_state.mipmapped {
             self.generate_mips(command_buffer);
-        } else if self.texture_usage == Texture2DUsage::Blit {
-            self.transition_to_transfer_read_layout(command_buffer);
         } else {
             self.transition_to_shader_read_layout(command_buffer);
         }
-    }
-
-    /// Records a copy of `image`, in the transfer source layout, into this
-    /// texture.
-    pub(crate) fn copy_image(
-        &mut self,
-        image: vk::Image,
-        image_size: Size,
-        x_offset: u16,
-        y_offset: u16,
-        command_buffer: vk::CommandBuffer,
-    ) {
-        if image == vk::Image::null() {
-            return;
-        }
-        self.create();
-        let Some(target) = self.image_allocation.as_ref().map(|allocation| allocation.image()) else {
-            return;
-        };
-        let copy_info = vk::ImageCopy::default()
-            .src_subresource(COLOR_LAYER)
-            .dst_subresource(COLOR_LAYER)
-            .extent(vk::Extent3D { width: image_size.width, height: image_size.height, depth: 1 })
-            .dst_offset(vk::Offset3D { x: i32::from(x_offset), y: i32::from(y_offset), z: 0 });
-        self.transition_to_transfer_write_layout(command_buffer);
-        // SAFETY: both images are in the layouts named, and the region is
-        // within both.
-        unsafe {
-            self.backend.get_device().cmd_copy_image(
-                command_buffer,
-                image,
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                target,
-                self.image_layout,
-                &[copy_info],
-            );
-        }
-        self.transition_to_general_layout(command_buffer);
-    }
-
-    /// `copy_image` with a blit, which converts between the images' formats.
-    pub(crate) fn blit_image(
-        &mut self,
-        image: vk::Image,
-        image_size: Size,
-        x_offset: u16,
-        y_offset: u16,
-        command_buffer: vk::CommandBuffer,
-    ) {
-        if image == vk::Image::null() {
-            return;
-        }
-        self.create();
-        let Some(target) = self.image_allocation.as_ref().map(|allocation| allocation.image()) else {
-            return;
-        };
-        let offsets = [
-            vk::Offset3D { x: i32::from(x_offset), y: i32::from(y_offset), z: 0 },
-            vk::Offset3D { x: image_size.width as i32, y: image_size.height as i32, z: 1 },
-        ];
-        let blit_info = vk::ImageBlit::default()
-            .src_offsets(offsets)
-            .dst_offsets(offsets)
-            .src_subresource(COLOR_LAYER)
-            .dst_subresource(COLOR_LAYER);
-        self.transition_to_transfer_write_layout(command_buffer);
-        // SAFETY: as in `copy_image`.
-        unsafe {
-            self.backend.get_device().cmd_blit_image(
-                command_buffer,
-                image,
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                target,
-                self.image_layout,
-                &[blit_info],
-                vk::Filter::NEAREST,
-            );
-        }
-        self.transition_to_general_layout(command_buffer);
-    }
-
-    /// Reads the pixels of a texture made to be read (`Texture2DUsage::Read`)
-    /// or rendered to (`Attachment`).
-    pub(crate) fn read_image(&mut self) -> Option<PremultipliedImage> {
-        let allocation = self.image_allocation.clone()?;
-        let image_size = self.get_data_size();
-        let row_size = self.size.width as usize * self.get_pixel_stride();
-        let mut data = vec![0u8; image_size];
-
-        match self.texture_usage {
-            Texture2DUsage::Attachment => {
-                // For optimal tiling, we need to copy to a staging buffer
-                // first.
-                let context = self.context.upgrade()?;
-                let Some(staging) = BufferAllocation::create(
-                    &self.backend,
-                    image_size,
-                    vk::BufferUsageFlags::TRANSFER_DST,
-                    MemoryLocation::GpuToCpu,
-                    "texture read",
-                )
-                .filter(|staging| !staging.mapped_buffer().is_null()) else {
-                    Log::error(Event::Render, "Vulkan readImage staging buffer allocation failed");
-                    return None;
-                };
-                let device = self.backend.get_device();
-                let layout = self.image_layout;
-                context.submit_one_time_command(|command_buffer| {
-                    // Transition image layout for reading.
-                    transition_image(
-                        device,
-                        command_buffer,
-                        allocation.image(),
-                        color_range(0, 1),
-                        (layout, vk::ImageLayout::TRANSFER_SRC_OPTIMAL),
-                        (vk::AccessFlags::COLOR_ATTACHMENT_WRITE, vk::AccessFlags::TRANSFER_READ),
-                        (vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, vk::PipelineStageFlags::TRANSFER),
-                    );
-                    let region = vk::BufferImageCopy::default()
-                        .image_subresource(COLOR_LAYER)
-                        .image_extent(vk::Extent3D { width: self.size.width, height: self.size.height, depth: 1 });
-                    // SAFETY: the image is in the transfer source layout and
-                    // the buffer holds its pixels.
-                    unsafe {
-                        device.cmd_copy_image_to_buffer(
-                            command_buffer,
-                            allocation.image(),
-                            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                            staging.buffer(),
-                            &[region],
-                        );
-                    }
-                    transition_image(
-                        device,
-                        command_buffer,
-                        allocation.image(),
-                        color_range(0, 1),
-                        (vk::ImageLayout::TRANSFER_SRC_OPTIMAL, layout),
-                        (vk::AccessFlags::TRANSFER_READ, vk::AccessFlags::SHADER_READ),
-                        (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::FRAGMENT_SHADER),
-                    );
-                });
-                // SAFETY: the staging buffer is `image_size` bytes of mapped
-                // memory, which the finished copy wrote.
-                data.copy_from_slice(unsafe { std::slice::from_raw_parts(staging.mapped_buffer(), image_size) });
-            }
-            Texture2DUsage::Read => {
-                // For linear tiling (Read usage), use direct memory mapping.
-                let mapped = allocation.mapped_ptr()?;
-                // SAFETY: the image is live and has the color aspect.
-                let layout = unsafe {
-                    self.backend.get_device().get_image_subresource_layout(
-                        allocation.image(),
-                        vk::ImageSubresource { aspect_mask: vk::ImageAspectFlags::COLOR, mip_level: 0, array_layer: 0 },
-                    )
-                };
-                for (i, row) in data.chunks_exact_mut(row_size.max(1)).enumerate() {
-                    // SAFETY: the layout gives where each row of the image
-                    // starts in its mapped memory, `row_size` bytes long.
-                    row.copy_from_slice(unsafe {
-                        std::slice::from_raw_parts(
-                            mapped.add(layout.offset as usize + layout.row_pitch as usize * i),
-                            row_size,
-                        )
-                    });
-                }
-            }
-            _ => {
-                // not readable
-                debug_assert!(false, "texture is not readable");
-                return None;
-            }
-        }
-        Some(PremultipliedImage::from_vec(self.size, data))
     }
 }
 

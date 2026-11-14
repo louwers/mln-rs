@@ -29,15 +29,13 @@ use std::sync::Arc;
 
 use ash::vk;
 use mln_gfx::Window;
-use mln_gfx::command_encoder::CommandEncoder;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use crate::context::Context;
 use crate::device::Device;
-use crate::draw_target::{DrawTarget, TargetResource as _};
 use crate::renderer_backend::{RendererBackend, SurfaceProvider};
 use crate::surface_resource::SurfaceResource;
 use crate::window::WindowSurface;
@@ -59,16 +57,15 @@ impl HostSurface {
 }
 
 /// Port-only: what an overlay draws with (`SurfaceTarget::set_overlay`):
-/// the frame's command buffer, inside a render pass over the frame's image
-/// that keeps what the map drew.
+/// a command buffer of its own, inside a render pass over the frame's image
+/// that keeps what the map drew, submitted after the frame's commands.
 pub struct OverlayTarget<'a> {
-    /// The backend's context, for the overlay's buffers and textures. The
-    /// frame is in a render pass, so a texture uploaded now is uploaded
-    /// before the frame's commands run.
+    /// The backend's context, for the overlay's buffers and textures. A
+    /// texture uploaded now is uploaded before the overlay's commands run.
     pub context: &'a Context,
     pub device: &'a ash::Device,
-    /// The frame's command buffer, which the overlay records its draws
-    /// into. What they use must live until the frame is done
+    /// The overlay's command buffer, which it records its draws into. What
+    /// they use must live until the commands are done
     /// (`Context::enqueue_deletion`).
     pub command_buffer: vk::CommandBuffer,
     /// The render pass the command buffer is in, for the overlay's
@@ -105,7 +102,6 @@ pub(crate) fn present_mode(cap_frame_rate: bool, available: &[vk::PresentModeKHR
 pub struct SurfaceTarget {
     backend: Rc<RendererBackend>,
     resource: Rc<SurfaceResource>,
-    image: Rc<DrawTarget>,
     size: Cell<Size>,
     /// Whether the swapchain is rebuilt before the next frame.
     rebuild: Cell<bool>,
@@ -251,10 +247,9 @@ impl SurfaceTarget {
         let resource = SurfaceResource::new(
             context,
             framebuffer_size,
-            Some(surface),
+            surface,
             provider,
             present_mode(cap_frame_rate, &present_modes),
-            /*read_every_frame=*/ false,
         );
         if !resource.has_platform_surface() {
             return Err(Error::native("The window has no Vulkan surface"));
@@ -263,11 +258,9 @@ impl SurfaceTarget {
         if resource.get_image_count() == 0 && framebuffer_size.width > 0 && framebuffer_size.height > 0 {
             return Err(Error::native("Failed to create a swapchain for the window"));
         }
-        let image = Rc::new(DrawTarget::new(framebuffer_size, Rc::<SurfaceResource>::clone(&resource)));
         Ok(SurfaceTarget {
             backend,
             resource,
-            image,
             size: Cell::new(framebuffer_size),
             rebuild: Cell::new(false),
             readback_requested: Cell::new(false),
@@ -289,7 +282,6 @@ impl SurfaceTarget {
     /// where the window system gives it one.
     pub fn resize(&self, size: Size) {
         self.size.set(size);
-        self.image.set_size(size);
         if size.width == 0 || size.height == 0 {
             return;
         }
@@ -306,18 +298,18 @@ impl SurfaceTarget {
     /// Port-only: copy the frame being drawn, or else the next one, when it
     /// is presented (see `take_readback`).
     pub fn request_readback(&self) {
-        self.resource.queue_surface_read();
+        self.resource.request_read();
         self.readback_requested.set(true);
     }
 
     /// Port-only: the frame copied after `request_readback`, once
     /// presented, with what the overlay drew over it.
     pub fn take_readback(&self) -> Option<PremultipliedImage> {
-        if !self.readback_requested.get() || self.resource.is_surface_read_queued() {
+        if !self.readback_requested.get() || self.resource.is_read_requested() {
             return None;
         }
         self.readback_requested.set(false);
-        self.resource.read_image()
+        self.resource.read_image(self.backend.vulkan_context())
     }
 
     /// Port-only: draws `overlay` over each frame from now on, after the
@@ -334,12 +326,11 @@ fn is_empty(extent: vk::Extent2D) -> bool {
 }
 
 impl FrameTarget for SurfaceTarget {
-    /// The frame's image is acquired when the frame begins
-    /// (`Context::begin_frame`). No frame is drawn into an empty
+    /// Acquires the frame's image. No frame is drawn into an empty
     /// framebuffer. A swapchain that couldn't be made, as for a surface of
     /// an empty extent, such as a minimized window's, is made again before
     /// the frame, once the surface has an extent.
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
+    fn begin_frame(&self) -> Option<FrameImage> {
         let size = self.size.get();
         if size.width == 0 || size.height == 0 {
             return None;
@@ -348,16 +339,16 @@ impl FrameTarget for SurfaceTarget {
         if unbuilt && self.resource.current_extent().is_some_and(is_empty) {
             return None;
         }
-        let context = self.backend.vulkan_context();
-        context.set_surface(&self.resource);
         if self.rebuild.take() || unbuilt {
-            context.request_surface_update(false);
+            self.resource.request_surface_update(false);
         }
-        Some(Rc::<DrawTarget>::clone(&self.image))
+        self.resource.begin_frame(self.backend.vulkan_context())
     }
 
-    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
-        if self.resource.swap() { Handoff::Presented } else { Handoff::Dropped }
+    /// Draws the overlay over the frame, reads it back if asked, and
+    /// presents it.
+    fn end_frame(&self) -> Handoff {
+        if self.resource.end_frame(self.backend.vulkan_context()) { Handoff::Presented } else { Handoff::Dropped }
     }
 }
 

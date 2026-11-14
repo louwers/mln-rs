@@ -42,13 +42,12 @@ use objc2_metal::{
 use parking_lot::{Condvar, Mutex};
 
 use crate::Device;
-use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass};
+use crate::custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
 use crate::mtl_fwd::{
     MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLFunctionPtr, MTLRenderCommandEncoderPtr,
     MTLRenderPipelineStatePtr, MTLSamplerStatePtr, MTLTexturePtr, MTLVertexDescriptorPtr,
 };
 use crate::readback::{buffer_bytes, encode_region_copy};
-use crate::render_pass::AttachmentFormats;
 use crate::shaders::msl_sources::PRELUDE;
 use crate::shaders::shader_source::{ShaderSource, shader_source};
 
@@ -486,9 +485,33 @@ impl MetalGpu {
         result
     }
 
-    /// The Metal texture of `texture`.
-    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<&ProtocolObject<dyn MTLTexture>> {
-        self.textures.get(texture).map(|texture| &*texture.texture)
+    /// Commits a command buffer, after the writes made so far, that `encode`
+    /// encodes native commands into, such as an overlay's. It keeps what its
+    /// commands use alive.
+    pub(crate) fn submit_native(
+        &mut self,
+        encode: impl FnOnce(&ProtocolObject<dyn MTLCommandBuffer>),
+    ) -> Result<(), GpuError> {
+        autoreleasepool(|_| {
+            self.commit(true, |_, command_buffer| {
+                encode(command_buffer);
+                Ok(())
+            })
+        })
+    }
+
+    /// Drops what `texture` still waits for, which no submit takes now.
+    pub(crate) fn forget_waits(&mut self, texture: TextureId) {
+        if let Some(texture) = self.textures.get_mut(texture) {
+            texture.waits.clear();
+        }
+    }
+
+    /// Has the next submit wait for what `texture` still waits for
+    /// ([`wait_before_using`](Self::wait_before_using)), as when nothing of
+    /// a frame used it.
+    pub(crate) fn take_waits_into_next_submit(&mut self, texture: TextureId) {
+        self.take_waits([texture]);
     }
 
     fn buffer(&self, id: BufferId) -> Result<&ProtocolObject<dyn MTLBuffer>, GpuError> {
@@ -694,34 +717,6 @@ impl MetalGpu {
             .ok_or_else(|| GpuError::Invalid(format!("{}: Metal made no render encoder", pass.label)))?;
         encoder.setLabel(Some(&NSString::from_str(&pass.label)));
         Ok((encoder, size))
-    }
-
-    /// Encodes `commands` into `encoder`, whose attachments have `size` and
-    /// `targets`, as the commands of a pass of their own.
-    ///
-    /// The old frame submission encodes the renderer's commands into the
-    /// render command encoder it has open with this, until frames go through
-    /// [`Gpu::submit`].
-    pub(crate) fn encode_into(
-        &self,
-        encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
-        (width, height): (usize, usize),
-        targets: TargetFormats,
-        commands: &[RenderCommand],
-    ) -> Result<(), GpuError> {
-        validation::check_commands(self, "render pass", targets, commands)?;
-        encoder.setViewport(MTLViewport {
-            originX: 0.0,
-            originY: 0.0,
-            width: width as f64,
-            height: height as f64,
-            znear: 0.0,
-            zfar: 1.0,
-        });
-        encoder.setScissorRect(MTLScissorRect { x: 0, y: 0, width, height });
-        encoder.setStencilReferenceValue(0);
-        encoder.setBlendColorRed_green_blue_alpha(0.0, 0.0, 0.0, 0.0);
-        self.encode_commands(encoder, "render pass", commands, (width, height))
     }
 
     /// Encodes `commands`, which the shared validation passed, into an

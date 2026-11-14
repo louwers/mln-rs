@@ -4,9 +4,10 @@
 //   final projection, whose depth range depends on how many layer groups the
 //   frame has.
 // - The layer group is of a kind of its own, whose `render` lends the
-//   backend's live pass to the host (`gfx::RenderPass::lend_to_custom_layer`).
+//   frame's pass to the host (`PaintParameters::lend_pass`, through
+//   `Gpu::lend_to_custom_layer`).
 // - A host that drew is told the renderer stopped once the layer leaves it,
-//   after the GPU finished the host's work (`gfx::Context::finish`), or that
+//   after the GPU finished the host's work (`Gpu::finish`), or that
 //   its graphics objects are lost (`Renderer::lose_custom_layers`).
 
 use std::cell::{Cell, RefCell};
@@ -23,6 +24,7 @@ use mln_style::layers::{
     CustomLayerRenderParameters,
 };
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_util::logging::{Event, Log};
 
 use crate::change_request::UniqueChangeRequestVec;
 use crate::layer_group::{LayerGroup, LayerGroupKind};
@@ -61,8 +63,11 @@ impl Shared {
         if lost {
             host.context_lost();
         } else {
-            if let Some(context) = context {
-                context.finish();
+            // The host frees what it drew with once the GPU is done with it.
+            if let Some(context) = context
+                && let Err(error) = context.gpu().finish()
+            {
+                Log::error(Event::Render, format!("Waiting for a custom layer's frames failed: {error}"));
             }
             host.deinitialize();
         }
@@ -161,19 +166,19 @@ impl RenderLayer for RenderCustomLayer {
         }
     }
 
-    fn prerender(&mut self, parameters: &PaintParameters<'_>, target: &dyn mln_gfx::DrawTarget) {
+    fn prerender(&mut self, parameters: &PaintParameters<'_>) {
         let Some(frame) = parameters.custom_layer_frame else {
             return;
         };
         self.shared.frame.set(Some(frame));
         self.shared.context.replace(Some(Rc::clone(parameters.backend.get_context_ptr())));
         let Some(host) = self.shared.host() else { return };
-        let Some(encoder) = parameters.encoder.as_deref() else { return };
-        let lent = encoder.lend_to_custom_layer(target, &mut |encoder| {
+        let lent = parameters.context.gpu().lend_to_custom_layer(None, &mut |encoder| {
             host.prerender(&mut CustomLayerPrerenderParameters { encoder, frame: &frame });
         });
-        if lent {
-            self.shared.used.set(true);
+        match lent {
+            Ok(()) => self.shared.used.set(true),
+            Err(error) => Log::error(Event::Render, format!("Lending a custom layer the commands failed: {error}")),
         }
     }
 
@@ -193,17 +198,20 @@ impl CustomLayerDraw {
         if parameters.pass != RenderPass::Translucent {
             return;
         }
-        let (Some(host), Some(frame), Some(render_pass)) =
-            (self.shared.host(), self.shared.frame.get(), parameters.render_pass.as_deref())
-        else {
+        let (Some(host), Some(frame)) = (self.shared.host(), self.shared.frame.get()) else {
             return;
         };
         let layer_depth = f64::from(parameters.layer_depth());
-        let lent = render_pass.lend_to_custom_layer(&mut |pass| {
+        let lent = parameters.lend_pass(&mut |pass| {
             host.render(&mut CustomLayerRenderParameters { pass, frame: &frame, layer_depth });
         });
-        if lent {
-            self.shared.used.set(true);
+        match lent {
+            Ok(lent) => {
+                if lent {
+                    self.shared.used.set(true);
+                }
+            }
+            Err(error) => Log::error(Event::Render, format!("Lending a custom layer the pass failed: {error}")),
         }
     }
 }

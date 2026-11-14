@@ -7,22 +7,22 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, Pass};
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
-use mln_gfx::{
-    BackendScope, FrameTarget, Handoff, RenderPassDescriptor, RendererBackend, ScissorRect, ScopeType, ShaderRegistry,
-};
+use mln_gfx::{BackendScope, FrameTarget, Handoff, RendererBackend, ScissorRect, ScopeType, ShaderRegistry};
 use mln_map_types::{MapDebugOptions, MapView};
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_util::Color;
+use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use crate::clip_masks::ClipMasks;
 use crate::frame_projection::{self, FrameProjection};
 use crate::layer_tweaker::to_projection_ubo;
-use crate::paint_parameters::PaintParameters;
+use crate::paint_parameters::{PaintParameters, RecordedPass};
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -336,6 +336,11 @@ impl Renderer {
 
         let image = target.begin_frame()?;
         context.begin_frame();
+        {
+            let mut stats = context.rendering_stats();
+            stats.num_draw_calls = 0;
+            stats.num_frames += 1;
+        }
 
         if self.static_data.is_none() {
             let program_parameters = ProgramParameters::new(self.pixel_ratio, false);
@@ -345,7 +350,7 @@ impl Renderer {
         let render_tree_parameters = render_tree.get_parameters();
         let static_data = self.static_data.as_mut().expect("static data");
         static_data.has_3d = render_tree_parameters.has_3d;
-        let renderable_size = image.size();
+        let renderable_size = image.size;
 
         if self.render_state == RenderState::Never {
             self.orchestrator.emit(RendererEvent::RenderMapStarted);
@@ -511,7 +516,7 @@ impl Renderer {
             height: renderable_size.height,
         });
         for item in render_tree.get_layer_render_item_map().values() {
-            item.layer.borrow_mut().prerender(&parameters, &*image);
+            item.layer.borrow_mut().prerender(&parameters);
         }
 
         // - 3D PASS -------------------------------------------------------
@@ -551,16 +556,20 @@ impl Renderer {
             } else {
                 render_tree_parameters.background_color
             };
-            let encoder = parameters.encoder.as_ref().expect("encoder");
-            parameters.render_pass = Some(encoder.create_render_pass(
-                "main buffer",
-                &RenderPassDescriptor {
-                    target: &*image,
-                    clear_color: Some(color),
-                    clear_depth: Some(1.0),
-                    clear_stencil: Some(0),
+            *parameters.recorded.borrow_mut() = Some(RecordedPass {
+                pass: Pass {
+                    label: "main buffer".to_owned(),
+                    color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(color) }),
+                    depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
+                        texture,
+                        depth: LoadOp::Clear(1.0),
+                        stencil: LoadOp::Clear(0),
+                    }),
+                    commands: Vec::new(),
                 },
-            ));
+                size: image.size,
+                targets: image.targets,
+            });
         }
 
         // drawableSkyPass
@@ -638,16 +647,15 @@ impl Renderer {
             parameters.current_layer += 1;
         }
 
-        // Ends the RenderPass
-        parameters.render_pass = None;
-
         let start_rendering = Instant::now();
-        // Ending the frame submits its commands.
-        let handoff = target.end_frame(&**parameters.encoder.as_ref().expect("encoder"));
+        if let Err(error) = parameters.submit() {
+            Log::error(Event::Render, format!("Submitting the frame failed: {error}"));
+        }
+        let handoff = target.end_frame();
         let submitted = Instant::now();
         context.rendering_stats().rendering_time = (submitted - start_rendering).as_secs_f64();
 
-        parameters.encoder = None;
+        context.destroy_released();
         context.end_frame();
         self.clip_masks = std::mem::take(&mut parameters.clip_masks);
 

@@ -1,5 +1,6 @@
-//! The Metal backend: the `mln_gfx` traits implemented on the `objc2-metal`
-//! bindings, with its shaders and render targets.
+//! The Metal backend: `MetalGpu`, the backend's `mln_gfx::gpu::Gpu`, on the
+//! `objc2-metal` bindings, with its shaders and the targets the renderer
+//! draws frames into.
 //!
 //! The C++ backend calls Metal through metal-cpp; this port makes the same
 //! calls through objc2. `NS::SharedPtr`s become `Retained` objects, and the
@@ -17,30 +18,26 @@
 #![expect(unsafe_code, reason = "Metal through objc2 is the FFI here")]
 
 pub mod borrowed_target;
-pub mod command_encoder;
 pub mod context;
 pub mod custom_layer;
 pub mod device;
-pub mod draw_target;
 pub mod exported_target;
 pub mod gpu;
 pub mod mtl_fwd;
-pub mod offscreen_target;
-pub mod offscreen_texture;
 mod readback;
-pub mod render_pass;
 pub mod renderer_backend;
 pub mod shaders;
 pub mod surface_target;
 
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, PendingReads};
-pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
+pub use custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;
 pub use exported_target::ExportedTarget;
 pub use gpu::MetalGpu;
 pub use objc2;
 pub use objc2_metal;
-pub use offscreen_target::OffscreenTarget;
+/// Frames drawn into textures of the library's and read back.
+pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
 pub use renderer_backend::RendererBackend;
 pub use surface_target::{Layer, SurfaceTarget};
 

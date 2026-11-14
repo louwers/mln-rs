@@ -2,27 +2,13 @@
 // device through `Rc<BackendImpl>`: a resource that outlives its context is
 // destroyed when dropped, instead of through the context's deletion queue.
 //
-// C++ reaches the default renderable's resource through its backend
-// (`backend.getDefaultRenderable()`); here the frame target hands its images
-// to the context when a frame begins (`set_surface`).
-//
-// Differences from C++:
-// - The render passes are the context's, one for each set of attachment
-//   formats (`get_render_pass`), where C++ makes one for each renderable
-//   resource. A pipeline is made for a render pass, so the renderables of
-//   one format share their pipelines, and a resized one keeps its own.
-// - The descriptor set layouts are the port's (`shaders::layout`), and they
-//   and the pipeline layouts are made with the context.
-// - The surface pre-rotation of Android (`GlobalPlatformParamsUBO`, the
-//   polling for a new surface transform) is not ported.
-// - `SurfaceNotReady` is not ported: acquiring a surface image waits.
-// - Errors C++ throws (a failed wait for a frame, a surface that stays out
-//   of date) are logged. A frame that acquires no image, for a swapchain or
-//   a surface that couldn't be made again, is recorded without a
-//   framebuffer for the frame target, and submitted without presenting.
+// Frames go through the context's `VulkanGpu`, and their targets acquire and
+// present their images themselves; the context keeps the descriptor set and
+// pipeline layouts the `Gpu` is made with, and what the native resources of
+// an overlay (`Texture2D`, `BufferResource`) need: uploads, and a deletion
+// queue that waits for the submits that may use them.
 
-use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::collections::HashMap;
+use std::cell::{Cell, RefCell, RefMut};
 use std::rc::{Rc, Weak};
 
 use ash::vk;
@@ -33,92 +19,25 @@ use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_util::logging::{Event, Log};
 
 use crate::buffer_resource::BufferResource;
-use crate::command_encoder::CommandEncoder;
 use crate::device::Device;
 use crate::gpu::VulkanGpu;
 use crate::renderer_backend::BackendImpl;
 use crate::shaders::layout::{DescriptorSetType, IMAGE_TEXTURE_COUNT, image_sampler_binding, image_texture_binding};
-use crate::surface_resource::SurfaceResource;
 use crate::texture2d::Texture2D;
 
-const MAXIMUM_SURFACE_UPDATE_RETRIES: u8 = 3;
-
-/// Destroys something once the frame it was last used in is done.
+/// Destroys something once the submits that may use it are done.
 pub(crate) type DeletionTask = Box<dyn FnOnce(&Context)>;
-
-/// What a frame in flight records into and waits on, and what is destroyed
-/// when it is done.
-struct FrameResources {
-    command_buffer: vk::CommandBuffer,
-    flight_frame_fence: vk::Fence,
-    deletion_queue: Vec<DeletionTask>,
-}
-
-/// The attachments a render pass is made for. Without a depth format, the
-/// pass has a color attachment only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct RenderPassKey {
-    pub(crate) color_format: vk::Format,
-    pub(crate) depth_format: Option<vk::Format>,
-    /// The layout the pass leaves the color attachment in.
-    pub(crate) color_final_layout: vk::ImageLayout,
-    /// Whether the pass draws over what the color attachment holds, which
-    /// is in `color_final_layout` when the pass begins, instead of clearing
-    /// it.
-    pub(crate) color_load: bool,
-    /// The layout the pass leaves the depth attachment in, having stored its
-    /// depth and stencil for the host, or `None` to discard them.
-    pub(crate) depth_final_layout: Option<vk::ImageLayout>,
-}
 
 pub struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
-
-    /// The `Gpu` the renderer's buffers and textures belong to. A frame's
-    /// submission comes after its writes, and the buffers the renderer
-    /// drops go after the frame's submission.
+    /// The `Gpu` the renderer's resources belong to and its frames are
+    /// submitted through.
     gpu: RefCell<VulkanGpu>,
-    render_passes: RefCell<HashMap<RenderPassKey, vk::RenderPass>>,
-
-    frame_resource_index: Cell<u8>,
-    frame_resources: RefCell<Vec<FrameResources>>,
-    /// The number of the frame being recorded, or of the last one.
-    frame_serial: Cell<u64>,
-    /// Whether the frame's command buffer is recording.
-    frame_recording: Cell<bool>,
-    /// Whether the frame's command buffer is inside a render pass.
-    render_pass_active: Cell<bool>,
-    /// Whether the frame has an image of the default renderable to draw
-    /// into: without a platform surface always, with one when it was
-    /// acquired from the swapchain.
-    frame_image_acquired: Cell<bool>,
-
-    surface: RefCell<Weak<SurfaceResource>>,
-    surface_update_requested: Cell<bool>,
-    /// The platform surface must be recreated before the swapchain is
-    /// rebuilt.
-    surface_lost: Cell<bool>,
-    surface_update_latency: Cell<i32>,
-
+    /// What to destroy once the `Gpu`'s submit of each serial has finished.
+    deletions: RefCell<Vec<(u64, DeletionTask)>>,
     destroyed: Cell<bool>,
-    /// What the next frame's submission waits on and signals, besides a
-    /// swapchain's semaphores.
-    frame_sync: RefCell<FrameSync>,
-    /// Whether the next frame waits for the work submitted to the queue
-    /// before it, at its start.
-    queue_wait: Cell<bool>,
-}
-
-/// Semaphores that a frame's submission waits on and signals, each with the
-/// value of a timeline, or zero for a binary semaphore.
-#[derive(Default)]
-struct FrameSync {
-    waits: Vec<(vk::Semaphore, u64)>,
-    signals: Vec<(vk::Semaphore, u64)>,
-    /// Whether one of them is a timeline.
-    timeline: bool,
 }
 
 pub(crate) fn build_descriptor_set_layout(
@@ -185,67 +104,17 @@ pub(crate) fn build_pipeline_layout(
 }
 impl Context {
     /// Creates the context of `backend`, or an error if the device can't make
-    /// its `Gpu` or the frames' command buffers.
+    /// its `Gpu`.
     pub(crate) fn new(backend: Rc<BackendImpl>) -> Result<Rc<Context>, String> {
         let gpu = VulkanGpu::on(Rc::clone(&backend)).map_err(|error| error.to_string())?;
-        let context = Rc::new_cyclic(|weak| Context {
+        Ok(Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
             backend,
             weak_self: Weak::clone(weak),
             gpu: RefCell::new(gpu),
-            render_passes: RefCell::new(HashMap::new()),
-            frame_resource_index: Cell::new(0),
-            frame_resources: RefCell::new(Vec::new()),
-            frame_serial: Cell::new(0),
-            frame_recording: Cell::new(false),
-            render_pass_active: Cell::new(false),
-            frame_image_acquired: Cell::new(false),
-            surface: RefCell::new(Weak::new()),
-            surface_update_requested: Cell::new(false),
-            surface_lost: Cell::new(false),
-            surface_update_latency: Cell::new(0),
+            deletions: RefCell::new(Vec::new()),
             destroyed: Cell::new(false),
-            frame_sync: RefCell::new(FrameSync::default()),
-            queue_wait: Cell::new(false),
-        });
-        // Dropping the context destroys what a failed step leaves.
-        context.init_frame_resources()?;
-        Ok(context)
-    }
-
-    /// Makes the command buffer and the fence of each frame in flight.
-    fn init_frame_resources(&self) -> Result<(), String> {
-        let backend = &self.backend;
-        let device = backend.get_device();
-        let allocate_info = vk::CommandBufferAllocateInfo::default()
-            .command_pool(backend.get_command_pool())
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(backend.get_max_frames());
-        // SAFETY: the pool is the device's, and only this thread uses it.
-        let command_buffers = unsafe { device.allocate_command_buffers(&allocate_info) }
-            .map_err(|e| format!("Failed to allocate the frames' command buffers: {e}"))?;
-        for (index, command_buffer) in command_buffers.into_iter().enumerate() {
-            let create_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
-            // SAFETY: the create info is valid for the device.
-            let flight_frame_fence = unsafe { device.create_fence(&create_info, None) }.unwrap_or_default();
-            self.frame_resources.borrow_mut().push(FrameResources {
-                command_buffer,
-                flight_frame_fence,
-                deletion_queue: Vec::new(),
-            });
-            if flight_frame_fence == vk::Fence::null() {
-                return Err("Failed to create a frame's fence".to_owned());
-            }
-            backend.set_debug_name(command_buffer, &format!("FrameCommandBuffer_{index}"));
-            backend.set_debug_name(flight_frame_fence, &format!("FrameFence_{index}"));
-        }
-
-        Ok(())
-    }
-
-    /// The owning `Rc`.
-    pub(crate) fn rc(&self) -> Rc<Context> {
-        self.weak_self.upgrade().expect("vulkan::Context used after drop")
+        }))
     }
 
     pub fn weak(&self) -> Weak<Context> {
@@ -261,18 +130,7 @@ impl Context {
         self.backend.device()
     }
 
-    /// Makes `surface` the images that frames are acquired from and
-    /// presented to, from the next frame on.
-    pub(crate) fn set_surface(&self, surface: &Rc<SurfaceResource>) {
-        let surface = Rc::downgrade(surface);
-        if !self.surface.borrow().ptr_eq(&surface) {
-            *self.surface.borrow_mut() = surface;
-            self.surface_update_requested.set(false);
-            self.surface_lost.set(false);
-        }
-    }
-
-    /// Waits for the device, runs the deletion queues and destroys what the
+    /// Waits for the device, runs the deletion queue and destroys what the
     /// context made. Called before the backend lets go of the context, and when
     /// it is dropped.
     pub(crate) fn destroy_resources(&self) {
@@ -280,78 +138,43 @@ impl Context {
             return;
         }
         self.backend.wait_idle("context shutdown");
-        self.frame_recording.set(false);
-
         *self.mutable_global_uniform_buffers() = UniformBufferArray::new();
         self.release_cached_resources();
         self.destroy_released();
-
-        // A deletion can enqueue another.
-        loop {
-            let tasks: Vec<DeletionTask> = self
-                .frame_resources
-                .borrow_mut()
-                .iter_mut()
-                .flat_map(|frame| std::mem::take(&mut frame.deletion_queue))
-                .collect();
-            if tasks.is_empty() {
-                break;
-            }
-            for task in tasks {
-                task(self);
-            }
-        }
-
-        let device = self.backend.get_device();
-        let frames = std::mem::take(&mut *self.frame_resources.borrow_mut());
-        // SAFETY: the device is idle, and nothing made from these objects
-        // is left: the deletion queues have run, and what is enqueued from
-        // here on is destroyed at once.
-        unsafe {
-            for frame in frames {
-                device.free_command_buffers(self.backend.get_command_pool(), &[frame.command_buffer]);
-                device.destroy_fence(frame.flight_frame_fence, None);
-            }
-            for (_, render_pass) in self.render_passes.borrow_mut().drain() {
-                device.destroy_render_pass(render_pass, None);
-            }
-        }
-    }
-    /// The `Gpu` the renderer's resources belong to and its draws encode
-    /// through.
-    pub(crate) fn vulkan_gpu(&self) -> Ref<'_, VulkanGpu> {
-        self.gpu.borrow()
-    }
-
-    pub(crate) fn vulkan_gpu_mut(&self) -> RefMut<'_, VulkanGpu> {
-        self.gpu.borrow_mut()
-    }
-
-    /// Runs `function` when the frame being recorded, or the last one, is
-    /// done.
-    pub fn enqueue_deletion(&self, function: DeletionTask) {
-        let index = usize::from(self.frame_resource_index.get());
-        let mut frames = self.frame_resources.borrow_mut();
-        if let Some(frame) = frames.get_mut(index) {
-            frame.deletion_queue.push(function);
-        } else {
-            drop(frames);
-            function(self);
-        }
-    }
-
-    fn run_deletion_queue(&self, index: usize) {
-        let tasks = self.frame_resources.borrow_mut().get_mut(index).map(|f| std::mem::take(&mut f.deletion_queue));
-        for task in tasks.into_iter().flatten() {
+        // A deletion can enqueue another, which runs at once.
+        let tasks = std::mem::take(&mut *self.deletions.borrow_mut());
+        for (_, task) in tasks {
             task(self);
         }
     }
 
-    fn run_deletion_queues(&self) {
-        // Not borrowed while the tasks run: they reach the frames.
-        let frame_count = self.frame_resources.borrow().len();
-        for index in 0..frame_count {
-            self.run_deletion_queue(index);
+    /// The `Gpu` the renderer's resources belong to and its frames are
+    /// submitted through.
+    pub(crate) fn vulkan_gpu_mut(&self) -> RefMut<'_, VulkanGpu> {
+        self.gpu.borrow_mut()
+    }
+
+    /// Runs `function` once the `Gpu`'s submits so far, and the next one,
+    /// which takes what is being recorded, are done.
+    pub fn enqueue_deletion(&self, function: DeletionTask) {
+        if self.destroyed.get() {
+            function(self);
+            return;
+        }
+        let serial = self.gpu.borrow().last_serial() + 1;
+        self.deletions.borrow_mut().push((serial, function));
+    }
+
+    /// Runs the deletions whose submits are done.
+    fn run_deletions(&self) {
+        let finished = self.gpu.borrow_mut().finished_serial();
+        // Not borrowed while the tasks run: they can enqueue more.
+        let (done, waiting) =
+            std::mem::take(&mut *self.deletions.borrow_mut()).into_iter().partition(|(serial, _)| *serial <= finished);
+        self.deletions.borrow_mut().extend::<Vec<_>>(waiting);
+        let done: Vec<(u64, DeletionTask)> = done;
+        for (_, task) in done {
+            task(self);
         }
     }
 
@@ -392,204 +215,24 @@ impl Context {
         }
     }
 
-    /// Records an upload's commands: into the frame's command buffer
-    /// between its passes, where they run before the passes that follow, or
-    /// else into a command buffer of their own, which is waited for.
-    /// Returns whether the commands have run.
+    /// Records an upload's commands into a command buffer that the `Gpu`
+    /// submits after the work submitted before it, or else into one of its
+    /// own, which is waited for. Returns whether the commands have run.
     pub(crate) fn record_upload(&self, function: impl FnOnce(vk::CommandBuffer)) -> bool {
-        if self.frame_recording.get() && !self.render_pass_active.get() {
-            function(self.get_command_buffer());
-            false
-        } else {
-            self.submit_one_time_command(function);
-            true
-        }
-    }
-
-    /// Tells the context that the frame's command buffer entered or left a
-    /// render pass.
-    pub(crate) fn set_render_pass_active(&self, active: bool) {
-        self.render_pass_active.set(active);
-    }
-
-    /// Whether a frame is being recorded that has an image of the default
-    /// renderable to draw into.
-    pub(crate) fn frame_has_image(&self) -> bool {
-        self.frame_recording.get() && self.frame_image_acquired.get()
-    }
-
-    /// Has the swapchain rebuilt, a few frames from now or, without
-    /// `use_delay`, before the next one.
-    pub(crate) fn request_surface_update(&self, use_delay: bool) {
-        if self.surface_update_requested.get() {
-            if !use_delay {
-                self.surface_update_latency.set(0);
+        let recording = self.gpu.borrow_mut().begin_recording();
+        let command_buffer = match recording {
+            Ok(command_buffer) => command_buffer,
+            Err(error) => {
+                Log::error(Event::Render, format!("Recording an upload failed: {error}"));
+                self.submit_one_time_command(function);
+                return true;
             }
-            return;
-        }
-        self.surface_update_requested.set(true);
-        self.surface_update_latency.set(if use_delay { self.backend.get_max_frames() as i32 * 3 } else { 0 });
-    }
-
-    fn update_surface(&self) {
-        let Some(surface) = self.surface.borrow().upgrade() else {
-            return;
         };
-        // The request stays pending if this fails, so the next frame
-        // retries it.
-        if !surface.recreate_swapchain(self.surface_lost.get()) {
-            return;
+        function(command_buffer);
+        if let Err(error) = self.gpu.borrow_mut().submit_recording(command_buffer) {
+            Log::error(Event::Render, format!("Submitting an upload failed: {error}"));
         }
-        self.surface_lost.set(false);
-
-        // We wait for an idle device to recreate the swapchain so it's a
-        // good opportunity to delete all queued items.
-        self.run_deletion_queues();
-
-        // Sync resources with swapchain.
-        self.frame_resource_index.set(0);
-        self.surface_update_requested.set(false);
-    }
-
-    /// Waits for the frame of the current frame resources. Returns false if
-    /// there is none or the wait fails.
-    pub(crate) fn wait_frame(&self) -> bool {
-        let fence = self
-            .frame_resources
-            .borrow()
-            .get(usize::from(self.frame_resource_index.get()))
-            .map(|frame| frame.flight_frame_fence);
-        // SAFETY: the fence is the device's.
-        fence
-            .is_some_and(|fence| unsafe { self.backend.get_device().wait_for_fences(&[fence], true, u64::MAX) }.is_ok())
-    }
-
-    /// Has the frame being recorded wait for `semaphore` before its commands
-    /// run: for a timeline, until it reaches `value`, and for a binary
-    /// semaphore, whose `value` is `None`, until it is signaled.
-    pub(crate) fn wait_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
-        let mut sync = self.frame_sync.borrow_mut();
-        sync.timeline |= value.is_some();
-        sync.waits.push((semaphore, value.unwrap_or(0)));
-    }
-
-    /// Has the frame being recorded signal `semaphore` once its commands
-    /// finish: a timeline with `value`, or a binary semaphore, whose `value`
-    /// is `None`.
-    pub(crate) fn signal_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
-        let mut sync = self.frame_sync.borrow_mut();
-        sync.timeline |= value.is_some();
-        sync.signals.push((semaphore, value.unwrap_or(0)));
-    }
-
-    /// Has the next frame that begins wait, before its commands run, for
-    /// every command submitted to the queue before it, such as the host's
-    /// reads of an image that the frame draws into.
-    pub(crate) fn wait_for_queue_in_next_frame(&self) {
-        self.queue_wait.set(true);
-    }
-
-    /// Ends the frame's command buffer, submits it and, with a platform
-    /// surface, presents the image.
-    pub(crate) fn submit_frame(&self) {
-        let frame_sync = std::mem::take(&mut *self.frame_sync.borrow_mut());
-        if !self.frame_recording.replace(false) {
-            return;
-        }
-        let device = self.backend.get_device();
-        let Some((command_buffer, fence)) = self
-            .frame_resources
-            .borrow()
-            .get(usize::from(self.frame_resource_index.get()))
-            .map(|frame| (frame.command_buffer, frame.flight_frame_fence))
-        else {
-            return;
-        };
-        // A frame that acquired no image has nothing to present, and no
-        // semaphore to wait for.
-        let surface = self
-            .surface
-            .borrow()
-            .upgrade()
-            .filter(|surface| surface.has_platform_surface() && self.frame_image_acquired.get());
-
-        // Submit frame commands.
-        let command_buffers = [command_buffer];
-        let frame_index = self.frame_resource_index.get();
-        let semaphores =
-            surface.as_ref().map(|s| ([s.get_acquire_semaphore(frame_index)], [s.get_present_semaphore()]));
-        let mut waits: Vec<(vk::Semaphore, u64)> = Vec::new();
-        let mut wait_stages = Vec::new();
-        let mut signals: Vec<(vk::Semaphore, u64)> = Vec::new();
-        if let Some((acquire, present)) = &semaphores {
-            waits.push((acquire[0], 0));
-            wait_stages.push(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT);
-            signals.push((present[0], 0));
-        }
-        for &wait in &frame_sync.waits {
-            waits.push(wait);
-            wait_stages.push(vk::PipelineStageFlags::ALL_COMMANDS);
-        }
-        signals.extend(frame_sync.signals.iter().copied());
-        let wait_semaphores: Vec<vk::Semaphore> = waits.iter().map(|(semaphore, _)| *semaphore).collect();
-        let wait_values: Vec<u64> = waits.iter().map(|(_, value)| *value).collect();
-        let signal_semaphores: Vec<vk::Semaphore> = signals.iter().map(|(semaphore, _)| *semaphore).collect();
-        let signal_values: Vec<u64> = signals.iter().map(|(_, value)| *value).collect();
-        let mut timeline_info = vk::TimelineSemaphoreSubmitInfo::default()
-            .wait_semaphore_values(&wait_values)
-            .signal_semaphore_values(&signal_values);
-        let mut submit_info = vk::SubmitInfo::default()
-            .command_buffers(&command_buffers)
-            .wait_semaphores(&wait_semaphores)
-            .wait_dst_stage_mask(&wait_stages)
-            .signal_semaphores(&signal_semaphores);
-        // A timeline semaphore needs its value, even zero.
-        if frame_sync.timeline {
-            submit_info = submit_info.push_next(&mut timeline_info);
-        }
-        // SAFETY: the command buffer is recording and complete, the fence
-        // was waited for when the frame began, and the semaphores are the
-        // acquired image's.
-        unsafe {
-            if device.end_command_buffer(command_buffer).is_err() {
-                Log::error(Event::Render, "Ending the frame's command buffer failed");
-            }
-            if device.reset_fences(&[fence]).is_err() {
-                Log::error(Event::Render, "Reset fence failed");
-            }
-            // The writes the frame's commands read go first.
-            if let Err(error) = self.gpu.borrow_mut().submit(&[]) {
-                Log::error(Event::Render, format!("Submitting the frame's writes failed: {error}"));
-            }
-            if self.backend.submit(&[submit_info], fence).is_err() {
-                Log::error(Event::Render, "Submitting the frame failed");
-            }
-        }
-        self.destroy_released();
-
-        // Present rendered frame.
-        if let (Some(surface), Some((_, present))) = (&surface, &semaphores) {
-            let swapchains = [surface.get_swapchain()];
-            let image_indices = [surface.get_acquired_image_index()];
-            let present_info = vk::PresentInfoKHR::default()
-                .swapchains(&swapchains)
-                .wait_semaphores(present)
-                .image_indices(&image_indices);
-            // The image was acquired from the swapchain, and the submitted
-            // frame signals the semaphore.
-            match self.backend.present(&present_info) {
-                Ok(true) => self.request_surface_update(true),
-                Ok(false) => {}
-                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => self.request_surface_update(false),
-                Err(vk::Result::ERROR_SURFACE_LOST_KHR) => {
-                    // The frame was submitted, recreate the surface before
-                    // the next one.
-                    self.surface_lost.set(true);
-                    self.request_surface_update(false);
-                }
-                Err(error) => Log::error(Event::Render, format!("queuePresentKHR result: {error}")),
-            }
-        }
+        false
     }
 
     pub fn create_buffer(&self, data: Option<&[u8]>, size: usize, usage: vk::BufferUsageFlags) -> BufferResource {
@@ -599,93 +242,6 @@ impl Context {
     /// Creates a texture, of the concrete type.
     pub fn create_vulkan_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
         Rc::new(RefCell::new(Texture2D::new(self)))
-    }
-
-    /// The render pass over attachments of `key`'s formats, null if the
-    /// device can't make it.
-    ///
-    /// A pass clears its attachments, unless it loads the color
-    /// (`RenderPassKey::color_load`). A pass with depth and stencil
-    /// (`SurfaceResource::initRenderPass`) keeps the color only; a
-    /// pass without (`OffscreenTextureResource::createRenderPass`) leaves
-    /// the color attachment ready to be sampled. Its subpass dependencies
-    /// are the `Gpu`'s, so that the `Gpu`'s pipelines fit it.
-    pub(crate) fn get_render_pass(&self, key: RenderPassKey) -> vk::RenderPass {
-        if let Some(&render_pass) = self.render_passes.borrow().get(&key) {
-            return render_pass;
-        }
-        let color_attachment = vk::AttachmentDescription::default()
-            .format(key.color_format)
-            .samples(vk::SampleCountFlags::TYPE_1)
-            .load_op(if key.color_load { vk::AttachmentLoadOp::LOAD } else { vk::AttachmentLoadOp::CLEAR })
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(if key.color_load { key.color_final_layout } else { vk::ImageLayout::UNDEFINED })
-            .final_layout(key.color_final_layout);
-        let color_attachment_ref =
-            [vk::AttachmentReference::default().attachment(0).layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
-        let depth_attachment_ref =
-            vk::AttachmentReference::default().attachment(1).layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-
-        let mut attachments = vec![color_attachment];
-        let mut subpass = vk::SubpassDescription::default()
-            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .color_attachments(&color_attachment_ref);
-        if let Some(depth_format) = key.depth_format {
-            let store = if key.depth_final_layout.is_some() {
-                vk::AttachmentStoreOp::STORE
-            } else {
-                vk::AttachmentStoreOp::DONT_CARE
-            };
-            attachments.push(
-                vk::AttachmentDescription::default()
-                    .format(depth_format)
-                    .samples(vk::SampleCountFlags::TYPE_1)
-                    .load_op(vk::AttachmentLoadOp::CLEAR)
-                    .store_op(store)
-                    .stencil_load_op(vk::AttachmentLoadOp::CLEAR)
-                    .stencil_store_op(store)
-                    .initial_layout(vk::ImageLayout::UNDEFINED)
-                    .final_layout(key.depth_final_layout.unwrap_or(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)),
-            );
-            subpass = subpass.depth_stencil_attachment(&depth_attachment_ref);
-        }
-        let dependencies = crate::gpu::subpass_dependencies();
-        let subpasses = [subpass];
-        let create_info = vk::RenderPassCreateInfo::default()
-            .attachments(&attachments)
-            .subpasses(&subpasses)
-            .dependencies(&dependencies);
-        // SAFETY: the create info is valid for the device.
-        match unsafe { self.backend.get_device().create_render_pass(&create_info, None) } {
-            Ok(render_pass) => {
-                self.render_passes.borrow_mut().insert(key, render_pass);
-                render_pass
-            }
-            Err(error) => {
-                Log::error(Event::Render, format!("Failed to create a render pass: {error}"));
-                vk::RenderPass::null()
-            }
-        }
-    }
-
-    /// The color and depth-stencil formats of a render pass that
-    /// [`get_render_pass`](Self::get_render_pass) made.
-    pub(crate) fn render_pass_formats(&self, render_pass: vk::RenderPass) -> Option<(vk::Format, Option<vk::Format>)> {
-        self.render_passes
-            .borrow()
-            .iter()
-            .find(|(_, made)| **made == render_pass)
-            .map(|(key, _)| (key.color_format, key.depth_format))
-    }
-
-    /// The command buffer of the frame.
-    pub(crate) fn get_command_buffer(&self) -> vk::CommandBuffer {
-        self.frame_resources
-            .borrow()
-            .get(usize::from(self.frame_resource_index.get()))
-            .map_or(vk::CommandBuffer::null(), |frame| frame.command_buffer)
     }
 }
 
@@ -704,143 +260,14 @@ impl GfxContext for Context {
         BackendType::Vulkan
     }
 
-    fn begin_frame(&self) {
-        if self.destroyed.get() {
-            return;
-        }
-        let frame_count = self.frame_resources.borrow().len().max(1);
-        self.frame_resource_index.set(((usize::from(self.frame_resource_index.get()) + 1) % frame_count) as u8);
+    fn begin_frame(&self) {}
 
-        let device = self.backend.get_device();
-        let surface = self.surface.borrow().upgrade();
-        // Asked again after each update, which makes a lost surface anew.
-        let platform_surface = || surface.as_ref().is_some_and(|surface| surface.has_platform_surface());
-
-        // A lost surface may have been destroyed by a failed recreation.
-        if (platform_surface() || self.surface_lost.get()) && self.surface_update_requested.get() {
-            self.surface_update_latency.set(self.surface_update_latency.get() - 1);
-            if self.surface_update_latency.get() <= 0 {
-                self.update_surface();
-            }
-        }
-
-        let mut acquired = false;
-        for _ in 0..MAXIMUM_SURFACE_UPDATE_RETRIES {
-            if !self.wait_frame() {
-                Log::error(Event::Render, "waitFrame failed");
-            }
-            self.run_deletion_queue(usize::from(self.frame_resource_index.get()));
-
-            let frame_index = self.frame_resource_index.get();
-            match &surface {
-                Some(surface) if platform_surface() => {
-                    let Some(loader) = self.backend.get_swapchain_loader() else {
-                        break;
-                    };
-                    // A swapchain that couldn't be rebuilt has no images.
-                    if surface.get_image_count() == 0 {
-                        break;
-                    }
-                    // SAFETY: the swapchain and the semaphore are the
-                    // surface's, and the semaphore isn't waited on.
-                    let result = unsafe {
-                        loader.acquire_next_image(
-                            surface.get_swapchain(),
-                            u64::MAX,
-                            surface.get_acquire_semaphore(frame_index),
-                            vk::Fence::null(),
-                        )
-                    };
-                    match result {
-                        Ok((index, suboptimal)) => {
-                            surface.set_acquired_image_index(index);
-                            if suboptimal {
-                                self.request_surface_update(true);
-                            }
-                        }
-                        Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                            self.request_surface_update(false);
-                            self.update_surface();
-                            continue;
-                        }
-                        Err(vk::Result::ERROR_SURFACE_LOST_KHR) => {
-                            self.surface_lost.set(true);
-                            self.request_surface_update(false);
-                            self.update_surface();
-                            continue;
-                        }
-                        Err(error) => {
-                            Log::error(Event::Render, format!("acquireNextImageKHR result: {error}"));
-                            break;
-                        }
-                    }
-                }
-                // The lost surface couldn't be made again.
-                Some(_) if self.surface_lost.get() => break,
-                Some(surface) => surface.set_acquired_image_index(u32::from(frame_index)),
-                None => {}
-            }
-            // acquire successful
-            acquired = true;
-            break;
-        }
-        if !acquired {
-            Log::error(Event::Render, "acquireNextImageKHR failed");
-        }
-        self.frame_image_acquired.set(acquired);
-
-        let command_buffer = self.get_command_buffer();
-        // SAFETY: the frame that used the command buffer is done.
-        unsafe {
-            let begin_info = vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-            if device.reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::RELEASE_RESOURCES).is_err()
-                || device.begin_command_buffer(command_buffer, &begin_info).is_err()
-            {
-                Log::error(Event::Render, "Beginning the frame's command buffer failed");
-                return;
-            }
-        }
-        if self.queue_wait.replace(false) {
-            // SAFETY: the command buffer is recording, outside a render
-            // pass. An execution dependency is enough: the earlier work only
-            // reads what this frame writes.
-            unsafe {
-                device.cmd_pipeline_barrier(
-                    command_buffer,
-                    vk::PipelineStageFlags::ALL_COMMANDS,
-                    vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    vk::DependencyFlags::empty(),
-                    &[],
-                    &[],
-                    &[],
-                );
-            }
-        }
-        self.frame_serial.set(self.frame_serial.get() + 1);
-        self.frame_recording.set(true);
-        self.render_pass_active.set(false);
-    }
-
-    fn end_frame(&self) {}
-
-    fn finish(&self) {
-        if !self.destroyed.get() {
-            self.backend.wait_idle("a custom layer's teardown");
-        }
-    }
-
-    /// Called at the end of a frame.
-    fn perform_cleanup(&self) {
-        let mut stats = self.rendering_stats();
-        stats.num_draw_calls = 0;
-        stats.num_frames += 1;
+    /// Runs the deletions whose submits are done.
+    fn end_frame(&self) {
+        self.run_deletions();
     }
 
     fn reduce_memory_usage(&self) {}
-
-    fn create_command_encoder(&self) -> Box<dyn mln_gfx::command_encoder::CommandEncoder> {
-        Box::new(CommandEncoder::new(self.rc(), self.get_command_buffer()))
-    }
 
     fn gpu(&self) -> RefMut<'_, dyn Gpu> {
         RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })

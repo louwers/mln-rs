@@ -31,11 +31,10 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{
-    BufferUsage, DepthState, PipelineKey, PipelineState, RenderCommand, StencilState, VertexAttribute,
-    VertexBufferLayout, VertexStep, Viewport,
+    BufferUsage, ColorAttachment, DepthState, DepthStencilAttachment, LoadOp, Pass, PipelineKey, PipelineState,
+    RenderCommand, StencilState, TargetFormats, VertexAttribute, VertexBufferLayout, VertexStep, Viewport,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::render_pass::RenderPassDescriptor;
 use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
@@ -229,9 +228,9 @@ impl Scene {
         }
     }
 
-    /// Draws the tile into `render_pass`.
-    fn draw(&self, context: &dyn Context, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
-        let (size, targets) = render_pass.target().expect("a target");
+    /// The commands that draw the tile into attachments of `size` and
+    /// `targets`.
+    fn draw(&self, context: &dyn Context, size: Size, targets: TargetFormats) -> Vec<RenderCommand> {
         let entries = self.uniform_buffers.borrow().entries();
         let layer = self.bind_group.borrow_mut().get(context, "background", entries).expect("bind group");
         let attribute = self.shader.attribute_id(VertexStep::Vertex, 0).expect("position attribute");
@@ -259,25 +258,23 @@ impl Scene {
                 targets,
             })
             .expect("pipeline");
-        render_pass
-            .encode(&[
-                RenderCommand::SetBindGroup { slot: 0, group: context.global_bind_group().expect("global group") },
-                RenderCommand::SetBindGroup { slot: 1, group: layer },
-                RenderCommand::SetGlobalIndex(0),
-                RenderCommand::SetVertexBuffer { slot: 0, buffer: self.vertices.id(), offset: 0 },
-                RenderCommand::SetIndexBuffer { buffer: self.indexes.id(), offset: 0 },
-                RenderCommand::SetViewport(Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: size.width as f32,
-                    height: size.height as f32,
-                    min_depth: 0.5,
-                    max_depth: 0.5,
-                }),
-                RenderCommand::SetPipeline(pipeline),
-                RenderCommand::DrawIndexed { indices: 0..6, base_vertex: 0, instances: 0..1 },
-            ])
-            .expect("draw");
+        vec![
+            RenderCommand::SetBindGroup { slot: 0, group: context.global_bind_group().expect("global group") },
+            RenderCommand::SetBindGroup { slot: 1, group: layer },
+            RenderCommand::SetGlobalIndex(0),
+            RenderCommand::SetVertexBuffer { slot: 0, buffer: self.vertices.id(), offset: 0 },
+            RenderCommand::SetIndexBuffer { buffer: self.indexes.id(), offset: 0 },
+            RenderCommand::SetViewport(Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: size.width as f32,
+                height: size.height as f32,
+                min_depth: 0.5,
+                max_depth: 0.5,
+            }),
+            RenderCommand::SetPipeline(pipeline),
+            RenderCommand::DrawIndexed { indices: 0..6, base_vertex: 0, instances: 0..1 },
+        ]
     }
 }
 
@@ -307,10 +304,9 @@ fn render_frame(
     }
     let context = backend.get_context();
     let image = backend.target.begin_frame().expect("a frame");
-    let renderable = &*image;
     context.begin_frame();
 
-    let encoder = context.create_command_encoder();
+    let mut commands = Vec::new();
     if let Some(scene) = scene {
         if let Some(color) = change.color {
             scene.set_color(context, color);
@@ -318,22 +314,20 @@ fn render_frame(
         if let Some(right) = change.right {
             scene.set_half(context, right);
         }
+        commands = scene.draw(context, image.size, image.targets);
     }
-    {
-        let render_pass = encoder.create_render_pass(
-            "main buffer",
-            &RenderPassDescriptor {
-                target: renderable,
-                clear_color: Some(clear),
-                clear_depth: Some(1.0),
-                clear_stencil: Some(0),
-            },
-        );
-        if let Some(scene) = scene {
-            scene.draw(context, &*render_pass);
-        }
-    }
-    backend.target.end_frame(&*encoder);
+    let pass = Pass {
+        label: "main buffer".to_owned(),
+        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(clear) }),
+        depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
+            texture,
+            depth: LoadOp::Clear(1.0),
+            stencil: LoadOp::Clear(0),
+        }),
+        commands,
+    };
+    context.gpu().submit(&[pass]).expect("submit");
+    backend.target.end_frame();
     context.end_frame();
 
     let image = backend.take_readback();

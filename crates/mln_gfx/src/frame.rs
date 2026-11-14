@@ -1,28 +1,20 @@
-//! How the renderer draws a frame into its target: it begins the frame, draws
-//! into the image the target gives it, and ends the frame, which hands the
-//! image off.
-
-use std::any::Any;
-use std::rc::Rc;
+//! How the renderer draws a frame into its target: it begins the frame,
+//! draws into the textures the target gives it, submits them, and ends the
+//! frame, which hands the image off.
 
 use mln_util::size::Size;
 
-use crate::command_encoder::CommandEncoder;
+use crate::gpu::{TargetFormats, TextureId};
 
-/// What a render pass draws into: a frame's image, or a texture that the
-/// renderer draws into ahead of the frame. Each backend downcasts it to its
-/// own type.
-pub trait DrawTarget: Any {
-    /// The size in physical pixels.
-    fn size(&self) -> Size;
-}
-
-impl dyn DrawTarget {
-    /// The concrete type behind this trait object, if it is a `T`.
-    pub fn downcast_ref<T: DrawTarget>(&self) -> Option<&T> {
-        let any: &dyn Any = self;
-        any.downcast_ref()
-    }
+/// The textures of the backend's `Gpu` that a frame draws into.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameImage {
+    /// In physical pixels.
+    pub size: Size,
+    pub color: TextureId,
+    pub depth_stencil: Option<TextureId>,
+    /// Their formats, as the frame's pipelines name them.
+    pub targets: TargetFormats,
 }
 
 /// How one side of a shared texture waits for the other's GPU work on it.
@@ -191,14 +183,14 @@ pub enum Handoff {
 /// image of the library's that is read back. It belongs to the thread that
 /// built it.
 pub trait FrameTarget {
-    /// Begins a frame, and returns what the renderer draws it into, or `None`
-    /// when the target has nothing to draw into now: it has no surface, or
-    /// the surface is hidden or out of date. The caller then skips the frame.
-    /// Until [`end_frame`](Self::end_frame), each call returns the same
-    /// image.
-    fn begin_frame(&self) -> Option<Rc<dyn DrawTarget>>;
+    /// Begins a frame, and returns the textures of the backend's `Gpu` that
+    /// the renderer draws it into, or `None` when the target has nothing to
+    /// draw into now: it has no surface, or the surface is hidden or out of
+    /// date. The caller then skips the frame. Until
+    /// [`end_frame`](Self::end_frame), each call returns the same image.
+    fn begin_frame(&self) -> Option<FrameImage>;
 
-    /// Submits what the renderer recorded into `encoder` for the frame, and
-    /// hands the frame's image off.
-    fn end_frame(&self, encoder: &dyn CommandEncoder) -> Handoff;
+    /// Hands the frame's image off, once the renderer has submitted the
+    /// frame's passes to the backend's `Gpu`.
+    fn end_frame(&self) -> Handoff;
 }

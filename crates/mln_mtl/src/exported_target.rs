@@ -7,9 +7,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::export::Generations;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::{
     ConsumerSync, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture,
     SyncKind, SyncKinds,
@@ -285,12 +284,12 @@ impl ExportedTarget {
 }
 
 impl FrameTarget for ExportedTarget {
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
+    fn begin_frame(&self) -> Option<FrameImage> {
         self.generations.borrow().current().target.begin_frame()
     }
 
-    fn end_frame(&self, encoder: &dyn CommandEncoder) -> Handoff {
-        match self.generations.borrow().current().target.end_frame(encoder) {
+    fn end_frame(&self) -> Handoff {
+        match self.generations.borrow().current().target.end_frame() {
             Handoff::GivenBack { slot, sync } => Handoff::Queued { slot, sync },
             other => other,
         }

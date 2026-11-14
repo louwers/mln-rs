@@ -30,9 +30,8 @@ use std::cell::{Cell, RefCell, RefMut};
 use std::rc::Rc;
 use std::time::Duration;
 
-use mln_gfx::command_encoder::CommandEncoder as GfxCommandEncoder;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
-use mln_gfx::gpu::{Gpu as _, ReadbackId, TextureRegion};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
+use mln_gfx::gpu::{Gpu as _, ReadbackId, TargetFormats, TextureId, TextureRegion};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
@@ -40,8 +39,7 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use crate::WebGpu;
-use crate::command_encoder::CommandEncoder;
-use crate::draw_target::{DrawTarget, TargetResource};
+use crate::gpu::from_wgpu_format;
 use crate::renderer_backend::{BackendImpl, RendererBackend};
 
 const MAX_CONSECUTIVE_ERRORS: i32 = 3;
@@ -129,6 +127,11 @@ struct SurfaceState {
     pending_readback: Cell<Option<(ReadbackId, Size)>>,
     readback: RefCell<Option<PremultipliedImage>>,
     overlay: RefCell<Option<Overlay>>,
+    /// The current texture, imported into the backend's `WebGpu` for the
+    /// frame that draws into it.
+    color_import: Cell<Option<TextureId>>,
+    /// The depth and stencil texture, imported into the backend's `WebGpu`.
+    depth_import: Cell<Option<TextureId>>,
 }
 
 impl SurfaceState {
@@ -283,12 +286,38 @@ impl SurfaceState {
         Some(view)
     }
 
-    fn get_depth_stencil_view(&self) -> Option<wgpu::TextureView> {
-        if self.depth_stencil.borrow().is_none() {
-            let size = self.framebuffer_size.get();
+    /// The textures of the frame begun, imported into the backend's
+    /// `WebGpu`: the current texture, acquired if the frame has none yet,
+    /// and the depth and stencil texture of its size.
+    fn frame_image(&self) -> Option<FrameImage> {
+        self.get_current_texture_view()?;
+        let current = self.current.borrow();
+        let texture = &current.as_ref()?.texture.texture;
+        let size = Size::new(texture.width(), texture.height());
+        if self
+            .depth_stencil
+            .borrow()
+            .as_ref()
+            .is_none_or(|(depth, _)| (depth.width(), depth.height()) != (size.width, size.height))
+        {
             self.create_depth_stencil_texture(size.width, size.height);
         }
-        self.depth_stencil.borrow().as_ref().map(|(_, view)| view.clone())
+        let mut gpu = self.gpu();
+        let color = match self.color_import.get() {
+            Some(color) => color,
+            None => gpu.import_texture(texture),
+        };
+        self.color_import.set(Some(color));
+        let depth_stencil = match self.depth_import.get() {
+            Some(depth_stencil) => depth_stencil,
+            None => gpu.import_texture(&self.depth_stencil.borrow().as_ref()?.0),
+        };
+        self.depth_import.set(Some(depth_stencil));
+        let targets = TargetFormats {
+            color: from_wgpu_format(self.swap_chain_format),
+            depth_stencil: from_wgpu_format(self.depth_stencil_format),
+        };
+        Some(FrameImage { size, color, depth_stencil: Some(depth_stencil), targets })
     }
 
     fn reconfigure_surface(&self) {
@@ -333,6 +362,9 @@ impl SurfaceState {
 
     fn create_depth_stencil_texture(&self, width: u32, height: u32) {
         self.depth_stencil.borrow_mut().take();
+        if let Some(import) = self.depth_import.take() {
+            self.gpu().destroy_texture(import);
+        }
 
         let format = self.depth_stencil_format;
         if width == 0 || height == 0 {
@@ -412,29 +444,6 @@ impl SurfaceState {
     }
 }
 
-/// The swapchain's texture as a draw target.
-struct SurfaceResource {
-    state: Rc<SurfaceState>,
-}
-
-impl TargetResource for SurfaceResource {
-    fn get_color_texture_view(&self) -> Option<wgpu::TextureView> {
-        self.state.get_current_texture_view()
-    }
-
-    fn get_color_texture_format(&self) -> Option<wgpu::TextureFormat> {
-        Some(self.state.swap_chain_format)
-    }
-
-    fn get_depth_stencil_texture_view(&self) -> Option<wgpu::TextureView> {
-        self.state.get_depth_stencil_view()
-    }
-
-    fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
-        Some(self.state.depth_stencil_format)
-    }
-}
-
 /// How a [`SurfaceTarget`] presents.
 #[derive(Clone, Copy, Debug)]
 pub struct SurfaceOptions {
@@ -466,7 +475,6 @@ pub struct SurfaceTarget {
     )]
     backend: Rc<RendererBackend>,
     state: Rc<SurfaceState>,
-    image: Rc<DrawTarget>,
 }
 
 impl SurfaceTarget {
@@ -569,9 +577,10 @@ impl SurfaceTarget {
             pending_readback: Cell::new(None),
             readback: RefCell::new(None),
             overlay: RefCell::new(None),
+            color_import: Cell::new(None),
+            depth_import: Cell::new(None),
         });
-        let image = Rc::new(DrawTarget::new(framebuffer_size, Rc::new(SurfaceResource { state: Rc::clone(&state) })));
-        Ok(SurfaceTarget { backend, state, image })
+        Ok(SurfaceTarget { backend, state })
     }
 
     /// The format the surface is configured with.
@@ -589,7 +598,6 @@ impl SurfaceTarget {
     /// Draws the next frame at `size` physical pixels.
     pub fn resize(&self, size: Size) {
         if self.state.framebuffer_size.replace(size) != size {
-            self.image.set_size(size);
             self.state.surface_needs_reconfigure.set(true);
         }
     }
@@ -618,16 +626,14 @@ impl SurfaceTarget {
 
 impl FrameTarget for SurfaceTarget {
     /// Acquires the surface's next texture, unless the frame has one. A
-    /// frame without one is skipped: a render pass without a color
-    /// attachment trips the drawables' debug assertions.
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        self.state.get_current_texture_view()?;
-        Some(Rc::<DrawTarget>::clone(&self.image))
+    /// frame without one is skipped.
+    fn begin_frame(&self) -> Option<FrameImage> {
+        self.state.frame_image()
     }
 
-    fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {
-        if let Some(encoder) = encoder.downcast_ref::<CommandEncoder>() {
-            encoder.submit_frame(Some(self.image.resource()));
+    fn end_frame(&self) -> Handoff {
+        if let Some(color) = self.state.color_import.take() {
+            self.state.gpu().destroy_texture(color);
         }
         if self.state.swap() { Handoff::Presented } else { Handoff::Dropped }
     }
@@ -640,9 +646,14 @@ impl Drop for SurfaceTarget {
         self.state.current.borrow_mut().take();
         self.state.depth_stencil.borrow_mut().take();
         self.state.overlay.borrow_mut().take();
+        let mut gpu = self.state.gpu();
         if let Some((readback, _)) = self.state.pending_readback.take() {
-            self.state.gpu().destroy_readback(readback);
+            gpu.destroy_readback(readback);
         }
+        for import in [self.state.color_import.take(), self.state.depth_import.take()].into_iter().flatten() {
+            gpu.destroy_texture(import);
+        }
+        drop(gpu);
         self.state.process_events();
         self.state.surface.borrow_mut().take();
     }

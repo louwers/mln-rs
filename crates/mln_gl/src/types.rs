@@ -14,4 +14,3 @@ pub(crate) type SamplerID = <Gl as HasContext>::Sampler;
 pub(crate) type VertexArrayID = <Gl as HasContext>::VertexArray;
 pub(crate) type FramebufferID = <Gl as HasContext>::Framebuffer;
 pub(crate) type FenceID = <Gl as HasContext>::Fence;
-pub(crate) type RenderbufferID = <Gl as HasContext>::Renderbuffer;

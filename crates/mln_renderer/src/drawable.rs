@@ -426,9 +426,10 @@ impl Drawable {
             });
             draws += 1;
         }
-        let encoded = if draws > 0 { parameters.record(&commands) } else { Ok(()) };
+        if draws > 0 {
+            parameters.record(&commands);
+        }
         self.commands = commands;
-        encoded?;
         let mut stats = context.rendering_stats();
         stats.num_draw_calls += draws;
         stats.total_draw_calls += draws;

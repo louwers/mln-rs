@@ -1,12 +1,12 @@
+use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use mln_gfx::backend::Type as BackendType;
-use mln_gfx::gpu::{GpuError, Pass, RenderCommand, TargetFormats};
-use mln_gfx::render_pass::RenderPass as GfxRenderPass;
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, GpuError, LoadOp, Pass, RenderCommand, TargetFormats};
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
-use mln_gfx::{CommandEncoder, Context, DepthMaskType, DepthMode, RendererBackend, ScissorRect, StencilMode};
+use mln_gfx::{Context, DepthMaskType, DepthMode, RendererBackend, ScissorRect, StencilMode};
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::mat4::Mat4;
@@ -65,14 +65,33 @@ pub(crate) struct RecordedPass {
     pub(crate) targets: TargetFormats,
 }
 
+impl RecordedPass {
+    /// A pass with no commands over the same attachments that loads them,
+    /// with the stencil as `stencil` says.
+    fn loading(&self, stencil: LoadOp<u32>) -> RecordedPass {
+        let pass = Pass {
+            label: self.pass.label.clone(),
+            color: self.pass.color.map(|color| ColorAttachment { load: LoadOp::Load, ..color }),
+            depth_stencil: self.pass.depth_stencil.map(|depth_stencil| DepthStencilAttachment {
+                depth: LoadOp::Load,
+                stencil,
+                ..depth_stencil
+            }),
+            commands: Vec::new(),
+        };
+        RecordedPass { pass, size: self.size, targets: self.targets }
+    }
+}
+
 pub struct PaintParameters<'a> {
     pub(crate) context: &'a dyn Context,
     pub(crate) backend: &'a dyn RendererBackend,
-    pub(crate) encoder: Option<Box<dyn CommandEncoder>>,
-    pub(crate) render_pass: Option<Box<dyn GfxRenderPass>>,
     /// The pass of the backend's `Gpu` that drawables record into, while
     /// one is begun.
     pub(crate) recorded: RefCell<Option<RecordedPass>>,
+    /// The frame's passes recorded before the one begun, which the next
+    /// submit runs first.
+    finished: RefCell<Vec<Pass>>,
 
     pub(crate) transform_params: &'a TransformParameters,
     pub(crate) state: &'a TransformState,
@@ -135,9 +154,8 @@ impl<'a> PaintParameters<'a> {
         PaintParameters {
             context,
             backend,
-            encoder: Some(context.create_command_encoder()),
-            render_pass: None,
             recorded: RefCell::new(None),
+            finished: RefCell::new(Vec::new()),
             transform_params,
             state,
             static_data,
@@ -165,21 +183,47 @@ impl<'a> PaintParameters<'a> {
     /// The size and formats of the attachments that drawables draw into
     /// now, `None` outside a pass.
     pub(crate) fn pass_target(&self) -> Option<(Size, TargetFormats)> {
-        match &*self.recorded.borrow() {
-            Some(recorded) => Some((recorded.size, recorded.targets)),
-            None => self.render_pass.as_deref()?.target(),
-        }
+        self.recorded.borrow().as_ref().map(|recorded| (recorded.size, recorded.targets))
     }
 
     /// Records `commands`, a drawable's, into the pass begun.
-    pub(crate) fn record(&self, commands: &[RenderCommand]) -> Result<(), GpuError> {
-        match &mut *self.recorded.borrow_mut() {
-            Some(recorded) => {
-                recorded.pass.commands.extend_from_slice(commands);
-                Ok(())
-            }
-            None => self.render_pass.as_deref().map_or(Ok(()), |render_pass| render_pass.encode(commands)),
+    pub(crate) fn record(&self, commands: &[RenderCommand]) {
+        if let Some(recorded) = &mut *self.recorded.borrow_mut() {
+            recorded.pass.commands.extend_from_slice(commands);
         }
+    }
+
+    /// Ends the pass begun, and begins one over its attachments that loads
+    /// them, with the stencil as `stencil` says.
+    fn restart_pass(&self, stencil: LoadOp<u32>) {
+        if let Some(recorded) = &mut *self.recorded.borrow_mut() {
+            let next = recorded.loading(stencil);
+            self.finished.borrow_mut().push(std::mem::replace(recorded, next).pass);
+        }
+    }
+
+    /// Runs `f` with the backend's commands inside the pass begun, after
+    /// what the frame recorded so far, as a custom layer draws: `f` gets the
+    /// backend's `CustomLayerPass`. The pass then goes on in one that loads
+    /// its attachments. Returns whether `f` ran.
+    pub(crate) fn lend_pass(&self, f: &mut dyn FnMut(&mut dyn Any)) -> Result<bool, GpuError> {
+        let Some(recorded) = self.recorded.borrow_mut().take() else {
+            return Ok(false);
+        };
+        let next = recorded.loading(LoadOp::Load);
+        let finished = std::mem::take(&mut *self.finished.borrow_mut());
+        let mut gpu = self.context.gpu();
+        let lent = gpu.submit(&finished).and_then(|()| gpu.lend_to_custom_layer(Some(&recorded.pass), f));
+        drop(gpu);
+        *self.recorded.borrow_mut() = Some(next);
+        lent.map(|()| true)
+    }
+
+    /// Submits the passes the frame recorded, ending the one begun.
+    pub(crate) fn submit(&self) -> Result<(), GpuError> {
+        let mut passes = std::mem::take(&mut *self.finished.borrow_mut());
+        passes.extend(self.recorded.borrow_mut().take().map(|recorded| recorded.pass));
+        self.context.gpu().submit(&passes)
     }
 
     #[must_use]
@@ -224,7 +268,7 @@ impl<'a> PaintParameters<'a> {
 
         match self.stencil_clear_tile() {
             Some(tile) => self.draw_clip_masks(&[(tile, 0)]),
-            None => self.render_pass.as_deref().expect("render pass").clear_stencil(0),
+            None => self.restart_pass(LoadOp::Clear(0)),
         }
         self.context.rendering_stats().stencil_clears += 1;
     }

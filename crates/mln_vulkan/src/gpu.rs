@@ -944,7 +944,35 @@ impl VulkanGpu {
         if let Some(depth_ref) = &depth_ref {
             subpass = subpass.depth_stencil_attachment(depth_ref);
         }
-        let dependencies = subpass_dependencies();
+        // Each pass waits for what the commands before it wrote, and the
+        // commands after it for what it wrote, as a pass may sample or load
+        // what an earlier one drew, or draw over what an earlier one
+        // sampled. Render passes are compatible, so that a pipeline fits each
+        // of a format's, only where their dependencies are the same.
+        let attachment_stages = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+            | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+            | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS;
+        let attachment_writes =
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE;
+        let attachment_access =
+            attachment_writes | vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ;
+        let shader_stages = vk::PipelineStageFlags::VERTEX_SHADER | vk::PipelineStageFlags::FRAGMENT_SHADER;
+        let dependencies = [
+            vk::SubpassDependency::default()
+                .src_subpass(vk::SUBPASS_EXTERNAL)
+                .dst_subpass(0)
+                .src_stage_mask(attachment_stages | shader_stages | vk::PipelineStageFlags::TRANSFER)
+                .dst_stage_mask(attachment_stages | shader_stages)
+                .src_access_mask(attachment_writes | vk::AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(attachment_access | vk::AccessFlags::SHADER_READ),
+            vk::SubpassDependency::default()
+                .src_subpass(0)
+                .dst_subpass(vk::SUBPASS_EXTERNAL)
+                .src_stage_mask(attachment_stages)
+                .dst_stage_mask(attachment_stages | shader_stages | vk::PipelineStageFlags::TRANSFER)
+                .src_access_mask(attachment_writes)
+                .dst_access_mask(attachment_access | vk::AccessFlags::SHADER_READ | vk::AccessFlags::TRANSFER_READ),
+        ];
         let subpasses = [subpass];
         let create_info = vk::RenderPassCreateInfo::default()
             .attachments(&attachments)
@@ -1394,25 +1422,6 @@ impl VulkanGpu {
         self.backend.end_debug_label(command_buffer);
     }
 
-    /// Records `commands` into `command_buffer`, inside a render pass of
-    /// `extent` over attachments of `targets`, as the commands of a pass of
-    /// their own.
-    ///
-    /// The old frame submission encodes the renderer's commands into the
-    /// render pass it has begun with this, until frames go through
-    /// [`Gpu::submit`].
-    pub(crate) fn encode_into(
-        &mut self,
-        command_buffer: vk::CommandBuffer,
-        commands: &[RenderCommand],
-        targets: TargetFormats,
-        extent: vk::Extent2D,
-    ) -> Result<(), GpuError> {
-        validation::check_commands(self, "render pass", targets, commands)?;
-        self.set_pass_defaults(command_buffer, extent);
-        self.encode_commands(command_buffer, "render pass", commands, extent)
-    }
-
     /// Sets the dynamic state a pass starts with, over `extent`.
     fn set_pass_defaults(&self, command_buffer: vk::CommandBuffer, extent: vk::Extent2D) {
         let device = self.backend.get_device();
@@ -1634,18 +1643,109 @@ impl VulkanGpu {
         record: Option<impl FnOnce(&mut VulkanGpu, vk::CommandBuffer) -> Result<(), GpuError>>,
     ) -> Result<(), GpuError> {
         self.collect_garbage();
-        let mut command_buffers = Vec::with_capacity(2);
-        if let Some(record) = record {
-            let command_buffer = self.begin_command_buffer()?;
-            if let Err(error) = record(self, command_buffer) {
-                // SAFETY: the command buffer is recording, not pending.
-                let _ =
-                    unsafe { self.device().reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty()) };
-                self.free_command_buffers.push(command_buffer);
-                return Err(error);
-            }
-            command_buffers.push(command_buffer);
+        let Some(record) = record else {
+            return self.submit_batch(None);
+        };
+        let command_buffer = self.begin_command_buffer()?;
+        if let Err(error) = record(self, command_buffer) {
+            self.abandon_recording(command_buffer);
+            return Err(error);
         }
+        self.submit_batch(Some(command_buffer))
+    }
+
+    /// A command buffer, recording, for a target to record native commands
+    /// into, such as an overlay's: [`submit_recording`](Self::submit_recording)
+    /// submits it after the work submitted before then, and
+    /// [`abandon_recording`](Self::abandon_recording) drops it.
+    pub(crate) fn begin_recording(&mut self) -> Result<vk::CommandBuffer, GpuError> {
+        self.begin_command_buffer()
+    }
+
+    /// Submits `command_buffer`, of [`begin_recording`](Self::begin_recording),
+    /// after the writes since the last submit.
+    pub(crate) fn submit_recording(&mut self, command_buffer: vk::CommandBuffer) -> Result<(), GpuError> {
+        self.collect_garbage();
+        self.submit_batch(Some(command_buffer))
+    }
+
+    /// Drops `command_buffer`, recording, unsubmitted.
+    pub(crate) fn abandon_recording(&mut self, command_buffer: vk::CommandBuffer) {
+        // SAFETY: the command buffer is recording, not pending.
+        let _ = unsafe { self.device().reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty()) };
+        self.free_command_buffers.push(command_buffer);
+    }
+
+    /// The render pass that draws over `texture`, a color render target,
+    /// keeping what it holds, and its framebuffer and extent: for native
+    /// commands, such as an overlay's, recorded into a command buffer of
+    /// [`begin_recording`](Self::begin_recording). The pass leaves the
+    /// texture in the layout it found it in.
+    pub(crate) fn load_pass(
+        &mut self,
+        texture: TextureId,
+    ) -> Result<(vk::RenderPass, vk::Framebuffer, vk::Extent2D), GpuError> {
+        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        let size = entry.size;
+        let color = AttachmentKey { format: entry.vk_format, layout: entry.layout, load: true, stencil_load: false };
+        let render_pass = self.render_pass(RenderPassKey { color: Some(color), depth_stencil: None })?;
+        let framebuffer = self.framebuffer(render_pass, Some(texture), None, size)?;
+        Ok((render_pass, framebuffer, vk::Extent2D { width: size.width, height: size.height }))
+    }
+
+    /// Drops what `texture` still waits for, which no submit takes now.
+    pub(crate) fn forget_waits(&mut self, texture: TextureId) {
+        if let Some(texture) = self.textures.get_mut(texture) {
+            texture.waits.clear();
+        }
+    }
+
+    /// Has the next submit wait for what `texture` still waits for
+    /// ([`wait_before_using`](Self::wait_before_using)), as when nothing of
+    /// a frame used it.
+    pub(crate) fn take_waits_into_next_submit(&mut self, texture: TextureId) {
+        self.take_waits([texture]);
+    }
+
+    /// Has the commands submitted from now on wait for every command
+    /// submitted to the queue before then, such as a host's reads of an
+    /// image that they draw into.
+    pub(crate) fn wait_for_queue(&mut self) -> Result<(), GpuError> {
+        let uploads = self.uploads()?;
+        // SAFETY: the command buffer is recording outside a render pass. An
+        // execution dependency is enough: the earlier work only reads what
+        // the later work writes.
+        unsafe {
+            self.device().cmd_pipeline_barrier(
+                uploads,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[],
+            );
+        }
+        Ok(())
+    }
+
+    /// The serial of the last submit, 0 before the first.
+    pub(crate) fn last_serial(&self) -> u64 {
+        self.next_serial - 1
+    }
+
+    /// The serial of the last submit known to have finished, as every one
+    /// before it has.
+    pub(crate) fn finished_serial(&mut self) -> u64 {
+        self.collect_garbage();
+        self.finished_serial
+    }
+
+    /// Submits a batch of the writes since the last submit, then
+    /// `recorded`, with the waits and signals of the next submit.
+    fn submit_batch(&mut self, recorded: Option<vk::CommandBuffer>) -> Result<(), GpuError> {
+        let mut command_buffers = Vec::with_capacity(2);
+        command_buffers.extend(recorded);
         if let Some(uploads) = self.uploads.take() {
             memory_barrier(
                 self.device(),
@@ -1699,7 +1799,7 @@ impl VulkanGpu {
     }
 
     /// Blocks until the submit of `serial` has finished.
-    fn wait_for(&mut self, serial: u64) -> Result<(), GpuError> {
+    pub(crate) fn wait_for(&mut self, serial: u64) -> Result<(), GpuError> {
         if serial <= self.finished_serial {
             return Ok(());
         }
@@ -1782,37 +1882,6 @@ impl Resources for VulkanGpu {
     fn bind_group_entries(&self, id: BindGroupId) -> Option<&[BindGroupEntry]> {
         self.bind_groups.get(id).map(Vec::as_slice)
     }
-}
-
-/// The subpass dependencies of every render pass: each waits for what the
-/// commands before it wrote, and the commands after it for what it wrote, as
-/// a pass may sample or load what an earlier one drew, or draw over what an
-/// earlier one sampled. Render passes are compatible, so that a pipeline
-/// fits each of a format's, only where their dependencies are the same.
-pub(crate) fn subpass_dependencies() -> [vk::SubpassDependency; 2] {
-    let attachment_stages = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-        | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
-        | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS;
-    let attachment_writes = vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE;
-    let attachment_access =
-        attachment_writes | vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ;
-    let shader_stages = vk::PipelineStageFlags::VERTEX_SHADER | vk::PipelineStageFlags::FRAGMENT_SHADER;
-    [
-        vk::SubpassDependency::default()
-            .src_subpass(vk::SUBPASS_EXTERNAL)
-            .dst_subpass(0)
-            .src_stage_mask(attachment_stages | shader_stages | vk::PipelineStageFlags::TRANSFER)
-            .dst_stage_mask(attachment_stages | shader_stages)
-            .src_access_mask(attachment_writes | vk::AccessFlags::TRANSFER_WRITE)
-            .dst_access_mask(attachment_access | vk::AccessFlags::SHADER_READ),
-        vk::SubpassDependency::default()
-            .src_subpass(0)
-            .dst_subpass(vk::SUBPASS_EXTERNAL)
-            .src_stage_mask(attachment_stages)
-            .dst_stage_mask(attachment_stages | shader_stages | vk::PipelineStageFlags::TRANSFER)
-            .src_access_mask(attachment_writes)
-            .dst_access_mask(attachment_access | vk::AccessFlags::SHADER_READ | vk::AccessFlags::TRANSFER_READ),
-    ]
 }
 
 impl Gpu for VulkanGpu {

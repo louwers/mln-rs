@@ -12,7 +12,6 @@ use mln_util::logging::{Event, Log};
 use crate::backend::Type as BackendType;
 use crate::bind_group::BindGroup;
 use crate::buffer::{Buffer, BufferPtr};
-use crate::command_encoder::CommandEncoder;
 use crate::gfx_types::AttributeDataType;
 use crate::gpu::{BindGroupId, BufferUsage, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, TextureFormat};
 use crate::released::Released;
@@ -56,11 +55,6 @@ pub trait Context: Any {
 
     fn begin_frame(&self);
     fn end_frame(&self);
-    /// Waits until the GPU no longer uses what the work submitted so far
-    /// used, on the backends where dropping an object the GPU still uses is
-    /// unsafe, so that a custom layer can destroy its objects.
-    fn finish(&self) {}
-    fn perform_cleanup(&self);
     fn reduce_memory_usage(&self);
 
     /// The channel type of a render target's color texture, which
@@ -75,7 +69,6 @@ pub trait Context: Any {
     fn render_target_depth(&self) -> Option<TextureFormat> {
         None
     }
-    fn create_command_encoder(&self) -> Box<dyn CommandEncoder>;
 
     /// The rendering stats, which count the renderer's resources until it
     /// releases them.

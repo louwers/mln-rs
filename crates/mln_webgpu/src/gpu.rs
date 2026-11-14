@@ -8,8 +8,8 @@ use std::sync::{Arc, OnceLock};
 use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, ReadbackId, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc,
-    TextureFormat, TextureId, TextureRegion, TextureUsage,
+    PipelineId, PipelineKey, ReadbackId, RenderCommand, SamplerId, ShaderKey, SlotMap, TextureDesc, TextureFormat,
+    TextureId, TextureRegion, TextureUsage,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -144,13 +144,14 @@ impl WebGpu {
         self.textures.insert(Texture { texture: texture.clone(), view })
     }
 
-    /// The wgpu texture of `texture`, and its view.
-    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<(&wgpu::Texture, &wgpu::TextureView)> {
-        self.textures.get(texture).map(|texture| (&texture.texture, &texture.view))
+    /// The wgpu texture of `texture`.
+    #[cfg(test)]
+    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<&wgpu::Texture> {
+        self.textures.get(texture).map(|texture| &texture.texture)
     }
 
     /// Submits `command_buffer` after the copies of the writes made so far.
-    pub(crate) fn submit_native(&mut self, command_buffer: wgpu::CommandBuffer) -> wgpu::SubmissionIndex {
+    fn submit_native(&mut self, command_buffer: wgpu::CommandBuffer) -> wgpu::SubmissionIndex {
         let writes = self.writes.encode(self.device.device(), self.device.queue());
         self.device.queue().submit(writes.into_iter().chain([command_buffer]))
     }
@@ -373,27 +374,6 @@ impl WebGpu {
         Ok(render_pass)
     }
 
-    /// Records `commands` into `render_pass`, of `size` and over attachments
-    /// of `targets`, as the commands of a pass of their own.
-    ///
-    /// The old frame submission encodes the renderer's commands into the
-    /// render pass it has open with this, until frames go through
-    /// [`Gpu::submit`].
-    pub(crate) fn encode_into(
-        &mut self,
-        render_pass: &mut wgpu::RenderPass<'static>,
-        size: Size,
-        targets: TargetFormats,
-        commands: &[RenderCommand],
-    ) -> Result<(), GpuError> {
-        validation::check_commands(self, "render pass", targets, commands)?;
-        render_pass.set_viewport(0.0, 0.0, size.width as f32, size.height as f32, 0.0, 1.0);
-        render_pass.set_scissor_rect(0, 0, size.width, size.height);
-        render_pass.set_stencil_reference(0);
-        render_pass.set_blend_constant(wgpu::Color::TRANSPARENT);
-        self.encode_commands(render_pass, "render pass", commands)
-    }
-
     /// Records `commands`, which the checks passed, into `render_pass`.
     fn encode_commands(
         &mut self,
@@ -576,7 +556,7 @@ impl Resources for WebGpu {
         let texture = &self.textures.get(id)?.texture;
         let usage = texture.usage();
         Some(TextureInfo {
-            format: TextureFormat::ALL.into_iter().find(|&format| texture_format(format) == texture.format()),
+            format: from_wgpu_format(texture.format()),
             size: Size { width: texture.width(), height: texture.height() },
             usage: TextureUsage {
                 sampled: usage.contains(wgpu::TextureUsages::TEXTURE_BINDING),

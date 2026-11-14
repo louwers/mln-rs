@@ -34,7 +34,7 @@ use super::target::{BorrowedRing, Device, DeviceOptions, FrameTexture, RingKind,
 /// Frames read back: an offscreen target.
 trait Offscreen: FrameTarget {
     fn resize(&self, size: Size);
-    fn read_image(&self) -> Option<PremultipliedImage>;
+    fn read_image(&self) -> Result<PremultipliedImage, Error>;
 }
 
 /// Frames presented: a surface target.
@@ -185,7 +185,7 @@ macro_rules! offscreen {
             fn resize(&self, size: Size) {
                 <$type>::resize(self, size);
             }
-            fn read_image(&self) -> Option<PremultipliedImage> {
+            fn read_image(&self) -> Result<PremultipliedImage, Error> {
                 <$type>::read_image(self)
             }
         }
@@ -788,13 +788,13 @@ impl LocalTarget {
     /// The last frame's pixels.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
-    /// target that presents its frames, and with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) before a frame.
+    /// target that presents its frames, with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) before a frame, and
+    /// with [`ErrorKind::Native`](mln_util::ErrorKind) where the backend
+    /// reads nothing back.
     pub fn read_image(&self) -> Result<PremultipliedImage, Error> {
         match &self.frames {
-            Frames::Offscreen(target) => target
-                .read_image()
-                .ok_or_else(|| Error::invalid_state("the target has no frame since it was made or resized")),
+            Frames::Offscreen(target) => target.read_image(),
             Frames::Presenting(_) => Err(Error::unsupported("a surface session can't read its frames back")),
             Frames::Borrowed { .. } | Frames::Exported(_) => {
                 Err(Error::unsupported("a ring's frames are the host's to read"))

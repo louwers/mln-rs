@@ -7,33 +7,29 @@
 // renderbuffers, draw scopes and vertex array state, and the debugging and
 // timestamp query extensions.
 
-use std::cell::{Cell, RefCell, RefMut};
+use std::cell::{RefCell, RefMut};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use glow::HasContext;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
-use mln_gfx::gpu::{Gpu, TextureRegion};
+use mln_gfx::gpu::Gpu;
 use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
-use mln_util::Color;
 use mln_util::logging::{Event, Log};
-use mln_util::size::Size;
 
-use crate::command_encoder::CommandEncoder;
 use crate::gpu::GlGpu;
 use crate::renderer_backend::BackendImpl;
 use crate::state::State;
-use crate::types::{FramebufferID, Gl, RenderbufferID, TextureID};
+use crate::types::{FramebufferID, Gl, TextureID};
 
-/// The objects whose owners are gone, deleted by `perform_cleanup` while the
+/// The objects whose owners are gone, deleted by `end_frame` while the
 /// context is current.
 #[derive(Default)]
 struct Abandoned {
     textures: Vec<TextureID>,
     framebuffers: Vec<FramebufferID>,
-    renderbuffers: Vec<RenderbufferID>,
 }
 
 pub(crate) struct Context {
@@ -48,12 +44,6 @@ pub(crate) struct Context {
     /// (`EXT_color_buffer_half_float` or `EXT_color_buffer_float`).
     half_float_renderable: bool,
     abandoned: RefCell<Abandoned>,
-    /// The framebuffer being drawn into, none for the default one.
-    framebuffer: Cell<Option<FramebufferID>>,
-    /// The size of the framebuffer being drawn into.
-    framebuffer_size: Cell<Size>,
-    /// Whether that framebuffer has a stencil buffer.
-    framebuffer_has_stencil: Cell<bool>,
 }
 
 impl Context {
@@ -85,9 +75,6 @@ impl Context {
             gpu: RefCell::new(gpu),
             half_float_renderable,
             abandoned: RefCell::new(Abandoned::default()),
-            framebuffer: Cell::new(None),
-            framebuffer_size: Cell::new(Size::new(0, 0)),
-            framebuffer_has_stencil: Cell::new(false),
         })
     }
 
@@ -96,6 +83,7 @@ impl Context {
         self.weak_self.upgrade().expect("gl::Context used after drop")
     }
 
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     pub(crate) fn weak(&self) -> Weak<Context> {
         Weak::clone(&self.weak_self)
     }
@@ -110,12 +98,8 @@ impl Context {
         self.backend.gl()
     }
 
-    /// The GL functions, to share with a custom layer.
-    pub(crate) fn gl_shared(&self) -> &Arc<Gl> {
-        self.backend.gl_shared()
-    }
-
     /// The GL state the context last set.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn state(&self) -> &State {
         &self.state
     }
@@ -137,13 +121,9 @@ impl Context {
         self.abandoned.borrow_mut().textures.push(texture);
     }
 
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     pub(crate) fn abandon_framebuffer(&self, framebuffer: FramebufferID) {
         self.abandoned.borrow_mut().framebuffers.push(framebuffer);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn abandon_renderbuffer(&self, renderbuffer: RenderbufferID) {
-        self.abandoned.borrow_mut().renderbuffers.push(renderbuffer);
     }
 
     /// `MBGL_CHECK_ERROR`, once a frame and in debug builds only, as in
@@ -175,9 +155,6 @@ impl Context {
                 self.state.forget_framebuffer(framebuffer);
                 gl.delete_framebuffer(framebuffer);
             }
-            for renderbuffer in abandoned.renderbuffers {
-                gl.delete_renderbuffer(renderbuffer);
-            }
         }
     }
 
@@ -187,34 +164,6 @@ impl Context {
     /// all of it again. Call it after code outside the context changed it.
     pub(crate) fn set_dirty_state(&self) {
         self.state.set_dirty();
-    }
-
-    pub(crate) fn clear(&self, color: Option<Color>, depth: Option<f32>, stencil: Option<i32>) {
-        self.state.clear(self.gl(), color, depth, stencil);
-    }
-
-    /// Binds `framebuffer` (none: the default one) to draw all of its `size`
-    /// (C++: the `bind` of each renderable resource).
-    pub(crate) fn bind_framebuffer(&self, framebuffer: Option<FramebufferID>, size: Size, has_stencil: bool) {
-        let gl = self.gl();
-        self.state.bind_framebuffer(gl, framebuffer);
-        self.state.set_scissor(gl, None);
-        self.state.set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
-        self.framebuffer.set(framebuffer);
-        self.framebuffer_size.set(size);
-        self.framebuffer_has_stencil.set(has_stencil);
-    }
-
-    /// The framebuffer being drawn into, as `bind_framebuffer` bound it: none
-    /// for the default one, its size, and whether it has a stencil buffer.
-    pub(crate) fn bound_framebuffer(&self) -> (Option<FramebufferID>, Size, bool) {
-        (self.framebuffer.get(), self.framebuffer_size.get(), self.framebuffer_has_stencil.get())
-    }
-
-    /// Reads the RGBA pixels of the bound framebuffer, of `size`, the top
-    /// row first.
-    pub(crate) fn read_framebuffer(&self, size: Size) -> Vec<u8> {
-        crate::gpu::read_pixels(self.gl(), &self.state, size.height, TextureRegion::whole(size))
     }
 
     pub(crate) fn gl_gpu_mut(&self) -> RefMut<'_, GlGpu> {
@@ -233,23 +182,13 @@ impl GfxContext for Context {
 
     fn begin_frame(&self) {}
 
+    /// Deletes the objects abandoned since the last frame.
     fn end_frame(&self) {
         // What draws on the context outside the frames samples with its
         // textures' own parameters.
         self.state.unbind_samplers(self.gl());
         self.log_errors();
-    }
-
-    fn finish(&self) {
-        // SAFETY: glFinish takes no arguments.
-        unsafe { self.gl().finish() };
-    }
-
-    /// Called at the end of a frame, when its command encoder goes: deletes
-    /// the objects abandoned since the last one.
-    fn perform_cleanup(&self) {
         self.delete_abandoned();
-        self.destroy_released();
     }
 
     fn reduce_memory_usage(&self) {
@@ -269,10 +208,6 @@ impl GfxContext for Context {
         } else {
             TextureChannelDataType::UnsignedByte
         }
-    }
-
-    fn create_command_encoder(&self) -> Box<dyn mln_gfx::command_encoder::CommandEncoder> {
-        Box::new(CommandEncoder::new(self.rc()))
     }
 
     fn gpu(&self) -> RefMut<'_, dyn Gpu> {

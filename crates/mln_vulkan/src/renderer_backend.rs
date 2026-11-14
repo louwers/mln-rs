@@ -215,18 +215,6 @@ impl BackendImpl {
         }
     }
 
-    pub(crate) fn insert_debug_label(&self, buffer: vk::CommandBuffer, name: &str) {
-        let Some(debug_utils) = self.device.shared.debug_utils() else {
-            return;
-        };
-        let Ok(name) = std::ffi::CString::new(name) else {
-            return;
-        };
-        let label = vk::DebugUtilsLabelEXT::default().label_name(&name);
-        // SAFETY: as in `begin_debug_label`.
-        unsafe { debug_utils.cmd_insert_debug_utils_label(buffer, &label) };
-    }
-
     /// Waits for the work the backend submitted to the device's queue, by
     /// submitting an empty batch with a fence: the fence signals once
     /// everything submitted to the queue before it has finished. It never
