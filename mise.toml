@@ -92,7 +92,7 @@ run = ["mise run package", "mise run ci:assert-clean"]
 description = "Build the API docs as docs.rs does; `--open` opens them"
 usage = 'arg "[args]..." var=#true help="Arguments to `cargo doc`, such as `--open`"'
 env = { DOCS_RS = "1" }
-run = "cargo doc --no-deps --workspace {{ usage.args | default(value=[]) | join(sep=' ') }}"
+run = 'eval "set -- ${usage_args:-}"; cargo doc --no-deps --workspace "$@"'
 
 # Needs libclang, which bindgen loads at run time (LIBCLANG_PATH names its
 # directory if it isn't found).
@@ -104,7 +104,7 @@ run = "cargo run -q -p mln-rs-c-abi-gen"
 [tasks."generate:icu-tables"]
 description = "Regenerate the Unicode bidi table from ICU 78.3's sources"
 usage = '''arg "<icu_common>" help="The icu/source/common directory of ICU 78.3's sources"'''
-run = "python3 -I crates/mln_text/tools/gen_icu_tables.py {{ usage.icu_common }} > crates/mln_text/src/icu/ubidi_props_data.rs"
+run = 'python3 -I crates/mln_text/tools/gen_icu_tables.py "$usage_icu_common" > crates/mln_text/src/icu/ubidi_props_data.rs'
 
 # style-codegen's generated_code_test checks that the code is up to date.
 [tasks."generate:style"]
@@ -118,7 +118,7 @@ run = "cargo deny --locked check licenses"
 [tasks.ratchet]
 description = "Check that no file gains panics or RefCell borrows (tools/ratchet); `--update` lowers the counts"
 usage = 'arg "[args]..." var=#true help="Arguments to tools/ratchet/ratchet.py, such as `--update`"'
-run = "python3 -I tools/ratchet/ratchet.py {{ usage.args | default(value=[]) | join(sep=' ') }}"
+run = 'eval "set -- ${usage_args:-}"; python3 -I tools/ratchet/ratchet.py "$@"'
 
 [tasks.release]
 description = "Publish the crates from main at the version in Cargo.toml (RELEASING.md)"
@@ -133,4 +133,4 @@ run = "cargo +$MLN_NIGHTLY udeps --workspace --all-targets"
 [tasks."update:style-spec"]
 description = "Refresh the copy of the MapLibre style spec (tools/style-codegen/v8.json)"
 usage = 'arg "[ref]" default="c2a460f6e55899e4b6e04b44f8e29e08fef3067b" help="A maplibre-style-spec tag or commit"'
-run = "curl -fsSL https://raw.githubusercontent.com/maplibre/maplibre-style-spec/{{ usage.ref }}/src/reference/v8.json -o tools/style-codegen/v8.json"
+run = 'curl -fsSL "https://raw.githubusercontent.com/maplibre/maplibre-style-spec/$usage_ref/src/reference/v8.json" -o tools/style-codegen/v8.json'

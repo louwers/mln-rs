@@ -88,9 +88,9 @@ coverage *args:
 desktop *args:
     mise run desktop --profile {{profile}} "$@"
 
-# `mise run docs --open`
+# `mise run docs --open`, or `mise run docs` with the arguments given
 docs *args:
-    mise run docs --open "$@"
+    if [ $# -eq 0 ]; then mise run docs --open; else mise run docs "$@"; fi
 
 # `mise run fmt`
 fmt *args:
