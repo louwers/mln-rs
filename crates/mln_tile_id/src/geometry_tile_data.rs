@@ -187,7 +187,7 @@ pub enum EncodedTileData {
         fast_pfor_enabled: bool,
     },
     /// `GeoJSONTileData`'s features.
-    GeoJson(Arc<Vec<feature::Feature<i16>>>),
+    GeoJson(Arc<Vec<feature::Feature<i16, Arc<PropertyMap>>>>),
 }
 
 #[cfg(test)]

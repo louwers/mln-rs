@@ -197,7 +197,7 @@ fn invoke_tile_changed() {
     tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();
     assert_eq!(result, Vec::<mln_util::feature::Feature>::new());
 
-    tile.set_tile_data(Arc::new(vec![Feature::new(Point::new(0i16, 0))]));
+    tile.set_tile_data(Arc::new(vec![Feature { geometry: Some(Point::new(0i16, 0).into()), ..Feature::default() }]));
 
     while !tile.is_complete() {
         test.run_loop.run_once();

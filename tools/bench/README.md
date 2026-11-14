@@ -48,6 +48,8 @@ mise run bench:compare main         # this checkout, uncommitted changes include
 | `Load/GlyphCache/Private`, `Load/GlyphCache/Shared` | `Load/Concurrent` over the render suite's `text-font/chinese` style (500 labels, about 2,500 CJK characters over 80 glyph ranges), each renderer with a glyph cache of its own, or all sharing one `GlyphCache`                                         |
 | `Style/Replace600`                                  | replacing a style of 600 circle layers over 100 GeoJSON points, each filtered by point id as maplibre-compose's style benchmarks build one, with its other variant, to the first complete still                                                         |
 | `Runtime/Lifecycle`                                 | starting a runtime with the default options, then releasing it and waiting for the release, as maplibre-native-ffi's case of the name does through the C API                                                                                            |
+| `Style/Replace600/OnDemand`                         | as `Style/Replace600`, on a continuous map drawn on a 60 Hz display's clock, until it settles complete                                                                                                                                                  |
+| `Style/AddLayer600`                                 | a circle layer added over `Style/Replace600`'s first style until the continuous map settles complete, then removed until it settles, as maplibre-compose's overlay-update case does                                                                     |
 | `Load/JumpWarm`, `Load/JumpCold`                    | a jump between two views that share no tile until a frame shows the new view complete, on the display's clock; cold drops the loaded tiles first                                                                                                        |
 
 In `Frame/Paced`, refreshes are absolute deadlines, and at each refresh with no
@@ -95,6 +97,8 @@ metrics only; `--verbose` also shows the others.
   once the view is complete.
 - In `Style/Replace600`: **`load_json_cpu_ms`**, the CPU time that `load_json`
   takes before the map renders.
+- In `Style/Replace600/OnDemand` and `Style/AddLayer600`: **`frames`**, frames
+  drawn per change until the map settles complete.
 
 ## Comparing
 

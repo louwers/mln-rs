@@ -290,6 +290,18 @@ impl Scene {
         self.map.style_mut().remove_layer(id).expect("the layer");
     }
 
+    /// Replaces the data of the GeoJSON source `id` with `json`.
+    pub(crate) fn set_geojson(&mut self, id: &str, json: &str) {
+        let document: serde_json::Value = serde_json::from_str(json).expect("GeoJSON is JSON");
+        let mut error = mln_conversion::Error::default();
+        let geojson =
+            mln_conversion::to_geojson(&mln_conversion::Convertible::from(&document), &mut error).expect("GeoJSON");
+        let source: &dyn std::any::Any = self.map.style().get_source(id).expect("the source");
+        let source =
+            source.downcast_ref::<mln_style::sources::geojson_source::GeoJSONSource>().expect("a GeoJSON source");
+        source.set_geojson(geojson).expect("the data");
+    }
+
     /// Adds an image to the style, as a sprite's would be.
     pub(crate) fn add_image(&mut self, id: &str, image: PremultipliedImage) {
         let image =

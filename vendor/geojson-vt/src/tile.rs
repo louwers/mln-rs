@@ -1,5 +1,7 @@
 // Ports vendor/maplibre-native-base/deps/geojson-vt-cpp/include/mapbox/geojsonvt/tile.hpp.
 
+use std::sync::Arc;
+
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
@@ -8,10 +10,14 @@ use crate::types::{
     VtPolygon,
 };
 
+/// A tile's features. A feature cut from a source feature shares its
+/// property map.
+pub type TileFeatures = Vec<Feature<i16, Arc<PropertyMap>>>;
+
 /// `Tile`
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tile {
-    pub features: Vec<Feature<i16>>,
+    pub features: TileFeatures,
     pub(crate) num_points: u32,
     pub(crate) num_simplified: u32,
 }
@@ -63,7 +69,7 @@ impl InternalTile {
         t.tile.features.reserve(source.len());
         for feature in source {
             let geom = &feature.geometry;
-            let props = &*feature.properties;
+            let props = &feature.properties;
             let id = &feature.id;
 
             t.tile.num_points = t.tile.num_points.wrapping_add(feature.num_points);
@@ -78,23 +84,23 @@ impl InternalTile {
         t
     }
 
-    fn emplace(&mut self, geometry: Option<Geometry<i16>>, properties: PropertyMap, id: &Identifier) {
+    fn emplace(&mut self, geometry: Option<Geometry<i16>>, properties: Arc<PropertyMap>, id: &Identifier) {
         self.tile.features.push(Feature { geometry, properties, id: id.clone() });
     }
 
     /// The `addFeature` overloads.
-    fn add_feature(&mut self, geom: &VtGeometry, props: &PropertyMap, id: &Identifier) {
+    fn add_feature(&mut self, geom: &VtGeometry, props: &Arc<PropertyMap>, id: &Identifier) {
         match geom {
-            VtGeometry::Empty => self.emplace(None, props.clone(), id),
+            VtGeometry::Empty => self.emplace(None, Arc::clone(props), id),
             VtGeometry::Point(point) => {
                 let p = self.transform_point(point);
-                self.emplace(Some(Geometry::Point(Point(p))), props.clone(), id);
+                self.emplace(Some(Geometry::Point(Point(p))), Arc::clone(props), id);
             }
             VtGeometry::LineString(line) => {
                 let new_line = self.transform_line_string(line);
                 if !new_line.0.is_empty() {
                     if self.line_metrics {
-                        let mut new_props = props.clone();
+                        let mut new_props = PropertyMap::clone(props);
                         // `emplace` keeps an existing value.
                         new_props
                             .entry("mapbox_clip_start".to_owned())
@@ -102,16 +108,16 @@ impl InternalTile {
                         new_props
                             .entry("mapbox_clip_end".to_owned())
                             .or_insert(Value::Double(line.seg_end / line.dist));
-                        self.emplace(Some(Geometry::LineString(new_line)), new_props, id);
+                        self.emplace(Some(Geometry::LineString(new_line)), Arc::new(new_props), id);
                     } else {
-                        self.emplace(Some(Geometry::LineString(new_line)), props.clone(), id);
+                        self.emplace(Some(Geometry::LineString(new_line)), Arc::clone(props), id);
                     }
                 }
             }
             VtGeometry::Polygon(polygon) => {
                 let new_polygon = self.transform_polygon(polygon);
                 if !new_polygon.is_empty() {
-                    self.emplace(Some(Geometry::Polygon(to_polygon(new_polygon))), props.clone(), id);
+                    self.emplace(Some(Geometry::Polygon(to_polygon(new_polygon))), Arc::clone(props), id);
                 }
             }
             VtGeometry::GeometryCollection(collection) => {
@@ -123,26 +129,36 @@ impl InternalTile {
                 let mut new_multi = self.transform_multi_point(points);
                 match new_multi.len() {
                     0 => {}
-                    1 => self.emplace(Some(Geometry::Point(new_multi.swap_remove(0))), props.clone(), id),
-                    _ => self.emplace(Some(Geometry::MultiPoint(MultiPoint(new_multi))), props.clone(), id),
+                    1 => self.emplace(Some(Geometry::Point(new_multi.swap_remove(0))), Arc::clone(props), id),
+                    _ => self.emplace(Some(Geometry::MultiPoint(MultiPoint(new_multi))), Arc::clone(props), id),
                 }
             }
             VtGeometry::MultiLineString(lines) => {
                 let mut new_multi = self.transform_multi_line_string(lines);
                 match new_multi.len() {
                     0 => {}
-                    1 => self.emplace(Some(Geometry::LineString(new_multi.swap_remove(0))), props.clone(), id),
-                    _ => self.emplace(Some(Geometry::MultiLineString(MultiLineString(new_multi))), props.clone(), id),
+                    1 => self.emplace(Some(Geometry::LineString(new_multi.swap_remove(0))), Arc::clone(props), id),
+                    _ => {
+                        self.emplace(
+                            Some(Geometry::MultiLineString(MultiLineString(new_multi))),
+                            Arc::clone(props),
+                            id,
+                        );
+                    }
                 }
             }
             VtGeometry::MultiPolygon(polygons) => {
                 let mut new_multi = self.transform_multi_polygon(polygons);
                 match new_multi.len() {
                     0 => {}
-                    1 => self.emplace(Some(Geometry::Polygon(to_polygon(new_multi.swap_remove(0)))), props.clone(), id),
+                    1 => self.emplace(
+                        Some(Geometry::Polygon(to_polygon(new_multi.swap_remove(0)))),
+                        Arc::clone(props),
+                        id,
+                    ),
                     _ => self.emplace(
                         Some(Geometry::MultiPolygon(MultiPolygon(new_multi.into_iter().map(to_polygon).collect()))),
-                        props.clone(),
+                        Arc::clone(props),
                         id,
                     ),
                 }

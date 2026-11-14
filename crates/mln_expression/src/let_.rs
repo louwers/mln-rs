@@ -1,5 +1,6 @@
 // The module is `let_` because `let` is a Rust keyword.
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use feature::Value as MbglValue;
@@ -84,6 +85,12 @@ impl Expression for Let {
             visit(&**binding);
         }
         visit(&*self.result);
+    }
+
+    /// The result alone, as `equals` ignores the bindings.
+    fn hash_structure(&self, mut state: &mut dyn Hasher) {
+        self.get_kind().hash(&mut state);
+        self.result.hash_structure(state);
     }
 
     fn equals(&self, e: &dyn Expression) -> bool {

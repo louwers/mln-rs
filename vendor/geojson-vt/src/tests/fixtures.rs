@@ -8,6 +8,7 @@
 // and the ids; the coordinates are not compared. The port compares the
 // same. //difftest/geometry compares everything exactly against the C++.
 
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
@@ -15,7 +16,7 @@ use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Coord, Geometry, LineString, MultiLineString, Point, Polygon};
 use serde_json::Value as Json;
 
-use crate::{EMPTY_TILE, GeoJSONVT, Options, TileOptions, geojson_to_tile};
+use crate::{EMPTY_TILE, GeoJSONVT, Options, TileFeatures, TileOptions, geojson_to_tile};
 
 fn load_file(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -56,15 +57,18 @@ fn compare_maps(a: &PropertyMap, b: &PropertyMap) {
     }
 }
 
-fn features_eq(a: &[Feature<i16>], b: &[Feature<i16>]) {
+fn features_eq<P: Borrow<PropertyMap>, Q: Borrow<PropertyMap>>(a: &[Feature<i16, P>], b: &[Feature<i16, Q>]) {
     assert_eq!(a.len(), b.len());
     for (fa, fb) in a.iter().zip(b) {
-        compare_maps(&fa.properties, &fb.properties);
+        compare_maps(fa.properties.borrow(), fb.properties.borrow());
         assert_eq!(fa.id, fb.id);
     }
 }
 
-fn tiles_eq(a: &BTreeMap<String, Vec<Feature<i16>>>, b: &BTreeMap<String, Vec<Feature<i16>>>) {
+fn tiles_eq<P: Borrow<PropertyMap>, Q: Borrow<PropertyMap>>(
+    a: &BTreeMap<String, Vec<Feature<i16, P>>>,
+    b: &BTreeMap<String, Vec<Feature<i16, Q>>>,
+) {
     assert_eq!(a.len(), b.len());
     for (k, v) in a {
         features_eq(v, b.get(k).unwrap_or_else(|| panic!("missing tile {k}")));
@@ -308,7 +312,7 @@ fn gen_tiles(
     max_zoom: u8,
     max_points: u32,
     line_metrics: bool,
-) -> Result<BTreeMap<String, Vec<Feature<i16>>>, geojson::Error> {
+) -> Result<BTreeMap<String, TileFeatures>, geojson::Error> {
     let options = Options {
         tile: TileOptions { line_metrics, ..TileOptions::default() },
         max_zoom: 14,

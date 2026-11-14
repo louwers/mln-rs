@@ -152,7 +152,7 @@ fn test_3_map_reduce() {
     let index3 = Supercluster::new(features.clone(), sum_options(None)).unwrap();
 
     let tile3 = index3.get_tile(0, 0, 0);
-    assert_ne!(tile3, Vec::<Feature<i16>>::new());
+    assert_ne!(tile3, Vec::<Feature<i16, Arc<PropertyMap>>>::new());
     assert!(tile3[0].properties.contains_key("sum"));
     assert_eq!(uint(&tile3[0].properties, "sum"), 69);
 }
@@ -164,7 +164,7 @@ fn test_4_map_reduce_radius() {
 
     let expect_vec0: Vec<u64> = vec![298, 122, 12, 36, 98, 7, 24, 8, 125, 98, 125, 12, 36, 8];
     let expect_vec1: Vec<u64> = vec![146, 84, 63, 23, 34, 12, 19, 29, 8, 8, 80, 35];
-    let sums = |tile: &[Feature<i16>]| -> Vec<u64> {
+    let sums = |tile: &[Feature<i16, Arc<PropertyMap>>]| -> Vec<u64> {
         tile.iter().filter(|f| f.properties.contains_key("sum")).map(|f| uint(&f.properties, "sum")).collect()
     };
     assert_eq!(sums(&index4.get_tile(0, 0, 0)), expect_vec0);

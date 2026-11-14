@@ -2486,6 +2486,7 @@ version = "0.0.11"
 dependencies = [
  "libc",
  "mln-rs-actor",
+ "mln-rs-conversion",
  "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-gl",

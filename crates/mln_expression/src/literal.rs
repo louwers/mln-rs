@@ -1,10 +1,12 @@
+use std::hash::{Hash, Hasher};
+
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 
 use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
-use crate::value::{ObjectType, Value, from_mbgl_value, to_mbgl_value, type_of};
+use crate::value::{ObjectType, Value, from_mbgl_value, hash_value, to_mbgl_value, type_of};
 
 pub struct Literal {
     base: ExpressionBase,
@@ -126,6 +128,11 @@ impl Expression for Literal {
     }
 
     fn each_child<'a>(&'a self, _: &mut dyn FnMut(&'a dyn Expression)) {}
+
+    fn hash_structure(&self, mut state: &mut dyn Hasher) {
+        self.get_kind().hash(&mut state);
+        hash_value(&self.value, state);
+    }
 
     fn equals(&self, e: &dyn Expression) -> bool {
         if e.get_kind() == Kind::Literal {

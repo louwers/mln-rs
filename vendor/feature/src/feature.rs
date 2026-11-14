@@ -25,16 +25,20 @@ pub type PropertyMap = ValueObject;
 ///
 /// `geometry` is `None` where C++ holds an empty geometry, as for a GeoJSON
 /// feature whose geometry is `null`.
+///
+/// `P` holds the properties. Features that share one property map, as the
+/// features a GeoJSON source's tiles cut from one source feature do, hold it
+/// as an [`Arc<PropertyMap>`](std::sync::Arc).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Feature<T: CoordNum = f64> {
+pub struct Feature<T: CoordNum = f64, P = PropertyMap> {
     pub geometry: Option<Geometry<T>>,
-    pub properties: PropertyMap,
+    pub properties: P,
     pub id: Identifier,
 }
 
-impl<T: CoordNum> Default for Feature<T> {
+impl<T: CoordNum, P: Default> Default for Feature<T, P> {
     fn default() -> Self {
-        Feature { geometry: None, properties: PropertyMap::new(), id: Identifier::Null }
+        Feature { geometry: None, properties: P::default(), id: Identifier::Null }
     }
 }
 

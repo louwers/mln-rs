@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use feature::{Feature, PropertyMap, Value};
+use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
@@ -102,9 +102,11 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
                 Shape::LineString => Geometry::LineString(LineString::from(vec![(x, 10), (x, 20)])),
                 Shape::Point => Geometry::Point(Point::new(x, 300 - (i as i16) * 100)),
             };
-            let mut feature = Feature::new(geometry);
-            feature.properties = PropertyMap::from_iter([("rank".to_owned(), Value::Double(rank))]);
-            feature
+            Feature {
+                geometry: Some(geometry),
+                properties: Arc::new(PropertyMap::from_iter([("rank".to_owned(), Value::Double(rank))])),
+                id: Identifier::Null,
+            }
         })
         .collect();
     let data: Arc<dyn GeometryTileData + Send + Sync> = Arc::new(GeoJSONTileData::new(features));
