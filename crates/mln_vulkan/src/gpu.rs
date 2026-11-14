@@ -7,6 +7,7 @@ use std::rc::{Rc, Weak};
 use ash::vk;
 use gpu_allocator::MemoryLocation;
 use mln_gfx::color_mode::BlendFunction;
+use mln_gfx::gpu::validation::{self, Resources, ShaderBinding};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
     PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat,
@@ -70,6 +71,8 @@ pub(crate) struct Shader {
     fragment: vk::ShaderModule,
     /// The bindings its stages use, by descriptor set.
     bindings: [Vec<(u32, Binding)>; DescriptorSetType::COUNT],
+    /// What its stages read from the bind groups, by the shaders' ids.
+    reads: Vec<ShaderBinding>,
     /// The location of each per-vertex attribute, by id.
     attributes: &'static [AttributeInfo],
     /// The location of each per-instance attribute, by id.
@@ -285,6 +288,28 @@ fn binding_of(
         None => return Err(GpuError::Invalid(format!("{name}: no descriptor set {set}"))),
     };
     Ok(resource)
+}
+
+/// Adds `resource`, which a stage reads `size` bytes of, to what a shader
+/// `reads`: a buffer that both stages read, as many bytes as either reads.
+fn read(reads: &mut Vec<ShaderBinding>, resource: Binding, size: u64) {
+    let read = match resource {
+        Binding::Buffer(id) => ShaderBinding::Buffer { id, min_size: size },
+        Binding::Texture(id) | Binding::Sampler(id) => ShaderBinding::Texture { id },
+    };
+    for earlier in reads.iter_mut() {
+        match (earlier, read) {
+            (ShaderBinding::Buffer { id, min_size }, ShaderBinding::Buffer { id: read_id, min_size: read_size })
+                if *id == read_id =>
+            {
+                *min_size = (*min_size).max(read_size);
+                return;
+            }
+            (earlier, read) if *earlier == read => return,
+            _ => {}
+        }
+    }
+    reads.push(read);
 }
 
 impl VulkanGpu {
@@ -548,6 +573,7 @@ impl VulkanGpu {
         }
 
         let mut bindings: [Vec<(u32, Binding)>; DescriptorSetType::COUNT] = Default::default();
+        let mut reads: Vec<ShaderBinding> = Vec::new();
         let mut modules = Vec::with_capacity(2);
         let destroy = |modules: &[vk::ShaderModule]| {
             // SAFETY: no pipeline is made from them yet.
@@ -562,12 +588,13 @@ impl VulkanGpu {
             let result = compiler::compile_reflected(stage, &composed)
                 .map_err(|error| GpuError::Invalid(format!("{}: {error}", source.name)))
                 .and_then(|compiled| {
-                    for (set, binding) in compiled.bindings {
+                    for (set, binding, size) in compiled.bindings {
                         let (type_, resource) = binding_of(source.name, source.textures, set, binding)?;
                         let set_bindings = &mut bindings[type_ as usize];
                         if !set_bindings.contains(&(binding, resource)) {
                             set_bindings.push((binding, resource));
                         }
+                        read(&mut reads, resource, size);
                     }
                     let create_info = vk::ShaderModuleCreateInfo::default().code(&compiled.spirv);
                     // SAFETY: the code is the SPIR-V module naga wrote.
@@ -591,6 +618,7 @@ impl VulkanGpu {
             vertex: modules[0],
             fragment: modules[1],
             bindings,
+            reads,
             attributes: source.attributes,
             instance_attributes: source.instance_attributes,
         })
@@ -1036,23 +1064,16 @@ impl VulkanGpu {
         Ok(framebuffer)
     }
 
-    /// Records `pass` into `command_buffer`.
+    /// Records `pass`, which the shared validation passed, into
+    /// `command_buffer`.
     fn encode(&mut self, command_buffer: vk::CommandBuffer, pass: &Pass) -> Result<(), GpuError> {
         let lookup = |id| self.textures.get(id).ok_or(GpuError::UnknownId("texture"));
         let mut size = None;
-        let mut targets = (None, None);
         let mut key = RenderPassKey { color: None, depth_stencil: None };
         let mut clear_values = Vec::with_capacity(2);
         if let Some(attachment) = pass.color {
             let texture = lookup(attachment.texture)?;
-            if !texture.usage.render_target || has_depth(texture.format) {
-                return Err(GpuError::Invalid(format!(
-                    "{}: the color attachment isn't a color render target",
-                    pass.label
-                )));
-            }
             size = Some(texture.size);
-            targets.0 = Some(texture.format);
             key.color = Some(AttachmentKey {
                 format: texture.vk_format,
                 layout: texture.layout,
@@ -1066,17 +1087,7 @@ impl VulkanGpu {
         }
         if let Some(attachment) = pass.depth_stencil {
             let texture = lookup(attachment.texture)?;
-            if !texture.usage.render_target || !has_depth(texture.format) {
-                return Err(GpuError::Invalid(format!(
-                    "{}: the depth attachment isn't a depth render target",
-                    pass.label
-                )));
-            }
-            if size.is_some_and(|size| size != texture.size) {
-                return Err(GpuError::Invalid(format!("{}: attachments of different sizes", pass.label)));
-            }
             size = Some(texture.size);
-            targets.1 = Some(texture.format);
             key.depth_stencil = Some(AttachmentKey {
                 format: texture.vk_format,
                 layout: texture.layout,
@@ -1093,13 +1104,7 @@ impl VulkanGpu {
             };
             clear_values.push(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth, stencil } });
         }
-        let Some(size) = size else {
-            return if pass.commands.is_empty() {
-                Ok(())
-            } else {
-                Err(GpuError::Invalid(format!("{}: draws without attachments", pass.label)))
-            };
-        };
+        let size = size.ok_or_else(|| GpuError::Invalid(format!("{}: a pass without attachments", pass.label)))?;
         let render_pass = self.render_pass(key)?;
         let framebuffer = self.framebuffer(
             render_pass,
@@ -1148,7 +1153,7 @@ impl VulkanGpu {
                 &0u32.to_ne_bytes(),
             );
         }
-        let result = self.encode_commands(command_buffer, pass, (targets.0, targets.1), extent);
+        let result = self.encode_commands(command_buffer, pass, extent);
         // SAFETY: the render pass begun above.
         unsafe { self.device().cmd_end_render_pass(command_buffer) };
         self.backend.end_debug_label(command_buffer);
@@ -1156,12 +1161,11 @@ impl VulkanGpu {
     }
 
     /// Records the commands of `pass`, inside its render pass over
-    /// attachments of `targets` and `extent`.
+    /// attachments of `extent`.
     fn encode_commands(
         &mut self,
         command_buffer: vk::CommandBuffer,
         pass: &Pass,
-        targets: (Option<TextureFormat>, Option<TextureFormat>),
         extent: vk::Extent2D,
     ) -> Result<(), GpuError> {
         let mut pipeline: Option<Rc<Pipeline>> = None;
@@ -1169,10 +1173,6 @@ impl VulkanGpu {
         let mut current_sets = [vk::DescriptorSet::null(); DescriptorSetType::COUNT];
         // Whether the next draw binds its descriptor sets.
         let mut sets_dirty = true;
-        // The vertex buffer slots and the index buffer the pass has bound:
-        // Vulkan keeps a binding from an earlier pass.
-        let mut vertex_buffers: Vec<bool> = Vec::new();
-        let mut index_buffer = false;
         let (min_line_width, max_line_width) = {
             let range = self.backend.get_device_properties().limits.line_width_range;
             (range[0], range[1])
@@ -1185,14 +1185,6 @@ impl VulkanGpu {
             match command {
                 RenderCommand::SetPipeline(id) => {
                     let entry = Rc::clone(self.pipelines.get(*id).ok_or(GpuError::UnknownId("pipeline"))?);
-                    let targets_match =
-                        targets.0 == Some(entry.key.targets.color) && targets.1 == entry.key.targets.depth_stencil;
-                    if !targets_match {
-                        return Err(GpuError::Invalid(format!(
-                            "{}: a pipeline for {:?} in a pass over {targets:?}",
-                            pass.label, entry.key.targets
-                        )));
-                    }
                     unsafe {
                         device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, entry.pipeline);
                     }
@@ -1227,11 +1219,6 @@ impl VulkanGpu {
                 },
                 RenderCommand::SetVertexBuffer { slot, buffer, offset } => {
                     let buffer = self.buffers.get(*buffer).ok_or(GpuError::UnknownId("buffer"))?;
-                    let slot_index = *slot as usize;
-                    if vertex_buffers.len() <= slot_index {
-                        vertex_buffers.resize(slot_index + 1, false);
-                    }
-                    vertex_buffers[slot_index] = true;
                     unsafe {
                         device.cmd_bind_vertex_buffers(
                             command_buffer,
@@ -1243,7 +1230,6 @@ impl VulkanGpu {
                 }
                 RenderCommand::SetIndexBuffer { buffer, offset } => {
                     let buffer = self.buffers.get(*buffer).ok_or(GpuError::UnknownId("buffer"))?;
-                    index_buffer = true;
                     unsafe {
                         device.cmd_bind_index_buffer(
                             command_buffer,
@@ -1296,13 +1282,6 @@ impl VulkanGpu {
                     let entry = pipeline
                         .as_ref()
                         .ok_or_else(|| GpuError::Invalid(format!("{}: a draw before a pipeline", pass.label)))?;
-                    let slots = entry.key.state.vertex_buffers.len();
-                    let indexed = matches!(command, RenderCommand::DrawIndexed { .. });
-                    if (0..slots).any(|slot| !vertex_buffers.get(slot).copied().unwrap_or(false))
-                        || (indexed && !index_buffer)
-                    {
-                        return Err(GpuError::Invalid(format!("{}: a draw without its buffers", pass.label)));
-                    }
                     if sets_dirty {
                         self.bind_descriptor_sets(command_buffer, entry, &bound, &mut current_sets)?;
                         sets_dirty = false;
@@ -1435,6 +1414,34 @@ fn memory_barrier(
             &[],
             &[],
         );
+    }
+}
+
+impl Resources for VulkanGpu {
+    fn buffer_info(&self, id: BufferId) -> Option<validation::BufferInfo> {
+        self.buffers.get(id).map(|buffer| validation::BufferInfo { usage: buffer.usage, size: buffer.size })
+    }
+
+    fn texture_info(&self, id: TextureId) -> Option<validation::TextureInfo> {
+        let texture = self.textures.get(id)?;
+        Some(validation::TextureInfo { format: Some(texture.format), size: texture.size, usage: texture.usage })
+    }
+
+    fn has_sampler(&self, id: SamplerId) -> bool {
+        self.samplers.contains_key(id)
+    }
+
+    fn pipeline_info(&self, id: PipelineId) -> Option<validation::PipelineInfo<'_>> {
+        let pipeline = self.pipelines.get(id)?;
+        Some(validation::PipelineInfo {
+            targets: pipeline.key.targets,
+            vertex_buffers: &pipeline.key.state.vertex_buffers,
+            bindings: &pipeline.shader.reads,
+        })
+    }
+
+    fn bind_group_entries(&self, id: BindGroupId) -> Option<&[BindGroupEntry]> {
+        self.bind_groups.get(id).map(Vec::as_slice)
     }
 }
 
@@ -1747,20 +1754,7 @@ impl Gpu for VulkanGpu {
     }
 
     fn create_bind_group(&mut self, desc: &BindGroupDesc<'_>) -> Result<BindGroupId, GpuError> {
-        for entry in desc.entries {
-            match *entry {
-                BindGroupEntry::Buffer { buffer, .. } if !self.buffers.contains_key(buffer) => {
-                    return Err(GpuError::UnknownId("buffer"));
-                }
-                BindGroupEntry::Texture { texture, .. } if !self.textures.contains_key(texture) => {
-                    return Err(GpuError::UnknownId("texture"));
-                }
-                BindGroupEntry::Texture { sampler, .. } if !self.samplers.contains_key(sampler) => {
-                    return Err(GpuError::UnknownId("sampler"));
-                }
-                _ => {}
-            }
-        }
+        validation::check_bind_group(self, self.limits(), desc)?;
         Ok(self.bind_groups.insert(desc.entries.to_vec()))
     }
 
@@ -1769,6 +1763,9 @@ impl Gpu for VulkanGpu {
     }
 
     fn submit(&mut self, passes: &[Pass]) -> Result<(), GpuError> {
+        for pass in passes {
+            validation::check_pass(self, pass)?;
+        }
         self.collect_garbage();
         let mut command_buffers = Vec::with_capacity(2);
         if !passes.is_empty() {

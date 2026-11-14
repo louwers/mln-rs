@@ -1,4 +1,6 @@
-use mln_gfx::gpu::conformance::clip_mask_and_background;
+use mln_gfx::gpu::conformance::{
+    clip_mask_and_background, foreign_ids, invalid_calls, transparent_replace, vertex_layouts,
+};
 use mln_gfx::gpu::{Gpu, GpuError, ShaderKey, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_gfx::shader_group::GLOBE_DEFINE;
 use mln_util::size::Size;
@@ -12,6 +14,34 @@ fn clip_mask_and_background_through_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     clip_mask_and_background(&mut gpu, |gpu, texture| gpu.read_texture(texture).expect("readback")).expect("the frame");
+}
+
+#[test]
+fn invalid_calls_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    invalid_calls(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the valid calls");
+}
+
+#[test]
+fn foreign_ids_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    let mut first = VulkanGpu::new(&device).expect("VulkanGpu");
+    let mut second = VulkanGpu::new(&device).expect("VulkanGpu");
+    foreign_ids(&mut first, &mut second).expect("the valid calls");
+}
+
+#[test]
+fn transparent_replace_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
+    transparent_replace(&mut gpu, |gpu, texture| gpu.read_texture(texture).expect("readback")).expect("the frame");
+}
+
+#[test]
+fn vertex_layouts_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
+    vertex_layouts(&mut gpu, |gpu, texture| gpu.read_texture(texture).expect("readback")).expect("the frames");
 }
 
 // Every program compiles for `Gpu`, which maps each binding to an id, with
