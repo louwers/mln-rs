@@ -147,7 +147,8 @@ pub(crate) fn sort_like_collator(properties: &mut [Property]) {
     properties.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
 }
 
-fn properties_of(spec: &Value, key: &str, skip_visibility: bool) -> Result<Vec<Property>, String> {
+/// The properties under `key`, in the spec's order.
+fn spec_properties(spec: &Value, key: &str, skip_visibility: bool) -> Result<Vec<Property>, String> {
     let object = spec[key].as_object().ok_or_else(|| format!("spec has no {key}"))?;
     let mut result = Vec::new();
     for (name, value) in object {
@@ -157,6 +158,11 @@ fn properties_of(spec: &Value, key: &str, skip_visibility: bool) -> Result<Vec<P
         let spec = value.as_object().ok_or_else(|| format!("{key}.{name} is not an object"))?.clone();
         result.push(Property { name: name.clone(), spec, light: false });
     }
+    Ok(result)
+}
+
+fn properties_of(spec: &Value, key: &str, skip_visibility: bool) -> Result<Vec<Property>, String> {
+    let mut result = spec_properties(spec, key, skip_visibility)?;
     sort_like_collator(&mut result);
     Ok(result)
 }
@@ -176,20 +182,16 @@ pub(crate) fn layers(spec: &Value) -> Result<Vec<LayerSpec>, String> {
     Ok(result)
 }
 
-/// The light's properties, as generate-style-code.mjs collects them.
+/// The light's properties, in the spec's order.
 pub(crate) fn light_properties(spec: &Value) -> Result<Vec<Property>, String> {
-    let mut result = properties_of(spec, "light", false)?;
+    let mut result = spec_properties(spec, "light", false)?;
     for p in &mut result {
         p.light = true;
     }
-    sort_like_collator(&mut result);
     Ok(result)
 }
 
-/// The sky's properties, as generateRootProperties('Sky', 'sky') of
-/// generate-style-code.mjs collects them.
+/// The sky's properties, in the spec's order.
 pub(crate) fn sky_properties(spec: &Value) -> Result<Vec<Property>, String> {
-    let mut result = properties_of(spec, "sky", false)?;
-    sort_like_collator(&mut result);
-    Ok(result)
+    spec_properties(spec, "sky", false)
 }

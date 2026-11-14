@@ -4,6 +4,7 @@
 use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::circle_layer_impl::Impl as CircleLayerImpl;
+use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
 use mln_style_types::{AlignmentType, CirclePitchScaleType, TranslateAnchorType};
 use mln_util::Color;
 use mln_vec_map::VecSet;
@@ -161,5 +162,46 @@ impl HasEvaluated for CircleLayerProperties {
 
     fn evaluated(&self) -> &Self::Evaluated {
         &self.evaluated
+    }
+}
+
+/// The properties, by slot.
+pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
+    &[
+        PropertyInfo::paint("circle-blur").data_driven(),
+        PropertyInfo::paint("circle-color").data_driven(),
+        PropertyInfo::paint("circle-opacity").data_driven(),
+        PropertyInfo::paint("circle-pitch-alignment"),
+        PropertyInfo::paint("circle-pitch-scale"),
+        PropertyInfo::paint("circle-radius").data_driven(),
+        PropertyInfo::paint("circle-stroke-color").data_driven(),
+        PropertyInfo::paint("circle-stroke-opacity").data_driven(),
+        PropertyInfo::paint("circle-stroke-width").data_driven(),
+        PropertyInfo::paint("circle-translate"),
+        PropertyInfo::paint("circle-translate-anchor"),
+        PropertyInfo::layout("circle-sort-key").data_driven(),
+    ],
+    &[0, 1, 2, 3, 4, 5, 11, 6, 7, 8, 9, 10],
+);
+
+impl Properties for CircleLayerImpl {
+    const TABLE: &'static PropertyTable = &PROPERTIES;
+
+    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
+        Some(match slot {
+            0 => visitor.paint(|s| &s.paint.circle_blur, |s| &mut s.paint.circle_blur),
+            1 => visitor.paint(|s| &s.paint.circle_color, |s| &mut s.paint.circle_color),
+            2 => visitor.paint(|s| &s.paint.circle_opacity, |s| &mut s.paint.circle_opacity),
+            3 => visitor.paint(|s| &s.paint.circle_pitch_alignment, |s| &mut s.paint.circle_pitch_alignment),
+            4 => visitor.paint(|s| &s.paint.circle_pitch_scale, |s| &mut s.paint.circle_pitch_scale),
+            5 => visitor.paint(|s| &s.paint.circle_radius, |s| &mut s.paint.circle_radius),
+            6 => visitor.paint(|s| &s.paint.circle_stroke_color, |s| &mut s.paint.circle_stroke_color),
+            7 => visitor.paint(|s| &s.paint.circle_stroke_opacity, |s| &mut s.paint.circle_stroke_opacity),
+            8 => visitor.paint(|s| &s.paint.circle_stroke_width, |s| &mut s.paint.circle_stroke_width),
+            9 => visitor.paint(|s| &s.paint.circle_translate, |s| &mut s.paint.circle_translate),
+            10 => visitor.paint(|s| &s.paint.circle_translate_anchor, |s| &mut s.paint.circle_translate_anchor),
+            11 => visitor.layout(|s| &s.layout.circle_sort_key, |s| &mut s.layout.circle_sort_key),
+            _ => return None,
+        })
     }
 }

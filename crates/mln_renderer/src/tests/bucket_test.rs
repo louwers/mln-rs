@@ -184,7 +184,7 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
     let mut evaluated = FillPaintProperties::PossiblyEvaluated::default();
     *evaluated.get_mut::<FillColor>() = PossiblyEvaluatedPropertyValue::Expression(
-        layer.downcast_ref::<FillLayer>().expect("fill layer").get_fill_color().as_expression().clone(),
+        layer.downcast_ref::<FillLayer>().expect("fill layer").impl_().paint.fill_color.value.as_expression().clone(),
     );
     let properties: Arc<dyn LayerProperties> = Arc::new(FillLayerProperties::with_evaluated(
         downcast_arc(&layer.base_impl()),

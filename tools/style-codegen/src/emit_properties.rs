@@ -124,6 +124,13 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     }
     imports.push("std::sync::Arc".into());
     imports.push("mln_vec_map::VecSet".into());
+    imports.extend(crate::emit_table::imports());
+    let heatmap_color = layer.paint_properties.iter().find(|p| p.name == "heatmap-color");
+    if heatmap_color.is_some() {
+        imports.push("crate::color_ramp_property_value::ColorRampPropertyValue".into());
+        imports.push("crate::conversion::convert_color_ramp_property_value".into());
+        imports.push("mln_conversion::{Convertible, Error}".into());
+    }
     w.imports(imports);
     w.blank();
 
@@ -241,6 +248,37 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
         w.line("    fn crossfade(&self) -> &CrossfadeParameters {");
         w.line("        &self.crossfade");
         w.line("    }");
+        w.line("}");
+    }
+    w.blank();
+
+    let entries = crate::emit_table::layer_entries(&layer.paint_properties, &layer.layout_properties);
+    // Line layers keep the mock line-floor-width equal to line-width.
+    let changed = entries.iter().position(|e| e.property.name == "line-width").map(|slot| {
+        vec![
+            format!("if slot == {slot} {{"),
+            "    self.paint.line_floor_width.value = self.paint.line_width.value.clone();".to_owned(),
+            "}".to_owned(),
+        ]
+    });
+    crate::emit_table::emit(&mut w, &format!("{t}LayerImpl"), &entries, changed.as_deref());
+
+    if let Some(property) = heatmap_color {
+        // The renderer falls back to this default when the style leaves the
+        // property undefined.
+        let raw = crate::json::js_stringify(property.default().expect("heatmap-color default"));
+        assert!(!raw.contains("\"#"), "raw string delimiter in {raw}");
+        w.blank();
+        w.line("/// The default `heatmap-color`.");
+        w.line("#[must_use]");
+        w.line("pub fn default_heatmap_color() -> ColorRampPropertyValue {");
+        w.line("    let mut error = Error::default();");
+        w.line("    let raw_value: serde_json::Value = serde_json::from_str(");
+        w.line(&format!("        r#\"{raw}\"#,"));
+        w.line("    )");
+        w.line("    .unwrap();");
+        w.line("    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error, false, false)");
+        w.line("        .expect(\"the heatmap-color default converts\")");
         w.line("}");
     }
 

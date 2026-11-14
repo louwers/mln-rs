@@ -23,10 +23,10 @@ use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::HeatmapLayer;
 use mln_style::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
 use mln_style::layers::heatmap_layer_properties::{
     HeatmapColor, HeatmapLayerProperties, HeatmapOpacity, HeatmapPaintProperties, HeatmapRadius, HeatmapWeight,
+    default_heatmap_color,
 };
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_tile_id::OverscaledTileID;
@@ -124,7 +124,7 @@ impl RenderHeatmapLayer {
     fn update_color_ramp(&mut self) {
         let mut color_value = self.unevaluated.get::<HeatmapColor>().get_value().clone();
         if color_value.is_undefined() {
-            color_value = HeatmapLayer::get_default_heatmap_color();
+            color_value = default_heatmap_color();
         }
 
         // The ramp image is shared with the texture (C++ shared_ptr); a new

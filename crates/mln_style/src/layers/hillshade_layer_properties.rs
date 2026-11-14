@@ -4,6 +4,7 @@
 use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
+use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType};
 use mln_util::Color;
 use mln_vec_map::VecSet;
@@ -136,5 +137,40 @@ impl HasEvaluated for HillshadeLayerProperties {
 
     fn evaluated(&self) -> &Self::Evaluated {
         &self.evaluated
+    }
+}
+
+/// The properties, by slot.
+pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
+    &[
+        PropertyInfo::paint("hillshade-accent-color"),
+        PropertyInfo::paint("hillshade-exaggeration"),
+        PropertyInfo::paint("hillshade-highlight-color"),
+        PropertyInfo::paint("hillshade-illumination-altitude"),
+        PropertyInfo::paint("hillshade-illumination-anchor"),
+        PropertyInfo::paint("hillshade-illumination-direction"),
+        PropertyInfo::paint("hillshade-method"),
+        PropertyInfo::paint("hillshade-shadow-color"),
+        PropertyInfo::paint("resampling"),
+    ],
+    &[0, 1, 2, 3, 4, 5, 6, 7, 8],
+);
+
+impl Properties for HillshadeLayerImpl {
+    const TABLE: &'static PropertyTable = &PROPERTIES;
+
+    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
+        Some(match slot {
+            0 => visitor.paint(|s| &s.paint.hillshade_accent_color, |s| &mut s.paint.hillshade_accent_color),
+            1 => visitor.paint(|s| &s.paint.hillshade_exaggeration, |s| &mut s.paint.hillshade_exaggeration),
+            2 => visitor.paint(|s| &s.paint.hillshade_highlight_color, |s| &mut s.paint.hillshade_highlight_color),
+            3 => visitor.paint(|s| &s.paint.hillshade_illumination_altitude, |s| &mut s.paint.hillshade_illumination_altitude),
+            4 => visitor.paint(|s| &s.paint.hillshade_illumination_anchor, |s| &mut s.paint.hillshade_illumination_anchor),
+            5 => visitor.paint(|s| &s.paint.hillshade_illumination_direction, |s| &mut s.paint.hillshade_illumination_direction),
+            6 => visitor.paint(|s| &s.paint.hillshade_method, |s| &mut s.paint.hillshade_method),
+            7 => visitor.paint(|s| &s.paint.hillshade_shadow_color, |s| &mut s.paint.hillshade_shadow_color),
+            8 => visitor.paint(|s| &s.paint.resampling, |s| &mut s.paint.resampling),
+            _ => return None,
+        })
     }
 }

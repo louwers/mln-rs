@@ -4,6 +4,7 @@
 use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
+use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
 use mln_style_types::ResamplingType;
 use mln_vec_map::VecSet;
 use std::sync::Arc;
@@ -99,5 +100,28 @@ impl HasEvaluated for ColorReliefLayerProperties {
 
     fn evaluated(&self) -> &Self::Evaluated {
         &self.evaluated
+    }
+}
+
+/// The properties, by slot.
+pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
+    &[
+        PropertyInfo::paint("color-relief-color"),
+        PropertyInfo::paint("color-relief-opacity"),
+        PropertyInfo::paint("resampling"),
+    ],
+    &[0, 1, 2],
+);
+
+impl Properties for ColorReliefLayerImpl {
+    const TABLE: &'static PropertyTable = &PROPERTIES;
+
+    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
+        Some(match slot {
+            0 => visitor.paint(|s| &s.paint.color_relief_color, |s| &mut s.paint.color_relief_color),
+            1 => visitor.paint(|s| &s.paint.color_relief_opacity, |s| &mut s.paint.color_relief_opacity),
+            2 => visitor.paint(|s| &s.paint.resampling, |s| &mut s.paint.resampling),
+            _ => return None,
+        })
     }
 }

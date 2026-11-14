@@ -27,12 +27,12 @@ use mln_gfx::{
     AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, VertexAttributeArray,
 };
 use mln_map_types::TransformState;
+use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::ColorReliefLayer;
 use mln_style::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
 use mln_style::layers::color_relief_layer_properties::{
     ColorReliefColor, ColorReliefLayerProperties, ColorReliefOpacity, ColorReliefPaintProperties, Resampling,
@@ -138,7 +138,7 @@ impl RenderColorReliefLayer {
         // Get the color property value, using default if undefined
         let mut color_value = self.unevaluated.get::<ColorReliefColor>().get_value().clone();
         if color_value.is_undefined() {
-            color_value = ColorReliefLayer::get_default_color_relief_color();
+            color_value = ColorRampPropertyValue::default();
             if color_value.is_undefined() {
                 // If even the default is undefined, we can't proceed
                 return;

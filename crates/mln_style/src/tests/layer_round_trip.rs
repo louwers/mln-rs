@@ -121,7 +121,7 @@ fn zoom_functions_of_images() {
     );
     let runtime_constant = |layer: &dyn Layer| {
         let layer = layer.downcast_ref::<FillExtrusionLayer>().unwrap();
-        layer.get_fill_extrusion_pattern().as_expression().is_runtime_constant()
+        layer.impl_().paint.fill_extrusion_pattern.value.as_expression().is_runtime_constant()
     };
     assert!(runtime_constant(extrusion.as_ref()));
     assert!(runtime_constant(parse(&json(&serialized)).as_ref()));

@@ -16,10 +16,10 @@ pub enum PropertyValue<T> {
 }
 
 // Clone and PartialEq are written out rather than derived so that they can be
-// `#[inline(never)]`: each generated layer property's setter, `mutable_impl`
-// and transition code clone and compare these, and a derive inlined there
-// copies the match into every one of them, which costs code size (the browser
-// build's wasm most) for no speed that style mutation needs.
+// `#[inline(never)]`: a layer's impl, its property sets and the transitions
+// clone and compare one per property, and a derive inlined there copies the
+// match into every one of them, which costs code size (the browser build's
+// wasm most) for no speed that style mutation needs.
 impl<T: Clone> Clone for PropertyValue<T> {
     #[inline(never)]
     fn clone(&self) -> Self {

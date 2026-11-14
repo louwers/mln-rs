@@ -2,15 +2,15 @@ use std::fmt::Write;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use feature::Value;
 use geojson::{Feature, GeoJson, Geometry};
 use mln_renderer::RenderingStats;
-use mln_style::expression::Formatted;
+use mln_style::conversion::Convertible;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::sources::custom_geometry_source::{
     CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
 };
-use mln_style::{PropertyValue, Style};
-use mln_style_types::{SymbolAnchorType, TextJustifyType, TranslateAnchorType};
+use mln_style::{Layer, Style};
 use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::constants::EXTENT;
@@ -83,23 +83,26 @@ impl RenderingStatsView {
 
         if style.get_layer(RENDERING_STATS_LAYER_ID).is_none() {
             let mut layer = SymbolLayer::new(RENDERING_STATS_LAYER_ID, RENDERING_STATS_SOURCE_ID);
-
-            // required
-            layer.set_symbol_screen_space(&PropertyValue::Constant(true));
-            layer.set_text_allow_overlap(&PropertyValue::Constant(true));
-            layer.set_icon_allow_overlap(&PropertyValue::Constant(true));
-            layer.set_text_ignore_placement(&PropertyValue::Constant(true));
-
-            // customizable
-            layer.set_text_color(&PropertyValue::Constant(self.options.text_color));
-            layer.set_text_size(&PropertyValue::Constant(self.options.text_size));
-            layer.set_text_max_width(&PropertyValue::Constant(300.0));
-            layer.set_text_justify(&PropertyValue::Constant(TextJustifyType::Left));
-            layer.set_text_anchor(&PropertyValue::Constant(SymbolAnchorType::TopRight));
-
-            let translation = EXTENT as f32 / 2.0 - 100.0;
-            layer.set_text_translate_anchor(&PropertyValue::Constant(TranslateAnchorType::Viewport));
-            layer.set_text_translate(&PropertyValue::Constant([translation, translation]));
+            let translation = f64::from(EXTENT as f32 / 2.0 - 100.0);
+            let properties = [
+                // required
+                ("symbol-screen-space", Value::Bool(true)),
+                ("text-allow-overlap", Value::Bool(true)),
+                ("icon-allow-overlap", Value::Bool(true)),
+                ("text-ignore-placement", Value::Bool(true)),
+                // customizable
+                ("text-color", self.options.text_color.serialize()),
+                ("text-size", Value::Double(f64::from(self.options.text_size))),
+                ("text-max-width", Value::Double(300.0)),
+                ("text-justify", Value::String("left".to_owned())),
+                ("text-anchor", Value::String("top-right".to_owned())),
+                ("text-translate-anchor", Value::String("viewport".to_owned())),
+                ("text-translate", Value::Array(vec![Value::Double(translation), Value::Double(translation)])),
+            ];
+            for (name, value) in &properties {
+                let error = layer.set_property(name, &Convertible::from(value), None);
+                debug_assert!(error.is_none(), "{name}: {error:?}");
+            }
 
             let _ = style.add_layer(Box::new(layer), None);
         }
@@ -130,10 +133,9 @@ impl RenderingStatsView {
         }
 
         let text = self.text(stats);
-        if let Some(mut layer) = style.get_layer_mut(RENDERING_STATS_LAYER_ID)
-            && let Some(layer) = layer.downcast_mut::<SymbolLayer>()
-        {
-            layer.set_text_field(&PropertyValue::Constant(Formatted::from_plain(&text)));
+        if let Some(mut layer) = style.get_layer_mut(RENDERING_STATS_LAYER_ID) {
+            let error = layer.set_property("text-field", &Convertible::from(&Value::String(text)), None);
+            debug_assert!(error.is_none(), "text-field: {error:?}");
         }
 
         self.frame_count = 0;

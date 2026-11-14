@@ -9,10 +9,10 @@ use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions};
 use mln_storage::{FileSourceManager, ResourceOptions};
-use mln_style::PropertyValue;
+use mln_style::conversion::Convertible;
+use mln_style::layer::Layer;
 use mln_style::layers::circle_layer::CircleLayer;
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
-use mln_util::Color;
 use mln_util::geo::LatLngBounds;
 use support::*;
 
@@ -58,7 +58,8 @@ impl TileLODTest {
         map.style_mut().add_source(Box::new(source)).unwrap();
 
         let mut layer = CircleLayer::new("circles", "custom");
-        layer.set_circle_color(&PropertyValue::Constant(Color::new(0.0, 0.0, 1.0, 0.0)));
+        let error = layer.set_property("circle-color", &Convertible::from(&serde_json::json!("rgba(0,0,255,0)")), None);
+        assert!(error.is_none(), "{error:?}");
         map.style_mut().add_layer(Box::new(layer), None).unwrap();
 
         TileLODTest { _run_loop: run_loop, frontend, map, tile_count }

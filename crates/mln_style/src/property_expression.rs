@@ -29,7 +29,7 @@ fn collect_global_state_refs_shared(expression: &Expr) -> Option<Arc<VecSet<Stri
 /// A Rust struct cannot hold borrows of its own `Arc`, so
 /// `get_zoom_curve` recomputes it with
 /// `find_zoom_curve_checked` (a pure function of the expression).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PropertyExpressionBase {
     expression: Arc<Expr>,
     captured_global_state: Option<Arc<GlobalStateMap>>,
@@ -39,24 +39,6 @@ pub struct PropertyExpressionBase {
     is_zoom_constant: bool,
     is_feature_constant: bool,
     is_runtime_constant: bool,
-}
-
-// Not derived, so that it can be `#[inline(never)]`: see `PropertyValue`'s
-// Clone.
-impl Clone for PropertyExpressionBase {
-    #[inline(never)]
-    fn clone(&self) -> Self {
-        PropertyExpressionBase {
-            expression: Arc::clone(&self.expression),
-            captured_global_state: self.captured_global_state.clone(),
-            global_state_refs: self.global_state_refs.clone(),
-            use_integer_zoom: self.use_integer_zoom,
-            global_state_pinned: self.global_state_pinned,
-            is_zoom_constant: self.is_zoom_constant,
-            is_feature_constant: self.is_feature_constant,
-            is_runtime_constant: self.is_runtime_constant,
-        }
-    }
 }
 
 impl PropertyExpressionBase {

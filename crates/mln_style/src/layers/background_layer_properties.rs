@@ -4,6 +4,7 @@
 use crate::expression::{Dependency, Image};
 use crate::layer_properties::{HasCrossfade, HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::background_layer_impl::Impl as BackgroundLayerImpl;
+use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_util::Color;
 use mln_vec_map::VecSet;
@@ -110,5 +111,28 @@ impl HasEvaluated for BackgroundLayerProperties {
 impl HasCrossfade for BackgroundLayerProperties {
     fn crossfade(&self) -> &CrossfadeParameters {
         &self.crossfade
+    }
+}
+
+/// The properties, by slot.
+pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
+    &[
+        PropertyInfo::paint("background-color"),
+        PropertyInfo::paint("background-opacity"),
+        PropertyInfo::paint("background-pattern"),
+    ],
+    &[0, 1, 2],
+);
+
+impl Properties for BackgroundLayerImpl {
+    const TABLE: &'static PropertyTable = &PROPERTIES;
+
+    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
+        Some(match slot {
+            0 => visitor.paint(|s| &s.paint.background_color, |s| &mut s.paint.background_color),
+            1 => visitor.paint(|s| &s.paint.background_opacity, |s| &mut s.paint.background_opacity),
+            2 => visitor.paint(|s| &s.paint.background_pattern, |s| &mut s.paint.background_pattern),
+            _ => return None,
+        })
     }
 }

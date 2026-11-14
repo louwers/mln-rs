@@ -4,6 +4,7 @@
 use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::raster_layer_impl::Impl as RasterLayerImpl;
+use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
 use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_vec_map::VecSet;
 use std::sync::Arc;
@@ -135,5 +136,40 @@ impl HasEvaluated for RasterLayerProperties {
 
     fn evaluated(&self) -> &Self::Evaluated {
         &self.evaluated
+    }
+}
+
+/// The properties, by slot.
+pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
+    &[
+        PropertyInfo::paint("raster-brightness-max"),
+        PropertyInfo::paint("raster-brightness-min"),
+        PropertyInfo::paint("raster-contrast"),
+        PropertyInfo::paint("raster-fade-duration"),
+        PropertyInfo::paint("raster-hue-rotate"),
+        PropertyInfo::paint("raster-opacity"),
+        PropertyInfo::paint("raster-resampling"),
+        PropertyInfo::paint("raster-saturation"),
+        PropertyInfo::paint("resampling"),
+    ],
+    &[0, 1, 2, 3, 4, 5, 6, 7, 8],
+);
+
+impl Properties for RasterLayerImpl {
+    const TABLE: &'static PropertyTable = &PROPERTIES;
+
+    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
+        Some(match slot {
+            0 => visitor.paint(|s| &s.paint.raster_brightness_max, |s| &mut s.paint.raster_brightness_max),
+            1 => visitor.paint(|s| &s.paint.raster_brightness_min, |s| &mut s.paint.raster_brightness_min),
+            2 => visitor.paint(|s| &s.paint.raster_contrast, |s| &mut s.paint.raster_contrast),
+            3 => visitor.paint(|s| &s.paint.raster_fade_duration, |s| &mut s.paint.raster_fade_duration),
+            4 => visitor.paint(|s| &s.paint.raster_hue_rotate, |s| &mut s.paint.raster_hue_rotate),
+            5 => visitor.paint(|s| &s.paint.raster_opacity, |s| &mut s.paint.raster_opacity),
+            6 => visitor.paint(|s| &s.paint.raster_resampling, |s| &mut s.paint.raster_resampling),
+            7 => visitor.paint(|s| &s.paint.raster_saturation, |s| &mut s.paint.raster_saturation),
+            8 => visitor.paint(|s| &s.paint.resampling, |s| &mut s.paint.resampling),
+            _ => return None,
+        })
     }
 }

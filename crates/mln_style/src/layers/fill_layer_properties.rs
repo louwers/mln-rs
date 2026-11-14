@@ -4,6 +4,7 @@
 use crate::expression::{Dependency, Image};
 use crate::layer_properties::{HasCrossfade, HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::fill_layer_impl::Impl as FillLayerImpl;
+use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_style_types::TranslateAnchorType;
 use mln_util::Color;
@@ -148,5 +149,38 @@ impl HasEvaluated for FillLayerProperties {
 impl HasCrossfade for FillLayerProperties {
     fn crossfade(&self) -> &CrossfadeParameters {
         &self.crossfade
+    }
+}
+
+/// The properties, by slot.
+pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
+    &[
+        PropertyInfo::paint("fill-antialias"),
+        PropertyInfo::paint("fill-color").data_driven(),
+        PropertyInfo::paint("fill-opacity").data_driven(),
+        PropertyInfo::paint("fill-outline-color").data_driven(),
+        PropertyInfo::paint("fill-pattern").data_driven(),
+        PropertyInfo::paint("fill-translate"),
+        PropertyInfo::paint("fill-translate-anchor"),
+        PropertyInfo::layout("fill-sort-key").data_driven(),
+    ],
+    &[0, 1, 2, 3, 4, 7, 5, 6],
+);
+
+impl Properties for FillLayerImpl {
+    const TABLE: &'static PropertyTable = &PROPERTIES;
+
+    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
+        Some(match slot {
+            0 => visitor.paint(|s| &s.paint.fill_antialias, |s| &mut s.paint.fill_antialias),
+            1 => visitor.paint(|s| &s.paint.fill_color, |s| &mut s.paint.fill_color),
+            2 => visitor.paint(|s| &s.paint.fill_opacity, |s| &mut s.paint.fill_opacity),
+            3 => visitor.paint(|s| &s.paint.fill_outline_color, |s| &mut s.paint.fill_outline_color),
+            4 => visitor.paint(|s| &s.paint.fill_pattern, |s| &mut s.paint.fill_pattern),
+            5 => visitor.paint(|s| &s.paint.fill_translate, |s| &mut s.paint.fill_translate),
+            6 => visitor.paint(|s| &s.paint.fill_translate_anchor, |s| &mut s.paint.fill_translate_anchor),
+            7 => visitor.layout(|s| &s.layout.fill_sort_key, |s| &mut s.layout.fill_sort_key),
+            _ => return None,
+        })
     }
 }

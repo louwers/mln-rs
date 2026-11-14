@@ -245,13 +245,3 @@ pub(crate) fn is_data_driven(property: &Property) -> bool {
 pub(crate) fn is_color_ramp(property: &Property) -> bool {
     property.property_type() == Some("color-ramp")
 }
-
-/// The Rust type of the property's style value.
-#[must_use]
-pub(crate) fn property_value_type(property: &Property) -> String {
-    if is_color_ramp(property) {
-        "ColorRampPropertyValue".into()
-    } else {
-        format!("PropertyValue<{}>", evaluated_type(property).rust())
-    }
-}

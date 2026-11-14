@@ -4,6 +4,7 @@
 use crate::expression::{Dependency, Image};
 use crate::layer_properties::{HasCrossfade, HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
+use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_style_types::TranslateAnchorType;
 use mln_util::Color;
@@ -154,5 +155,40 @@ impl HasEvaluated for FillExtrusionLayerProperties {
 impl HasCrossfade for FillExtrusionLayerProperties {
     fn crossfade(&self) -> &CrossfadeParameters {
         &self.crossfade
+    }
+}
+
+/// The properties, by slot.
+pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
+    &[
+        PropertyInfo::paint("fill-extrusion-base").data_driven(),
+        PropertyInfo::paint("fill-extrusion-color").data_driven(),
+        PropertyInfo::paint("fill-extrusion-height").data_driven(),
+        PropertyInfo::paint("fill-extrusion-opacity"),
+        PropertyInfo::paint("fill-extrusion-pattern").data_driven(),
+        PropertyInfo::paint("fill-extrusion-translate"),
+        PropertyInfo::paint("fill-extrusion-translate-anchor"),
+        PropertyInfo::paint("fill-extrusion-vertical-gradient"),
+        PropertyInfo::layout("fill-extrusion-rounded-corner-distance"),
+    ],
+    &[0, 1, 2, 3, 4, 8, 5, 6, 7],
+);
+
+impl Properties for FillExtrusionLayerImpl {
+    const TABLE: &'static PropertyTable = &PROPERTIES;
+
+    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
+        Some(match slot {
+            0 => visitor.paint(|s| &s.paint.fill_extrusion_base, |s| &mut s.paint.fill_extrusion_base),
+            1 => visitor.paint(|s| &s.paint.fill_extrusion_color, |s| &mut s.paint.fill_extrusion_color),
+            2 => visitor.paint(|s| &s.paint.fill_extrusion_height, |s| &mut s.paint.fill_extrusion_height),
+            3 => visitor.paint(|s| &s.paint.fill_extrusion_opacity, |s| &mut s.paint.fill_extrusion_opacity),
+            4 => visitor.paint(|s| &s.paint.fill_extrusion_pattern, |s| &mut s.paint.fill_extrusion_pattern),
+            5 => visitor.paint(|s| &s.paint.fill_extrusion_translate, |s| &mut s.paint.fill_extrusion_translate),
+            6 => visitor.paint(|s| &s.paint.fill_extrusion_translate_anchor, |s| &mut s.paint.fill_extrusion_translate_anchor),
+            7 => visitor.paint(|s| &s.paint.fill_extrusion_vertical_gradient, |s| &mut s.paint.fill_extrusion_vertical_gradient),
+            8 => visitor.layout(|s| &s.layout.fill_extrusion_rounded_corner_distance, |s| &mut s.layout.fill_extrusion_rounded_corner_distance),
+            _ => return None,
+        })
     }
 }

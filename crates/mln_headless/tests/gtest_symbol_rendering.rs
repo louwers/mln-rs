@@ -16,7 +16,8 @@ use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
 use mln_renderer::UpdateReader;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::PropertyValue;
+use mln_style::conversion::Convertible;
+use mln_style::layer::Layer;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style_types::VisibilityType;
 use mln_util::geo::LatLng;
@@ -401,7 +402,8 @@ fn fully_hidden_layer_can_reappear() {
     let initial = test.render();
 
     let mut blocker = SymbolLayer::new("blocker", "points");
-    blocker.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("marker")));
+    let error = blocker.set_property("icon-image", &Convertible::from(&serde_json::json!("marker")), None);
+    assert!(error.is_none(), "{error:?}");
     test.map.borrow_mut().style_mut().add_layer(Box::new(blocker), None).unwrap();
     let hidden = test.render();
     assert_eq!(hidden.stats.num_draw_calls, 1);

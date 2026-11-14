@@ -37,9 +37,7 @@ use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::raster_layer::RasterLayer;
-use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::projection::Projection;
-use mln_style::property_expression::PropertyExpression;
 use mln_style::sources::custom_geometry_source::{
     CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
 };
@@ -61,6 +59,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::size::Size;
 use mln_util::tileset::{PartialTileset, Scheme};
+use serde_json::json;
 use support::*;
 
 fn ll(lat: f64, lon: f64) -> LatLng {
@@ -81,8 +80,15 @@ pub fn style_image(id: &str, image: PremultipliedImage, pixel_ratio: f32) -> Arc
 
 fn red_background(id: &str) -> BackgroundLayer {
     let mut layer = BackgroundLayer::new(id);
-    layer.set_background_color(&PropertyValue::Constant(Color::new(1.0, 0.0, 0.0, 1.0)));
+    set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
     layer
+}
+
+/// Sets `layer`'s property `name` from style JSON.
+#[track_caller]
+fn set(layer: &mut dyn Layer, name: &str, value: &serde_json::Value) {
+    let error = layer.set_property(name, &Convertible::from(value), None);
+    assert!(error.is_none(), "{name}: {error:?}");
 }
 
 fn vector_source(id: &str, tiles: &str) -> TileSource {
@@ -1922,8 +1928,7 @@ fn reduce_memory_use_removes_unused_requested_images() {
     for layer in ["kept", "dropped"] {
         let mut map = test.map();
         let mut layer = map.style_mut().get_layer_mut(layer).expect("the layer");
-        let symbol = layer.downcast_mut::<SymbolLayer>().expect("SymbolLayer");
-        symbol.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("other-icon")));
+        set(&mut *layer, "icon-image", &json!("other-icon"));
     }
     test.render();
     assert_eq!(reduce_memory_use(), [true, false, true]);
@@ -1962,8 +1967,7 @@ fn rendering_trims_unused_requested_images_past_the_cache_limit() {
     {
         let mut map = test.map();
         let mut layer = map.style_mut().get_layer_mut("unused").expect("the layer");
-        let symbol = layer.downcast_mut::<SymbolLayer>().expect("SymbolLayer");
-        symbol.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("used-icon")));
+        set(&mut *layer, "icon-image", &json!("used-icon"));
     }
     test.render();
     assert_eq!(images(), [true, false]);
@@ -3062,7 +3066,7 @@ fn observe_tile_lifecycle() {
     map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
     let mut layer = FillLayer::new("landcover", "mapbox");
     layer.set_source_layer("landcover");
-    layer.set_fill_color(&PropertyValue::Constant(Color::new(0.0, 1.0, 0.0, 1.0)));
+    set(&mut layer, "fill-color", &json!("rgba(0,255,0,1)"));
     map.style_mut().add_layer(Box::new(layer), None).unwrap();
     map.jump_to(&CameraOptions { center: Some(ll(37.8, -122.5)), zoom: Some(10.0), ..Default::default() });
     frontend.render(&mut map).unwrap();
@@ -3171,10 +3175,7 @@ fn empty_placement_does_not_request_repaint() {
         let mut map = test.map();
         let style = map.style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
-        layer
-            .downcast_mut::<BackgroundLayer>()
-            .expect("BackgroundLayer")
-            .set_background_color(&PropertyValue::Constant(Color::red()));
+        set(&mut *layer, "background-color", &json!("rgba(255,0,0,1)"));
     }
     test.run_loop.run_once();
     status.set(None);
@@ -3198,7 +3199,7 @@ fn immediate_style_replacement_retains_color() {
         }"#,
         );
         let mut layer = BackgroundLayer::new("background");
-        layer.set_background_color(&PropertyValue::Constant(Color::red()));
+        set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
         test.map().style_mut().add_layer(Box::new(layer), None).unwrap();
 
         let image = test.render().image;
@@ -3223,11 +3224,11 @@ fn switches_between_solid_and_patterned_drawables() {
     );
     let blue = vec![0u8, 0, 255, 255];
     test.map().style_mut().add_image(style_image("blue", PremultipliedImage::from_vec(Size::new(1, 1), blue), 1.0));
-    let set_pattern = |value: PropertyValue<mln_style::expression::Image>| {
+    let set_pattern = |value: serde_json::Value| {
         let mut map = test.map();
         let style = map.style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
-        layer.downcast_mut::<BackgroundLayer>().expect("BackgroundLayer").set_background_pattern(&value);
+        set(&mut *layer, "background-pattern", &value);
     };
     let expect_color = |red: u8, blue_channel: u8| {
         let image = test.render().image;
@@ -3235,18 +3236,15 @@ fn switches_between_solid_and_patterned_drawables() {
         assert_eq!(pixel, [red, 0, blue_channel, 255]);
     };
     expect_color(255, 0);
-    set_pattern(PropertyValue::Constant(mln_style::expression::Image::new("blue")));
+    set_pattern(json!("blue"));
     expect_color(0, 255);
-    set_pattern(PropertyValue::Undefined);
+    set_pattern(serde_json::Value::Null);
     expect_color(255, 0);
 }
 
 // gtest: BackgroundLayer.StyleUpdateZoomDependency
 #[test]
 fn style_update_zoom_dependency() {
-    use mln_style::expression::Value as ExpressionValue;
-    use mln_style::expression::dsl::{interpolate, linear, literal, zoom};
-
     let test = MapTest::new();
     test.load_json(&read_file("test/fixtures/map/style_update_zoom_dependency/style.json"));
     test.map().jump_to(&CameraOptions { zoom: Some(0.0), ..Default::default() });
@@ -3259,18 +3257,10 @@ fn style_update_zoom_dependency() {
         let mut map = test.map();
         let style = map.style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
-        layer.downcast_mut::<BackgroundLayer>().expect("BackgroundLayer").set_background_color(
-            &PropertyValue::Expression(PropertyExpression::from_expr(
-                interpolate(
-                    linear(),
-                    zoom(),
-                    vec![
-                        (0.0, literal(ExpressionValue::Color(Color::red()))),
-                        (14.0, literal(ExpressionValue::Color(Color::green()))),
-                    ],
-                ),
-                None,
-            )),
+        set(
+            &mut *layer,
+            "background-color",
+            &json!(["interpolate", ["linear"], ["zoom"], 0, "rgba(255,0,0,1)", 14, "rgba(0,255,0,1)"]),
         );
     }
 
@@ -3645,10 +3635,10 @@ fn line_layer_depth_distribution() {
     test.map().jump_to(&CameraOptions { zoom: Some(0.0), pitch: Some(45.0), ..Default::default() });
 
     let mut background_layer = BackgroundLayer::new("Background");
-    background_layer.set_background_color(&PropertyValue::Constant(Color::new(1.0, 1.0, 0.0, 1.0)));
+    set(&mut background_layer, "background-color", &json!("rgba(255,255,0,1)"));
     test.map().style_mut().add_layer(Box::new(background_layer), None).unwrap();
 
-    let colors = [Color::red(), Color::green(), Color::blue()];
+    let colors = ["rgba(255,0,0,1)", "rgba(0,255,0,1)", "rgba(0,0,255,1)"];
     let bounds = {
         let map = test.map();
         map.lat_lng_bounds_for_camera(&map.get_camera_options(None)).unwrap()
@@ -3671,7 +3661,7 @@ fn line_layer_depth_distribution() {
         test.map().style_mut().add_source(Box::new(get_source(i))).unwrap();
 
         let mut layer = LineLayer::new(&format!("LineLayer{i}"), &format!("GeoJSONSource_{i}"));
-        layer.set_line_color(&PropertyValue::Constant(colors[i as usize % colors.len()]));
+        set(&mut layer, "line-color", &json!(colors[i as usize % colors.len()]));
 
         test.map().style_mut().add_layer(Box::new(layer), None).unwrap();
     }
