@@ -42,6 +42,17 @@ fn expression_corpus() {
         failing.insert(t.id.clone());
         failing.extend(failures(t));
     }
+    let typed_mismatches: Vec<String> = stats
+        .passed
+        .iter()
+        .chain(&stats.failed)
+        .chain(&stats.errored)
+        .chain(&stats.ignore_passed)
+        .chain(&stats.ignore_failed)
+        .flat_map(|t| t.typed_mismatches.iter().map(move |m| format!("{}: {m}", t.id)))
+        .collect();
+    assert!(typed_mismatches.is_empty(), "typed evaluation disagrees:\n{}", typed_mismatches.join("\n"));
+
     let checked: BTreeSet<&str> =
         stats.passed.iter().chain(&stats.failed).chain(&stats.errored).map(|t| t.id.as_str()).collect();
     let newly_passing: Vec<&str> = expected

@@ -1,8 +1,9 @@
 use std::fmt::Write;
 
 use feature::{Value, ValueObject};
-use mln_expression::Expression;
-use mln_expression::expression::{evaluate_feature_with_canonical, evaluate_feature_with_images};
+use mln_expression::expression::{EvaluationContext, EvaluationResult, with_geojson_feature};
+use mln_expression::value::type_of;
+use mln_expression::{Expr, Value as ExpressionValue};
 
 use crate::parser::{
     TestData, TestResult, compiled_to_value, expression_value_to_value, parse_expression, to_document, to_json,
@@ -19,6 +20,9 @@ pub struct TestRunOutput {
     /// When the test fails only because some inputs evaluate differently,
     /// their indices in the fixture's `inputs`; empty otherwise.
     pub failed_inputs: Vec<usize>,
+    /// The inputs whose typed evaluation ([`Expr::evaluate_typed`]) disagrees
+    /// with [`Expr::evaluate`], described.
+    pub typed_mismatches: Vec<String>,
 }
 
 #[derive(Default)]
@@ -90,31 +94,44 @@ fn rewrite_roundtripped_type(expected: &str, actual: &mut String) {
     }
 }
 
-fn evaluate_expression(data_inputs: &[crate::parser::Input], expression: &dyn Expression, result: &mut TestResult) {
+/// Whether a typed evaluation agrees with the value one: the same value
+/// wherever that is a value of the expression's type (NaN equal to NaN),
+/// the same error for an error, and an error for a value of another type.
+fn typed_agrees(expression: &Expr, value: &EvaluationResult, typed: &EvaluationResult) -> bool {
+    match (value, typed) {
+        (Ok(v), Ok(t)) => {
+            v == t
+                || matches!((v, t), (ExpressionValue::Number(a), ExpressionValue::Number(b)) if a.is_nan() && b.is_nan())
+        }
+        (Ok(v), Err(_)) => type_of(v) != expression.get_type(),
+        (Err(a), Err(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Evaluates `expression` for each input, recording the outputs in `result`
+/// and the inputs whose typed evaluation disagrees in `typed_mismatches`.
+fn evaluate_expression(
+    data_inputs: &[crate::parser::Input],
+    expression: &Expr,
+    result: &mut TestResult,
+    typed_mismatches: &mut Vec<String>,
+) {
     let mut outputs = Vec::new();
-    for input in data_inputs {
-        let evaluation_result = if let Some(canonical) = &input.canonical {
-            evaluate_feature_with_canonical(
-                expression,
-                input.zoom,
-                &input.feature,
-                input.heatmap_density,
-                &input.available_images,
-                canonical,
-            )
-        } else {
-            evaluate_feature_with_images(
-                expression,
-                input.zoom,
-                &input.feature,
-                input.heatmap_density,
-                &input.available_images,
-            )
-        };
+    for (i, input) in data_inputs.iter().enumerate() {
+        let context = EvaluationContext::with_color_ramp(input.zoom, None, input.heatmap_density)
+            .with_available_images(Some(&input.available_images))
+            .with_canonical_tile_id(input.canonical.as_ref());
+        let (evaluation_result, typed) = with_geojson_feature(&input.feature, context, |cx| {
+            (expression.evaluate(cx), expression.evaluate_typed(cx))
+        });
+        if !typed_agrees(expression, &evaluation_result, &typed) {
+            typed_mismatches.push(format!("input {i}: evaluate {evaluation_result:?}, typed {typed:?}"));
+        }
         match evaluation_result {
             Err(e) => {
                 let mut error = ValueObject::new();
-                error.insert("error".to_owned(), Value::String(e.message));
+                error.insert("error".to_owned(), Value::String(e.message().to_owned()));
                 outputs.push(Value::Object(error));
             }
             Ok(v) => {
@@ -136,14 +153,14 @@ pub(crate) fn run_expression_test(data: &mut TestData, id: &str) -> TestRunOutpu
 
     // Evaluate expression
     if let Some(parsed) = &parsed_expression {
-        evaluate_expression(&data.inputs, &**parsed, &mut data.result);
+        evaluate_expression(&data.inputs, parsed, &mut data.result, &mut output.typed_mismatches);
         output.serialized = to_json(data.result.serialized.as_ref().unwrap_or(&Value::Null));
 
         // round trip
         let document = to_document(data.result.serialized.as_ref().expect("serialized"));
         let recompiled_expression = parse_expression(&document, data.spec.as_ref(), &mut data.recompiled);
         if let Some(recompiled) = &recompiled_expression {
-            evaluate_expression(&data.inputs, &**recompiled, &mut data.recompiled);
+            evaluate_expression(&data.inputs, recompiled, &mut data.recompiled, &mut output.typed_mismatches);
             rewrite_roundtripped_type(
                 &data.expected.compiled.serialized_type,
                 &mut data.recompiled.compiled.serialized_type,

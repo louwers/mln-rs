@@ -1,12 +1,8 @@
-use std::sync::Arc;
-
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 use mln_util::Color;
 
-use crate::expression::{
-    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
-};
+use crate::expression::{EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
 use crate::formatted::{
     FontStack, Formatted, FormattedSection, K_FORMATTED_SECTION_FONT_SCALE, K_FORMATTED_SECTION_TEXT_COLOR,
     K_FORMATTED_SECTION_TEXT_FONT,
@@ -15,64 +11,52 @@ use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::{Value, from_expression_value, to_string, type_of};
 
-#[derive(Clone)]
+/// A section of a `format` expression: its content and text options.
+#[derive(Clone, PartialEq)]
 pub struct FormatExpressionSection {
     /// Content can be expression that evaluates to String or Image.
-    pub(crate) content: Arc<dyn Expression>,
+    pub(crate) content: Expr,
 
     // Text related section options.
-    pub(crate) font_scale: Option<Arc<dyn Expression>>,
-    pub(crate) text_font: Option<Arc<dyn Expression>>,
-    pub text_color: Option<Arc<dyn Expression>>,
+    pub(crate) font_scale: Option<Expr>,
+    pub(crate) text_font: Option<Expr>,
+    pub text_color: Option<Expr>,
 }
 
 impl FormatExpressionSection {
     #[must_use]
-    pub fn new(content: Box<dyn Expression>) -> Self {
-        FormatExpressionSection { content: Arc::from(content), font_scale: None, text_font: None, text_color: None }
+    pub fn new(content: Expr) -> Self {
+        FormatExpressionSection { content, font_scale: None, text_font: None, text_color: None }
     }
 
     pub fn set_text_section_options(
         &mut self,
-        font_scale: Option<Box<dyn Expression>>,
-        text_font: Option<Box<dyn Expression>>,
-        text_color: Option<Box<dyn Expression>>,
+        font_scale: Option<Expr>,
+        text_font: Option<Expr>,
+        text_color: Option<Expr>,
     ) {
         if let Some(font_scale) = font_scale {
-            self.font_scale = Some(Arc::from(font_scale));
+            self.font_scale = Some(font_scale);
         }
         if let Some(text_font) = text_font {
-            self.text_font = Some(Arc::from(text_font));
+            self.text_font = Some(text_font);
         }
         if let Some(text_color) = text_color {
-            self.text_color = Some(Arc::from(text_color));
+            self.text_color = Some(text_color);
         }
     }
-
-    fn deps(&self) -> Dependency {
-        let opt = |e: &Option<Arc<dyn Expression>>| e.as_ref().map_or(Dependency::NONE, |e| e.dependencies());
-        self.content.dependencies() | opt(&self.font_scale) | opt(&self.text_font) | opt(&self.text_color)
-    }
 }
 
+/// `["format", content, options, ...]`.
+#[derive(Clone, PartialEq)]
 pub struct FormatExpression {
-    base: ExpressionBase,
     sections: Vec<FormatExpressionSection>,
-}
-
-fn opt_equal(l: Option<&dyn Expression>, r: Option<&dyn Expression>) -> bool {
-    match (l, r) {
-        (Some(l), Some(r)) => l.equals(r),
-        (None, None) => true,
-        _ => false,
-    }
 }
 
 impl FormatExpression {
     #[must_use]
-    pub fn new(sections: Vec<FormatExpressionSection>) -> Self {
-        let deps = sections.iter().fold(Dependency::NONE, |a, s| a | s.deps());
-        FormatExpression { base: ExpressionBase::new(Kind::FormatExpression, Type::Formatted, deps), sections }
+    pub fn new_expr(sections: Vec<FormatExpressionSection>) -> Expr {
+        Expr::new(Node::Format(Box::new(FormatExpression { sections })))
     }
 
     #[must_use]
@@ -130,16 +114,10 @@ impl FormatExpression {
             }
         }
 
-        Some(Box::new(FormatExpression::new(sections)))
-    }
-}
-
-impl Expression for FormatExpression {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(FormatExpression::new_expr(sections))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+    pub(crate) fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
         let mut evaluated_sections = Vec::new();
         for section in &self.sections {
             let content_result = section.content.evaluate(params)?;
@@ -191,51 +169,23 @@ impl Expression for FormatExpression {
         Ok(Value::Formatted(Formatted::new(evaluated_sections)))
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
         for section in &self.sections {
-            visit(&*section.content);
+            visit(&section.content);
             if let Some(font_scale) = &section.font_scale {
-                visit(&**font_scale);
+                visit(font_scale);
             }
             if let Some(text_font) = &section.text_font {
-                visit(&**text_font);
+                visit(text_font);
             }
             if let Some(text_color) = &section.text_color {
-                visit(&**text_color);
+                visit(text_color);
             }
         }
     }
 
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::FormatExpression {
-            let rhs = downcast::<FormatExpression>(e).expect("FormatExpression");
-            if self.sections.len() != rhs.sections.len() {
-                return false;
-            }
-            for (lhs_section, rhs_section) in self.sections.iter().zip(&rhs.sections) {
-                if !lhs_section.content.equals(&*rhs_section.content) {
-                    return false;
-                }
-                if !opt_equal(lhs_section.font_scale.as_deref(), rhs_section.font_scale.as_deref())
-                    || !opt_equal(lhs_section.text_font.as_deref(), rhs_section.text_font.as_deref())
-                    || !opt_equal(lhs_section.text_color.as_deref(), rhs_section.text_color.as_deref())
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        // Technically the combinatoric set of all children
-        // Usually, this.text will be undefined anyway
-        vec![None]
-    }
-
-    fn serialize(&self) -> MbglValue {
-        let mut serialized = vec![MbglValue::String(self.get_operator())];
+    pub(crate) fn serialize(&self) -> MbglValue {
+        let mut serialized = vec![MbglValue::String("format".to_owned())];
         for section in &self.sections {
             serialized.push(section.content.serialize());
             let mut options = ValueObject::new();
@@ -251,9 +201,5 @@ impl Expression for FormatExpression {
             serialized.push(MbglValue::Object(options));
         }
         MbglValue::Array(serialized)
-    }
-
-    fn get_operator(&self) -> String {
-        "format".to_owned()
     }
 }

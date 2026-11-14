@@ -259,4 +259,24 @@ impl<T: CollectionElement + ?Sized> CollectionWithPersistentOrder<T> {
     fn impls_index(&self, id: &str) -> usize {
         self.base.impls.partition_point(|a| T::impl_id(a) < id)
     }
+
+    /// Whether `impls`, which hold an impl for each element in id order,
+    /// are the elements' current impls. Takes O(n log n): it finds each
+    /// element's impl by binary search.
+    pub(crate) fn are_current(&self, impls: &[Arc<T::Impl>]) -> bool {
+        impls.len() == self.base.size()
+            && self.base.wrappers.iter().all(|wrapper| {
+                let current = wrapper.base_impl();
+                let id = T::impl_id(&current);
+                let index = impls.partition_point(|impl_| T::impl_id(impl_) < id);
+                impls.get(index).is_some_and(|impl_| Arc::ptr_eq(impl_, &current))
+            })
+    }
+
+    /// The elements' current impls, in id order.
+    pub(crate) fn current_impls(&self) -> Vec<Arc<T::Impl>> {
+        let mut impls: Vec<Arc<T::Impl>> = self.base.wrappers.iter().map(|wrapper| wrapper.base_impl()).collect();
+        impls.sort_unstable_by(|a, b| T::impl_id(a).cmp(T::impl_id(b)));
+        impls
+    }
 }

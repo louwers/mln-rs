@@ -735,14 +735,13 @@ impl GeometryTileWorker {
                 bucket.reserve_features(geometry_layer.feature_count());
 
                 let effective_z = f32::from(self.id.overscaled_z);
+                let context = EvaluationContext::new(effective_z)
+                    .with_canonical_tile_id(Some(&self.id.canonical))
+                    .with_global_state(self.global_state.as_deref());
                 let passes = |feature: &dyn GeometryTileFeature| {
-                    filter.evaluate(
-                        &EvaluationContext::with_zoom_feature(effective_z, Some(feature))
-                            .with_canonical_tile_id(Some(&self.id.canonical))
-                            .with_global_state(self.global_state.as_deref()),
-                    )
+                    filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
                 };
-                let selected = filter_groups.select(source_layer_id, &*geometry_layer, filter, passes);
+                let selected = filter_groups.select(source_layer_id, &*geometry_layer, filter, &context, passes);
 
                 let mut i = 0;
                 while !self.obsolete.load(Ordering::SeqCst) && i < geometry_layer.feature_count() {

@@ -15,12 +15,8 @@ use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::geometry::{FeatureType, to_feature_type};
 use mln_util::logging::{Event, Log};
 
-use crate::expression::{
-    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
-};
+use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
 use crate::parsing_context::{ParseResult, ParsingContext};
-use crate::type_::Type;
-use crate::value::Value;
 
 // The algorithms work on `mapbox::geometry`'s shapes, as in C++: a polygon
 // is its rings, the exterior first. `Geometry::from_geo` converts to them.
@@ -1023,22 +1019,13 @@ fn get_geometry(geometry: Option<&geojson::Geometry>, ctx: &mut ParsingContext) 
 }
 
 /// The distance in meters from the feature to a GeoJSON geometry.
+#[derive(Clone, PartialEq)]
 pub(crate) struct Distance {
-    base: ExpressionBase,
     geojson_source: GeoJson,
     geometries: Geometry<f64>,
 }
 
 impl Distance {
-    #[must_use]
-    fn new(geojson: GeoJson, geometries: Geometry<f64>) -> Self {
-        Distance {
-            base: ExpressionBase::new(Kind::Distance, Type::Number, Dependency::FEATURE),
-            geojson_source: geojson,
-            geometries,
-        }
-    }
-
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let parsed_value = parse_value(value, ctx)?;
 
@@ -1047,7 +1034,10 @@ impl Distance {
         // reports an error.
         for geometry in &geometries {
             if let Some(ret) = get_geometry(*geometry, ctx) {
-                return Some(Box::new(Distance::new(parsed_value.clone(), ret)));
+                return Some(Expr::new(Node::Distance(Box::new(Distance {
+                    geojson_source: parsed_value.clone(),
+                    geometries: ret,
+                }))));
             }
         }
         // C++ reports nothing for an empty collection, and its parser then
@@ -1081,12 +1071,8 @@ fn convert_value(v: &serde_json::Value) -> MbglValue {
     }
 }
 
-impl Expression for Distance {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
-    }
-
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+impl Distance {
+    pub(crate) fn eval_num(&self, params: &EvaluationContext<'_>) -> EvalResult<f64> {
         let (Some(feature), Some(canonical)) = (params.feature, params.canonical) else {
             return Err(EvaluationError::new("distance expression requires valid feature and canonical information."));
         };
@@ -1095,7 +1081,7 @@ impl Expression for Distance {
             let distance = calculate_distance(feature, canonical, &self.geometries)?;
             if !distance.is_nan() {
                 debug_assert!(distance >= 0.0);
-                return Ok(Value::Number(distance));
+                return Ok(distance);
             }
         }
         Err(EvaluationError::new(
@@ -1103,22 +1089,7 @@ impl Expression for Distance {
         ))
     }
 
-    fn each_child<'a>(&'a self, _visit: &mut dyn FnMut(&'a dyn Expression)) {}
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Distance
-            && let Some(rhs) = downcast::<Distance>(e)
-        {
-            return self.geojson_source == rhs.geojson_source && self.geometries == rhs.geometries;
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        vec![None]
-    }
-
-    fn serialize(&self) -> MbglValue {
+    pub(crate) fn serialize(&self) -> MbglValue {
         let value = serde_json::to_value(&self.geojson_source).unwrap_or_default();
         let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
             o.iter().map(|(k, v)| (k.clone(), convert_value(v))).collect()
@@ -1126,11 +1097,7 @@ impl Expression for Distance {
             Log::error(Event::Style, "Failed to serialize 'distance' expression, converted rapidJSON is not an object");
             ValueObject::new()
         };
-        MbglValue::Array(vec![MbglValue::String(self.get_operator()), MbglValue::Object(serialized)])
-    }
-
-    fn get_operator(&self) -> String {
-        "distance".to_owned()
+        MbglValue::Array(vec![MbglValue::String("distance".to_owned()), MbglValue::Object(serialized)])
     }
 }
 
@@ -1142,6 +1109,8 @@ mod tests {
 
     use super::*;
     use crate::dsl::create_expression_from_str;
+    use crate::expression::EvaluationResult;
+    use crate::value::Value;
 
     struct Feature {
         type_: FeatureType,

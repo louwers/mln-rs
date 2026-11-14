@@ -1,19 +1,22 @@
 // The module is `match_` because `match` is a Rust keyword.
 
-use std::sync::Arc;
+use std::borrow::Cow;
 
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 use mln_vec_map::VecMap;
 
 use crate::check_subtype::check_subtype;
-use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
+use crate::expression::{EvalResult, EvaluationContext, Expr, Node, Output};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::Value;
 
 /// A match label type: `int64_t` or `std::string`.
 pub trait MatchLabel: Ord + Clone + Send + Sync + 'static {
+    /// Wraps a label map of this type.
+    #[doc(hidden)]
+    fn wrap(labels: VecMap<Self, usize>) -> Labels;
     /// `Match<T>::evaluate`'s lookup key for an input value, if it can match.
     fn from_input(input: &Value) -> Option<Option<Self>>;
     fn to_mbgl(&self) -> MbglValue;
@@ -21,6 +24,9 @@ pub trait MatchLabel: Ord + Clone + Send + Sync + 'static {
 }
 
 impl MatchLabel for String {
+    fn wrap(labels: VecMap<Self, usize>) -> Labels {
+        Labels::String(labels)
+    }
     fn from_input(input: &Value) -> Option<Option<Self>> {
         match input {
             Value::String(s) => Some(Some(s.clone())),
@@ -39,6 +45,9 @@ impl MatchLabel for String {
 }
 
 impl MatchLabel for i64 {
+    fn wrap(labels: VecMap<Self, usize>) -> Labels {
+        Labels::Int(labels)
+    }
     fn from_input(input: &Value) -> Option<Option<Self>> {
         match input {
             Value::Number(numeric) => {
@@ -66,115 +75,121 @@ impl MatchLabel for i64 {
     }
 }
 
-/// The output of each label, sorted by label (C++ uses an unordered map).
-pub(crate) type Branches<T> = VecMap<T, Arc<dyn Expression>>;
-
-pub struct Match<T: MatchLabel> {
-    base: ExpressionBase,
-    input: Box<dyn Expression>,
-    branches: Branches<T>,
-    otherwise: Box<dyn Expression>,
+/// The index of each label's output, by label.
+#[derive(Clone, PartialEq)]
+#[doc(hidden)]
+pub enum Labels {
+    Int(VecMap<i64, usize>),
+    String(VecMap<String, usize>),
 }
 
-impl<T: MatchLabel> Match<T> {
+/// `["match", input, label, output, ..., otherwise]`.
+#[derive(Clone, PartialEq)]
+pub struct Match {
+    type_: Type,
+    input: Expr,
+    labels: Labels,
+    outputs: Box<[Expr]>,
+    otherwise: Expr,
+}
+
+impl Match {
+    /// A match of `input` with one output per label.
     #[must_use]
-    pub fn new(type_: Type, input: Box<dyn Expression>, branches: Branches<T>, otherwise: Box<dyn Expression>) -> Self {
-        let deps = input.dependencies()
-            | otherwise.dependencies()
-            | branches.values().fold(Dependency::NONE, |a, e| a | e.dependencies());
-        Match { base: ExpressionBase::new(Kind::Match, type_, deps), input, branches, otherwise }
-    }
-}
-
-impl<T: MatchLabel> Expression for Match<T> {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
-    }
-
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
-        let input_value = self.input.evaluate(params)?;
-
-        match T::from_input(&input_value) {
-            None | Some(None) => self.otherwise.evaluate(params),
-            Some(Some(key)) => match self.branches.get(&key) {
-                Some(branch) => branch.evaluate(params),
-                None => self.otherwise.evaluate(params),
-            },
+    pub fn new_expr<T: MatchLabel>(type_: Type, input: Expr, branches: VecMap<T, Expr>, otherwise: Expr) -> Expr {
+        let mut labels = VecMap::new();
+        let mut outputs = Vec::with_capacity(branches.len());
+        for (label, output) in branches {
+            labels.insert(label, outputs.len());
+            outputs.push(output);
         }
+        Match::with_labels(type_, input, T::wrap(labels), outputs, otherwise)
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        visit(&*self.input);
-        for branch in self.branches.values() {
-            visit(&**branch);
-        }
-        visit(&*self.otherwise);
+    fn with_labels(type_: Type, input: Expr, labels: Labels, outputs: Vec<Expr>, otherwise: Expr) -> Expr {
+        Expr::new(Node::Match(Box::new(Match { type_, input, labels, outputs: outputs.into(), otherwise })))
     }
 
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Match
-            && let Some(rhs) = downcast::<Match<T>>(e)
-        {
-            return self.input.equals(&*rhs.input)
-                && self.otherwise.equals(&*rhs.otherwise)
-                && self.branches.len() == rhs.branches.len()
-                && self.branches.iter().zip(&rhs.branches).all(|(l, r)| l.0 == r.0 && l.1.equals(&**r.1));
-        }
-        false
+    pub(crate) fn get_type(&self) -> &Type {
+        &self.type_
     }
 
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        let mut result = Vec::new();
-        for branch in self.branches.values() {
-            result.extend(branch.possible_outputs());
-        }
-        result.extend(self.otherwise.possible_outputs());
-        result
-    }
-
-    fn serialize(&self) -> MbglValue {
-        let mut serialized = vec![MbglValue::String(self.get_operator()), self.input.serialize()];
-
-        // Sort so serialization has an arbitrary defined order, even though
-        // branch order doesn't affect evaluation (the VecMap is sorted).
-
-        // Group branches by unique match expression to support condensed
-        // serializations of the form [case1, case2, ...] -> matchExpression
-        let mut output_lookup: Vec<(*const (), usize)> = Vec::new();
-        let mut grouped_by_output: Vec<(&Arc<dyn Expression>, Vec<MbglValue>)> = Vec::new();
-        for (label, output) in &self.branches {
-            let key = Arc::as_ptr(output).cast::<()>();
-            if let Some((_, index)) = output_lookup.iter().find(|(p, _)| *p == key) {
-                // We've seen this expression before, add the label to that
-                // output's group
-                grouped_by_output[*index].1.push(label.to_mbgl());
-            } else {
-                // First time seeing this output, add it to the end of the
-                // grouped list
-                output_lookup.push((key, grouped_by_output.len()));
-                grouped_by_output.push((output, vec![label.to_mbgl()]));
+    /// The output that the input selects.
+    fn select(&self, params: &EvaluationContext<'_>) -> EvalResult<&Expr> {
+        let index = match &self.labels {
+            Labels::Int(labels) => {
+                let key = if self.input.get_type() == Type::Number {
+                    int_label(self.input.eval_num(params)?)
+                } else {
+                    match &*self.input.evaluate_ref(params)? {
+                        Value::Number(n) => int_label(*n),
+                        _ => None,
+                    }
+                };
+                key.and_then(|key| labels.get(&key))
             }
+            Labels::String(labels) => {
+                let key: Option<Cow<'_, str>> = if self.input.get_type() == Type::String {
+                    Some(self.input.eval_str(params)?)
+                } else {
+                    match self.input.evaluate(params)? {
+                        Value::String(s) => Some(Cow::Owned(s)),
+                        _ => None,
+                    }
+                };
+                key.and_then(|key| labels.get(&*key))
+            }
+        };
+        Ok(index.map_or(&self.otherwise, |&i| &self.outputs[i]))
+    }
+
+    pub(crate) fn eval<'e, T: Output<'e>>(&'e self, params: &EvaluationContext<'_>) -> EvalResult<T> {
+        T::eval(self.select(params)?, params)
+    }
+
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        visit(&self.input);
+        self.each_output(visit);
+    }
+
+    /// Visits each output, the fallback last.
+    pub(crate) fn each_output<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        self.outputs.iter().for_each(&mut *visit);
+        visit(&self.otherwise);
+    }
+
+    pub(crate) fn serialize(&self) -> MbglValue {
+        let mut serialized = vec![MbglValue::String("match".to_owned()), self.input.serialize()];
+
+        // Each output once, after the labels that select it, in the order of
+        // its first label (labels are sorted, so the order is defined).
+        let mut grouped: Vec<(usize, Vec<MbglValue>)> = Vec::new();
+        let mut group = |label: MbglValue, output: usize| match grouped.iter_mut().find(|(o, _)| *o == output) {
+            Some((_, labels)) => labels.push(label),
+            None => grouped.push((output, vec![label])),
+        };
+        match &self.labels {
+            Labels::Int(labels) => labels.iter().for_each(|(label, &output)| group(label.to_mbgl(), output)),
+            Labels::String(labels) => labels.iter().for_each(|(label, &output)| group(label.to_mbgl(), output)),
         }
 
-        for (output, labels) in grouped_by_output {
+        for (output, mut labels) in grouped {
             if labels.len() == 1 {
-                // Only a single label matches this output expression
-                serialized.push(labels.into_iter().next().unwrap());
+                serialized.push(labels.pop().expect("a label"));
             } else {
-                // Array of literal labels pointing to this output expression
                 serialized.push(MbglValue::Array(labels));
             }
-            // The output expression itself
-            serialized.push(output.serialize());
+            serialized.push(self.outputs[output].serialize());
         }
 
         serialized.push(self.otherwise.serialize());
         MbglValue::Array(serialized)
     }
+}
 
-    fn get_operator(&self) -> String {
-        "match".to_owned()
-    }
+/// The integer label a number input selects: none unless it is an integer.
+fn int_label(numeric: f64) -> Option<i64> {
+    i64::from_input(&Value::Number(numeric)).flatten()
 }
 
 /// A match label: an integer or a string.
@@ -247,33 +262,34 @@ fn parse_input_value(
     result
 }
 
-type ParsedBranches = Vec<(Vec<InputType>, Box<dyn Expression>)>;
+type ParsedBranches = Vec<(Vec<InputType>, Expr)>;
 
 fn create<T: MatchLabel>(
     output_type: Type,
-    input: Box<dyn Expression>,
+    input: Expr,
     branches: ParsedBranches,
-    otherwise: Box<dyn Expression>,
+    otherwise: Expr,
     ctx: &mut ParsingContext,
 ) -> ParseResult {
-    let mut typed_branches = Branches::<T>::new();
+    let mut labels = VecMap::<T, usize>::new();
+    let mut outputs = Vec::with_capacity(branches.len());
 
     let mut index = 2;
 
-    for (labels, output) in branches {
-        let result: Arc<dyn Expression> = Arc::from(output);
-        for label in &labels {
+    for (branch_labels, output) in branches {
+        for label in &branch_labels {
             let typed_label = T::from_input_type(label);
-            if typed_branches.contains_key(&typed_label) {
+            if labels.contains_key(&typed_label) {
                 ctx.error_at("Branch labels must be unique.".to_owned(), index);
                 return None;
             }
-            typed_branches.insert(typed_label, Arc::clone(&result));
+            labels.insert(typed_label, outputs.len());
         }
+        outputs.push(output);
 
         index += 2;
     }
-    Some(Box::new(Match::<T>::new(output_type, input, typed_branches, otherwise)))
+    Some(Match::with_labels(output_type, input, T::wrap(labels), outputs, otherwise))
 }
 
 pub(crate) fn parse_match(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -326,7 +342,7 @@ pub(crate) fn parse_match(value: &Convertible<'_>, ctx: &mut ParsingContext) -> 
         let output = ctx.parse(&value.array_member(i + 1), i + 1, output_type.clone(), None)?;
 
         if output_type.is_none() {
-            output_type = Some(output.get_type().clone());
+            output_type = Some(output.get_type());
         }
 
         branches.push((labels, output));
@@ -340,8 +356,9 @@ pub(crate) fn parse_match(value: &Convertible<'_>, ctx: &mut ParsingContext) -> 
     let input_type = input_type.expect("match input type");
     let output_type = output_type.expect("match output type");
 
-    if *input.get_type() != Type::Value
-        && let Some(err) = check_subtype(&input_type, input.get_type())
+    let actual_input_type = input.get_type();
+    if actual_input_type != Type::Value
+        && let Some(err) = check_subtype(&input_type, &actual_input_type)
     {
         ctx.error_at(err, 1);
         return None;

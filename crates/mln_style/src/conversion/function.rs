@@ -2,7 +2,6 @@
 // "colorSpace" member is not read.
 
 use std::cmp::Ordering;
-use std::sync::Arc;
 
 use mln_expression::Interpolator;
 use mln_expression::case::Case;
@@ -16,7 +15,7 @@ use mln_vec_map::VecMap;
 
 use super::{Converter, Convertible, Error, convert};
 use crate::expression::{
-    Expression, Image, ParsingContext, Step, Stops, Type, Value, ValueConverter, create_interpolate, dsl,
+    Expr, Image, ParsingContext, Step, Stops, Type, Value, ValueConverter, create_interpolate, dsl,
 };
 use crate::property_expression::PropertyExpression;
 
@@ -48,20 +47,20 @@ pub(crate) fn has_tokens(source: &str) -> bool {
 }
 
 #[must_use]
-pub(crate) fn convert_token_string_to_format_expression(source: &str) -> Box<dyn Expression> {
+pub(crate) fn convert_token_string_to_format_expression(source: &str) -> Expr {
     let text_expression = convert_token_string_to_expression(source);
     let sections = vec![FormatExpressionSection::new(text_expression)];
-    Box::new(FormatExpression::new(sections))
+    FormatExpression::new_expr(sections)
 }
 
 #[must_use]
-pub(crate) fn convert_token_string_to_image_expression(source: &str) -> Box<dyn Expression> {
-    Box::new(ImageExpression::new(convert_token_string_to_expression(source)))
+pub(crate) fn convert_token_string_to_image_expression(source: &str) -> Expr {
+    ImageExpression::new_expr(convert_token_string_to_expression(source))
 }
 
 #[must_use]
-pub(crate) fn convert_token_string_to_expression(source: &str) -> Box<dyn Expression> {
-    let mut inputs: Vec<Box<dyn Expression>> = Vec::new();
+pub(crate) fn convert_token_string_to_expression(source: &str) -> Expr {
+    let mut inputs: Vec<Expr> = Vec::new();
 
     // Byte positions; '{' and '}' are ASCII, so every slice is valid UTF-8.
     let bytes = source.as_bytes();
@@ -116,7 +115,7 @@ where
         }
     }
 
-    Some(PropertyExpression::from_box(expression, default_value))
+    Some(PropertyExpression::from_expr(expression, default_value))
 }
 
 // Ad-hoc Converters for double and int64_t. We should replace float with double
@@ -176,12 +175,7 @@ fn color_array_item_type(type_: &Type) -> Option<Type> {
     }
 }
 
-fn convert_literal(
-    type_: &Type,
-    value: &Convertible<'_>,
-    error: &mut Error,
-    convert_tokens: bool,
-) -> Option<Box<dyn Expression>> {
+fn convert_literal(type_: &Type, value: &Convertible<'_>, error: &mut Error, convert_tokens: bool) -> Option<Expr> {
     match type_ {
         Type::Number => {
             let result = convert::<f32>(value, error)?;
@@ -271,7 +265,7 @@ fn convert_literal(
             let result = convert::<String>(value, error)?;
             Some(if convert_tokens {
                 // Quirk kept: C++ wraps the ImageExpression in a second one.
-                Box::new(ImageExpression::new(convert_token_string_to_image_expression(&result)))
+                ImageExpression::new_expr(convert_token_string_to_image_expression(&result))
             } else {
                 dsl::literal(Value::Image(Image::new(result)))
             })
@@ -283,7 +277,7 @@ fn convert_literal(
 /// C++'s function conversion builds them.
 #[derive(Default)]
 struct DoubleStops {
-    stops: Vec<(f64, Box<dyn Expression>)>,
+    stops: Vec<(f64, Expr)>,
 }
 
 impl DoubleStops {
@@ -291,7 +285,7 @@ impl DoubleStops {
         self.stops.partition_point(|(k, _)| *k < key)
     }
 
-    fn emplace(&mut self, key: f64, value: Box<dyn Expression>) {
+    fn emplace(&mut self, key: f64, value: Expr) {
         let i = self.lower_bound(key);
         if i < self.stops.len() && key.partial_cmp(&self.stops[i].0) != Some(Ordering::Less) {
             return;
@@ -373,7 +367,7 @@ fn convert_branches<T: Ord>(
     value: &Convertible<'_>,
     error: &mut Error,
     convert_key: fn(&Convertible<'_>, &mut Error) -> Option<T>,
-) -> Option<VecMap<T, Box<dyn Expression>>> {
+) -> Option<VecMap<T, Expr>> {
     let Some(stops_value) = value.object_member("stops") else {
         error.message = "function value must specify stops".to_owned();
         return None;
@@ -426,16 +420,11 @@ fn convert_base(value: &Convertible<'_>, error: &mut Error) -> Option<f64> {
     Some(f64::from(base))
 }
 
-fn step(type_: Type, input: Box<dyn Expression>, stops: DoubleStops) -> Box<dyn Expression> {
-    Box::new(Step::new(type_, input, stops.into_stops()))
+fn step(type_: Type, input: Expr, stops: DoubleStops) -> Expr {
+    Step::new_expr(type_, input, stops.into_stops())
 }
 
-fn interpolate(
-    type_: Type,
-    interpolator: Interpolator,
-    input: Box<dyn Expression>,
-    stops: DoubleStops,
-) -> Box<dyn Expression> {
+fn interpolate(type_: Type, interpolator: Interpolator, input: Expr, stops: DoubleStops) -> Expr {
     let mut ctx = ParsingContext::new();
     let result = create_interpolate(type_, interpolator, ColorSpace::Rgb, input, stops.into_stops(), &mut ctx);
     // C++ asserts and returns a null expression.
@@ -443,28 +432,16 @@ fn interpolate(
 }
 
 /// A `match` on `property` over integer or string labels.
-fn categorical<T: MatchLabel>(
-    type_: Type,
-    property: &str,
-    branches: VecMap<T, Box<dyn Expression>>,
-    def: Option<Box<dyn Expression>>,
-) -> Box<dyn Expression> {
-    let converted_branches: VecMap<T, Arc<dyn Expression>> =
-        branches.into_iter().map(|(k, v)| (k, Arc::from(v))).collect();
-    Box::new(Match::<T>::new(
+fn categorical<T: MatchLabel>(type_: Type, property: &str, branches: VecMap<T, Expr>, def: Option<Expr>) -> Expr {
+    Match::new_expr(
         type_,
         dsl::get(dsl::literal_str(property)),
-        converted_branches,
+        branches,
         def.unwrap_or_else(|| dsl::error("replaced with default")),
-    ))
+    )
 }
 
-fn categorical_bool(
-    type_: Type,
-    property: &str,
-    mut branches: VecMap<bool, Box<dyn Expression>>,
-    def: Option<Box<dyn Expression>>,
-) -> Box<dyn Expression> {
+fn categorical_bool(type_: Type, property: &str, mut branches: VecMap<bool, Expr>, def: Option<Expr>) -> Expr {
     let true_case = branches.remove(&true).unwrap_or_else(|| dsl::error("replaced with default"));
     let false_case = branches.remove(&false).unwrap_or_else(|| dsl::error("replaced with default"));
 
@@ -473,31 +450,26 @@ fn categorical_bool(
         (dsl::eq(dsl::get(dsl::literal_str(property)), dsl::literal(Value::Bool(false))), false_case),
     ];
 
-    Box::new(Case::new(type_, converted_branches, def.unwrap_or_else(|| dsl::error("replaced with default"))))
+    Case::new_expr(type_, converted_branches, def.unwrap_or_else(|| dsl::error("replaced with default")))
 }
 
-fn number_or_default(
-    type_: Type,
-    get: Box<dyn Expression>,
-    expr: Box<dyn Expression>,
-    def: Option<Box<dyn Expression>>,
-) -> Box<dyn Expression> {
+fn number_or_default(type_: Type, get: Expr, expr: Expr, def: Option<Expr>) -> Expr {
     let Some(def) = def else {
         return expr;
     };
 
     let branches = vec![(dsl::eq(dsl::compound("typeof", vec![get]), dsl::literal_str("number")), expr)];
-    Box::new(Case::new(type_, branches, def))
+    Case::new_expr(type_, branches, def)
 }
 
 fn convert_interval_function(
     type_: Type,
     value: &Convertible<'_>,
     error: &mut Error,
-    make_input: &dyn Fn(bool) -> Box<dyn Expression>,
-    def: Option<Box<dyn Expression>>,
+    make_input: &dyn Fn(bool) -> Expr,
+    def: Option<Expr>,
     convert_tokens: bool,
-) -> Option<Box<dyn Expression>> {
+) -> Option<Expr> {
     let mut stops = convert_stops(&type_, value, error, convert_tokens)?;
     omit_first_stop(&mut stops);
 
@@ -520,10 +492,10 @@ fn convert_exponential_function(
     type_: Type,
     value: &Convertible<'_>,
     error: &mut Error,
-    make_input: &dyn Fn(bool) -> Box<dyn Expression>,
-    def: Option<Box<dyn Expression>>,
+    make_input: &dyn Fn(bool) -> Expr,
+    def: Option<Expr>,
     convert_tokens: bool,
-) -> Option<Box<dyn Expression>> {
+) -> Option<Expr> {
     let stops = convert_stops(&type_, value, error, convert_tokens)?;
     let base = convert_base(value, error)?;
 
@@ -547,8 +519,8 @@ fn convert_categorical_function(
     value: &Convertible<'_>,
     err: &mut Error,
     property: &str,
-    def: Option<Box<dyn Expression>>,
-) -> Option<Box<dyn Expression>> {
+    def: Option<Expr>,
+) -> Option<Expr> {
     let Some(stops_value) = value.object_member("stops") else {
         err.message = "function value must specify stops".to_owned();
         return None;
@@ -599,19 +571,19 @@ fn convert_categorical_function(
 /// function (`emplace` keeps the first value of a key).
 trait InnerStops: Default {
     type Key;
-    fn emplace(&mut self, key: Self::Key, value: Box<dyn Expression>);
+    fn emplace(&mut self, key: Self::Key, value: Expr);
 }
 
 impl InnerStops for DoubleStops {
     type Key = f64;
-    fn emplace(&mut self, key: f64, value: Box<dyn Expression>) {
+    fn emplace(&mut self, key: f64, value: Expr) {
         DoubleStops::emplace(self, key, value);
     }
 }
 
-impl<K: Ord> InnerStops for VecMap<K, Box<dyn Expression>> {
+impl<K: Ord> InnerStops for VecMap<K, Expr> {
     type Key = K;
-    fn emplace(&mut self, key: K, value: Box<dyn Expression>) {
+    fn emplace(&mut self, key: K, value: Expr) {
         self.entry(key).or_insert(value);
     }
 }
@@ -623,8 +595,8 @@ fn composite<M: InnerStops>(
     value: &Convertible<'_>,
     error: &mut Error,
     convert_key: KeyConverter<'_, M::Key>,
-    make_inner_expression: &dyn Fn(&Type, f64, M) -> Box<dyn Expression>,
-) -> Option<Box<dyn Expression>> {
+    make_inner_expression: &dyn Fn(&Type, f64, M) -> Expr,
+) -> Option<Expr> {
     let base = convert_base(value, error)?;
 
     // Checked by caller.
@@ -696,7 +668,7 @@ pub fn convert_function_to_expression_for_type(
     value: &Convertible<'_>,
     err: &mut Error,
     convert_tokens: bool,
-) -> Option<Box<dyn Expression>> {
+) -> Option<Expr> {
     if !value.is_object() {
         err.message = "function must be an object".to_owned();
         return None;
@@ -728,7 +700,7 @@ pub fn convert_function_to_expression_for_type(
 
     // `defaultExpr()`: the literal "default", or none. Like the C++ lambda
     // it can leave a message in `err` without failing.
-    let default_expr = |err: &mut Error| -> Option<Box<dyn Expression>> {
+    let default_expr = |err: &mut Error| -> Option<Expr> {
         let member = value.object_member("default")?;
         convert_literal(type_, &member, err, false)
     };
@@ -811,7 +783,7 @@ pub fn convert_function_to_expression_for_type(
 
     let stop = first.array_member(0);
 
-    let get_property = |coerce: bool| -> Box<dyn Expression> {
+    let get_property = |coerce: bool| -> Expr {
         if coerce {
             dsl::number(dsl::get(dsl::literal_str(&property)), None)
         } else {
@@ -829,14 +801,14 @@ pub fn convert_function_to_expression_for_type(
         // The C++ inner lambdas call defaultExpr() (writing to `err`) once
         // per zoom stop, after every failure point of the conversion, so the
         // messages they leave are never observable; a scratch error matches.
-        let default_for_inner = || -> Option<Box<dyn Expression>> {
+        let default_for_inner = || -> Option<Expr> {
             let mut scratch = Error::default();
             default_expr(&mut scratch)
         };
 
         if source_value.to_bool().is_some() {
             return if function_type == FunctionType::Categorical {
-                composite::<VecMap<bool, Box<dyn Expression>>>(
+                composite::<VecMap<bool, Expr>>(
                     type_.clone(),
                     value,
                     err,
@@ -872,7 +844,7 @@ pub fn convert_function_to_expression_for_type(
                         )
                     })
                 }
-                FunctionType::Categorical => composite::<VecMap<i64, Box<dyn Expression>>>(
+                FunctionType::Categorical => composite::<VecMap<i64, Expr>>(
                     type_.clone(),
                     value,
                     err,
@@ -888,7 +860,7 @@ pub fn convert_function_to_expression_for_type(
 
         if source_value.to_string().is_some() {
             return if function_type == FunctionType::Categorical {
-                composite::<VecMap<String, Box<dyn Expression>>>(
+                composite::<VecMap<String, Expr>>(
                     type_.clone(),
                     value,
                     err,
@@ -944,7 +916,7 @@ mod tests {
         assert!(has_tokens("token {token}"));
         assert!(has_tokens("{token} {token}"));
 
-        let eq = |a: Box<dyn Expression>, b: Box<dyn Expression>| a.equals(b.as_ref());
+        let eq = |a: Expr, b: Expr| a == b;
         assert!(eq(convert_token_string_to_expression("{token}"), dsl::to_string(get(literal_str("token")), None)));
         assert!(eq(
             convert_token_string_to_expression("token {token}"),

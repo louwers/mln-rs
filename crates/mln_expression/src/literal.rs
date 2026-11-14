@@ -1,15 +1,16 @@
-use std::hash::{Hash, Hasher};
-
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 
-use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
+use crate::expression::{Expr, Node};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
-use crate::value::{ObjectType, Value, from_mbgl_value, hash_value, to_mbgl_value, type_of};
+use crate::value::{ObjectType, Value, from_mbgl_value, to_mbgl_value, type_of};
 
-pub struct Literal {
-    base: ExpressionBase,
+/// A constant value, typed as the value is, or as the array type it was
+/// parsed as.
+#[derive(Clone, PartialEq)]
+pub(crate) struct Literal {
+    type_: Type,
     value: Value,
 }
 
@@ -66,26 +67,30 @@ pub(crate) fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> 
 
 impl Literal {
     #[must_use]
-    pub fn new(value: Value) -> Self {
-        Literal { base: ExpressionBase::new(Kind::Literal, type_of(&value), Dependency::NONE), value }
+    pub(crate) fn new(value: Value) -> Self {
+        Literal { type_: type_of(&value), value }
     }
 
     #[must_use]
-    pub(crate) fn with_array_type(type_: type_::Array, value: Vec<Value>) -> Self {
-        Literal { base: ExpressionBase::new(Kind::Literal, type_.into(), Dependency::NONE), value: Value::Array(value) }
+    pub(crate) fn get_type(&self) -> &Type {
+        &self.type_
     }
 
     #[must_use]
-    pub fn get_value(&self) -> &Value {
+    pub(crate) fn get_value(&self) -> &Value {
         &self.value
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    /// An array literal typed as `type_`.
+    pub(crate) fn array(type_: type_::Array, items: Vec<Value>) -> Expr {
+        Expr::new(Node::Literal(Box::new(Literal { type_: type_.into(), value: Value::Array(items) })))
+    }
+
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         if value.is_object() {
             ctx.error(r#"Bare objects invalid. Use ["literal", {...}] instead."#.to_owned());
             None
         } else if value.is_array() {
-            // object or array value, quoted with ["literal", value]
             if value.array_length() != 2 {
                 ctx.error(format!(
                     "'literal' expression requires exactly one argument, but found {} instead.",
@@ -95,82 +100,29 @@ impl Literal {
             }
             let parsed_value = parse_value(&value.array_member(1), ctx)?;
 
-            // special case: infer the item type if possible for zero-length
-            // arrays
             if let (Some(Type::Array(expected)), Value::Array(items)) = (ctx.get_expected(), &parsed_value)
                 && let Type::Array(t) = type_of(&parsed_value)
                 && t.n == Some(0)
                 && (expected.n.is_none() || expected.n == Some(0))
             {
-                return Some(Box::new(Literal::with_array_type(*expected, items.clone())));
+                return Some(Literal::array(*expected, items.clone()));
             }
 
-            Some(Box::new(Literal::new(parsed_value)))
+            Some(Expr::literal(parsed_value))
         } else {
-            // bare primitive value (string, number, boolean, null)
             let parsed_value = parse_value(value, ctx).expect("primitive literal");
-            Some(Box::new(Literal::new(parsed_value)))
+            Some(Expr::literal(parsed_value))
         }
     }
-}
 
-impl Expression for Literal {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
-    }
-
-    fn evaluate(&self, _: &EvaluationContext<'_>) -> EvaluationResult {
-        Ok(self.value.clone())
-    }
-
-    fn literal_value(&self) -> Option<&Value> {
-        Some(&self.value)
-    }
-
-    fn each_child<'a>(&'a self, _: &mut dyn FnMut(&'a dyn Expression)) {}
-
-    fn hash_structure(&self, mut state: &mut dyn Hasher) {
-        self.get_kind().hash(&mut state);
-        hash_value(&self.value, state);
-    }
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Literal {
-            let rhs = downcast::<Literal>(e).expect("Literal");
-            return self.value == rhs.value;
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        vec![Some(self.value.clone())]
-    }
-
-    fn serialize(&self) -> MbglValue {
-        // Port-only: C++ writes an image as `Image::toValue()`, an object
-        // that doesn't parse back. The legacy property functions make
-        // literal images (zoom functions of `*-pattern` and `icon-image`),
-        // where an image is expected, so they serialize as the image's
-        // name, which parses back as the implicit coercion to an image.
-        // Like the literal, and unlike an "image" expression, that is
-        // runtime constant, so the property evaluates the same.
+    pub(crate) fn serialize(&self) -> MbglValue {
         if let Value::Image(image) = &self.value {
             return MbglValue::String(image.id().to_owned());
         }
-        // Port-only: C++ writes a collection as a bare array (`["top", [0,
-        // 1]]`), which parses as an expression with an unknown operator. As
-        // a literal, it converts back to the collection.
-        if self.get_type().is_array()
-            || *self.get_type() == Type::Object
-            || *self.get_type() == Type::VariableAnchorOffsetCollection
-        {
-            MbglValue::Array(vec![MbglValue::String(self.get_operator()), to_mbgl_value(&self.value)])
+        if self.type_.is_array() || self.type_ == Type::Object || self.type_ == Type::VariableAnchorOffsetCollection {
+            MbglValue::Array(vec![MbglValue::String("literal".to_owned()), to_mbgl_value(&self.value)])
         } else {
             to_mbgl_value(&self.value)
         }
-    }
-
-    fn get_operator(&self) -> String {
-        "literal".to_owned()
     }
 }

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// The type of an expression's value, with the variants in the C++ variant's
 /// order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Type {
     Null,
     Number,
@@ -26,7 +26,7 @@ pub enum Type {
     Image,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Array {
     pub item_type: Type,
     pub n: Option<usize>,

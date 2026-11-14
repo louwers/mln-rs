@@ -1,33 +1,23 @@
 // The module is `let_` because `let` is a Rust keyword.
 
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use feature::Value as MbglValue;
 use mln_conversion::{Convertible, get_json_type};
 
-use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
+use crate::expression::{Expr, Node, SharedExpr};
 use crate::parsing_context::{Bindings, ParseResult, ParsingContext};
-use crate::value::Value;
 
+/// `["let", name, value, ..., result]`.
+#[derive(Clone, PartialEq)]
 pub(crate) struct Let {
-    base: ExpressionBase,
     bindings: Bindings,
-    result: Box<dyn Expression>,
+    result: Expr,
 }
 
 impl Let {
-    #[must_use]
-    pub(crate) fn new(bindings: Bindings, result: Box<dyn Expression>) -> Self {
-        let deps = bindings.values().fold(Dependency::NONE, |a, e| a | e.dependencies())
-            | result.dependencies()
-            | Dependency::BIND;
-        Let { base: ExpressionBase::new(Kind::Let, result.get_type().clone(), deps), bindings, result }
-    }
-
-    #[must_use]
-    pub(crate) fn get_result(&self) -> &dyn Expression {
-        &*self.result
+    pub(crate) fn result(&self) -> &Expr {
+        &self.result
     }
 
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -60,53 +50,25 @@ impl Let {
             let binding_value = ctx.parse(&value.array_member(i + 1), i + 1, None, None)?;
 
             // std::map::emplace keeps the first binding of a name.
-            bindings.entry(name).or_insert_with(|| Arc::from(binding_value));
+            bindings.entry(name).or_insert_with(|| Arc::new(binding_value));
             i += 2;
         }
 
         let result =
             ctx.parse_with_bindings(&value.array_member(length - 1), length - 1, ctx.get_expected(), &bindings)?;
 
-        Some(Box::new(Let::new(bindings, result)))
-    }
-}
-
-impl Expression for Let {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Expr::new(Node::Let(Box::new(Let { bindings, result }))))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
-        self.result.evaluate(params)
-    }
-
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
         for binding in self.bindings.values() {
-            visit(&**binding);
+            visit(binding);
         }
-        visit(&*self.result);
+        visit(&self.result);
     }
 
-    /// The result alone, as `equals` ignores the bindings.
-    fn hash_structure(&self, mut state: &mut dyn Hasher) {
-        self.get_kind().hash(&mut state);
-        self.result.hash_structure(state);
-    }
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Let {
-            let rhs = downcast::<Let>(e).expect("Let");
-            return self.result.equals(&*rhs.result);
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        self.result.possible_outputs()
-    }
-
-    fn serialize(&self) -> MbglValue {
-        let mut serialized = vec![MbglValue::String(self.get_operator())];
+    pub(crate) fn serialize(&self) -> MbglValue {
+        let mut serialized = vec![MbglValue::String("let".to_owned())];
         for (name, value) in &self.bindings {
             serialized.push(MbglValue::String(name.clone()));
             serialized.push(value.serialize());
@@ -114,29 +76,22 @@ impl Expression for Let {
         serialized.push(self.result.serialize());
         MbglValue::Array(serialized)
     }
-
-    fn get_operator(&self) -> String {
-        "let".to_owned()
-    }
 }
 
+/// `["var", name]`: the expression its enclosing `let` bound to the name,
+/// which it evaluates in its place.
+#[derive(Clone, PartialEq)]
 pub(crate) struct Var {
-    base: ExpressionBase,
     name: String,
-    value: Arc<dyn Expression>,
+    value: SharedExpr,
 }
 
 impl Var {
-    pub(crate) fn new(name: String, value: Arc<dyn Expression>) -> Self {
-        Var {
-            base: ExpressionBase::new(Kind::Var, value.get_type().clone(), value.dependencies() | Dependency::VAR),
-            name,
-            value,
-        }
+    pub(crate) fn name(&self) -> &str {
+        &self.name
     }
 
-    #[must_use]
-    pub(crate) fn get_bound_expression(&self) -> &Arc<dyn Expression> {
+    pub(crate) fn bound_expression(&self) -> &Expr {
         &self.value
     }
 
@@ -159,38 +114,10 @@ impl Var {
             return None;
         };
 
-        Some(Box::new(Var::new(name, binding_value)))
-    }
-}
-
-impl Expression for Var {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Expr::new(Node::Var(Box::new(Var { name, value: binding_value }))))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
-        self.value.evaluate(params)
-    }
-
-    fn each_child<'a>(&'a self, _: &mut dyn FnMut(&'a dyn Expression)) {}
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Var {
-            let rhs = downcast::<Var>(e).expect("Var");
-            return self.value.equals(&*rhs.value);
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        vec![None]
-    }
-
-    fn serialize(&self) -> MbglValue {
-        MbglValue::Array(vec![MbglValue::String(self.get_operator()), MbglValue::String(self.name.clone())])
-    }
-
-    fn get_operator(&self) -> String {
-        "var".to_owned()
+    pub(crate) fn serialize(&self) -> MbglValue {
+        MbglValue::Array(vec![MbglValue::String("var".to_owned()), MbglValue::String(self.name.clone())])
     }
 }

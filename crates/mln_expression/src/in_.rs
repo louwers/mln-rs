@@ -2,12 +2,10 @@
 
 use mln_conversion::Convertible;
 
-use crate::expression::{
-    EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
-};
+use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
-use crate::value::{Value, to_string, type_of};
+use crate::value::{to_string, type_of};
 
 fn is_comparable_type(t: &Type) -> bool {
     *t == Type::Boolean || *t == Type::String || *t == Type::Number || *t == Type::Null || *t == Type::Value
@@ -25,24 +23,14 @@ fn is_searchable_runtime_type(t: &Type) -> bool {
     *t == Type::String || t.is_array() || *t == Type::Null
 }
 
+/// `["in", needle, haystack]`.
+#[derive(Clone, PartialEq)]
 pub(crate) struct In {
-    base: ExpressionBase,
-    needle: Box<dyn Expression>,
-    haystack: Box<dyn Expression>,
+    needle: Expr,
+    haystack: Expr,
 }
 
 impl In {
-    #[must_use]
-    pub(crate) fn new(needle: Box<dyn Expression>, haystack: Box<dyn Expression>) -> Self {
-        debug_assert!(is_comparable_type(needle.get_type()));
-        debug_assert!(is_searchable_type(haystack.get_type()));
-        In {
-            base: ExpressionBase::new(Kind::In, Type::Boolean, needle.dependencies() | haystack.dependencies()),
-            needle,
-            haystack,
-        }
-    }
-
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
 
@@ -55,8 +43,8 @@ impl In {
         let needle = ctx.parse(&value.array_member(1), 1, Some(Type::Value), None)?;
         let haystack = ctx.parse(&value.array_member(2), 2, Some(Type::Value), None)?;
 
-        let needle_type = needle.get_type().clone();
-        let haystack_type = haystack.get_type().clone();
+        let needle_type = needle.get_type();
+        let haystack_type = haystack.get_type();
 
         if !is_comparable_type(&needle_type) {
             ctx.error(format!(
@@ -73,18 +61,12 @@ impl In {
             ));
             return None;
         }
-        Some(Box::new(In::new(needle, haystack)))
-    }
-}
-
-impl Expression for In {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Expr::new(Node::In(Box::new(In { needle, haystack }))))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
-        let evaluated_haystack = self.haystack.evaluate(params)?;
-        let evaluated_needle = self.needle.evaluate(params)?;
+    pub(crate) fn eval_bool(&self, params: &EvaluationContext<'_>) -> EvalResult<bool> {
+        let evaluated_haystack = self.haystack.evaluate_ref(params)?;
+        let evaluated_needle = self.needle.evaluate_ref(params)?;
 
         let evaluated_needle_type = type_of(&evaluated_needle);
         if !is_comparable_runtime_type(&evaluated_needle_type) {
@@ -103,37 +85,21 @@ impl Expression for In {
         }
 
         if evaluated_needle_type == Type::Null || evaluated_haystack_type == Type::Null {
-            return Ok(Value::Bool(false));
+            return Ok(false);
         }
 
         if evaluated_haystack_type == Type::String {
             let haystack_string = evaluated_haystack.as_str().unwrap();
             let needle_string = to_string(&evaluated_needle);
-            Ok(Value::Bool(haystack_string.contains(needle_string.as_str())))
+            Ok(haystack_string.contains(needle_string.as_str()))
         } else {
             let haystack_array = evaluated_haystack.as_array().unwrap();
-            Ok(Value::Bool(haystack_array.contains(&evaluated_needle)))
+            Ok(haystack_array.contains(&evaluated_needle))
         }
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        visit(&*self.needle);
-        visit(&*self.haystack);
-    }
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::In {
-            let rhs = downcast::<In>(e).expect("In");
-            return self.needle.equals(&*rhs.needle) && self.haystack.equals(&*rhs.haystack);
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        vec![Some(Value::Bool(true)), Some(Value::Bool(false))]
-    }
-
-    fn get_operator(&self) -> String {
-        "in".to_owned()
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        visit(&self.needle);
+        visit(&self.haystack);
     }
 }

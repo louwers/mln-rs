@@ -372,16 +372,20 @@ impl SymbolLayout {
         let geometry_layer = source_layer.layer()?;
         let feature_count = geometry_layer.feature_count();
         let canonical_id = this.canonical_id;
+        let context = EvaluationContext::new(this.zoom)
+            .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
+            .with_global_state(parameters.global_state.as_deref())
+            .with_font_faces(layout_parameters.font_faces.as_deref());
         let passes = |feature: &dyn GeometryTileFeature| {
-            leader.filter.evaluate(
-                &EvaluationContext::with_zoom_feature(this.zoom, Some(feature))
-                    .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
-                    .with_global_state(parameters.global_state.as_deref())
-                    .with_font_faces(layout_parameters.font_faces.as_deref()),
-            )
+            leader.filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
         };
-        let selected =
-            layout_parameters.filter_groups.select(&source_layer.name, &*geometry_layer, &leader.filter, passes);
+        let selected = layout_parameters.filter_groups.select(
+            &source_layer.name,
+            &*geometry_layer,
+            &leader.filter,
+            &context,
+            passes,
+        );
         for i in 0..feature_count {
             if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;

@@ -77,8 +77,8 @@ fn parse_filter(expression: &str) -> Filter {
     convert::<Filter>(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("filter: {}", error.message))
 }
 
-fn filter(expression: Box<dyn mln_style::expression::Expression>) -> Filter {
-    Filter::new(Some(Arc::from(expression)), None)
+fn filter(expression: mln_style::expression::Expr) -> Filter {
+    Filter::new(Some(Arc::new(expression)), None)
 }
 
 fn layers(ids: &[&str]) -> Vec<String> {

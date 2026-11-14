@@ -23,7 +23,7 @@ fn invalid_zoom_curve_is_logged() {
     // A zoom step nested below the top level.
     let expression =
         eq(step(zoom(), literal(Value::Number(1.0)), 5.0, literal(Value::Number(2.0))), literal(Value::Number(1.0)));
-    assert!(find_zoom_curve_checked(expression.as_ref()).is_null());
+    assert!(find_zoom_curve_checked(&expression).is_null());
 
     let _ = Log::set_thread_observer(previous);
     assert_eq!(

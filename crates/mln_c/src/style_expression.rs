@@ -9,7 +9,7 @@ use std::sync::Arc;
 use feature::{Feature, Value as JsonValue, ValueObject};
 use mln_conversion::Convertible;
 use mln_expression::{
-    EvaluationContext, Expression, ParsingContext, Type, TypeAnnotationOption, is_feature_constant, is_zoom_constant,
+    EvaluationContext, Expr, ParsingContext, Type, TypeAnnotationOption, is_feature_constant, is_zoom_constant,
 };
 use mln_tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
@@ -33,7 +33,7 @@ abi::versioned!(mln_style_expression_info, mln_style_expression_inputs, mln_styl
 
 /// Parsed expressions, which only evaluation reads, so any number of threads
 /// may evaluate one at once.
-static EXPRESSIONS: HandleTable<Box<dyn Expression>> = HandleTable::new(HandleKind::StyleExpression);
+static EXPRESSIONS: HandleTable<Expr> = HandleTable::new(HandleKind::StyleExpression);
 
 /// The text that a caller's view names, as an owned copy for the parse
 /// thread.
@@ -113,7 +113,7 @@ unsafe fn read_expected_type(options: *const mln_style_expression_options) -> Re
     fields.get(MLN_STYLE_EXPRESSION_OPTION_EXPECTED_TYPE, options.expected_type).map(expected_type).transpose()
 }
 
-fn parse(json: &str, expected: Option<Type>) -> Result<Box<dyn Expression>, Error> {
+fn parse(json: &str, expected: Option<Type>) -> Result<Expr, Error> {
     let document = parse_json(json, "expression")?;
     // GL JS's createExpression() coerces a result that must be a string
     // rather than asserting it, as a string layer property does.
@@ -127,7 +127,7 @@ fn parse(json: &str, expected: Option<Type>) -> Result<Box<dyn Expression>, Erro
     };
     // No value of another type holds a collator, so checking the result's
     // type keeps every result serializable.
-    if *parsed.get_type() == Type::Collator {
+    if parsed.get_type() == Type::Collator {
         return Err(Error::invalid_argument("expression: a collator result has no JSON form"));
     }
     Ok(parsed)
@@ -185,8 +185,8 @@ pub(crate) unsafe extern "C" fn mln_style_expression_get_info(
         let expression = EXPRESSIONS.get(expression)?;
         let info = mln_style_expression_info {
             size: 0,
-            is_feature_constant: is_feature_constant(&**expression),
-            is_zoom_constant: is_zoom_constant(&**expression),
+            is_feature_constant: is_feature_constant(&expression),
+            is_zoom_constant: is_zoom_constant(&expression),
         };
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_info, &info) }
@@ -292,7 +292,7 @@ fn parse_object(text: Option<&str>, name: &str) -> Result<Option<ValueObject>, E
 }
 
 /// Evaluates `expression` and writes its result as JSON.
-fn evaluate(expression: &dyn Expression, inputs: &Inputs) -> Result<String, Error> {
+fn evaluate(expression: &Expr, inputs: &Inputs) -> Result<String, Error> {
     let feature = inputs.feature.as_deref().map(parse_feature).transpose()?;
     let feature_state = parse_object(inputs.feature_state.as_deref(), "feature_state")?;
     let global_state = parse_object(inputs.global_state.as_deref(), "global_state")?;
@@ -309,7 +309,7 @@ fn evaluate(expression: &dyn Expression, inputs: &Inputs) -> Result<String, Erro
         Some(feature) => mln_expression::expression::evaluate_feature_with_context(expression, feature, context),
         None => expression.evaluate(&context),
     };
-    let result = result.map_err(|error| Error::invalid_argument(format!("expression: {}", error.message)))?;
+    let result = result.map_err(|error| Error::invalid_argument(format!("expression: {}", error.message())))?;
     // A NaN or infinite number becomes null, as `JSON.stringify()` writes it.
     Ok(mln_conversion::value_to_json(&mln_expression::value::to_mbgl_value(&result)).to_string())
 }
@@ -335,7 +335,7 @@ pub(crate) unsafe extern "C" fn mln_style_expression_evaluate(
         let expression = EXPRESSIONS.get(expression)?;
         // SAFETY: the caller's contract.
         let inputs = unsafe { read_inputs(inputs) }?;
-        let json = parse_thread::run(move || evaluate(&**expression, &inputs))??;
+        let json = parse_thread::run(move || evaluate(&expression, &inputs))??;
         // SAFETY: the caller's contract.
         unsafe { buffer::write_text(&json, out_json, json_capacity, out_json_length, ("out_json", "out_json_length")) }
     })

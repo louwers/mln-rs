@@ -1,10 +1,9 @@
 use mln_conversion::Convertible;
 
-use crate::expression::{
-    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
-};
+use crate::expression::{EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_;
+use crate::type_::Type;
 use crate::utf8_op_helpers::{get_unicode_character_offset_on_validated_utf8, unicode_length_on_validated_utf8};
 use crate::value::{Value, type_of};
 
@@ -18,24 +17,18 @@ fn static_cast_int(f: f64) -> i32 {
     if f > -2_147_483_649.0 && f < 2_147_483_648.0 { f as i32 } else { i32::MIN }
 }
 
+/// `["slice", input, from, to?]`, of a string or an array.
+#[derive(Clone, PartialEq)]
 pub(crate) struct Slice {
-    base: ExpressionBase,
-    input: Box<dyn Expression>,
-    from_index: Box<dyn Expression>,
-    to_index: Option<Box<dyn Expression>>,
+    input: Expr,
+    from_index: Expr,
+    to_index: Option<Expr>,
 }
 
 impl Slice {
-    #[must_use]
-    pub(crate) fn new(
-        input: Box<dyn Expression>,
-        from_index: Box<dyn Expression>,
-        to_index: Option<Box<dyn Expression>>,
-    ) -> Self {
-        let deps = input.dependencies()
-            | from_index.dependencies()
-            | to_index.as_ref().map_or(Dependency::NONE, |e| e.dependencies());
-        Slice { base: ExpressionBase::new(Kind::Slice, input.get_type().clone(), deps), input, from_index, to_index }
+    /// The input's type.
+    pub(crate) fn get_type(&self) -> Type {
+        self.input.get_type()
     }
 
     fn evaluate_for_array_input(array: &[Value], from_index_value: i32, to_index_value: i32) -> Value {
@@ -100,17 +93,11 @@ impl Slice {
             return None;
         };
 
-        Some(Box::new(Slice::new(input, from_index, to_index)))
-    }
-}
-
-impl Expression for Slice {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Expr::new(Node::Slice(Box::new(Slice { input, from_index, to_index }))))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
-        let evaluated_input = self.input.evaluate(params)?;
+    pub(crate) fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+        let evaluated_input = self.input.evaluate_ref(params)?;
         // C++ checks `!fromIndex` (the expression, never null)
         // instead of the result here and then dereferences a failed result
         // (undefined behaviour); the port returns the error.
@@ -137,7 +124,7 @@ impl Expression for Slice {
             to_index_value = static_cast_int(to);
         }
 
-        match &evaluated_input {
+        match &*evaluated_input {
             Value::String(s) => Ok(Self::evaluate_for_string_input(s, from_index_value, to_index_value)),
             Value::Array(v) => Ok(Self::evaluate_for_array_input(v, from_index_value, to_index_value)),
             _ => Err(EvaluationError::new(format!(
@@ -147,32 +134,11 @@ impl Expression for Slice {
         }
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        visit(&*self.input);
-        visit(&*self.from_index);
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        visit(&self.input);
+        visit(&self.from_index);
         if let Some(to_index) = &self.to_index {
-            visit(&**to_index);
+            visit(to_index);
         }
-    }
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Slice {
-            let rhs = downcast::<Slice>(e).expect("Slice");
-            let to_index_equal = match (&self.to_index, &rhs.to_index) {
-                (Some(l), Some(r)) => l.equals(&**r),
-                (None, None) => true,
-                _ => false,
-            };
-            return self.input.equals(&*rhs.input) && self.from_index.equals(&*rhs.from_index) && to_index_equal;
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        vec![None]
-    }
-
-    fn get_operator(&self) -> String {
-        "slice".to_owned()
     }
 }

@@ -1,11 +1,13 @@
 //! Style expressions: their types and values, parsing, and evaluation.
 //!
-//! Each expression has its own module. `type`, `match`, `let` and `in` are
-//! Rust keywords, so those modules are `type_`, `match_`, `let_` and `in_`.
+//! A parsed expression is an [`Expr`], a closed tree whose nodes the parser
+//! has type-checked, so that it evaluates typed (see [`expression`]). Each
+//! kind of node has its own module. `type`, `match`, `let` and `in` are Rust
+//! keywords, so those modules are `type_`, `match_`, `let_` and `in_`.
 
 mod assertion;
 mod at;
-pub mod boolean_operator;
+mod boolean_operator;
 pub mod case;
 mod check_subtype;
 mod coalesce;
@@ -16,10 +18,10 @@ mod comparison;
 pub mod compound_expression;
 mod distance;
 pub mod dsl;
-mod error;
 pub mod expression;
 mod find_zoom_curve;
 pub mod format_expression;
+pub mod format_section_override;
 pub mod formatted;
 pub mod image;
 pub mod image_expression;
@@ -47,7 +49,7 @@ mod util;
 pub mod value;
 mod within;
 
-pub use expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
+pub use expression::{Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expr};
 pub use find_zoom_curve::{ZoomCurvePtr, find_zoom_curve_checked};
 pub use formatted::{Formatted, FormattedSection};
 pub use image::Image;
@@ -55,7 +57,6 @@ pub use interpolate::{Interpolate, create_interpolate};
 pub use interpolator::Interpolator;
 pub use is_constant::{feature_property_keys, is_feature_constant, is_runtime_constant, is_zoom_constant};
 pub use is_expression::is_expression;
-pub use literal::Literal;
 pub use parsing_context::{ParseResult, ParsingContext, TypeAnnotationOption};
 pub use step::Step;
 pub use stops::Stops;

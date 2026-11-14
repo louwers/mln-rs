@@ -14,6 +14,7 @@ use mln_util::{Color, Padding};
 use serde::Serialize;
 
 use crate::collator::Collator;
+use crate::expression::{EvaluationContext, Expr};
 use crate::formatted::Formatted;
 use crate::image::Image;
 use crate::type_::Type;
@@ -187,7 +188,7 @@ pub(crate) fn hash_value(value: &Value, mut state: &mut dyn Hasher) {
 }
 
 #[must_use]
-pub(crate) fn type_of(value: &Value) -> Type {
+pub fn type_of(value: &Value) -> Type {
     match value {
         Value::Bool(_) => Type::Boolean,
         Value::Number(_) => Type::Number,
@@ -378,6 +379,14 @@ pub trait ValueConverter: Sized {
     fn to_expression_value(&self) -> Value;
     fn from_expression_value(value: &Value) -> Option<Self>;
 
+    /// Evaluates `expression`, of this type, to a `Self`: `None` when it
+    /// fails or gives another type. The types that typed evaluation covers
+    /// skip building a [`Value`].
+    #[must_use]
+    fn evaluate(expression: &Expr, context: &EvaluationContext<'_>) -> Option<Self> {
+        Self::from_expression_value(&expression.evaluate(context).ok()?)
+    }
+
     /// Converts an array element-wise. The `Color` implementation also wraps a
     /// single color.
     fn vec_from_expression_value(value: &Value) -> Option<Vec<Self>> {
@@ -427,6 +436,12 @@ impl ValueConverter for f32 {
     fn expression_type() -> Type {
         Type::Number
     }
+    fn evaluate(expression: &Expr, context: &EvaluationContext<'_>) -> Option<Self> {
+        if expression.get_type() != Type::Number {
+            return Self::from_expression_value(&expression.evaluate(context).ok()?);
+        }
+        expression.eval_num(context).ok().map(|n| n as f32)
+    }
     fn to_expression_value(&self) -> Value {
         Value::Number(f64::from(*self))
     }
@@ -435,11 +450,36 @@ impl ValueConverter for f32 {
     }
 }
 
+fn evaluate_as_value<T: ValueConverter>(expression: &Expr, context: &EvaluationContext<'_>) -> Option<T> {
+    T::from_expression_value(&expression.evaluate(context).ok()?)
+}
+
+fn evaluate_bool(expression: &Expr, context: &EvaluationContext<'_>) -> Option<bool> {
+    expression.eval_bool(context).ok()
+}
+
+fn evaluate_number(expression: &Expr, context: &EvaluationContext<'_>) -> Option<f64> {
+    expression.eval_num(context).ok()
+}
+
+fn evaluate_string(expression: &Expr, context: &EvaluationContext<'_>) -> Option<String> {
+    expression.eval_str(context).ok().map(std::borrow::Cow::into_owned)
+}
+
 macro_rules! simple_value_converter {
     ($t:ty, $variant:ident, $type_:expr) => {
+        simple_value_converter!($t, $variant, $type_, evaluate_as_value);
+    };
+    ($t:ty, $variant:ident, $type_:expr, $evaluate:path) => {
         impl ValueConverter for $t {
             fn expression_type() -> Type {
                 $type_
+            }
+            fn evaluate(expression: &Expr, context: &EvaluationContext<'_>) -> Option<Self> {
+                if expression.get_type() != $type_ {
+                    return Self::from_expression_value(&expression.evaluate(context).ok()?);
+                }
+                $evaluate(expression, context)
             }
             fn to_expression_value(&self) -> Value {
                 Value::$variant(self.clone())
@@ -454,12 +494,18 @@ macro_rules! simple_value_converter {
     };
 }
 
-simple_value_converter!(bool, Bool, Type::Boolean);
-simple_value_converter!(f64, Number, Type::Number);
-simple_value_converter!(String, String, Type::String);
+simple_value_converter!(bool, Bool, Type::Boolean, evaluate_bool);
+simple_value_converter!(f64, Number, Type::Number, evaluate_number);
+simple_value_converter!(String, String, Type::String, evaluate_string);
 impl ValueConverter for Color {
     fn expression_type() -> Type {
         Type::Color
+    }
+    fn evaluate(expression: &Expr, context: &EvaluationContext<'_>) -> Option<Self> {
+        if expression.get_type() != Type::Color {
+            return Self::from_expression_value(&expression.evaluate(context).ok()?);
+        }
+        expression.eval_color(context).ok()
     }
     fn to_expression_value(&self) -> Value {
         Value::Color(*self)

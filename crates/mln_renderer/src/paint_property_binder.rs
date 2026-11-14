@@ -135,7 +135,7 @@ impl BinderValue for Color {
 }
 
 /// True if `expression` reads `feature-state` anywhere.
-fn uses_feature_state(expression: &dyn mln_style::expression::Expression) -> bool {
+fn uses_feature_state(expression: &mln_style::expression::Expr) -> bool {
     if expression.get_operator() == "feature-state" {
         return true;
     }

@@ -1,110 +1,30 @@
-// The `format-section-override` expression, and the functions that install it
-// in a symbol layer's paint properties. The only overridable property is
-// `text-color`, so the expression is for `Color` values.
+// The functions that install `format-section-override` in a symbol layer's
+// paint properties. The only overridable property is `text-color`.
 
 use std::sync::Arc;
 
-use mln_expression::expression::{
-    Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
-};
-use mln_expression::type_::Type;
-use mln_expression::value::{Value, ValueConverter};
-use mln_util::Color;
+use mln_expression::format_section_override::{FormatSectionOverride, OverrideDefault};
 
-use crate::expression::GlobalStateMap;
+use crate::expression::{Dependency, Expr, GlobalStateMap};
 use crate::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
 use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties, TextColor, TextField};
 use crate::property_expression::PropertyExpression;
 use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 
-pub(crate) struct FormatSectionOverride {
-    base: ExpressionBase,
-    default_value: PossiblyEvaluatedPropertyValue<Color>,
+/// A `format-section-override` of the color property `property_name`, whose
+/// value is `default_value` where no section overrides it.
+pub(crate) fn format_section_override(
+    default_value: PossiblyEvaluatedPropertyValue<mln_util::Color>,
     property_name: String,
-}
-
-impl FormatSectionOverride {
-    #[must_use]
-    pub(crate) fn new(
-        type_: Type,
-        default_value: PossiblyEvaluatedPropertyValue<Color>,
-        property_name: String,
-    ) -> Self {
-        let dependencies = default_value.get_dependencies() | Dependency::OVERRIDE | Dependency::FEATURE;
-        FormatSectionOverride {
-            base: ExpressionBase::new(Kind::FormatSectionOverride, type_, dependencies),
-            default_value,
-            property_name,
-        }
-    }
-}
-
-impl FormatSectionOverride {
-    /// Port-only: the default value and the property name, which serde
-    /// writes for a tile worker in another wasm instance
-    /// (serialization.rs).
-    pub(crate) fn parts(&self) -> (&PossiblyEvaluatedPropertyValue<Color>, &str) {
-        (&self.default_value, &self.property_name)
-    }
-}
-
-impl Expression for FormatSectionOverride {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
-    }
-
-    fn evaluate(&self, context: &EvaluationContext<'_>) -> EvaluationResult {
-        if let Some(Value::Object(section)) = context.formatted_section
-            && let Some(hit) = section.get(&self.property_name)
-        {
-            return Ok(hit.clone());
-        }
-        match &self.default_value {
-            PossiblyEvaluatedPropertyValue::Expression(e) => {
-                // Binder contexts do not carry global state, so the captured
-                // state is used as a fallback. If the caller explicitly
-                // provides context state, it takes precedence.
-                if context.global_state.is_none()
-                    && let Some(state) = e.get_captured_global_state()
-                {
-                    let mut context_with_state = *context;
-                    context_with_state.global_state = Some(state);
-                    return e.get_expression().evaluate(&context_with_state);
-                }
-                e.get_expression().evaluate(context)
-            }
-            PossiblyEvaluatedPropertyValue::Constant(t) => Ok(t.to_expression_value()),
-        }
-    }
-
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        if let PossiblyEvaluatedPropertyValue::Expression(e) = &self.default_value {
-            visit(e.get_expression());
-        }
-    }
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        let Some(other) = downcast::<FormatSectionOverride>(e) else {
-            return false;
-        };
-        if self.get_type() != other.get_type() || self.property_name != other.property_name {
-            return false;
-        }
-        // Check that default values or property expressions are equal.
-        match (&self.default_value, &other.default_value) {
-            (PossiblyEvaluatedPropertyValue::Expression(a), PossiblyEvaluatedPropertyValue::Expression(b)) => a == b,
-            (PossiblyEvaluatedPropertyValue::Constant(a), PossiblyEvaluatedPropertyValue::Constant(b)) => a == b,
-            _ => false,
-        }
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        vec![None]
-    }
-
-    fn get_operator(&self) -> String {
-        "format-section-override".to_owned()
-    }
+) -> Expr {
+    let default_value = match default_value {
+        PossiblyEvaluatedPropertyValue::Constant(color) => OverrideDefault::Constant(color),
+        PossiblyEvaluatedPropertyValue::Expression(expression) => OverrideDefault::Expression {
+            expression: Arc::clone(expression.shared_expression()),
+            captured_global_state: expression.get_captured_global_state().cloned(),
+        },
+    };
+    FormatSectionOverride::new_expr(default_value, property_name)
 }
 
 pub fn set_overrides(
@@ -129,7 +49,6 @@ pub fn set_overrides(
             *value = PossiblyEvaluatedPropertyValue::Expression(retained);
         }
     }
-    let default_value = std::mem::take(value);
-    let override_ = FormatSectionOverride::new(TextColor::expression_type(), default_value, "text-color".to_owned());
+    let override_ = format_section_override(std::mem::take(value), "text-color".to_owned());
     *value = PossiblyEvaluatedPropertyValue::Expression(PropertyExpression::new(Arc::new(override_), None));
 }

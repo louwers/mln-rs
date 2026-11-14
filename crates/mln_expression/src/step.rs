@@ -1,33 +1,36 @@
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 
-use crate::expression::{
-    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
-};
+use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node, Output};
 use crate::interpolate::parse_stop_label;
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::range::Range;
 use crate::stops::{Stops, get_covering_stops};
 use crate::type_::Type;
-use crate::value::Value;
 
+/// `["step", input, output, label, output, ...]`.
+#[derive(Clone, PartialEq)]
 pub struct Step {
-    base: ExpressionBase,
-    input: Box<dyn Expression>,
+    type_: Type,
+    input: Expr,
     stops: Stops,
 }
 
 impl Step {
+    /// A step over `input`, which is a number.
     #[must_use]
-    pub fn new(type_: Type, input: Box<dyn Expression>, stops: Stops) -> Self {
-        assert_eq!(*input.get_type(), Type::Number);
-        let deps = input.dependencies() | stops.values().fold(Dependency::NONE, |a, e| a | e.dependencies());
-        Step { base: ExpressionBase::new(Kind::Step, type_, deps), input, stops }
+    pub fn new_expr(type_: Type, input: Expr, stops: Stops) -> Expr {
+        assert_eq!(input.get_type(), Type::Number);
+        Expr::new(Node::Step(Box::new(Step { type_, input, stops })))
+    }
+
+    pub(crate) fn get_type(&self) -> &Type {
+        &self.type_
     }
 
     #[must_use]
-    pub(crate) fn get_input(&self) -> &dyn Expression {
-        &*self.input
+    pub(crate) fn get_input(&self) -> &Expr {
+        &self.input
     }
 
     #[must_use]
@@ -67,7 +70,7 @@ impl Step {
         // input value, before proceeding into the "stops" loop below.
         let first_output = ctx.parse(&value.array_member(2), 2, output_type.clone(), None)?;
         if output_type.is_none() {
-            output_type = Some(first_output.get_type().clone());
+            output_type = Some(first_output.get_type());
         }
         stops.emplace(f64::NEG_INFINITY, first_output);
 
@@ -94,7 +97,7 @@ impl Step {
 
             let output = ctx.parse(&value.array_member(i + 1), i + 1, output_type.clone(), None)?;
             if output_type.is_none() {
-                output_type = Some(output.get_type().clone());
+                output_type = Some(output.get_type());
             }
 
             stops.emplace(label, output);
@@ -103,19 +106,12 @@ impl Step {
 
         let output_type = output_type.expect("step output type");
 
-        Some(Box::new(Step::new(output_type, input, stops)))
-    }
-}
-
-impl Expression for Step {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Step::new_expr(output_type, input, stops))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
-        let evaluated_input = self.input.evaluate(params)?;
-
-        let x: f32 = evaluated_input.as_number().map(|d| d as f32).expect("numeric step input");
+    /// The output of the last stop at or below the input.
+    pub(crate) fn eval<'e, T: Output<'e>>(&'e self, params: &EvaluationContext<'_>) -> EvalResult<T> {
+        let x = self.input.eval_num(params)? as f32;
         if x.is_nan() {
             return Err(EvaluationError::new("Input is not a number."));
         }
@@ -125,40 +121,20 @@ impl Expression for Step {
         }
 
         let it = self.stops.upper_bound(f64::from(x));
-        if it == self.stops.len() {
-            self.stops.get(self.stops.len() - 1).1.evaluate(params)
-        } else if it == 0 {
-            self.stops.get(0).1.evaluate(params)
-        } else {
-            self.stops.get(it - 1).1.evaluate(params)
-        }
+        T::eval(self.stops.output(it.saturating_sub(1)), params)
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        visit(&*self.input);
-        for v in self.stops.values() {
-            visit(&**v);
-        }
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        visit(&self.input);
+        self.each_output(visit);
     }
 
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Step {
-            let rhs = downcast::<Step>(e).expect("Step");
-            return self.input.equals(&*rhs.input) && self.stops.children_equal(&rhs.stops);
-        }
-        false
+    pub(crate) fn each_output<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        self.stops.values().for_each(visit);
     }
 
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        let mut result = Vec::new();
-        for stop in self.stops.values() {
-            result.extend(stop.possible_outputs());
-        }
-        result
-    }
-
-    fn serialize(&self) -> MbglValue {
-        let mut serialized = vec![MbglValue::String(self.get_operator()), self.input.serialize()];
+    pub(crate) fn serialize(&self) -> MbglValue {
+        let mut serialized = vec![MbglValue::String("step".to_owned()), self.input.serialize()];
         for (i, (k, v)) in self.stops.iter().enumerate() {
             // Port-only: C++ writes every label but -infinity's. The legacy
             // property functions make steps whose first label is finite
@@ -182,9 +158,5 @@ impl Expression for Step {
             serialized.push(output);
         }
         MbglValue::Array(serialized)
-    }
-
-    fn get_operator(&self) -> String {
-        "step".to_owned()
     }
 }

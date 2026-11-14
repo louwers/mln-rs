@@ -11,7 +11,7 @@ use mln_style_types::VisibilityType;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
-use crate::expression::{Dependency, Expression};
+use crate::expression::{Dependency, Expr};
 use crate::filter::Filter;
 use crate::layer::LayerTypeInfo;
 use crate::serialization::shared_expression;
@@ -35,7 +35,7 @@ pub struct ImplBase {
     // result is kept in `visibility` and re-evaluated by the style whenever
     // the global state changes.
     #[serde(with = "shared_expression::option")]
-    pub(crate) visibility_expression: Option<Arc<dyn Expression>>,
+    pub(crate) visibility_expression: Option<Arc<Expr>>,
 
     pub id: String,
     pub source: String,

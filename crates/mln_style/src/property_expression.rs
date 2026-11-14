@@ -9,12 +9,12 @@ use mln_vec_map::VecSet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::expression::{
-    Dependency, EvaluationContext, Expression, GlobalStateMap, ValueConverter, ZoomCurvePtr, collect_global_state_refs,
+    Dependency, EvaluationContext, Expr, GlobalStateMap, ValueConverter, ZoomCurvePtr, collect_global_state_refs,
     find_zoom_curve_checked,
 };
 use crate::serialization::shared_expression;
 
-fn collect_global_state_refs_shared(expression: &dyn Expression) -> Option<Arc<VecSet<String>>> {
+fn collect_global_state_refs_shared(expression: &Expr) -> Option<Arc<VecSet<String>>> {
     if !expression.has(Dependency::GLOBAL_STATE) {
         return None;
     }
@@ -31,7 +31,7 @@ fn collect_global_state_refs_shared(expression: &dyn Expression) -> Option<Arc<V
 /// `find_zoom_curve_checked` (a pure function of the expression).
 #[derive(Debug)]
 pub struct PropertyExpressionBase {
-    expression: Arc<dyn Expression>,
+    expression: Arc<Expr>,
     captured_global_state: Option<Arc<GlobalStateMap>>,
     global_state_refs: Option<Arc<VecSet<String>>>,
     use_integer_zoom: bool,
@@ -60,7 +60,7 @@ impl Clone for PropertyExpressionBase {
 }
 
 impl PropertyExpressionBase {
-    pub(crate) fn new(expression: Arc<dyn Expression>) -> Self {
+    pub(crate) fn new(expression: Arc<Expr>) -> Self {
         let global_state_refs = collect_global_state_refs_shared(expression.as_ref());
         let is_zoom_constant = !expression.has(Dependency::ZOOM);
         let is_feature_constant = !expression.has(Dependency::FEATURE);
@@ -123,8 +123,14 @@ impl PropertyExpressionBase {
     }
 
     #[must_use]
-    pub fn get_expression(&self) -> &dyn Expression {
+    pub fn get_expression(&self) -> &Expr {
         self.expression.as_ref()
+    }
+
+    /// The expression, as the `Arc` that values of the property share.
+    #[must_use]
+    pub fn shared_expression(&self) -> &Arc<Expr> {
+        &self.expression
     }
 
     #[must_use]
@@ -192,7 +198,7 @@ impl PropertyExpressionBase {
 #[derive(Serialize, Deserialize)]
 struct PropertyExpressionParts {
     #[serde(with = "shared_expression")]
-    expression: Arc<dyn Expression>,
+    expression: Arc<Expr>,
     captured_global_state: Option<Arc<GlobalStateMap>>,
     use_integer_zoom: bool,
     global_state_pinned: bool,
@@ -242,12 +248,12 @@ impl<T> std::ops::DerefMut for PropertyExpression<T> {
 
 impl<T> PropertyExpression<T> {
     /// Second parameter to be used only for conversions from legacy functions.
-    pub fn new(expression: Arc<dyn Expression>, default_value: Option<T>) -> Self {
+    pub fn new(expression: Arc<Expr>, default_value: Option<T>) -> Self {
         PropertyExpression { base: PropertyExpressionBase::new(expression), default_value }
     }
 
-    pub fn from_box(expression: Box<dyn Expression>, default_value: Option<T>) -> Self {
-        PropertyExpression::new(Arc::from(expression), default_value)
+    pub fn from_expr(expression: Expr, default_value: Option<T>) -> Self {
+        PropertyExpression::new(Arc::new(expression), default_value)
     }
 }
 
@@ -357,9 +363,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
     }
 
     fn evaluate_context(&self, context: &EvaluationContext<'_>, final_default_value: T) -> T {
-        if let Ok(result) = self.base.expression.evaluate(context)
-            && let Some(typed) = T::from_expression_value(&result)
-        {
+        if let Some(typed) = T::evaluate(&self.base.expression, context) {
             return typed;
         }
         match &self.default_value {
@@ -371,6 +375,6 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
 
 impl<T> PartialEq for PropertyExpression<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.base.expression.equals(other.base.expression.as_ref())
+        self.base.expression == other.base.expression
     }
 }

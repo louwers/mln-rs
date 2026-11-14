@@ -256,10 +256,10 @@ fn zoom_curve() {
         || interpolate(linear(), zoom(), vec![(0.0, literal(Value::Number(0.0))), (0.0, literal(Value::Number(0.0)))]);
 
     let expr1 = interpolate(linear(), literal(Value::Number(0.0)), vec![(0.0, zoom_interp()), (0.0, zoom_interp())]);
-    assert!(find_zoom_curve_checked(expr1.as_ref()).is_null());
+    assert!(find_zoom_curve_checked(&expr1).is_null());
 
     let expr2 = interpolate(linear(), zoom(), vec![(0.0, literal(Value::Number(0.0))), (0.0, zoom_interp())]);
-    assert!(find_zoom_curve_checked(expr2.as_ref()).is_null());
+    assert!(find_zoom_curve_checked(&expr2).is_null());
 }
 
 // Port-only: C++ cuts `unicode-range` strings by bytes (`substr(2)`), also
