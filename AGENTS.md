@@ -1,6 +1,11 @@
 # mln-rs
 
-A Rust port of MapLibre Native's map rendering core.
+mln-rs started as a port of MapLibre Native, which stays a useful reference for
+how maps should look and behave, but isn't a spec. Prefer idiomatic Rust and
+good behavior over matching the C++ core's behavior, error messages or quirks.
+
+The MapLibre Style Spec and render tests' expected images are the bar for
+correctness, not the C++ or GL JS code.
 
 ## Project map
 
@@ -40,5 +45,6 @@ not the code.
 Open a PR as a draft until it's ready to merge.
 
 A PR that claims a performance change includes measurements in its description.
-A PR that changes what users see includes before and after screenshots, attached
-with `gh pr edit --attach` or `gh pr create --attach`.
+A PR that adds or removes significant or third party code includes Wasm size
+measurements. A PR that changes what users see includes before and after
+screenshots, attached with `gh pr edit --attach` or `gh pr create --attach`.
