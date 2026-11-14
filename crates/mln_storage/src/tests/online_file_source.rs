@@ -37,6 +37,15 @@ fn data(res: &Response) -> &[u8] {
     res.data.as_deref().map(Vec::as_slice).expect("data")
 }
 
+/// Fails the test with `message` if it still runs in a minute. A test that
+/// waits for a retry only a network status change starts would otherwise
+/// hang when that retry never comes.
+fn fail_after_a_minute(message: &'static str) -> Timer {
+    let timer = Timer::new();
+    timer.start(Duration::from_secs(60), Duration::ZERO, move || panic!("{message}"));
+    timer
+}
+
 /// The seconds since `start`.
 fn seconds_since(start: Instant) -> f64 {
     start.elapsed().as_secs_f64()
@@ -418,6 +427,7 @@ fn network_status_change_preempt() {
     // Longer than the test runs, so that only the network status change can
     // retry the request.
     fs.set_connection_backoff(Duration::from_secs(3600));
+    let _deadline = fail_after_a_minute("The network status change didn't retry the request");
 
     let counter = Rc::new(Cell::new(0));
 
@@ -468,6 +478,7 @@ fn network_status_online_offline() {
 
     let online_timer = Timer::new();
     online_timer.start(Duration::from_millis(100), Duration::ZERO, || NetworkStatus::set(Status::Online));
+    let _deadline = fail_after_a_minute("Going back Online didn't retry the request");
 
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
