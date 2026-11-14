@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -9,13 +8,15 @@ use mln_gfx::shaders::shader_defines::{ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, DrawableBuilder, ShaderProgramPtr, ShaderRegistry,
-    StencilMode, UniqueDrawable,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, StencilMode,
 };
 use mln_tile_id::UnwrappedTileID;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::drawable::UniqueDrawable;
+use crate::drawable_builder::DrawableBuilder;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
+use crate::paint_parameters::PaintParameters;
 use crate::render_static_data::RenderStaticData;
 
 /// The tile clipping masks: for each tile that the frame's layer groups can
@@ -65,7 +66,7 @@ impl ClipMasks {
         builder.set_vertex_attr_id(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE);
         // The far side of a limb tile projects inside the disc; cull it or it
         // overwrites the tile in front.
-        builder.set_cull_face_mode(&if globe { CullFaceMode::back_ccw() } else { CullFaceMode::disabled() });
+        builder.set_cull_face_mode(if globe { CullFaceMode::back_ccw() } else { CullFaceMode::disabled() });
 
         for tile in tiles {
             let drawables = masks.entry(*tile).or_insert_with(|| {
@@ -114,7 +115,7 @@ impl ClipMasks {
     /// Draws the mask of each tile of `masks` with its stencil value, which
     /// it writes over the tile whatever the stencil buffer holds there.
     /// Every tile must be one `update` made a mask for.
-    pub(crate) fn draw(&mut self, masks: &[(UnwrappedTileID, i32)], parameters: &mut dyn GfxPaintParameters) {
+    pub(crate) fn draw(&mut self, masks: &[(UnwrappedTileID, i32)], parameters: &PaintParameters<'_>) {
         // On the globe each mask is drawn with a border first, then exactly,
         // as GL JS does: where a tile meets finer ones, its coarser edge
         // leaves a sliver between the masks that only a neighbor's border

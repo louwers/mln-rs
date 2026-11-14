@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
+use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::color_relief_layer_ubo::{
     ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
 };
@@ -8,11 +8,11 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_TILE_PROPS_UBO,
 };
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefOpacity};
 
 use super::cast_matrix;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -50,7 +50,7 @@ impl LayerTweaker for ColorReliefLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         let context = parameters.context;
         let properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = get_evaluated::<ColorReliefLayerProperties>(&properties);
@@ -73,13 +73,13 @@ impl LayerTweaker for ColorReliefLayerTweaker {
             .set(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
         let mut i: u32 = 0;
-        let count = layer_group.get_drawable_count();
+        let count = layer_group.drawable_count();
         let mut drawable_ubo_vector = vec![ColorReliefDrawableUBO::default(); count];
         let mut tile_props_ubo_vector = vec![ColorReliefTilePropsUBO::default(); count];
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
 
-        visit_layer_group_drawables(layer_group, |drawable| {
-            let Some(tile_id) = drawable.get_tile_id() else {
+        layer_group.visit_drawables(|drawable| {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
 
@@ -91,7 +91,7 @@ impl LayerTweaker for ColorReliefLayerTweaker {
             projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             // Get tile props from drawable data (set during creation)
-            if let Some(data) = drawable.get_data().and_then(|data| data.downcast_ref::<ColorReliefDrawableData>()) {
+            if let Some(crate::drawable::DrawableData::ColorRelief(data)) = &drawable.data {
                 tile_props_ubo_vector[i as usize] = data.tile_props;
             }
 

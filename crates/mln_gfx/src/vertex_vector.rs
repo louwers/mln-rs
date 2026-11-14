@@ -116,11 +116,6 @@ impl<V: bytemuck::Pod> Default for VertexVector<V> {
 }
 
 impl<V: bytemuck::Pod> VertexVector<V> {
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     /// A vector holding `vertices` (C++ builds one with `emplace_back`; the
     /// renderer moves a bucket's vertices into a shared vector this way, see
     /// `mln_renderer::bucket_geometry`).
@@ -170,7 +165,7 @@ impl<V: bytemuck::Pod> VertexVector<V> {
         0
     }
 
-    pub(crate) fn emplace_back(&mut self, vertex: V) {
+    pub fn emplace_back(&mut self, vertex: V) {
         debug_assert!(!self.base.released.get());
         self.v.get_mut().push(vertex);
         self.base.dirty.set(true);

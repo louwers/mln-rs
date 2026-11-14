@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::shader_defines::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
-use mln_gfx::{
-    AttributeDataType, ColorMode, Context, DepthMaskType, DrawMode, DrawableBuilder, ShaderProgramPtr, ShaderRegistry,
-    TileLayerGroup,
-};
+use mln_gfx::{AttributeDataType, ColorMode, Context, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
@@ -22,8 +19,10 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::{background_crossfade, background_layer_properties};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::drawable_builder::DrawableBuilder;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
+use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layers::background_layer_tweaker::BackgroundLayerTweaker;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
@@ -193,7 +192,7 @@ impl RenderLayer for RenderBackgroundLayer {
         }
 
         if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(TileLayerGroup::new_ptr(self.base.layer_index, self.get_id())), changes);
+            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -244,14 +243,13 @@ impl RenderLayer for RenderBackgroundLayer {
         let indexes = RenderStaticData::quad_triangle_indices();
         let segs = RenderStaticData::tile_triangle_segments();
 
-        let mut builder: Option<mln_gfx::UniqueDrawableBuilder> = None;
+        let mut builder: Option<crate::drawable_builder::UniqueDrawableBuilder> = None;
 
-        let mut group = layer_group.borrow_mut();
-        let tile_layer_group = group.as_tile_layer_group_mut().expect("background layer group is a TileLayerGroup");
+        let mut tile_layer_group = layer_group.borrow_mut();
 
         // Remove drawables for tiles that are no longer in the cover set.
         // (Note that `RenderTiles` is empty, and this layer does not use it)
-        tile_layer_group.remove_drawables_if(|drawable| match drawable.get_tile_id() {
+        tile_layer_group.remove_drawables_if(|drawable| match drawable.tile_id {
             Some(tile_id) => !tile_cover.contains(&tile_id),
             None => false,
         });
@@ -261,7 +259,7 @@ impl RenderLayer for RenderBackgroundLayer {
         for tile_id in &tile_cover {
             // If we already have drawables for this tile, skip. If a drawable
             // needs to be updated, that's handled in the layer tweaker.
-            if tile_layer_group.get_drawable_count_for(draw_passes, tile_id) > 0 {
+            if tile_layer_group.drawable_count_for(draw_passes, tile_id) > 0 {
                 continue;
             }
 
@@ -295,9 +293,9 @@ impl RenderLayer for RenderBackgroundLayer {
             builder.flush();
 
             for mut drawable in builder.clear_drawables() {
-                drawable.set_tile_id(*tile_id);
-                drawable.set_layer_tweaker(layer_tweaker_slot(&layer_tweaker));
-                tile_layer_group.add_drawable(draw_passes, tile_id, drawable);
+                drawable.tile_id = Some(*tile_id);
+                drawable.layer_tweaker = Some(Rc::clone(&layer_tweaker));
+                tile_layer_group.add_tile_drawable(draw_passes, tile_id, drawable);
             }
         }
     }

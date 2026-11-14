@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
+use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
@@ -9,7 +9,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_PROPS_UBO,
     ID_FILL_EXTRUSION_TILE_PROPS_UBO,
 };
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::fill_extrusion_layer_properties::{
@@ -21,9 +20,10 @@ use mln_style::renderer::cross_faded_property_evaluator::Faded;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::size::Size;
 
-use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
+use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::frame_projection::zero_to_one_clip_z;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -58,7 +58,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -102,7 +102,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         let anchor = *evaluated.get::<FillExtrusionTranslateAnchor>();
 
         let mut i: u32 = 0;
-        let count = layer_group.get_drawable_count();
+        let count = layer_group.drawable_count();
         let mut drawable_ubo_vector = vec![FillExtrusionDrawableUBO::default(); count];
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![FillExtrusionTilePropsUBO::default(); count];
@@ -111,17 +111,17 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         // (`frame_projection`). The globe projects in its shaders.
         let zero_to_one = context.backend_type() == mln_gfx::backend::Type::OpenGL && !state.is_globe_rendering();
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
+        layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = true;
-            let Some(tile_id) = drawable.get_tile_id() else {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check_tweak_drawable_ptr(drawable, self_ptr) {
                 return;
             }
 
-            let Some(binders_slot) = get_drawable_binders(drawable) else {
+            let Some(binders_slot) = drawable.binders.clone() else {
                 debug_assert!(false);
                 return;
             };
@@ -135,7 +135,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             };
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
-            let tile = get_drawable_render_tile(drawable);
+            let tile = drawable.render_tile.as_ref().map(DrawableRenderTile::tile);
             if tile.is_none() {
                 debug_assert!(false);
                 return;
@@ -172,7 +172,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
             let mut texture_size = Size::new(0, 0);
-            if let Some(tex) = drawable.get_texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE) {
+            if let Some(tex) = drawable.textures[ID_FILL_EXTRUSION_IMAGE_TEXTURE].as_ref() {
                 texture_size = tex.borrow().size();
             }
 

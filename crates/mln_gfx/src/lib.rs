@@ -4,12 +4,9 @@
 //! `mln_gl` on OpenGL ES 3.0.
 //!
 //! The renderer's buffers and textures are resources of the backend's `Gpu`
-//! (`buffer`, `texture2d`). Drawables (`drawable`) and the layer groups that
-//! draw them (`renderer::layer_group`) record `gpu::RenderCommand`s, with
-//! each program's attributes from `shaders::program_info` and its variants
-//! from `shader_group`. The renderer's paint parameters are seen through the
-//! `paint_parameters::PaintParameters` trait. `LayerTweaker` stays in the
-//! renderer.
+//! (`buffer`, `texture2d`), and so are the groups of buffers its draws bind
+//! (`bind_group`). Each program's attributes are in `shaders::program_info`
+//! and its variants come from `shader_group`.
 //!
 //! The renderer runs on one thread: shared pointers are `Rc`, mutation
 //! through them uses `RefCell`/`Cell`.
@@ -26,21 +23,16 @@ pub mod cull_face_mode;
 pub mod debug_group;
 pub mod depth_mode;
 pub mod draw_mode;
-pub mod drawable;
-pub mod drawable_builder;
-pub mod drawable_tweaker;
 pub mod export;
 pub mod frame;
 pub mod gfx_types;
 pub mod gpu;
 pub mod index_vector;
 pub mod offscreen_texture;
-pub mod paint_parameters;
 pub mod polyline_generator;
 pub mod projection_variant;
 pub mod released;
 pub mod render_pass;
-pub mod renderer;
 pub mod renderer_backend;
 pub mod rendering_stats;
 pub mod scissor_rect;
@@ -65,9 +57,6 @@ pub use context::Context;
 pub use cull_face_mode::CullFaceMode;
 pub use depth_mode::DepthMode;
 pub use draw_mode::DrawMode;
-pub use drawable::{Drawable, UniqueDrawable};
-pub use drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
-pub use drawable_tweaker::{DrawableTweaker, DrawableTweakerPtr};
 pub use export::{
     DepthStencilFormat, DepthStencilFormats, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedFrame,
     ExportedImage, ExportedRing, FrameDepth, NativeTexture,
@@ -75,9 +64,7 @@ pub use export::{
 pub use frame::{ConsumerSync, DrawTarget, FrameTarget, GpuSync, Handoff, SyncKind, SyncKinds};
 pub use gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
 pub use offscreen_texture::OffscreenTexture;
-pub use paint_parameters::PaintParameters;
 pub use render_pass::{RenderPass, RenderPassDescriptor};
-pub use renderer::layer_group::{LayerGroup, LayerGroupBase, LayerGroupBasePtr, TileLayerGroup};
 pub use renderer_backend::RendererBackend;
 pub use scissor_rect::ScissorRect;
 pub use shader_registry::ShaderRegistry;

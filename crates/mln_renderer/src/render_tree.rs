@@ -3,11 +3,12 @@
 // `std::set<LayerRenderItem>` (ordered and deduplicated by `index`) is a
 // `VecMap<u32, LayerRenderItem>`.
 
-use mln_gfx::{Context, LayerGroupBasePtr}; // layers: debug
+use mln_gfx::Context; // layers: debug
 use mln_map_types::{MapDebugOptions, TransformState};
 use mln_util::Color;
 use mln_vec_map::VecMap;
 
+use crate::layer_group::LayerGroupPtr;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_layer::RenderLayerPtr;
 
@@ -20,7 +21,7 @@ pub(crate) enum DebugType {
 }
 
 /// The debug layer groups, by debug type (layers: debug).
-pub(crate) type DebugLayerGroupMap = VecMap<DebugType, LayerGroupBasePtr>;
+pub(crate) type DebugLayerGroupMap = VecMap<DebugType, LayerGroupPtr>;
 
 /// The render item of a source. The layer render items are the concrete
 /// `LayerRenderItem`.

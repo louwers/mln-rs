@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::LayerGroupBase;
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
 use mln_gfx::shaders::shader_defines::{ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO};
 use mln_style::layer_properties::LayerProperties;
@@ -11,6 +9,7 @@ use mln_util::tileset::RasterEncoding;
 
 use super::cast_matrix;
 use crate::geometry::dem_data::get_unpack_vector;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase};
 use crate::paint_parameters::PaintParameters;
 
@@ -40,7 +39,7 @@ impl LayerTweaker for HillshadePrepareLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -49,15 +48,14 @@ impl LayerTweaker for HillshadePrepareLayerTweaker {
         crate::layer_tweaker::bind_no_projection(layer_group.mutable_uniform_buffers(), parameters.context);
 
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
-            let Some(tile_id) = drawable.get_tile_id() else {
+        layer_group.visit_drawables(|drawable| {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
-            let Some(drawable_data) =
-                drawable.get_data().and_then(|data| data.downcast_ref::<HillshadePrepareDrawableData>()).copied()
-            else {
+            let Some(crate::drawable::DrawableData::HillshadePrepare(drawable_data)) = &drawable.data else {
                 return;
             };
+            let drawable_data = *drawable_data;
             if !super::check_tweak_drawable_ptr(drawable, self_ptr) {
                 return;
             }

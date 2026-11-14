@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
+use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
     BackgroundPropsUBO,
@@ -11,13 +11,13 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::{BackgroundColor, BackgroundOpacity, BackgroundPattern};
 use mln_style_types::TranslateAnchorType;
 use mln_util::constants::TILE_SIZE_D;
 
 use super::{background_crossfade, background_layer_properties};
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -45,7 +45,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -71,10 +71,10 @@ impl LayerTweaker for BackgroundLayerTweaker {
 
         if has_pattern && (image_pos_a.is_none() || image_pos_b.is_none()) {
             // The pattern isn't valid, disable the whole thing.
-            layer_group.set_enabled(false);
+            layer_group.enabled = false;
             return;
         }
-        layer_group.set_enabled(true);
+        layer_group.enabled = true;
 
         // properties are re-evaluated every time
         self.base.properties_updated = false;
@@ -105,22 +105,14 @@ impl LayerTweaker for BackgroundLayerTweaker {
         }
 
         let mut i: u32 = 0;
-        let mut drawable_ubo_vector = vec![BackgroundDrawableUnionUBO::default(); layer_group.get_drawable_count()];
-        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
+        let mut drawable_ubo_vector = vec![BackgroundDrawableUnionUBO::default(); layer_group.drawable_count()];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
 
         let self_ptr: *const Self = self;
-        let check = |d: &mln_gfx::Drawable| match d
-            .get_layer_tweaker()
-            .and_then(|slot| slot.downcast_ref::<crate::layer_tweaker::LayerTweakerPtr>())
-        {
-            // checkTweakDrawable (the trait method needs `&self`, which the
-            // RefCell of the running tweaker already lends out mutably).
-            None => true,
-            Some(tweaker) => std::ptr::addr_eq(tweaker.as_ptr(), self_ptr),
-        };
-        visit_layer_group_drawables(layer_group, |drawable| {
-            debug_assert!(drawable.get_tile_id().is_some());
-            let Some(tile_id) = drawable.get_tile_id() else {
+        let check = |d: &crate::drawable::Drawable| super::check_tweak_drawable_ptr(d, self_ptr);
+        layer_group.visit_drawables(|drawable| {
+            debug_assert!(drawable.tile_id.is_some());
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check(drawable) {

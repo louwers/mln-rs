@@ -25,11 +25,9 @@ pub(crate) mod render_raster_layer;
 pub(crate) mod render_symbol_layer;
 pub(crate) mod symbol_layer_tweaker;
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::Drawable;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_style::CrossfadeParameters;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
@@ -43,6 +41,7 @@ pub(crate) use render_raster_layer::RenderRasterLayer;
 pub(crate) use render_symbol_layer::RenderSymbolLayer;
 
 use crate::bucket::{Bucket, BucketPtr};
+use crate::drawable::Drawable;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::render_tile::RenderTile;
 
@@ -56,40 +55,36 @@ pub(crate) fn background_crossfade(properties: &Arc<dyn LayerProperties>) -> &Cr
     get_crossfade::<BackgroundLayerProperties>(properties)
 }
 
-/// What `drawable->setBinders(bucket, &binders)` stores: the bucket (kept
-/// alive by the drawable) and the id of the layer whose binders
-/// (`bucket.paintPropertyBinders.at(id)`) the drawable uses.
+/// The bucket a drawable's data comes from, kept alive by the drawable, and
+/// the id of the layer whose binders in it the drawable uses.
 pub(crate) struct DrawableBinders {
     pub(crate) bucket: BucketPtr,
     pub(crate) layer_id: String,
-    /// The bucket's `version` when the drawable's attribute data was copied
-    /// (see `refresh_if_bucket_updated`).
+    /// The bucket's version when the drawable's attribute data was copied;
+    /// see `refresh_if_bucket_updated`.
     pub(crate) version: std::cell::Cell<u64>,
 }
 
-/// The value for `Drawable::set_binders`.
-#[expect(clippy::unnecessary_wraps, reason = "the value of a `Drawable` setter, which takes an `Option`")]
-pub(crate) fn drawable_binders_slot(bucket: &BucketPtr, layer_id: &str) -> Option<Rc<dyn Any>> {
-    Some(Rc::new(DrawableBinders {
-        bucket: Arc::clone(bucket),
-        layer_id: layer_id.to_owned(),
-        version: std::cell::Cell::new(bucket.get_version()),
-    }))
+impl DrawableBinders {
+    #[must_use]
+    pub(crate) fn new(bucket: &BucketPtr, layer_id: &str) -> Rc<Self> {
+        Rc::new(DrawableBinders {
+            bucket: Arc::clone(bucket),
+            layer_id: layer_id.to_owned(),
+            version: std::cell::Cell::new(bucket.get_version()),
+        })
+    }
 }
 
 /// Refreshes the drawable's copies of the bucket's data-driven attributes
 /// when the bucket's version moved since the copy: `refresh(attrs)` re-reads
 /// them into the drawable's attribute array, and new attributes are uploaded
-/// again. C++ drawables share the bucket's vertex vectors, which the binders
-/// update in place (feature state).
+/// again.
 pub(crate) fn refresh_if_bucket_updated(
     drawable: &mut Drawable,
     refresh: impl FnOnce(&mut mln_gfx::vertex_attribute::VertexAttributeArray),
 ) {
-    let Some(slot) = drawable.get_binders().cloned() else {
-        return;
-    };
-    let Some(binders) = slot.downcast_ref::<DrawableBinders>() else {
+    let Some(binders) = &drawable.binders else {
         return;
     };
     let version = binders.bucket.get_version();
@@ -97,54 +92,41 @@ pub(crate) fn refresh_if_bucket_updated(
         return;
     }
     binders.version.set(version);
-    if let Some(attrs) = drawable.get_vertex_attributes().cloned() {
+    if let Some(attrs) = &drawable.vertex_attributes {
         refresh(&mut attrs.borrow_mut());
     }
 }
 
-/// The drawable's bucket and binders slot, cloned so that the drawable can be
-/// mutated while the binders are used; see `slot_bucket`.
-pub(crate) fn get_drawable_binders(drawable: &Drawable) -> Option<Rc<dyn Any>> {
-    drawable.get_binders().cloned()
+/// The bucket of `binders`, as the type the layer created, and the id of the
+/// layer.
+pub(crate) fn slot_bucket<B: Bucket>(binders: &DrawableBinders) -> Option<(&B, &str)> {
+    let bucket = (*binders.bucket).downcast_ref::<B>()?;
+    Some((bucket, binders.layer_id.as_str()))
 }
 
-/// The bucket (downcast to the type the layer created) and the layer id of
-/// the binders in a `get_drawable_binders` slot.
-pub(crate) fn slot_bucket<B: Bucket>(slot: &Rc<dyn Any>) -> Option<(&B, &str)> {
-    let slot = slot.downcast_ref::<DrawableBinders>()?;
-    let bucket = (*slot.bucket).downcast_ref::<B>()?;
-    Some((bucket, slot.layer_id.as_str()))
-}
-
-/// What `drawable->setRenderTile(renderTilesOwner, &tile)` stores: the
-/// owning vector and the tile's index in it.
+/// The tile a drawable draws: the shared tiles of the frame, and the tile's
+/// index in them.
 pub(crate) struct DrawableRenderTile {
     pub(crate) owner: Rc<Vec<RenderTile>>,
     pub(crate) index: usize,
 }
 
 impl DrawableRenderTile {
+    /// `tile` of `owner`, or `None` where `owner` doesn't hold it.
+    #[must_use]
+    pub(crate) fn new(owner: &Rc<Vec<RenderTile>>, tile: &RenderTile) -> Option<Self> {
+        let index = owner.iter().position(|t| std::ptr::eq(t, tile))?;
+        Some(DrawableRenderTile { owner: Rc::clone(owner), index })
+    }
+
     #[must_use]
     pub(crate) fn tile(&self) -> &RenderTile {
         &self.owner[self.index]
     }
 }
 
-/// The value for `Drawable::set_render_tile`.
-#[must_use]
-pub(crate) fn drawable_render_tile_slot(owner: &Rc<Vec<RenderTile>>, tile: &RenderTile) -> Option<Rc<dyn Any>> {
-    let index = owner.iter().position(|t| std::ptr::eq(t, tile))?;
-    Some(Rc::new(DrawableRenderTile { owner: Rc::clone(owner), index }))
-}
-
-pub(crate) fn get_drawable_render_tile(drawable: &Drawable) -> Option<&RenderTile> {
-    let slot = drawable.get_render_tile()?.downcast_ref::<DrawableRenderTile>()?;
-    Some(slot.tile())
-}
-
 pub(crate) fn drawable_has_layer_tweaker(drawable: &Drawable, layer_tweaker: Option<&LayerTweakerPtr>) -> bool {
-    let current = drawable.get_layer_tweaker().and_then(|slot| slot.downcast_ref::<LayerTweakerPtr>());
-    match (current, layer_tweaker) {
+    match (&drawable.layer_tweaker, layer_tweaker) {
         (None, None) => true,
         (Some(a), Some(b)) => Rc::ptr_eq(a, b),
         _ => false,
@@ -162,7 +144,7 @@ pub(crate) fn shared_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorB
 /// at all. It takes a pointer because the running `execute` already borrows
 /// the tweaker's `RefCell` mutably.
 pub(crate) fn check_tweak_drawable_ptr<T: ?Sized>(drawable: &Drawable, self_ptr: *const T) -> bool {
-    match drawable.get_layer_tweaker().and_then(|slot| slot.downcast_ref::<LayerTweakerPtr>()) {
+    match &drawable.layer_tweaker {
         None => true,
         Some(tweaker) => std::ptr::addr_eq(tweaker.as_ptr(), self_ptr),
     }
@@ -192,10 +174,7 @@ pub(crate) trait TileDrawables: crate::render_layer::RenderLayer {
         let Some(layer_group) = self.base().layer_group.clone() else {
             return;
         };
-        let mut group = layer_group.borrow_mut();
-        let Some(tile_group) = group.as_tile_layer_group_mut() else {
-            return;
-        };
+        let mut tile_group = layer_group.borrow_mut();
         tile_group.remove_drawables(render_pass, tile_id);
     }
 
@@ -215,11 +194,7 @@ pub(crate) trait TileDrawables: crate::render_layer::RenderLayer {
         let mut any_updated = false;
         let mut un_updated_drawables = false;
         {
-            let mut group = layer_group.borrow_mut();
-            debug_assert!(group.as_tile_layer_group().is_some());
-            let Some(tile_group) = group.as_tile_layer_group_mut() else {
-                return false;
-            };
+            let mut tile_group = layer_group.borrow_mut();
             tile_group.visit_drawables_for(render_pass, tile_id, |drawable| {
                 if update(drawable) {
                     any_updated = true;

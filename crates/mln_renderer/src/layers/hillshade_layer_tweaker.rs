@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
+use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::hillshade_layer_ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
@@ -8,7 +8,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_TILE_PROPS_UBO,
 };
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_math::deg2radf;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::hillshade_layer_properties::{
@@ -22,6 +21,7 @@ use mln_util::Color;
 use mln_util::geo::LatLng;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -155,7 +155,7 @@ impl LayerTweaker for HillshadeLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -185,7 +185,7 @@ impl LayerTweaker for HillshadeLayerTweaker {
             .set(ID_HILLSHADE_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
         let mut i: u32 = 0;
-        let count = layer_group.get_drawable_count();
+        let count = layer_group.drawable_count();
         let mut drawable_ubo_vector = vec![HillshadeDrawableUBO::default(); count];
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![HillshadeTilePropsUBO::default(); count];
@@ -195,8 +195,8 @@ impl LayerTweaker for HillshadeLayerTweaker {
         let num_lights = illumination.num_sources() as i32;
 
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
-            let Some(tile_id) = drawable.get_tile_id() else {
+        layer_group.visit_drawables(|drawable| {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check_tweak_drawable_ptr(drawable, self_ptr) {

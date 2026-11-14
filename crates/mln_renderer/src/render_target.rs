@@ -7,16 +7,17 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use mln_gfx::Context;
 use mln_gfx::offscreen_texture::OffscreenTexture;
 use mln_gfx::render_pass::RenderPassDescriptor;
 use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::TextureChannelDataType;
-use mln_gfx::{Context, LayerGroupBasePtr};
 use mln_util::Color;
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
+use crate::layer_group::LayerGroupPtr;
 use crate::paint_parameters::PaintParameters;
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
@@ -28,7 +29,7 @@ pub struct RenderTarget {
     offscreen_texture: Box<dyn OffscreenTexture>,
     /// The channel type the offscreen texture was asked for.
     type_: TextureChannelDataType,
-    layer_groups_by_layer_index: VecMap<i32, LayerGroupBasePtr>,
+    layer_groups_by_layer_index: VecMap<i32, LayerGroupPtr>,
 }
 
 impl RenderTarget {
@@ -62,8 +63,8 @@ impl RenderTarget {
 
     /// Add a layer group to the render target; `replace`: replace if
     /// exists. Returns whether added.
-    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupBasePtr, replace: bool) -> bool {
-        let index = layer_group.borrow().get_layer_index();
+    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupPtr, replace: bool) -> bool {
+        let index = layer_group.borrow().layer_index;
         match self.layer_groups_by_layer_index.entry(index) {
             mln_vec_map::Entry::Vacant(entry) => {
                 // added
@@ -84,13 +85,13 @@ impl RenderTarget {
 
     /// Get a specific layer group by index, if existent.
     #[must_use]
-    pub(crate) fn get_layer_group(&self, layer_index: i32) -> Option<&LayerGroupBasePtr> {
+    pub(crate) fn get_layer_group(&self, layer_index: i32) -> Option<&LayerGroupPtr> {
         self.layer_groups_by_layer_index.get(&layer_index)
     }
 
     /// The contained layer groups, in layer index order.
     #[must_use]
-    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupBasePtr> {
+    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupPtr> {
         self.layer_groups_by_layer_index.values().cloned().collect()
     }
 

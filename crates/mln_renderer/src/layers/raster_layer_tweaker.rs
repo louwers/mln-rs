@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
+use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::{ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO};
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::raster_layer_properties::{
     RasterBrightnessMax, RasterBrightnessMin, RasterContrast, RasterHueRotate, RasterLayerProperties, RasterOpacity,
@@ -13,6 +12,7 @@ use mln_style::layers::raster_layer_properties::{
 use mln_style_types::TranslateAnchorType;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -57,7 +57,7 @@ impl LayerTweaker for RasterLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -89,12 +89,12 @@ impl LayerTweaker for RasterLayerTweaker {
             .set(ID_RASTER_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
         let mut i: u32 = 0;
-        let mut drawable_ubo_vector = vec![RasterDrawableUBO::default(); layer_group.get_drawable_count()];
-        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
+        let mut drawable_ubo_vector = vec![RasterDrawableUBO::default(); layer_group.drawable_count()];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
 
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
-            let Some(tile_id) = drawable.get_tile_id() else {
+        layer_group.visit_drawables(|drawable| {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check_tweak_drawable_ptr(drawable, self_ptr) {

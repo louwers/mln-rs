@@ -25,8 +25,8 @@ use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType}
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, Drawable, DrawableBuilder,
-    ShaderProgramPtr, ShaderRegistry, TileLayerGroup, VertexAttributeArray,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry,
+    VertexAttributeArray,
 };
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
@@ -40,7 +40,6 @@ use mln_style_types::ResamplingType;
 use mln_util::constants;
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
-use mln_util::time::Instant;
 
 use super::hillshade_layer_tweaker::HillshadeLayerTweaker;
 use super::hillshade_prepare_layer_tweaker::{HillshadePrepareDrawableData, HillshadePrepareLayerTweaker};
@@ -48,8 +47,11 @@ use super::render_heatmap_layer::activate_render_target;
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::drawable::Drawable;
+use crate::drawable_builder::DrawableBuilder;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
+use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
 use crate::render_pass::RenderPass;
@@ -65,10 +67,6 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HillshadeLayerImpl {
 
 const HILLSHADE_PREPARE_SHADER_GROUP_NAME: &str = "HillshadePrepareShader";
 const HILLSHADE_SHADER_GROUP_NAME: &str = "HillshadeShader";
-
-/// The data of a hillshade tile drawable: the time of the bucket geometry
-/// its vertex attributes were built from.
-struct HillshadeDrawableGeometryTime(Instant);
 
 pub(crate) struct RenderHillshadeLayer {
     base: RenderLayerBase,
@@ -266,7 +264,7 @@ impl RenderLayer for RenderHillshadeLayer {
 
         // Set up a layer group
         if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(TileLayerGroup::new_ptr(self.base.layer_index, self.get_id())), changes);
+            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -303,11 +301,10 @@ impl RenderLayer for RenderHillshadeLayer {
         }
 
         {
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("hillshade layer group is a TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             let base = &self.base;
             tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
         }
 
@@ -375,7 +372,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 self.bucket_render_targets.insert(bucket_id, (Rc::clone(&render_target), generation));
                 self.add_render_target(&render_target, changes);
 
-                let single_tile_layer_group = TileLayerGroup::new_ptr(0, self.get_id());
+                let single_tile_layer_group = LayerGroup::tiles(0, self.get_id());
                 render_target.borrow_mut().add_layer_group(Rc::clone(&single_tile_layer_group), /*replace=*/ true);
 
                 if self.prepare_layer_tweaker.is_none() {
@@ -395,7 +392,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 hillshade_prepare_builder.set_shader(Some(Rc::clone(&hillshade_prepare_shader)));
                 hillshade_prepare_builder.set_depth_type(DepthMaskType::ReadOnly);
                 hillshade_prepare_builder.set_color_mode(&ColorMode::unblended());
-                hillshade_prepare_builder.set_cull_face_mode(&CullFaceMode::disabled());
+                hillshade_prepare_builder.set_cull_face_mode(CullFaceMode::disabled());
                 hillshade_prepare_builder.set_render_pass(render_pass);
                 let attrs = Rc::clone(
                     hillshade_prepare_vertex_attrs
@@ -426,17 +423,17 @@ impl RenderLayer for RenderHillshadeLayer {
 
                 hillshade_prepare_builder.flush();
 
-                let mut group = single_tile_layer_group.borrow_mut();
-                let tile_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+                let mut tile_group = single_tile_layer_group.borrow_mut();
                 for mut drawable in hillshade_prepare_builder.clear_drawables() {
-                    drawable.set_tile_id(tile_id);
-                    drawable.set_layer_tweaker(layer_tweaker_slot(&prepare_layer_tweaker));
-                    drawable.set_data(Some(Box::new(HillshadePrepareDrawableData {
-                        stride,
-                        encoding,
-                        maxzoom: self.maxzoom,
-                    })));
-                    tile_group.add_drawable(render_pass, &tile_id, drawable);
+                    drawable.tile_id = Some(tile_id);
+                    drawable.layer_tweaker = Some(Rc::clone(&prepare_layer_tweaker));
+                    drawable.data =
+                        Some(crate::drawable::DrawableData::HillshadePrepare(HillshadePrepareDrawableData {
+                            stride,
+                            encoding,
+                            maxzoom: self.maxzoom,
+                        }));
+                    tile_group.add_tile_drawable(render_pass, &tile_id, drawable);
                 }
             }
             let render_target_texture =
@@ -492,10 +489,10 @@ impl RenderLayer for RenderHillshadeLayer {
                     return false;
                 }
 
-                let built_from = drawable
-                    .get_data()
-                    .and_then(|data| data.downcast_ref::<HillshadeDrawableGeometryTime>())
-                    .map(|time| time.0);
+                let built_from = match &drawable.data {
+                    Some(crate::drawable::DrawableData::HillshadeGeometryTime(time)) => Some(*time),
+                    _ => None,
+                };
                 if built_from != Some(geometry_time) {
                     drawable.update_vertex_attributes(
                         Some(hillshade_vertex_attributes(&vertices)),
@@ -504,7 +501,7 @@ impl RenderLayer for RenderHillshadeLayer {
                         Some(Rc::clone(&indices)),
                         &segments,
                     );
-                    drawable.set_data(Some(Box::new(HillshadeDrawableGeometryTime(geometry_time))));
+                    drawable.data = Some(crate::drawable::DrawableData::HillshadeGeometryTime(geometry_time));
                 }
                 drawable.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
 
@@ -518,7 +515,7 @@ impl RenderLayer for RenderHillshadeLayer {
             hillshade_builder.set_shader(Some(Rc::clone(&hillshade_shader)));
             hillshade_builder.set_enable_depth(false);
             hillshade_builder.set_color_mode(&ColorMode::alpha_blended());
-            hillshade_builder.set_cull_face_mode(&CullFaceMode::disabled());
+            hillshade_builder.set_cull_face_mode(CullFaceMode::disabled());
             hillshade_builder.set_render_pass(render_pass);
             hillshade_builder.set_vertex_attributes(Some(hillshade_vertex_attributes(&vertices)));
             hillshade_builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
@@ -527,14 +524,13 @@ impl RenderLayer for RenderHillshadeLayer {
 
             hillshade_builder.flush();
 
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             for mut drawable in hillshade_builder.clear_drawables() {
-                drawable.set_tile_id(tile_id);
-                drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                drawable.set_data(Some(Box::new(HillshadeDrawableGeometryTime(geometry_time))));
+                drawable.tile_id = Some(tile_id);
+                drawable.layer_tweaker = layer_tweaker.clone();
+                drawable.data = Some(crate::drawable::DrawableData::HillshadeGeometryTime(geometry_time));
 
-                tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
+                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
             }
         }
     }

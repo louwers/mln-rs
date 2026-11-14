@@ -3,7 +3,6 @@
 // (MLN_ENABLE_POLYLINE_DRAWABLES, set for WebGPU), and
 // PolylineLayerImpl/Properties/Tweaker.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
@@ -14,7 +13,6 @@ use glam::Vec2;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::polyline_generator::PolylineGeneratorOptions;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
@@ -25,10 +23,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_EXPRESSION_UBO, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
     ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::{
-    ColorMode, Context, CullFaceMode, Drawable, DrawableBuilder, LayerGroupBase, LayerGroupBasePtr, TileLayerGroup,
-    UniformBufferPtr, UniqueDrawableBuilder,
-};
+use mln_gfx::{ColorMode, Context, CullFaceMode, UniformBufferPtr};
 use mln_map_types::MapDebugOptions;
 use mln_style::expression::Dependency;
 use mln_style::layer::{LayerTypeInfo, layer_type_info};
@@ -42,6 +37,9 @@ use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::drawable::Drawable;
+use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
+use crate::layer_group::{LayerGroup, LayerGroupPtr};
 // layers: debug
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layers::cast_matrix;
@@ -139,45 +137,46 @@ impl RenderItem for TileSourceRenderItem {
 
         let mut polyline_builder: Option<UniqueDrawableBuilder> = None;
         // Builds one drawable of `lines` for the tile and adds it to the group.
-        let mut add_polyline_drawable = |tile_layer_group: &mut TileLayerGroup,
-                                         tile_id: OverscaledTileID,
-                                         lines: &[GeometryCoordinates],
-                                         options: &PolylineGeneratorOptions,
-                                         data: Option<Box<dyn Any>>| {
-            let builder = polyline_builder.get_or_insert_with(|| {
-                let mut builder = DrawableBuilder::boxed();
-                builder.set_shader(Some(Rc::clone(&polyline_shader)));
-                builder.set_render_pass(render_pass);
-                builder.set_enable_depth(false);
-                builder.set_color_mode(&ColorMode::alpha_blended());
-                builder.set_cull_face_mode(&CullFaceMode::disabled());
-                builder.set_vertex_attr_id(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE);
-                builder.set_drawable_name(drawable_name.clone());
-                builder
-            });
-            for line in lines {
-                builder.add_polyline(line, options);
-            }
+        let mut add_polyline_drawable =
+            |tile_layer_group: &mut LayerGroup,
+             tile_id: OverscaledTileID,
+             lines: &[GeometryCoordinates],
+             options: &PolylineGeneratorOptions,
+             data: Option<crate::drawable::DrawableData>| {
+                let builder = polyline_builder.get_or_insert_with(|| {
+                    let mut builder = DrawableBuilder::boxed();
+                    builder.set_shader(Some(Rc::clone(&polyline_shader)));
+                    builder.set_render_pass(render_pass);
+                    builder.set_enable_depth(false);
+                    builder.set_color_mode(&ColorMode::alpha_blended());
+                    builder.set_cull_face_mode(CullFaceMode::disabled());
+                    builder.set_vertex_attr_id(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE);
+                    builder.set_drawable_name(drawable_name.clone());
+                    builder
+                });
+                for line in lines {
+                    builder.add_polyline(line, options);
+                }
 
-            // finish
-            builder.flush();
-            let mut data = data;
-            for mut drawable in builder.clear_drawables() {
-                drawable.set_tile_id(tile_id);
-                drawable.set_data(data.take());
-                tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
-            }
-        };
+                // finish
+                builder.flush();
+                let mut data = data;
+                for mut drawable in builder.clear_drawables() {
+                    drawable.tile_id = Some(tile_id);
+                    drawable.data = data.take();
+                    tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                }
+            };
 
         // add or get the layer group for a debug type
         let add_or_get_layer_group_for_type = |debug_layer_groups: &mut DebugLayerGroupMap,
                                                type_: DebugType,
                                                layer_name: &str|
-         -> Option<LayerGroupBasePtr> {
+         -> Option<LayerGroupPtr> {
             if let Some(layer_group) = debug_layer_groups.get(&type_) {
                 return Some(Rc::clone(layer_group));
             }
-            let layer_group = TileLayerGroup::new_ptr(type_ as i32, layer_name);
+            let layer_group = LayerGroup::tiles(type_ as i32, layer_name);
             debug_layer_groups.insert(type_, Rc::clone(&layer_group));
             Some(layer_group)
         };
@@ -187,14 +186,13 @@ impl RenderItem for TileSourceRenderItem {
             self.render_tiles.iter().map(|tile| *tile.get_overscaled_tile_id()).collect();
         // erase drawables that are not in the current tile set, and those
         // built for the other projection, which keep its shader
-        let remove_stale = |tile_layer_group: &mut TileLayerGroup| {
+        let remove_stale = |tile_layer_group: &mut LayerGroup| {
             tile_layer_group.remove_drawables_if(|drawable| {
                 let same_shader = drawable
-                    .get_shader()
-                    .as_ref()
+                    .shader()
                     .is_some_and(|shader| std::ptr::addr_eq(Rc::as_ptr(shader), Rc::as_ptr(&polyline_shader)));
-                drawable.get_name() == drawable_name
-                    && (!drawable.get_tile_id().is_some_and(|id| new_tiles.contains(&id)) || !same_shader)
+                drawable.name == drawable_name
+                    && (!drawable.tile_id.is_some_and(|id| new_tiles.contains(&id)) || !same_shader)
             });
         };
 
@@ -211,11 +209,8 @@ impl RenderItem for TileSourceRenderItem {
                 let Some(layer_group) = add_or_get_layer_group_for_type(debug_layer_groups, type_, layer_name) else {
                     continue;
                 };
-                let mut group = layer_group.borrow_mut();
-                let Some(tile_layer_group) = group.as_tile_layer_group_mut() else {
-                    continue;
-                };
-                remove_stale(tile_layer_group);
+                let mut tile_layer_group = layer_group.borrow_mut();
+                remove_stale(&mut tile_layer_group);
 
                 // add new drawables and replace those whose text changed
                 for tile in self.render_tiles.iter() {
@@ -223,27 +218,24 @@ impl RenderItem for TileSourceRenderItem {
                     let Some(debug_bucket) = &tile.debug_bucket else {
                         continue;
                     };
-                    let shows_text = |drawable: &mut Drawable| {
-                        drawable.get_data().and_then(|data| data.downcast_ref::<Vec<String>>())
-                            == Some(&debug_bucket.text)
-                    };
+                    let shows_text = |drawable: &mut Drawable| matches!(&drawable.data, Some(crate::drawable::DrawableData::DebugText(text)) if *text == debug_bucket.text);
                     let mut current = false;
                     tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
-                        current |= drawable.get_name() == drawable_name && shows_text(drawable);
+                        current |= drawable.name == drawable_name && shows_text(drawable);
                     });
                     if current {
                         continue;
                     }
                     tile_layer_group.remove_drawables_if(|drawable| {
-                        drawable.get_name() == drawable_name && drawable.get_tile_id() == Some(tile_id)
+                        drawable.name == drawable_name && drawable.tile_id == Some(tile_id)
                     });
                     if tile.get_needs_rendering() && !debug_bucket.strokes.is_empty() {
                         add_polyline_drawable(
-                            tile_layer_group,
+                            &mut tile_layer_group,
                             tile_id,
                             &debug_bucket.strokes,
                             &text_options,
-                            Some(Box::new(debug_bucket.text.clone())),
+                            Some(crate::drawable::DrawableData::DebugText(debug_bucket.text.clone())),
                         );
                     }
                 }
@@ -261,11 +253,8 @@ impl RenderItem for TileSourceRenderItem {
             else {
                 return;
             };
-            let mut group = layer_group.borrow_mut();
-            let Some(tile_layer_group) = group.as_tile_layer_group_mut() else {
-                return;
-            };
-            remove_stale(tile_layer_group);
+            let mut tile_layer_group = layer_group.borrow_mut();
+            remove_stale(&mut tile_layer_group);
 
             // add new drawables
             let extent = EXTENT as i16;
@@ -287,7 +276,7 @@ impl RenderItem for TileSourceRenderItem {
                 }
                 let mut drawn = false;
                 tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
-                    drawn |= drawable.get_name() == drawable_name;
+                    drawn |= drawable.name == drawable_name;
                 });
                 if !drawn {
                     let border = if globe {
@@ -300,7 +289,7 @@ impl RenderItem for TileSourceRenderItem {
                         &tile_border
                     };
                     add_polyline_drawable(
-                        tile_layer_group,
+                        &mut tile_layer_group,
                         tile_id,
                         std::slice::from_ref(border),
                         &border_options,
@@ -399,7 +388,7 @@ impl LayerTweaker for PolylineLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         let context = parameters.context;
         if layer_group.empty() {
             return;
@@ -423,10 +412,10 @@ impl LayerTweaker for PolylineLayerTweaker {
         }
 
         let mut i: u32 = 0;
-        let mut drawable_ubo_vector = vec![LineDrawableUnionUBO::default(); layer_group.get_drawable_count()];
-        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
-        visit_layer_group_drawables(layer_group, |drawable| {
-            let Some(tile_id) = drawable.get_tile_id() else {
+        let mut drawable_ubo_vector = vec![LineDrawableUnionUBO::default(); layer_group.drawable_count()];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
+        layer_group.visit_drawables(|drawable| {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
 
