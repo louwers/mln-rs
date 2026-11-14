@@ -112,6 +112,12 @@ pub struct WebGpu {
     /// The page that small vertex and index buffers are taken from, and how
     /// many of its bytes are taken.
     geometry_page: Option<(wgpu::Buffer, u64)>,
+    /// The vertex and index buffers of their own that `destroy_buffer` let
+    /// go of since the last submit, by usage and size, which `create_buffer`
+    /// takes before it makes one, so that a frame that remakes many
+    /// drawables makes few wgpu buffers. A write to a taken buffer follows
+    /// the submits before it, so their passes still read what they did.
+    spare_buffers: HashMap<(wgpu::BufferUsages, u64), Vec<wgpu::Buffer>>,
     writes: Writes,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, wgpu::Sampler>,
@@ -137,6 +143,7 @@ impl WebGpu {
             buffers: SlotMap::with_key(),
             uniform_page: None,
             geometry_page: None,
+            spare_buffers: HashMap::default(),
             writes: Writes::default(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
@@ -679,14 +686,18 @@ impl Gpu for WebGpu {
                 return Ok(self.buffers.insert(Buffer { buffer, usage: desc.usage, offset, size, written }));
             }
         };
-        let buffer = self.validated(desc.label, |device| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(desc.label),
-                size,
-                usage: usage | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
-        })?;
+        let usage = usage | wgpu::BufferUsages::COPY_DST;
+        let buffer = match self.spare_buffers.get_mut(&(usage, size)).and_then(Vec::pop) {
+            Some(buffer) => buffer,
+            None => self.validated(desc.label, |device| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(desc.label),
+                    size,
+                    usage,
+                    mapped_at_creation: false,
+                })
+            })?,
+        };
         Ok(self.buffers.insert(Buffer { buffer, usage: desc.usage, offset: 0, size, written: None }))
     }
 
@@ -746,8 +757,13 @@ impl Gpu for WebGpu {
     }
 
     fn destroy_buffer(&mut self, buffer: BufferId) {
-        if self.buffers.remove(buffer).is_some() {
-            self.forget_native_groups(|resource| matches!(*resource, NativeResource::Buffer(id, ..) if id == buffer));
+        let Some(entry) = self.buffers.remove(buffer) else {
+            return;
+        };
+        self.forget_native_groups(|resource| matches!(*resource, NativeResource::Buffer(id, ..) if id == buffer));
+        if entry.written.is_none() && matches!(entry.usage, BufferUsage::Vertex | BufferUsage::Index) {
+            let key = (entry.buffer.usage(), entry.buffer.size());
+            self.spare_buffers.entry(key).or_default().push(entry.buffer);
         }
     }
 
@@ -896,6 +912,7 @@ impl Gpu for WebGpu {
         // writes stay for the next submit.
         let command_buffer = self.validated("submit", |_| encoder.finish())?;
         self.submit_native(command_buffer);
+        self.spare_buffers.clear();
         Ok(())
     }
 
