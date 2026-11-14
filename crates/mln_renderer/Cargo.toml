@@ -24,7 +24,7 @@ default = ["font-face-shaper"]
 # workspace's packages depend on this crate without its default features,
 # and those that render (mln-rs, examples/desktop, tools/render-test, and
 # through it tools/bench) turn this one on. The browser build (examples/web)
-# leaves it off: HarfRust, skrifa and the FreeType port go into its second
+# leaves it off: HarfRust, skrifa and the glyph rasterizer go into its second
 # module, crates/mln_web_shaper, which its map loads only for styles with font
 # faces.
 font-face-shaper = []

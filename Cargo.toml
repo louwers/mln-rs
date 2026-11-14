@@ -90,6 +90,8 @@ supercluster = { package = "mln-rs-supercluster", path = "vendor/supercluster", 
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
 # add a crate when nothing in the C++ core has to be ported for it.
 #
+# The coverage of the font-face glyphs' outlines (mln_text's rasterize.rs).
+ab_glyph_rasterizer = { version = "0.1.10" }
 # min_const_generics: Pod for any array length (mln_gfx's UBOs).
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
 # The buffers that pmtiles reads headers and directories from.

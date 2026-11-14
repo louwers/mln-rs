@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crate::freetype::FreeTypeFace;
+use crate::face::Face;
 use crate::glyph::{FontData, GlyphID, GlyphIDType};
 use crate::woff::{self, WoffError};
 use crate::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
@@ -64,12 +64,10 @@ fn woff_decodes_to_the_ttf_tables() {
 #[test]
 fn woff2_decodes_to_a_font() {
     let sfnt = woff::decode_woff2(WOFF2).unwrap();
-    let face = FreeTypeFace::from_memory(sfnt, &FreeTypeLibrary::new());
-    assert!(face.is_valid());
-    assert_eq!(
-        face.get_char_index(u32::from('ខ')),
-        FreeTypeFace::from_memory(TTF.to_vec(), &FreeTypeLibrary::new()).get_char_index(u32::from('ខ'))
-    );
+    let glyph = |face: Face| face.font().and_then(|font| font.charmap().map_unicode('ខ'));
+    let decoded = glyph(Face::from_memory(sfnt));
+    assert!(decoded.is_some());
+    assert_eq!(decoded, glyph(Face::from_memory(TTF.to_vec())));
 }
 
 #[test]
@@ -83,11 +81,13 @@ fn to_sfnt_keeps_other_data_uncopied() {
 }
 
 #[test]
-fn freetype_face_opens_woff_and_woff2() {
+fn face_opens_woff_and_woff2() {
     for font in [WOFF, WOFF2] {
-        let face = FreeTypeFace::from_memory(font.to_vec(), &FreeTypeLibrary::new());
-        assert!(face.is_valid());
-        assert!(!woff::is_woff(face.data().as_bytes()));
+        let face = Face::from_memory(font.to_vec());
+        let Some(skrifa::font::Source::Blob(data)) = face.font().map(skrifa::Font::source) else {
+            panic!("a valid face reads the font's bytes");
+        };
+        assert!(!woff::is_woff(data));
     }
 }
 
@@ -129,7 +129,7 @@ fn malformed_woff_is_an_error() {
     assert_eq!(woff::decode_woff(TTF), Err(WoffError::InvalidWoff));
     assert_eq!(woff::decode_woff2(b"wOF2"), Err(WoffError::InvalidWoff2));
     assert_eq!(woff::to_sfnt(FontData::from(b"wOFF".to_vec())), Err(WoffError::InvalidWoff));
-    assert!(!FreeTypeFace::from_memory(corrupt, &FreeTypeLibrary::new()).is_valid());
+    assert!(!Face::from_memory(corrupt).is_valid());
 }
 
 /// A decoder from a font file to its sfnt.
@@ -149,7 +149,7 @@ fn damaged_files_never_panic() {
                 let mut damaged = font.to_vec();
                 damaged[at] ^= flip;
                 if let Ok(sfnt) = woff::to_sfnt(FontData::from(damaged)) {
-                    let _ = FreeTypeFace::from_memory(sfnt, &FreeTypeLibrary::new());
+                    let _ = Face::from_memory(sfnt);
                 }
             }
         }

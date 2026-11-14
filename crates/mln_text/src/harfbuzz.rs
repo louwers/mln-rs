@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::freetype::FreeTypeLibrary;
+use crate::face::FreeTypeLibrary;
 use crate::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 use crate::harfbuzz_impl::Impl;
 

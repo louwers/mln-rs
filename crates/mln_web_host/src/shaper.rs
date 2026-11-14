@@ -1,7 +1,7 @@
 //! A map's font faces (a style's "font-faces"), shaped and rasterized by
 //! the shaper module (`crates/mln_web_shaper`): the map's `FontFaceEngine`.
 //! A module built without `mln_renderer`'s in-process shaper leaves HarfRust,
-//! skrifa and the FreeType port to that one, which the map's instance
+//! skrifa and the glyph rasterizer to that one, which the map's instance
 //! loads the first time a style declares font faces, as a second wasm
 //! instance beside it. Once it is loaded, calls go to it synchronously,
 //! through JavaScript.

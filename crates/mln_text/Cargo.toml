@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
-license = "BSD-2-Clause AND FTL AND MIT-Modern-Variant AND Unicode-3.0 AND ICU"
+license = "BSD-2-Clause AND Unicode-3.0 AND ICU"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -16,6 +16,7 @@ name = "mln_text"
 doctest = false
 
 [dependencies]
+ab_glyph_rasterizer.workspace = true
 buffa.workspace = true
 flate2.workspace = true
 harfrust.workspace = true
