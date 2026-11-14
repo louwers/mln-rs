@@ -1,11 +1,11 @@
-// C++ parses with rapidjson; the port parses with serde_json (with
-// `preserve_order`, so members iterate in document order as in rapidjson).
+// C++ parses with rapidjson; the port parses with serde_json into a
+// `JsonValue`, whose members iterate in document order as in rapidjson.
 // Deviation: the message of a JSON syntax error is serde_json's, not
 // rapidjson's `GetParseError_En(code) + " at offset " + offset`.
 
 use std::collections::{HashMap, HashSet};
 
-use mln_conversion::{Convertible, Error};
+use mln_conversion::{Convertible, Error, JsonObject, JsonValue};
 use mln_util::LatLng;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::logging::{Event, Log};
@@ -75,17 +75,17 @@ impl Default for Parser {
     }
 }
 
-fn is_number(value: &serde_json::Value) -> bool {
+fn is_number(value: &JsonValue<'_>) -> bool {
     value.is_number()
 }
 
-fn get_double(value: &serde_json::Value) -> f64 {
+fn get_double(value: &JsonValue<'_>) -> f64 {
     value.as_f64().unwrap_or(0.0)
 }
 
 impl Parser {
     pub fn parse(&mut self, json: &str) -> StyleParseResult {
-        let document: serde_json::Value = match serde_json::from_str(json) {
+        let document = match JsonValue::parse(json) {
             Ok(document) => document,
             Err(error) => return Err(mln_util::Error::invalid_argument(format_json_parse_error(&error))),
         };
@@ -204,7 +204,7 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_transition(&mut self, value: &serde_json::Value) {
+    fn parse_transition(&mut self, value: &JsonValue<'_>) {
         let mut error = Error::default();
         let Some(converted) = convert::<TransitionOptions>(&Convertible::from(value), &mut error) else {
             Log::warning(Event::ParseStyle, &error.message);
@@ -214,7 +214,7 @@ impl Parser {
         self.transition = converted;
     }
 
-    fn parse_light(&mut self, value: &serde_json::Value) {
+    fn parse_light(&mut self, value: &JsonValue<'_>) {
         let mut error = Error::default();
         let Some(converted) = <Light as Converter>::convert(&Convertible::from(value), &mut error) else {
             Log::warning(Event::ParseStyle, &error.message);
@@ -224,7 +224,7 @@ impl Parser {
         self.light = converted;
     }
 
-    fn parse_sky(&mut self, value: &serde_json::Value) {
+    fn parse_sky(&mut self, value: &JsonValue<'_>) {
         let mut error = Error::default();
         let Some(converted) = <Sky as Converter>::convert(&Convertible::from(value), &mut error) else {
             Log::warning(Event::ParseStyle, &error.message);
@@ -234,7 +234,7 @@ impl Parser {
         self.sky = Some(converted);
     }
 
-    fn parse_projection(&mut self, value: &serde_json::Value) {
+    fn parse_projection(&mut self, value: &JsonValue<'_>) {
         let mut error = Error::default();
         let Some(converted) = <Projection as Converter>::convert(&Convertible::from(value), &mut error) else {
             Log::warning(Event::ParseStyle, &error.message);
@@ -244,13 +244,13 @@ impl Parser {
         self.projection = converted;
     }
 
-    fn parse_state(&mut self, value: &serde_json::Value) {
+    fn parse_state(&mut self, value: &JsonValue<'_>) {
         let Some(object) = value.as_object() else {
             Log::warning(Event::ParseStyle, "state must be an object");
             return;
         };
 
-        for (property_name, member) in object {
+        for (property_name, member) in object.iter() {
             let Some(member_object) = member.as_object() else {
                 Log::warning(Event::ParseStyle, format!("state property \"{property_name}\" must be an object"));
                 continue;
@@ -259,19 +259,17 @@ impl Parser {
                 continue;
             };
             // emplace: the first definition wins.
-            self.global_state_defaults
-                .entry(property_name.clone())
-                .or_insert_with(|| mln_conversion::json_to_value(default));
+            self.global_state_defaults.entry(property_name.to_owned()).or_insert_with(|| default.to_value());
         }
     }
 
-    fn parse_sources(&mut self, value: &serde_json::Value) {
+    fn parse_sources(&mut self, value: &JsonValue<'_>) {
         let Some(object) = value.as_object() else {
             Log::warning(Event::ParseStyle, "sources must be an object");
             return;
         };
 
-        for (id, property) in object {
+        for (id, property) in object.iter() {
             let mut error = Error::default();
             let Some(source) = convert_source(&Convertible::from(property), &mut error, id) else {
                 Log::warning(Event::ParseStyle, &error.message);
@@ -282,7 +280,7 @@ impl Parser {
         }
     }
 
-    fn parse_sprites(&mut self, value: &serde_json::Value) {
+    fn parse_sprites(&mut self, value: &JsonValue<'_>) {
         if let Some(url) = value.as_str() {
             let sprite = Sprite::new("default", url);
             self.sprites.push(sprite);
@@ -313,7 +311,7 @@ impl Parser {
         }
     }
 
-    fn parse_layers(&mut self, value: &serde_json::Value) {
+    fn parse_layers(&mut self, value: &JsonValue<'_>) {
         let mut ids: Vec<String> = Vec::new();
 
         let Some(array) = value.as_array() else {
@@ -376,7 +374,7 @@ impl Parser {
 }
 
 struct LayerEntry<'a> {
-    value: &'a serde_json::Value,
+    value: &'a JsonValue<'a>,
     layer: Option<Box<dyn Layer>>,
 }
 
@@ -446,7 +444,7 @@ fn format_json_parse_error(error: &serde_json::Error) -> String {
 /// warning for each range it can't read, and skips the range.
 fn parse_font_file(
     face_name: &str,
-    font_file: &serde_json::Map<String, serde_json::Value>,
+    font_file: &JsonObject<'_>,
     warnings: &mut Vec<String>,
 ) -> mln_text::glyph::FontFace {
     let mut font_face = mln_text::glyph::FontFace::new(face_name, "", vec![(0, 0x0010_FFFF)]);
@@ -494,8 +492,8 @@ fn parse_font_file(
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't such an
 /// array.
 pub fn parse_fallback_font_faces(json: &str) -> Result<mln_text::glyph::FontFaces, mln_util::Error> {
-    let document: serde_json::Value = serde_json::from_str(json)
-        .map_err(|error| mln_util::Error::invalid_argument(format_json_parse_error(&error)))?;
+    let document =
+        JsonValue::parse(json).map_err(|error| mln_util::Error::invalid_argument(format_json_parse_error(&error)))?;
     let Some(files) = document.as_array() else {
         return Err(mln_util::Error::invalid_argument("fallback font faces must be an array"));
     };
@@ -522,10 +520,10 @@ pub fn parse_fallback_font_faces(json: &str) -> Result<mln_text::glyph::FontFace
 }
 
 /// The "font-faces" block of `Parser::parse` (`MLN_TEXT_SHAPING_HARFBUZZ`).
-fn parse_font_faces(faces: &serde_json::Map<String, serde_json::Value>) -> mln_text::glyph::FontFaces {
+fn parse_font_faces(faces: &JsonObject<'_>) -> mln_text::glyph::FontFaces {
     use mln_text::glyph::{FontFace, gen_new_glyph_id_type};
     let mut font_faces = mln_text::glyph::FontFaces::new();
-    for (face_name, face_value) in faces {
+    for (face_name, face_value) in faces.iter() {
         if let Some(files) = face_value.as_array() {
             // If the face is an array, we assume it is a list of font file
             // objects.
