@@ -26,7 +26,8 @@ idiomatic_version_file_enable_tools = ["rust"]
 "github:est31/cargo-udeps" = "0.1.61"
 # The browser build: wasm-bindgen must match the wasm-bindgen crate in
 # Cargo.lock, and binaryen's wasm-opt shrinks the release build.
-"github:wasm-bindgen/wasm-bindgen" = "0.2.130"
+# wasm-bindgen publishes no build for Windows on Arm, which runs the x64 one.
+"github:wasm-bindgen/wasm-bindgen" = { version = "0.2.130", platforms = { windows-arm64 = { asset_pattern = "wasm-bindgen-*-x86_64-pc-windows-msvc.tar.gz" } } }
 "aqua:WebAssembly/binaryen" = "133"
 # The browser build's page (examples/web) and its check.
 "core:node" = "24.22.2"
@@ -127,9 +128,9 @@ description = "Regenerate the style layer code (crates/mln_style) from the style
 run = "cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/v8.json --out crates/mln_style/src"
 
 [tasks.install-nightly]
-description = "Install the nightly that MLN_NIGHTLY names, with rustfmt and the standard library's sources"
+description = "Install the nightly rustfmt that MLN_NIGHTLY names, for its unstable import options"
 hide = true
-run = "rustup toolchain install $MLN_NIGHTLY --profile minimal --component rustfmt,rust-src --no-self-update"
+run = "rustup toolchain install {{env.MLN_NIGHTLY}} --profile minimal --component rustfmt --no-self-update"
 
 [tasks.licenses]
 description = "Check every dependency's license against deny.toml"
@@ -146,7 +147,7 @@ run = "gh workflow run release.yml --repo louwers/mln-rs --ref main"
 
 [tasks.udeps]
 description = "Find unused dependencies"
-run = "cargo +$MLN_NIGHTLY udeps --workspace --all-targets"
+run = "cargo +{{env.MLN_NIGHTLY}} udeps --workspace --all-targets"
 
 # The default is a commit after v26.6.0 that replaces `emptyResponse` with
 # vector sources' `sparse`. Run `mise run generate:style` after.

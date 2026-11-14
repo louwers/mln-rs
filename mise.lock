@@ -458,6 +458,20 @@ url = "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.130/wa
 url_api = "https://api.github.com/repos/wasm-bindgen/wasm-bindgen/releases/assets/691140662"
 provenance = "github-attestations"
 
+[[tools."github:wasm-bindgen/wasm-bindgen"]]
+version = "0.2.130"
+backend = "github:wasm-bindgen/wasm-bindgen"
+specifiers = ["0.2.130"]
+
+[tools."github:wasm-bindgen/wasm-bindgen".options]
+asset_pattern = "wasm-bindgen-*-x86_64-pc-windows-msvc.tar.gz"
+
+[tools."github:wasm-bindgen/wasm-bindgen"."platforms.windows-arm64"]
+checksum = "sha256:844d23f1b56097549b936dd2e0d561fadebc1e8c9e985d5068b6b919654104ad"
+url = "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.130/wasm-bindgen-0.2.130-x86_64-pc-windows-msvc.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-bindgen/releases/assets/691140662"
+provenance = "github-attestations"
+
 [[tools.node]]
 version = "24.22.2"
 backend = "core:node"
