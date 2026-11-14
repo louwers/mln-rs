@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use feature::Value;
-use geojson::{Feature, GeoJSON, Geometry, Point};
+use feature::{Feature, GeoJSON, Value};
+use geo_types::{Geometry, LineString, Point};
 use mln_actor::{RunLoop, Timer};
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::{BackendScope, ScopeType};
@@ -253,14 +253,15 @@ fn lat_lngs_to_camera_with_bearing_and_pitch_min_max() {
 /// A geometry fits as its points do, wherever they sit in it.
 #[test]
 fn geometry_to_camera() {
-    use mln_util::geometry::{Geometry as G, Point as P};
+    use geo_types::{Geometry as G, GeometryCollection, MultiPoint, Polygon};
     let test = MapTest::new();
-    let points: Vec<P<f64>> = lat_lngs().iter().map(|ll| P::new(ll.longitude(), ll.latitude())).collect();
-    let geometry = G::GeometryCollection(vec![
-        G::Point(points[0]),
-        G::Polygon(vec![vec![points[1], points[2], points[1]]]),
-        G::Empty,
-    ]);
+    let points: LineString<f64> = lat_lngs().iter().map(|ll| (ll.longitude(), ll.latitude())).collect();
+    let empty = G::GeometryCollection(GeometryCollection(Vec::new()));
+    let geometry = G::GeometryCollection(GeometryCollection(vec![
+        G::Point(points.0[0].into()),
+        G::Polygon(Polygon::new(LineString(vec![points.0[1], points.0[2], points.0[1]]), vec![])),
+        empty.clone(),
+    ]));
 
     let expected = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(20.0)).unwrap();
     let fitted = test.map().camera_for_geometry(&geometry, &EdgeInsets::default(), Some(23.0), Some(20.0)).unwrap();
@@ -275,9 +276,9 @@ fn geometry_to_camera() {
     assert_double_eq(fitted.zoom.unwrap(), expected.zoom.unwrap());
 
     // No points: the camera as cameraForLatLngs leaves it, unset.
-    assert!(test.map().camera_for_geometry(&G::Empty, &EdgeInsets::default(), None, None).unwrap().zoom.is_none());
+    assert!(test.map().camera_for_geometry(&empty, &EdgeInsets::default(), None, None).unwrap().zoom.is_none());
     // A point with no LatLng.
-    let bad = G::MultiPoint(vec![P::new(0.0, 0.0), P::new(0.0, 91.0)]);
+    let bad = G::MultiPoint(MultiPoint(vec![Point::new(0.0, 0.0), Point::new(0.0, 91.0)]));
     assert!(test.map().camera_for_geometry(&bad, &EdgeInsets::default(), None, None).is_err());
 }
 
@@ -3662,7 +3663,7 @@ fn line_layer_depth_distribution() {
         let y = (bounds.north() - bounds.south()) * 0.95 / f64::from(LAYER_COUNT) * f64::from(index + 1) / 2.0;
         let x = (bounds.east() - bounds.west()) * 0.95 / f64::from(LAYER_COUNT) * f64::from(index + 1) / 2.0;
 
-        let geo = vec![Point::new(-x, y), Point::new(x, y), Point::new(x, -y), Point::new(-x, -y), Point::new(-x, y)];
+        let geo = LineString::from(vec![(-x, y), (x, y), (x, -y), (-x, -y), (-x, y)]);
 
         let features = vec![Feature::new(Geometry::LineString(geo))];
 

@@ -3,8 +3,8 @@
 // Simplify.Points, Clip.* and GeoJSONVT.ClipVertexOnTileBorder.
 // tests/fixtures.rs has the rest.
 
-use feature::Value;
-use geometry::{Geometry, Point};
+use feature::{Value, geojson};
+use geo_types::{Coord, Geometry, LineString};
 
 use crate::clip::Clipper;
 use crate::detail::{VtGeometry, VtLineString, VtLinearRing, VtPoint};
@@ -307,8 +307,8 @@ fn geojsonvt_clip_vertex_on_tile_border() {
 
     let tile = index.get_tile(13, 2344, 3134).unwrap();
     assert_ne!(tile.features, Vec::<feature::Feature<i16>>::new());
-    let expected = vec![Point::new(-2048i16, 2747), Point::new(408, 5037)];
-    assert_eq!(tile.features[0].geometry, Geometry::LineString(expected));
+    let expected = LineString::from(vec![(-2048i16, 2747), (408, 5037)]);
+    assert_eq!(tile.features[0].geometry, Some(Geometry::LineString(expected)));
 
     // Check line metrics
     let props = &tile.features[0].properties;
@@ -319,7 +319,7 @@ fn geojsonvt_clip_vertex_on_tile_border() {
 }
 
 /// Twice the signed area of a ring, positive for clockwise with y down.
-fn shoelace(ring: &[Point<i16>]) -> i64 {
+fn shoelace(ring: &[Coord<i16>]) -> i64 {
     let mut sum = 0;
     for (p, q) in ring.iter().zip(ring.iter().cycle().skip(1)) {
         sum += i64::from(p.x) * i64::from(q.y) - i64::from(q.x) * i64::from(p.y);
@@ -340,12 +340,12 @@ fn polygon_rings_are_closed_and_rewound() {
     }"#;
     let mut index = GeoJSONVT::from_geojson(&geojson::parse(data).unwrap(), Options::default());
     let tile = index.get_tile(0, 0, 0).unwrap();
-    let Geometry::MultiPolygon(polygons) = &tile.features[0].geometry else { panic!("{:?}", tile.features) };
-    assert_eq!(polygons.len(), 2);
+    let Some(Geometry::MultiPolygon(polygons)) = &tile.features[0].geometry else { panic!("{:?}", tile.features) };
+    assert_eq!(polygons.0.len(), 2);
     for polygon in polygons {
-        assert_eq!(polygon.len(), 2);
-        assert!(polygon.iter().all(|ring| ring.first() == ring.last()), "{polygon:?}");
-        assert!(shoelace(&polygon[0]) > 0, "outer ring {:?}", polygon[0]);
-        assert!(shoelace(&polygon[1]) < 0, "hole {:?}", polygon[1]);
+        let [hole] = polygon.interiors() else { panic!("{polygon:?}") };
+        assert!([polygon.exterior(), hole].iter().all(|ring| ring.0.first() == ring.0.last()), "{polygon:?}");
+        assert!(shoelace(&polygon.exterior().0) > 0, "outer ring {:?}", polygon.exterior());
+        assert!(shoelace(&hole.0) < 0, "hole {hole:?}");
     }
 }

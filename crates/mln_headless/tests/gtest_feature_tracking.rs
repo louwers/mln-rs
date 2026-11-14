@@ -91,7 +91,7 @@ impl FeatureTrackingTest {
         frontend.attach(&map);
 
         let source = GeoJSONSource::with_default_options(SOURCE_NAME);
-        source.set_geojson(&geojson::parse(geojson).expect("GeoJSON")).expect("set GeoJSON");
+        source.set_geojson(&feature::geojson::parse(geojson).expect("GeoJSON")).expect("set GeoJSON");
 
         let mut background_layer = BackgroundLayer::new("background");
         background_layer.set_background_color(&constant(Color::new(1.0, 1.0, 1.0, 1.0)));
@@ -759,7 +759,7 @@ fn globe_capture_close_up() {
     let source = GeoJSONSource::new("lowZoom", Arc::new(options));
     let large = r#"{"type": "Feature", "id": "large", "properties": {},
         "geometry": {"type": "Polygon", "coordinates": [[[-40, -40], [40, -40], [40, 40], [-40, 40], [-40, -40]]]}}"#;
-    source.set_geojson(&geojson::parse(large).expect("GeoJSON")).expect("set GeoJSON");
+    source.set_geojson(&feature::geojson::parse(large).expect("GeoJSON")).expect("set GeoJSON");
     let mut fill_layer = FillLayer::new("lowZoomFill", "lowZoom");
     fill_layer.set_fill_color(&constant(Color::new(0.0, 1.0, 0.0, 1.0)));
     {

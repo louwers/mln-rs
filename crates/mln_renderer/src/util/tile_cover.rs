@@ -8,6 +8,7 @@
 // from the `LatLng` constructor while projecting a point whose latitude is
 // out of range.
 
+use geo_types::{Coord, Geometry, LineString, Polygon};
 use geometry::Point;
 use mln_map_types::{TileCoordinate, TileLodMode, TransformState, ViewportMode};
 use mln_math::{fmax, fmin};
@@ -17,7 +18,6 @@ use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate};
-use mln_util::geometry::{Geometry, Polygon};
 use mln_util::mat3::{vec3_length, vec3_scale, vec3_sub};
 use mln_util::projection::Projection;
 use mln_util::range::Range;
@@ -197,7 +197,7 @@ impl TileCover {
         let se = Projection::project_zoom(&bounds.southeast(), i32::from(z));
         let nw = Projection::project_zoom(&bounds.northwest(), i32::from(z));
 
-        let p: Polygon<f64> = vec![vec![sw, nw, ne, se, sw]];
+        let p = Polygon::new(LineString([sw, nw, ne, se, sw].map(Coord::from).to_vec()), Vec::new());
         // Nothing is projected (`project = false`), so nothing can throw.
         TileCover {
             impl_: Box::new(Impl::new(i32::from(z), &Geometry::Polygon(p), false).expect("unprojected tile cover")),
@@ -1211,13 +1211,11 @@ mod tests {
     /// `TileCover::new_from_geometry` (the line of `TileCover.GeomLineZ10`).
     #[test]
     fn tile_count_geometry_counts_the_cover() {
-        let line = vec![
-            Point::new(-121.493_682_861_328_12, 38.579_037_146_674_59),
-            Point::new(-122.442_283_630_371_1, 37.773_157_169_570_695),
-        ];
-        let geom = Geometry::LineString(line);
+        let line =
+            vec![(-121.493_682_861_328_12, 38.579_037_146_674_59), (-122.442_283_630_371_1, 37.773_157_169_570_695)];
+        let geom = Geometry::LineString(line.into());
         assert_eq!(7, tile_count_geometry(&geom, 10).unwrap());
         assert_eq!(7, tile_cover_geometry(&geom, 10).unwrap().len());
-        assert!(tile_count_geometry(&Geometry::Point(Point::new(0.0, 97.0)), 2).is_err());
+        assert!(tile_count_geometry(&Geometry::Point(geo_types::Point::new(0.0, 97.0)), 2).is_err());
     }
 }

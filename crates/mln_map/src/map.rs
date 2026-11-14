@@ -6,6 +6,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use geo_types::Geometry;
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, ConstrainMode,
@@ -25,7 +26,7 @@ use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::geometry::{Geometry, for_each_point};
+use mln_util::geometry::for_each_point;
 use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::Mat4;
 use mln_util::size::Size;

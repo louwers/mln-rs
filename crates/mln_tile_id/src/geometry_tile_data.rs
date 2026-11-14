@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn triangles() {
         let mut c = GeometryCollection::from(vec![vec![Point::new(0, 0), Point::new(1, 0), Point::new(0, 1)]]);
-        assert_eq!(c.get_triangles(), []);
+        assert_eq!(c.get_triangles(), <&[u32]>::default());
         let owner: Arc<[u32]> = Arc::from(vec![9, 9, 0, 1, 2, 9]);
         c.set_triangles(owner, 2..5);
         assert_eq!(c.get_triangles(), &[0, 1, 2]);

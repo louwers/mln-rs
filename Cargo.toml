@@ -43,7 +43,6 @@ categories = ["graphics", "science::geo"]
 [workspace.dependencies]
 # In-repo libraries. The exact version keeps a release's packages together.
 feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.11" }
-geojson = { package = "mln-rs-geojson", path = "vendor/geojson", version = "=0.0.11" }
 geojson_vt = { package = "mln-rs-geojson-vt", path = "vendor/geojson-vt", version = "=0.0.11" }
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.11" }
 kdbush = { package = "mln-rs-kdbush", path = "vendor/kdbush", version = "=0.0.11" }
@@ -152,6 +151,17 @@ glam = { version = "0.34.3", default-features = false, features = [
   "std",
   "serde",
 ] }
+# The GeoJSON and feature geometry (mln-rs-feature's `Feature`, the GeoJSON
+# sources, queries, the `within` and `distance` expressions), in place of a
+# port of the C++ core's vendored geometry.hpp variant. Tile geometry stays
+# the port's (mln-rs-geometry's `Point`). mlt-core already depends on it.
+geo-types = { version = "0.7.20", features = ["serde"] }
+# The geometry that geojson-vt reads, so that it takes any geometry type
+# that implements the traits, `geo_types`' among them.
+geo-traits = { version = "0.3.0", features = ["geo-types"] }
+# GeoJSON reading and writing, in place of a port of the C++ core's vendored
+# geojson.hpp. mln-rs-feature converts its types to and from the port's.
+geojson = { version = "1.0.0" }
 # MVT decoding, instead of porting the C++ reader (vendor/vector-tile).
 fast-mvt = { version = "0.7.3", default-features = false, features = [
   "reader",
@@ -467,6 +477,8 @@ categories = ["graphics", "rendering::engine", "science::geo"]
 
 [dependencies]
 feature.workspace = true
+geo-traits.workspace = true
+geo-types.workspace = true
 geojson.workspace = true
 geojson_vt.workspace = true
 geometry.workspace = true

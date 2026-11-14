@@ -459,11 +459,14 @@ fn pattern_layouts_cross() {
 #[test]
 fn geojson_tiles_cross() {
     use feature::{Feature, Identifier, PropertyMap};
-    use geometry::{Geometry, Point};
+    use geo_types::{
+        Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon, Polygon,
+    };
 
-    let p = |x: i16, y: i16| Point::new(x, y);
+    let p = |x: i16, y: i16| Coord { x, y };
+    let line = |coords: Vec<Coord<i16>>| LineString(coords);
     let square =
-        |x: i16, y: i16, size: i16| vec![p(x, y), p(x + size, y), p(x + size, y + size), p(x, y + size), p(x, y)];
+        |x: i16, y: i16, size: i16| line(vec![p(x, y), p(x + size, y), p(x + size, y + size), p(x, y + size), p(x, y)]);
     let feature = |geometry, id, class: &str| Feature {
         geometry,
         properties: PropertyMap::from([
@@ -474,26 +477,40 @@ fn geojson_tiles_cross() {
         id,
     };
     let features = vec![
-        feature(Geometry::Empty, Identifier::Null, "empty"),
-        feature(Geometry::Point(p(100, 100)), Identifier::Uint(1), "point"),
-        feature(Geometry::MultiPoint(vec![p(200, 200), p(300, 300)]), Identifier::Int(-2), "points"),
-        feature(Geometry::LineString(vec![p(0, 0), p(4096, 4096)]), Identifier::Double(3.5), "line"),
+        feature(None, Identifier::Null, "empty"),
+        feature(Some(Geometry::Point(p(100, 100).into())), Identifier::Uint(1), "point"),
         feature(
-            Geometry::MultiLineString(vec![vec![p(0, 4096), p(4096, 0)], vec![p(0, 2048), p(4096, 2048)]]),
+            Some(Geometry::MultiPoint(MultiPoint(vec![p(200, 200).into(), p(300, 300).into()]))),
+            Identifier::Int(-2),
+            "points",
+        ),
+        feature(Some(Geometry::LineString(line(vec![p(0, 0), p(4096, 4096)]))), Identifier::Double(3.5), "line"),
+        feature(
+            Some(Geometry::MultiLineString(MultiLineString(vec![
+                line(vec![p(0, 4096), p(4096, 0)]),
+                line(vec![p(0, 2048), p(4096, 2048)]),
+            ]))),
             Identifier::String("four".to_owned()),
             "lines",
         ),
-        feature(Geometry::Polygon(vec![square(500, 500, 1000), square(700, 700, 200)]), Identifier::Uint(5), "polygon"),
         feature(
-            Geometry::MultiPolygon(vec![vec![square(2000, 2000, 500)], vec![square(3000, 3000, 500)]]),
+            Some(Geometry::Polygon(Polygon::new(square(500, 500, 1000), vec![square(700, 700, 200)]))),
+            Identifier::Uint(5),
+            "polygon",
+        ),
+        feature(
+            Some(Geometry::MultiPolygon(MultiPolygon(vec![
+                Polygon::new(square(2000, 2000, 500), vec![]),
+                Polygon::new(square(3000, 3000, 500), vec![]),
+            ]))),
             Identifier::Uint(6),
             "polygons",
         ),
         feature(
-            Geometry::GeometryCollection(vec![
-                Geometry::Point(p(50, 50)),
-                Geometry::LineString(vec![p(1, 1), p(9, 9)]),
-            ]),
+            Some(Geometry::GeometryCollection(GeometryCollection(vec![
+                Geometry::Point(p(50, 50).into()),
+                Geometry::LineString(line(vec![p(1, 1), p(9, 9)])),
+            ]))),
             Identifier::Uint(7),
             "collection",
         ),

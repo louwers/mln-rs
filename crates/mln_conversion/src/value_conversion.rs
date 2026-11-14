@@ -97,7 +97,7 @@ impl ConversionTraits for Value {
 
     /// The JSON front end's conversion of the JSON the value stringifies to
     /// (the GeoJSON argument of "within" and "distance").
-    fn to_geojson(&self, error: &mut Error) -> Option<geojson::GeoJSON> {
+    fn to_geojson(&self, error: &mut Error) -> Option<feature::GeoJSON> {
         crate::json_conversion::to_geojson(&value_to_json(self), error)
     }
 }

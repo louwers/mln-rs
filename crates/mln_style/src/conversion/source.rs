@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use geojson::GeoJSON;
+use feature::GeoJSON;
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::tileset::{Tileset, VectorEncoding};

@@ -1,14 +1,14 @@
 // Ports vendor/maplibre-native-base/deps/geojson.hpp/test/test.cpp over its
-// fixtures, read in place. `use_convert` reads through `convert` (C++: a
-// rapidjson document) instead of `parse`, and writes through `to_json` +
-// serde_json instead of `stringify`.
+// fixtures. `use_convert` reads through `convert` (C++: a rapidjson
+// document) instead of `parse`, and writes through `to_json` + serde_json
+// instead of `stringify`.
 
 use std::path::PathBuf;
 
-use crate::{
-    Feature, GeoJSON, Geometry, Identifier, Value, convert, convert_geometry, parse, stringify, stringify_geometry,
-    to_json, to_json_geometry,
-};
+use geo_types::Geometry;
+
+use super::{GeoJSON, convert, convert_geometry, parse, stringify, stringify_geometry, to_json, to_json_geometry};
+use crate::{Feature, Identifier, Value};
 
 fn fixture(name: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -20,7 +20,7 @@ fn read_file(name: &str) -> String {
     std::fs::read_to_string(fixture(name)).unwrap()
 }
 
-fn read_geojson(name: &str, use_convert: bool) -> Result<GeoJSON, crate::Error> {
+fn read_geojson(name: &str, use_convert: bool) -> Result<GeoJSON, super::Error> {
     let text = read_file(name);
     if use_convert {
         let d: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -56,72 +56,73 @@ fn roundtrips(data: &GeoJSON, use_convert: bool) {
 fn test_empty() {
     let d: serde_json::Value = serde_json::from_str(&read_file("null.json")).unwrap();
     let geom = convert_geometry(&d).unwrap();
-    assert_eq!(geom, Geometry::Empty);
-    assert_eq!(stringify_geometry(&geom), "null");
-    assert_eq!(to_json_geometry(&geom), serde_json::Value::Null);
+    assert_eq!(geom, None);
+    assert_eq!(stringify_geometry(geom.as_ref()), "null");
+    assert_eq!(to_json_geometry(geom.as_ref()), serde_json::Value::Null);
 }
 
 fn test_point(use_convert: bool) {
     let data = read_geojson("point.json", use_convert).unwrap();
     let Geometry::Point(p) = geometry(&data) else { panic!() };
-    assert_eq!(p.x, 30.5);
-    assert_eq!(p.y, 50.5);
+    assert_eq!(p.x(), 30.5);
+    assert_eq!(p.y(), 50.5);
     roundtrips(&data, use_convert);
 }
 
 fn test_multi_point(use_convert: bool) {
     let data = read_geojson("multi-point.json", use_convert).unwrap();
     let Geometry::MultiPoint(points) = geometry(&data) else { panic!() };
-    assert_eq!(points.len(), 2);
+    assert_eq!(points.0.len(), 2);
     roundtrips(&data, use_convert);
 }
 
 fn test_line_string(use_convert: bool) {
     let data = read_geojson("line-string.json", use_convert).unwrap();
     let Geometry::LineString(points) = geometry(&data) else { panic!() };
-    assert_eq!(points.len(), 2);
+    assert_eq!(points.0.len(), 2);
     roundtrips(&data, use_convert);
 }
 
 fn test_multi_line_string(use_convert: bool) {
     let data = read_geojson("multi-line-string.json", use_convert).unwrap();
     let Geometry::MultiLineString(lines) = geometry(&data) else { panic!() };
-    assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].len(), 2);
+    assert_eq!(lines.0.len(), 1);
+    assert_eq!(lines.0[0].0.len(), 2);
     roundtrips(&data, use_convert);
 }
 
 fn test_polygon(use_convert: bool) {
     let data = read_geojson("polygon.json", use_convert).unwrap();
-    let Geometry::Polygon(rings) = geometry(&data) else { panic!() };
-    assert_eq!(rings.len(), 1);
-    assert_eq!(rings[0].len(), 5);
-    assert_eq!(rings[0][0], rings[0][4]);
+    let Geometry::Polygon(polygon) = geometry(&data) else { panic!() };
+    assert_eq!(polygon.interiors(), []);
+    assert_eq!(polygon.exterior().0.len(), 5);
+    assert_eq!(polygon.exterior().0[0], polygon.exterior().0[4]);
     roundtrips(&data, use_convert);
 }
 
 fn test_multi_polygon(use_convert: bool) {
     let data = read_geojson("multi-polygon.json", use_convert).unwrap();
     let Geometry::MultiPolygon(polygons) = geometry(&data) else { panic!() };
-    assert_eq!(polygons.len(), 1);
-    assert_eq!(polygons[0].len(), 1);
-    assert_eq!(polygons[0][0].len(), 5);
-    assert_eq!(polygons[0][0][0], polygons[0][0][4]);
+    assert_eq!(polygons.0.len(), 1);
+    assert_eq!(polygons.0[0].interiors(), []);
+    let exterior = &polygons.0[0].exterior().0;
+    assert_eq!(exterior.len(), 5);
+    assert_eq!(exterior[0], exterior[4]);
     roundtrips(&data, use_convert);
 }
 
 fn test_geometry_collection(use_convert: bool) {
     let data = read_geojson("geometry-collection.json", use_convert).unwrap();
     let Geometry::GeometryCollection(collection) = geometry(&data) else { panic!() };
-    assert!(matches!(collection[0], Geometry::Point(_)));
-    assert!(matches!(collection[1], Geometry::LineString(_)));
+    assert!(matches!(collection.0[0], Geometry::Point(_)));
+    assert!(matches!(collection.0[1], Geometry::LineString(_)));
     roundtrips(&data, use_convert);
 }
 
 fn test_feature(use_convert: bool) {
     let data = read_geojson("feature.json", use_convert).unwrap();
     let f = feature(&data);
-    assert!(matches!(f.geometry, Geometry::Point(_)));
+    assert!(matches!(f.geometry, Some(Geometry::Point(_))));
 
     assert_eq!(f.properties["bool"], Value::Bool(true));
     assert_eq!(f.properties["string"], Value::String("foo".to_owned()));
@@ -141,7 +142,7 @@ fn test_feature(use_convert: bool) {
 fn test_feature_null_properties(use_convert: bool) {
     let data = read_geojson("feature-null-properties.json", use_convert).unwrap();
     let f = feature(&data);
-    assert!(matches!(f.geometry, Geometry::Point(_)));
+    assert!(matches!(f.geometry, Some(Geometry::Point(_))));
     assert!(f.properties.is_empty());
     roundtrips(&data, use_convert);
 }
@@ -149,7 +150,7 @@ fn test_feature_null_properties(use_convert: bool) {
 fn test_feature_null_geometry(use_convert: bool) {
     let data = read_geojson("feature-null-geometry.json", use_convert).unwrap();
     let f = feature(&data);
-    assert_eq!(f.geometry, Geometry::Empty);
+    assert_eq!(f.geometry, None);
     assert!(f.properties.is_empty());
     roundtrips(&data, use_convert);
 }
@@ -157,7 +158,7 @@ fn test_feature_null_geometry(use_convert: bool) {
 fn test_feature_missing_properties(use_convert: bool) {
     let data = read_geojson("feature-missing-properties.json", use_convert).unwrap();
     let f = feature(&data);
-    assert!(matches!(f.geometry, Geometry::Point(_)));
+    assert!(matches!(f.geometry, Some(Geometry::Point(_))));
     assert!(f.properties.is_empty());
     roundtrips(&data, use_convert);
 }
@@ -189,7 +190,9 @@ fn test_parse_error_handling() {
 
     // test invalid polygon
     assert!(error_message("invalid-polygon.json").contains("described by 4"));
-    assert!(error_message("invalid-polygon-2.json").contains("array"));
+    // C++: "coordinates must be an array." (contains "array"); the
+    // `geojson` crate reports the nesting depth.
+    assert!(error_message("invalid-polygon-2.json").contains("unexpected coordinates dimensions"));
     assert!(error_message("invalid-multi-polygon.json").contains("described by 4"));
     assert!(error_message("invalid-multi-polygon-2.json").contains("2 numbers"));
     assert!(error_message("invalid-line-string.json").contains("two or more"));

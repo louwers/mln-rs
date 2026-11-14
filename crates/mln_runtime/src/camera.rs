@@ -1,12 +1,13 @@
 //! The options of the camera commands that the core map takes as separate
 //! calls: fitting an area, the viewport and the tile settings.
 
+use geo_types::Geometry;
 use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, TileLodMode, ViewportMode,
 };
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
-use mln_util::geometry::{Geometry, for_each_point};
+use mln_util::geometry::for_each_point;
 
 /// An area for a camera to fit in the map's view.
 #[derive(Clone, Debug, PartialEq)]

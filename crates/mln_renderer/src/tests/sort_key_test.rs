@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use feature::{Feature, PropertyMap, Value};
-use geometry::{Geometry, Point};
+use geo_types::{Geometry, LineString, Point, Polygon};
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::downcast_arc;
@@ -95,13 +95,11 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
         .map(|(i, &rank)| {
             let x = ((i + 1) * 100) as i16;
             let geometry = match shape {
-                Shape::Polygon => Geometry::Polygon(vec![vec![
-                    Point::new(x, 10),
-                    Point::new(x, 20),
-                    Point::new(x + 10, 20),
-                    Point::new(x, 10),
-                ]]),
-                Shape::LineString => Geometry::LineString(vec![Point::new(x, 10), Point::new(x, 20)]),
+                Shape::Polygon => Geometry::Polygon(Polygon::new(
+                    LineString::from(vec![(x, 10), (x, 20), (x + 10, 20), (x, 10)]),
+                    vec![],
+                )),
+                Shape::LineString => Geometry::LineString(LineString::from(vec![(x, 10), (x, 20)])),
                 Shape::Point => Geometry::Point(Point::new(x, 300 - (i as i16) * 100)),
             };
             let mut feature = Feature::new(geometry);

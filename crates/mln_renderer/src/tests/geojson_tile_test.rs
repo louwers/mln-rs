@@ -3,7 +3,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use feature::Feature;
-use geometry::{Geometry, Point};
+use geo_types::Point;
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map_types::{ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
@@ -90,7 +90,7 @@ impl GeoJSONData for FakeGeoJSONData {
 }
 
 fn point_data() -> Arc<dyn GeoJSONData> {
-    let features = vec![Feature::new(Geometry::Point(Point::new(0i16, 0)))];
+    let features = vec![Feature::new(Point::new(0i16, 0))];
     Arc::new(FakeGeoJSONData { features })
 }
 

@@ -18,6 +18,7 @@ doctest = false
 [dependencies]
 fast-mvt.workspace = true
 feature.workspace = true
+geo-types.workspace = true
 geometry.workspace = true
 i_overlay.workspace = true
 mln_math.workspace = true

@@ -17,7 +17,6 @@ doctest = false
 
 [dependencies]
 feature.workspace = true
-geojson.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 

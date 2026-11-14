@@ -100,15 +100,15 @@ impl ConversionTraits for serde_json::Value {
         }
     }
 
-    fn to_geojson(&self, error: &mut Error) -> Option<geojson::GeoJSON> {
+    fn to_geojson(&self, error: &mut Error) -> Option<feature::GeoJSON> {
         to_geojson(self, error)
     }
 }
 
 /// Converts `value` to GeoJSON, storing the conversion's error message in
 /// `error` when it fails.
-pub(crate) fn to_geojson(value: &serde_json::Value, error: &mut Error) -> Option<geojson::GeoJSON> {
-    match geojson::convert(value) {
+pub(crate) fn to_geojson(value: &serde_json::Value, error: &mut Error) -> Option<feature::GeoJSON> {
+    match feature::geojson::convert(value) {
         Ok(geojson) => Some(geojson),
         Err(e) => {
             error.message = e.message().to_owned();

@@ -2,9 +2,10 @@
 //! GeoJSON geometries and tile IDs, checked as they enter and converted to the
 //! core's types.
 
+use feature::{GeoJSON, geojson};
+use geo_types::Geometry;
 use mln_tile_id::CanonicalTileID;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate};
-use mln_util::geometry::Geometry;
 
 use crate::error::Error;
 use crate::generated::types::{
@@ -71,7 +72,7 @@ pub(crate) fn geometry(json: &str, name: &'static str) -> Result<Geometry<f64>, 
         let document = serde_json::from_str(&json)
             .map_err(|error| Error::invalid_argument(format!("{name} is not valid JSON: {error}")))?;
         match geojson::convert(&document) {
-            Ok(geojson::GeoJSON::Geometry(geometry)) => Ok(geometry),
+            Ok(GeoJSON::Geometry(geometry)) => Ok(geometry),
             Ok(_) => Err(Error::invalid_argument(format!("{name} must contain one GeoJSON Geometry"))),
             Err(error) => Err(Error::invalid_argument(format!("{name} is invalid: {}", error.message()))),
         }
@@ -162,7 +163,7 @@ mod tests {
     #[test]
     fn a_geometry_is_one_geojson_geometry() {
         let line = geometry(r#"{"type":"LineString","coordinates":[[1,2],[3,4]]}"#, "geometry").unwrap();
-        assert!(matches!(line, Geometry::LineString(points) if points.len() == 2));
+        assert!(matches!(line, Geometry::LineString(points) if points.0.len() == 2));
         for (json, expected) in [
             ("", "geometry must not be empty"),
             (r#"{"type":"Point""#, "geometry is not valid JSON"),

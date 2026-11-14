@@ -6,7 +6,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use geojson::GeoJSON;
+use feature::GeoJSON;
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler;
 use mln_storage::FileSource;

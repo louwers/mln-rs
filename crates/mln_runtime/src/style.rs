@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
-use geojson::GeoJSON;
+use feature::GeoJSON;
+use geo_types::Geometry;
 use mln_actor::scheduler;
 use mln_style::image::Impl as StyleImage;
 use mln_style::source::{Source, same_source, set_volatile};
@@ -480,16 +481,19 @@ fn parse_geojson(json: &str) -> Result<GeoJSON, Error> {
         .ok_or_else(|| Error::invalid_argument(format!("GeoJSON data is invalid: {}", error.message)))
 }
 
-fn geometry_name(geometry: &geometry::Geometry<f64>) -> &'static str {
+fn geometry_name(geometry: Option<&Geometry<f64>>) -> &'static str {
     match geometry {
-        geometry::Geometry::Empty => "empty",
-        geometry::Geometry::Point(_) => "point",
-        geometry::Geometry::MultiPoint(_) => "multi-point",
-        geometry::Geometry::LineString(_) => "line string",
-        geometry::Geometry::MultiLineString(_) => "multi-line string",
-        geometry::Geometry::Polygon(_) => "polygon",
-        geometry::Geometry::MultiPolygon(_) => "multi-polygon",
-        geometry::Geometry::GeometryCollection(_) => "geometry collection",
+        None => "empty",
+        Some(Geometry::Point(_)) => "point",
+        Some(Geometry::MultiPoint(_)) => "multi-point",
+        Some(Geometry::Line(_)) => "line",
+        Some(Geometry::LineString(_)) => "line string",
+        Some(Geometry::MultiLineString(_)) => "multi-line string",
+        Some(Geometry::Polygon(_)) => "polygon",
+        Some(Geometry::MultiPolygon(_)) => "multi-polygon",
+        Some(Geometry::GeometryCollection(_)) => "geometry collection",
+        Some(Geometry::Rect(_)) => "rectangle",
+        Some(Geometry::Triangle(_)) => "triangle",
     }
 }
 
@@ -506,11 +510,11 @@ fn check_clusterable(geojson: &GeoJSON) -> Result<(), Error> {
             )));
         }
     };
-    match features.iter().position(|feature| !matches!(feature.geometry, geometry::Geometry::Point(_))) {
+    match features.iter().position(|feature| !matches!(feature.geometry, Some(Geometry::Point(_)))) {
         None => Ok(()),
         Some(index) => Err(Error::invalid_argument(format!(
             "clustered GeoJSON data requires point geometry on every feature; feature {index} has {} geometry",
-            geometry_name(&features[index].geometry)
+            geometry_name(features[index].geometry.as_ref())
         ))),
     }
 }

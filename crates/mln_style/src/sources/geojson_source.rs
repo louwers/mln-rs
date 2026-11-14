@@ -4,8 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
 
-use feature::Feature;
-use geojson::GeoJSON;
+use feature::{Feature, GeoJSON};
 use mln_actor::scheduler::{self, SchedulerPtr};
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_tile_id::CanonicalTileID;

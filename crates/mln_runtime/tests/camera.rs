@@ -91,7 +91,8 @@ fn a_fit_moves_the_camera_where_the_query_fits() {
     assert_eq!(wait(map.camera()).camera, moved);
 
     assert_eq!(ErrorKind::InvalidArgument, wait_err(map.camera_for(CameraFitArea::Coordinates(Vec::new()), fit)).kind);
-    let empty = CameraFitArea::Geometry(mln_util::geometry::Geometry::Empty);
+    let empty =
+        CameraFitArea::Geometry(geo_types::Geometry::GeometryCollection(geo_types::GeometryCollection(Vec::new())));
     assert_eq!(ErrorKind::InvalidArgument, wait_err(map.camera_for(empty, fit)).kind);
     wait(map.release());
     wait(runtime.release());

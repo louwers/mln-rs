@@ -10,8 +10,15 @@
 //! packages, which only exist for this crate. The actor runtime (`mln_actor`)
 //! and the headless frontend (`mln_headless`) are internal to the port and
 //! not re-exported.
+//!
+//! GeoJSON and feature geometry is `geo_types`', and `geo_traits` geometry
+//! goes into `geojson_vt`. Both crates are re-exported, with the `geojson`
+//! crate that reads and writes GeoJSON; `feature::geojson` converts its
+//! objects to the port's.
 
 pub use feature;
+pub use geo_traits;
+pub use geo_types;
 pub use geojson;
 pub use geojson_vt;
 pub use geometry;

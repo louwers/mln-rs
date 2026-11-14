@@ -1,8 +1,6 @@
 use std::sync::{Arc, Weak};
 
-use feature::{Feature, PropertyMap, Value};
-use geojson::GeoJSON;
-use geometry::Geometry;
+use feature::{Feature, GeoJSON, PropertyMap, Value};
 use mln_actor::scheduler::{self, SchedulerPtr};
 use mln_expression::expression::evaluate_accumulated;
 use mln_style_types::SourceType;
@@ -138,8 +136,7 @@ pub(super) fn create(
                 return ret;
             }
             for (key, (map_expression, _)) in &map_options.cluster_properties {
-                let mut feature = Feature::new(Geometry::Empty);
-                feature.properties = properties.clone();
+                let feature = Feature { properties: properties.clone(), ..Feature::default() };
                 ret.insert(key.clone(), evaluate_feature(&feature, map_expression, None));
             }
             ret
@@ -150,8 +147,7 @@ pub(super) fn create(
                 if !to_fill.contains_key(key) {
                     continue;
                 }
-                let mut feature = Feature::new(Geometry::Empty);
-                feature.properties = to_fill.clone();
+                let feature = Feature { properties: to_fill.clone(), ..Feature::default() };
                 // `toReturn[p.first]` default-constructs a missing entry.
                 let accumulated = to_return.entry(key.clone()).or_default().clone();
                 let value = evaluate_feature(&feature, reduce_expression, Some(&accumulated));

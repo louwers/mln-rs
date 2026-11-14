@@ -20,7 +20,7 @@ path = "src/main.rs"
 
 [dependencies]
 feature.workspace = true
-geometry.workspace = true
+geo-types.workspace = true
 mln_conversion.workspace = true
 mln_expression.workspace = true
 mln_style.workspace = true

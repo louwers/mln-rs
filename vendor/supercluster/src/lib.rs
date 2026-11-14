@@ -12,7 +12,8 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
-use geometry::{Geometry, Point};
+use geo_types::Geometry;
+use geometry::Point;
 use kdbush::{KDBush, Nth};
 
 /// `feature_collection<double>`
@@ -55,7 +56,7 @@ impl Cluster {
         let x = (self.pos.x - 0.5) * 360.0;
         let y = 360.0 * ((180.0 - self.pos.y * 360.0) * PI / 180.0).exp().atan() / PI - 90.0;
         Feature {
-            geometry: Geometry::Point(Point::new(x, y)),
+            geometry: Some(Geometry::Point(geo_types::Point::new(x, y))),
             properties: self.get_properties(),
             id: Identifier::Uint(u64::from(self.id)),
         }
@@ -173,9 +174,10 @@ impl Zoom {
         zoom.clusters.reserve(features.len());
         for f in features {
             // `f.geometry.get<GeoJSONPoint>()`
-            let Geometry::Point(p) = &f.geometry else {
+            let Some(Geometry::Point(p)) = &f.geometry else {
                 return Err("in get<T>()".to_owned());
             };
+            let p = &Point::from(p.0);
             if options.reduce.is_some() {
                 let cluster_properties = (options.map)(&f.properties);
                 zoom.clusters.push(Cluster::with_properties(project(p), 1, i, &cluster_properties));
@@ -333,7 +335,7 @@ impl Supercluster {
         let mut visitor = |x: i32, id: u32| {
             let c = &zoom.clusters[id as usize];
 
-            let point = Point::new(
+            let point = geo_types::Point::new(
                 (extent * (c.pos.x * f64::from(z2) - f64::from(x))).round() as i16,
                 (extent * (c.pos.y * f64::from(z2) - yf)).round() as i16,
             );
@@ -347,13 +349,13 @@ impl Supercluster {
                     original_feature.id.clone()
                 };
                 result.push(Feature {
-                    geometry: Geometry::Point(point),
+                    geometry: Some(Geometry::Point(point)),
                     properties: original_feature.properties.clone(),
                     id: feature_id,
                 });
             } else {
                 result.push(Feature {
-                    geometry: Geometry::Point(point),
+                    geometry: Some(Geometry::Point(point)),
                     properties: c.get_properties(),
                     id: Identifier::Uint(u64::from(c.id)),
                 });

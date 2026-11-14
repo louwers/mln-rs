@@ -8,7 +8,12 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use geometry::{LinearRing, Point, Polygon};
+use geometry::Point;
+
+/// `mapbox::geometry::linear_ring<T>`
+pub type LinearRing<T> = Vec<Point<T>>;
+/// `mapbox::geometry::polygon<T>`: the exterior ring, then the holes.
+pub type Polygon<T> = Vec<LinearRing<T>>;
 
 /// `polygon.at(0)` / `ring.at(0)` on an empty vector (`std::out_of_range`).
 const OUT_OF_RANGE: &str = "vector::_M_range_check: __n (which is 0) >= this->size() (which is 0)";

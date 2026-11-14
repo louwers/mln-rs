@@ -106,9 +106,10 @@ pub(crate) fn to_json_value(value: &Value) -> String {
 pub(crate) fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
     let mut array = Vec::with_capacity(features.len());
     for feature in features {
-        // type, id, geometry, properties (mapbox::geojson::convert), then
+        // type, geometry, id, properties (the `geojson` crate's order), then
         // source, sourceLayer (when not empty) and state.
-        let serde_json::Value::Object(mut result) = geojson::to_json_feature(&feature.to_geojson_feature()) else {
+        let serde_json::Value::Object(mut result) = feature::geojson::to_json_feature(&feature.to_geojson_feature())
+        else {
             unreachable!("a feature converts to an object");
         };
         result.insert("source".to_owned(), serde_json::Value::String(feature.source.clone()));

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use feature::{PropertyMap, Value};
-use geojson::{GeoJSON, Geometry, Point};
+use feature::{GeoJSON, PropertyMap, Value};
+use geo_types::{Geometry, Point};
 use mln_actor::RunLoop;
 use mln_map::{CameraOptions, MapMode};
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};

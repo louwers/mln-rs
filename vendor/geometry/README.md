@@ -6,8 +6,9 @@
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
 > this crate as `mln_rs::geometry`.
 
-Ports `mapbox::geometry` of geometry.hpp: points, line strings, polygons, their
-multi variants and geometry collections.
+Ports `mapbox::geometry::point` of geometry.hpp: the point of tile geometry.
+GeoJSON and feature geometry is
+[`geo-types`](https://crates.io/crates/geo-types)'.
 
 Licensed under the ISC License, as geometry.hpp is ([LICENSE](LICENSE)).
 

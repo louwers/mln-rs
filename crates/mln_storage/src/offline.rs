@@ -2,11 +2,13 @@
 // is `is_f64()` (a number written with a fraction or exponent, or an integer
 // too large for 64 bits).
 
+#[cfg(any(test, feature = "sqlite"))]
+use feature::geojson;
+use geo_types::Geometry;
 use mln_util::error::Error;
 #[cfg(any(test, feature = "sqlite"))]
 use mln_util::geo::LatLng;
 use mln_util::geo::LatLngBounds;
-use mln_util::geometry::Geometry;
 #[cfg(any(test, feature = "sqlite"))]
 use serde_json::{Map, Value as Json};
 
@@ -232,8 +234,10 @@ pub(crate) fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineR
         )?
         .into())
     } else {
+        // A null geometry covers no tiles, as an empty collection does.
         let geometry = geojson::convert_geometry(member("geometry").expect("validated geometry"))
-            .map_err(|e| Error::native(e.message()))?;
+            .map_err(|e| Error::native(e.message()))?
+            .unwrap_or(Geometry::GeometryCollection(geo_types::GeometryCollection(Vec::new())));
         Ok(OfflineGeometryRegionDefinition::new(
             style_url,
             geometry,
@@ -267,7 +271,7 @@ pub(crate) fn encode_offline_region_definition(region: &OfflineRegionDefinition)
             json.insert("bounds".into(), [bounds.south(), bounds.west(), bounds.north(), bounds.east()].into());
         }
         OfflineRegionDefinition::Geometry(region) => {
-            json.insert("geometry".into(), geojson::to_json_geometry(&region.geometry));
+            json.insert("geometry".into(), geojson::to_json_geometry(Some(&region.geometry)));
         }
     }
 

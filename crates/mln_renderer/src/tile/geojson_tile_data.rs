@@ -28,7 +28,7 @@ impl<'a> GeoJSONTileFeature<'a> {
 
 impl GeometryTileFeature for GeoJSONTileFeature<'_> {
     fn get_type(&self) -> FeatureType {
-        to_feature_type(&self.feature.geometry)
+        to_feature_type(self.feature.geometry.as_ref())
     }
 
     fn get_properties(&self) -> &PropertyMap {
@@ -40,7 +40,7 @@ impl GeometryTileFeature for GeoJSONTileFeature<'_> {
     }
 
     fn get_geometries(&self) -> &GeometryCollection {
-        self.geometry.get_or_init(|| to_geometry_collection(&self.feature.geometry))
+        self.geometry.get_or_init(|| to_geometry_collection(self.feature.geometry.as_ref()))
     }
 
     fn get_value(&self, key: &str) -> Option<Value> {

@@ -1,4 +1,4 @@
-use geojson::GeoJSON;
+use feature::GeoJSON;
 
 use super::{Converter, Convertible, Error};
 
@@ -9,16 +9,14 @@ impl Converter for GeoJSON {
     }
 }
 
-/// Parses JSON bytes, then converts them to GeoJSON. A JSON syntax error
-/// carries `serde_json`'s message (C++: rapidjson's
-/// `GetParseError_En(code) + " at offset N"`).
+/// Reads GeoJSON from JSON bytes. A JSON syntax error carries `serde_json`'s
+/// message (C++: rapidjson's `GetParseError_En(code) + " at offset N"`).
 pub(crate) fn convert_json_geojson(json: &[u8], error: &mut Error) -> Option<GeoJSON> {
-    let document: serde_json::Value = match serde_json::from_slice(json) {
-        Ok(document) => document,
+    match feature::geojson::parse_slice(json) {
+        Ok(geojson) => Some(geojson),
         Err(e) => {
-            error.message = e.to_string();
-            return None;
+            error.message = e.0;
+            None
         }
-    };
-    GeoJSON::convert(&Convertible::from(&document), error)
+    }
 }

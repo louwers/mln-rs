@@ -460,8 +460,8 @@ impl TestRunner {
                 return;
             };
 
-            let actual_val = geojson::convert_value(&actual);
-            let expected_val = geojson::convert_value(&expected);
+            let actual_val = feature::geojson::convert_value(&actual);
+            let expected_val = feature::geojson::convert_value(&expected);
             let equal = deep_equal(&actual_val, &expected_val);
 
             metadata.difference = if equal { 0.0 } else { 1.0 };

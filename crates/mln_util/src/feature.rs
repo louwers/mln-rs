@@ -27,10 +27,10 @@ pub fn feature_id_to_string(id: &Identifier) -> Option<String> {
 }
 
 /// A `GeoJSONFeature` plus the source, source layer, style layer and feature
-/// state a query fills in.
+/// state a query fills in. `geometry` is `None` for a null geometry.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Feature {
-    pub geometry: geometry::Geometry<f64>,
+    pub geometry: Option<geo_types::Geometry<f64>>,
     pub properties: feature::PropertyMap,
     pub id: Identifier,
     pub source: String,

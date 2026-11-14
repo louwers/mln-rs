@@ -19,7 +19,8 @@ doctest = false
 
 [dependencies]
 feature.workspace = true
-geojson.workspace = true
+geo-traits.workspace = true
+geo-types.workspace = true
 geometry.workspace = true
 
 [dev-dependencies]

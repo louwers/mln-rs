@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
-use geometry::{Geometry, Point};
+use geo_types::Point;
 use serde_json::Value as Json;
 
 use crate::{Options, Supercluster};
@@ -21,7 +21,7 @@ fn parse_features() -> Vec<Feature<f64>> {
         let json_coords = &itr["geometry"]["coordinates"];
         let lng = json_coords[0].as_f64().unwrap();
         let lat = json_coords[1].as_f64().unwrap();
-        let mut feature = Feature::new(Geometry::Point(Point::new(lng, lat)));
+        let mut feature = Feature::new(Point::new(lng, lat));
         let properties = &itr["properties"];
         for key in
             ["name", "scalerank", "lat_y", "long_x", "region", "featureclass", "comment", "name_alt", "subregion"]

@@ -127,7 +127,7 @@ fn evaluate_feature_with_context_uses_every_input() {
         let mut ctx = ParsingContext::new();
         ctx.parse_expression(&Convertible::from(&document), None).expect("parsed")
     };
-    let mut feature = feature::Feature::new(geometry::Geometry::Point(geometry::Point { x: 2.0, y: 2.0 }));
+    let mut feature = feature::Feature::new(geo_types::Point::new(2.0, 2.0));
     feature.properties.insert("name".to_owned(), feature::Value::String("a".to_owned()));
     let feature_state: FeatureState = [("hover".to_owned(), feature::Value::Bool(true))].into_iter().collect();
     let global_state: GlobalStateMap =

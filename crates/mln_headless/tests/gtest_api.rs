@@ -3,7 +3,8 @@ mod support;
 
 use std::sync::{Arc, OnceLock};
 
-use geojson::{Feature, GeoJSON, Geometry, Point};
+use feature::{Feature, GeoJSON};
+use geo_types::{Geometry, LineString, Point};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
@@ -63,14 +64,14 @@ fn grid() {
             let bounds = LatLngBounds::from_canonical_tile(tile_id.z, tile_id.x, tile_id.y);
             let mut y = (bounds.north() / grid_spacing).ceil() * grid_spacing;
             while y >= (bounds.south() / grid_spacing).floor() * grid_spacing {
-                let grid_line = vec![Point::new(bounds.west(), y), Point::new(bounds.east(), y)];
+                let grid_line = LineString::from(vec![(bounds.west(), y), (bounds.east(), y)]);
                 features.push(Feature::new(Geometry::LineString(grid_line)));
                 y -= grid_spacing;
             }
 
             let mut x = (bounds.west() / grid_spacing).floor() * grid_spacing;
             while x <= (bounds.east() / grid_spacing).ceil() * grid_spacing {
-                let grid_line = vec![Point::new(x, bounds.south()), Point::new(x, bounds.north())];
+                let grid_line = LineString::from(vec![(x, bounds.south()), (x, bounds.north())]);
                 features.push(Feature::new(Geometry::LineString(grid_line)));
                 x += grid_spacing;
             }

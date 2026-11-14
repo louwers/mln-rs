@@ -226,7 +226,7 @@ fn drawn(buffers: &Buffers) -> (Vec<Triangle>, Vec<Line>, &[LineLayoutVertex]) {
 
 /// A tile with one layer, `polygons`, of these geometries, which mlt-core
 /// stores with their triangles.
-fn tessellated_mlt(geometries: &[mlt_core::geo_types::Geometry<i32>]) -> Vec<u8> {
+fn tessellated_mlt(geometries: &[geo_types::Geometry<i32>]) -> Vec<u8> {
     use mlt_core::encoder::{EncoderConfig, Network, Profile, Tessellation};
 
     let mut builder = mlt_core::TileLayer::builder("polygons", EXTENT as u32).expect("layer");
@@ -278,9 +278,9 @@ fn carried_triangles(tile: &[u8]) -> Vec<Vec<Triangle>> {
 // each decoded ring gets.
 #[test]
 fn mlt_polygons_fill_with_the_triangles_the_tile_carries() {
+    use geo_types::{Geometry, LineString, MultiPolygon, Polygon};
     use mln_tile::VectorMLTTileData;
     use mln_tile_id::geometry_tile_data::GeometryTileData as _;
-    use mlt_core::geo_types::{Geometry, LineString, MultiPolygon, Polygon};
 
     let ring =
         |coords: &[(i32, i32)]| LineString::from(coords.iter().map(|&(x, y)| (x * 20, y * 20)).collect::<Vec<_>>());

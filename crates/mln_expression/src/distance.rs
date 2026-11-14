@@ -5,8 +5,8 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use cheap_ruler::{CheapRuler, DistanceUnit};
-use feature::{Value as MbglValue, ValueObject};
-use geometry::{Geometry, LineString, MultiLineString, MultiPoint, Point, Polygon};
+use feature::{GeoJSON, Value as MbglValue, ValueObject};
+use geometry::Point;
 use mln_conversion::{Convertible, Error};
 use mln_tile::geometry_tile_data::convert_geometry;
 use mln_tile_id::CanonicalTileID;
@@ -20,6 +20,52 @@ use crate::expression::{
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::Value;
+
+// The algorithms work on `mapbox::geometry`'s shapes, as in C++: a polygon
+// is its rings, the exterior first. `Geometry::from_geo` converts to them.
+type LineString<T> = Vec<Point<T>>;
+type MultiPoint<T> = Vec<Point<T>>;
+type MultiLineString<T> = Vec<LineString<T>>;
+type Polygon<T> = Vec<LineString<T>>;
+
+#[derive(Clone, Debug, PartialEq)]
+enum Geometry<T> {
+    Point(Point<T>),
+    MultiPoint(MultiPoint<T>),
+    LineString(LineString<T>),
+    MultiLineString(MultiLineString<T>),
+    Polygon(Polygon<T>),
+    MultiPolygon(Vec<Polygon<T>>),
+    /// A geometry collection, which has no distance.
+    Collection,
+}
+
+impl Geometry<f64> {
+    fn from_geo(geometry: &geo_types::Geometry<f64>) -> Self {
+        let line = |l: &geo_types::LineString<f64>| l.0.iter().map(|&c| Point::from(c)).collect::<Vec<_>>();
+        let polygon = |p: &geo_types::Polygon<f64>| {
+            // A polygon of no rings has an empty exterior.
+            let exterior = (!p.exterior().0.is_empty() || !p.interiors().is_empty()).then(|| p.exterior());
+            exterior.into_iter().chain(p.interiors()).map(line).collect::<Vec<_>>()
+        };
+        match geometry {
+            geo_types::Geometry::Point(p) => Geometry::Point(p.0.into()),
+            geo_types::Geometry::MultiPoint(points) => {
+                Geometry::MultiPoint(points.iter().map(|p| p.0.into()).collect())
+            }
+            geo_types::Geometry::Line(l) => Geometry::LineString(vec![l.start.into(), l.end.into()]),
+            geo_types::Geometry::LineString(l) => Geometry::LineString(line(l)),
+            geo_types::Geometry::MultiLineString(lines) => Geometry::MultiLineString(lines.iter().map(line).collect()),
+            geo_types::Geometry::Polygon(p) => Geometry::Polygon(polygon(p)),
+            geo_types::Geometry::MultiPolygon(polygons) => {
+                Geometry::MultiPolygon(polygons.iter().map(polygon).collect())
+            }
+            geo_types::Geometry::Rect(r) => Geometry::Polygon(polygon(&r.to_polygon())),
+            geo_types::Geometry::Triangle(t) => Geometry::Polygon(polygon(&t.to_polygon())),
+            geo_types::Geometry::GeometryCollection(_) => Geometry::Collection,
+        }
+    }
+}
 
 /// A cheap ruler in meters, over the port's points.
 struct Ruler(CheapRuler<f64>);
@@ -758,7 +804,7 @@ fn points_to_geometry_distance(points: &MultiPoint<f64>, geo_set: &Geometry<f64>
             }
             dist
         }
-        Geometry::Empty | Geometry::GeometryCollection(_) => INVALID_DISTANCE,
+        Geometry::Collection => INVALID_DISTANCE,
     }
 }
 
@@ -813,7 +859,7 @@ fn line_to_geometry_distance(line: &LineString<f64>, geo_set: &Geometry<f64>) ->
             }
             dist
         }
-        Geometry::Empty | Geometry::GeometryCollection(_) => INVALID_DISTANCE,
+        Geometry::Collection => INVALID_DISTANCE,
     }
 }
 
@@ -876,7 +922,7 @@ fn polygon_to_geometry_distance(polygon: &Polygon<f64>, geo_set: &Geometry<f64>)
             }
             dist
         }
-        Geometry::Empty | Geometry::GeometryCollection(_) => INVALID_DISTANCE,
+        Geometry::Collection => INVALID_DISTANCE,
     }
 }
 
@@ -889,7 +935,7 @@ fn calculate_distance(
     geo_set: &Geometry<f64>,
 ) -> Result<f64, EvaluationError> {
     let geometry = convert_geometry(feature, canonical).map_err(|e| EvaluationError::new(e.to_string()))?;
-    Ok(match &geometry {
+    Ok(match &Geometry::from_geo(&geometry) {
         Geometry::Point(point) => points_to_geometry_distance(&vec![*point], geo_set),
         Geometry::MultiPoint(points) => points_to_geometry_distance(points, geo_set),
         Geometry::LineString(line) => line_to_geometry_distance(line, geo_set),
@@ -916,11 +962,11 @@ fn calculate_distance(
             }
             dist
         }
-        Geometry::Empty | Geometry::GeometryCollection(_) => INVALID_DISTANCE,
+        Geometry::Collection => INVALID_DISTANCE,
     })
 }
 
-fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<geojson::GeoJSON> {
+fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<GeoJSON> {
     if value.is_array() {
         // object value, quoted with ["distance", GeoJSONObj]
         let length = value.array_length();
@@ -952,9 +998,14 @@ fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<geoj
 const NO_SUPPORTED_GEOMETRY: &str =
     "'distance' expression requires valid geojson that contains Point/LineString/Polygon geometries.";
 
-fn get_geometry(geometry: &Geometry<f64>, ctx: &mut ParsingContext) -> Option<Geometry<f64>> {
-    if matches!(to_feature_type(geometry), FeatureType::Point | FeatureType::LineString | FeatureType::Polygon) {
-        return Some(geometry.clone());
+fn get_geometry(geometry: Option<&geo_types::Geometry<f64>>, ctx: &mut ParsingContext) -> Option<Geometry<f64>> {
+    if let Some(geometry) = geometry
+        && matches!(
+            to_feature_type(Some(geometry)),
+            FeatureType::Point | FeatureType::LineString | FeatureType::Polygon
+        )
+    {
+        return Some(Geometry::from_geo(geometry));
     }
     ctx.error(
         "'distance' expression requires valid geojson object with valid geometry type: Point, LineString or Polygon."
@@ -966,13 +1017,13 @@ fn get_geometry(geometry: &Geometry<f64>, ctx: &mut ParsingContext) -> Option<Ge
 /// The distance in meters from the feature to a GeoJSON geometry.
 pub(crate) struct Distance {
     base: ExpressionBase,
-    geojson_source: geojson::GeoJSON,
+    geojson_source: GeoJSON,
     geometries: Geometry<f64>,
 }
 
 impl Distance {
     #[must_use]
-    pub(crate) fn new(geojson: geojson::GeoJSON, geometries: Geometry<f64>) -> Self {
+    fn new(geojson: GeoJSON, geometries: Geometry<f64>) -> Self {
         Distance {
             base: ExpressionBase::new(Kind::Distance, Type::Number, Dependency::FEATURE),
             geojson_source: geojson,
@@ -983,15 +1034,15 @@ impl Distance {
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let parsed_value = parse_value(value, ctx)?;
 
-        let geometries: Vec<&Geometry<f64>> = match &parsed_value {
-            geojson::GeoJSON::Geometry(geometry_set) => vec![geometry_set],
-            geojson::GeoJSON::Feature(feature) => vec![&feature.geometry],
-            geojson::GeoJSON::FeatureCollection(features) => features.iter().map(|feature| &feature.geometry).collect(),
+        let geometries: Vec<Option<&geo_types::Geometry<f64>>> = match &parsed_value {
+            GeoJSON::Geometry(geometry_set) => vec![Some(geometry_set)],
+            GeoJSON::Feature(feature) => vec![feature.geometry.as_ref()],
+            GeoJSON::FeatureCollection(features) => features.iter().map(|feature| feature.geometry.as_ref()).collect(),
         };
         // The first supported geometry wins; every unsupported one before it
         // reports an error.
         for geometry in &geometries {
-            if let Some(ret) = get_geometry(geometry, ctx) {
+            if let Some(ret) = get_geometry(*geometry, ctx) {
                 return Some(Box::new(Distance::new(parsed_value.clone(), ret)));
             }
         }
@@ -1064,7 +1115,7 @@ impl Expression for Distance {
     }
 
     fn serialize(&self) -> MbglValue {
-        let value = geojson::to_json(&self.geojson_source);
+        let value = feature::geojson::to_json(&self.geojson_source);
         let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
             o.iter().map(|(k, v)| (k.clone(), convert_value(v))).collect()
         } else {
@@ -1275,7 +1326,10 @@ mod tests {
         let line: Vec<Point<f64>> = points(300, 7, 24.90);
         let feature = Feature {
             type_: FeatureType::LineString,
-            geometry: convert_geometry_to_tile(&Geometry::LineString(line), &CANONICAL),
+            geometry: convert_geometry_to_tile(
+                &geo_types::Geometry::LineString(line.into_iter().map(geo_types::Coord::from).collect()),
+                &CANONICAL,
+            ),
         };
         let coordinates: Vec<String> = points(200, 8, 24.94).iter().map(|p| format!("[{}, {}]", p.x, p.y)).collect();
         let expression =

@@ -11,8 +11,8 @@
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
-use feature::{Feature, Identifier, PropertyMap, Value};
-use geometry::{Geometry, Point};
+use feature::{Feature, Identifier, PropertyMap, Value, geojson};
+use geo_types::{Coord, Geometry, LineString, MultiLineString, Point, Polygon};
 use serde_json::Value as Json;
 
 use crate::{EMPTY_TILE, GeoJSONVT, Options, TileOptions, geojson_to_tile};
@@ -74,18 +74,18 @@ fn tiles_eq(a: &BTreeMap<String, Vec<Feature<i16>>>, b: &BTreeMap<String, Vec<Fe
     }
 }
 
-fn parse_point(pt: &Json) -> Point<i16> {
+fn parse_point(pt: &Json) -> Coord<i16> {
     let pt = pt.as_array().unwrap();
     assert!(pt.len() >= 2);
     // `static_cast<int16_t>(pt[i].GetInt())`
-    Point::new(pt[0].as_i64().unwrap() as i16, pt[1].as_i64().unwrap() as i16)
+    Coord { x: pt[0].as_i64().unwrap() as i16, y: pt[1].as_i64().unwrap() as i16 }
 }
 
 /// util.cpp `parseJSONTile`
 fn parse_json_tile(tile: &Json) -> Vec<Feature<i16>> {
     let mut features = Vec::new();
     for feature in tile.as_array().unwrap() {
-        let mut feat = Feature::new(Geometry::Point(Point::new(0i16, 0)));
+        let mut feat = Feature::new(Point::new(0i16, 0));
 
         if let Some(tags) = feature.get("tags").and_then(Json::as_object) {
             for (key, value) in tags {
@@ -121,30 +121,29 @@ fn parse_json_tile(tile: &Json) -> Vec<Feature<i16>> {
             match type_.as_i64().unwrap() {
                 1 => {
                     for pt in geometry {
-                        feat.geometry = Geometry::Point(parse_point(pt));
+                        feat.geometry = Some(Geometry::Point(Point(parse_point(pt))));
                     }
                 }
                 2 => {
                     let mut multi_line = Vec::new();
                     let is_multi = geometry.len() > 1;
                     for part in geometry {
-                        let line: Vec<Point<i16>> = part.as_array().unwrap().iter().map(parse_point).collect();
+                        let line: LineString<i16> = part.as_array().unwrap().iter().map(parse_point).collect();
                         if !is_multi {
-                            feat.geometry = Geometry::LineString(line);
+                            feat.geometry = Some(Geometry::LineString(line));
                             break;
                         }
                         multi_line.push(line);
                     }
                     if is_multi {
-                        feat.geometry = Geometry::MultiLineString(multi_line);
+                        feat.geometry = Some(Geometry::MultiLineString(MultiLineString(multi_line)));
                     }
                 }
                 3 => {
-                    let poly = geometry
-                        .iter()
-                        .map(|ring| ring.as_array().unwrap().iter().map(parse_point).collect())
-                        .collect();
-                    feat.geometry = Geometry::Polygon(poly);
+                    let mut rings =
+                        geometry.iter().map(|ring| ring.as_array().unwrap().iter().map(parse_point).collect());
+                    let exterior = rings.next().unwrap();
+                    feat.geometry = Some(Geometry::Polygon(Polygon::new(exterior, rings.collect())));
                 }
                 _ => {}
             }
@@ -174,7 +173,8 @@ fn feature_collection(geojson: &geojson::GeoJSON) -> &Vec<Feature<f64>> {
 #[test]
 fn get_tile_us_states() {
     let geojson = geojson::parse(&load_file("test/fixtures/us-states.json")).unwrap();
-    let mut index = GeoJSONVT::new(feature_collection(&geojson), Options::default());
+    let features = feature_collection(&geojson).iter().map(|f| (f.geometry.as_ref(), &f.properties, &f.id));
+    let mut index = GeoJSONVT::from_features(features, Options::default());
 
     let features = index.get_tile(7, 37, 48).unwrap().features.clone();
     let expected = parse_json_tile_str(&load_file("test/fixtures/us-states-z7-37-48.json"));
@@ -233,15 +233,10 @@ fn get_tile_polygon_clipping_bug() {
     assert_eq!(tile.features.len(), 1);
     assert_eq!(tile.num_points, 5);
 
-    let expected = Geometry::Polygon(vec![vec![
-        Point::new(3072i16, 3072),
-        Point::new(5120, 3072),
-        Point::new(5120, 5120),
-        Point::new(3072, 5120),
-        Point::new(3072, 3072),
-    ]]);
+    let exterior = [(3072i16, 3072), (5120, 3072), (5120, 5120), (3072, 5120), (3072, 3072)];
+    let expected = Geometry::Polygon(Polygon::new(LineString::from(exterior.to_vec()), vec![]));
 
-    assert_eq!(tile.features[0].geometry, expected);
+    assert_eq!(tile.features[0].geometry, Some(expected));
 }
 
 #[test]
@@ -284,17 +279,17 @@ fn get_tile_projection() {
         let tile = index.get_tile(z, x, y).unwrap();
         assert_eq!(tile.num_points, tile.num_simplified);
         assert_eq!(tile.features.len(), 1);
-        let Geometry::LineString(line_string) = &tile.features[0].geometry else { panic!("not a line string") };
-        assert_eq!(line_string.len(), 2);
+        let Some(Geometry::LineString(line_string)) = &tile.features[0].geometry else { panic!("not a line string") };
+        assert_eq!(line_string.0.len(), 2);
 
         let total_features = f64::from(1u32 << z) * 8192.0;
 
-        let to_web_mercator_lon = |point: &Point<i16>| -> f64 {
+        let to_web_mercator_lon = |point: &Coord<i16>| -> f64 {
             let x0 = 8192.0 * f64::from(x);
             (x0 + f64::from(point.x)) * 360.0 / total_features - 180.0
         };
 
-        let to_web_mercator_lat = |point: &Point<i16>| -> f64 {
+        let to_web_mercator_lat = |point: &Coord<i16>| -> f64 {
             let y0 = 8192.0 * f64::from(y);
             let y2 = 180.0 - (y0 + f64::from(point.y)) * 360.0 / total_features;
             360.0 / PI * (y2 * PI / 180.0).exp().atan() - 90.0
@@ -302,11 +297,11 @@ fn get_tile_projection() {
 
         let tolerance = 0.1 / (1.0 + f64::from(z));
 
-        assert!((-122.418_224_215_507_51 - to_web_mercator_lon(&line_string[0])).abs() <= tolerance);
-        assert!((37.778_525_145_991_72 - to_web_mercator_lat(&line_string[0])).abs() <= tolerance);
+        assert!((-122.418_224_215_507_51 - to_web_mercator_lon(&line_string.0[0])).abs() <= tolerance);
+        assert!((37.778_525_145_991_72 - to_web_mercator_lat(&line_string.0[0])).abs() <= tolerance);
 
-        assert!((-122.417_070_865_631_09 - to_web_mercator_lon(&line_string[1])).abs() <= tolerance);
-        assert!((37.780_424_620_898_664 - to_web_mercator_lat(&line_string[1])).abs() <= tolerance);
+        assert!((-122.417_070_865_631_09 - to_web_mercator_lon(&line_string.0[1])).abs() <= tolerance);
+        assert!((37.780_424_620_898_664 - to_web_mercator_lat(&line_string.0[1])).abs() <= tolerance);
     }
 }
 
@@ -358,7 +353,8 @@ fn tile_test_tiles() {
 #[test]
 fn gen_tiles_invalid_geojson() {
     let err = gen_tiles(r#"{"type": "Pologon"}"#, 0, 10000, false).expect_err("Expected exception");
-    assert_eq!(err.message(), "Pologon geometry must have a coordinates property");
+    // C++: "Pologon geometry must have a coordinates property".
+    assert!(err.message().starts_with("unknown variant `Pologon`"), "{}", err.message());
 }
 
 #[test]
@@ -370,7 +366,8 @@ fn gen_tiles_empty_geojson() {
 #[test]
 fn gen_tiles_no_object_geojson() {
     let err = gen_tiles("42", 0, 10000, false).expect_err("Expected exception");
-    assert_eq!(err.message(), "GeoJSON must be an object");
+    // C++: "GeoJSON must be an object".
+    assert!(err.message().starts_with("invalid type: integer `42`, expected GeoJson object"), "{}", err.message());
 }
 
 fn property_string<'a>(props: &'a PropertyMap, key: &str) -> &'a str {

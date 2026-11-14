@@ -1,5 +1,5 @@
-use feature::Value as MbglValue;
-use geometry::{Geometry, Point};
+use feature::{Value as MbglValue, geojson};
+use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, Point, Polygon};
 use mln_expression::dsl::create_expression_from_str;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryCollection;
@@ -241,8 +241,22 @@ fn pt(x: f64, y: f64) -> Point<f64> {
     Point::new(x, y)
 }
 
-fn pts(points: &[(f64, f64)]) -> Vec<Point<f64>> {
-    points.iter().map(|&(x, y)| pt(x, y)).collect()
+fn pts(points: &[(f64, f64)]) -> LineString<f64> {
+    points.iter().copied().collect()
+}
+
+fn multi_point(points: LineString<f64>) -> Geometry<f64> {
+    Geometry::MultiPoint(MultiPoint(points.into_points()))
+}
+
+fn multi_line_string(lines: Vec<LineString<f64>>) -> Geometry<f64> {
+    Geometry::MultiLineString(MultiLineString(lines))
+}
+
+/// The polygon of `rings`, the exterior first.
+fn polygon(rings: Vec<LineString<f64>>) -> Geometry<f64> {
+    let mut rings = rings.into_iter();
+    Geometry::Polygon(Polygon::new(rings.next().expect("an exterior"), rings.collect()))
 }
 
 fn create_geo_expression(op: &str, geojson: &str) -> Option<Box<dyn crate::expression::Expression>> {
@@ -309,7 +323,7 @@ fn within_expression() {
             (-2.460_937_5, -16.045_813_453_752_17),
             (-9.228_515_625, -17.560_246_503_294_888),
         ])];
-        let geo_poly = convert_geometry(&Geometry::Polygon(test_ring), &canonical_tile_id);
+        let geo_poly = convert_geometry(&polygon(test_ring), &canonical_tile_id);
         let poly_feature = StubGeometryTileFeature::with_geometry(FeatureType::Polygon, geo_poly);
 
         assert!(!eval(&poly_feature));
@@ -454,9 +468,9 @@ fn distance_expression() {
     let get_feature = |name: &str, type_: FeatureType| {
         let geometry_input = read_geometry_data(name);
         let geometry = match geojson::parse(&geometry_input).expect("fixture GeoJSON") {
-            geojson::GeoJSON::Geometry(geometry_set) => geometry_set,
-            geojson::GeoJSON::Feature(feature) => feature.geometry,
-            geojson::GeoJSON::FeatureCollection(features) => features[0].geometry.clone(),
+            feature::GeoJSON::Geometry(geometry_set) => geometry_set,
+            feature::GeoJSON::Feature(feature) => feature.geometry.expect("a geometry"),
+            feature::GeoJSON::FeatureCollection(features) => features[0].geometry.clone().expect("a geometry"),
         };
         feature(type_, geometry)
     };
@@ -507,7 +521,7 @@ fn distance_expression() {
         let prop_expr = distance_expr(point_geo_source);
         let multi_point = feature(
             FeatureType::Point,
-            Geometry::MultiPoint(pts(&[
+            multi_point(pts(&[
                 (24.931_159_615_516_663, 60.167_333_872_589_23),
                 (24.936_089_515_686_035, 60.169_033_745_694_826),
             ])),
@@ -534,7 +548,7 @@ fn distance_expression() {
         let prop_expr = distance_expr(point_geo_source);
         let line_feature = feature(
             FeatureType::LineString,
-            Geometry::MultiLineString(vec![
+            multi_line_string(vec![
                 pts(&[
                     (24.936_218_261_718_75, 60.171_317_895_077_54),
                     (24.941_453_933_715_817, 60.170_229_208_170_014),
@@ -634,7 +648,7 @@ fn distance_expression() {
 
         let polygon_feature = feature(
             FeatureType::Polygon,
-            Geometry::Polygon(vec![pts(&[
+            polygon(vec![pts(&[
                 (24.941_711_425_781_25, 60.167_774_193_529_04),
                 (24.948_577_880_859_375, 60.167_774_193_529_04),
                 (24.948_577_880_859_375, 60.170_122_472_217_564),
@@ -668,7 +682,7 @@ fn distance_expression() {
         // polygon1 is fully inside polygon
         let polygon_feature1 = feature(
             FeatureType::Polygon,
-            Geometry::Polygon(vec![pts(&[
+            polygon(vec![pts(&[
                 (24.941_797_256_469_727, 60.168_500_043_045_34),
                 (24.942_355_155_944_82, 60.168_500_043_045_34),
                 (24.942_355_155_944_82, 60.169_439_353_910_285),
@@ -681,7 +695,7 @@ fn distance_expression() {
         // polygon2's line is intersecting polygon, but no point is inside polygon
         let polygon_feature2 = feature(
             FeatureType::Polygon,
-            Geometry::Polygon(vec![pts(&[
+            polygon(vec![pts(&[
                 (24.943_385_124_206_543, 60.166_066_249_059_554),
                 (24.945_960_044_860_84, 60.166_066_249_059_554),
                 (24.945_960_044_860_84, 60.171_424_627_146_2),
@@ -694,7 +708,7 @@ fn distance_expression() {
         // one of polygon3's point is inside polygon
         let polygon_feature3 = feature(
             FeatureType::Polygon,
-            Geometry::Polygon(vec![pts(&[
+            polygon(vec![pts(&[
                 (24.947_977_066_040_04, 60.169_460_701_572_4),
                 (24.952_354_431_152_344, 60.169_460_701_572_4),
                 (24.952_354_431_152_344, 60.170_826_923_095_42),

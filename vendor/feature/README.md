@@ -7,7 +7,8 @@
 > this crate as `mln_rs::feature`.
 
 Ports `mapbox::feature` of geometry.hpp: feature values, identifiers and
-features (`mln::Feature` in the C++ core).
+features (`mln::Feature` in the C++ core), whose geometry is
+[`geo-types`](https://crates.io/crates/geo-types)'.
 
 Licensed under the ISC License, as geometry.hpp is ([LICENSE](LICENSE)).
 

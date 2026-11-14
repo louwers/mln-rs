@@ -6,12 +6,13 @@
 use std::collections::VecDeque;
 use std::iter::Peekable;
 
+use geo_types::{Coord, Geometry, Polygon};
 use geometry::Point;
 use mln_math::clamp_f64;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
-use mln_util::geometry::{FeatureType, Geometry, MultiPoint, Polygon, to_feature_type};
+use mln_util::geometry::{FeatureType, to_feature_type};
 use mln_util::projection::Projection;
 use mln_vec_map::VecMap;
 
@@ -271,34 +272,30 @@ impl BuildBoundsMap {
         Ok(Projection::project_zoom(&LatLng::new(p.y, p.x)?, self.zoom))
     }
 
-    fn build_table(&self, points: &[Point<f64>], et: &mut BoundsMap, closed: bool) -> Result<(), Error> {
-        let mut projected_points: PointList = Vec::new();
-        if self.project {
-            projected_points.reserve(points.len());
-            for p in points {
-                projected_points.push(self.project_point(p)?);
-            }
-        } else {
-            projected_points.extend_from_slice(points);
+    fn build_table(&self, points: &[Coord<f64>], et: &mut BoundsMap, closed: bool) -> Result<(), Error> {
+        let mut projected_points: PointList = Vec::with_capacity(points.len());
+        for &p in points {
+            let p = Point::from(p);
+            projected_points.push(if self.project { self.project_point(&p)? } else { p });
         }
         build_bounds_map(&mut projected_points, self.max_tile() as u32, et, closed);
         Ok(())
     }
 
     fn build_polygon_table(&self, polygon: &Polygon<f64>, et: &mut BoundsMap) -> Result<(), Error> {
-        for ring in polygon {
-            self.build_table(ring, et, true)?;
+        for ring in std::iter::once(polygon.exterior()).chain(polygon.interiors()) {
+            self.build_table(&ring.0, et, true)?;
         }
         Ok(())
     }
 
     /// The body of `operator()(const Point<double>&)`, which
     /// `operator()(const MultiPoint<double>&)` repeats per point.
-    fn point(&self, p: &Point<f64>, et: &mut BoundsMap) -> Result<(), Error> {
+    fn point(&self, p: Coord<f64>, et: &mut BoundsMap) -> Result<(), Error> {
         let mut bnd = Bound::default();
-        let mut point = *p;
+        let mut point = Point::from(p);
         if self.project {
-            point = self.project_point(p)?;
+            point = self.project_point(&point)?;
         }
         bnd.points.extend([point, point]);
         bnd.winding = false;
@@ -307,9 +304,9 @@ impl BuildBoundsMap {
         Ok(())
     }
 
-    fn multi_point(&self, points: &MultiPoint<f64>, et: &mut BoundsMap) -> Result<(), Error> {
+    fn multi_point(&self, points: &geo_types::MultiPoint<f64>, et: &mut BoundsMap) -> Result<(), Error> {
         for p in points {
-            self.point(p, et)?;
+            self.point(p.0, et)?;
         }
         Ok(())
     }
@@ -317,15 +314,18 @@ impl BuildBoundsMap {
     fn apply(&self, geom: &Geometry<f64>) -> Result<BoundsMap, Error> {
         let mut et = BoundsMap::new();
         match geom {
-            Geometry::Empty | Geometry::GeometryCollection(_) => {}
-            Geometry::Point(p) => self.point(p, &mut et)?,
+            Geometry::GeometryCollection(_) => {}
+            Geometry::Point(p) => self.point(p.0, &mut et)?,
             Geometry::MultiPoint(points) => self.multi_point(points, &mut et)?,
-            Geometry::LineString(lines) => self.build_table(lines, &mut et, false)?,
+            Geometry::Line(line) => self.build_table(&[line.start, line.end], &mut et, false)?,
+            Geometry::LineString(line) => self.build_table(&line.0, &mut et, false)?,
             Geometry::MultiLineString(lines) => {
                 for line in lines {
-                    self.build_table(line, &mut et, false)?;
+                    self.build_table(&line.0, &mut et, false)?;
                 }
             }
+            Geometry::Rect(rect) => self.build_polygon_table(&rect.to_polygon(), &mut et)?,
+            Geometry::Triangle(triangle) => self.build_polygon_table(&triangle.to_polygon(), &mut et)?,
             Geometry::Polygon(polygon) => self.build_polygon_table(polygon, &mut et)?,
             Geometry::MultiPolygon(polygons) => {
                 for polygon in polygons {
@@ -375,7 +375,7 @@ impl Impl {
     /// (C++ defaults it to true). Errors for a point with an out-of-range
     /// latitude while projecting.
     pub(crate) fn new(z: i32, geom: &Geometry<f64>, project: bool) -> Result<Impl, Error> {
-        let is_closed = to_feature_type(geom) == FeatureType::Polygon;
+        let is_closed = to_feature_type(Some(geom)) == FeatureType::Polygon;
 
         let to_bounds_map = BuildBoundsMap::new(z, project);
         let bounds_map = to_bounds_map.apply(geom)?;

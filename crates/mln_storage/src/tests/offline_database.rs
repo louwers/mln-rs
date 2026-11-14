@@ -7,10 +7,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use geo_types::{Geometry, Point};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::geometry::{Geometry, Point};
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::tileset::Scheme;
 

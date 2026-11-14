@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use geometry::{Geometry, LineString, LinearRing, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map_types::{CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
 use mln_style_types::{ProjectionDefinition, SourceType};
@@ -44,8 +44,14 @@ fn p(x: f64, y: f64) -> Point<f64> {
     Point::new(x, y)
 }
 
-fn points(coords: &[(f64, f64)]) -> Vec<Point<f64>> {
-    coords.iter().map(|&(x, y)| p(x, y)).collect()
+fn points(coords: &[(f64, f64)]) -> LineString<f64> {
+    coords.iter().copied().collect()
+}
+
+/// The polygon of `rings`, the exterior first.
+fn polygon(rings: Vec<LineString<f64>>) -> Polygon<f64> {
+    let mut rings = rings.into_iter();
+    Polygon::new(rings.next().expect("an exterior"), rings.collect())
 }
 
 /// `Transform transform;`
@@ -482,7 +488,7 @@ mod tile_cover {
     // gtest: TileCover.GeomMultiPoint
     #[test]
     fn geom_multi_point() {
-        let points: MultiPoint<f64> = points(&[(-122.5, 37.76), (-122.4, 37.76)]);
+        let points = MultiPoint(points(&[(-122.5, 37.76), (-122.4, 37.76)]).into_points());
 
         assert_eq!(
             vec![uw(20, 167_480, 405_351), uw(20, 167_772, 405_351)],
@@ -541,8 +547,10 @@ mod tile_cover {
     // gtest: TileCover.GeomMultiLineString
     #[test]
     fn geom_multi_line_string() {
-        let geom: MultiLineString<f64> =
-            vec![points(&[(-122.5, 37.76), (-122.4, 37.76)]), points(&[(-122.5, 37.72), (-122.4, 37.72)])];
+        let geom = MultiLineString(vec![
+            points(&[(-122.5, 37.76), (-122.4, 37.76)]),
+            points(&[(-122.5, 37.72), (-122.4, 37.72)]),
+        ]);
 
         assert_eq!(
             vec![
@@ -563,7 +571,7 @@ mod tile_cover {
         );
     }
 
-    fn europe_ring() -> LinearRing<f64> {
+    fn europe_ring() -> LineString<f64> {
         points(&[
             (5.097_656_25, 53.067_626_642_387_374),
             (2.373_046_875, 43.389_081_939_117_496),
@@ -579,7 +587,7 @@ mod tile_cover {
     // gtest: TileCover.GeomPolygon
     #[test]
     fn geom_polygon() {
-        let polygon: Polygon<f64> = vec![
+        let polygon = polygon(vec![
             europe_ring(),
             points(&[
                 (19.6875, 49.667_627_822_621_94),
@@ -590,7 +598,7 @@ mod tile_cover {
                 (8.701_171_874_999_998, 50.233_151_832_472_245),
                 (19.6875, 49.667_627_822_621_94),
             ]),
-        ];
+        ]);
 
         let results = tile_cover_geometry(&Geometry::Polygon(polygon), 8).unwrap();
 
@@ -603,16 +611,16 @@ mod tile_cover {
     // gtest: TileCover.GeomMultiPolygon
     #[test]
     fn geom_multi_polygon() {
-        let multi_polygon: MultiPolygon<f64> = vec![
-            vec![europe_ring()],
-            vec![points(&[
+        let multi_polygon = MultiPolygon(vec![
+            polygon(vec![europe_ring()]),
+            polygon(vec![points(&[
                 (59.150_390_625, 45.460_130_637_921_004),
                 (65.126_953_125, 41.112_468_789_180_88),
                 (69.169_921_875, 47.457_808_530_750_31),
                 (63.896_484_375, 50.064_191_736_659_104),
                 (59.150_390_625, 45.460_130_637_921_004),
-            ])],
-        ];
+            ])]),
+        ]);
         let results = tile_cover_geometry(&Geometry::MultiPolygon(multi_polygon), 8).unwrap();
 
         assert_eq!(424, results.len());
@@ -624,7 +632,7 @@ mod tile_cover {
     // gtest: TileCover.GeomSanFranciscoPoly
     #[test]
     fn geom_san_francisco_poly() {
-        let san_francisco_geom: Polygon<f64> = vec![points(&[
+        let san_francisco_geom = polygon(vec![points(&[
             (-122.514_381_408_691_4, 37.779_127_216_982_424),
             (-122.508_115_768_432_62, 37.727_212_390_567_09),
             (-122.503_137_588_500_99, 37.708_201_780_639_29),
@@ -648,7 +656,7 @@ mod tile_cover {
             (-122.489_662_170_410_16, 37.789_166_663_996_49),
             (-122.505_798_339_843_75, 37.787_810_061_660_96),
             (-122.514_381_408_691_4, 37.779_127_216_982_424),
-        ])];
+        ])]);
 
         assert_eq!(
             vec![
@@ -673,14 +681,14 @@ mod tile_cover {
             tile_cover_geometry(&Geometry::Point(point), 2)
         );
 
-        let bad_line: LineString<f64> = vec![p(1.0, 35.0)];
+        let bad_line = points(&[(1.0, 35.0)]);
         assert_eq!(Vec::<UnwrappedTileID>::new(), tile_cover_geometry(&Geometry::LineString(bad_line), 16).unwrap());
 
-        let bad_poly: Polygon<f64> = vec![vec![p(1.0, 35.0)]];
+        let bad_poly = polygon(vec![points(&[(1.0, 35.0)])]);
         assert_eq!(Vec::<UnwrappedTileID>::new(), tile_cover_geometry(&Geometry::Polygon(bad_poly), 16).unwrap());
 
         // Should handle open polygons.
-        let bad_poly: Polygon<f64> = vec![points(&[(1.0, 34.2), (1.0, 34.4), (0.5, 34.3)])];
+        let bad_poly = polygon(vec![points(&[(1.0, 34.2), (1.0, 34.4), (0.5, 34.3)])]);
         assert_eq!(
             vec![uw(10, 513, 407), uw(10, 514, 407), uw(10, 513, 408), uw(10, 514, 408)],
             tile_cover_geometry(&Geometry::Polygon(bad_poly), 10).unwrap()
@@ -712,24 +720,24 @@ mod tile_cover {
         let mut rng = Lcg(1);
         for _ in 0..FUZZ_ROUNDS {
             let len = rng.rand() % 10000 + 3;
-            let mut polygon: Polygon<f64> = Vec::new();
+            let mut rings = Vec::new();
 
             let mut num_rings = 1;
             num_rings += rng.rand() % 5;
             while num_rings > 0 {
-                let mut ring: LinearRing<f64> = Vec::new();
+                let mut ring = Vec::new();
                 for _ in 0..len {
                     let x = (rng.rand() % 180) as f64;
                     let y = (rng.rand() % 90) as f64;
 
-                    ring.push(p(x, y));
+                    ring.push((x, y));
                 }
-                polygon.push(ring);
+                rings.push(LineString::from(ring));
                 num_rings -= 1;
             }
 
             eprint!(".");
-            let mut tc = TileCover::new_from_geometry(&Geometry::Polygon(polygon), 5, true).unwrap();
+            let mut tc = TileCover::new_from_geometry(&Geometry::Polygon(polygon(rings)), 5, true).unwrap();
             while tc.next().is_some() {}
         }
     }
@@ -741,24 +749,25 @@ mod tile_cover {
         let mut rng = Lcg(1);
         for _ in 0..FUZZ_ROUNDS {
             let len = rng.rand() % 10000 + 3;
-            let mut mls: MultiLineString<f64> = Vec::new();
+            let mut mls = Vec::new();
 
             let mut num_lines = 1;
             num_lines += rng.rand() % 5;
             while num_lines > 0 {
-                let mut line: LineString<f64> = Vec::new();
+                let mut line = Vec::new();
                 for _ in 0..len {
                     let x = (rng.rand() % 180) as f64;
                     let y = (rng.rand() % 90) as f64;
 
-                    line.push(p(x, y));
+                    line.push((x, y));
                 }
-                mls.push(line);
+                mls.push(LineString::from(line));
                 num_lines -= 1;
             }
 
             eprint!(".");
-            let mut tc = TileCover::new_from_geometry(&Geometry::MultiLineString(mls), 5, true).unwrap();
+            let mut tc =
+                TileCover::new_from_geometry(&Geometry::MultiLineString(MultiLineString(mls)), 5, true).unwrap();
             while tc.next().is_some() {}
         }
     }

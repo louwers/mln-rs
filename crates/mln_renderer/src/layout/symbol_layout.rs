@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use geometry::{LinearRing, Point, Polygon};
+use geometry::Point;
 use glam::Vec2;
 use mln_expression::Value;
 use mln_expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
@@ -899,9 +899,10 @@ impl SymbolLayout {
             }
         } else if feature_type == FeatureType::Polygon {
             for polygon in mln_tile::geometry_tile_data::classify_rings(&feature.geometry) {
-                let mut poly: Polygon<f64> = Polygon::new();
+                let mut poly: polylabel::Polygon<f64> = Vec::new();
                 for ring in polygon.iter() {
-                    let r: LinearRing<f64> = ring.iter().map(|p| Point::new(f64::from(p.x), f64::from(p.y))).collect();
+                    let r: polylabel::LinearRing<f64> =
+                        ring.iter().map(|p| Point::new(f64::from(p.x), f64::from(p.y))).collect();
                     poly.push(r);
                 }
 

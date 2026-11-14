@@ -19,6 +19,7 @@ doctest = false
 
 [dependencies]
 feature.workspace = true
+geo-types.workspace = true
 geometry.workspace = true
 kdbush.workspace = true
 

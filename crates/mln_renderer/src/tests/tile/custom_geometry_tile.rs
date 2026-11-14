@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use feature::Feature;
-use geometry::{Geometry, Point};
+use geo_types::Point;
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler;
 use mln_style::custom_tile_loader::{CustomTileLoader, TileFunction};
@@ -197,7 +197,7 @@ fn invoke_tile_changed() {
     tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();
     assert_eq!(result, Vec::<mln_util::feature::Feature>::new());
 
-    tile.set_tile_data(Arc::new(vec![Feature::new(Geometry::Point(Point::new(0i16, 0)))]));
+    tile.set_tile_data(Arc::new(vec![Feature::new(Point::new(0i16, 0))]));
 
     while !tile.is_complete() {
         test.run_loop.run_once();

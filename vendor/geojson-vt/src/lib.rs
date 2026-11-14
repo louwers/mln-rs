@@ -3,7 +3,8 @@
 // its detail headers (types, convert, simplify, clip, wrap, tile).
 //
 // `geojsonvt::geojson` is the same variant as `mapbox::geojson::geojson`
-// (`mln::GeoJSON`): //vendor/geojson's `GeoJSON`.
+// (`mln::GeoJSON`): `feature::GeoJSON`. Its input geometry is any
+// `geo_traits` geometry; its tiles' geometry is `geo_types`'.
 
 mod clip;
 mod convert;
@@ -24,18 +25,29 @@ mod detail {
 use std::collections::{BTreeMap, HashMap};
 
 use detail::{InternalTile, VtFeatures};
-use feature::Feature;
-use geojson::{FeatureCollection, GeoJSON};
+use feature::{GeoJSON, Identifier, PropertyMap};
+use geo_traits::GeometryTrait;
+use geo_types::Geometry;
 pub(crate) use tile::Tile;
 
-/// `ToFeatureCollection`
-#[must_use]
-pub(crate) fn to_feature_collection(geojson: &GeoJSON) -> FeatureCollection<f64> {
-    match geojson {
-        GeoJSON::FeatureCollection(value) => value.clone(),
-        GeoJSON::Feature(value) => vec![value.clone()],
-        GeoJSON::Geometry(value) => vec![Feature::new(value.clone())],
-    }
+static NO_PROPERTIES: PropertyMap = PropertyMap::new();
+static NO_ID: Identifier = Identifier::Null;
+
+/// `ToFeatureCollection`: the geometry, properties and id of each feature of
+/// `geojson`, without copying them. A geometry is one feature without
+/// properties or id.
+pub(crate) fn geojson_features(
+    geojson: &GeoJSON,
+) -> impl Iterator<Item = (Option<&Geometry<f64>>, &PropertyMap, &Identifier)> {
+    let (geometry, features) = match geojson {
+        GeoJSON::Geometry(g) => (Some(g), &[][..]),
+        GeoJSON::Feature(f) => (None, std::slice::from_ref(f)),
+        GeoJSON::FeatureCollection(c) => (None, c.as_slice()),
+    };
+    geometry
+        .map(|g| (Some(g), &NO_PROPERTIES, &NO_ID))
+        .into_iter()
+        .chain(features.iter().map(|f| (f.geometry.as_ref(), &f.properties, &f.id)))
 }
 
 /// `TileOptions`
@@ -107,10 +119,9 @@ pub fn geojson_to_tile(
     wrap: bool,
     clip: bool,
 ) -> Tile {
-    let features_ = to_feature_collection(geojson);
     let z2 = 1u32.wrapping_shl(u32::from(z));
     let tolerance = (options.tolerance / f64::from(options.extent)) / f64::from(z2);
-    let mut features = detail::convert(&features_, tolerance, false);
+    let mut features = detail::convert(geojson_features(geojson), tolerance, false);
     if wrap {
         features = detail::wrap(&features, f64::from(options.buffer) / f64::from(options.extent), options.line_metrics);
     }
@@ -149,9 +160,14 @@ pub struct GeoJSONVT {
 }
 
 impl GeoJSONVT {
-    /// `GeoJSONVT(const feature_collection&, const Options&)`
+    /// `GeoJSONVT(const feature_collection&, const Options&)`: tiles
+    /// features given as their geometry (`None` for a null geometry), in
+    /// longitude/latitude, their properties and their id.
     #[must_use]
-    pub(crate) fn new(features: &FeatureCollection<f64>, options: Options) -> Self {
+    pub fn from_features<'a, G: GeometryTrait<T = f64> + 'a>(
+        features: impl IntoIterator<Item = (Option<&'a G>, &'a PropertyMap, &'a Identifier)>,
+        options: Options,
+    ) -> Self {
         let mut vt = GeoJSONVT { options, stats: BTreeMap::new(), total: 0, tiles: HashMap::new() };
 
         let z2 = 1u32.wrapping_shl(u32::from(options.max_zoom));
@@ -174,7 +190,7 @@ impl GeoJSONVT {
     /// `GeoJSONVT(const geojson&, const Options&)`
     #[must_use]
     pub fn from_geojson(geojson: &GeoJSON, options: Options) -> Self {
-        Self::new(&to_feature_collection(geojson), options)
+        Self::from_features(geojson_features(geojson), options)
     }
 
     /// `getTile(z, x, y)`; `Err` is the C++ `std::runtime_error` message.

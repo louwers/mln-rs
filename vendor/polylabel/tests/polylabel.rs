@@ -1,7 +1,7 @@
 // Ports vendor/polylabel/test/test.cpp over test/fixtures, read in place.
 
-use geometry::{Point, Polygon};
-use polylabel::polylabel;
+use geometry::Point;
+use polylabel::{Polygon, polylabel};
 
 fn fixture(name: &str) -> Polygon<f64> {
     let path =

@@ -5,7 +5,8 @@
 use std::f64::consts::PI;
 
 use feature::Feature;
-use geometry::{Geometry, LineString, LinearRing, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use geo_types::{Coord, CoordNum, Geometry, LineString, MultiLineString, MultiPolygon, Polygon};
+use geometry::Point;
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay::{Overlay, ShapeType};
 use i_overlay::core::overlay_rule::OverlayRule;
@@ -130,63 +131,50 @@ pub fn convert_geometry(
 
     let tile_coordinates_to_lat_lng = |p: &Point<i16>| {
         let y2 = 180.0 - (f64::from(p.y) + y0) * 360.0 / size;
-        Point::new((f64::from(p.x) + x0) * 360.0 / size - 180.0, (y2 * PI / 180.0).exp().atan() * 360.0 / PI - 90.0)
+        Coord { x: (f64::from(p.x) + x0) * 360.0 / size - 180.0, y: (y2 * PI / 180.0).exp().atan() * 360.0 / PI - 90.0 }
     };
+    let line_string = |points: &[Point<i16>]| LineString(points.iter().map(tile_coordinates_to_lat_lng).collect());
 
     let geometries = geometry_tile_feature.get_geometries();
 
     match geometry_tile_feature.get_type() {
         FeatureType::Unknown => {
             debug_assert!(false, "convertGeometry of a feature of unknown type");
-            Ok(Geometry::Point(Point::new(f64::NAN, f64::NAN)))
+            Ok(Geometry::Point(geo_types::Point::new(f64::NAN, f64::NAN)))
         }
 
         FeatureType::Point => {
-            let mut multi_point: MultiPoint<f64> = MultiPoint::new();
             let first = geometries.first().ok_or_else(|| Error::vector_range_check(0, geometries.len()))?;
-            for p in first {
-                multi_point.push(tile_coordinates_to_lat_lng(p));
-            }
-            if multi_point.len() == 1 {
-                Ok(Geometry::Point(multi_point[0]))
+            if let [p] = first.as_slice() {
+                Ok(Geometry::Point(tile_coordinates_to_lat_lng(p).into()))
             } else {
-                Ok(Geometry::MultiPoint(multi_point))
+                Ok(Geometry::MultiPoint(
+                    first.iter().map(|p| geo_types::Point(tile_coordinates_to_lat_lng(p))).collect(),
+                ))
             }
         }
 
         FeatureType::LineString => {
-            let mut multi_line_string: MultiLineString<f64> = MultiLineString::new();
-            for g in geometries.iter() {
-                let mut line_string: LineString<f64> = LineString::new();
-                for p in g {
-                    line_string.push(tile_coordinates_to_lat_lng(p));
-                }
-                multi_line_string.push(line_string);
-            }
-            if multi_line_string.len() == 1 {
-                Ok(Geometry::LineString(multi_line_string.swap_remove(0)))
+            if let [g] = geometries.as_slice() {
+                Ok(Geometry::LineString(line_string(g)))
             } else {
-                Ok(Geometry::MultiLineString(multi_line_string))
+                Ok(Geometry::MultiLineString(MultiLineString(geometries.iter().map(|g| line_string(g)).collect())))
             }
         }
 
         FeatureType::Polygon => {
-            let mut multi_polygon: MultiPolygon<f64> = MultiPolygon::new();
-            for pg in classify_rings(geometries) {
-                let mut polygon: Polygon<f64> = Polygon::new();
-                for r in pg.iter() {
-                    let mut linear_ring: LinearRing<f64> = LinearRing::new();
-                    for p in r {
-                        linear_ring.push(tile_coordinates_to_lat_lng(p));
-                    }
-                    polygon.push(linear_ring);
-                }
-                multi_polygon.push(polygon);
-            }
+            let mut multi_polygon: Vec<Polygon<f64>> = classify_rings(geometries)
+                .iter()
+                .map(|pg| {
+                    let mut rings = pg.iter().map(|r| line_string(r));
+                    let exterior = rings.next().unwrap_or_else(|| LineString(Vec::new()));
+                    Polygon::new(exterior, rings.collect())
+                })
+                .collect();
             if multi_polygon.len() == 1 {
                 Ok(Geometry::Polygon(multi_polygon.swap_remove(0)))
             } else {
-                Ok(Geometry::MultiPolygon(multi_polygon))
+                Ok(Geometry::MultiPolygon(MultiPolygon(multi_polygon)))
             }
         }
     }
@@ -210,7 +198,7 @@ pub fn convert_geometry_to_tile(geometry: &Geometry<f64>, tile_id: &CanonicalTil
     let x0 = f64::from(EXTENT) * f64::from(tile_id.x);
     let y0 = f64::from(EXTENT) * f64::from(tile_id.y);
 
-    let lat_lon_to_tile_coodinates = |c: &Point<f64>| {
+    let lat_lon_to_tile_coodinates = |c: Coord<f64>| {
         let x = (c.x + 180.0) * size / 360.0 - x0;
         let px = int16_cast_x86_64(x);
 
@@ -220,21 +208,31 @@ pub fn convert_geometry_to_tile(geometry: &Geometry<f64>, tile_id: &CanonicalTil
         Point::new(px, py)
     };
 
-    let ring =
-        |points: &[Point<f64>]| -> GeometryCoordinates { points.iter().map(&lat_lon_to_tile_coodinates).collect() };
+    GeometryCollection::from(geometry_rings(geometry, lat_lon_to_tile_coodinates))
+}
 
+/// The points of `geometry` as lines or rings: one for a point, its line
+/// for a line string, one per line, and a polygon's exterior then its
+/// interiors. A geometry collection has none.
+fn geometry_rings<T: CoordNum, U>(geometry: &Geometry<T>, point: impl Fn(Coord<T>) -> U) -> Vec<Vec<U>> {
+    let line = |coords: &[Coord<T>]| coords.iter().map(|&c| point(c)).collect::<Vec<_>>();
+    let polygon_rings = |polygon: &Polygon<T>| {
+        // A polygon of no rings has an empty exterior.
+        let exterior =
+            (!polygon.exterior().0.is_empty() || !polygon.interiors().is_empty()).then(|| polygon.exterior());
+        exterior.into_iter().chain(polygon.interiors()).map(|ring| line(&ring.0)).collect::<Vec<_>>()
+    };
     match geometry {
-        Geometry::Point(point) => GeometryCollection::from(vec![vec![lat_lon_to_tile_coodinates(point)]]),
-        Geometry::MultiPoint(points) => GeometryCollection::from(vec![ring(points)]),
-        Geometry::LineString(line_string) => GeometryCollection::from(vec![ring(line_string)]),
-        Geometry::MultiLineString(line_strings) => {
-            GeometryCollection::from(line_strings.iter().map(|line| ring(line)).collect::<Vec<_>>())
-        }
-        Geometry::Polygon(polygon) => GeometryCollection::from(polygon.iter().map(|r| ring(r)).collect::<Vec<_>>()),
-        Geometry::MultiPolygon(polygons) => {
-            GeometryCollection::from(polygons.iter().flat_map(|pg| pg.iter().map(|r| ring(r))).collect::<Vec<_>>())
-        }
-        Geometry::Empty | Geometry::GeometryCollection(_) => GeometryCollection::new(),
+        Geometry::Point(p) => vec![vec![point(p.0)]],
+        Geometry::MultiPoint(points) => vec![points.iter().map(|p| point(p.0)).collect()],
+        Geometry::Line(l) => vec![vec![point(l.start), point(l.end)]],
+        Geometry::LineString(l) => vec![line(&l.0)],
+        Geometry::MultiLineString(lines) => lines.iter().map(|l| line(&l.0)).collect(),
+        Geometry::Polygon(p) => polygon_rings(p),
+        Geometry::MultiPolygon(polygons) => polygons.iter().flat_map(polygon_rings).collect(),
+        Geometry::Rect(r) => polygon_rings(&r.to_polygon()),
+        Geometry::Triangle(t) => polygon_rings(&t.to_polygon()),
+        Geometry::GeometryCollection(_) => Vec::new(),
     }
 }
 
@@ -250,17 +248,11 @@ pub fn convert_feature(
     Ok(feature)
 }
 
+/// The lines or rings of a tile feature's geometry; a null geometry has
+/// none.
 #[must_use]
-pub fn to_geometry_collection(geom: &Geometry<i16>) -> GeometryCollection {
-    match geom {
-        Geometry::Empty | Geometry::GeometryCollection(_) => GeometryCollection::new(),
-        Geometry::Point(p) => GeometryCollection::from(vec![vec![*p]]),
-        Geometry::MultiPoint(g) | Geometry::LineString(g) => GeometryCollection::from(vec![g.clone()]),
-        Geometry::MultiLineString(g) | Geometry::Polygon(g) => GeometryCollection::from(g.clone()),
-        Geometry::MultiPolygon(g) => {
-            GeometryCollection::from(g.iter().flat_map(|polygon| polygon.iter().cloned()).collect::<Vec<_>>())
-        }
-    }
+pub fn to_geometry_collection(geom: Option<&Geometry<i16>>) -> GeometryCollection {
+    geom.map_or_else(GeometryCollection::new, |geom| GeometryCollection::from(geometry_rings(geom, Point::from)))
 }
 
 pub(crate) type GeometryCoordinateFloat = Point<f32>;

@@ -136,12 +136,12 @@ pub(crate) fn center_pixel(image: &PremultipliedImage) -> [u8; 4] {
 /// through `getSource("custom")`.
 pub(crate) fn answer_with(
     handle: &Arc<OnceLock<CustomGeometrySourceHandle>>,
-    features: impl Fn(&CanonicalTileID) -> Vec<geojson::Feature> + Send + Sync + 'static,
+    features: impl Fn(&CanonicalTileID) -> Vec<feature::Feature> + Send + Sync + 'static,
 ) -> TileFunction {
     let handle = Arc::clone(handle);
     Arc::new(move |tile_id: &CanonicalTileID| {
         if let Some(handle) = handle.get() {
-            handle.set_tile_data(*tile_id, geojson::GeoJSON::FeatureCollection(features(tile_id)));
+            handle.set_tile_data(*tile_id, feature::GeoJSON::FeatureCollection(features(tile_id)));
         }
     })
 }

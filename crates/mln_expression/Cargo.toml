@@ -18,7 +18,7 @@ doctest = false
 [dependencies]
 cheap-ruler.workspace = true
 feature.workspace = true
-geojson.workspace = true
+geo-types.workspace = true
 geometry.workspace = true
 mln_conversion.workspace = true
 mln_math.workspace = true

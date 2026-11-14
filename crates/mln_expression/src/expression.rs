@@ -413,14 +413,16 @@ impl<'a> GeoJSONFeature<'a> {
     }
 
     fn with_canonical(feature: &'a Feature<f64>, canonical: &CanonicalTileID) -> Self {
-        let geometry = mln_tile::geometry_tile_data::convert_geometry_to_tile(&feature.geometry, canonical);
+        let geometry = feature.geometry.as_ref().map_or_else(GeometryCollection::default, |g| {
+            mln_tile::geometry_tile_data::convert_geometry_to_tile(g, canonical)
+        });
         GeoJSONFeature { feature, geometry }
     }
 }
 
 impl GeometryTileFeature for GeoJSONFeature<'_> {
     fn get_type(&self) -> FeatureType {
-        to_feature_type(&self.feature.geometry)
+        to_feature_type(self.feature.geometry.as_ref())
     }
 
     fn get_properties(&self) -> &ValueObject {

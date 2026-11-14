@@ -2,7 +2,7 @@
 // aliased as mln::FeatureIdentifier / mln::Feature in
 // include/mln/util/feature.hpp.
 
-use geometry::Geometry;
+use geo_types::{CoordNum, Geometry};
 use serde::{Deserialize, Serialize};
 
 use crate::value::ValueObject;
@@ -22,15 +22,24 @@ pub enum Identifier {
 pub type PropertyMap = ValueObject;
 
 /// `mapbox::feature::feature<T>`.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Feature<T = f64> {
-    pub geometry: Geometry<T>,
+///
+/// `geometry` is `None` where C++ holds an empty geometry, as for a GeoJSON
+/// feature whose geometry is `null`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Feature<T: CoordNum = f64> {
+    pub geometry: Option<Geometry<T>>,
     pub properties: PropertyMap,
     pub id: Identifier,
 }
 
-impl<T> Feature<T> {
-    pub fn new(geometry: Geometry<T>) -> Self {
-        Feature { geometry, properties: PropertyMap::new(), id: Identifier::Null }
+impl<T: CoordNum> Default for Feature<T> {
+    fn default() -> Self {
+        Feature { geometry: None, properties: PropertyMap::new(), id: Identifier::Null }
+    }
+}
+
+impl<T: CoordNum> Feature<T> {
+    pub fn new(geometry: impl Into<Geometry<T>>) -> Self {
+        Feature { geometry: Some(geometry.into()), properties: PropertyMap::new(), id: Identifier::Null }
     }
 }

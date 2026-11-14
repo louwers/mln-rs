@@ -273,8 +273,8 @@ unsafe fn read_inputs(inputs: *const mln_style_expression_inputs) -> Result<Inpu
 
 fn parse_feature(text: &str) -> Result<Feature<f64>, Error> {
     let document = parse_json(text, "feature")?;
-    match geojson::convert(&document) {
-        Ok(geojson::GeoJSON::Feature(feature)) => Ok(feature),
+    match feature::geojson::convert(&document) {
+        Ok(feature::GeoJSON::Feature(feature)) => Ok(feature),
         Ok(_) => Err(Error::invalid_argument("feature must contain one GeoJSON Feature")),
         Err(error) => Err(Error::invalid_argument(format!("feature is invalid: {}", error.message()))),
     }
@@ -286,7 +286,7 @@ fn parse_object(text: Option<&str>, name: &str) -> Result<Option<ValueObject>, E
     if !document.is_object() {
         return Err(Error::invalid_argument(format!("{name} must contain a JSON object")));
     }
-    match geojson::convert_value(&document) {
+    match feature::geojson::convert_value(&document) {
         JsonValue::Object(object) => Ok(Some(object)),
         _ => Err(Error::invalid_argument(format!("{name} must contain a JSON object"))),
     }

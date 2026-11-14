@@ -20,7 +20,7 @@ doctest = false
 [dependencies]
 bytes.workspace = true
 feature.workspace = true
-geojson.workspace = true
+geo-types.workspace = true
 mln_actor.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true

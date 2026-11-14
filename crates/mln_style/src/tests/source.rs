@@ -207,7 +207,7 @@ fn geojson_source_keeps_the_style_attribution() {
 
     let observer = Rc::new(StubStyleObserver::default());
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
-    source.set_geojson(&geojson::parse(r#"{"type": "Point", "coordinates": [1.1, 1.1]}"#).unwrap()).unwrap();
+    source.set_geojson(&feature::geojson::parse(r#"{"type": "Point", "coordinates": [1.1, 1.1]}"#).unwrap()).unwrap();
     assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
 
     file_source.set_response(Kind::Source, |_| {
@@ -290,7 +290,7 @@ fn geojson_source_data_replaces_building_url_data() {
     // The URL's data arrives and starts building in the background.
     file_source.respond_to_all();
 
-    let data = geojson::parse(std::str::from_utf8(&geojson_points(2)).unwrap()).unwrap();
+    let data = feature::geojson::parse(std::str::from_utf8(&geojson_points(2)).unwrap()).unwrap();
     source.set_geojson(&data).unwrap();
     finish_geojson_build(&run_loop);
 

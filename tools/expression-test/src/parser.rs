@@ -4,7 +4,6 @@
 use std::path::{Path, PathBuf};
 
 use feature::{Feature, Identifier, Value, ValueObject};
-use geometry::{Geometry, LineString, Point, Polygon};
 use mln_conversion::Convertible;
 use mln_expression::type_::{self, Type};
 use mln_expression::{Expression, ParsingContext, is_feature_constant, is_zoom_constant};
@@ -187,62 +186,6 @@ fn parse_property_spec(property_spec: &serde_json::Value, data: &mut TestData) {
     data.spec = Some(spec);
 }
 
-fn convert_point(json: &serde_json::Value) -> Result<Point<f64>, String> {
-    let a = json.as_array().ok_or("coordinates must be an array")?;
-    if a.len() < 2 {
-        return Err("coordinates array must have at least 2 numbers".to_owned());
-    }
-    let x = a[0].as_f64().ok_or("coordinate must be a number")?;
-    let y = a[1].as_f64().ok_or("coordinate must be a number")?;
-    Ok(Point::new(x, y))
-}
-
-fn convert_points(json: &serde_json::Value) -> Result<Vec<Point<f64>>, String> {
-    json.as_array().ok_or("coordinates must be an array")?.iter().map(convert_point).collect()
-}
-
-fn convert_polygon(json: &serde_json::Value) -> Result<Polygon<f64>, String> {
-    json.as_array().ok_or("coordinates must be an array")?.iter().map(convert_points).collect()
-}
-
-// Reads only what the tests use: no null geometries, and the error
-// messages differ from mapbox/geojson.hpp's.
-fn convert_geometry(json: &serde_json::Value) -> Result<Geometry<f64>, String> {
-    let t = json.get("type").and_then(|t| t.as_str()).ok_or("Geometry must have a type property")?;
-    if t == "GeometryCollection" {
-        let geometries = json
-            .get("geometries")
-            .and_then(|g| g.as_array())
-            .ok_or("GeometryCollection must have a geometries property")?;
-        return Ok(Geometry::GeometryCollection(geometries.iter().map(convert_geometry).collect::<Result<_, _>>()?));
-    }
-    let coordinates =
-        json.get("coordinates").ok_or_else(|| format!("{t} geometry must have a coordinates property"))?;
-    Ok(match t {
-        "Point" => Geometry::Point(convert_point(coordinates)?),
-        "MultiPoint" => Geometry::MultiPoint(convert_points(coordinates)?),
-        "LineString" => Geometry::LineString(convert_points(coordinates)?),
-        "MultiLineString" => Geometry::MultiLineString(
-            coordinates
-                .as_array()
-                .ok_or("coordinates must be an array")?
-                .iter()
-                .map(convert_points)
-                .collect::<Result<Vec<LineString<f64>>, _>>()?,
-        ),
-        "Polygon" => Geometry::Polygon(convert_polygon(coordinates)?),
-        "MultiPolygon" => Geometry::MultiPolygon(
-            coordinates
-                .as_array()
-                .ok_or("coordinates must be an array")?
-                .iter()
-                .map(convert_polygon)
-                .collect::<Result<_, _>>()?,
-        ),
-        _ => return Err(format!("{t} not yet implemented")),
-    })
-}
-
 fn convert_identifier(json: &serde_json::Value) -> Identifier {
     match json {
         serde_json::Value::Number(n) => {
@@ -285,7 +228,7 @@ fn parse_inputs(inputs_value: &serde_json::Value, data: &mut TestData) -> Result
         }
 
         // Parse feature properties
-        let mut feature = Feature::new(Geometry::Point(Point::new(0.0, 0.0)));
+        let mut feature = Feature::new(geo_types::Point::new(0.0, 0.0));
         let feature_object = &input[1];
         if let Some(properties) = feature_object.get("properties")
             && let Some(Value::Object(p)) = json_to_value(properties)
@@ -294,7 +237,7 @@ fn parse_inputs(inputs_value: &serde_json::Value, data: &mut TestData) -> Result
         }
 
         if let Some(geometry) = feature_object.get("geometry") {
-            feature.geometry = convert_geometry(geometry)?;
+            feature.geometry = feature::geojson::convert_geometry(geometry).map_err(|e| e.0)?;
         }
 
         if let Some(id) = feature_object.get("id") {
