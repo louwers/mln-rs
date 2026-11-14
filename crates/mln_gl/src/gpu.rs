@@ -11,8 +11,8 @@ use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, PipelineState, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc,
-    TextureFormat, TextureId, TextureRegion, TextureUsage, VertexStep,
+    PipelineId, PipelineKey, PipelineState, ReadbackId, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats,
+    TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
@@ -286,12 +286,16 @@ fn buffer_target(usage: BufferUsage) -> u32 {
 /// with it, so a `destroy_*` call deletes at once.
 ///
 /// What a pass draws is stored bottom row first, as GL stores it, so the
-/// viewports and scissors of its commands, which count rows from the top,
-/// are flipped.
+/// viewports and scissors of its commands, and readbacks, which count rows
+/// from the top, are flipped. A texture's written rows read back in the
+/// other order.
 ///
 /// A storage buffer is a uniform buffer of its elements, of the size the
 /// shader's block reads, so a bind group binds one from a whole number of
 /// elements.
+///
+/// A readback reads the texels at once, since GL runs the commands before
+/// it first: a texture of 8-bit red or RGBA texels, which GL reads as RGBA.
 pub struct GlGpu {
     /// The GL state the context last set, which a renderer backend's
     /// context shares.
@@ -312,8 +316,11 @@ pub struct GlGpu {
     programs: HashMap<ShaderKey, Rc<Program>>,
     pipelines: SlotMap<PipelineId, Pipeline>,
     bind_groups: SlotMap<BindGroupId, Vec<BindGroupEntry>>,
-    /// The framebuffer of each pair of attachments a pass has drawn into.
+    /// The framebuffer of each pair of attachments a pass has drawn into,
+    /// or a readback has read.
     framebuffers: HashMap<(Option<TextureId>, Option<TextureId>), FramebufferID>,
+    /// The texels each readback read.
+    readbacks: SlotMap<ReadbackId, Vec<u8>>,
     // Dropped before the platform's context, which the functions belong to.
     gl: Arc<Gl>,
     /// The context `gl` calls, for the calls that take a JS array.
@@ -404,6 +411,7 @@ impl GlGpu {
             pipelines: SlotMap::with_key(),
             bind_groups: SlotMap::with_key(),
             framebuffers: HashMap::new(),
+            readbacks: SlotMap::with_key(),
             gl,
             #[cfg(target_family = "wasm")]
             webgl2,
@@ -788,6 +796,17 @@ impl GlGpu {
     fn framebuffer(&mut self, pass: &Pass) -> Result<FramebufferID, GpuError> {
         let color = pass.color.map(|attachment| attachment.texture);
         let depth_stencil = pass.depth_stencil.map(|attachment| attachment.texture);
+        self.framebuffer_of(color, depth_stencil, &pass.label)
+    }
+
+    /// The framebuffer of `color` and `depth_stencil`, made on first use,
+    /// for what `label` names.
+    fn framebuffer_of(
+        &mut self,
+        color: Option<TextureId>,
+        depth_stencil: Option<TextureId>,
+        label: &str,
+    ) -> Result<FramebufferID, GpuError> {
         if let Some(&framebuffer) = self.framebuffers.get(&(color, depth_stencil)) {
             return Ok(framebuffer);
         }
@@ -820,10 +839,7 @@ impl GlGpu {
             if status != glow::FRAMEBUFFER_COMPLETE {
                 self.state.forget_framebuffer(framebuffer);
                 gl.delete_framebuffer(framebuffer);
-                return Err(GpuError::Invalid(format!(
-                    "{}: GL can't draw into its attachments ({status:#x})",
-                    pass.label
-                )));
+                return Err(GpuError::Invalid(format!("{label}: GL can't draw into its attachments ({status:#x})")));
             }
             framebuffer
         };
@@ -1100,40 +1116,36 @@ impl GlGpu {
         }
         self.enabled_attributes = enabled;
     }
+}
 
-    /// The texels of `texture`, a render target of
-    /// [`Rgba8Unorm`](TextureFormat::Rgba8Unorm), top row first.
-    #[cfg(test)]
-    pub(crate) fn read_rgba8(&mut self, texture: TextureId) -> Result<Vec<u8>, GpuError> {
-        let pass = Pass {
-            label: "read_rgba8".to_owned(),
-            color: Some(mln_gfx::gpu::ColorAttachment { texture, load: LoadOp::Load }),
-            depth_stencil: None,
-            commands: Vec::new(),
-        };
-        let size = self.pass_size(&pass)?;
-        self.current(|gpu| {
-            let framebuffer = gpu.framebuffer(&pass)?;
-            gpu.state.bind_framebuffer(&gpu.gl, Some(framebuffer));
-            gpu.state.set_pixel_store_pack_alignment(&gpu.gl, 1);
-            let row = size.width as usize * 4;
-            let mut pixels = vec![0u8; row * size.height as usize];
-            // SAFETY: the framebuffer is complete, and `pixels` holds its
-            // texels.
-            unsafe {
-                gpu.gl.read_pixels(
-                    0,
-                    0,
-                    size.width as i32,
-                    size.height as i32,
-                    glow::RGBA,
-                    glow::UNSIGNED_BYTE,
-                    glow::PixelPackData::Slice(Some(&mut pixels)),
-                );
-            }
-            Ok(pixels.chunks_exact(row).rev().flatten().copied().collect())
-        })
+/// Reads `region` of the bound framebuffer, `height` pixels tall, as RGBA
+/// texels in rows from the top: GL's rows start at the bottom.
+pub(crate) fn read_pixels(gl: &Gl, state: &State, height: u32, region: TextureRegion) -> Vec<u8> {
+    let row = region.size.width as usize * 4;
+    let mut pixels = vec![0u8; row * region.size.height as usize];
+    if pixels.is_empty() {
+        return pixels;
     }
+    // Packed tightly into `pixels`.
+    state.set_pixel_store_pack_alignment(gl, 1);
+    let bottom = height - region.y - region.size.height;
+    // SAFETY: `pixels` holds the region's RGBA texels.
+    unsafe {
+        gl.read_pixels(
+            region.x as i32,
+            bottom as i32,
+            region.size.width as i32,
+            region.size.height as i32,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelPackData::Slice(Some(&mut pixels)),
+        );
+    }
+    let mut flipped = Vec::with_capacity(pixels.len());
+    for line in pixels.chunks_exact(row).rev() {
+        flipped.extend_from_slice(line);
+    }
+    flipped
 }
 
 impl Resources for GlGpu {
@@ -1421,6 +1433,33 @@ impl Gpu for GlGpu {
             }
             passes.iter().try_for_each(|pass| gpu.encode(pass))
         })
+    }
+
+    fn read_texture(&mut self, texture: TextureId, region: TextureRegion) -> Result<ReadbackId, GpuError> {
+        let readback = validation::check_readback(self, texture, region)?;
+        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        let height = entry.size.height;
+        let red = match readback.format {
+            TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb => false,
+            TextureFormat::R8Unorm => true,
+            TextureFormat::A8Unorm if self.desktop => true,
+            format => return Err(GpuError::Unsupported(format!("reading {format:?} texels back"))),
+        };
+        let rgba = self.current(|gpu| {
+            let framebuffer = gpu.framebuffer_of(Some(texture), None, "readback")?;
+            gpu.state.bind_framebuffer(&gpu.gl, Some(framebuffer));
+            Ok::<_, GpuError>(read_pixels(&gpu.gl, &gpu.state, height, region))
+        })?;
+        let texels = if red { rgba.as_chunks::<4>().0.iter().map(|&[red, ..]| red).collect() } else { rgba };
+        Ok(self.readbacks.insert(texels))
+    }
+
+    fn take_readback(&mut self, readback: ReadbackId, _wait: bool) -> Result<Option<Vec<u8>>, GpuError> {
+        self.readbacks.remove(readback).map(Some).ok_or(GpuError::UnknownId("readback"))
+    }
+
+    fn destroy_readback(&mut self, readback: ReadbackId) {
+        self.readbacks.remove(readback);
     }
 }
 

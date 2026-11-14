@@ -1,54 +1,17 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, topologies, transparent_replace,
-    vertex_layouts,
+    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks, topologies,
+    transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_util::Color;
-use objc2_metal::MTLCommandBuffer;
 
 use super::*;
-
-/// The RGBA texels of `texture`, once the work submitted before is done.
-fn read_back(gpu: &mut MetalGpu, texture: TextureId) -> Vec<u8> {
-    gpu.wait_until_completed();
-    let texture = &gpu.textures.get(texture).expect("the texture").texture;
-    let (width, height) = (texture.width(), texture.height());
-    let (row, length) = (width * 4, width * 4 * height);
-    let buffer = gpu
-        .device
-        .device()
-        .newBufferWithLength_options(length, MTLResourceOptions::StorageModeShared)
-        .expect("a buffer");
-    let command_buffer = gpu.device.queue().commandBuffer().expect("a command buffer");
-    let blit = command_buffer.blitCommandEncoder().expect("a blit encoder");
-    // SAFETY: the copy is within the texture and the buffer.
-    unsafe {
-        blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
-            texture,
-            0,
-            0,
-            MTLOrigin { x: 0, y: 0, z: 0 },
-            MTLSize { width, height, depth: 1 },
-            &buffer,
-            0,
-            row,
-            length,
-        );
-    }
-    blit.endEncoding();
-    command_buffer.commit();
-    command_buffer.waitUntilCompleted();
-    // SAFETY: the shared buffer holds `length` bytes, which the GPU is done
-    // writing.
-    unsafe { std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<u8>(), length) }.to_vec()
-}
 
 #[test]
 fn clip_mask_and_background_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    let mut gpu = MetalGpu::new(&device);
-    clip_mask_and_background(&mut gpu, read_back).expect("the frame");
+    clip_mask_and_background(&mut MetalGpu::new(&device)).expect("the frame");
 }
 
 #[test]
@@ -66,31 +29,37 @@ fn foreign_ids_through_gpu() {
 #[test]
 fn transparent_replace_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    transparent_replace(&mut MetalGpu::new(&device), read_back).expect("the frame");
+    transparent_replace(&mut MetalGpu::new(&device)).expect("the frame");
 }
 
 #[test]
 fn topologies_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    topologies(&mut MetalGpu::new(&device), read_back).expect("the frames");
+    topologies(&mut MetalGpu::new(&device)).expect("the frames");
+}
+
+#[test]
+fn readbacks_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    readbacks(&mut MetalGpu::new(&device)).expect("the readbacks");
 }
 
 #[test]
 fn depth_only_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    depth_only(&mut MetalGpu::new(&device), read_back).expect("the frame");
+    depth_only(&mut MetalGpu::new(&device)).expect("the frame");
 }
 
 #[test]
 fn vertex_layouts_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    vertex_layouts(&mut MetalGpu::new(&device), read_back).expect("the frames");
+    vertex_layouts(&mut MetalGpu::new(&device)).expect("the frames");
 }
 
 #[test]
 fn instanced_walls_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    instanced_walls(&mut MetalGpu::new(&device), read_back).expect("the frame");
+    instanced_walls(&mut MetalGpu::new(&device)).expect("the frame");
 }
 
 #[test]

@@ -44,20 +44,18 @@ impl CommandEncoder {
         self.encoder.borrow_mut()
     }
 
-    /// Submits the command buffer, ending it with what `resource` records
-    /// in `finish_frame`.
+    /// Submits the command buffer, then tells `resource` it was.
     pub(crate) fn submit_frame(&self, resource: Option<&dyn TargetResource>) {
-        let Some(mut encoder) = self.encoder.borrow_mut().take() else {
+        let Some(encoder) = self.encoder.borrow_mut().take() else {
             return;
         };
         self.context.count_submission();
-        if let Some(resource) = resource {
-            resource.finish_frame(&mut encoder);
-        }
-        // Finish and submit the command buffer, after the buffer writes
+        // After the buffer writes.
         self.context.get_backend().submit(encoder.finish());
-        // Create a new command encoder (C++ also updates
-        // context.setCurrentCommandEncoder).
+        if let Some(resource) = resource {
+            resource.frame_submitted();
+        }
+        // C++ also updates context.setCurrentCommandEncoder.
         *self.encoder.borrow_mut() = Some(new_encoder(&self.context));
     }
 }

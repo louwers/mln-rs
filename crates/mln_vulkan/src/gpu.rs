@@ -11,8 +11,8 @@ use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::validation::{self, Resources, ShaderBinding};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat,
-    TextureId, TextureRegion, TextureUsage, VertexStep,
+    PipelineId, PipelineKey, ReadbackId, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc,
+    TextureFormat, TextureId, TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
@@ -142,6 +142,15 @@ struct FramebufferKey {
     depth_stencil: Option<TextureId>,
 }
 
+/// A texture's texels, copied into a buffer the CPU reads.
+struct Readback {
+    staging: BufferAllocation,
+    /// The bytes of the texels, at the start of `staging`.
+    len: usize,
+    /// The serial of the submit that copies them.
+    serial: u64,
+}
+
 /// A submit the GPU may still be running.
 struct Submission {
     serial: u64,
@@ -205,6 +214,7 @@ pub struct VulkanGpu {
     free_fences: Vec<vk::Fence>,
     /// What to destroy once the submit of each serial has finished.
     garbage: Vec<(u64, Garbage)>,
+    readbacks: SlotMap<ReadbackId, Readback>,
 }
 
 fn vk_error(what: &str) -> impl FnOnce(vk::Result) -> GpuError + '_ {
@@ -410,6 +420,7 @@ impl VulkanGpu {
             free_command_buffers: Vec::new(),
             free_fences: Vec::new(),
             garbage: Vec::new(),
+            readbacks: SlotMap::with_key(),
         };
         for type_ in DescriptorSetType::ALL {
             gpu.set_layouts[type_ as usize] =
@@ -1353,82 +1364,21 @@ impl VulkanGpu {
         Ok(())
     }
 
-    /// The texels of `texture`, a color texture that is
-    /// [`copy_src`](TextureUsage::copy_src), in rows from the top with no
-    /// padding, once the work submitted so far is done.
-    pub(crate) fn read_texture(&mut self, texture: TextureId) -> Result<Vec<u8>, GpuError> {
-        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
-        let bytes_per_texel =
-            entry.format.bytes_per_texel().filter(|_| entry.usage.copy_src).ok_or_else(|| {
-                GpuError::Invalid(format!("{:?} texture without copy_src: no readback", entry.format))
-            })?;
-        let (image, layout, size) = (entry.image.image(), entry.layout, entry.size);
-        let length = (size.width * size.height * bytes_per_texel) as usize;
-        let staging = BufferAllocation::create(
-            &self.backend,
-            length,
-            vk::BufferUsageFlags::TRANSFER_DST,
-            MemoryLocation::GpuToCpu,
-            "Gpu_Readback",
-        )
-        .ok_or_else(|| GpuError::Invalid("Vulkan couldn't make a readback buffer".to_owned()))?;
-        let uploads = self.uploads()?;
-        let device = self.backend.get_device();
-        let range = whole_range(vk::ImageAspectFlags::COLOR);
-        transition_image(
-            device,
-            uploads,
-            image,
-            range,
-            (layout, vk::ImageLayout::TRANSFER_SRC_OPTIMAL),
-            (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::TRANSFER_READ),
-            (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::TRANSFER),
-        );
-        let region = vk::BufferImageCopy::default()
-            .image_subresource(vk::ImageSubresourceLayers {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0,
-                base_array_layer: 0,
-                layer_count: 1,
-            })
-            .image_extent(vk::Extent3D { width: size.width, height: size.height, depth: 1 });
-        // SAFETY: the image is in the transfer source layout, and the
-        // buffer holds its texels.
-        unsafe {
-            device.cmd_copy_image_to_buffer(
-                uploads,
-                image,
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                staging.buffer(),
-                &[region],
-            );
+    /// Blocks until the submit of `serial` has finished.
+    fn wait_for(&mut self, serial: u64) -> Result<(), GpuError> {
+        if serial <= self.finished_serial {
+            return Ok(());
         }
-        transition_image(
-            device,
-            uploads,
-            image,
-            range,
-            (vk::ImageLayout::TRANSFER_SRC_OPTIMAL, layout),
-            (vk::AccessFlags::empty(), vk::AccessFlags::empty()),
-            (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::ALL_COMMANDS),
-        );
-        memory_barrier(
-            device,
-            uploads,
-            (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::HOST),
-            (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::HOST_READ),
-        );
-        self.submit(&[])?;
-        let fence = self.in_flight.back().ok_or(GpuError::Invalid("the readback wasn't submitted".to_owned()))?.fence;
+        let fence = self
+            .in_flight
+            .iter()
+            .find(|submission| submission.serial == serial)
+            .ok_or_else(|| GpuError::Invalid(format!("submit {serial} was never made")))?
+            .fence;
         // SAFETY: the fence is this backend's, and its submission was made.
-        unsafe { self.device().wait_for_fences(&[fence], true, u64::MAX) }.map_err(vk_error("reading back"))?;
-        let mapped = staging.mapped_buffer();
-        if mapped.is_null() {
-            return Err(GpuError::Invalid("the readback buffer isn't mapped".to_owned()));
-        }
-        // SAFETY: the copy has finished, and the mapping holds `length`
-        // bytes.
-        Ok(unsafe { std::slice::from_raw_parts(mapped, length) }.to_vec())
+        unsafe { self.device().wait_for_fences(&[fence], true, u64::MAX) }.map_err(vk_error("waiting for a submit"))?;
+        self.collect_garbage();
+        Ok(())
     }
 }
 
@@ -1834,6 +1784,98 @@ impl Gpu for VulkanGpu {
 
     fn destroy_bind_group(&mut self, group: BindGroupId) {
         self.bind_groups.remove(group);
+    }
+
+    /// Copies into a host-visible buffer, in a submit of its own after the
+    /// writes made so far.
+    fn read_texture(&mut self, texture: TextureId, region: TextureRegion) -> Result<ReadbackId, GpuError> {
+        let readback = validation::check_readback(self, texture, region)?;
+        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        let (image, layout) = (entry.image.image(), entry.layout);
+        let staging = BufferAllocation::create(
+            &self.backend,
+            readback.len(),
+            vk::BufferUsageFlags::TRANSFER_DST,
+            MemoryLocation::GpuToCpu,
+            "Gpu_Readback",
+        )
+        .filter(|staging| !staging.mapped_buffer().is_null())
+        .ok_or_else(|| GpuError::Invalid("Vulkan couldn't make a readback buffer".to_owned()))?;
+        let uploads = self.uploads()?;
+        let device = self.backend.get_device();
+        let range = whole_range(vk::ImageAspectFlags::COLOR);
+        transition_image(
+            device,
+            uploads,
+            image,
+            range,
+            (layout, vk::ImageLayout::TRANSFER_SRC_OPTIMAL),
+            (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::TRANSFER_READ),
+            (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::TRANSFER),
+        );
+        let copy = vk::BufferImageCopy::default()
+            .image_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .image_offset(vk::Offset3D { x: region.x as i32, y: region.y as i32, z: 0 })
+            .image_extent(vk::Extent3D { width: region.size.width, height: region.size.height, depth: 1 });
+        // SAFETY: the image is in the transfer source layout, and the
+        // buffer holds the region's texels.
+        unsafe {
+            device.cmd_copy_image_to_buffer(
+                uploads,
+                image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                staging.buffer(),
+                &[copy],
+            );
+        }
+        transition_image(
+            device,
+            uploads,
+            image,
+            range,
+            (vk::ImageLayout::TRANSFER_SRC_OPTIMAL, layout),
+            (vk::AccessFlags::empty(), vk::AccessFlags::empty()),
+            (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::ALL_COMMANDS),
+        );
+        memory_barrier(
+            device,
+            uploads,
+            (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::HOST),
+            (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::HOST_READ),
+        );
+        let serial = self.next_serial;
+        self.submit(&[])?;
+        Ok(self.readbacks.insert(Readback { staging, len: readback.len(), serial }))
+    }
+
+    fn take_readback(&mut self, readback: ReadbackId, wait: bool) -> Result<Option<Vec<u8>>, GpuError> {
+        let serial = self.readbacks.get(readback).ok_or(GpuError::UnknownId("readback"))?.serial;
+        if wait {
+            if let Err(error) = self.wait_for(serial) {
+                self.readbacks.remove(readback);
+                return Err(error);
+            }
+        } else {
+            self.collect_garbage();
+        }
+        if serial > self.finished_serial {
+            return Ok(None);
+        }
+        let Readback { staging, len, .. } = self.readbacks.remove(readback).ok_or(GpuError::UnknownId("readback"))?;
+        // SAFETY: the copy has finished, and the mapping starts with the
+        // region's `len` bytes of texels.
+        Ok(Some(unsafe { std::slice::from_raw_parts(staging.mapped_buffer(), len) }.to_vec()))
+    }
+
+    fn destroy_readback(&mut self, readback: ReadbackId) {
+        if let Some(Readback { staging, .. }) = self.readbacks.remove(readback) {
+            self.discard(Garbage::Buffer(staging));
+        }
     }
 
     fn submit(&mut self, passes: &[Pass]) -> Result<(), GpuError> {

@@ -3,13 +3,13 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, topologies, transparent_replace,
-    vertex_layouts,
+    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks, topologies,
+    transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState, Gpu, GpuError,
     LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey, StencilState, TargetFormats, TextureDesc,
-    TextureFormat, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
+    TextureFormat, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -60,7 +60,7 @@ fn clip_mask_and_background_through_gpu() {
     let Some(mut gpu) = gpu() else {
         return;
     };
-    clip_mask_and_background(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frame");
+    clip_mask_and_background(&mut gpu).expect("the frame");
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn depth_only_through_gpu() {
     let Some(mut gpu) = gpu() else {
         return;
     };
-    depth_only(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frame");
+    depth_only(&mut gpu).expect("the frame");
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn transparent_replace_through_gpu() {
     let Some(mut gpu) = gpu() else {
         return;
     };
-    transparent_replace(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frame");
+    transparent_replace(&mut gpu).expect("the frame");
 }
 
 #[test]
@@ -100,7 +100,15 @@ fn topologies_through_gpu() {
     let Some(mut gpu) = gpu() else {
         return;
     };
-    topologies(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frames");
+    topologies(&mut gpu).expect("the frames");
+}
+
+#[test]
+fn readbacks_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    readbacks(&mut gpu).expect("the readbacks");
 }
 
 #[test]
@@ -108,7 +116,7 @@ fn vertex_layouts_through_gpu() {
     let Some(mut gpu) = gpu() else {
         return;
     };
-    vertex_layouts(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frames");
+    vertex_layouts(&mut gpu).expect("the frames");
 }
 
 #[test]
@@ -116,7 +124,7 @@ fn instanced_walls_through_gpu() {
     let Some(mut gpu) = gpu() else {
         return;
     };
-    instanced_walls(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frame");
+    instanced_walls(&mut gpu).expect("the frame");
 }
 
 fn buffer(gpu: &mut GlGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
@@ -215,12 +223,12 @@ fn draws_read_only_what_is_bound() {
         ],
     };
     gpu.submit(std::slice::from_ref(&pass)).unwrap();
-    assert_eq!(gpu.read_rgba8(color).unwrap()[..4], [255, 0, 0, 255]);
+    assert_eq!(gpu.read_texels(color, TextureRegion::whole(size)).unwrap()[..4], [255, 0, 0, 255]);
 
     let green = BackgroundPropsUBO { color: [0.0, 1.0, 0.0, 1.0], ..red };
     gpu.write_buffer(props_buffer, 0, bytemuck::bytes_of(&green)).unwrap();
     gpu.submit(std::slice::from_ref(&pass)).unwrap();
-    assert_eq!(gpu.read_rgba8(color).unwrap()[..4], [0, 255, 0, 255]);
+    assert_eq!(gpu.read_texels(color, TextureRegion::whole(size)).unwrap()[..4], [0, 255, 0, 255]);
 
     let mut past_the_end = pass.clone();
     past_the_end.commands.insert(5, RenderCommand::SetGlobalIndex(1));

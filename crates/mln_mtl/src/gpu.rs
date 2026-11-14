@@ -12,8 +12,8 @@ use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::validation::{self, Resources, ShaderBinding};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, DepthState, Gpu, GpuError, Limits,
-    LoadOp, Pass, PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, StencilState, TargetFormats,
-    TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
+    LoadOp, Pass, PipelineId, PipelineKey, ReadbackId, RenderCommand, SamplerId, ShaderKey, SlotMap, StencilState,
+    TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::texture2d::SamplerState;
@@ -43,6 +43,7 @@ use crate::mtl_fwd::{
     MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLFunctionPtr, MTLRenderPipelineStatePtr,
     MTLSamplerStatePtr, MTLTexturePtr, MTLVertexDescriptorPtr,
 };
+use crate::readback::{buffer_bytes, encode_region_copy};
 use crate::shaders::msl_sources::PRELUDE;
 use crate::shaders::shader_source::{ShaderSource, shader_source};
 
@@ -139,6 +140,15 @@ struct Pipeline {
     reads: Vec<ShaderBinding>,
 }
 
+/// A texture's texels, copied into shared memory.
+struct Readback {
+    buffer: MTLBufferPtr,
+    /// The bytes of the texels, at the start of `buffer`.
+    len: usize,
+    /// The number of the command buffer that copies them.
+    number: u64,
+}
+
 /// A copy out of the staging buffer of a submit.
 enum Upload {
     Buffer { from: usize, to: MTLBufferPtr, offset: usize, size: usize },
@@ -230,6 +240,7 @@ pub struct MetalGpu {
     /// What the command buffers up to each number may use, freed once they
     /// finish.
     retired: VecDeque<(u64, Box<dyn Any>)>,
+    readbacks: SlotMap<ReadbackId, Readback>,
 }
 
 impl MetalGpu {
@@ -253,6 +264,7 @@ impl MetalGpu {
             submitted: 0,
             in_flight: VecDeque::new(),
             retired: VecDeque::new(),
+            readbacks: SlotMap::with_key(),
         }
     }
 
@@ -279,16 +291,62 @@ impl MetalGpu {
         }) {
             self.in_flight.pop_front();
         }
-        let finished = self.in_flight.front().map_or(self.submitted, |(number, _)| number - 1);
+        let finished = self.finished();
         while self.retired.front().is_some_and(|(number, _)| *number <= finished) {
             self.retired.pop_front();
         }
+    }
+
+    /// The number of the last command buffer known to have finished, as
+    /// every one before it has.
+    fn finished(&self) -> u64 {
+        self.in_flight.front().map_or(self.submitted, |(number, _)| number - 1)
     }
 
     /// Keeps `resource` until the command buffers submitted so far finish.
     fn retire_later(&mut self, resource: impl Any) {
         self.retired.push_back((self.submitted, Box::new(resource)));
         self.retire();
+    }
+
+    /// Commits a command buffer of the copies of the writes made so far,
+    /// then what `encode` encodes. Where `encode` fails, commits the copies
+    /// alone, and returns its error. Call it in an autorelease pool.
+    fn commit(
+        &mut self,
+        encode: impl FnOnce(&mut MetalGpu, &ProtocolObject<dyn MTLCommandBuffer>) -> Result<(), GpuError>,
+    ) -> Result<(), GpuError> {
+        self.retire();
+        let staging = if self.uploads.copies.is_empty() {
+            None
+        } else {
+            let data = &self.uploads.data;
+            let staging =
+                new_metal_buffer(self.device.device(), Some(data), data.len(), MTLResourceOptions::StorageModeShared)
+                    .ok_or_else(|| GpuError::Invalid("Metal made no staging buffer".to_owned()))?;
+            Some(staging)
+        };
+        let mut command_buffer = self.command_buffer()?;
+        if let Some(staging) = &staging {
+            self.uploads.encode(&command_buffer, staging);
+        }
+        let result = encode(self, &command_buffer);
+        if result.is_err() {
+            // The writes take effect without what `encode` encoded.
+            let Some(staging) = &staging else {
+                return result;
+            };
+            command_buffer = self.command_buffer()?;
+            self.uploads.encode(&command_buffer, staging);
+        }
+        command_buffer.commit();
+        self.submitted += 1;
+        self.in_flight.push_back((self.submitted, command_buffer));
+        if let Some(staging) = staging {
+            let uploads = std::mem::take(&mut self.uploads);
+            self.retired.push_back((self.submitted, Box::new((uploads, staging))));
+        }
+        result
     }
 
     /// The Metal texture of `texture`.
@@ -1404,46 +1462,54 @@ impl Gpu for MetalGpu {
         for pass in passes {
             validation::check_pass(self, pass)?;
         }
+        if passes.is_empty() && self.uploads.copies.is_empty() {
+            autoreleasepool(|_| self.retire());
+            return Ok(());
+        }
         autoreleasepool(|_| {
-            self.retire();
-            if passes.is_empty() && self.uploads.copies.is_empty() {
-                return Ok(());
-            }
-            let staging = if self.uploads.copies.is_empty() {
-                None
-            } else {
-                let data = &self.uploads.data;
-                let staging = new_metal_buffer(
-                    self.device.device(),
-                    Some(data),
-                    data.len(),
-                    MTLResourceOptions::StorageModeShared,
-                )
-                .ok_or_else(|| GpuError::Invalid("Metal made no staging buffer".to_owned()))?;
-                Some(staging)
-            };
-            let mut command_buffer = self.command_buffer()?;
-            if let Some(staging) = &staging {
-                self.uploads.encode(&command_buffer, staging);
-            }
-            let result = passes.iter().try_for_each(|pass| self.encode(&command_buffer, pass));
-            if result.is_err() {
-                // The writes take effect without the passes.
-                let Some(staging) = &staging else {
-                    return result;
-                };
-                command_buffer = self.command_buffer()?;
-                self.uploads.encode(&command_buffer, staging);
-            }
-            command_buffer.commit();
-            self.submitted += 1;
-            self.in_flight.push_back((self.submitted, command_buffer));
-            if let Some(staging) = staging {
-                let uploads = std::mem::take(&mut self.uploads);
-                self.retired.push_back((self.submitted, Box::new((uploads, staging))));
-            }
-            result
+            self.commit(|gpu, command_buffer| passes.iter().try_for_each(|pass| gpu.encode(command_buffer, pass)))
         })
+    }
+
+    /// Blits into shared memory, in a command buffer of its own after the
+    /// writes made so far.
+    fn read_texture(&mut self, texture: TextureId, region: TextureRegion) -> Result<ReadbackId, GpuError> {
+        let readback = validation::check_readback(self, texture, region)?;
+        let texture = self.texture(texture)?.texture.clone();
+        autoreleasepool(|_| {
+            let buffer = self
+                .device
+                .device()
+                .newBufferWithLength_options(readback.len(), MTLResourceOptions::StorageModeShared)
+                .ok_or_else(|| GpuError::Invalid("Metal made no readback buffer".to_owned()))?;
+            self.commit(|_, command_buffer| {
+                if encode_region_copy(command_buffer, &texture, region, readback.bytes_per_row, &buffer) {
+                    Ok(())
+                } else {
+                    Err(GpuError::Invalid("the command buffer gave no blit encoder".to_owned()))
+                }
+            })?;
+            Ok(self.readbacks.insert(Readback { buffer, len: readback.len(), number: self.submitted }))
+        })
+    }
+
+    fn take_readback(&mut self, readback: ReadbackId, wait: bool) -> Result<Option<Vec<u8>>, GpuError> {
+        let number = self.readbacks.get(readback).ok_or(GpuError::UnknownId("readback"))?.number;
+        if wait && let Some((_, command_buffer)) = self.in_flight.iter().find(|(at, _)| *at == number) {
+            command_buffer.waitUntilCompleted();
+        }
+        self.retire();
+        if number > self.finished() {
+            return Ok(None);
+        }
+        let Readback { buffer, len, .. } = self.readbacks.remove(readback).ok_or(GpuError::UnknownId("readback"))?;
+        Ok(Some(buffer_bytes(&buffer, len).to_vec()))
+    }
+
+    fn destroy_readback(&mut self, readback: ReadbackId) {
+        if let Some(readback) = self.readbacks.remove(readback) {
+            self.retire_later(readback.buffer);
+        }
     }
 }
 

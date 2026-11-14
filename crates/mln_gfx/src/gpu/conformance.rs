@@ -4,10 +4,11 @@
 //! buffer as an ordinary draw, then the background shader tested against
 //! it. The mask covers the left half, so the background colors only that
 //! half. [`invalid_calls`] checks the calls that every backend rejects, and
-//! [`foreign_ids`] that a backend takes no other backend's ids.
-//! [`instanced_walls`] draws fill extrusion walls over the left half. The
-//! other cases draw one color over the whole target, as
-//! [`transparent_replace`] does to check that `Replace` doesn't blend.
+//! [`foreign_ids`] that a backend takes no other backend's ids, and
+//! [`readbacks`] what a readback copies. [`instanced_walls`] draws fill
+//! extrusion walls over the left half. The other cases draw one color over
+//! the whole target, as [`transparent_replace`] does to check that
+//! `Replace` doesn't blend.
 
 mod cases;
 
@@ -18,8 +19,8 @@ pub use self::cases::*;
 use super::{
     BindGroupDesc, BindGroupEntry, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Gpu, GpuError, LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey,
-    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute,
-    VertexBufferLayout, VertexStep,
+    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureUsage, VertexAttribute, VertexBufferLayout,
+    VertexStep,
 };
 use crate::color_mode::ColorMode;
 use crate::cull_face_mode::CullFaceMode;
@@ -66,18 +67,14 @@ fn position_layout(id: usize) -> VertexBufferLayout {
 }
 
 /// Draws the frame through `gpu` into an [`Rgba8Unorm`](TextureFormat)
-/// texture of [`SIZE`], and checks the texels that `read_back` returns, in
-/// rows from the top with no padding. Then checks that a draw missing its
+/// texture of [`SIZE`], and checks the texels it reads back. Then checks that a draw missing its
 /// shader's buffers and a pass naming a destroyed buffer fail. Returns the
 /// error of a call that should succeed.
 ///
 /// # Panics
 ///
 /// Where a check doesn't hold.
-pub fn clip_mask_and_background<G: Gpu>(
-    gpu: &mut G,
-    read_back: impl FnOnce(&mut G, TextureId) -> Vec<u8>,
-) -> Result<(), GpuError> {
+pub fn clip_mask_and_background(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let color = gpu.create_texture(&TextureDesc {
         label: "color",
         size: SIZE,
@@ -194,12 +191,8 @@ pub fn clip_mask_and_background<G: Gpu>(
     };
     gpu.submit(std::slice::from_ref(&pass))?;
 
-    let pixels = read_back(gpu, color);
-    assert_eq!(pixels.len(), (SIZE.width * SIZE.height * 4) as usize);
-    let pixel = |x: u32, y: u32| {
-        let i = ((y * SIZE.width + x) * 4) as usize;
-        [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
-    };
+    let pixels = read(gpu, color)?;
+    let pixel = |x, y| texel(&pixels, x, y);
     for y in [0, SIZE.height / 2, SIZE.height - 1] {
         assert_eq!(pixel(0, y), [255, 0, 0, 255], "the mask's half has the background");
         assert_eq!(pixel(SIZE.width / 2 - 1, y), [255, 0, 0, 255]);
