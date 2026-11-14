@@ -140,14 +140,14 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("rgba", T::Color, fixed(&[n.clone(), n.clone(), n.clone(), n.clone()]), D::NONE, Op::Rgba),
         sig("rgb", T::Color, fixed(&[n.clone(), n.clone(), n.clone()]), D::NONE, Op::Rgb),
         sig("zoom", n.clone(), none(), D::ZOOM, Op::Zoom),
-        sig("heatmap-density", n.clone(), none(), D::NONE, Op::HeatmapDensity),
+        sig("heatmap-density", n.clone(), none(), D::PROPERTY_INPUT, Op::HeatmapDensity),
         sig("elevation", n.clone(), none(), D::ELEVATION, Op::Elevation),
-        sig("line-progress", n.clone(), none(), D::NONE, Op::LineProgress),
-        sig("accumulated", T::Value, none(), D::NONE, Op::Accumulated),
+        sig("line-progress", n.clone(), none(), D::PROPERTY_INPUT, Op::LineProgress),
+        sig("accumulated", T::Value, none(), D::PROPERTY_INPUT, Op::Accumulated),
         sig("has", b.clone(), str1(), D::FEATURE, Op::Has),
-        sig("has", b.clone(), fixed(&[s.clone(), T::Object]), D::FEATURE, Op::HasObject),
+        sig("has", b.clone(), fixed(&[s.clone(), T::Object]), D::NONE, Op::HasObject),
         sig("get", T::Value, str1(), D::FEATURE, Op::Get),
-        sig("get", T::Value, fixed(&[s.clone(), T::Object]), D::FEATURE, Op::GetObject),
+        sig("get", T::Value, fixed(&[s.clone(), T::Object]), D::NONE, Op::GetObject),
         sig("properties", T::Object, none(), D::FEATURE, Op::Properties),
         sig("geometry-type", s.clone(), none(), D::FEATURE, Op::GeometryType),
         sig("id", T::Value, none(), D::FEATURE, Op::Id),
@@ -189,7 +189,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("join", s.clone(), fixed(&[T::array(s.clone()), s.clone()]), D::NONE, Op::Join),
         sig("resolved-locale", s.clone(), fixed(&[T::Collator]), D::NONE, Op::ResolvedLocale),
         sig("error", T::Error, str1(), D::NONE, Op::Error),
-        sig("feature-state", T::Value, str1(), D::FEATURE, Op::FeatureState),
+        sig("feature-state", T::Value, str1(), D::FEATURE | D::FEATURE_STATE, Op::FeatureState),
         sig("global-state", T::Value, str1(), D::GLOBAL_STATE, Op::GlobalState),
         // Legacy filters
         sig("filter-==", b.clone(), key_value(), D::FEATURE, Op::FilterEq),
@@ -297,14 +297,6 @@ impl PartialEq for CompoundExpression {
 }
 
 impl CompoundExpression {
-    #[must_use]
-    pub(crate) fn get_parameter_count(&self) -> Option<usize> {
-        match &self.signature.params {
-            Params::Varargs(_) => None,
-            Params::Fixed(p) => Some(p.len()),
-        }
-    }
-
     /// The signature the arguments matched.
     #[must_use]
     pub(crate) fn signature(&self) -> &'static SignatureBase {

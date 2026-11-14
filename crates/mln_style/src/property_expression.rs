@@ -65,9 +65,6 @@ impl PropertyExpressionBase {
         let is_zoom_constant = !expression.has(Dependency::ZOOM);
         let is_feature_constant = !expression.has(Dependency::FEATURE);
         let is_runtime_constant = !expression.has(Dependency::IMAGE | Dependency::GLOBAL_STATE);
-        debug_assert_eq!(is_zoom_constant, crate::expression::is_zoom_constant(expression.as_ref()));
-        debug_assert_eq!(is_feature_constant, crate::expression::is_feature_constant(expression.as_ref()));
-        debug_assert_eq!(is_runtime_constant, crate::expression::is_runtime_constant(expression.as_ref()));
         PropertyExpressionBase {
             expression,
             captured_global_state: None,
