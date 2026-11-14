@@ -1,5 +1,4 @@
-// What a custom layer's host gets of a Metal frame (C++:
-// `style::mtl::CustomLayerRenderParameters`).
+// What a custom layer's host gets of a Metal frame.
 
 use objc2_metal::MTLPixelFormat;
 

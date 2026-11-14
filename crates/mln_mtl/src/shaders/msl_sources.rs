@@ -1,33 +1,10 @@
-// The C++ core's MSL, copied from the raw string literals of
-//   include/mln/shaders/mtl/background.hpp
-//   include/mln/shaders/mtl/circle.hpp
-//   include/mln/shaders/mtl/clipping_mask.hpp
-//   include/mln/shaders/mtl/collision.hpp
-//   include/mln/shaders/mtl/color_relief.hpp
-//   include/mln/shaders/mtl/common.hpp
-//   include/mln/shaders/mtl/debug.hpp
-//   include/mln/shaders/mtl/fill.hpp
-//   include/mln/shaders/mtl/fill_extrusion.hpp
-//   include/mln/shaders/mtl/globe_depth.hpp
-//   include/mln/shaders/mtl/heatmap.hpp
-//   include/mln/shaders/mtl/heatmap_texture.hpp
-//   include/mln/shaders/mtl/hillshade.hpp
-//   include/mln/shaders/mtl/hillshade_prepare.hpp
-//   include/mln/shaders/mtl/line.hpp
-//   include/mln/shaders/mtl/raster.hpp
-//   include/mln/shaders/mtl/shader_group.hpp
-//   include/mln/shaders/mtl/shader_program.hpp
-//   include/mln/shaders/mtl/shader_program_mtl.hpp
-//   include/mln/shaders/mtl/sky.hpp
-//   include/mln/shaders/mtl/symbol.hpp
-//   include/mln/shaders/mtl/widevector.hpp
-// with the port's changes, so that it reads the vertices and UBOs its
-// renderer makes.
+//! The MSL of the built-in shaders, which started as MapLibre Native's, and
+//! reads the vertices and UBOs the renderer makes.
 
 use super::shader_source::MslShaderSource;
 
 /// The start of every shader's source.
-pub const PRELUDE: &str = r#"
+pub(crate) const PRELUDE: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
 
@@ -435,8 +412,6 @@ enum {
 "#;
 
 pub(crate) const ATMOSPHERE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "AtmosphereShader",
-    name: r"AtmosphereShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -593,8 +568,6 @@ half4 fragment fragmentMain(
 };
 
 pub(crate) const BACKGROUND_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "BackgroundPatternShader",
-    name: r"BackgroundPatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -723,8 +696,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const BACKGROUND_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "BackgroundShader",
-    name: r"BackgroundShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -826,8 +797,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const CIRCLE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "CircleShader",
-    name: r"CircleShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1092,8 +1061,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
-    built_in: "ClippingMaskProgram",
-    name: r"ClippingMaskProgram",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -1130,8 +1097,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const COLLISION_BOX_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "CollisionBoxShader",
-    name: r"CollisionBoxShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1236,8 +1201,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const COLLISION_CIRCLE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "CollisionCircleShader",
-    name: r"CollisionCircleShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1362,8 +1325,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const COLOR_RELIEF_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "ColorReliefShader",
-    name: r"ColorReliefShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1515,8 +1476,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const DEBUG_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "DebugShader",
-    name: r"DebugShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1579,8 +1538,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillExtrusionInstancedShader",
-    name: r"FillExtrusionInstancedShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1766,8 +1723,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillExtrusionPatternInstancedShader",
-    name: r"FillExtrusionPatternInstancedShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2033,8 +1988,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillExtrusionPatternShader",
-    name: r"FillExtrusionPatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2274,8 +2227,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillExtrusionShader",
-    name: r"FillExtrusionShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2447,8 +2398,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const FILL_OUTLINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillOutlinePatternShader",
-    name: r"FillOutlinePatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2756,15 +2705,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
         return half4(mix(color * sdf_alpha_a, color * sdf_alpha_b, props.fade) * alpha * opacity);
     }
     // The outline fades over a pixel from the line, as in the GL and Vulkan
-    // shaders; the C++ Metal source leaves `alpha` out here.
+    // shaders.
     return half4(mix(color1, color2, props.fade) * alpha * opacity);
 }
 ",
 };
 
 pub(crate) const FILL_OUTLINE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillOutlineShader",
-    name: r"FillOutlineShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2977,8 +2924,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillOutlineTriangulatedShader",
-    name: r"FillOutlineTriangulatedShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3195,8 +3140,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillPatternShader",
-    name: r"FillPatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3496,8 +3439,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillShader",
-    name: r"FillShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3706,8 +3647,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const GLOBE_DEPTH_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "GlobeDepthShader",
-    name: r"GlobeDepthShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -3742,8 +3681,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const HEATMAP_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "HeatmapShader",
-    name: r"HeatmapShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3881,8 +3818,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const HEATMAP_TEXTURE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "HeatmapTextureShader",
-    name: r"HeatmapTextureShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3946,8 +3881,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "HillshadePrepareShader",
-    name: r"HillshadePrepareShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -4071,8 +4004,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const HILLSHADE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "HillshadeShader",
-    name: r"HillshadeShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -4318,8 +4249,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_GRADIENT_SDF_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LineGradientSDFShader",
-    name: r"LineGradientSDFShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -4713,8 +4642,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_GRADIENT_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LineGradientShader",
-    name: r"LineGradientShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -5063,8 +4990,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LinePatternShader",
-    name: r"LinePatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -5494,8 +5419,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_SDF_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LineSDFShader",
-    name: r"LineSDFShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -5898,8 +5821,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LineShader",
-    name: r"LineShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6261,8 +6182,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const RASTER_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "RasterShader",
-    name: r"RasterShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6382,8 +6301,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const SKY_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "SkyShader",
-    name: r"SkyShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -6455,8 +6372,6 @@ half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]],
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "SymbolIconShader",
-    name: r"SymbolIconShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6718,8 +6633,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "SymbolSDFShader",
-    name: r"SymbolSDFShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -7059,8 +6972,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "SymbolTextAndIconShader",
-    name: r"SymbolTextAndIconShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

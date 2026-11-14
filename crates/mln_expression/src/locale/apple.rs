@@ -6,6 +6,10 @@
 //! only the `kn` extension, as `NSNumericSearch`: `co` and `kf` have no
 //! effect, and its resolved locale leaves them out. Its case- and
 //! diacritic-insensitive options select the strength.
+//!
+//! Each entry point drains an autorelease pool of its own: expressions are
+//! evaluated on threads that have none, and Foundation hands its locales and
+//! strings back through one.
 
 #![expect(unsafe_code, reason = "Foundation through objc2 is the FFI here")]
 
@@ -13,7 +17,7 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use objc2::rc::Retained;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_core_foundation::{CFNumberFormatter, CFString};
 use objc2_foundation::{
@@ -82,8 +86,11 @@ pub(crate) struct Collator {
 impl Collator {
     #[expect(clippy::unnecessary_wraps, reason = "the other platforms' collators can fail")]
     pub(crate) fn new(tag: &str, sensitivity: Sensitivity) -> Result<Self, String> {
-        let language = base_tag(&resolve_locale(tag));
-        let locale = NSLocale::localeWithLocaleIdentifier(&NSString::from_str(&language));
+        let (language, locale) = autoreleasepool(|_| {
+            let language = base_tag(&resolve_locale(tag));
+            let locale = NSLocale::localeWithLocaleIdentifier(&NSString::from_str(&language));
+            (language, locale)
+        });
 
         let numeric = CollationKeywords::parse(tag).numeric;
         let mut options = NSStringCompareOptions::empty();
@@ -138,25 +145,27 @@ pub(crate) fn format_number(
     currency: Option<&str>,
     digits: FractionDigits,
 ) -> Result<String, String> {
-    let formatter = NSNumberFormatter::new();
-    formatter.setLocale(Some(&resolve_locale(tag)));
-    let currency_digits = if let Some(code) = currency {
-        formatter.setNumberStyle(NSNumberFormatterStyle::CurrencyStyle);
-        formatter.setCurrencyCode(Some(&NSString::from_str(code)));
-        Some(currency_digits(code))
-    } else {
-        formatter.setNumberStyle(NSNumberFormatterStyle::DecimalStyle);
-        None
-    };
-    let (min, max) = digits.resolve(currency_digits);
-    // The maximum first: setting a limit moves the other past it.
-    formatter.setMaximumFractionDigits(max.into());
-    formatter.setMinimumFractionDigits(min.into());
-    formatter.setRoundingMode(NSNumberFormatterRoundingMode::RoundHalfEven);
-    // Foundation's own is "+∞".
-    formatter.setPositiveInfinitySymbol(&NSString::from_str("∞"));
-    formatter
-        .stringFromNumber(&NSNumber::numberWithDouble(number))
-        .map(|formatted| formatted.to_string())
-        .ok_or_else(|| format!("NSNumberFormatter can't format {number}"))
+    autoreleasepool(|_| {
+        let formatter = NSNumberFormatter::new();
+        formatter.setLocale(Some(&resolve_locale(tag)));
+        let currency_digits = if let Some(code) = currency {
+            formatter.setNumberStyle(NSNumberFormatterStyle::CurrencyStyle);
+            formatter.setCurrencyCode(Some(&NSString::from_str(code)));
+            Some(currency_digits(code))
+        } else {
+            formatter.setNumberStyle(NSNumberFormatterStyle::DecimalStyle);
+            None
+        };
+        let (min, max) = digits.resolve(currency_digits);
+        // The maximum first: setting a limit moves the other past it.
+        formatter.setMaximumFractionDigits(max.into());
+        formatter.setMinimumFractionDigits(min.into());
+        formatter.setRoundingMode(NSNumberFormatterRoundingMode::RoundHalfEven);
+        // Foundation's own is "+∞".
+        formatter.setPositiveInfinitySymbol(&NSString::from_str("∞"));
+        formatter
+            .stringFromNumber(&NSNumber::numberWithDouble(number))
+            .map(|formatted| formatted.to_string())
+            .ok_or_else(|| format!("NSNumberFormatter can't format {number}"))
+    })
 }

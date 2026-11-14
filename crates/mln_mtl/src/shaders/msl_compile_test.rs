@@ -1,14 +1,11 @@
-#![cfg(target_vendor = "apple")]
 //! Compiles every MSL source `shader_source()` returns with the system's
-//! Metal compiler, the way `mtl::ShaderGroup` does: `PRELUDE + prelude +
-//! source`, MSL 2.4, fast math, the `ProgramParameters` defines, a
+//! Metal compiler, the way `MetalGpu` does: `PRELUDE + prelude + source`,
+//! MSL 2.4, fast math, the `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
 //! `PROJECTION_GLOBE` for the globe variant. Also checks that the UBO ids and
 //! sizes the MSL declares are the renderer's, and that the shaders' pipelines
 //! build with the vertex layouts their tables describe, in both projection
 //! variants.
-
-#![expect(unsafe_code, reason = "Metal through objc2 is the FFI here")]
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -19,8 +16,6 @@ use mln_gfx::shader_group::GLOBE_DEFINE;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::shaders::*;
-use mln_mtl::shaders::msl_sources::PRELUDE;
-use mln_mtl::shaders::shader_source::{AttributeInfo, ShaderSource, shader_source};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSDictionary, NSObject, NSString};
@@ -28,6 +23,9 @@ use objc2_metal::{
     MTLCompileOptions, MTLCreateSystemDefaultDevice, MTLDevice, MTLFunction, MTLLanguageVersion, MTLLibrary,
     MTLPixelFormat, MTLRenderPipelineDescriptor, MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction,
 };
+
+use super::msl_sources::PRELUDE;
+use super::shader_source::{AttributeInfo, ShaderSource, shader_source};
 
 const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::ClippingMaskProgram,
@@ -93,9 +91,7 @@ fn compile(
     let options = MTLCompileOptions::new();
     // SAFETY: the macros map NSString names to NSString values.
     unsafe { options.setPreprocessorMacros(Some(&macros)) };
-    #[expect(deprecated, reason = "C++ sets `fastMathEnabled`, which `mathMode` replaces on macOS 15")]
-    // C++ sets fastMathEnabled, which mathMode replaces on macOS 15.
-    options.setFastMathEnabled(true);
+    // Fast math is Metal's default.
     options.setLanguageVersion(MTLLanguageVersion::Version2_4);
     options.setPreserveInvariance(true);
     device
@@ -390,8 +386,7 @@ fn ubo_ids_and_sizes_are_the_renderers() {
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
-/// The vertex format of `data_type` (drawable.cpp's `mtlVertexTypeOf`) and
-/// its size.
+/// The vertex format of `data_type` and its size.
 fn vertex_format(data_type: AttributeDataType) -> (MTLVertexFormat, usize) {
     match data_type {
         AttributeDataType::UByte4 => (MTLVertexFormat::UChar4, 4),

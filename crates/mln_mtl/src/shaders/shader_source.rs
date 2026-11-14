@@ -1,11 +1,9 @@
-// The tables describe the vertex layout the port's renderer produces, which
-// is C++'s with MLN_USE_FILL_EXTRUSION_INSTANCING on and
-// MLN_USE_SYMBOL_INSTANCING off: the symbol tables are the non-instanced ones,
-// plus the attribute the port adds (`tex_origin`). The vertex buffers follow
-// the shader's UBOs: the layout vertices at `<layer>UBOCount`, then the
-// fill extrusions' instances or the symbols' dynamic and opacity vertices,
-// then the interleaved data-driven vertices, then the fill extrusions'
-// instances again, one vertex on, for each instance's next outline vertex.
+// The tables describe the vertex layout the renderer produces: instanced fill
+// extrusions, and symbols that aren't instanced. The vertex buffers follow
+// the shader's UBOs: the layout vertices at `<layer>UBOCount`, then the fill
+// extrusions' instances or the symbols' dynamic and opacity vertices, then
+// the interleaved data-driven vertices, then the fill extrusions' instances
+// again, one vertex on, for each instance's next outline vertex.
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::shader_defines::{
@@ -48,53 +46,50 @@ use mln_gfx::shaders::shader_source::BuiltIn;
 
 use super::msl_sources;
 
-/// The MSL members of a `ShaderSource<BuiltIn::X, gfx::Backend::Type::Metal>`
-/// specialisation, as extracted.
-///
-/// A shader's library compiles from `msl_sources::PRELUDE + prelude + source`.
+/// The MSL of a shader. Its library compiles from
+/// `msl_sources::PRELUDE + prelude + source`.
 #[derive(Debug)]
-pub struct MslShaderSource {
-    /// The `BuiltIn` enumerator name.
-    pub built_in: &'static str,
-    pub name: &'static str,
-    pub vertex_main_function: &'static str,
-    pub fragment_main_function: &'static str,
+pub(crate) struct MslShaderSource {
+    pub(crate) vertex_main_function: &'static str,
+    pub(crate) fragment_main_function: &'static str,
     /// The shader's own prelude constant (its UBO ids and structs), "" if none.
-    pub prelude: &'static str,
-    pub source: &'static str,
+    pub(crate) prelude: &'static str,
+    pub(crate) source: &'static str,
 }
 
 /// The vertex attribute `id` is `[[attribute(index)]]`, read from vertex
 /// buffer `[[buffer(buffer_index)]]`.
 #[derive(Clone, Copy, Debug)]
-pub struct AttributeInfo {
-    pub index: usize,
-    pub data_type: AttributeDataType,
-    pub buffer_index: usize,
-    pub id: usize,
+pub(crate) struct AttributeInfo {
+    pub(crate) index: usize,
+    /// The format the tests build the shader's pipelines with.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests build pipelines with it"))]
+    pub(crate) data_type: AttributeDataType,
+    pub(crate) buffer_index: usize,
+    pub(crate) id: usize,
 }
 
 /// Texture `id` binds to `[[texture(index)]]` and its sampler to
 /// `[[sampler(index)]]`.
 #[derive(Clone, Copy, Debug)]
-pub struct TextureInfo {
-    pub index: usize,
-    pub id: usize,
+pub(crate) struct TextureInfo {
+    pub(crate) index: usize,
+    pub(crate) id: usize,
 }
 
-/// A complete specialisation: MSL plus the `attributes`,
-/// `instanceAttributes` and `textures` tables.
+/// A shader: its MSL, and its per-vertex inputs, per-instance inputs and
+/// textures.
 #[derive(Debug)]
-pub struct ShaderSource {
-    pub msl: &'static MslShaderSource,
-    pub name: &'static str,
-    pub attributes: &'static [AttributeInfo],
-    pub instance_attributes: &'static [AttributeInfo],
-    pub textures: &'static [TextureInfo],
+pub(crate) struct ShaderSource {
+    pub(crate) msl: &'static MslShaderSource,
+    pub(crate) name: &'static str,
+    pub(crate) attributes: &'static [AttributeInfo],
+    pub(crate) instance_attributes: &'static [AttributeInfo],
+    pub(crate) textures: &'static [TextureInfo],
 }
 
-// The `<layer>UBOCount` enumerators of include/mln/shaders/shader_defines.hpp
-// (packed, as on Metal) that shader_defines.rs doesn't name.
+// The number of UBOs each shader binds before its vertex buffers, for the
+// shaders whose count shader_defines.rs doesn't name.
 const ATMOSPHERE_UBO_COUNT: usize = ATMOSPHERE_LAYER_UBO_COUNT;
 const CIRCLE_UBO_COUNT: usize = CIRCLE_LAYER_UBO_COUNT;
 const CLIPPING_MASK_UBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
@@ -137,7 +132,6 @@ macro_rules! shader_source {
     };
 }
 
-// src/mln/shaders/mtl/background.cpp
 const BACKGROUND_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, BACKGROUND_UBO_COUNT, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
 shader_source!(BACKGROUND_SHADER, "BackgroundShader", BACKGROUND_ATTRIBUTES, &[]);
@@ -148,7 +142,6 @@ shader_source!(
     &[tex(0, ID_BACKGROUND_IMAGE_TEXTURE)]
 );
 
-// src/mln/shaders/mtl/circle.cpp
 const CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, CIRCLE_UBO_COUNT, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
     // Data driven
@@ -162,12 +155,10 @@ const CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
 ];
 shader_source!(CIRCLE_SHADER, "CircleShader", CIRCLE_ATTRIBUTES, &[]);
 
-// src/mln/shaders/mtl/clipping_mask.cpp
 const CLIPPING_MASK_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, CLIPPING_MASK_UBO_COUNT, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
 shader_source!(CLIPPING_MASK_PROGRAM, "ClippingMaskProgram", CLIPPING_MASK_ATTRIBUTES, &[]);
 
-// src/mln/shaders/mtl/collision.cpp
 const COLLISION_BOX_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, COLLISION_UBO_COUNT, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, COLLISION_UBO_COUNT, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
@@ -186,7 +177,6 @@ const COLLISION_CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
 shader_source!(COLLISION_BOX_SHADER, "CollisionBoxShader", COLLISION_BOX_ATTRIBUTES, &[]);
 shader_source!(COLLISION_CIRCLE_SHADER, "CollisionCircleShader", COLLISION_CIRCLE_ATTRIBUTES, &[]);
 
-// src/mln/shaders/mtl/color_relief.cpp
 const COLOR_RELIEF_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, COLOR_RELIEF_UBO_COUNT, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, COLOR_RELIEF_UBO_COUNT, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
@@ -198,11 +188,9 @@ const COLOR_RELIEF_TEXTURES: &[TextureInfo] = &[
 ];
 shader_source!(COLOR_RELIEF_SHADER, "ColorReliefShader", COLOR_RELIEF_ATTRIBUTES, COLOR_RELIEF_TEXTURES);
 
-// src/mln/shaders/mtl/debug.cpp
 const DEBUG_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, DEBUG_UBO_COUNT, ID_DEBUG_POS_VERTEX_ATTRIBUTE)];
 shader_source!(DEBUG_SHADER, "DebugShader", DEBUG_ATTRIBUTES, &[tex(0, ID_DEBUG_OVERLAY_TEXTURE)]);
 
-// src/mln/shaders/mtl/fill.cpp
 const FILL_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
@@ -239,9 +227,8 @@ shader_source!(
     &[]
 );
 
-// src/mln/shaders/mtl/fill_extrusion.cpp. An instance of the instanced
-// shaders is an outline vertex; the port adds the vertex after it, which C++
-// reads from the instance buffer directly.
+// An instance of the instanced shaders is an outline vertex, and the vertex
+// after it.
 const FILL_EXTRUSION_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
     attr(1, UShort2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
@@ -307,12 +294,10 @@ shader_source!(
     FILL_EXTRUSION_PATTERN_TEXTURES
 );
 
-// src/mln/shaders/mtl/globe_depth.cpp
 const GLOBE_DEPTH_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, GLOBE_DEPTH_UBO_COUNT, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE)];
 shader_source!(GLOBE_DEPTH_SHADER, "GlobeDepthShader", GLOBE_DEPTH_ATTRIBUTES, &[]);
 
-// src/mln/shaders/mtl/heatmap.cpp
 const HEATMAP_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, HEATMAP_UBO_COUNT, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
     // Data driven
@@ -321,7 +306,6 @@ const HEATMAP_ATTRIBUTES: &[AttributeInfo] = &[
 ];
 shader_source!(HEATMAP_SHADER, "HeatmapShader", HEATMAP_ATTRIBUTES, &[]);
 
-// src/mln/shaders/mtl/heatmap_texture.cpp
 const HEATMAP_TEXTURE_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, HEATMAP_TEXTURE_UBO_COUNT, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
 shader_source!(
@@ -331,7 +315,6 @@ shader_source!(
     &[tex(0, ID_HEATMAP_IMAGE_TEXTURE), tex(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)]
 );
 
-// src/mln/shaders/mtl/hillshade.cpp, hillshade_prepare.cpp
 const HILLSHADE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
@@ -344,7 +327,6 @@ const HILLSHADE_TEXTURES: &[TextureInfo] = &[tex(0, ID_HILLSHADE_IMAGE_TEXTURE)]
 shader_source!(HILLSHADE_SHADER, "HillshadeShader", HILLSHADE_ATTRIBUTES, HILLSHADE_TEXTURES);
 shader_source!(HILLSHADE_PREPARE_SHADER, "HillshadePrepareShader", HILLSHADE_PREPARE_ATTRIBUTES, HILLSHADE_TEXTURES);
 
-// src/mln/shaders/mtl/line.cpp
 const LINE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, LINE_UBO_COUNT, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
     attr(1, UByte4, LINE_UBO_COUNT, ID_LINE_DATA_VERTEX_ATTRIBUTE),
@@ -413,7 +395,6 @@ shader_source!(
     &[tex(0, ID_LINE_IMAGE_TEXTURE), tex(1, ID_LINE_DASH_TEXTURE)]
 );
 
-// src/mln/shaders/mtl/raster.cpp
 const RASTER_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, RASTER_UBO_COUNT, ID_RASTER_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, RASTER_UBO_COUNT, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
@@ -425,18 +406,15 @@ shader_source!(
     &[tex(0, ID_RASTER_IMAGE0_TEXTURE), tex(1, ID_RASTER_IMAGE1_TEXTURE)]
 );
 
-// src/mln/shaders/mtl/sky.cpp
 const SKY_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, SKY_UBO_COUNT, ID_SKY_POS_VERTEX_ATTRIBUTE)];
 const ATMOSPHERE_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, ATMOSPHERE_UBO_COUNT, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE)];
 shader_source!(SKY_SHADER, "SkyShader", SKY_ATTRIBUTES, &[]);
 shader_source!(ATMOSPHERE_SHADER, "AtmosphereShader", ATMOSPHERE_ATTRIBUTES, &[]);
 
-// src/mln/shaders/mtl/symbol.cpp before the symbol instancing
-// (`!MLN_USE_SYMBOL_INSTANCING`): the layout vertex (`SymbolLayoutVertex`,
-// with the port's `tex_origin`), the dynamic vertex (`projected_pos`), the
-// opacity vertex (`fade_opacity`) and the interleaved data-driven vertex, in
-// four buffers.
+// The layout vertex (`SymbolLayoutVertex`), the dynamic vertex
+// (`projected_pos`), the opacity vertex (`fade_opacity`) and the interleaved
+// data-driven vertex, in four buffers.
 const SYMBOL_ICON_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short4, SYMBOL_UBO_COUNT, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
     attr(1, UShort4, SYMBOL_UBO_COUNT, ID_SYMBOL_DATA_ATTRIBUTE),
@@ -496,7 +474,7 @@ shader_source!(
 /// The Metal source of `shader_id`, or `None` for the shaders the renderer
 /// doesn't draw with: the wide vector.
 #[must_use]
-pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
+pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {
         BuiltIn::BackgroundShader => Some(&BACKGROUND_SHADER),
         BuiltIn::BackgroundPatternShader => Some(&BACKGROUND_PATTERN_SHADER),

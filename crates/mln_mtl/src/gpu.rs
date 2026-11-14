@@ -255,8 +255,9 @@ type BeforeCommit = Box<dyn Fn(&ProtocolObject<dyn MTLCommandBuffer>)>;
 /// Command buffers don't retain the resources they use: a destroyed
 /// resource waits in a queue until the command buffers submitted before it
 /// was destroyed finish (see [`Completion`]). Writes go into a staging
-/// buffer that the next submit copies in before its passes. Each submit and pipeline
-/// creation drains an autorelease pool of its own.
+/// buffer that the next submit copies in before its passes. Each call that
+/// encodes commands or compiles a pipeline drains an autorelease pool of its
+/// own.
 pub struct MetalGpu {
     device: Device,
     /// The texture size limit and whether draws may offset their base
@@ -1380,6 +1381,21 @@ pub(crate) fn texture_format(pixel_format: MTLPixelFormat) -> Option<TextureForm
     TEXTURE_FORMATS.into_iter().find(|&format| self::pixel_format(format) == pixel_format)
 }
 
+/// A descriptor of a 2D texture of `size` pixels, neither of them zero. It's
+/// made with `new`: the factory methods would leave it in the caller's
+/// autorelease pool.
+pub(crate) fn texture_descriptor(format: MTLPixelFormat, size: Size) -> Retained<MTLTextureDescriptor> {
+    let descriptor = MTLTextureDescriptor::new();
+    descriptor.setPixelFormat(format);
+    // SAFETY: the size isn't zero, and a texture past the device's limits
+    // fails to be made.
+    unsafe {
+        descriptor.setWidth(size.width as usize);
+        descriptor.setHeight(size.height as usize);
+    }
+    descriptor
+}
+
 fn pixel_format(format: TextureFormat) -> MTLPixelFormat {
     match format {
         TextureFormat::R8Unorm => MTLPixelFormat::R8Unorm,
@@ -1499,15 +1515,7 @@ impl Gpu for MetalGpu {
         if !(1..=max).contains(&width) || !(1..=max).contains(&height) {
             return Err(GpuError::Unsupported(format!("{}: a {width}x{height} texture", desc.label)));
         }
-        // SAFETY: the size is in the device's limits.
-        let descriptor = unsafe {
-            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                pixel_format(desc.format),
-                width as usize,
-                height as usize,
-                false,
-            )
-        };
+        let descriptor = texture_descriptor(pixel_format(desc.format), desc.size);
         let mut usage = MTLTextureUsage::empty();
         if desc.usage.sampled {
             usage |= MTLTextureUsage::ShaderRead;
