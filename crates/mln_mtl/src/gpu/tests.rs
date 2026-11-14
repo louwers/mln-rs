@@ -1,4 +1,6 @@
-use mln_gfx::gpu::conformance::{clip_mask_and_background, vertex_layouts};
+use mln_gfx::gpu::conformance::{
+    clip_mask_and_background, depth_only, foreign_ids, invalid_calls, topologies, transparent_replace, vertex_layouts,
+};
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_util::Color;
 use objc2_metal::MTLCommandBuffer;
@@ -45,6 +47,36 @@ fn clip_mask_and_background_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     let mut gpu = MetalGpu::new(&device);
     clip_mask_and_background(&mut gpu, read_back).expect("the frame");
+}
+
+#[test]
+fn invalid_calls_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    invalid_calls(&mut MetalGpu::new(&device)).expect("the valid calls");
+}
+
+#[test]
+fn foreign_ids_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    foreign_ids(&mut MetalGpu::new(&device), &mut MetalGpu::new(&device)).expect("the valid calls");
+}
+
+#[test]
+fn transparent_replace_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    transparent_replace(&mut MetalGpu::new(&device), read_back).expect("the frame");
+}
+
+#[test]
+fn topologies_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    topologies(&mut MetalGpu::new(&device), read_back).expect("the frames");
+}
+
+#[test]
+fn depth_only_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    depth_only(&mut MetalGpu::new(&device), read_back).expect("the frame");
 }
 
 #[test]
