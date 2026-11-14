@@ -11,6 +11,7 @@ use mln_map::{
     MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
 use mln_renderer::UpdateReader;
+use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
@@ -690,6 +691,11 @@ impl Map {
 
     pub(crate) fn glyph_cache(&self) -> Arc<GlyphCache> {
         Arc::clone(&self.shared.runtime.glyph_cache)
+    }
+
+    /// What the renderers of the runtime's maps load font faces with.
+    pub(crate) fn font_face_engine(&self) -> Arc<dyn FontFaceEngine> {
+        Arc::clone(&self.shared.runtime.font_face_engine)
     }
 
     /// Reserves the map for the session `id`.

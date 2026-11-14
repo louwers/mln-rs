@@ -54,8 +54,6 @@ mod ureq_transport;
 
 #[cfg(feature = "sqlite")]
 pub use database_file_source::DatabaseFileSource;
-#[cfg(target_family = "wasm")]
-pub use fetch_transport::set_fetch_preloads;
 pub use file_source::{FileSource, FileSourceExt};
 pub use loader::{Loader, LoaderBuilder};
 #[cfg(feature = "sqlite")]

@@ -16,9 +16,9 @@ use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent, MapOptions,
     UpdateReader,
 };
-use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::SerializingTransport;
 use mln_renderer::{RenderTimings, Renderer};
+use mln_storage::{Loader, OnlineFileSource};
 use mln_util::LatLng;
 use mln_util::geo::ScreenCoordinate;
 use mln_util::size::Size;
@@ -71,11 +71,16 @@ fn physical(size: Size, pixel_ratio: f64) -> Size {
 
 /// Hands this instance's fetches the responses its Web Worker fetched ahead
 /// (web/map-worker.ts): `take(url)` returns a promise of the response
-/// fetched for exactly `url`, once, or undefined (`mln_storage`'s
-/// `set_fetch_preloads`).
+/// fetched for exactly `url`, once, or undefined
+/// (`OnlineFileSource::set_fetch_preloads`).
 #[wasm_bindgen]
 pub fn set_preloads(take: js_sys::Function) {
-    mln_storage::set_fetch_preloads(Some(take));
+    PRELOADS.with(|preloads| *preloads.borrow_mut() = Some(take));
+}
+
+thread_local! {
+    /// What `set_preloads` set, for the maps made after.
+    static PRELOADS: std::cell::RefCell<Option<js_sys::Function>> = const { std::cell::RefCell::new(None) };
 }
 
 /// A continuous map in an `OffscreenCanvas`, in the Web Worker that runs it
@@ -543,12 +548,17 @@ impl WebMap {
     ) -> Result<WebMap, JsValue> {
         let scheduler = install_cooperative_scheduler();
         shaper::set_loader(load_shaper);
-        font_face_engine::set_font_face_engine(Arc::new(ShaperModuleEngine));
 
         let run_loop = RunLoop::get();
         run_loop.set_waker(Some(pump::waker()));
         scheduler.set_waker(Some(pump::waker()));
-        let mut renderer = Renderer::new(Rc::clone(&backend), pixel_ratio as f32, local_ideograph_font_family);
+        let mut renderer = Renderer::with_fonts(
+            Rc::clone(&backend),
+            pixel_ratio as f32,
+            local_ideograph_font_family,
+            Arc::default(),
+            Arc::new(ShaperModuleEngine),
+        );
         let received = Rc::new(Cell::new(0));
         let count = Rc::clone(&received);
         let transport = tile_workers::transport(
@@ -573,8 +583,14 @@ impl WebMap {
                 true
             })
         };
-        let mut map =
-            Map::new(MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() }).map_err(js_error)?;
+        let online = Arc::new(OnlineFileSource::new());
+        online.set_fetch_preloads(PRELOADS.with(|preloads| preloads.borrow().clone()));
+        let loader = Loader::builder().network(online).build();
+        let mut map = Map::with_file_source(
+            Arc::new(loader),
+            MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
+        )
+        .map_err(js_error)?;
         map.set_waker(Some(pump::waker()));
         renderer.set_event_queue(Some(map.renderer_events()));
         let frontend = Frontend { renderer, target, updates: map.update_reader(), drawn_update: 0, redraw: false };

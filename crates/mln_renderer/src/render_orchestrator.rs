@@ -257,15 +257,17 @@ impl RenderOrchestrator {
         background_layer_as_color: bool,
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
+        font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
     ) -> Self {
         let events = EventSink::default();
         // `imageManager->setObserver(this)`.
         let image_manager = ImageManager::create();
         image_manager.set_observer(Some(Rc::new(OrchestratorImageObserver { events: events.clone() })));
         // symbols: `glyphManager->setObserver(this)`.
-        let glyph_manager = GlyphManager::with_glyph_cache(
+        let glyph_manager = GlyphManager::with_cache_and_engine(
             Some(Box::new(DefaultLocalGlyphRasterizer::new(local_font_family))),
             glyph_cache,
+            font_face_engine,
         );
         glyph_manager.set_observer(Some(Rc::new(OrchestratorGlyphObserver { events: events.clone() })));
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());

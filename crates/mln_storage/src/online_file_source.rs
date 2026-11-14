@@ -631,6 +631,19 @@ impl OnlineFileSource {
         self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_transform(transform));
     }
 
+    /// Sets where the browser's fetch looks for a response that the host
+    /// fetched ahead before it fetches a whole resource: `take(url)` returns
+    /// a promise of the `Response` fetched for exactly `url`, at most once
+    /// for each, or undefined. A promise that rejects is fetched again.
+    #[cfg(target_family = "wasm")]
+    pub fn set_fetch_preloads(&self, take: Option<js_sys::Function>) {
+        let take = take.map(mln_actor::LocalObject::new);
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| {
+            let take = take.as_ref().and_then(mln_actor::LocalObject::get).map(|take| (*take).clone());
+            t.state.http_file_source.set_fetch_preloads(take);
+        });
+    }
+
     /// Sets the headers to add to each transfer.
     pub fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
         self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_http_header_transform(transform));

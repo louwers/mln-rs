@@ -8,32 +8,24 @@
 //! slice, never inside the call that sent it. Each session's renderer puts
 //! its tiles' workers in Web Workers of the instance's own
 //! ([`tile_worker_transport`]), and shapes font faces with the shaper module
-//! once a style declares them.
+//! (the runtime's font-face engine) once a style declares them.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use mln_actor::RunLoop;
-use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::SerializingTransport;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
-use mln_web_host::{pump, shaper, tile_workers};
+use mln_web_host::{pump, tile_workers};
 
 use crate::render::SessionId;
 
 /// Makes the instance ready for runtimes: the cooperative scheduler, which
-/// the pump runs, and the font-face shaper module.
+/// the pump runs.
 pub(crate) fn install() {
     let scheduler = mln_web_host::install_cooperative_scheduler();
     scheduler.set_waker(Some(pump::waker()));
-    thread_local! {
-        static SHAPER: Cell<bool> = const { Cell::new(false) };
-    }
-    if !SHAPER.replace(true) {
-        font_face_engine::set_font_face_engine(Arc::new(shaper::ShaperModuleEngine));
-    }
 }
 
 /// Runs `run_loop` in the pump's slices until it stops. Each slice calls

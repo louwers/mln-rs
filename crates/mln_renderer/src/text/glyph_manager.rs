@@ -49,7 +49,7 @@ use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-use crate::text::font_face_engine::{self, FontFaceEngine, FontFaceShaper};
+use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct HBShapeResult {
@@ -171,15 +171,20 @@ impl GlyphManager {
 
     /// A manager that uses `glyph_cache`: managers given the same cache share
     /// the glyphs they parse from glyph PBFs.
+    #[cfg(test)]
     pub(crate) fn with_glyph_cache(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         glyph_cache: Arc<GlyphCache>,
     ) -> Rc<GlyphManager> {
-        Self::with_cache_and_engine(local_glyph_rasterizer, glyph_cache, font_face_engine::font_face_engine())
+        Self::with_cache_and_engine(
+            local_glyph_rasterizer,
+            glyph_cache,
+            crate::text::font_face_engine::default_engine(),
+        )
     }
 
-    /// A manager whose font faces load with `engine` instead of the one
-    /// `set_font_face_engine` set.
+    /// A manager whose font faces load with `engine` instead of the
+    /// default.
     #[cfg(test)]
     pub(crate) fn with_font_face_engine(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
@@ -188,7 +193,7 @@ impl GlyphManager {
         Self::with_cache_and_engine(local_glyph_rasterizer, Arc::default(), engine)
     }
 
-    fn with_cache_and_engine(
+    pub(crate) fn with_cache_and_engine(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         glyph_cache: Arc<GlyphCache>,
         engine: Arc<dyn FontFaceEngine>,

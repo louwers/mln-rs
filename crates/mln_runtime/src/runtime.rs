@@ -11,6 +11,7 @@ use std::sync::mpsc;
 use std::thread::ThreadId;
 
 use mln_actor::{AsyncTask, RunLoop, RunLoopHandle};
+use mln_renderer::text::font_face_engine::FontFaceEngine;
 #[cfg(not(target_family = "wasm"))]
 use mln_storage::DatabaseFileSource;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
@@ -90,6 +91,10 @@ pub(crate) struct RuntimeShared {
     /// The glyphs that the renderers of the runtime's maps parse, which they
     /// share.
     pub(crate) glyph_cache: Arc<GlyphCache>,
+    /// What the renderers of the runtime's maps load font faces with: in
+    /// the browser, the shaper module, which loads the first time a style
+    /// declares font faces.
+    pub(crate) font_face_engine: Arc<dyn FontFaceEngine>,
     /// The runtime's thread, which the drop waits for after the shutdown
     /// unless a release or disposal detached it, except in the browser,
     /// where the thread is the host's.
@@ -189,6 +194,16 @@ impl Drop for RuntimeShared {
 #[cfg(target_family = "wasm")]
 fn no_database() -> Error {
     Error::unsupported("the browser build has no cache database: the browser caches the requests")
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn font_face_engine() -> Arc<dyn FontFaceEngine> {
+    mln_renderer::text::font_face_engine::default_engine()
+}
+
+#[cfg(target_family = "wasm")]
+fn font_face_engine() -> Arc<dyn FontFaceEngine> {
+    Arc::new(mln_web_host::shaper::ShaperModuleEngine)
 }
 
 fn released() -> Error {
@@ -458,6 +473,7 @@ impl Runtime {
                 lifecycle: Mutex::new(Lifecycle { released: false, live_maps: 0, shut_down: false }),
                 next_map_id: AtomicU64::new(1),
                 glyph_cache: Arc::default(),
+                font_face_engine: font_face_engine(),
                 thread_end,
             }),
         })

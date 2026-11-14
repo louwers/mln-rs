@@ -138,11 +138,6 @@ fn default_transport() -> Arc<dyn HttpTransport> {
     Arc::new(crate::ureq_transport::Transport::new())
 }
 
-#[cfg(target_family = "wasm")]
-fn default_transport() -> Arc<dyn HttpTransport> {
-    Arc::new(crate::fetch_transport::FetchTransport)
-}
-
 /// The response half of `HTTPRequest`, from a finished transfer: the header
 /// callback and `handleResult(CURLcode)`.
 fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceError>>) -> Response {
@@ -259,14 +254,33 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
 /// Plain HTTP(S) requests, used by the `OnlineFileSource`.
 pub(crate) struct HTTPFileSource {
     transport: Arc<dyn HttpTransport>,
+    /// The browser's fetch, which is the transport.
+    #[cfg(target_family = "wasm")]
+    fetch: Arc<crate::fetch_transport::FetchTransport>,
     header_transform: Mutex<HttpHeaderTransform>,
 }
 
 impl HTTPFileSource {
     /// An HTTP file source over the platform's HTTP stack.
+    #[cfg(not(target_family = "wasm"))]
     #[must_use]
     pub(crate) fn new() -> Self {
         HTTPFileSource { transport: default_transport(), header_transform: Mutex::new(HttpHeaderTransform::default()) }
+    }
+
+    /// An HTTP file source over the browser's fetch.
+    #[cfg(target_family = "wasm")]
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        let fetch = Arc::new(crate::fetch_transport::FetchTransport::default());
+        let transport: Arc<dyn HttpTransport> = Arc::<crate::fetch_transport::FetchTransport>::clone(&fetch);
+        HTTPFileSource { transport, fetch, header_transform: Mutex::new(HttpHeaderTransform::default()) }
+    }
+
+    /// Sets the responses that the host fetched ahead (`FetchTransport`).
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn set_fetch_preloads(&self, take: Option<js_sys::Function>) {
+        self.fetch.set_preloads(take);
     }
 
     /// Sets the headers to add to requests.

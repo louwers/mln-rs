@@ -97,8 +97,27 @@ impl Renderer {
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
     ) -> Self {
+        let engine = crate::text::font_face_engine::default_engine();
+        Self::with_fonts(backend, pixel_ratio, local_font_family, glyph_cache, engine)
+    }
+
+    /// A renderer that uses `glyph_cache`, and loads the font files of a
+    /// style's font faces with `font_face_engine` instead of
+    /// `font_face_engine::default_engine()`.
+    pub fn with_fonts(
+        backend: Rc<dyn RendererBackend>,
+        pixel_ratio: f32,
+        local_font_family: Option<String>,
+        glyph_cache: Arc<GlyphCache>,
+        font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
+    ) -> Self {
         Renderer {
-            orchestrator: ManuallyDrop::new(RenderOrchestrator::new(true, local_font_family, glyph_cache)),
+            orchestrator: ManuallyDrop::new(RenderOrchestrator::new(
+                true,
+                local_font_family,
+                glyph_cache,
+                font_face_engine,
+            )),
             context: Rc::new(Context::new(Rc::clone(&backend))),
             backend,
             pixel_ratio,
