@@ -7,7 +7,8 @@
 //! glyphs and draws near regular weight (`pick`), looked up for the user's preferred
 //! languages, and gives the map that font for the script's code points only.
 //! It asks the platform's font matcher where it has one: fontconfig on Linux
-//! and the BSDs. Elsewhere, or without it, it scans the system's font files
+//! and the BSDs, `AFontMatcher` on Android 10 and later. Elsewhere, or
+//! without it, it scans the system's font files
 //! for families known to draw each script. The browser build finds none: the
 //! browser draws CJK glyphs itself (`DefaultLocalGlyphRasterizer`).
 //!
@@ -29,6 +30,8 @@ mod sfnt;
 #[cfg(not(target_family = "wasm"))]
 mod source;
 
+#[cfg(target_os = "android")]
+mod android;
 #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
 mod fontconfig;
 
@@ -120,6 +123,8 @@ fn pick(script: &scripts::Script, candidates: Vec<(String, source::Source)>) -> 
 /// The platform's way to find fonts.
 #[cfg(not(target_family = "wasm"))]
 enum Finder {
+    #[cfg(target_os = "android")]
+    Android(android::FontMatcher),
     #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
     Fontconfig(fontconfig::Fontconfig),
     Scan(scan::Scan),
@@ -128,6 +133,10 @@ enum Finder {
 #[cfg(not(target_family = "wasm"))]
 impl Finder {
     fn new() -> Finder {
+        #[cfg(target_os = "android")]
+        if let Some(matcher) = android::FontMatcher::new() {
+            return Finder::Android(matcher);
+        }
         #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
         if let Some(fontconfig) = fontconfig::Fontconfig::new() {
             return Finder::Fontconfig(fontconfig);
@@ -139,6 +148,8 @@ impl Finder {
     /// their family names.
     fn candidates(&self, script: &scripts::Script, languages: &[String]) -> Vec<(String, source::Source)> {
         match self {
+            #[cfg(target_os = "android")]
+            Finder::Android(matcher) => matcher.candidates(script, languages),
             #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
             Finder::Fontconfig(fontconfig) => fontconfig.candidates(script, languages),
             Finder::Scan(scan) => {

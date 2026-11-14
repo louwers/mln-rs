@@ -25,8 +25,8 @@ memmap2.workspace = true
 skrifa.workspace = true
 sys-locale.workspace = true
 
-# fontconfig, loaded at run time.
-[target.'cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))'.dependencies]
+# fontconfig, and Android's font matcher, loaded at run time.
+[target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
 libloading.workspace = true
 
 [dev-dependencies]

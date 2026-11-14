@@ -1,0 +1,120 @@
+//! The font for a script from Android's font matcher (`AFontMatcher`, API
+//! level 29), which picks the system font that the platform would draw the
+//! text in for the given languages. Its functions are looked up at run time,
+//! so that an app that runs on older versions falls back to the scan of
+//! `/system/fonts`.
+
+#![expect(unsafe_code, reason = "the NDK's font API is the FFI here")]
+
+use std::ffi::{CStr, CString, c_char, c_void};
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
+
+use libloading::Library;
+
+use crate::scripts::Script;
+use crate::source::Source;
+
+/// The functions of the NDK's `font_matcher.h` and `font.h` that this uses.
+pub(crate) struct FontMatcher {
+    create: unsafe extern "C" fn() -> *mut c_void,
+    destroy: unsafe extern "C" fn(*mut c_void),
+    set_locales: unsafe extern "C" fn(*mut c_void, *const c_char),
+    matches: unsafe extern "C" fn(*const c_void, *const c_char, *const u16, u32, *mut u32) -> *mut c_void,
+    close: unsafe extern "C" fn(*mut c_void),
+    file_path: unsafe extern "C" fn(*const c_void) -> *const c_char,
+    collection_index: unsafe extern "C" fn(*const c_void) -> usize,
+    // Last, so that the functions above stay loaded while they are used.
+    _library: Library,
+}
+
+impl FontMatcher {
+    /// The font matcher, or `None` before API level 29.
+    pub(crate) fn new() -> Option<FontMatcher> {
+        // SAFETY: every app has libandroid loaded already.
+        let library = unsafe { Library::new("libandroid.so") }.ok()?;
+        macro_rules! symbol {
+            ($name:literal) => {
+                // SAFETY: the signature is that of the function in the NDK's
+                // header.
+                *unsafe { library.get(concat!($name, "\0").as_bytes()) }.ok()?
+            };
+        }
+        Some(FontMatcher {
+            create: symbol!("AFontMatcher_create"),
+            destroy: symbol!("AFontMatcher_destroy"),
+            set_locales: symbol!("AFontMatcher_setLocales"),
+            matches: symbol!("AFontMatcher_match"),
+            close: symbol!("AFont_close"),
+            file_path: symbol!("AFont_getFontFilePath"),
+            collection_index: symbol!("AFont_getCollectionIndex"),
+            _library: library,
+        })
+    }
+
+    /// The font that Android draws `script` in for `languages`, with the name
+    /// of its file as its family. It may lack the script's glyphs: the
+    /// matcher returns a font even when none has them.
+    pub(crate) fn candidates(&self, script: &Script, languages: &[String]) -> Vec<(String, Source)> {
+        let mut probe = [0; 2];
+        let probe = script.probe.encode_utf16(&mut probe);
+        let Ok(locales) = CString::new(languages.join(",")) else { return Vec::new() };
+        // SAFETY: the matcher and the font are checked for null, used while
+        // they live and released once; the path belongs to the font, and is
+        // copied before the font is closed.
+        unsafe {
+            let matcher = (self.create)();
+            if matcher.is_null() {
+                return Vec::new();
+            }
+            if !languages.is_empty() {
+                (self.set_locales)(matcher, locales.as_ptr());
+            }
+            let font = (self.matches)(
+                matcher,
+                c"sans-serif".as_ptr(),
+                probe.as_ptr(),
+                probe.len() as u32,
+                std::ptr::null_mut(),
+            );
+            (self.destroy)(matcher);
+            if font.is_null() {
+                return Vec::new();
+            }
+            let path = PathBuf::from(std::ffi::OsStr::from_bytes(CStr::from_ptr((self.file_path)(font)).to_bytes()));
+            let index = (self.collection_index)(font) as u32;
+            (self.close)(font);
+            let family = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+            vec![(family, Source::File { path, index })]
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FontMatcher;
+    use crate::scripts::SCRIPTS;
+
+    /// The device's API level, from `ro.build.version.sdk`.
+    fn api_level() -> u32 {
+        let output = std::process::Command::new("getprop").arg("ro.build.version.sdk").output().unwrap();
+        String::from_utf8_lossy(&output.stdout).trim().parse().unwrap()
+    }
+
+    #[test]
+    fn the_matcher_is_there_from_api_29() {
+        assert_eq!(FontMatcher::new().is_some(), api_level() >= 29);
+    }
+
+    #[test]
+    fn ideographs_take_a_font_for_the_users_language() {
+        let Some(matcher) = FontMatcher::new() else { return };
+        let han = SCRIPTS.iter().find(|script| script.probe == '\u{4E2D}').unwrap();
+        let font = |language: &str| matcher.candidates(han, &[language.to_owned()]).remove(0);
+        let (japanese, chinese) = (font("ja-JP"), font("zh-CN"));
+        println!("ja-JP: {japanese:?}\nzh-CN: {chinese:?}");
+        assert!(japanese.1.drawn_weight(han.probe).is_some());
+        assert!(chinese.1.drawn_weight(han.probe).is_some());
+        assert_ne!(japanese.1, chinese.1);
+    }
+}
