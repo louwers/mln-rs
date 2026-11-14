@@ -275,6 +275,23 @@ fn platform_pinches_zoom_turn_and_glide() {
 }
 
 #[test]
+fn a_platform_pinch_stops_zooming_out_where_the_fingers_lift() {
+    let mut rig = Rig::new();
+    rig.pinch(1.0, 0.0, PinchPhase::Begin);
+    for _ in 0..10 {
+        rig.now += 16.0;
+        rig.pinch(2f64.powf(-0.05), -2.0, PinchPhase::Update);
+    }
+    assert!((rig.zoom() - 11.5).abs() < 1e-9, "{}", rig.zoom());
+    rig.pinch(1.0, 0.0, PinchPhase::End);
+    rig.settle();
+    // As in Apple Maps, the zoom out stops where the fingers lift, and the
+    // turn glides on.
+    assert!((rig.zoom() - 11.5).abs() < 1e-9, "{}", rig.zoom());
+    assert!(rig.bearing() > 25.0, "{}", rig.bearing());
+}
+
+#[test]
 fn a_cancelled_platform_pinch_doesnt_glide_and_a_touch_takes_over() {
     // An update without a begin begins.
     let mut rig = Rig::new();

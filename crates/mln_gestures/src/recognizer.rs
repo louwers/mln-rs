@@ -402,6 +402,9 @@ enum Finish {
     Settle,
     /// Released: it glides on, and settles.
     Glide,
+    /// A platform pinch released: it glides on as `Glide` does, but a zoom
+    /// out stops where the fingers lifted, as Apple Maps' trackpad pinch does.
+    PinchGlide,
 }
 
 /// The gesture recognizers for one map: MapLibre Compose's gesture set, with
@@ -999,8 +1002,12 @@ impl GestureRecognizer {
         match finish {
             Finish::Cancel => self.cancel_phase(camera),
             Finish::Stop => self.end_phase(camera, None),
-            Finish::Settle | Finish::Glide => {
-                let release = if finish == Finish::Glide { self.tracking.release(now) } else { Release::default() };
+            Finish::Settle | Finish::Glide | Finish::PinchGlide => {
+                let mut release =
+                    if finish == Finish::Settle { Release::default() } else { self.tracking.release(now) };
+                if finish == Finish::PinchGlide {
+                    release.zoom = release.zoom.filter(|&zoom| zoom > 0.0);
+                }
                 let momentum = release.into_momentum(caught_glide, &self.options);
                 self.end_phase(camera, Some(&momentum));
             }
@@ -1150,7 +1157,8 @@ impl GestureRecognizer {
     }
 
     /// A pinch the platform recognized: it zooms and turns around its center
-    /// as a touch pinch does, and glides on when it ends.
+    /// as a touch pinch does, and glides on when it ends, except that a zoom
+    /// out stops where the fingers lift.
     fn platform_pinch(
         &mut self,
         camera: &mut dyn GestureCamera,
@@ -1166,7 +1174,7 @@ impl GestureRecognizer {
                 if !pinching {
                     return false;
                 }
-                let finish = if phase == PinchPhase::End { Finish::Glide } else { Finish::Cancel };
+                let finish = if phase == PinchPhase::End { Finish::PinchGlide } else { Finish::Cancel };
                 self.finish(camera, now, finish);
                 return true;
             }

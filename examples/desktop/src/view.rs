@@ -920,7 +920,7 @@ impl View {
             7 => ("right drag up (tilt)", drag(Button::Secondary, none, 0.0, -120.0), vec![], vec![]),
             8 => ("shift+drag (box zoom)", drag(Button::Primary, shift, 200.0, 150.0), vec![], vec![]),
             9 => (
-                "trackpad pinch (zoom out half a level, turn 20 degrees counterclockwise, then glide)",
+                "trackpad pinch (zoom out half a level, turn 20 degrees counterclockwise, then the turn glides)",
                 std::iter::once(pinch(1.0, 0.0, PinchPhase::Begin))
                     .chain(std::iter::repeat_n(pinch(2f64.powf(-0.05), -2.0, PinchPhase::Update), 10))
                     .chain(std::iter::once(pinch(1.0, 0.0, PinchPhase::End)))
