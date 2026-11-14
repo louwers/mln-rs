@@ -10,6 +10,7 @@ use std::time::Duration;
 use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelDelta};
+use mln_gfx::gpu::{ReadbackId, conformance};
 use mln_gfx::{FrameTarget, RendererBackend};
 use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent, MapOptions,
@@ -103,6 +104,11 @@ pub struct WebMap {
     pending: [f64; PHASES],
     /// What the last frame that drew spent on each phase (`frame_timings`).
     phases: [f64; PHASES],
+    /// What the renderer draws with.
+    backend: Rc<dyn RendererBackend>,
+    /// The frame of the GPU check that `start_gpu_check` started, until
+    /// `take_gpu_check` takes it.
+    gpu_check: Option<ReadbackId>,
 }
 
 /// How many phases `WebMap::frame_timings` reports.
@@ -482,6 +488,30 @@ impl WebMap {
     pub fn take_pixels(&self) -> Option<Vec<u8>> {
         self.frontend.target.take_readback().map(|image| image.data)
     }
+
+    /// Starts `mln_gfx`'s conformance case of writes from JS arrays on the
+    /// renderer's `Gpu`, whose frame `take_gpu_check` checks. Only
+    /// check/check.mjs asks for it.
+    pub fn start_gpu_check(&mut self) -> Result<(), JsValue> {
+        let host = |bytes: &[u8]| mln_util::host_bytes::HostBytes::new(js_sys::Uint8Array::from(bytes));
+        let readback = conformance::host_writes(&mut *self.backend.gpu(), host).map_err(js_error)?;
+        if let Some(stale) = self.gpu_check.replace(readback) {
+            self.backend.gpu().destroy_readback(stale);
+        }
+        Ok(())
+    }
+
+    /// Whether the GPU has the frame of the check that `start_gpu_check`
+    /// started, which passed its checks. Panics where a check doesn't hold.
+    pub fn take_gpu_check(&mut self) -> Result<bool, JsValue> {
+        let readback = self.gpu_check.take().ok_or_else(|| js_error("no GPU check started"))?;
+        let Some(pixels) = self.backend.gpu().take_readback(readback, false).map_err(js_error)? else {
+            self.gpu_check = Some(readback);
+            return Ok(false);
+        };
+        conformance::check_host_writes(&pixels);
+        Ok(true)
+    }
 }
 
 /// `WebMap::wheel`'s `kind`, as web/protocol.ts's `WHEEL_PIXELS` and
@@ -518,7 +548,7 @@ impl WebMap {
         let run_loop = RunLoop::get();
         run_loop.set_waker(Some(pump::waker()));
         scheduler.set_waker(Some(pump::waker()));
-        let mut renderer = Renderer::new(backend, pixel_ratio as f32, local_ideograph_font_family);
+        let mut renderer = Renderer::new(Rc::clone(&backend), pixel_ratio as f32, local_ideograph_font_family);
         let received = Rc::new(Cell::new(0));
         let count = Rc::clone(&received);
         let transport = tile_workers::transport(
@@ -562,6 +592,8 @@ impl WebMap {
             between_frames_ms,
             pending: [0.0; PHASES],
             phases: [0.0; PHASES],
+            backend,
+            gpu_check: None,
         })
     }
 
