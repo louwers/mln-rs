@@ -1,48 +1,19 @@
-// The backend and the context share the device and queue (`Rc<BackendImpl>`),
-// and resources hold an `Rc<Context>`.
-//
-// What the backend draws into is a target built on it (`OffscreenTarget`,
-// `SurfaceTarget`, `BorrowedTarget`), whose textures it imports into the
-// backend's `WebGpu`.
-
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
-use mln_gfx::context::Context as GfxContext;
-use mln_gfx::released::Released;
+use mln_gfx::backend::Type as BackendType;
+use mln_gfx::context::{Context as GfxContext, ContextBase};
+use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
 
-use crate::context::Context;
 use crate::device::Device;
 use crate::gpu::WebGpu;
 
-pub(crate) struct BackendImpl {
-    /// The `Gpu` the renderer's resources belong to and its draws encode
-    /// through.
-    gpu: RefCell<WebGpu>,
-    /// The buffers the renderer dropped, which a context destroys at the
-    /// end of a frame.
-    released: Rc<Released>,
-}
-
-impl BackendImpl {
-    fn new(device: &Device) -> Self {
-        BackendImpl { gpu: RefCell::new(WebGpu::new(device)), released: Rc::default() }
-    }
-
-    pub(crate) fn gpu(&self) -> &RefCell<WebGpu> {
-        &self.gpu
-    }
-
-    pub(crate) fn released(&self) -> &Rc<Released> {
-        &self.released
-    }
-}
-
-/// A renderer's context on a [`Device`].
+/// A renderer's backend on a [`Device`]: the [`WebGpu`] that its resources
+/// belong to, and that the targets built on it import their textures into.
 pub struct RendererBackend {
     base: RendererBackendBase,
-    impl_: Rc<BackendImpl>,
+    gpu: Rc<RefCell<WebGpu>>,
     device: Device,
 }
 
@@ -51,8 +22,8 @@ impl RendererBackend {
     /// each submitting to the device's queue.
     #[must_use]
     pub fn new(device: &Device) -> Self {
-        let impl_ = BackendImpl::new(device);
-        RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(impl_), device: device.clone() }
+        let gpu = Rc::new(RefCell::new(WebGpu::new(device)));
+        RendererBackend { base: RendererBackendBase::new(), gpu, device: device.clone() }
     }
 
     /// The device the backend renders on.
@@ -60,21 +31,8 @@ impl RendererBackend {
         &self.device
     }
 
-    /// The device state that the backend's contexts share, with its
-    /// `WebGpu`.
-    pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
-        &self.impl_
-    }
-
-    /// Drops the context, releasing the resources it caches first.
-    pub(crate) fn reset_context(&mut self) {
-        if let Some(context) = self.base.reset_context() {
-            context.release_cached_resources();
-        }
-    }
-
-    pub(crate) fn create_context(&self) -> Rc<Context> {
-        Context::new(Rc::clone(&self.impl_))
+    pub(crate) fn gpu(&self) -> RefMut<'_, WebGpu> {
+        self.gpu.borrow_mut()
     }
 }
 
@@ -84,7 +42,7 @@ impl renderer_backend::RendererBackend for RendererBackend {
     }
 
     fn create_context(&self) -> Rc<dyn GfxContext> {
-        RendererBackend::create_context(self)
+        Rc::new(Context { base: ContextBase::default(), gpu: Rc::clone(&self.gpu) })
     }
 
     /// WebGPU has no context to make current.
@@ -92,8 +50,33 @@ impl renderer_backend::RendererBackend for RendererBackend {
     fn deactivate(&self) {}
 }
 
-impl Drop for RendererBackend {
-    fn drop(&mut self) {
-        self.reset_context();
+/// The renderer's caches over the backend's [`WebGpu`].
+struct Context {
+    base: ContextBase,
+    gpu: Rc<RefCell<WebGpu>>,
+}
+
+impl GfxContext for Context {
+    fn context_base(&self) -> &ContextBase {
+        &self.base
+    }
+
+    fn backend_type(&self) -> BackendType {
+        BackendType::WebGPU
+    }
+
+    fn begin_frame(&self) {}
+
+    fn end_frame(&self) {}
+
+    fn reduce_memory_usage(&self) {}
+
+    /// Depth only, which every render target's pass clears.
+    fn render_target_depth(&self) -> Option<TextureFormat> {
+        Some(TextureFormat::Depth32Float)
+    }
+
+    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
+        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
 }

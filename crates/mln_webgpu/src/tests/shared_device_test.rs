@@ -1,13 +1,11 @@
 // Backends on a device they share: with other backends, with the host that
-// made it, and on an adapter picked by index, as maplibre-native-ffi's
-// offscreen device (tests/native/abi/render/offscreen.c) uses it.
+// made it, and on an adapter picked by index.
 
 use std::rc::Rc;
 
 use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::frame::FrameTarget as _;
-use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, Pass};
-use mln_gfx::renderer_backend::RendererBackend as _;
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu as _, LoadOp, Pass};
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -22,11 +20,10 @@ fn headless(device: &Device) -> OffscreenTarget {
 
 /// Clears the target to `color` and reads it back.
 fn clear_and_read(target: &OffscreenTarget, color: Color) -> Vec<[u8; 4]> {
-    let backend = target.backend();
-    let _scope = BackendScope::new(&**backend, ScopeType::Explicit);
-    let context = backend.get_context();
+    // The offscreen target reaches the backend's context, which a scope
+    // must hold.
+    let _scope = BackendScope::new(&**target.backend(), ScopeType::Explicit);
     let image = target.begin_frame().expect("a frame");
-    context.begin_frame();
     let pass = Pass {
         label: "main buffer".to_owned(),
         color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(color) }),
@@ -37,9 +34,8 @@ fn clear_and_read(target: &OffscreenTarget, color: Color) -> Vec<[u8; 4]> {
         }),
         commands: Vec::new(),
     };
-    context.gpu().submit(&[pass]).expect("submit");
+    target.backend().gpu().submit(&[pass]).expect("submit");
     target.end_frame();
-    context.end_frame();
     let image = target.read_image().expect("a frame");
     assert_eq!(image.size, SIZE);
     image.data.as_chunks::<4>().0.to_vec()

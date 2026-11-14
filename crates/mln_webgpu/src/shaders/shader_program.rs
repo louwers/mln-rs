@@ -1,24 +1,24 @@
-// Shader modules and pipelines are created inside a validation error scope,
-// so that a WGSL compile error or a rejected pipeline is an `Err`. On a
-// browser's WebGPU the scope is skipped (see `validated`).
+//! WGSL programs and their pipelines. Shader modules and pipelines are
+//! created inside a validation error scope, so that a WGSL compile error or a
+//! rejected pipeline is an `Err`. On a browser's WebGPU the scope is skipped
+//! (see [`validated`]).
 
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::collections::HashMap;
 
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{GpuError, PipelineState, ShaderKey, VertexStep};
-use mln_gfx::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType,
 };
-use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_vec_map::VecMap;
 
-use crate::shaders::shader_source::{AttributeInfo, TextureInfo, prelude, shader_source as program_source};
-use crate::shaders::wgsl_preprocessor::preprocess_wgsl;
+use crate::shaders::shader_source::{
+    AttributeInfo, ShaderSource, TextureInfo, prelude, shader_source as program_source,
+};
+use crate::shaders::wgsl_preprocessor::{is_space, preprocess_wgsl};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BindingType {
@@ -27,7 +27,8 @@ pub(crate) enum BindingType {
     StorageBuffer,
     Sampler,
     Texture,
-    /// For `RGBA32Float` textures that require textureLoad instead of textureSample
+    /// A texture that the shader only reads with `textureLoad`, such as an
+    /// `Rgba32Float` one.
     UnfilterableTexture,
 }
 
@@ -40,8 +41,7 @@ pub(crate) struct BindingInfo {
 }
 
 /// Runs `create` inside a validation error scope and returns the error the
-/// scope caught. On a browser's
-/// WebGPU the scope is skipped: popping it waits for the browser, which in
+/// scope caught. On a browser's WebGPU the scope is skipped: popping it waits for the browser, which in
 /// the middle of a frame expires the canvas texture. Errors there reach the
 /// device's uncaptured-error callback instead.
 pub(crate) fn validated<T>(device: &wgpu::Device, create: impl FnOnce() -> T) -> Result<T, wgpu::Error> {
@@ -119,10 +119,6 @@ fn buffer_sizes(sources: &[&str]) -> Vec<((u32, u32), u64)> {
 #[cfg(target_family = "wasm")]
 fn buffer_sizes(_: &[&str]) -> Vec<((u32, u32), u64)> {
     Vec::new()
-}
-
-fn is_space(b: u8) -> bool {
-    matches!(b, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
 }
 
 fn trim_string(value: &str) -> String {
@@ -246,12 +242,8 @@ pub(crate) fn vertex_format(type_: AttributeDataType) -> Option<wgpu::VertexForm
     })
 }
 
-/// What a pipeline of a program is made from: its fixed-function state, and
-/// the formats of the color and depth-stencil attachments it draws into.
-type PipelineCacheKey = (PipelineState, Option<wgpu::TextureFormat>, Option<wgpu::TextureFormat>);
-
-/// A WGSL program: its vertex and fragment modules, its bind group layouts
-/// as its sources declare them, and the pipelines made from it so far.
+/// A WGSL program: its vertex and fragment modules, and its bind group
+/// layouts as its sources declare them.
 pub(crate) struct ShaderProgram {
     shader_name: String,
     device: wgpu::Device,
@@ -263,19 +255,18 @@ pub(crate) struct ShaderProgram {
     /// [`index_group`](Self::index_group)).
     index_group: Option<u32>,
     pipeline_layout: wgpu::PipelineLayout,
-    render_pipeline_cache: RefCell<HashMap<PipelineCacheKey, wgpu::RenderPipeline>>,
-    vertex_attributes: VertexAttributeArray,
-    instance_attributes: VertexAttributeArray,
-    texture_bindings: [Option<usize>; MAX_TEXTURE_COUNT_PER_SHADER],
+    /// The shader locations of the per-vertex and per-instance inputs.
+    attributes: &'static [AttributeInfo],
+    instance_attributes: &'static [AttributeInfo],
+    textures: &'static [TextureInfo],
     bindings_per_group: Vec<Vec<BindingInfo>>,
     /// The bytes of each buffer the sources read (`buffer_sizes`).
     buffer_sizes: Vec<((u32, u32), u64)>,
 }
 
 impl ShaderProgram {
-    /// The program `name` of `vertex_source` and `fragment_source`, which
-    /// are preprocessed already, with the inputs `attrs` and the textures
-    /// `texts`.
+    /// The program of `source`, from `vertex_source` and `fragment_source`,
+    /// its WGSL preprocessed already.
     ///
     /// A `globalIndex` the sources declare in group 0 moves to a group of its
     /// own, with layout `index_layout` (see
@@ -287,10 +278,9 @@ impl ShaderProgram {
         index_layout: &wgpu::BindGroupLayout,
         vertex_source: &str,
         fragment_source: &str,
-        attrs: &[AttributeInfo],
-        texts: &[TextureInfo],
-        name: &str,
+        source: &ShaderSource,
     ) -> Result<Self, GpuError> {
+        let name = source.name;
         let index_group = index_group_of(&[vertex_source, fragment_source]);
         let (vertex_source, fragment_source) = match index_group {
             Some(group) => (move_global_index(vertex_source, group), move_global_index(fragment_source, group)),
@@ -325,7 +315,7 @@ impl ShaderProgram {
             immediate_size: 0,
         });
 
-        let mut program = ShaderProgram {
+        Ok(ShaderProgram {
             shader_name: name.to_owned(),
             device: device.clone(),
             vertex_shader_module,
@@ -334,40 +324,12 @@ impl ShaderProgram {
             bind_group_order: groups.order,
             index_group,
             pipeline_layout,
-            render_pipeline_cache: RefCell::new(HashMap::new()),
-            vertex_attributes: VertexAttributeArray::new(),
-            instance_attributes: VertexAttributeArray::new(),
-            texture_bindings: [None; MAX_TEXTURE_COUNT_PER_SHADER],
+            attributes: source.attributes,
+            instance_attributes: source.instance_attributes,
+            textures: source.textures,
             bindings_per_group: groups.bindings,
             buffer_sizes: buffer_sizes(&[vertex_source, fragment_source]),
-        };
-        for attr in attrs {
-            program.init_attribute(attr);
-        }
-        for tex in texts {
-            program.init_texture(tex);
-        }
-        Ok(program)
-    }
-
-    /// The pipeline of this program with `state`, drawing into a `color`
-    /// attachment and a `depth_stencil` one, either of which may be
-    /// absent, made on the first call with them. Fails with [`GpuError::Unsupported`] for a primitive WebGPU
-    /// lacks: a line loop or a triangle fan.
-    pub(crate) fn render_pipeline(
-        &self,
-        state: &PipelineState,
-        color: impl Into<Option<wgpu::TextureFormat>>,
-        depth_stencil: Option<wgpu::TextureFormat>,
-    ) -> Result<wgpu::RenderPipeline, GpuError> {
-        let color = color.into();
-        let key = (state.clone(), color, depth_stencil);
-        if let Some(pipeline) = self.render_pipeline_cache.borrow().get(&key) {
-            return Ok(pipeline.clone());
-        }
-        let pipeline = self.create_pipeline(state, color, depth_stencil)?;
-        self.render_pipeline_cache.borrow_mut().insert(key, pipeline.clone());
-        Ok(pipeline)
+        })
     }
 
     /// The bindings of `group`, by binding.
@@ -405,54 +367,35 @@ impl ShaderProgram {
         &self.shader_name
     }
 
-    /// The texture id whose sampler the shader declares at `binding` if
-    /// `sampler`, else whose texture it declares there: a texture's sampler
-    /// is at its location, and the texture there or at the next binding.
+    /// The lowest texture id whose sampler the shader declares at `binding`
+    /// if `sampler`, else whose texture it declares there: a texture's
+    /// sampler is at its location, and the texture there or at the next
+    /// binding.
     pub(crate) fn texture_at(&self, binding: u32, sampler: bool) -> Option<usize> {
-        self.texture_bindings.iter().position(|location| {
-            location.is_some_and(|location| {
-                let location = location as u32;
+        self.textures
+            .iter()
+            .filter(|texture| {
+                let location = texture.index as u32;
                 location == binding || (!sampler && location + 1 == binding)
             })
-        })
+            .map(|texture| texture.id)
+            .min()
     }
 
-    fn attributes(&self, step: VertexStep) -> &VertexAttributeArray {
-        match step {
-            VertexStep::Vertex => &self.vertex_attributes,
-            VertexStep::Instance => &self.instance_attributes,
-        }
+    /// The shader location of the input `id` that steps by `step`.
+    fn location(&self, step: VertexStep, id: u32) -> Option<u32> {
+        let attributes = match step {
+            VertexStep::Vertex => self.attributes,
+            VertexStep::Instance => self.instance_attributes,
+        };
+        attributes.iter().find(|attribute| attribute.id == id as usize).map(|attribute| attribute.index as u32)
     }
 
-    fn init_attribute(&mut self, info: &AttributeInfo) {
-        let index = info.index as i32;
-        // Indexes must be unique, if there's a conflict check the `attributes`
-        // array in the shader
-        #[cfg(debug_assertions)]
-        {
-            self.vertex_attributes.visit_attributes(|a| debug_assert_ne!(a.get_index(), index));
-            self.instance_attributes.visit_attributes(|a| debug_assert_ne!(a.get_index(), index));
-        }
-        self.vertex_attributes.set(info.id, index, info.data_type, 1);
-    }
-
-    pub(crate) fn init_instance_attribute(&mut self, info: &AttributeInfo) {
-        // Index is the block index of the instance attribute
-        let index = info.index as i32;
-        #[cfg(debug_assertions)]
-        self.vertex_attributes.visit_attributes(|a| debug_assert_ne!(a.get_index(), index));
-        self.instance_attributes.set(info.id, index, info.data_type, 1);
-    }
-
-    fn init_texture(&mut self, info: &TextureInfo) {
-        debug_assert!(info.id < self.texture_bindings.len());
-        if info.id >= self.texture_bindings.len() {
-            return;
-        }
-        self.texture_bindings[info.id] = Some(info.index);
-    }
-
-    fn create_pipeline(
+    /// The pipeline of this program with `state`, drawing into a `color`
+    /// attachment and a `depth_stencil` one, either of which may be absent.
+    /// Fails with [`GpuError::Unsupported`] for a primitive WebGPU lacks: a
+    /// line loop or a triangle fan.
+    pub(crate) fn render_pipeline(
         &self,
         state: &PipelineState,
         color_format: Option<wgpu::TextureFormat>,
@@ -469,14 +412,10 @@ impl ShaderProgram {
                         let format = vertex_format(attribute.format).ok_or_else(|| {
                             GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format))
                         })?;
-                        let location = self.attributes(layout.step).get(attribute.id as usize).ok_or_else(|| {
+                        let shader_location = self.location(layout.step, attribute.id).ok_or_else(|| {
                             GpuError::Invalid(format!("{} has no attribute {}", self.name(), attribute.id))
                         })?;
-                        Ok(wgpu::VertexAttribute {
-                            format,
-                            offset: u64::from(attribute.offset),
-                            shader_location: location.get_index() as u32,
-                        })
+                        Ok(wgpu::VertexAttribute { format, offset: u64::from(attribute.offset), shader_location })
                     })
                     .collect::<Result<Vec<_>, GpuError>>()
             })
@@ -736,7 +675,6 @@ fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, s
         }
 
         let Some(colon_pos) = find_char(':', after_var) else { break };
-        // Extract the variable name
         let var_name = trim_string(&source[after_var..colon_pos]);
         let type_start = colon_pos + 1;
         let mut type_end = type_start;
@@ -753,7 +691,6 @@ fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, s
             if type_name.contains("sampler") {
                 type_ = BindingType::Sampler;
             } else if type_name.contains("texture") {
-                // textureLoad only (no textureSample) means unfilterable
                 let uses_texture_load = source.contains(&format!("textureLoad({var_name}"));
                 let uses_texture_sample = source.contains(&format!("textureSample({var_name}"));
                 type_ = if uses_texture_load && !uses_texture_sample {
@@ -795,19 +732,7 @@ pub(crate) fn compile(
     let vertex_source = preprocess_wgsl(&assemble(source.wgsl.vertex), &defines);
     let fragment_source = preprocess_wgsl(&assemble(source.wgsl.fragment), &defines);
 
-    let mut program = ShaderProgram::new(
-        device,
-        index_layout,
-        &vertex_source,
-        &fragment_source,
-        source.attributes,
-        source.textures,
-        source.name,
-    )?;
-    for attribute in source.instance_attributes {
-        program.init_instance_attribute(attribute);
-    }
-    Ok(program)
+    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, source)
 }
 
 /// How the vendored sources declare `globalIndex`.

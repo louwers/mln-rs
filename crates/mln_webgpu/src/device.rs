@@ -1,17 +1,12 @@
-// The GPU and queue that WebGPU renderers share.
-//
-// C++ wgpu-native creates the instance with default options (all backends)
-// and takes the HighPerformance adapter. The library's device restricts the
-// instance to `WGPU_BACKEND` if set (wgpu's env var, e.g. "vulkan"), else
-// Vulkan on Linux, so tests run on lavapipe (VK_DRIVER_FILES) like the C++
-// CI; other platforms use wgpu's defaults.
-//
-// Deviation: C++ creates an instance for each device. Here every device
-// `Device::new` makes comes from one instance per set of backends, kept for
-// the life of the process: the Vulkan loader crashes when one thread names an
-// object (`vkSetDebugUtilsObjectNameEXT`, which wgpu calls for each labeled
-// object) while another thread destroys an instance, which renderers on many
-// threads did whenever one of them finished.
+//! The GPU and queue that WebGPU renderers share.
+//!
+//! Natively, the library's device is on the backends that `WGPU_BACKEND`
+//! names (wgpu's variable, such as "vulkan"), or else Vulkan on Linux, where
+//! tests run on lavapipe (`VK_DRIVER_FILES`), and wgpu's defaults elsewhere.
+//! Every device `Device::new` makes comes from one instance per set of
+//! backends, kept for the life of the process: the Vulkan loader crashes when
+//! one thread names an object (`vkSetDebugUtilsObjectNameEXT`, which wgpu
+//! calls for each labeled object) while another thread destroys an instance.
 
 use std::sync::{Arc, OnceLock};
 
@@ -55,9 +50,8 @@ fn instance_backends() -> wgpu::Backends {
     if cfg!(target_os = "linux") { wgpu::Backends::VULKAN } else { wgpu::Backends::all() }
 }
 
-/// The instance for the backends `WGPU_BACKEND` names (Vulkan on Linux by
-/// default): one per set of backends, created on first use and never
-/// destroyed (see the deviation above).
+/// The instance for `backends`: one per set of backends, created on first
+/// use and never destroyed (see the module docs).
 #[cfg(not(target_family = "wasm"))]
 fn shared_instance(backends: wgpu::Backends) -> wgpu::Instance {
     static INSTANCES: Mutex<Vec<(wgpu::Backends, wgpu::Instance)>> = Mutex::new(Vec::new());
@@ -73,11 +67,24 @@ fn shared_instance(backends: wgpu::Backends) -> wgpu::Instance {
     instance
 }
 
+/// What the library's device is made with: the WebGPU default limits,
+/// lowered to what `adapter` supports (the Metal of the iOS, tvOS and
+/// visionOS simulators allows fewer inter-stage shader variables than they
+/// ask), and 32-bit float depth with stencil where `adapter` has it.
+fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> {
+    wgpu::DeviceDescriptor {
+        label: Some("MapLibre WebGPU Device"),
+        required_features: adapter.features() & wgpu::Features::DEPTH32FLOAT_STENCIL8,
+        required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
+        ..Default::default()
+    }
+}
+
 impl Device {
     /// The library's device, on the adapter at `adapter_index` in
     /// [`wgpu::Instance::enumerate_adapters`] order, or on the
-    /// high-performance adapter when `None`. It logs the adapter it is on,
-    /// and its uncaptured errors.
+    /// high-performance adapter when `None`. Its uncaptured errors are
+    /// logged.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is
     /// no adapter at `adapter_index`, with
@@ -104,37 +111,9 @@ impl Device {
             .map_err(|e| Error::unsupported(format!("No adapter found: {e}")))?,
         };
 
-        // The WebGPU default limits lowered to what the adapter supports:
-        // the Metal of the iOS, tvOS and visionOS simulators allows fewer
-        // inter-stage shader variables than they ask. A surface's depth and
-        // stencil take 32-bit float depth where the adapter has it.
-        let required_limits = wgpu::Limits::default().or_worse_values_from(&adapter.limits());
-        let required_features = adapter.features() & wgpu::Features::DEPTH32FLOAT_STENCIL8;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("MapLibre WebGPU Device"),
-            required_features,
-            required_limits,
-            ..Default::default()
-        }))
-        .map_err(|e| Error::native(format!("Failed to create device: {e}")))?;
-
-        // C++ sets no uncaptured-error callback, and Dawn logs the error and
-        // invalidates the object. wgpu's default handler panics; log instead
-        // (Dawn's logUncapturedError).
-        device.on_uncaptured_error(Arc::new(|error: wgpu::Error| {
-            Log::error(Event::Render, format!("WebGPU validation error: {error}"));
-        }));
-        let lost = watch_for_loss(&device);
-        let info = adapter.get_info();
-        Log::info(
-            Event::Render,
-            format!(
-                "graphics device uses WebGPU adapter {} on {}",
-                info.name,
-                crate::surface_target::backend_type_to_string(info.backend)
-            ),
-        );
-        Ok(Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None, lost })
+        let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter)))
+            .map_err(|e| Error::native(format!("Failed to create device: {e}")))?;
+        Ok(Device::library(instance, adapter, device, queue))
     }
 
     /// The library's device in the browser, on the browser's WebGPU and its
@@ -158,22 +137,21 @@ impl Device {
             })
             .await
             .map_err(|e| Error::unsupported(format!("No adapter found: {e}")))?;
-        let required_limits = wgpu::Limits::default().or_worse_values_from(&adapter.limits());
-        let required_features = adapter.features() & wgpu::Features::DEPTH32FLOAT_STENCIL8;
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("MapLibre WebGPU Device"),
-                required_features,
-                required_limits,
-                ..Default::default()
-            })
+            .request_device(&device_descriptor(&adapter))
             .await
             .map_err(|e| Error::native(format!("Failed to create device: {e}")))?;
+        Ok(Device::library(instance, adapter, device, queue))
+    }
+
+    /// The library's device, which logs its uncaptured errors: wgpu's
+    /// default handler panics.
+    fn library(instance: wgpu::Instance, adapter: wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue) -> Device {
         device.on_uncaptured_error(Arc::new(|error: wgpu::Error| {
             Log::error(Event::Render, format!("WebGPU validation error: {error}"));
         }));
         let lost = watch_for_loss(&device);
-        Ok(Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None, lost })
+        Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None, lost }
     }
 
     /// The host's device and queue. Window surfaces need the `instance` that
