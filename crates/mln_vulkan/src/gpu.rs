@@ -719,19 +719,19 @@ impl VulkanGpu {
     /// A render pass that pipelines drawing into `targets` are made for:
     /// any pass with attachments of these formats can use them.
     fn compatible_render_pass(&mut self, targets: TargetFormats) -> Result<vk::RenderPass, GpuError> {
-        let color = AttachmentKey {
-            format: self.vk_format(targets.color),
+        let color = targets.color.map(|format| AttachmentKey {
+            format: self.vk_format(format),
             layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             load: false,
             stencil_load: false,
-        };
+        });
         let depth_stencil = targets.depth_stencil.map(|format| AttachmentKey {
             format: self.vk_format(format),
             layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             load: false,
             stencil_load: false,
         });
-        self.render_pass(RenderPassKey { color: Some(color), depth_stencil })
+        self.render_pass(RenderPassKey { color, depth_stencil })
     }
 
     fn create_vk_pipeline(&mut self, key: &PipelineKey, shader: &Shader) -> Result<vk::Pipeline, GpuError> {
@@ -827,7 +827,9 @@ impl VulkanGpu {
             .src_alpha_blend_factor(src_factor)
             .dst_alpha_blend_factor(dst_factor)
             .color_write_mask(color_mask)];
-        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default().attachments(&color_blend_attachments);
+        // A pipeline without a color target blends into no attachment.
+        let color_blend_attachments = if key.targets.color.is_some() { &color_blend_attachments[..] } else { &[] };
+        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default().attachments(color_blend_attachments);
 
         // The state that commands set is dynamic in every pipeline, so
         // binding one keeps what was set.
