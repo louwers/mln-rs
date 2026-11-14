@@ -7,10 +7,11 @@ use std::rc::Rc;
 use glow::HasContext;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::depth_mode::DepthMode;
+use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, PipelineState, RenderCommand, SamplerId, ShaderKey, SlotMap, TextureDesc, TextureFormat,
-    TextureId, TextureRegion, TextureUsage, VertexStep,
+    PipelineId, PipelineKey, PipelineState, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc,
+    TextureFormat, TextureId, TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
@@ -102,6 +103,9 @@ impl Program {
 struct Pipeline {
     program: Rc<Program>,
     state: PipelineState,
+    targets: TargetFormats,
+    /// What the program reads from the bind groups.
+    bindings: Vec<ShaderBinding>,
 }
 
 /// Where a draw reads a uniform block from.
@@ -641,25 +645,14 @@ impl GlGpu {
         Ok(pointers)
     }
 
-    /// Checks what `pass` names and binds, without drawing.
+    /// Checks what `pass` names and binds, without drawing: the shared
+    /// checks, then what GL adds to them, a global index inside the bound
+    /// elements of a storage buffer and vertices from the start of their
+    /// buffers.
     fn check(&self, pass: &Pass) -> Result<(), GpuError> {
-        self.pass_size(pass)?;
+        validation::check_pass(self, pass)?;
         let mut state = PassState::default();
         for command in &pass.commands {
-            match *command {
-                RenderCommand::SetPipeline(id) if !self.pipelines.contains_key(id) => {
-                    return Err(GpuError::UnknownId("pipeline"));
-                }
-                RenderCommand::SetBindGroup { group, .. } if !self.bind_groups.contains_key(group) => {
-                    return Err(GpuError::UnknownId("bind group"));
-                }
-                RenderCommand::SetVertexBuffer { buffer, .. } | RenderCommand::SetIndexBuffer { buffer, .. }
-                    if !self.buffers.contains_key(buffer) =>
-                {
-                    return Err(GpuError::UnknownId("buffer"));
-                }
-                _ => {}
-            }
             if state.set(command) {
                 continue;
             }
@@ -672,18 +665,6 @@ impl GlGpu {
             if state.attribute_bases != Some(bases) {
                 self.attribute_pointers(pipeline, &state.vertex_buffers, bases)?;
                 state.attribute_bases = Some(bases);
-            }
-            if let RenderCommand::DrawIndexed { indices, .. } = command {
-                let (id, offset) = state
-                    .index_buffer
-                    .ok_or_else(|| GpuError::Invalid(format!("{}: an indexed draw without indices", pass.label)))?;
-                let buffer = self.buffers.get(id).ok_or(GpuError::UnknownId("buffer"))?;
-                if buffer.usage != BufferUsage::Index {
-                    return Err(GpuError::Invalid(format!("{}: indices in a buffer of another use", pass.label)));
-                }
-                if offset % 2 != 0 || offset + u64::from(indices.end) * 2 > buffer.size {
-                    return Err(GpuError::Invalid(format!("{}: indices past the index buffer", pass.label)));
-                }
             }
         }
         Ok(())
@@ -1019,6 +1000,34 @@ impl GlGpu {
     }
 }
 
+impl Resources for GlGpu {
+    fn buffer_info(&self, id: BufferId) -> Option<BufferInfo> {
+        self.buffers.get(id).map(|buffer| BufferInfo { usage: buffer.usage, size: buffer.size })
+    }
+
+    fn texture_info(&self, id: TextureId) -> Option<TextureInfo> {
+        let texture = self.textures.get(id)?;
+        Some(TextureInfo { format: Some(texture.format), size: texture.size, usage: texture.usage })
+    }
+
+    fn has_sampler(&self, id: SamplerId) -> bool {
+        self.samplers.contains_key(id)
+    }
+
+    fn pipeline_info(&self, id: PipelineId) -> Option<PipelineInfo<'_>> {
+        let pipeline = self.pipelines.get(id)?;
+        Some(PipelineInfo {
+            targets: pipeline.targets,
+            vertex_buffers: &pipeline.state.vertex_buffers,
+            bindings: &pipeline.bindings,
+        })
+    }
+
+    fn bind_group_entries(&self, id: BindGroupId) -> Option<&[BindGroupEntry]> {
+        self.bind_groups.get(id).map(Vec::as_slice)
+    }
+}
+
 impl Gpu for GlGpu {
     fn limits(&self) -> Limits {
         self.limits
@@ -1224,7 +1233,13 @@ impl Gpu for GlGpu {
                 }
             }
         }
-        Ok(self.pipelines.insert(Pipeline { program, state: key.state.clone() }))
+        let blocks = program
+            .blocks
+            .iter()
+            .map(|block| ShaderBinding::Buffer { id: block.id as u32, min_size: block.size as u64 });
+        let textures = program.textures.iter().map(|&id| ShaderBinding::Texture { id: id as u32 });
+        let bindings = blocks.chain(textures).collect();
+        Ok(self.pipelines.insert(Pipeline { program, state: key.state.clone(), targets: key.targets, bindings }))
     }
 
     fn destroy_pipeline(&mut self, pipeline: PipelineId) {
@@ -1232,23 +1247,7 @@ impl Gpu for GlGpu {
     }
 
     fn create_bind_group(&mut self, desc: &BindGroupDesc<'_>) -> Result<BindGroupId, GpuError> {
-        for entry in desc.entries {
-            match *entry {
-                BindGroupEntry::Buffer { buffer, offset, size, .. } => {
-                    let buffer = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
-                    if offset + size > buffer.size {
-                        return Err(GpuError::Invalid(format!("{}: a range past its buffer", desc.label)));
-                    }
-                }
-                BindGroupEntry::Texture { texture, .. } if !self.textures.contains_key(texture) => {
-                    return Err(GpuError::UnknownId("texture"));
-                }
-                BindGroupEntry::Texture { sampler, .. } if !self.samplers.contains_key(sampler) => {
-                    return Err(GpuError::UnknownId("sampler"));
-                }
-                BindGroupEntry::Texture { .. } => {}
-            }
-        }
+        validation::check_bind_group(self, self.limits, desc)?;
         Ok(self.bind_groups.insert(desc.entries.to_vec()))
     }
 

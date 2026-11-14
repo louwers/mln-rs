@@ -2,7 +2,9 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
-use mln_gfx::gpu::conformance::clip_mask_and_background;
+use mln_gfx::gpu::conformance::{
+    clip_mask_and_background, invalid_calls, topologies, transparent_replace, vertex_layouts,
+};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState, Gpu, GpuError,
     LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey, StencilState, TargetFormats, TextureDesc,
@@ -60,6 +62,38 @@ fn clip_mask_and_background_through_gpu() {
     clip_mask_and_background(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frame");
 }
 
+#[test]
+fn invalid_calls_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    invalid_calls(&mut gpu).expect("the valid calls");
+}
+
+#[test]
+fn transparent_replace_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    transparent_replace(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frame");
+}
+
+#[test]
+fn topologies_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    topologies(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frames");
+}
+
+#[test]
+fn vertex_layouts_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    vertex_layouts(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frames");
+}
+
 fn buffer(gpu: &mut GlGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
     let buffer = gpu.create_buffer(&BufferDesc { label: "test", usage, size: data.len() as u64 }).unwrap();
     gpu.write_buffer(buffer, 0, data).unwrap();
@@ -107,7 +141,7 @@ fn draws_read_only_what_is_bound() {
             depth: DepthState::from(&DepthMode::disabled()),
             stencil: StencilState::from(&StencilMode::disabled()),
         },
-        targets: TargetFormats { color: TextureFormat::Rgba8Unorm, depth_stencil: None },
+        targets: TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None },
     };
     let pipeline = gpu.create_pipeline(&key).unwrap();
     // A pipeline without its shader's attributes isn't made.
