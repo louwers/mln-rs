@@ -97,18 +97,35 @@ fn not_a_database() {
     assert!(res.data.is_none());
 }
 
-// Metadata that does not parse raises error
-// gtest: MBTilesFileSource.BadMetadata
+// Metadata zooms that don't parse give way to the tiles' zoom range.
 #[test]
-fn bad_metadata() {
+fn bad_metadata_zooms() {
     let path = temp_path("mbtiles_bad_metadata.mbtiles");
     Database::open(&path, OpenFlag::ReadWriteCreate)
         .and_then(|db| {
             db.exec(
                 "CREATE TABLE metadata (name TEXT, value TEXT); INSERT INTO metadata VALUES ('minzoom', 'zero'), \
-                 ('maxzoom', '1');",
+                 ('maxzoom', '7'), ('bounds', '1,2,3'); CREATE TABLE tiles (zoom_level INTEGER, tile_column \
+                 INTEGER, tile_row INTEGER, tile_data BLOB); INSERT INTO tiles VALUES (2, 0, 0, x''), (5, 0, 0, x'');",
             )
         })
+        .expect("create the database");
+
+    let mbtiles = mbtiles_file_source();
+    let res = request(&mbtiles, &Resource::new(Kind::Unknown, format!("mbtiles://{path}")));
+    assert_eq!(None, res.error);
+    let tilejson: serde_json::Value = serde_json::from_slice(&res.data.expect("data")).expect("JSON");
+    assert_eq!(2, tilejson["minzoom"]);
+    assert_eq!(7, tilejson["maxzoom"]);
+    assert_eq!(None, tilejson.get("bounds"));
+}
+
+// A database without a metadata table raises error
+#[test]
+fn no_metadata() {
+    let path = temp_path("mbtiles_no_metadata.mbtiles");
+    Database::open(&path, OpenFlag::ReadWriteCreate)
+        .and_then(|db| db.exec("CREATE TABLE tiles (zoom_level INTEGER);"))
         .expect("create the database");
 
     let mbtiles = mbtiles_file_source();
@@ -125,9 +142,16 @@ fn tile_json() {
     let mbtiles = mbtiles_file_source();
     let res = request(&mbtiles, &Resource::new(Kind::Unknown, to_absolute_url("geography-class-png.mbtiles")));
     assert_eq!(None, res.error);
-    let data = res.data.expect("data");
-    // basic test that TileJSON included a tile URL
-    assert!(String::from_utf8_lossy(&data).contains("geography-class-png.mbtiles?file={x}/{y}/{z}"));
+    let tilejson: serde_json::Value = serde_json::from_slice(&res.data.expect("data")).expect("JSON");
+    assert!(
+        tilejson["tiles"][0].as_str().expect("tile URL").ends_with("geography-class-png.mbtiles?file={x}/{y}/{z}.png")
+    );
+    assert_eq!("xyz", tilejson["scheme"]);
+    assert_eq!(0, tilejson["minzoom"]);
+    assert_eq!(1, tilejson["maxzoom"]);
+    assert_eq!(serde_json::json!([-180.0, -85.0511, 180.0, 85.0511]), tilejson["bounds"]);
+    assert_eq!(serde_json::json!([0.0, 20.0, 0]), tilejson["center"]);
+    assert_eq!("TileMill", tilejson["attribution"]);
 }
 
 // Existing tiles return tile data

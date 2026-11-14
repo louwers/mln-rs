@@ -74,9 +74,13 @@ fn tile_json() {
     let pmtiles = pmtiles_file_source();
     let res = request(&pmtiles, &Resource::new(Kind::Unknown, to_absolute_url("geography-class-png.pmtiles")));
     assert_eq!(None, res.error);
-    let data = res.data.expect("data");
-    // basic test that TileJSON included a tile URL
-    assert!(String::from_utf8_lossy(&data).contains("geography-class-png.pmtiles"));
+    let tilejson: serde_json::Value = serde_json::from_slice(&res.data.expect("data")).expect("JSON");
+    assert!(tilejson["tiles"][0].as_str().expect("tile URL").ends_with("geography-class-png.pmtiles"));
+    assert_eq!("xyz", tilejson["scheme"]);
+    assert_eq!(0, tilejson["minzoom"]);
+    assert_eq!(1, tilejson["maxzoom"]);
+    assert_eq!(serde_json::json!([-180.0, -85.0511, 180.0, 85.0511]), tilejson["bounds"]);
+    assert_eq!("TileMill", tilejson["attribution"]);
 }
 
 // Existing tiles return tile data

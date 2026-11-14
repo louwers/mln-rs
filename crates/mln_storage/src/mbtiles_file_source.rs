@@ -1,10 +1,7 @@
 // The database work runs on the "MBTilesFileSource" thread (`util::Thread`)
-// as in C++. The TileJSON is built as a rapidjson document would be (members
-// in insertion order, duplicates kept; json_document.rs). Needs the `sqlite`
-// feature.
+// as in C++. Needs the `sqlite` feature.
 //
-// A database that doesn't open or query, metadata whose zooms or scale don't
-// parse (`std::stoi`/`std::stod` throw), and data that doesn't decompress
+// A database that doesn't open or query and data that doesn't decompress
 // answer the request with an `Other` error carrying the message, as in
 // maplibre-native-ffi's patched C++. The resource options are kept
 // next to the thread behind a mutex (C++: in the thread object, read back
@@ -17,16 +14,15 @@ use mln_actor::{ActorRef, Thread};
 use mln_util::chrono::Timestamp;
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::MBTILES_PROTOCOL;
-use mln_util::string::float_prefix;
 use mln_util::url::percent_decode;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
-use serde_json::Value as Json;
+use serde_json::{Map, Value, json};
 
+use crate::archive_tilejson::archive_tilejson;
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
-use crate::json_document::Document;
 use crate::local_file_request::path_from_utf8;
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
@@ -41,56 +37,13 @@ fn url_to_path(url: &str) -> Vec<u8> {
     percent_decode(&url[MBTILES_PROTOCOL.len().min(url.len())..])
 }
 
-fn json_double(d: f64) -> Json {
-    serde_json::Number::from_f64(d).map_or(Json::Null, Json::Number)
-}
-
-/// The number at the start of `s`, after leading whitespace; 0 when there is
-/// none.
-pub(crate) fn strtod(s: &str) -> f64 {
-    float_prefix(s).parse().unwrap_or(0.0)
-}
-
-/// The number at the start of `s`, after leading whitespace; an error when
-/// there is none, or when it overflows to infinity or underflows to zero.
-fn stod(s: &str) -> Result<f64, String> {
-    let number = float_prefix(s);
-    let v: f64 = number.parse().map_err(|_| format!("\"{s}\" is not a number"))?;
-    let mantissa = number.split(['e', 'E']).next().unwrap_or_default();
-    let overflow = v.is_infinite() && !number.to_ascii_lowercase().contains("inf");
-    let underflow = v == 0.0 && mantissa.bytes().any(|b| (b'1'..=b'9').contains(&b));
-    if overflow || underflow {
-        return Err(format!("\"{s}\" is out of range"));
-    }
-    Ok(v)
-}
-
-/// The leading decimal integer of `s`, after whitespace, as `std::stoi`
-/// parses it; an error when there is none or it doesn't fit an `i32`.
-fn stoi(s: &str) -> Result<i32, String> {
-    let t = s.trim_start();
-    let sign = usize::from(matches!(t.as_bytes().first(), Some(b'-' | b'+')));
-    let digits = t.as_bytes()[sign..].iter().take_while(|b| b.is_ascii_digit()).count();
-    if digits == 0 {
-        return Err(format!("\"{s}\" is not an integer"));
-    }
-    t[..sign + digits].parse().map_err(|_| format!("\"{s}\" is out of range"))
-}
-
-/// A `minzoom` or `maxzoom` metadata value: 0 when empty, else `std::stoi`.
-fn zoom(name: &str, value: &str) -> Result<i32, String> {
-    if value.is_empty() { Ok(0) } else { stoi(value).map_err(|e| format!("MBTiles {name}: {e}")) }
-}
-
-/// `split(s, delim)`: each `std::getline` piece through [`strtod`].
-fn split(s: &str, delim: char) -> Vec<f64> {
-    let mut elems: Vec<f64> = s.split(delim).map(strtod).collect();
-    // `std::getline` yields no final empty piece after a trailing delimiter
-    // (nor any piece for an empty string).
-    if s.is_empty() || s.ends_with(delim) {
-        elems.pop();
-    }
-    elems
+/// The `N` comma-separated numbers of a metadata value such as `bounds`.
+fn numbers<const N: usize>(value: &str) -> Option<[f64; N]> {
+    let numbers: Vec<f64> = value
+        .split(',')
+        .map(|number| number.trim().parse().ok().filter(|number: &f64| number.is_finite()))
+        .collect::<Option<_>>()?;
+    numbers.try_into().ok()
 }
 
 fn db_path(path: &[u8]) -> &[u8] {
@@ -126,104 +79,64 @@ impl MBTilesFileSourceThread {
     fn tilejson(resource: &Resource) -> Result<Response, String> {
         let path = url_to_path(&resource.url);
         let path = path_from_utf8(&path)?;
-
-        let mut response = Response::new();
-
-        let mut doc = Document::default();
-
-        let mut values: VecMap<String, String> = VecMap::new();
         let db =
             Database::open(path.to_str().ok_or("Invalid UTF-8 in path")?, OpenFlag::ReadOnly).map_err(|e| e.message)?;
         let conn = db.conn();
 
+        // The metadata table's rows as strings, and the members of its `json`
+        // row (such as `vector_layers`) on their own.
+        let mut rows = Map::new();
+        let mut json = Map::new();
         {
-            let mut meta = Statement::new(&conn, "SELECT * from metadata").map_err(|e| e.message)?;
+            let mut meta = Statement::new(&conn, "SELECT name, value FROM metadata").map_err(|e| e.message)?;
             let mut q = Query::new(&mut meta);
             while q.run().map_err(|e| e.message)? {
                 let name = q.get_string(0).map_err(|e| e.message)?;
-                let val = q.get_bytes(1).map_err(|e| e.message)?;
+                let value = q.get_string(1).map_err(|e| e.message)?;
                 if name == "json" {
-                    doc = Document::parse_object(&val);
+                    if let Ok(Value::Object(members)) = serde_json::from_str(&value) {
+                        json = members;
+                    }
                 } else {
-                    values.insert(name, String::from_utf8_lossy(&val).into_owned());
+                    rows.insert(name, Value::String(value));
                 }
             }
         }
+        let row = |name: &str| rows.get(name).and_then(Value::as_str);
 
-        values.insert("tilejson".to_owned(), "2.0.0".to_owned());
-        values.insert("scheme".to_owned(), "xyz".to_owned());
+        let format = row("format").unwrap_or("png");
+        let zoom = |name: &str| row(name).and_then(|zoom| zoom.trim().parse::<u8>().ok());
+        let (mut minzoom, mut maxzoom) = (zoom("minzoom"), zoom("maxzoom"));
+        if minzoom.is_none() || maxzoom.is_none() {
+            // The tiles' own zoom range, where the metadata has no valid one.
+            let mut zooms =
+                Statement::new(&conn, "SELECT MIN(zoom_level), MAX(zoom_level) FROM tiles").map_err(|e| e.message)?;
+            let mut q = Query::new(&mut zooms);
+            if q.run().map_err(|e| e.message)? {
+                let zoom = |i| {
+                    Ok::<_, String>(q.get_optional_i64(i).map_err(|e| e.message)?.and_then(|z| u8::try_from(z).ok()))
+                };
+                minzoom = minzoom.or(zoom(0)?);
+                maxzoom = maxzoom.or(zoom(1)?);
+            }
+        }
 
-        let format = values.get("format").cloned().unwrap_or_else(|| "png".to_owned());
-
-        // Translate MIME type field to source encoding.
+        // The tile request carries the tile's coordinates in a query parameter
+        // of the file's URL.
+        let mut members = vec![("tiles", json!([format!("{}?file={{x}}/{{y}}/{{z}}.{format}", resource.url)]))];
+        members.extend(minzoom.map(|zoom| ("minzoom", json!(zoom))));
+        members.extend(maxzoom.map(|zoom| ("maxzoom", json!(zoom))));
+        members.extend(row("bounds").and_then(numbers::<4>).map(|bounds| ("bounds", json!(bounds))));
+        // TileJSON's center zoom is an integer.
+        let center = row("center").and_then(numbers::<3>);
+        members.extend(center.map(|[longitude, latitude, zoom]| ("center", json!([longitude, latitude, zoom as u8]))));
         if format == "mlt" || format == "application/vnd.maplibre-vector-tile" {
-            doc.add_member("encoding", Json::String("mlt".to_owned()));
+            members.push(("encoding", json!("mlt")));
         }
+        let tilejson = archive_tilejson(members, rows.into_iter().chain(json));
 
-        if format != "pbf" && !values.contains_key("scale") {
-            values.insert("scale".to_owned(), "1".to_owned());
-        }
-
-        // We use file location with appended parameter query parameter as
-        // URL for actual tile data
-        let tile_url = format!("{}?file={{x}}/{{y}}/{{z}}.{format}", resource.url);
-        doc.add_member("tiles", Json::Array(vec![Json::String(tile_url)]));
-
-        let minz;
-        let maxz;
-
-        let minzoom = values.get("minzoom").cloned();
-        let maxzoom = values.get("maxzoom").cloned();
-
-        if let (Some(min), Some(max)) = (&minzoom, &maxzoom) {
-            minz = min.clone();
-            maxz = max.clone();
-        } else {
-            let mut zoom_stmt =
-                Statement::new(&conn, "SELECT MIN(zoom_level),MAX(zoom_level) from tiles").map_err(|e| e.message)?;
-            let mut q = Query::new(&mut zoom_stmt);
-            let (mut min, mut max) = (String::new(), String::new());
-            while q.run().map_err(|e| e.message)? {
-                min = q.get_string(0).map_err(|e| e.message)?;
-                max = q.get_string(1).map_err(|e| e.message)?;
-            }
-            minz = min;
-            maxz = max;
-
-            values.insert("minzoom".to_owned(), minz.clone());
-            values.insert("maxzoom".to_owned(), maxz.clone());
-        }
-
-        let min_zoom = zoom("minzoom", &minz)?;
-        let max_zoom = zoom("maxzoom", &maxz)?;
-
-        for (name, value) in &values {
-            if name == "scale" {
-                let scale = stod(value).map_err(|e| format!("MBTiles scale: {e}"))?;
-                doc.add_member("scale", json_double(scale));
-            } else if name == "minzoom" || name == "maxzoom" {
-                doc.add_member(name.clone(), Json::from(zoom(name, value)?));
-            } else if name == "bounds" {
-                let bounds_values = split(value, ',');
-                if bounds_values.len() != 4 {
-                    response.error = Some(Box::new(ResourceError::new(Reason::Other, "")));
-                    return Ok(response);
-                }
-                let c_lon = f64::midpoint(bounds_values[0], bounds_values[2]);
-                let c_lat = f64::midpoint(bounds_values[1], bounds_values[3]);
-                let c_zoom = i32::midpoint(min_zoom, max_zoom);
-
-                if format != "pbf" {
-                    doc.add_member("bounds", Json::Array(bounds_values.iter().map(|&v| json_double(v)).collect()));
-                }
-
-                doc.add_member("center", Json::Array(vec![json_double(c_lon), json_double(c_lat), Json::from(c_zoom)]));
-            } else {
-                doc.add_member(name.clone(), Json::String(value.clone()));
-            }
-        }
-
-        response.data = Some(Arc::new(doc.serialize().into_bytes()));
+        let mut response = Response::new();
+        response.data = Some(Arc::new(tilejson.into_bytes()));
         Ok(response)
     }
 
@@ -370,38 +283,5 @@ impl FileSource for MBTilesFileSource {
 
     fn get_resource_options(&self) -> ResourceOptions {
         self.resource_options.lock().clone()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::json_document::strtol;
-
-    #[test]
-    fn stoi_and_stod_fail_without_a_number() {
-        assert_eq!(Ok(12), stoi(" 12x"));
-        assert_eq!(Ok(-3), stoi("-3"));
-        assert!(stoi("zero").is_err());
-        assert!(stoi("+").is_err());
-        assert!(stoi("2147483648").is_err());
-        assert_eq!(Ok(1.5), stod("1.5abc"));
-        assert_eq!(Ok(0.0), stod("0e-999"));
-        assert!(stod("abc").is_err());
-        assert!(stod("1e999").is_err());
-        assert!(stod("1e-999").is_err());
-        assert_eq!(Ok(f64::INFINITY), stod("inf"));
-    }
-
-    #[test]
-    fn strtod_and_strtol_prefixes() {
-        assert_eq!(1.5, strtod("1.5abc"));
-        assert_eq!(-180.0, strtod(" -180"));
-        assert_eq!(0.0, strtod("abc"));
-        assert_eq!(12, strtol("12x"));
-        assert_eq!(0, strtol(""));
-        assert_eq!(vec![1.0, 2.0, 3.0, 4.0], split("1,2,3,4", ','));
-        assert_eq!(vec![1.0, 2.0], split("1,2,", ','));
-        assert_eq!(split("", ','), Vec::<f64>::new());
     }
 }

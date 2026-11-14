@@ -238,9 +238,9 @@ impl<'s, 'conn> Query<'s, 'conn> {
         get_i32(self.row(), offset)
     }
 
-    /// The column at `offset` as bytes (see the free `get_bytes`).
-    pub(crate) fn get_bytes(&self, offset: usize) -> Result<Vec<u8>, SqliteError> {
-        get_bytes(self.row(), offset)
+    /// The column at `offset` as an integer; `None` for NULL.
+    pub(crate) fn get_optional_i64(&self, offset: usize) -> Result<Option<i64>, SqliteError> {
+        get_optional_i64(self.row(), offset)
     }
 
     /// The column at `offset` as bytes; `None` for NULL.

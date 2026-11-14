@@ -12,6 +12,7 @@
 
 #[cfg(target_os = "android")]
 pub mod android;
+mod archive_tilejson;
 mod asset_file_source;
 mod async_request;
 #[cfg(feature = "sqlite")]
@@ -26,7 +27,6 @@ pub mod http_header_transform;
 mod http_timeout;
 #[cfg(target_os = "android")]
 mod http_url_connection_transport;
-mod json_document;
 mod local_file_request;
 mod local_file_source;
 mod main_resource_loader;

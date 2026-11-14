@@ -3,9 +3,7 @@
 // the ResourceLoader file source, whose callbacks come back to this thread.
 // `tasks` is keyed by a request id instead of the caller's `AsyncRequest*`;
 // as in C++, a sub-request replaces the previous one of the same caller and
-// nothing removes them when the caller cancels. The TileJSON document is
-// built as a rapidjson document would be (members in insertion order,
-// duplicates kept; json_document.rs).
+// nothing removes them when the caller cancels.
 //
 // The resource options are shared with the thread behind a mutex
 // (C++: in the thread object, read back with a blocking `ask`).
@@ -23,13 +21,13 @@ use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 use pmtiles::{Compression, DirEntry, Directory, Header, PmtError, TileCoord, TileId, TileType};
-use serde_json::Value as Json;
+use serde_json::{Value as Json, json};
 
+use crate::archive_tilejson::archive_tilejson;
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, FileSourceType};
 use crate::file_source_manager::FileSourceManager;
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
-use crate::json_document::{Document, strtol};
 use crate::resource::{Kind, LoadingMethod, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
@@ -83,10 +81,6 @@ type AsyncTileCallback = Rc<dyn Fn((u64, u32), ErrorPtr)>;
 
 fn error(reason: Reason, message: impl Into<String>) -> ResourceError {
     ResourceError::new(reason, message)
-}
-
-fn json_double(d: f64) -> Json {
-    serde_json::Number::from_f64(d).map_or(Json::Null, Json::Number)
 }
 
 fn send(req: &ActorRef<FileSourceRequestState>, response: Response) {
@@ -203,72 +197,30 @@ impl State {
                     let (this, url, callback, header) =
                         (Rc::clone(&this), url.clone(), Rc::clone(&callback), Rc::clone(&header));
                     move |data: &[u8]| {
-                        let mut doc = if data.is_empty() { Document::default() } else { Document::parse_object(data) };
-
-                        doc.add_member("tilejson", Json::String("3.0.0".to_owned()));
-
-                        if !doc.has_member("scheme") {
-                            doc.add_member("scheme", Json::Null);
-                        }
-
-                        *doc.get_mut("scheme") = Json::String("xyz".to_owned());
-
-                        if !doc.has_member("tiles") {
-                            doc.add_member("tiles", Json::Null);
-                        }
-
-                        if !doc.get_mut("tiles").is_array() {
-                            *doc.get_mut("tiles") = Json::Array(vec![Json::String(format!("{PMTILES_PROTOCOL}{url}"))]);
-                        }
-
-                        // Translate tile type field to source encoding.
-                        if header.tile_type == TileType::Mlt {
-                            doc.add_member("encoding", Json::String("mlt".to_owned()));
-                        }
-
-                        if !doc.has_member("bounds") {
-                            doc.add_member("bounds", Json::Null);
-                        }
-
-                        if !doc.get_mut("bounds").is_array() {
-                            *doc.get_mut("bounds") = Json::Array(vec![
-                                json_double(header.min_longitude),
-                                json_double(header.min_latitude),
-                                json_double(header.max_longitude),
-                                json_double(header.max_latitude),
-                            ]);
-                        }
-
-                        if !doc.has_member("center") {
-                            doc.add_member("center", Json::Null);
-                        }
-
-                        if !doc.get_mut("center").is_array() {
-                            *doc.get_mut("center") = Json::Array(vec![
-                                json_double(header.center_longitude),
-                                json_double(header.center_latitude),
-                                Json::from(header.center_zoom),
-                            ]);
-                        }
-
-                        for (name, zoom) in [("minzoom", header.min_zoom), ("maxzoom", header.max_zoom)] {
-                            if !doc.has_member(name) {
-                                doc.add_member(name, Json::Null);
-                            }
-
-                            let value = doc.get_mut(name);
-
-                            if let Json::String(s) = value {
-                                *value = Json::from(strtol(s) as i32);
-                            }
-
-                            if !value.is_number() {
-                                *value = Json::from(zoom);
-                            }
-                        }
-
-                        let metadata = doc.serialize();
-                        this.metadata_cache.borrow_mut().entry(url.clone()).or_insert(metadata);
+                        // The header's members win over the metadata's, which
+                        // may be stale or name another tile URL.
+                        let members = [
+                            ("tiles", json!([format!("{PMTILES_PROTOCOL}{url}")])),
+                            ("minzoom", json!(header.min_zoom)),
+                            ("maxzoom", json!(header.max_zoom)),
+                            (
+                                "bounds",
+                                json!([
+                                    header.min_longitude,
+                                    header.min_latitude,
+                                    header.max_longitude,
+                                    header.max_latitude
+                                ]),
+                            ),
+                            ("center", json!([header.center_longitude, header.center_latitude, header.center_zoom])),
+                        ];
+                        let encoding = (header.tile_type == TileType::Mlt).then(|| ("encoding", json!("mlt")));
+                        let metadata = match serde_json::from_slice(data) {
+                            Ok(Json::Object(metadata)) => metadata,
+                            _ => serde_json::Map::new(),
+                        };
+                        let tilejson = archive_tilejson(members.into_iter().chain(encoding), metadata);
+                        this.metadata_cache.borrow_mut().entry(url.clone()).or_insert(tilejson);
 
                         callback(None);
                     }
