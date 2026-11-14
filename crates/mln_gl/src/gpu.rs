@@ -1357,7 +1357,8 @@ impl Gpu for GlGpu {
         data: &mln_util::host_bytes::HostBytes,
     ) -> Result<(), GpuError> {
         let entry = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
-        let end = offset + data.len() as u64;
+        let len = data.len() as u64;
+        let end = offset + len.next_multiple_of(4);
         if end > entry.size {
             return Err(GpuError::Invalid(format!("a write to bytes {offset}..{end} of a buffer of {}", entry.size)));
         }
@@ -1369,9 +1370,17 @@ impl Gpu for GlGpu {
         };
         self.current(|gpu| {
             let target = buffer_target(usage);
+            let gl = gpu.context.gl();
             // SAFETY: the buffer is alive and holds the bytes written.
-            unsafe { gpu.context.gl().bind_buffer(target, Some(object)) };
+            unsafe { gl.bind_buffer(target, Some(object)) };
             gpu.context.webgl2().buffer_sub_data_with_f64_and_array_buffer_view(target, offset as f64, &array);
+            // Zeros over the rest of the last word, as the trait asks.
+            let zeros = [0u8; 4];
+            let tail = &zeros[..(end - offset - len) as usize];
+            if !tail.is_empty() {
+                // SAFETY: as above, and the word is inside the buffer.
+                unsafe { gl.buffer_sub_data_u8_slice(target, (offset + len) as i32, tail) };
+            }
         });
         Ok(())
     }

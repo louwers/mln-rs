@@ -9,7 +9,8 @@
 //! layer is lent, and [`imported_textures`] textures made elsewhere.
 //! [`instanced_walls`] draws fill extrusion walls over the left half. The
 //! other cases draw one color over the whole target, as
-//! [`transparent_replace`] does to check that `Replace` doesn't blend.
+//! [`transparent_replace`] does to check that `Replace` doesn't blend. On
+//! wasm, [`host_writes`] checks writes from JS arrays.
 
 mod cases;
 
@@ -49,7 +50,7 @@ fn tile_matrix(x_max: f32) -> [f32; 16] {
     [sx, 0.0, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0]
 }
 
-fn buffer(gpu: &mut impl Gpu, usage: BufferUsage, data: &[u8]) -> Result<BufferId, GpuError> {
+fn buffer(gpu: &mut (impl Gpu + ?Sized), usage: BufferUsage, data: &[u8]) -> Result<BufferId, GpuError> {
     let buffer = gpu.create_buffer(&BufferDesc { label: "test", usage, size: data.len() as u64 })?;
     gpu.write_buffer(buffer, 0, data)?;
     Ok(buffer)

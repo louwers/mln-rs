@@ -678,11 +678,15 @@ impl Gpu for WebGpu {
         offset: u64,
         data: &mln_util::host_bytes::HostBytes,
     ) -> Result<(), GpuError> {
-        let entry = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
+        let entry = self.buffers.get_mut(buffer).ok_or(GpuError::UnknownId("buffer"))?;
         let len = data.len() as u64;
         let end = offset + len.next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
         if end > entry.size {
             return Err(GpuError::Invalid(format!("a write to bytes {offset}..{end} of a buffer of {}", entry.size)));
+        }
+        // A later write past these bytes pads only past them.
+        if let Some(written) = &mut entry.written {
+            *written = (*written).max(offset + len);
         }
         let (device, queue) = (self.device.device(), self.device.queue());
         let at = entry.offset + offset;
@@ -739,14 +743,13 @@ impl Gpu for WebGpu {
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
         let texture = &self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?.texture;
-        let bytes_per_texel = texture
-            .format()
-            .block_copy_size(None)
-            .ok_or_else(|| GpuError::Invalid(format!("{:?} textures take no writes", texture.format())))?;
-        let expected = u64::from(region.size.width) * u64::from(region.size.height) * u64::from(bytes_per_texel);
-        if data.len() as u64 != expected {
-            return Err(GpuError::Invalid(format!("a write of {} bytes to a region of {expected}", data.len())));
+        if !texture.usage().contains(wgpu::TextureUsages::COPY_DST) {
+            return Err(GpuError::Invalid("a write to a texture that isn't sampled".to_owned()));
         }
+        let format = from_wgpu_format(texture.format())
+            .ok_or_else(|| GpuError::Invalid(format!("{:?} textures take no writes", texture.format())))?;
+        let size = Size::new(texture.width(), texture.height());
+        let bytes_per_row = region.write_bytes_per_row(size, format, data)?;
         self.device.queue().write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,
@@ -757,7 +760,7 @@ impl Gpu for WebGpu {
             data,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(region.size.width * bytes_per_texel),
+                bytes_per_row: Some(bytes_per_row as u32),
                 rows_per_image: Some(region.size.height),
             },
             wgpu::Extent3d { width: region.size.width, height: region.size.height, depth_or_array_layers: 1 },

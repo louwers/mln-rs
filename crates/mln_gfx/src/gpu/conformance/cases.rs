@@ -86,7 +86,7 @@ fn at_depth(mut matrix: [f32; 16], z: f32) -> [f32; 16] {
 }
 
 /// A render target of [`SIZE`] and `format`, which can be read back.
-fn target(gpu: &mut impl Gpu, format: TextureFormat) -> Result<TextureId, GpuError> {
+fn target(gpu: &mut (impl Gpu + ?Sized), format: TextureFormat) -> Result<TextureId, GpuError> {
     gpu.create_texture(&TextureDesc {
         label: "target",
         size: SIZE,
@@ -207,6 +207,23 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let mut no_attachments = frame.pass(pipeline, []);
     no_attachments.color = None;
     assert!(invalid(&gpu.submit(&[no_attachments])), "a pass without attachments");
+
+    // Writes reach a sampled texture inside it, with a texel for each of the
+    // region's.
+    let sampled = gpu.create_texture(&TextureDesc {
+        label: "sampled",
+        size: Size::new(4, 4),
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+    })?;
+    let texels = [255u8; 2 * 2 * 4];
+    let region = |x, y| TextureRegion { x, y, size: Size::new(2, 2) };
+    gpu.write_texture(sampled, region(2, 2), &texels)?;
+    assert!(invalid(&gpu.write_texture(sampled, region(3, 2), &texels)), "a region past the right edge");
+    assert!(invalid(&gpu.write_texture(sampled, region(2, 3), &texels)), "a region past the bottom edge");
+    assert!(invalid(&gpu.write_texture(sampled, region(u32::MAX, 0), &texels)), "a region past u32::MAX");
+    assert!(invalid(&gpu.write_texture(sampled, region(0, 0), &texels[4..])), "a texel short");
+    assert!(invalid(&gpu.write_texture(frame.target, region(0, 0), &texels)), "a texture that isn't sampled");
 
     // The faults ran nothing, and the frame still draws.
     gpu.submit(&[frame.pass(pipeline, [DRAW_QUAD])])?;
@@ -721,4 +738,93 @@ pub fn custom_layers(
     assert!(invalid(&gpu.lend_to_custom_layer(Some(&unbound), &mut |_| called = true)), "a draw without its buffers");
     assert!(!called, "nothing lent for a rejected pass");
     gpu.finish()
+}
+
+/// Checks writes from bytes in a JS array, which `host` makes of bytes, as
+/// [`write_buffer_from_host`](Gpu::write_buffer_from_host) takes them: a
+/// write that ends inside a word writes zeros over the rest of it, and a
+/// later [`write_buffer`](Gpu::write_buffer) that ends before the host's
+/// bytes leaves them. The background shader covers the target through
+/// what the first wrote, and then its left half through what the second
+/// did. Returns the readback of the frame, whose texels
+/// [`check_host_writes`] checks once the backend has them, or the error of
+/// a call that should succeed.
+#[cfg(target_family = "wasm")]
+pub fn host_writes<G: Gpu + ?Sized>(
+    gpu: &mut G,
+    host: impl Fn(&[u8]) -> mln_util::host_bytes::HostBytes,
+) -> Result<crate::gpu::ReadbackId, GpuError> {
+    let target = target(gpu, TextureFormat::Rgba8Unorm)?;
+    let e = EXTENT as i16;
+    let quad: [[i16; 2]; 4] = [[0, 0], [e, 0], [0, e], [e, e]];
+    let quad = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&quad))?;
+    let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]))?;
+    let drawable = [BackgroundDrawableUnionUBO::default()];
+    let drawable = bytemuck::cast_slice(&drawable);
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let props = |color| BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
+    let props_size = size_of::<BackgroundPropsUBO>() as u64;
+    let props_buffer = |gpu: &mut G| {
+        gpu.create_buffer(&crate::gpu::BufferDesc { label: "props", usage: BufferUsage::Uniform, size: props_size })
+    };
+
+    // Opaque green, then red from the host up to the middle of the alpha:
+    // its low bytes, which are 0.0's. The zeros after them make the alpha
+    // 0.0, where 1.0's high bytes would leave 1.0.
+    let tail = props_buffer(gpu)?;
+    gpu.write_buffer(tail, 0, bytemuck::bytes_of(&props([0.0, 1.0, 0.0, 1.0])))?;
+    gpu.write_buffer_from_host(tail, 0, &host(&bytemuck::bytes_of(&props([1.0, 0.0, 0.0, 0.0]))[..14]))?;
+    // Opaque blue from the host, then red 1.0 in the first word.
+    let kept = props_buffer(gpu)?;
+    gpu.write_buffer_from_host(kept, 0, &host(bytemuck::bytes_of(&props([0.0, 0.0, 1.0, 1.0]))))?;
+    gpu.write_buffer(kept, 0, &1.0f32.to_le_bytes())?;
+
+    let group = |gpu: &mut G, props, x_max| {
+        let projection = [ProjectionUBO { matrix: tile_matrix(x_max), ..ProjectionUBO::default() }];
+        let projection = bytemuck::cast_slice(&projection);
+        let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+        gpu.create_bind_group(&BindGroupDesc {
+            label: "host writes",
+            entries: &[
+                whole(ID_PROJECTION_UBO, projection_buffer, projection),
+                whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
+                BindGroupEntry::Buffer {
+                    id: ID_BACKGROUND_PROPS_UBO as u32,
+                    buffer: props,
+                    offset: 0,
+                    size: props_size,
+                },
+            ],
+        })
+    };
+    let (whole_target, left) = (group(gpu, tail, 1.0)?, group(gpu, kept, 0.0)?);
+    let pipeline = gpu.create_pipeline(&background())?;
+    gpu.submit(&[Pass {
+        label: "host writes".to_owned(),
+        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
+        depth_stencil: None,
+        commands: vec![
+            RenderCommand::SetPipeline(pipeline),
+            RenderCommand::SetVertexBuffer { slot: 0, buffer: quad, offset: 0 },
+            RenderCommand::SetIndexBuffer { buffer: indices, offset: 0 },
+            RenderCommand::SetBindGroup { slot: 0, group: whole_target },
+            DRAW_QUAD,
+            RenderCommand::SetBindGroup { slot: 0, group: left },
+            DRAW_QUAD,
+        ],
+    }])?;
+    gpu.read_texture(target, TextureRegion::whole(SIZE))
+}
+
+/// Checks the texels of [`host_writes`]'s frame.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+#[cfg(target_family = "wasm")]
+pub fn check_host_writes(pixels: &[u8]) {
+    let (left, right) = (SIZE.width / 4, SIZE.width * 3 / 4);
+    let y = SIZE.height / 2;
+    assert_eq!(texel(pixels, left, y), [255, 0, 255, 255], "a write before the host's bytes left them");
+    assert_eq!(texel(pixels, right, y), [255, 0, 0, 0], "the host's write zeroed the rest of its last word");
 }
