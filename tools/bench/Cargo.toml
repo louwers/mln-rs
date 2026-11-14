@@ -28,7 +28,6 @@ mln_gfx.workspace = true
 mln_gl.workspace = true
 mln_headless.workspace = true
 mln_image.workspace = true
-mln_conversion.workspace = true
 mln_map.workspace = true
 mln_renderer.workspace = true
 # The device the headless frontend renders on.
@@ -49,6 +48,8 @@ pixelmatch.workspace = true
 render_test.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# The cache database of Runtime/Startup (cases.rs).
+tempfile.workspace = true
 wgpu.workspace = true
 
 # The Vulkan backend, which MLN_RENDER_BACKEND=vulkan picks in the headless
