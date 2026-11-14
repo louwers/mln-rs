@@ -229,6 +229,11 @@ typedef struct mln_render_session_attach_options {
    * Called when a session driven by MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD
    * has work for mln_render_session_service_driver_work(). It isn't called
    * again until a service runs.
+   *
+   * It can be called on your graphics thread from inside a service, for work
+   * that the same service then runs before it returns. Schedule a service from
+   * the wake rather than calling mln_render_session_service_driver_work() in
+   * it: a service inside another one fails with MLN_STATUS_BUSY.
    */
   mln_wake driver_work_wake;
   /**

@@ -689,6 +689,11 @@ MLN_API mln_status mln_render_session_dump_debug_logs(
  *
  * It accepts a released or disposed session until that release or disposal
  * finishes.
+ *
+ * Returns:
+ * - MLN_STATUS_BUSY when called while a service of the session already runs on
+ *   this thread, such as from the driver work wake or another callback that
+ *   the service runs.
  */
 MLN_BINDING("after_release=true")
 MLN_API mln_status mln_render_session_service_driver_work(
