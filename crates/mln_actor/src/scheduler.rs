@@ -232,8 +232,9 @@ impl TaggedScheduler {
         &self.scheduler
     }
 
-    #[cfg(test)]
-    pub(crate) fn schedule(&self, task: Task) {
+    /// Runs `task` on the scheduler under this tag, which
+    /// [`wait_for_empty`](Self::wait_for_empty) waits for.
+    pub fn schedule(&self, task: Task) {
         self.scheduler.schedule_tagged(self.tag, task);
     }
 

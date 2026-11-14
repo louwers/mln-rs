@@ -1058,9 +1058,15 @@ impl Worker {
             return RenderedFrame { result, events, slot: None };
         }
         let projection = gfx.renderer.frame_projection();
+        // The previous render's sources may hold the last references to
+        // replaced data, which the renderer's workers free instead.
+        if let Some(previous) = self.sources.replace(Arc::clone(&update.parameters.sources))
+            && !Arc::ptr_eq(&previous, &update.parameters.sources)
+        {
+            gfx.renderer.drop_on_workers(previous);
+        }
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
-        self.sources = Some(Arc::clone(&update.parameters.sources));
         let report = events.iter().rev().find_map(|event| match event {
             RendererEvent::RenderFrameFinished { mode, needs_repaint, .. } => Some(FrameReport {
                 mode: match mode {

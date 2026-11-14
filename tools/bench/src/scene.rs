@@ -18,6 +18,7 @@ use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStat
 use mln_renderer::query::SourceQueryOptions;
 use mln_runtime::Device;
 use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_style_types::VisibilityType;
 use mln_text::GlyphCache;
 use mln_util::feature::feature_id_to_string;
@@ -277,6 +278,14 @@ impl Scene {
         self.map.style_mut().load_json(json);
     }
 
+    /// Replaces the data of the GeoJSON source `id` with `json`.
+    pub(crate) fn set_geojson(&mut self, id: &str, json: &str) {
+        let geojson: geojson::GeoJson = json.parse().expect("valid GeoJSON");
+        let source = self.map.style().get_source(id).expect("the source");
+        let source = source.downcast_ref::<GeoJSONSource>().expect("a GeoJSON source");
+        source.set_geojson(geojson).expect("the source's data");
+    }
+
     /// Adds a layer from its JSON below `before`, or above every layer.
     pub(crate) fn add_layer_json(&mut self, json: &str, before: Option<&str>) {
         let value: serde_json::Value = serde_json::from_str(json).expect("a layer is JSON");
@@ -437,7 +446,25 @@ impl Scene {
         self.present_until(|status| status.mode == RenderMode::Full && !status.needs_repaint)
     }
 
+    /// As [`settle`](Self::settle), until `shown` also holds, adding to
+    /// `times` how long each frame took, from asking for it until the GPU
+    /// finished it.
+    pub(crate) fn settle_timed_until(&mut self, shown: impl Fn(&Scene) -> bool, times: &mut Vec<Duration>) -> usize {
+        self.present_until_timed(
+            |scene, status| status.mode == RenderMode::Full && !status.needs_repaint && shown(scene),
+            Some(times),
+        )
+    }
+
     fn present_until(&mut self, done: impl Fn(&RenderFrameStatus) -> bool) -> usize {
+        self.present_until_timed(|_, status| done(status), None)
+    }
+
+    fn present_until_timed(
+        &mut self,
+        done: impl Fn(&Scene, &RenderFrameStatus) -> bool,
+        mut times: Option<&mut Vec<Duration>>,
+    ) -> usize {
         let start = Instant::now();
         let mut frames = 0;
         loop {
@@ -445,7 +472,12 @@ impl Scene {
             std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
             self.pump();
             frames += 1;
-            if done(&self.render_frame()) {
+            let demanded = Instant::now();
+            let status = self.render_frame();
+            if let Some(times) = times.as_deref_mut() {
+                times.push(demanded.elapsed());
+            }
+            if done(self, &status) {
                 return frames;
             }
             self.check(start);
@@ -561,6 +593,21 @@ impl Scene {
             let ids: BTreeSet<String> =
                 features.iter().filter_map(|feature| feature_id_to_string(&feature.id)).collect();
             ids.into_iter().collect()
+        })
+    }
+
+    /// Whether the source `source` has features loaded, each with the
+    /// number `value` as its property `key`.
+    pub(crate) fn source_shows(&self, source: &str, key: &str, value: u64) -> bool {
+        self.frontend.with_renderer(|renderer| {
+            let options = SourceQueryOptions::new(None, None);
+            let features = renderer.query_source_features(source, &options).expect("the source's features");
+            !features.is_empty()
+                && features.iter().all(|feature| match feature.properties.get(key) {
+                    Some(Value::Uint(number)) => *number == value,
+                    Some(Value::Int(number)) => u64::try_from(*number) == Ok(value),
+                    _ => false,
+                })
         })
     }
 
