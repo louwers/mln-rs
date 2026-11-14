@@ -509,6 +509,22 @@ pub trait Gpu {
     /// Writes `data` at `offset` bytes into `buffer`. `offset` and the
     /// length of `data` are multiples of 4.
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError>;
+    /// Writes the bytes of `data`, which are in a JS array, at `offset`
+    /// bytes into `buffer`. `offset` is a multiple of 4. A length that isn't
+    /// writes zeros to the rest of the last word. A backend that can write
+    /// from the array overrides this, which copies the bytes into wasm
+    /// memory first.
+    #[cfg(target_family = "wasm")]
+    fn write_buffer_from_host(
+        &mut self,
+        buffer: BufferId,
+        offset: u64,
+        data: &mln_util::host_bytes::HostBytes,
+    ) -> Result<(), GpuError> {
+        let mut bytes = data.to_pod_vec::<u8>();
+        bytes.resize(bytes.len().next_multiple_of(4), 0);
+        self.write_buffer(buffer, offset, &bytes)
+    }
     fn destroy_buffer(&mut self, buffer: BufferId);
 
     fn create_texture(&mut self, desc: &TextureDesc<'_>) -> Result<TextureId, GpuError>;

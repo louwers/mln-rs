@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use geometry::Point;
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
@@ -331,7 +331,7 @@ impl Bucket for FillExtrusionBucket {
         Ok(())
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &dyn Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 

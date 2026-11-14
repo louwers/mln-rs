@@ -24,7 +24,7 @@ use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
-use mln_gfx::gpu::{Gpu, SamplerId, TextureId};
+use mln_gfx::gpu::{BufferId, Gpu, SamplerId, TextureId};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::scissor_rect::ScissorRect;
@@ -66,8 +66,8 @@ pub(crate) struct Context {
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
     state: Rc<State>,
-    /// The `Gpu` the renderer's uniform buffers belong to, on this context
-    /// and sharing its GL state.
+    /// The `Gpu` the renderer's buffers belong to, on this context and
+    /// sharing its GL state.
     gpu: RefCell<GlGpu>,
     /// Whether a half-float texture can be rendered into
     /// (`EXT_color_buffer_half_float` or `EXT_color_buffer_float`).
@@ -104,6 +104,9 @@ impl Context {
         let state = Rc::new(State::default());
         // On desktop OpenGL, this turns on the sRGB encoding of what is
         // written to an sRGB framebuffer, such as the host's texture.
+        #[cfg(target_family = "wasm")]
+        let gpu = GlGpu::hosted(Arc::clone(backend.gl_shared()), Rc::clone(&state), backend.webgl2().clone());
+        #[cfg(not(target_family = "wasm"))]
         let gpu = GlGpu::hosted(Arc::clone(backend.gl_shared()), Rc::clone(&state));
         Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
@@ -146,6 +149,11 @@ impl Context {
         &self.state
     }
 
+    /// The GL buffer of a buffer of the context's `Gpu`.
+    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<BufferID> {
+        self.gpu.borrow().native_buffer(buffer)
+    }
+
     /// Whether the context is of desktop OpenGL (3.3 or later) rather than
     /// OpenGL ES or WebGL2. Its shaders compile as GLSL 3.30, and it has no
     /// alpha or luminance textures.
@@ -168,33 +176,10 @@ impl Context {
 
     // --- objects ---
 
-    /// Counts a live buffer of `bytes` in the rendering stats.
-    pub(crate) fn count_buffer(&self, bytes: usize) {
-        let mut stats = self.rendering_stats();
-        stats.num_buffers += 1;
-        stats.total_buffers += 1;
-        stats.mem_buffers += bytes as i32;
-    }
-
-    /// Takes a buffer of `bytes` out of the rendering stats.
-    pub(crate) fn uncount_buffer(&self, bytes: usize) {
-        let mut stats = self.rendering_stats();
-        stats.num_buffers -= 1;
-        stats.mem_buffers -= bytes as i32;
-    }
-
-    /// A buffer bound to `target` holding `data`, counted in the rendering
-    /// stats until it is abandoned. An index buffer
+    /// A buffer bound to `target` holding `data`, which the rendering stats
+    /// don't count: one the context keeps for itself. An index buffer
     /// (`GL_ELEMENT_ARRAY_BUFFER`) is bound with no vertex array, whose state
     /// that binding belongs to.
-    pub(crate) fn create_buffer(&self, target: u32, data: &[u8], usage: u32) -> Option<BufferID> {
-        let buffer = self.create_uncounted_buffer(target, data, usage)?;
-        self.count_buffer(data.len());
-        Some(buffer)
-    }
-
-    /// `create_buffer` for a buffer the stats don't count: one the context
-    /// keeps for itself, or one whose owner counts it.
     pub(crate) fn create_uncounted_buffer(&self, target: u32, data: &[u8], usage: u32) -> Option<BufferID> {
         let gl = self.gl();
         if target == glow::ELEMENT_ARRAY_BUFFER {
@@ -213,53 +198,6 @@ impl Context {
             gl.buffer_data_u8_slice(target, data, usage);
             Some(buffer)
         }
-    }
-
-    /// `create_buffer` of bytes that are still in a JS array
-    /// (`mln_util::host_bytes`), written from there.
-    #[cfg(target_family = "wasm")]
-    pub(crate) fn create_buffer_from_host(
-        &self,
-        target: u32,
-        data: &mln_util::host_bytes::HostBytes,
-        usage: u32,
-    ) -> Option<BufferID> {
-        let array = data.array()?;
-        let gl = self.gl();
-        if target == glow::ELEMENT_ARRAY_BUFFER {
-            self.state.bind_vertex_array(gl, None);
-        }
-        // SAFETY: the buffer is new, and `target` and `usage` are GL's.
-        unsafe {
-            let buffer = gl.create_buffer().ok()?;
-            gl.bind_buffer(target, Some(buffer));
-            self.backend.webgl2().buffer_data_with_array_buffer_view(target, &array, usage);
-            self.count_buffer(data.len());
-            Some(buffer)
-        }
-    }
-
-    /// Replaces the start of `buffer`, bound to `target`, with `data`.
-    pub(crate) fn update_buffer(&self, target: u32, buffer: BufferID, data: &[u8]) {
-        let gl = self.gl();
-        if target == glow::ELEMENT_ARRAY_BUFFER {
-            self.state.bind_vertex_array(gl, None);
-        }
-        // SAFETY: the buffer is alive and at least as long as `data`.
-        unsafe {
-            gl.bind_buffer(target, Some(buffer));
-            gl.buffer_sub_data_u8_slice(target, 0, data);
-        }
-        let mut stats = self.rendering_stats();
-        stats.buffer_updates += 1;
-        stats.buffer_update_bytes += data.len();
-    }
-
-    /// Leaves `buffer`, which `create_buffer` made with `bytes` bytes, to be
-    /// deleted.
-    pub(crate) fn abandon_buffer(&self, buffer: BufferID, bytes: usize) {
-        self.uncount_buffer(bytes);
-        self.abandon_uncounted_buffer(buffer);
     }
 
     pub(crate) fn abandon_uncounted_buffer(&self, buffer: BufferID) {
@@ -558,7 +496,7 @@ impl Context {
         self.rendering_stats().num_texture_bindings += 1;
     }
 
-    /// The `Gpu` the renderer's uniform buffers and textures belong to.
+    /// The `Gpu` the renderer's buffers and textures belong to.
     pub(crate) fn gl_gpu(&self) -> Ref<'_, GlGpu> {
         self.gpu.borrow()
     }

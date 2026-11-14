@@ -101,15 +101,6 @@ pub enum CullFaceWindingType {
     CounterClockwise,
 }
 
-/// Buffer usage type
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum BufferUsageType {
-    StreamDraw,
-    StaticDraw,
-    DynamicDraw,
-}
-
 /// Texture pixel type
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]

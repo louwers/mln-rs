@@ -354,14 +354,13 @@ fn render_frame(
         scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
     };
     if let Some(scene) = scene {
-        let upload_pass = parameters.encoder.create_upload_pass("layerGroup-upload", renderable);
         if let Some(color) = change.color {
             scene.set_color(context, color);
         }
         if let Some(right) = change.right {
             scene.set_half(context, right);
         }
-        scene.layer_group.borrow_mut().upload(&*upload_pass);
+        scene.layer_group.borrow_mut().upload(context);
     }
     parameters.render_pass = Some(parameters.encoder.create_render_pass(
         "main buffer",
@@ -614,7 +613,7 @@ fn quarter_overlay(calls: Rc<Cell<u32>>, sizes: Rc<RefCell<Vec<Size>>>) -> Overl
             assert_ne!(texture.get_vulkan_image_view(), vk::ImageView::null());
             assert_ne!(texture.get_vulkan_sampler(), vk::Sampler::null());
         }
-        let buffer = target.context.create_buffer(Some(&[0; 64]), 64, vk::BufferUsageFlags::VERTEX_BUFFER, false);
+        let buffer = target.context.create_buffer(Some(&[0; 64]), 64, vk::BufferUsageFlags::VERTEX_BUFFER);
         assert!(buffer.is_valid());
 
         let attachment = vk::ClearAttachment::default()

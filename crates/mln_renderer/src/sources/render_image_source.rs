@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
@@ -175,11 +175,11 @@ impl ImageSourceRenderData {
 }
 
 impl RenderItem for ImageSourceRenderData {
-    fn upload(&self, upload_pass: &dyn UploadPass) {
+    fn upload(&self, context: &dyn Context) {
         if let Some(bucket) = &self.bucket
             && bucket.needs_upload()
         {
-            bucket.upload(upload_pass);
+            bucket.upload(context);
         }
     }
 }
@@ -188,8 +188,8 @@ impl RenderItem for ImageSourceRenderData {
 struct ImageSourceRenderItem(Rc<ImageSourceRenderData>);
 
 impl RenderItem for ImageSourceRenderItem {
-    fn upload(&self, upload_pass: &dyn UploadPass) {
-        self.0.upload(upload_pass);
+    fn upload(&self, context: &dyn Context) {
+        self.0.upload(context);
     }
 }
 

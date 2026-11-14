@@ -1,8 +1,8 @@
 // The atlas is shared by the render thread and the tile workers
 // (`DynamicTextureAtlasPtr`, C++ `std::shared_ptr`), so it is `Send + Sync`
 // with its state behind a mutex, as in C++. `Context::createDynamicTexture`
-// needs no context here: the GPU texture is created in the upload pass (see
-// dynamic_texture.rs).
+// needs no context here: the GPU texture is created when the frame uploads
+// (see dynamic_texture.rs).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -106,7 +106,7 @@ pub(crate) struct ImageAtlas {
 
 impl ImageAtlas {
     /// Copies `image` into the bin of the `type_` image with its id, where
-    /// the next upload pass puts it on the texture. False when this atlas
+    /// the frame's next upload puts it on the texture. False when this atlas
     /// has no such image at `image`'s size.
     pub(crate) fn patch_image(&self, image: &ImageImpl, type_: ImageType) -> bool {
         let positions = match type_ {

@@ -65,7 +65,7 @@
 "crates/mln_renderer/src/render_layer.rs" = 1
 "crates/mln_renderer/src/render_target.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1
-"crates/mln_renderer/src/renderer.rs" = 7
+"crates/mln_renderer/src/renderer.rs" = 5
 "crates/mln_renderer/src/sources/render_image_source.rs" = 2
 "crates/mln_renderer/src/sources/render_raster_dem_source.rs" = 1
 "crates/mln_renderer/src/text/collision_feature.rs" = 2
@@ -133,7 +133,6 @@
 "crates/mln_webgpu/src/drawable_builder.rs" = 1
 "crates/mln_webgpu/src/renderer_backend.rs" = 1
 "crates/mln_webgpu/src/shaders/shader_source.rs" = 1
-"crates/mln_webgpu/src/upload_pass.rs" = 1
 "vendor/geojson-vt/src/lib.rs" = 2
 "vendor/supercluster/src/lib.rs" = 1
 
@@ -154,8 +153,8 @@
 "crates/mln_gfx/src/vertex_vector.rs" = 13
 "crates/mln_gl/src/borrowed_target.rs" = 13
 "crates/mln_gl/src/canvas_target.rs" = 1
-"crates/mln_gl/src/context.rs" = 16
-"crates/mln_gl/src/drawable.rs" = 12
+"crates/mln_gl/src/context.rs" = 17
+"crates/mln_gl/src/drawable.rs" = 11
 "crates/mln_gl/src/drawable_builder.rs" = 1
 "crates/mln_gl/src/exported_target.rs" = 9
 "crates/mln_gl/src/offscreen_target.rs" = 4
@@ -165,7 +164,6 @@
 "crates/mln_headless/src/headless_frontend.rs" = 12
 "crates/mln_map/src/transform.rs" = 3
 "crates/mln_mtl/src/borrowed_target.rs" = 18
-"crates/mln_mtl/src/buffer_resource.rs" = 9
 "crates/mln_mtl/src/command_encoder.rs" = 4
 "crates/mln_mtl/src/context.rs" = 2
 "crates/mln_mtl/src/drawable.rs" = 13
@@ -173,7 +171,7 @@
 "crates/mln_mtl/src/exported_target.rs" = 8
 "crates/mln_mtl/src/offscreen_target.rs" = 4
 "crates/mln_mtl/src/offscreen_texture.rs" = 16
-"crates/mln_mtl/src/render_pass.rs" = 36
+"crates/mln_mtl/src/render_pass.rs" = 37
 "crates/mln_mtl/src/renderer_backend.rs" = 3
 "crates/mln_mtl/src/shaders/shader_program.rs" = 2
 "crates/mln_mtl/src/surface_target.rs" = 19
@@ -255,7 +253,7 @@
 "crates/mln_vulkan/src/borrowed_target.rs" = 18
 "crates/mln_vulkan/src/context.rs" = 36
 "crates/mln_vulkan/src/descriptor_set.rs" = 1
-"crates/mln_vulkan/src/drawable.rs" = 12
+"crates/mln_vulkan/src/drawable.rs" = 11
 "crates/mln_vulkan/src/drawable_builder.rs" = 1
 "crates/mln_vulkan/src/exported_target.rs" = 8
 "crates/mln_vulkan/src/offscreen_target.rs" = 4
@@ -270,14 +268,12 @@
 "crates/mln_webgpu/src/bind_groups.rs" = 2
 "crates/mln_webgpu/src/borrowed_target.rs" = 9
 "crates/mln_webgpu/src/command_encoder.rs" = 4
-"crates/mln_webgpu/src/context.rs" = 4
+"crates/mln_webgpu/src/context.rs" = 5
 "crates/mln_webgpu/src/drawable.rs" = 13
 "crates/mln_webgpu/src/drawable_builder.rs" = 1
 "crates/mln_webgpu/src/offscreen_target.rs" = 4
 "crates/mln_webgpu/src/offscreen_texture.rs" = 5
 "crates/mln_webgpu/src/render_pass.rs" = 11
-"crates/mln_webgpu/src/renderer_backend.rs" = 6
+"crates/mln_webgpu/src/renderer_backend.rs" = 4
 "crates/mln_webgpu/src/shaders/shader_program.rs" = 2
 "crates/mln_webgpu/src/surface_target.rs" = 21
-"crates/mln_webgpu/src/upload_pass.rs" = 1
-"crates/mln_webgpu/src/vertex_buffer_resource.rs" = 6

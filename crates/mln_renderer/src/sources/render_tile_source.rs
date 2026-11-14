@@ -26,8 +26,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::{
-    ColorMode, CullFaceMode, Drawable, LayerGroupBase, LayerGroupBasePtr, TileLayerGroup, UniformBufferPtr,
-    UniqueDrawableBuilder, UploadPass,
+    ColorMode, Context, CullFaceMode, Drawable, LayerGroupBase, LayerGroupBasePtr, TileLayerGroup, UniformBufferPtr,
+    UniqueDrawableBuilder,
 };
 use mln_map_types::MapDebugOptions;
 use mln_style::expression::Dependency;
@@ -88,9 +88,9 @@ pub(crate) fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
 }
 
 impl RenderItem for TileSourceRenderItem {
-    fn upload(&self, upload_pass: &dyn UploadPass) {
+    fn upload(&self, context: &dyn Context) {
         for tile in self.render_tiles.iter() {
-            tile.upload(upload_pass);
+            tile.upload(context);
         }
     }
 

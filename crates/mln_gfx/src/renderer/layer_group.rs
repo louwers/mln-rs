@@ -18,11 +18,11 @@ use std::rc::Rc;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
+use crate::context::Context;
 use crate::drawable::{Drawable, UniqueDrawable};
 use crate::paint_parameters::PaintParameters;
 use crate::renderer::render_pass::RenderPass;
 use crate::uniform_buffer::UniformBufferArray;
-use crate::upload_pass::UploadPass;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -70,8 +70,8 @@ pub trait LayerGroupBase: Any {
     /// Clear the drawable collection
     fn clear_drawables(&mut self) -> usize;
 
-    /// Called during the upload pass
-    fn upload(&mut self, _upload_pass: &dyn UploadPass) {}
+    /// Uploads the layer group's drawables, before the frame draws them.
+    fn upload(&mut self, _context: &dyn Context) {}
     /// Called during each render pass
     fn render(&mut self, _parameters: &mut dyn PaintParameters) {}
     /// Called at the end of each frame

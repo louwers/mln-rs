@@ -423,9 +423,9 @@ impl Painter {
         // Dropped after the draws are recorded, and destroyed when the
         // frame is done.
         let vertex_buffer =
-            target.context.create_buffer(Some(&vertices), vertices.len(), vk::BufferUsageFlags::VERTEX_BUFFER, false);
+            target.context.create_buffer(Some(&vertices), vertices.len(), vk::BufferUsageFlags::VERTEX_BUFFER);
         let index_buffer =
-            target.context.create_buffer(Some(&indexes), indexes.len(), vk::BufferUsageFlags::INDEX_BUFFER, false);
+            target.context.create_buffer(Some(&indexes), indexes.len(), vk::BufferUsageFlags::INDEX_BUFFER);
         if !vertex_buffer.is_valid() || !index_buffer.is_valid() {
             return Ok(());
         }

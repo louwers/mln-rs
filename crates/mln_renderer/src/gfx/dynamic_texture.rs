@@ -68,7 +68,7 @@ impl Eq for TextureHandle {}
 struct Inner {
     shelf_pack: ShelfPack,
     num_textures: i32,
-    /// The images queued for the next upload pass, keyed by handle id.
+    /// The images queued for the frame's next upload, keyed by handle id.
     images_to_upload: HashMap<i32, (RectU16, Vec<u8>)>,
 }
 
@@ -162,7 +162,8 @@ impl DynamicTexture {
         Some(tex_handle)
     }
 
-    /// Queues the pixels of the handle's rectangle for the next upload pass.
+    /// Queues the pixels of the handle's rectangle for the frame's next
+    /// upload.
     pub(crate) fn upload_image(&self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
         let mut inner = self.inner.lock();
         let rect = tex_handle.rectangle;

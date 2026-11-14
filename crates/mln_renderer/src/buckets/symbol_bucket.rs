@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use glam::Vec2;
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
@@ -812,7 +812,7 @@ impl Bucket for SymbolBucket {
         &mut self.base
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &dyn Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 
