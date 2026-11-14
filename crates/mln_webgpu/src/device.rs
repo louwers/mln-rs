@@ -76,8 +76,8 @@ fn shared_instance(backends: wgpu::Backends) -> wgpu::Instance {
 impl Device {
     /// The library's device, on the adapter at `adapter_index` in
     /// [`wgpu::Instance::enumerate_adapters`] order, or on the
-    /// high-performance adapter when `None`. Its uncaptured errors are
-    /// logged.
+    /// high-performance adapter when `None`. It logs the adapter it is on,
+    /// and its uncaptured errors.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is
     /// no adapter at `adapter_index`, with
@@ -125,6 +125,15 @@ impl Device {
             Log::error(Event::Render, format!("WebGPU validation error: {error}"));
         }));
         let lost = watch_for_loss(&device);
+        let info = adapter.get_info();
+        Log::info(
+            Event::Render,
+            format!(
+                "graphics device uses WebGPU adapter {} on {}",
+                info.name,
+                crate::surface_target::backend_type_to_string(info.backend)
+            ),
+        );
         Ok(Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None, lost })
     }
 

@@ -9,3 +9,6 @@ mod shared_device_test;
 // TileLayerGroup with the UBOs background_layer_tweaker.cpp sets, rendered
 // into the offscreen target and read back.
 mod background_test;
+// A library device logs the adapter it is on, as maplibre-native-ffi's
+// graphics devices log theirs.
+mod log_test;

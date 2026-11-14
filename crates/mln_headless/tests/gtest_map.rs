@@ -837,6 +837,8 @@ fn set_style_invalid_json() {
         1,
         log.count(EventSeverity::Error, Event::ParseStyle, -1, &format!("Failed to parse style: {serde_error}"))
     );
+    // The frontend's device logs the platform or GPU it is on.
+    assert_eq!(1, log.count_containing(EventSeverity::Info, Event::Render, -1, "graphics device uses "));
     let unchecked = log.unchecked();
     assert!(unchecked.is_empty(), "{unchecked:?}");
 }
@@ -1697,6 +1699,10 @@ fn an_image_source_without_a_url_draws_once_it_has_an_image() {
 
     image_source(&test.map()).set_url("fixture://image.png");
     assert_eq!(test.file_source.requests_len(), 1);
+    // The frontend's device logs the platform or GPU it is on, and the
+    // process's first OpenGL context the GPU, which may be this test's.
+    assert_eq!(1, log.count_containing(EventSeverity::Info, Event::Render, -1, "graphics device uses "));
+    assert!(log.count_containing(EventSeverity::Info, Event::General, -1, "GPU Identifier: ") <= 1);
     assert!(log.unchecked().is_empty(), "{:?}", log.unchecked());
 }
 

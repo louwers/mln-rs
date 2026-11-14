@@ -550,7 +550,7 @@ fn d3d12_fence_support(instance: &ash::Instance, physical_device: vk::PhysicalDe
 impl Device {
     /// The library's device: the GPU at `adapter_index` in
     /// `vkEnumeratePhysicalDevices` order, or the first that can render when
-    /// `None`, discrete GPUs first.
+    /// `None`, discrete GPUs first. It logs the GPU it is on.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library or a GPU that can render, or without what
@@ -603,6 +603,8 @@ impl Device {
         let (queue, properties) = unsafe {
             (device.get_device_queue(queue_family_index, 0), instance.get_physical_device_properties(physical_device))
         };
+        let name = properties.device_name_as_c_str().map(CStr::to_string_lossy).unwrap_or_default();
+        Log::info(Event::Render, format!("graphics device uses Vulkan physical device {name}"));
         let get_instance_proc_addr = entry.static_fn().get_instance_proc_addr;
         let get_device_proc_addr = instance.fp_v1_0().get_device_proc_addr;
         Ok(Device {

@@ -58,5 +58,10 @@ path = "tests/background_test.rs"
 name = "gtest_metal_renderable"
 path = "tests/gtest_metal_renderable.rs"
 
+# A library device logs the GPU it is on.
+[[test]]
+name = "log_test"
+path = "tests/log_test.rs"
+
 [lints]
 workspace = true

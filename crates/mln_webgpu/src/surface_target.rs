@@ -44,7 +44,7 @@ use crate::renderer_backend::RendererBackend;
 
 const MAX_CONSECUTIVE_ERRORS: i32 = 3;
 
-fn backend_type_to_string(backend: wgpu::Backend) -> &'static str {
+pub(crate) fn backend_type_to_string(backend: wgpu::Backend) -> &'static str {
     match backend {
         wgpu::Backend::Noop => "Null",
         wgpu::Backend::BrowserWebGpu => "WebGPU",

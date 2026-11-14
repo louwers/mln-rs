@@ -53,5 +53,11 @@ web-sys = { workspace = true, features = [
   "WebGlContextAttributes",
 ] }
 
+# A library device logs the platform it is on, and the process's first
+# context the GPU: a binary of its own, since that is once per process.
+[[test]]
+name = "log_test"
+path = "tests/log_test.rs"
+
 [lints]
 workspace = true
