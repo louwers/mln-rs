@@ -31,7 +31,7 @@ mod sfnt;
 mod source;
 
 #[cfg(target_os = "android")]
-mod android;
+pub mod android;
 #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
 mod fontconfig;
 

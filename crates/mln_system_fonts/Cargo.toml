@@ -29,6 +29,10 @@ sys-locale.workspace = true
 [target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
 libloading.workspace = true
 
+# The app's languages, from Java.
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 

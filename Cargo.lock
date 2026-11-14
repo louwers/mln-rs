@@ -2531,6 +2531,7 @@ dependencies = [
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-style-types",
+ "mln-rs-system-fonts",
  "mln-rs-text",
  "mln-rs-tile-id",
  "mln-rs-util",
@@ -3101,6 +3102,7 @@ name = "mln-rs-system-fonts"
 version = "0.0.11"
 dependencies = [
  "fontdb",
+ "jni",
  "libloading",
  "memmap2",
  "mln-rs-text",

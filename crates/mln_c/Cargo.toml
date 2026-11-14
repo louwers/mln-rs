@@ -91,6 +91,10 @@ mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 winit.workspace = true
 
 # The sync files of the exported ring test, whose hardware buffers it locks.
+# The app's languages, which mln_android_init() reads for the system fonts.
+[target.'cfg(target_os = "android")'.dependencies]
+mln_system_fonts.workspace = true
+
 [target.'cfg(target_os = "android")'.dev-dependencies]
 libc.workspace = true
 

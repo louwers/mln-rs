@@ -2,18 +2,68 @@
 //! level 29), which picks the system font that the platform would draw the
 //! text in for the given languages. Its functions are looked up at run time,
 //! so that an app that runs on older versions falls back to the scan of
-//! `/system/fonts`.
+//! `/system/fonts`. And the app's languages, from Java, through [`init`].
 
-#![expect(unsafe_code, reason = "the NDK's font API is the FFI here")]
+#![expect(unsafe_code, reason = "the NDK's font API and JNI are the FFI here")]
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
+use jni::objects::JString;
+use jni::{EnvUnowned, Outcome, jni_sig, jni_str};
 use libloading::Library;
 
 use crate::scripts::Script;
 use crate::source::Source;
+
+/// The app's languages, most preferred first, once [`init`] read them.
+static LANGUAGES: OnceLock<Vec<String>> = OnceLock::new();
+
+/// Reads the app's languages (`LocaleList.getDefault()`), which the system
+/// fonts are looked up for: native code can read only the device's first
+/// language. Call it before the fonts are found, from a thread attached to
+/// the app's Java VM; a later call changes nothing. Leaves no Java exception
+/// pending.
+///
+/// # Safety
+///
+/// `jni_env` is the calling thread's `JNIEnv*`.
+pub unsafe fn init(jni_env: *mut c_void) {
+    // SAFETY: the caller's contract; the local references that JNI makes
+    // here go with the caller's frame.
+    let mut env = unsafe { EnvUnowned::from_raw(jni_env.cast()) };
+    let outcome = env
+        .with_env(|env| -> Result<String, jni::errors::Error> {
+            let read = (|| {
+                let list = env
+                    .call_static_method(
+                        jni_str!("android/os/LocaleList"),
+                        jni_str!("getDefault"),
+                        jni_sig!("()Landroid/os/LocaleList;"),
+                        &[],
+                    )?
+                    .l()?;
+                let tags =
+                    env.call_method(&list, jni_str!("toLanguageTags"), jni_sig!("()Ljava/lang/String;"), &[])?.l()?;
+                env.cast_local::<JString>(tags)?.try_to_string(env)
+            })();
+            if env.exception_check() {
+                env.exception_clear();
+            }
+            read
+        })
+        .into_outcome();
+    if let Outcome::Ok(tags) = outcome {
+        let _ = LANGUAGES.set(tags.split(',').filter(|tag| !tag.is_empty()).map(str::to_owned).collect());
+    }
+}
+
+/// The app's languages, once [`init`] read them.
+pub(crate) fn languages() -> Option<Vec<String>> {
+    LANGUAGES.get().cloned()
+}
 
 /// The functions of the NDK's `font_matcher.h` and `font.h` that this uses.
 pub(crate) struct FontMatcher {

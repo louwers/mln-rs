@@ -4,6 +4,12 @@ use crate::scripts::Script;
 
 /// The user's preferred languages, most preferred first, as BCP 47 tags.
 pub(crate) fn preferred() -> Vec<String> {
+    // Android's native code can read only the first of the device's
+    // languages; Java has the app's.
+    #[cfg(target_os = "android")]
+    if let Some(languages) = crate::android::languages() {
+        return languages;
+    }
     sys_locale::get_locales().collect()
 }
 

@@ -10,8 +10,9 @@ use crate::error::Error;
 use crate::generated::types::{mln_diagnostic, mln_status};
 
 /// `mln_android_init()`: what the library needs of the app is the Java VM,
-/// whose `HttpURLConnection` fetches HTTP(S), and the context's assets, which
-/// `asset://` URLs load when the runtime has no asset path.
+/// whose `HttpURLConnection` fetches HTTP(S), the context's assets, which
+/// `asset://` URLs load when the runtime has no asset path, and the app's
+/// languages, which the system fonts are looked up for.
 ///
 /// # Safety
 ///
@@ -28,6 +29,8 @@ pub(crate) unsafe extern "C" fn mln_android_init(
         }
         #[cfg(target_os = "android")]
         {
+            // SAFETY: the caller's contract.
+            unsafe { mln_system_fonts::android::init(jni_env) };
             // SAFETY: the caller's contract.
             unsafe { mln_storage::android::init(jni_env, context) }.map_err(Error::from)
         }
