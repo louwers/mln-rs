@@ -2,16 +2,18 @@
 
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
+use std::ops::Deref;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
 use mln_gfx::color_mode::{BlendFunction, Mask};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gpu::validation::{self, Resources, ShaderBinding};
 use mln_gfx::gpu::{
-    BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, DepthState, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, StencilState, TextureDesc, TextureFormat,
-    TextureId, TextureRegion, VertexBufferLayout, VertexStep,
+    BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, DepthState, Gpu, GpuError, Limits,
+    LoadOp, Pass, PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, StencilState, TargetFormats,
+    TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::texture2d::SamplerState;
@@ -25,8 +27,8 @@ use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{NSObject, ProtocolObject};
 use objc2_foundation::{NSDictionary, NSString};
 use objc2_metal::{
-    MTLBinding, MTLBindingType, MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor,
-    MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
+    MTLBinding, MTLBindingType, MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding,
+    MTLClearColor, MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
     MTLCompareFunction, MTLCompileOptions, MTLCullMode, MTLDepthStencilDescriptor, MTLDevice, MTLGPUFamily,
     MTLIndexType, MTLLanguageVersion, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
     MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor,
@@ -65,6 +67,22 @@ const TEXTURE_FORMATS: [TextureFormat; 13] = [
     TextureFormat::Depth24PlusStencil8,
     TextureFormat::Depth32FloatStencil8,
 ];
+
+/// A buffer, and what the shared checks read of it.
+struct Buffer {
+    buffer: MTLBufferPtr,
+    usage: BufferUsage,
+    /// The size asked for, rounded up to a multiple of 4.
+    size: u64,
+}
+
+impl Deref for Buffer {
+    type Target = ProtocolObject<dyn MTLBuffer>;
+
+    fn deref(&self) -> &ProtocolObject<dyn MTLBuffer> {
+        &self.buffer
+    }
+}
 
 struct Texture {
     texture: MTLTexturePtr,
@@ -108,13 +126,14 @@ struct Pipeline {
     primitive: MTLPrimitiveType,
     cull: MTLCullMode,
     winding: MTLWinding,
-    /// The pixel formats of the color and depth-stencil attachments the
-    /// pipeline draws into.
-    formats: (MTLPixelFormat, Option<MTLPixelFormat>),
+    targets: TargetFormats,
+    vertex_buffers: Vec<VertexBufferLayout>,
     /// The buffer index of each vertex buffer slot, `None` for a slot with
     /// no attributes.
     vertex_buffer_indices: Vec<Option<usize>>,
     bindings: Vec<Binding>,
+    /// What the shader reads from the bind groups, for the shared checks.
+    reads: Vec<ShaderBinding>,
 }
 
 /// A copy out of the staging buffer of a submit.
@@ -190,7 +209,7 @@ pub struct MetalGpu {
     /// vertex and instance, by the device's GPU family.
     max_texture_size: u32,
     base_vertex_instance: bool,
-    buffers: SlotMap<BufferId, MTLBufferPtr>,
+    buffers: SlotMap<BufferId, Buffer>,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, MTLSamplerStatePtr>,
     shaders: HashMap<ShaderKey, Shader>,
@@ -361,7 +380,6 @@ impl MetalGpu {
         descriptor.setVertexDescriptor(Some(&vertex_descriptor));
         let color_format = pixel_format(key.targets.color);
         set_color_target(&descriptor, color_format, state.blend, state.color_mask);
-        let depth_stencil_format = key.targets.depth_stencil.map(pixel_format);
         if let Some(format) = key.targets.depth_stencil {
             descriptor.setDepthAttachmentPixelFormat(pixel_format(format));
             if format.has_stencil() {
@@ -378,7 +396,7 @@ impl MetalGpu {
             .map_err(|error| GpuError::Invalid(format!("{name}: {}", error.localizedDescription())))?;
         let reflection =
             reflection.ok_or_else(|| GpuError::Invalid(format!("{name}: Metal gave no pipeline reflection")))?;
-        let bindings = shader_bindings(&reflection, shader.source, &vertex_buffer_indices)?;
+        let (bindings, reads) = shader_bindings(&reflection, shader.source, &vertex_buffer_indices)?;
 
         let CullFaceMode { enabled, side, winding } = state.cull;
         Ok(Pipeline {
@@ -388,9 +406,11 @@ impl MetalGpu {
             primitive,
             cull: if enabled { map_cull_mode(side) } else { MTLCullMode::None },
             winding: map_winding_mode(winding),
-            formats: (color_format, depth_stencil_format),
+            targets: key.targets,
+            vertex_buffers: state.vertex_buffers.clone(),
             vertex_buffer_indices,
             bindings,
+            reads,
         })
     }
 
@@ -398,7 +418,6 @@ impl MetalGpu {
     fn encode(&self, command_buffer: &ProtocolObject<dyn MTLCommandBuffer>, pass: &Pass) -> Result<(), GpuError> {
         let descriptor = MTLRenderPassDescriptor::new();
         let mut size = None;
-        let mut formats = (MTLPixelFormat::Invalid, None);
         if let Some(attachment) = pass.color {
             let texture = &self.texture(attachment.texture)?.texture;
             // SAFETY: index 0 is in the attachment array's bounds.
@@ -418,7 +437,6 @@ impl MetalGpu {
             }
             color.setStoreAction(MTLStoreAction::Store);
             size = Some((texture.width(), texture.height()));
-            formats.0 = texture.pixelFormat();
         }
         if let Some(attachment) = pass.depth_stencil {
             let texture = &self.texture(attachment.texture)?.texture;
@@ -445,25 +463,23 @@ impl MetalGpu {
                 stencil.setStoreAction(MTLStoreAction::Store);
             }
             size.get_or_insert((texture.width(), texture.height()));
-            formats.1 = Some(texture.pixelFormat());
         }
         let size = size.ok_or_else(|| GpuError::Invalid(format!("{}: a pass without attachments", pass.label)))?;
         let encoder = command_buffer
             .renderCommandEncoderWithDescriptor(&descriptor)
             .ok_or_else(|| GpuError::Invalid(format!("{}: Metal made no render encoder", pass.label)))?;
         encoder.setLabel(Some(&NSString::from_str(&pass.label)));
-        let result = self.encode_commands(&encoder, pass, formats, size);
+        let result = self.encode_commands(&encoder, pass, size);
         encoder.endEncoding();
         result
     }
 
-    /// Encodes the commands of `pass`, whose attachments have `formats` and
-    /// `size`.
+    /// Encodes the commands of `pass`, which the shared validation passed,
+    /// whose attachments have `size`.
     fn encode_commands(
         &self,
         encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
         pass: &Pass,
-        formats: (MTLPixelFormat, Option<MTLPixelFormat>),
         (width, height): (usize, usize),
     ) -> Result<(), GpuError> {
         let mut pipeline: Option<&Pipeline> = None;
@@ -479,12 +495,6 @@ impl MetalGpu {
             match command {
                 RenderCommand::SetPipeline(id) => {
                     let entry = self.pipelines.get(*id).ok_or(GpuError::UnknownId("pipeline"))?;
-                    if entry.formats != formats {
-                        return Err(GpuError::Invalid(format!(
-                            "{}: a pipeline of {} for attachments {:?}, in a pass with {formats:?}",
-                            pass.label, entry.name, entry.formats
-                        )));
-                    }
                     encoder.setRenderPipelineState(&entry.state);
                     encoder.setDepthStencilState(Some(&entry.depth_stencil));
                     encoder.setCullMode(entry.cull);
@@ -790,13 +800,15 @@ fn vertex_descriptor(
 }
 
 /// What the pipeline of `reflection` reads, besides its vertex buffers at
-/// `vertex_buffer_indices`.
+/// `vertex_buffer_indices`: where in its argument tables, and by the
+/// shaders' ids, as the shared checks read it.
 fn shader_bindings(
     reflection: &MTLRenderPipelineReflection,
     source: &ShaderSource,
     vertex_buffer_indices: &[Option<usize>],
-) -> Result<Vec<Binding>, GpuError> {
+) -> Result<(Vec<Binding>, Vec<ShaderBinding>), GpuError> {
     let mut bindings: Vec<Binding> = Vec::new();
+    let mut reads: Vec<ShaderBinding> = Vec::new();
     for (vertex, stage) in [(true, reflection.vertexBindings()), (false, reflection.fragmentBindings())] {
         for binding in stage.to_vec() {
             if !binding.isUsed() {
@@ -821,6 +833,20 @@ fn shader_bindings(
                 MTLBindingType::Sampler => Resource::Sampler(texture_id()?),
                 _ => continue,
             };
+            let read = match resource {
+                Resource::GlobalIndex => None,
+                Resource::Buffer(id) => {
+                    // SAFETY: Metal reflects a buffer binding as an
+                    // MTLBufferBinding, which ProtocolObject wraps alike.
+                    let buffer =
+                        unsafe { &*std::ptr::from_ref(&*binding).cast::<ProtocolObject<dyn MTLBufferBinding>>() };
+                    Some(ShaderBinding::Buffer { id, min_size: buffer.bufferDataSize() as u64 })
+                }
+                Resource::Texture(id) | Resource::Sampler(id) => Some(ShaderBinding::Texture { id }),
+            };
+            if let Some(read) = read {
+                merge_read(&mut reads, read);
+            }
             match bindings.iter_mut().find(|binding| binding.resource == resource && binding.index == index) {
                 Some(binding) if vertex => binding.vertex = true,
                 Some(binding) => binding.fragment = true,
@@ -828,7 +854,25 @@ fn shader_bindings(
             }
         }
     }
-    Ok(bindings)
+    Ok((bindings, reads))
+}
+
+/// Adds `read` to `reads`: of a buffer that a shader's two stages read, as
+/// many bytes as either reads.
+fn merge_read(reads: &mut Vec<ShaderBinding>, read: ShaderBinding) {
+    for earlier in reads.iter_mut() {
+        match (earlier, read) {
+            (ShaderBinding::Buffer { id, min_size }, ShaderBinding::Buffer { id: read_id, min_size: read_size })
+                if *id == read_id =>
+            {
+                *min_size = (*min_size).max(read_size);
+                return;
+            }
+            (earlier, read) if *earlier == read => return,
+            _ => {}
+        }
+    }
+    reads.push(read);
 }
 
 /// Compiles `source`, with `defines` as preprocessor macros, and finds its
@@ -1070,6 +1114,44 @@ fn has_stencil(format: MTLPixelFormat) -> bool {
     )
 }
 
+impl Resources for MetalGpu {
+    fn buffer_info(&self, id: BufferId) -> Option<validation::BufferInfo> {
+        self.buffers.get(id).map(|buffer| validation::BufferInfo { usage: buffer.usage, size: buffer.size })
+    }
+
+    fn texture_info(&self, id: TextureId) -> Option<validation::TextureInfo> {
+        let Texture { texture, format } = self.textures.get(id)?;
+        let usage = texture.usage();
+        Some(validation::TextureInfo {
+            format: *format,
+            size: Size { width: texture.width() as u32, height: texture.height() as u32 },
+            usage: TextureUsage {
+                sampled: usage.contains(MTLTextureUsage::ShaderRead),
+                render_target: usage.contains(MTLTextureUsage::RenderTarget),
+                // A blit copies out of any texture.
+                copy_src: true,
+            },
+        })
+    }
+
+    fn has_sampler(&self, id: SamplerId) -> bool {
+        self.samplers.contains_key(id)
+    }
+
+    fn pipeline_info(&self, id: PipelineId) -> Option<validation::PipelineInfo<'_>> {
+        let pipeline = self.pipelines.get(id)?;
+        Some(validation::PipelineInfo {
+            targets: pipeline.targets,
+            vertex_buffers: &pipeline.vertex_buffers,
+            bindings: &pipeline.reads,
+        })
+    }
+
+    fn bind_group_entries(&self, id: BindGroupId) -> Option<&[BindGroupEntry]> {
+        self.bind_groups.get(id).map(Vec::as_slice)
+    }
+}
+
 impl Gpu for MetalGpu {
     fn limits(&self) -> Limits {
         Limits { buffer_offset_alignment: BUFFER_OFFSET_ALIGNMENT, max_texture_size: self.max_texture_size }
@@ -1083,7 +1165,7 @@ impl Gpu for MetalGpu {
             .newBufferWithLength_options(size, MTLResourceOptions::StorageModePrivate)
             .ok_or_else(|| GpuError::Invalid(format!("{}: Metal made no buffer of {size} bytes", desc.label)))?;
         buffer.setLabel(Some(&NSString::from_str(desc.label)));
-        Ok(self.buffers.insert(buffer))
+        Ok(self.buffers.insert(Buffer { buffer, usage: desc.usage, size: size as u64 }))
     }
 
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
@@ -1219,20 +1301,7 @@ impl Gpu for MetalGpu {
     }
 
     fn create_bind_group(&mut self, desc: &BindGroupDesc<'_>) -> Result<BindGroupId, GpuError> {
-        for entry in desc.entries {
-            match *entry {
-                BindGroupEntry::Buffer { buffer, .. } if !self.buffers.contains_key(buffer) => {
-                    return Err(GpuError::UnknownId("buffer"));
-                }
-                BindGroupEntry::Texture { texture, .. } if !self.textures.contains_key(texture) => {
-                    return Err(GpuError::UnknownId("texture"));
-                }
-                BindGroupEntry::Texture { sampler, .. } if !self.samplers.contains_key(sampler) => {
-                    return Err(GpuError::UnknownId("sampler"));
-                }
-                _ => {}
-            }
-        }
+        validation::check_bind_group(self, self.limits(), desc)?;
         Ok(self.bind_groups.insert(desc.entries.to_vec()))
     }
 
@@ -1241,6 +1310,9 @@ impl Gpu for MetalGpu {
     }
 
     fn submit(&mut self, passes: &[Pass]) -> Result<(), GpuError> {
+        for pass in passes {
+            validation::check_pass(self, pass)?;
+        }
         autoreleasepool(|_| {
             self.retire();
             if passes.is_empty() && self.uploads.copies.is_empty() {

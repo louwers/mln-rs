@@ -58,7 +58,7 @@ fn a_destroyed_buffer_waits_for_the_submits_before() {
             label: "target",
             size: Size { width: 4, height: 4 },
             format: TextureFormat::Rgba8Unorm,
-            usage: mln_gfx::gpu::TextureUsage { render_target: true, ..Default::default() },
+            usage: TextureUsage { render_target: true, ..Default::default() },
         })
         .unwrap();
     let pass = Pass {
