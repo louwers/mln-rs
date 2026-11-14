@@ -1,9 +1,7 @@
-use serde::{Deserialize, Serialize};
-
 use crate::layer::{self, ImplBase, LayerTypeInfo};
 use crate::layers::hillshade_layer_properties::HillshadePaintProperties;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Impl {
     pub(crate) base: ImplBase,
     pub paint: HillshadePaintProperties::Transitionable,

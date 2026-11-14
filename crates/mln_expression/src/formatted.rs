@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::image::Image;
 
-pub(crate) const K_FORMATTED_SECTION_FONT_SCALE: &str = "font-scale";
-pub(crate) const K_FORMATTED_SECTION_TEXT_FONT: &str = "text-font";
+pub const K_FORMATTED_SECTION_FONT_SCALE: &str = "font-scale";
+pub const K_FORMATTED_SECTION_TEXT_FONT: &str = "text-font";
 pub const K_FORMATTED_SECTION_TEXT_COLOR: &str = "text-color";
 
 /// A list of font names.

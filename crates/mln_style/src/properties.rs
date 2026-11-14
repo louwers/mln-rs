@@ -25,7 +25,6 @@ use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::interpolate::Interpolate;
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, Image, ValueConverter, global_state_refs_intersect};
 use crate::property_value::PropertyValue;
@@ -219,7 +218,7 @@ impl<V: PropertyValueLike> Transitioning<V> {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Transitionable<V> {
     pub value: V,
     pub(crate) options: TransitionOptions,
@@ -393,7 +392,7 @@ macro_rules! paint_properties {
             use super::*;
             use $crate::properties::Property;
 
-            #[derive(Clone, Debug, Default, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Clone, Debug, Default, PartialEq)]
             pub struct Transitionable {
                 $(pub $field: $crate::properties::Transitionable<<$prop as Property>::Value>,)+
             }

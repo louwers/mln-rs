@@ -282,7 +282,14 @@ pub(crate) fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
     }
 
     if layer.get_filter().is_set() {
-        result.insert("filter".to_owned(), layer.get_filter().serialize());
+        // Port-only: a filter is an array, and C++ writes a literal (what
+        // `setFilter(null)` or a constant filter makes) as the bare value,
+        // which doesn't parse back as one.
+        let filter = match layer.get_filter().serialize() {
+            array @ Value::Array(_) => array,
+            value => Value::Array(vec![Value::String("literal".to_owned()), value]),
+        };
+        result.insert("filter".to_owned(), filter);
     }
 
     if layer.get_min_zoom() != f32::NEG_INFINITY {

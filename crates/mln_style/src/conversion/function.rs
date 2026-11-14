@@ -4,6 +4,7 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
+use feature::{Value as MbglValue, ValueObject};
 use mln_expression::Interpolator;
 use mln_expression::case::Case;
 use mln_expression::format_expression::{FormatExpression, FormatExpressionSection};
@@ -106,17 +107,40 @@ where
 {
     let expression = convert_function_to_expression_for_type(&T::expression_type(), value, error, convert_tokens)?;
 
-    let mut default_value: Option<T> = None;
+    let Some(default_value_value) = value.object_member("default") else {
+        return Some(PropertyExpression::from_box(expression, None));
+    };
+    let Some(default_value) = convert::<T>(&default_value_value, error) else {
+        error.message = format!(r#"wrong type for "default": {}"#, error.message);
+        return None;
+    };
+    let expression = PropertyExpression::from_box(expression, Some(default_value));
+    // The expression doesn't hold the default, so it serializes as the
+    // function.
+    Some(match to_value(value) {
+        Some(function) => expression.with_function(function),
+        None => expression,
+    })
+}
 
-    if let Some(default_value_value) = value.object_member("default") {
-        default_value = convert::<T>(&default_value_value, error);
-        if default_value.is_none() {
-            error.message = format!(r#"wrong type for "default": {}"#, error.message);
-            return None;
-        }
+/// `value` as a `feature::Value`, with its arrays and objects.
+fn to_value(value: &Convertible<'_>) -> Option<MbglValue> {
+    if value.is_array() {
+        (0..value.array_length()).map(|i| to_value(&value.array_member(i))).collect::<Option<_>>().map(MbglValue::Array)
+    } else if value.is_object() {
+        let mut object = ValueObject::new();
+        let mut complete = true;
+        value.each_member(|name, member| {
+            match to_value(member) {
+                Some(member) => drop(object.insert(name.to_owned(), member)),
+                None => complete = false,
+            }
+            None
+        });
+        complete.then_some(MbglValue::Object(object))
+    } else {
+        value.to_value()
     }
-
-    Some(PropertyExpression::from_box(expression, default_value))
 }
 
 // Ad-hoc Converters for double and int64_t. We should replace float with double

@@ -92,7 +92,7 @@ macro_rules! layout_properties {
             use super::*;
             use $crate::properties::Property;
 
-            #[derive(Clone, Debug, Default, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Clone, Debug, Default, PartialEq)]
             pub struct Unevaluated {
                 $(pub $field: <$prop as Property>::Value,)+
             }

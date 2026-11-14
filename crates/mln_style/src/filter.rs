@@ -2,21 +2,16 @@ use std::hash::Hasher;
 use std::sync::{Arc, OnceLock};
 
 use feature::Value;
-use serde::{Deserialize, Serialize};
 
 use crate::expression::{EvaluationContext, Expression, feature_property_keys, from_expression_value};
-use crate::serialization::shared_expression;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default)]
 pub struct Filter {
-    #[serde(with = "shared_expression::option")]
     pub expression: Option<Arc<dyn Expression>>,
     legacy_filter: Option<Value>,
     /// [`Filter::property_keys`], found on first use.
-    #[serde(skip)]
     property_keys: OnceLock<Option<Box<[String]>>>,
     /// [`Filter::expression_hash`], found on first use.
-    #[serde(skip)]
     expression_hash: OnceLock<u64>,
 }
 

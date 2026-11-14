@@ -1,9 +1,9 @@
-// Not a C++ test: every layer in every render- and query-test style crosses
-// through serde (its `Layer::Impl`, as a tile worker in another wasm
-// instance gets its layers) to one that encodes the same, its expressions as
-// the JSON they serialize to (mln_style::serialization). A layer that
-// doesn't cross couldn't be laid out there, and one that crosses as another
-// layer would be laid out differently.
+// Not a C++ test: every layer of a geometry tile in every render- and
+// query-test style crosses through serde (its `Layer::Impl`, as a tile
+// worker in another wasm instance gets its layers) to an equal one, as its
+// style JSON (mln_style::serialization). A layer that doesn't cross couldn't
+// be laid out there, and one that crosses as another layer would be laid out
+// differently. Layers of other tiles have no worker that gets them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,11 +11,37 @@ use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};
 use mln_style::conversion::convert_layer;
+use mln_style::layer::layer_type_info::TileKind;
 use mln_style::layer_impl::Impl;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 struct Crossing(#[serde(with = "mln_style::serialization::shared_layer")] Arc<dyn Impl>);
+
+/// The concrete impl's `Debug`, which shows every member; two impls that
+/// show the same are equal.
+fn describe(impl_: &dyn Impl) -> String {
+    macro_rules! describe {
+        ($($module:ident),+) => {
+            $(if let Some(impl_) = impl_.downcast_ref::<mln_style::layers::$module::Impl>() {
+                return format!("{impl_:?}");
+            })+
+        };
+    }
+    describe!(
+        background_layer_impl,
+        circle_layer_impl,
+        color_relief_layer_impl,
+        fill_extrusion_layer_impl,
+        fill_layer_impl,
+        heatmap_layer_impl,
+        hillshade_layer_impl,
+        line_layer_impl,
+        raster_layer_impl,
+        symbol_layer_impl
+    );
+    panic!("{impl_:?}: an impl of another layer type")
+}
 
 fn styles(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
@@ -48,11 +74,14 @@ fn every_layer_crosses_through_serde() {
             // Layers that don't parse in the first place (tests of invalid
             // styles) have nothing to send.
             let Some(layer) = convert_layer(&Convertible::from(json), &mut Error::default()) else { continue };
+            if layer.get_type_info().tile_kind != TileKind::Geometry {
+                continue;
+            }
             layers += 1;
             let encoded = postcard::to_allocvec(&Crossing(layer.base_impl())).unwrap();
             match postcard::from_bytes::<Crossing>(&encoded) {
                 Ok(decoded) => {
-                    if postcard::to_allocvec(&decoded).unwrap() != encoded {
+                    if describe(&*decoded.0) != describe(layer.base_impl_ref()) {
                         failures.push(format!(
                             "{}: crosses as another layer\n  {:?}",
                             path.display(),

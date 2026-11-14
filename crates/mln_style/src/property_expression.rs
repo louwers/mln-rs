@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use feature::Value;
 use mln_expression::expression::FeatureState;
 use mln_expression::range::Range;
 use mln_expression::value::from_expression_values;
@@ -225,6 +226,11 @@ impl<'de> Deserialize<'de> for PropertyExpressionBase {
 pub struct PropertyExpression<T> {
     base: PropertyExpressionBase,
     default_value: Option<T>,
+    /// Port-only: the legacy function this was converted from, when it has a
+    /// "default", which the expression doesn't hold; [`Self::serialize`]
+    /// writes it.
+    #[serde(skip)]
+    function: Option<Arc<Value>>,
 }
 
 impl<T> std::ops::Deref for PropertyExpression<T> {
@@ -243,11 +249,27 @@ impl<T> std::ops::DerefMut for PropertyExpression<T> {
 impl<T> PropertyExpression<T> {
     /// Second parameter to be used only for conversions from legacy functions.
     pub fn new(expression: Arc<dyn Expression>, default_value: Option<T>) -> Self {
-        PropertyExpression { base: PropertyExpressionBase::new(expression), default_value }
+        PropertyExpression { base: PropertyExpressionBase::new(expression), default_value, function: None }
     }
 
     pub fn from_box(expression: Box<dyn Expression>, default_value: Option<T>) -> Self {
         PropertyExpression::new(Arc::from(expression), default_value)
+    }
+
+    /// Records the legacy function this was converted from.
+    pub(crate) fn with_function(mut self, function: Value) -> Self {
+        self.function = Some(Arc::new(function));
+        self
+    }
+
+    /// The style JSON that converts back to this: the expression's, or the
+    /// legacy function's when it has a default.
+    #[must_use]
+    pub fn serialize(&self) -> Value {
+        match &self.function {
+            Some(function) => Value::clone(function),
+            None => self.base.expression.serialize(),
+        }
     }
 }
 

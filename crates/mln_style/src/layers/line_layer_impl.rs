@@ -1,11 +1,10 @@
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
 use crate::layer::{self, ImplBase, LayerTypeInfo};
 use crate::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Impl {
     pub(crate) base: ImplBase,
     pub layout: LineLayoutProperties::Unevaluated,

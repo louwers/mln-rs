@@ -1,9 +1,8 @@
 use std::time::Duration;
 
 use feature::{Value, ValueObject};
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TransitionOptions {
     pub duration: Option<Duration>,
     pub delay: Option<Duration>,

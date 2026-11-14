@@ -1,8 +1,12 @@
-use feature::Value;
+use feature::{Value, ValueObject};
+use mln_expression::formatted::{
+    FormattedSection, K_FORMATTED_SECTION_FONT_SCALE, K_FORMATTED_SECTION_TEXT_COLOR, K_FORMATTED_SECTION_TEXT_FONT,
+};
 use mln_style_types::{Position, ProjectionDefinition, Rotation, VariableAnchorOffsetCollection};
 use mln_util::{Color, Padding};
 
 use crate::color_ramp_property_value::ColorRampPropertyValue;
+use crate::conversion::function::has_tokens;
 use crate::expression::{Formatted, Image};
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
@@ -100,15 +104,54 @@ impl ValueFactory for Rotation {
     }
 }
 
+// Port-only: C++ writes an image as `Image::toValue()` and formatted text as
+// `Formatted::toObject()`, objects that don't parse back as the property
+// (`Layer::serialize`, which `Style::layer_json` writes and a tile worker in
+// another wasm instance parses, mln_style::serialization). The port writes
+// the style JSON that parses back to the same constant.
+
+/// The image's name.
 impl ValueFactory for Image {
     fn make_value(&self) -> Value {
-        self.to_value()
+        Value::String(self.id().to_owned())
     }
 }
 
+/// The text of one plain section, which parses back as itself if it has no
+/// `{token}`s; otherwise a "format" expression, which parsing folds back to
+/// the constant. No sections write as empty text, which shows the same.
 impl ValueFactory for Formatted {
     fn make_value(&self) -> Value {
-        self.to_object()
+        if self.sections.is_empty() {
+            return Value::String(String::new());
+        }
+        if let [section] = self.sections.as_slice()
+            && *section == FormattedSection::new(section.text.clone(), None, None, None)
+            && !has_tokens(&section.text)
+        {
+            return Value::String(section.text.clone());
+        }
+        let mut format = vec![Value::String("format".to_owned())];
+        for section in &self.sections {
+            format.push(match &section.image {
+                Some(image) => Value::Array(vec![Value::String("image".to_owned()), image.make_value()]),
+                None => Value::String(section.text.clone()),
+            });
+            let mut options = ValueObject::new();
+            if let Some(scale) = section.font_scale {
+                options.insert(K_FORMATTED_SECTION_FONT_SCALE.to_owned(), Value::Double(scale));
+            }
+            if let Some(font_stack) = &section.font_stack {
+                let fonts = font_stack.iter().map(|font| Value::String(font.clone())).collect();
+                let literal = vec![Value::String("literal".to_owned()), Value::Array(fonts)];
+                options.insert(K_FORMATTED_SECTION_TEXT_FONT.to_owned(), Value::Array(literal));
+            }
+            if let Some(color) = &section.text_color {
+                options.insert(K_FORMATTED_SECTION_TEXT_COLOR.to_owned(), color.serialize());
+            }
+            format.push(Value::Object(options));
+        }
+        Value::Array(format)
     }
 }
 
@@ -172,7 +215,7 @@ pub(crate) fn make_style_property<T: ValueFactory>(value: &PropertyValue<T>) -> 
     match value {
         PropertyValue::Undefined => StyleProperty::default(),
         PropertyValue::Constant(t) => StyleProperty::new(make_value(t), T::constant_kind()),
-        PropertyValue::Expression(fn_) => StyleProperty::new(fn_.get_expression().serialize(), Kind::Expression),
+        PropertyValue::Expression(fn_) => StyleProperty::new(fn_.serialize(), Kind::Expression),
     }
 }
 

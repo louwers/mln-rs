@@ -21,10 +21,11 @@
 //!   layout refers back to (its buckets' binders hold the layers'
 //!   expressions, its render data the properties, its feature index the
 //!   data), and the textures of the instance's atlas from the other side.
-//!   Expressions cross as their style JSON (`mln_style::serialization`).
-//! - Trait objects cross as the types they can be (fields.rs): layers and
-//!   their properties as their layer type's, buckets as their bucket type's,
-//!   tile data as what it is made from (`GeometryTileData::encoded`).
+//!   Layers and expressions cross as their style JSON, which the other side
+//!   parses (`mln_style::serialization`).
+//! - Trait objects cross as the types they can be (fields.rs): layer
+//!   properties as their layer type's, buckets as their bucket type's, tile
+//!   data as what it is made from (`GeometryTileData::encoded`).
 //!
 //! The worker instance has its own `DynamicTextureAtlas`. The map side keeps
 //! a copy of each of its textures, which uploads the pixels the instance

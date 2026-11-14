@@ -1,5 +1,4 @@
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
 use crate::property_expression::PropertyExpression;
@@ -7,7 +6,7 @@ use crate::renderer::property_evaluator::Evaluator;
 
 /// A style property's value: undefined (the default), a constant or an
 /// expression.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default)]
 pub enum PropertyValue<T> {
     #[default]
     Undefined,

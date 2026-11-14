@@ -1,10 +1,9 @@
 // Not a C++ gtest (port-only): a layer's `Layer::Impl` crosses through serde
-// (as a tile worker in another wasm instance gets its layers) to one that
-// encodes the same, its expressions as the JSON they serialize to
-// (serialization.rs). C++'s expression serialization doesn't
+// (as a tile worker in another wasm instance gets its layers) as its style
+// JSON, to an equal one (serialization.rs). C++'s serialization doesn't
 // parse back for the legacy property functions, literal images, some
-// coercions and colors; these are the cases the port fixes, each where it
-// serializes.
+// coercions, colors, constant images and formatted text, and literal
+// filters; these are the cases the port fixes, each where it serializes.
 // tools/render-test's layer_round_trip test checks every layer of the
 // render and query suites.
 
@@ -20,6 +19,7 @@ use crate::conversion::convert_layer;
 use crate::layer::Layer;
 use crate::layer_impl::Impl;
 use crate::layers::fill_extrusion_layer::FillExtrusionLayer;
+use crate::serialization::describe;
 
 fn parse(json: &serde_json::Value) -> Box<dyn Layer> {
     let mut error = Error::default();
@@ -30,12 +30,12 @@ fn parse(json: &serde_json::Value) -> Box<dyn Layer> {
 struct Crossing(#[serde(with = "crate::serialization::shared_layer")] Arc<dyn Impl>);
 
 /// The layer's serialized value, after checking that its `Impl` crosses
-/// through serde to one that encodes the same.
+/// through serde to an equal one.
 fn round_trip(layer: &dyn Layer) -> Value {
     let encoded = postcard::to_allocvec(&Crossing(layer.base_impl())).unwrap();
     let decoded: Crossing =
         postcard::from_bytes(&encoded).unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
-    assert_eq!(postcard::to_allocvec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());
+    assert_eq!(describe(&*decoded.0), describe(layer.base_impl_ref()), "{:?}", layer.serialize());
     layer.serialize()
 }
 
@@ -167,6 +167,30 @@ fn colors_that_c_plus_plus_rounds() {
         r#"{"line-color": ["match", ["get", "k"], "a", "rgba(170, 255, 0, 0.6)", "rgba(1, 2, 3, 0.678)"]}"#,
     );
     round_trip(line.as_ref());
+}
+
+#[test]
+fn formatted_text_with_tokens() {
+    // A "format" expression folds to a constant whose text has a token,
+    // which parses back as the constant rather than as a token string.
+    let symbol = layer("symbol", "layout", r#"{"text-field": ["format", "{name}", {}]}"#);
+    let serialized = round_trip(symbol.as_ref());
+    assert_eq!(json(&property(&serialized, "layout", "text-field")), parse_json(r#"["format", "{name}", {}]"#));
+    let plain = layer("symbol", "layout", r#"{"text-field": "plain", "text-font": ["Open Sans"]}"#);
+    let serialized = round_trip(plain.as_ref());
+    assert_eq!(json(&property(&serialized, "layout", "text-field")), parse_json(r#""plain""#));
+    let fonts = layer("symbol", "layout", r#"{"text-field": ["format", "a", {"text-font": ["literal", ["A", "B"]]}]}"#);
+    round_trip(fonts.as_ref());
+}
+
+#[test]
+fn evaluated_visibility_expression() {
+    let mut fill = layer("fill", "layout", r#"{"visibility": ["global-state", "shown"]}"#);
+    let mut global_state = crate::expression::GlobalStateMap::new();
+    global_state.insert("shown".to_owned(), Value::String("none".to_owned()));
+    fill.reevaluate_visibility(&global_state);
+    assert_eq!(fill.get_visibility(), mln_style_types::VisibilityType::None);
+    round_trip(fill.as_ref());
 }
 
 #[test]
