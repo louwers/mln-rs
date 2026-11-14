@@ -95,29 +95,8 @@ impl BackendImpl {
         (self.color_format.get().unwrap_or(wgpu::TextureFormat::Bgra8Unorm), self.depth_stencil_format.get())
     }
 
-    /// Writes `data` at `offset` in `buffer` ahead of the next
-    /// [`submit`](Self::submit)'s commands, as `Queue::write_buffer` does,
-    /// but small writes are gathered and copied into place together.
-    pub(crate) fn write_buffer(&self, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) {
-        self.gpu.borrow_mut().write_native(buffer, offset, data);
-    }
-
-    /// Writes the bytes of `data` at `offset` in `buffer`
-    /// straight from the JS array they're in (`Writes::write_from_host`).
-    /// `offset` is a multiple of 4; a length that isn't is padded with
-    /// zeros.
-    #[cfg(target_family = "wasm")]
-    pub(crate) fn write_buffer_from_host(
-        &self,
-        buffer: &wgpu::Buffer,
-        offset: u64,
-        data: &mln_util::host_bytes::HostBytes,
-    ) {
-        self.gpu.borrow_mut().write_native_from_host(buffer, offset, data);
-    }
-
-    /// Submits `command_buffer` after the copies of the writes
-    /// gathered by [`write_buffer`](Self::write_buffer).
+    /// Submits `command_buffer` after the copies of the writes made to the
+    /// `Gpu`'s buffers so far.
     pub(crate) fn submit(&self, command_buffer: wgpu::CommandBuffer) {
         self.gpu.borrow_mut().submit_native(command_buffer);
     }

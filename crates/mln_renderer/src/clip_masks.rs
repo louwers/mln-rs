@@ -10,7 +10,7 @@ use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
 use mln_gfx::{
     AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramBasePtr, ShaderRegistry, StencilMode,
-    UniqueDrawable, UploadPass,
+    UniqueDrawable,
 };
 use mln_tile_id::UnwrappedTileID;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -45,7 +45,6 @@ impl ClipMasks {
         globe: bool,
         tiles: &BTreeSet<UnwrappedTileID>,
         projection: impl Fn(&UnwrappedTileID) -> ProjectionUBO,
-        upload_pass: &dyn UploadPass,
     ) {
         if globe != self.globe {
             *self = ClipMasks { globe, ..ClipMasks::default() };
@@ -108,7 +107,7 @@ impl ClipMasks {
             let ubo = projection(tile);
             for drawable in drawables {
                 drawable.mutable_uniform_buffers().create_or_update_pod(ID_PROJECTION_UBO, &ubo, context);
-                drawable.upload(upload_pass);
+                drawable.upload(context);
             }
         }
     }

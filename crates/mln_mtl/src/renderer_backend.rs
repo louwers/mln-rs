@@ -37,7 +37,7 @@ pub(crate) struct BackendImpl {
     device: MTLDevicePtr,
     command_queue: MTLCommandQueuePtr,
     base_vertex_instance_drawing_supported: bool,
-    /// The `Gpu` the renderer's uniform buffers belong to, whose writes a
+    /// The `Gpu` the renderer's buffers and textures belong to, whose writes a
     /// frame's commands read (`flush_writes`).
     gpu: RefCell<MetalGpu>,
     /// The buffers the renderer dropped, which a context destroys at the

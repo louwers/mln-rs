@@ -171,19 +171,7 @@ struct Copy {
 impl Writes {
     /// Writes `data` at `offset` in `buffer` ahead of the commands submitted
     /// after the next [`encode`](Self::encode)'s, as `Queue::write_buffer`
-    /// does ahead of the next submission's.
-    pub(crate) fn write(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        buffer: &wgpu::Buffer,
-        offset: u64,
-        data: &[u8],
-    ) {
-        self.write_padded(device, queue, buffer, offset, data, data.len() as u64);
-    }
-
-    /// [`write`](Self::write)s `data`, where the bytes after it up to
+    /// does ahead of the next submission's. The bytes after `data` up to
     /// `padded` bytes from `offset` already hold zeros: those may be written
     /// too, so that the copy can join the next write's.
     pub(crate) fn write_padded(

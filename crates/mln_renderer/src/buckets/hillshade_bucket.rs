@@ -12,7 +12,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use geometry::Point;
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
@@ -223,7 +223,7 @@ impl Bucket for HillshadeBucket {
         &mut self.base
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &dyn Context) {
         if !self.has_data() {
             return;
         }

@@ -15,12 +15,13 @@
 //!
 //! The `gpu` module is the id-based interface the backends move onto: a
 //! backend owns its resources, and the renderer records passes of plain
-//! commands. The renderer's uniform buffers and textures are resources of the
-//! backend's `Gpu` already (`uniform_buffer`, `texture2d`).
+//! commands. The renderer's buffers and textures are resources of the
+//! backend's `Gpu` already (`buffer`, `texture2d`).
 
 pub mod attribute;
 pub mod backend;
 pub mod backend_scope;
+pub mod buffer;
 pub mod color_mode;
 pub mod command_encoder;
 pub mod context;
@@ -54,14 +55,14 @@ pub mod stencil_mode;
 pub mod texture2d;
 pub mod types;
 pub mod uniform_buffer;
-pub mod upload_pass;
+pub mod upload;
 pub mod util_hash;
 pub mod vertex_attribute;
-pub mod vertex_buffer;
 pub mod vertex_vector;
 pub mod window;
 
 pub use backend_scope::{BackendScope, ScopeType};
+pub use buffer::{Buffer, BufferPtr};
 pub use color_mode::ColorMode;
 pub use command_encoder::CommandEncoder;
 pub use context::Context;
@@ -87,7 +88,6 @@ pub use shader_registry::ShaderRegistry;
 pub use shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBasePtr};
 pub use stencil_mode::StencilMode;
 pub use types::DepthMaskType;
-pub use uniform_buffer::{UniformBuffer, UniformBufferArray, UniformBufferPtr};
-pub use upload_pass::UploadPass;
+pub use uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 pub use vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
 pub use window::Window;

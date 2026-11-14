@@ -9,8 +9,8 @@ use mln_mtl::offscreen_texture::OffscreenTextureResource;
 use mln_mtl::{Device, OffscreenTarget, RendererBackend};
 use mln_util::size::Size;
 
-// Each frame an upload pass and then a render pass bind the offscreen target's image, and only
-// the commit after the render pass commits. If the second bind replaces the pending command buffer, one
+// A frame can bind the offscreen target's image more than once (for a custom layer, then for
+// the render pass), and only the commit after the render pass commits. If the second bind replaces the pending command buffer, one
 // buffer per frame is never committed, and after about 64 frames (the queue's default pool) the
 // next commandBuffer() call blocks forever.
 // gtest: MetalRenderable.BindKeepsThePendingCommandBuffer

@@ -34,7 +34,6 @@ use crate::context::Context;
 use crate::drawable::Drawable;
 use crate::shaders::shader_program::ShaderProgram;
 use crate::shaders::shader_source::{GlslShaderSource, ShaderSource, UniformBlockInfo};
-use crate::upload_pass::UploadPass;
 use crate::{Api, Device, DeviceOptions, OffscreenTarget, RendererBackend};
 
 /// The API that `MLN_RENDER_BACKEND` asks for: desktop OpenGL for
@@ -141,9 +140,8 @@ void main() { gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0); }
     textures: &[],
 };
 
-/// An index vector that changes gets a new buffer at the next upload of any
-/// drawable that shares it. Each drawable then draws with the new buffer,
-/// though it may have the GL name of a buffer it replaced.
+/// An index vector that changes is written again at the next upload of any
+/// drawable that shares it, and each drawable then draws the new indices.
 #[test]
 fn draws_with_replaced_index_buffer() {
     let size = Size { width: 16, height: 16 };
@@ -173,15 +171,11 @@ fn draws_with_replaced_index_buffer() {
     let renderable = &*image;
     context.begin_frame();
     let encoder = context.create_command_encoder();
-    let upload = |drawable: &mut Drawable| {
-        let pass = encoder.create_upload_pass("upload", renderable);
-        drawable.upload(pass.downcast_ref::<UploadPass>().expect("a GL upload pass"));
-    };
+    let upload = |drawable: &mut Drawable| drawable.upload(context);
     upload(&mut first);
     upload(&mut second);
 
-    // Replace the buffer twice through the other drawable. Once the first
-    // buffer is deleted, the second replacement can take its GL name.
+    // Change the indices twice through the other drawable.
     for _ in 0..2 {
         for i in 0..3 {
             *indexes.borrow_mut().at_mut(i) = i as u16 + 3;

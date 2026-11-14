@@ -9,7 +9,6 @@
 
 mod bind_groups;
 mod borrowed_target;
-mod buffer_resource;
 mod command_encoder;
 mod context;
 mod custom_layer;
@@ -26,8 +25,6 @@ mod renderer_backend;
 mod shaders;
 mod surface_target;
 mod tile_layer_group;
-mod upload_pass;
-mod vertex_buffer_resource;
 mod writes;
 
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, depth_stencil_format};
@@ -37,7 +34,6 @@ pub use gpu::WebGpu;
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
 pub use surface_target::{Overlay, OverlayTarget, SurfaceOptions, SurfaceTarget};
-pub use upload_pass::UploadPass;
 
 #[cfg(test)]
 mod tests;

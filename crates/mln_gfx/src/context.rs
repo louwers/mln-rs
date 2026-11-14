@@ -1,6 +1,6 @@
 // All methods take `&self`: the context is reached from everywhere
-// (`PaintParameters`, render layers, upload passes) and wgpu's API is `&self`
-// too; the backend keeps mutable state in cells.
+// (`PaintParameters`, render layers, uploads) and wgpu's API is `&self` too;
+// the backend keeps mutable state in cells.
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
@@ -11,9 +11,10 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::backend::Type as BackendType;
+use crate::buffer::Buffer;
 use crate::command_encoder::CommandEncoder;
 use crate::drawable_builder::UniqueDrawableBuilder;
-use crate::gpu::{Gpu, GpuError, SamplerId};
+use crate::gpu::{BufferUsage, Gpu, GpuError, SamplerId};
 use crate::offscreen_texture::OffscreenTexture;
 use crate::projection_variant::ProjectionVariant;
 use crate::released::Released;
@@ -24,7 +25,7 @@ use crate::shader_registry::ShaderRegistry;
 use crate::shaders::shader_program_base::ShaderProgramBasePtr;
 use crate::texture2d::{SamplerState, Texture2D, Texture2DPtr};
 use crate::types::TextureChannelDataType;
-use crate::uniform_buffer::{UniformBuffer, UniformBufferArray, UniformBufferPtr};
+use crate::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use crate::vertex_attribute::VertexAttributeArrayPtr;
 
 /// The data members of `gfx::Context`.
@@ -32,7 +33,7 @@ use crate::vertex_attribute::VertexAttributeArrayPtr;
 pub struct ContextBase {
     stats: RefCell<RenderingStats>,
     global_uniform_buffers: RefCell<UniformBufferArray>,
-    released: Rc<Released>,
+    pub(crate) released: Rc<Released>,
     /// The sampler of each state a texture is sampled with.
     samplers: RefCell<HashMap<SamplerState, SamplerId>>,
 }
@@ -81,7 +82,7 @@ pub trait Context: Any {
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr;
     fn create_drawable_builder(&self) -> UniqueDrawableBuilder;
 
-    /// The backend's [`Gpu`], which owns the renderer's uniform buffers and
+    /// The backend's [`Gpu`], which owns the renderer's buffers and
     /// textures.
     fn gpu(&self) -> RefMut<'_, dyn Gpu>;
 
@@ -155,9 +156,10 @@ pub trait Context: Any {
 }
 
 fn create_buffer<C: Context + ?Sized>(context: &C, data: &[u8], storage: bool) -> Option<UniformBufferPtr> {
-    let released = &context.context_base().released;
-    let created = UniformBuffer::create(&mut *context.gpu(), released, &mut context.rendering_stats(), data, storage);
-    created.inspect_err(|error| Log::error(Event::Render, format!("Making a buffer failed: {error}"))).ok()
+    let usage = if storage { BufferUsage::Storage } else { BufferUsage::Uniform };
+    Buffer::create(context, usage, data)
+        .inspect_err(|error| Log::error(Event::Render, format!("Making a buffer failed: {error}")))
+        .ok()
 }
 
 fn write_buffer<C: Context + ?Sized>(context: &C, slot: &mut Option<UniformBufferPtr>, data: &[u8], storage: bool) {
@@ -166,7 +168,7 @@ fn write_buffer<C: Context + ?Sized>(context: &C, slot: &mut Option<UniformBuffe
         *slot = create_buffer(context, data, storage);
         return;
     };
-    let written = buffer.write(&mut *context.gpu(), &mut context.rendering_stats(), data);
+    let written = buffer.write(context, data);
     if let Err(error) = written {
         Log::error(Event::Render, format!("Writing a buffer failed: {error}"));
     }

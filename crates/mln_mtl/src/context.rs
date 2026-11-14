@@ -1,5 +1,4 @@
-// Resources hold an `Rc<Context>` where C++ holds `Context&`, except buffer
-// resources, which hold a `Weak` (see buffer_resource.rs). So that the
+// Resources hold an `Rc<Context>` where C++ holds `Context&`. So that the
 // context can be freed, it keeps no `Rc` to anything that points back at
 // it: its placeholder buffer is a plain `MTLBuffer`.
 
@@ -26,7 +25,6 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use objc2_metal::{MTLDepthStencilDescriptor, MTLDevice, MTLResourceOptions, MTLStencilDescriptor};
 
-use crate::buffer_resource::BufferResource;
 use crate::command_encoder::CommandEncoder;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gpu::{self, map_depth_func, map_operation, map_stencil_func};
@@ -68,10 +66,6 @@ impl Context {
         self.weak_self.upgrade().expect("mtl::Context used after drop")
     }
 
-    pub(crate) fn weak(&self) -> Weak<Context> {
-        Weak::clone(&self.weak_self)
-    }
-
     pub(crate) fn get_backend(&self) -> &Rc<BackendImpl> {
         &self.backend
     }
@@ -81,16 +75,6 @@ impl Context {
     pub(crate) fn release_cached_resources(&self) {
         *self.mutable_global_uniform_buffers() = UniformBufferArray::new();
         self.destroy_released();
-    }
-
-    pub(crate) fn create_buffer(
-        &self,
-        data: Option<&[u8]>,
-        size: usize,
-        is_index_buffer: bool,
-        persistent: bool,
-    ) -> BufferResource {
-        BufferResource::new(self, data, size, BUFFER_USAGE, is_index_buffer, persistent)
     }
 
     /// Compiles `source` with the program's defines and `additional_defines`

@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use crate::gpu::{BufferId, Gpu, TextureId};
+use crate::gpu::{BufferId, BufferUsage, Gpu, TextureId};
 use crate::rendering_stats::RenderingStats;
 
 /// The buffers and textures the renderer dropped. A backend destroys them
@@ -19,18 +19,24 @@ pub struct Released {
 
 #[derive(Clone, Copy, Default)]
 struct Uncounted {
-    buffers: i32,
-    buffer_bytes: i32,
+    vertex_buffers: (i32, i32),
+    index_buffers: (i32, i32),
+    uniform_buffers: (i32, i32),
     textures: i32,
     texture_bytes: i32,
 }
 
 impl Released {
-    pub(crate) fn buffer(&self, id: BufferId, bytes: usize) {
+    pub(crate) fn buffer(&self, id: BufferId, usage: BufferUsage, bytes: usize) {
         push(&self.buffers, id);
         let mut uncounted = self.uncounted.get();
-        uncounted.buffers += 1;
-        uncounted.buffer_bytes += bytes as i32;
+        let (count, total) = match usage {
+            BufferUsage::Vertex => &mut uncounted.vertex_buffers,
+            BufferUsage::Index => &mut uncounted.index_buffers,
+            BufferUsage::Uniform | BufferUsage::Storage => &mut uncounted.uniform_buffers,
+        };
+        *count += 1;
+        *total += bytes as i32;
         self.uncounted.set(uncounted);
     }
 
@@ -45,10 +51,16 @@ impl Released {
     /// Takes the resources released since the last call out of `stats`.
     pub(crate) fn uncount(&self, stats: &mut RenderingStats) {
         let uncounted = self.uncounted.take();
-        stats.num_buffers -= uncounted.buffers;
-        stats.mem_buffers -= uncounted.buffer_bytes;
-        stats.num_uniform_buffers -= uncounted.buffers;
-        stats.mem_uniform_buffers -= uncounted.buffer_bytes;
+        for ((count, bytes), (num, mem)) in [
+            (uncounted.vertex_buffers, (&mut stats.num_vertex_buffers, &mut stats.mem_vertex_buffers)),
+            (uncounted.index_buffers, (&mut stats.num_index_buffers, &mut stats.mem_index_buffers)),
+            (uncounted.uniform_buffers, (&mut stats.num_uniform_buffers, &mut stats.mem_uniform_buffers)),
+        ] {
+            *num -= count;
+            *mem -= bytes;
+            stats.num_buffers -= count;
+            stats.mem_buffers -= bytes;
+        }
         stats.num_active_textures -= uncounted.textures;
         stats.mem_textures -= uncounted.texture_bytes;
     }

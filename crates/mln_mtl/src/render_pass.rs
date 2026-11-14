@@ -6,9 +6,10 @@
 // - The pass keeps the attachments' pixel formats, which pipeline states
 //   and depth-stencil states are made for (C++ reads them from the
 //   draw target's descriptor where it needs them).
-// - A cached binding remembers the buffer's version, so the same buffer is
-//   bound again only after it changes (C++ records version 0, so it binds
-//   again after any update).
+// - A cached binding is of a buffer of the backend's `Gpu`, whose writes
+//   land before the frame's commands, so the same buffer isn't bound again
+//   after it changes (C++ records version 0, so it binds again after any
+//   update).
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -28,7 +29,6 @@ use objc2_metal::{
     MTLRenderCommandEncoder, MTLScissorRect, MTLStoreAction, MTLTexture, MTLViewport, MTLWinding,
 };
 
-use crate::buffer_resource::{BufferResource, VersionType};
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
 use crate::custom_layer::CustomLayerPass;
@@ -39,21 +39,6 @@ use crate::mtl_fwd::{
 };
 
 const MAX_BINDS: usize = 32;
-
-/// What a pass bound at a buffer index.
-#[derive(Clone, Copy, PartialEq)]
-enum Bound {
-    /// A buffer resource, at the version it had.
-    Resource(u64, VersionType),
-    /// The whole of a buffer of the backend's `Gpu`.
-    Gpu(BufferId),
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct BindInfo {
-    buffer: Bound,
-    offset: usize,
-}
 
 /// The pixel formats of a pass's attachments.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -67,8 +52,11 @@ struct State {
     current_depth_stencil_state: Option<MTLDepthStencilStatePtr>,
     current_pipeline_state: Option<MTLRenderPipelineStatePtr>,
     current_stencil_reference_value: i32,
-    vertex_binds: [Option<BindInfo>; MAX_BINDS],
-    fragment_binds: [Option<BindInfo>; MAX_BINDS],
+    /// The buffer of the backend's `Gpu` and the byte offset into it bound
+    /// at each index.
+    vertex_binds: [Option<(BufferId, usize)>; MAX_BINDS],
+    /// The buffer of the backend's `Gpu` bound whole at each index.
+    fragment_binds: [Option<BufferId>; MAX_BINDS],
     fragment_texture_bindings: [Option<MTLTexturePtr>; MAX_BINDS],
     fragment_sampler_states: [Option<MTLSamplerStatePtr>; MAX_BINDS],
     current_cull_mode: MTLCullMode,
@@ -300,32 +288,26 @@ impl RenderPass {
         }
     }
 
-    /// Binds `size` bytes of `buffer` from `offset` (the rest of it if
-    /// `size` is 0) to the vertex functions at `index`.
-    pub(crate) fn bind_vertex(&self, buffer: &BufferResource, offset: usize, index: usize, size: usize) {
-        let actual_size = if size != 0 { size } else { buffer.get_size_in_bytes() - offset };
-        debug_assert!(actual_size <= buffer.get_size_in_bytes());
+    /// Binds `buffer`, a buffer of the backend's `Gpu`, from byte `offset`
+    /// to the vertex functions at `index`.
+    pub(crate) fn bind_vertex_buffer(&self, buffer: BufferId, offset: usize, index: usize) {
         debug_assert!(index < MAX_BINDS);
         let encoder = self.encoder.borrow();
         let Some(encoder) = encoder.as_ref() else {
             return;
         };
-        if index < MAX_BINDS {
-            let mut s = self.state.borrow_mut();
-            let bound = Bound::Resource(buffer.id(), buffer.get_version());
-            if let Some(bind) = s.vertex_binds[index].as_mut()
-                && bind.buffer == bound
-            {
-                // The same buffer is bound here; move only the offset.
-                if bind.offset != offset {
-                    buffer.update_vertex_bind_offset(encoder, offset, index, actual_size);
-                    bind.offset = offset;
-                }
+        let gpu = self.context.get_backend().gpu().borrow();
+        let Some(native) = gpu.native_buffer(buffer) else {
+            return;
+        };
+        if let Some(bound) = self.state.borrow_mut().vertex_binds.get_mut(index) {
+            if *bound == Some((buffer, offset)) {
                 return;
             }
-            s.vertex_binds[index] = Some(BindInfo { buffer: bound, offset });
+            *bound = Some((buffer, offset));
         }
-        buffer.bind_vertex(encoder, offset, index, actual_size);
+        // SAFETY: the command buffer retains the buffer it encodes.
+        unsafe { encoder.setVertexBuffer_offset_atIndex(Some(native), offset, index) };
     }
 
     pub(crate) fn unbind_vertex(&self, index: usize) {
@@ -362,9 +344,9 @@ impl RenderPass {
             let Some(native) = gpu.native_buffer(buffer.id()) else {
                 continue;
             };
-            let bound = Some(BindInfo { buffer: Bound::Gpu(buffer.id()), offset: 0 });
-            if index != ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO && s.vertex_binds[index] != bound {
-                s.vertex_binds[index] = bound;
+            let bound = Some(buffer.id());
+            if index != ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO && s.vertex_binds[index] != Some((buffer.id(), 0)) {
+                s.vertex_binds[index] = Some((buffer.id(), 0));
                 // SAFETY: the command buffer retains the buffer it encodes.
                 unsafe { encoder.setVertexBuffer_offset_atIndex(Some(native), 0, index) };
             }
@@ -397,8 +379,8 @@ impl RenderPass {
         }
     }
 
-    /// Port-only: binds a Metal buffer that has no `BufferResource` (the
-    /// context's empty vertex buffer) to the vertex functions at `index`.
+    /// Port-only: binds a Metal buffer of the context's own (its empty
+    /// vertex buffer) to the vertex functions at `index`.
     pub(crate) fn set_vertex_buffer(&self, buffer: &MTLBufferPtr, offset: usize, index: usize) {
         self.unbind_vertex(index);
         if let Some(encoder) = self.encoder.borrow().as_ref() {
