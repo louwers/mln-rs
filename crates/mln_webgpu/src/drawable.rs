@@ -140,7 +140,7 @@ impl Drawable {
         self.impl_.vertex_attr_id = id;
     }
 
-    pub(crate) fn upload(&mut self, upload_pass: &UploadPass) {
+    fn upload_in(&mut self, upload_pass: &UploadPass) {
         let Some(shader) = self.base.shader.clone() else {
             Log::warning(
                 Event::General,
@@ -577,6 +577,12 @@ impl drawable::Drawable for Drawable {
         &mut self.base
     }
 
+    fn upload(&mut self, upload_pass: &dyn mln_gfx::upload_pass::UploadPass) {
+        if let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() {
+            self.upload_in(upload_pass);
+        }
+    }
+
     fn draw(&mut self, parameters: &mut dyn PaintParameters) {
         let draw_call_count = DRAW_CALL_COUNT.with(|c| {
             c.set(c.get() + 1);
@@ -639,7 +645,9 @@ impl drawable::Drawable for Drawable {
             if self.base.enable_depth {
                 depth_mode = parameters.depth_mode_for_sublayer(self.base.sub_layer_index as u8, self.base.depth_type);
             }
-            if self.base.enable_stencil
+            if let Some(mode) = self.base.stencil_mode {
+                stencil_mode = mode;
+            } else if self.base.enable_stencil
                 && let Some(tile_id) = drawable_tile_id
             {
                 stencil_mode = parameters.stencil_mode_for_clipping(&tile_id.to_unwrapped());
@@ -738,9 +746,7 @@ impl drawable::Drawable for Drawable {
             depth_mode.range.max,
         );
 
-        if self.base.enable_stencil {
-            encoder.set_stencil_reference(stencil_mode.ref_ as u32);
-        }
+        encoder.set_stencil_reference(stencil_mode.ref_ as u32);
 
         // Clamp scissor to the current render pass size (not the default
         // renderable, which may be different during offscreen passes).
@@ -804,37 +810,6 @@ impl drawable::Drawable for Drawable {
         }
         if let Some((slot, bind_group, offset)) = &index_bind_group {
             encoder.set_bind_group(*slot, bind_group, Some(*offset));
-        }
-
-        // Handle depth and stencil states (like Metal does). For 3D mode,
-        // stenciling is handled by the layer group.
-        if !self.base.is_3d {
-            if self.base.enable_stencil {
-                if let Some(tile_id) = self.base.tile_id {
-                    let expected_stencil = parameters.stencil_mode_for_clipping(&tile_id.to_unwrapped());
-                    if StencilState::from(&expected_stencil) != StencilState::from(&self.impl_.stencil_mode) {
-                        debug_assert!(false, "stencil mismatch");
-                        Log::warning(
-                            Event::Render,
-                            format!("WebGPU drawable stencil mismatch for '{}' tile={tile_id}", self.base.name),
-                        );
-                    }
-                    encoder.set_stencil_reference(expected_stencil.ref_ as u32);
-                }
-            } else {
-                // Reset the reference so subsequent drawables that re-enable
-                // stencilling start from a known value.
-                encoder.set_stencil_reference(0);
-            }
-            if self.base.enable_depth {
-                #[cfg(debug_assertions)]
-                {
-                    let expected_depth =
-                        parameters.depth_mode_for_sublayer(self.base.sub_layer_index as u8, self.base.depth_type);
-                    debug_assert_eq!(expected_depth.func, self.impl_.depth_mode.func);
-                    debug_assert_eq!(expected_depth.mask, self.impl_.depth_mode.mask);
-                }
-            }
         }
 
         // Draw indexed geometry - loop through segments (exactly like Metal does)

@@ -25,11 +25,10 @@ use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-use crate::shaders::clipping_mask_ubo::ClipUBO;
 use crate::shaders::layer_ubo::ProjectionUBO;
 use crate::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
-    ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_CLIPPING_MASK_UBO, ID_PROJECTION_UBO,
+    ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
 use crate::shaders::shader_source::BuiltIn;
 use crate::stencil_mode::{StencilMode, Test};
@@ -121,11 +120,11 @@ pub fn clip_mask_and_background<G: Gpu>(
         },
         targets,
     })?;
-    let clip = ClipUBO { matrix: tile_matrix(0.0), stencil_ref: 1, ..ClipUBO::default() };
+    let clip = ProjectionUBO { matrix: tile_matrix(0.0), ..ProjectionUBO::default() };
     let clip_buffer = buffer(gpu, BufferUsage::Uniform, bytemuck::bytes_of(&clip))?;
     let mask_group = gpu.create_bind_group(&BindGroupDesc {
         label: "clip",
-        entries: &[whole(ID_CLIPPING_MASK_UBO, clip_buffer, bytemuck::bytes_of(&clip))],
+        entries: &[whole(ID_PROJECTION_UBO, clip_buffer, bytemuck::bytes_of(&clip))],
     })?;
 
     // The background, where the stencil is 1. Its layer's entries are at

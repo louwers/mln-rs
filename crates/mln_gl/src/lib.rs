@@ -11,8 +11,6 @@
 //!   OpenGL ES 3.0 has no storage buffers to index in the shader, so a
 //!   drawable binds its element of that buffer as the uniform block
 //!   (`uniform_buffer::UniformBuffer`).
-//! - The tile clipping masks are drawn by the context
-//!   (`Context::render_tile_clipping_masks`), as on Metal.
 //! - Scissor rectangles arrive with a top-left origin and are flipped here.
 //!
 //! The GLSL comes from the C++ headers, with the port's changes

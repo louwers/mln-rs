@@ -204,7 +204,7 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
             ],
             "circleUBOCount",
         ),
-        "ClippingMaskProgram" => (&[("idClippingMaskUBO", ID_CLIPPING_MASK_UBO)], "clippingMaskUBOCount"),
+        "ClippingMaskProgram" => (&[], "clippingMaskUBOCount"),
         "CollisionBoxShader" | "CollisionCircleShader" => (
             &[
                 ("idCollisionDrawableUBO", ID_COLLISION_DRAWABLE_UBO),
@@ -316,7 +316,6 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("BackgroundDrawableUnionUBO", size_of::<background_layer_ubo::BackgroundDrawableUnionUBO>()),
     ("CircleDrawableUBO", size_of::<circle_layer_ubo::CircleDrawableUBO>()),
     ("CircleEvaluatedPropsUBO", size_of::<circle_layer_ubo::CircleEvaluatedPropsUBO>()),
-    ("ClipUBO", size_of::<clipping_mask_ubo::ClipUBO>()),
     ("CollisionDrawableUBO", size_of::<symbol_layer_ubo::CollisionDrawableUBO>()),
     ("CollisionTilePropsUBO", size_of::<symbol_layer_ubo::CollisionTilePropsUBO>()),
     ("ColorReliefDrawableUBO", size_of::<color_relief_layer_ubo::ColorReliefDrawableUBO>()),

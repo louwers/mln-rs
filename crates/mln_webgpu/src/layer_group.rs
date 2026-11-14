@@ -5,7 +5,6 @@ use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 
 use crate::drawable::Drawable;
-use crate::upload_pass::UploadPass;
 
 pub(crate) struct LayerGroup {
     inner: layer_group::LayerGroup,
@@ -45,13 +44,8 @@ impl layer_group::LayerGroupBase for LayerGroup {
         if !self.inner.base.enabled {
             return;
         }
-        let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() else {
-            return;
-        };
         self.inner.visit_drawables(|drawable| {
-            if drawable.get_enabled()
-                && let Some(drawable) = drawable.downcast_mut::<Drawable>()
-            {
+            if drawable.get_enabled() {
                 drawable.upload(upload_pass);
             }
         });

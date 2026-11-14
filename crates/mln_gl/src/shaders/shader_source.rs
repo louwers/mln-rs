@@ -10,8 +10,7 @@
 //   OpenGL build has no instanced walls).
 // - FillOutlineTriangulatedShader and ClippingMaskProgram have tables: the
 //   port's renderer triangulates fill outlines, as C++ does for Metal and
-//   WebGPU, and the context draws the clipping masks with a program of the
-//   registry.
+//   WebGPU, and draws the clipping masks as drawables.
 // - RasterShader's second texture has its own id (C++ gives both the first).
 // - Every block a shader's GLSL declares has an entry, the prelude's
 //   projection block too: WebGL2 rejects a draw whose program has a block
@@ -186,7 +185,7 @@ macro_rules! shader_source {
 /// and the overlay scale with its padding.
 const DEBUG_UBO: UniformBlockInfo = UniformBlockInfo { name: "DebugUBO", id: ID_DEBUG_UBO, size: 96, element_size: 0 };
 
-// Clipping mask: the Mercator variant takes its matrix as a plain uniform.
+// Clipping mask
 shader_source!(
     CLIPPING_MASK_PROGRAM,
     "ClippingMaskProgram",
