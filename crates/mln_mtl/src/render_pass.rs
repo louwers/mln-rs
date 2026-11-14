@@ -15,7 +15,10 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mln_gfx::debug_group::DebugGroupTarget;
+use mln_gfx::gpu::BufferId;
 use mln_gfx::render_pass::{self, RenderPassDescriptor};
+use mln_gfx::shaders::shader_defines::{ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
+use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_util::range::Range;
 use objc2::rc::Retained;
 use objc2_foundation::{NSCopying, NSString};
@@ -36,11 +39,19 @@ use crate::mtl_fwd::{
 
 const MAX_BINDS: usize = 32;
 
-#[derive(Clone, Copy)]
+/// What a pass bound at a buffer index.
+#[derive(Clone, Copy, PartialEq)]
+enum Bound {
+    /// A buffer resource, at the version it had.
+    Resource(u64, VersionType),
+    /// The whole of a buffer of the backend's `Gpu`.
+    Gpu(BufferId),
+}
+
+#[derive(Clone, Copy, PartialEq)]
 struct BindInfo {
-    buffer_id: u64,
+    buffer: Bound,
     offset: usize,
-    version: VersionType,
 }
 
 /// The pixel formats of a pass's attachments.
@@ -300,9 +311,9 @@ impl RenderPass {
         };
         if index < MAX_BINDS {
             let mut s = self.state.borrow_mut();
+            let bound = Bound::Resource(buffer.id(), buffer.get_version());
             if let Some(bind) = s.vertex_binds[index].as_mut()
-                && bind.buffer_id == buffer.id()
-                && !buffer.need_rebind(bind.version)
+                && bind.buffer == bound
             {
                 // The same buffer is bound here; move only the offset.
                 if bind.offset != offset {
@@ -311,7 +322,7 @@ impl RenderPass {
                 }
                 return;
             }
-            s.vertex_binds[index] = Some(BindInfo { buffer_id: buffer.id(), offset, version: buffer.get_version() });
+            s.vertex_binds[index] = Some(BindInfo { buffer: bound, offset });
         }
         buffer.bind_vertex(encoder, offset, index, actual_size);
     }
@@ -322,30 +333,35 @@ impl RenderPass {
         }
     }
 
-    /// `bind_vertex` for the fragment functions.
-    pub(crate) fn bind_fragment(&self, buffer: &BufferResource, offset: usize, index: usize, size: usize) {
-        let actual_size = if size != 0 { size } else { buffer.get_size_in_bytes() - offset };
-        debug_assert!(actual_size <= buffer.get_size_in_bytes());
-        debug_assert!(index < MAX_BINDS);
+    /// Binds each buffer of `array` at its id, to the vertex and fragment
+    /// functions both except at the reserved vertex-only and fragment-only
+    /// ids.
+    pub(crate) fn bind_uniform_buffers(&self, array: &UniformBufferArray) {
         let encoder = self.encoder.borrow();
         let Some(encoder) = encoder.as_ref() else {
             return;
         };
-        if index < MAX_BINDS {
-            let mut s = self.state.borrow_mut();
-            if let Some(bind) = s.fragment_binds[index].as_mut()
-                && bind.buffer_id == buffer.id()
-                && !buffer.need_rebind(bind.version)
-            {
-                if bind.offset != offset {
-                    buffer.update_fragment_bind_offset(encoder, offset, index, actual_size);
-                    bind.offset = offset;
-                }
-                return;
+        let gpu = self.context.get_backend().gpu().borrow();
+        let mut s = self.state.borrow_mut();
+        for index in 0..array.allocated_size().min(MAX_BINDS) {
+            let Some(buffer) = array.get(index) else {
+                continue;
+            };
+            let Some(native) = gpu.native_buffer(buffer.id()) else {
+                continue;
+            };
+            let bound = Some(BindInfo { buffer: Bound::Gpu(buffer.id()), offset: 0 });
+            if index != ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO && s.vertex_binds[index] != bound {
+                s.vertex_binds[index] = bound;
+                // SAFETY: the command buffer retains the buffer it encodes.
+                unsafe { encoder.setVertexBuffer_offset_atIndex(Some(native), 0, index) };
             }
-            s.fragment_binds[index] = Some(BindInfo { buffer_id: buffer.id(), offset, version: buffer.get_version() });
+            if index != ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO && s.fragment_binds[index] != bound {
+                s.fragment_binds[index] = bound;
+                // SAFETY: as above.
+                unsafe { encoder.setFragmentBuffer_offset_atIndex(Some(native), 0, index) };
+            }
         }
-        buffer.bind_fragment(encoder, offset, index, actual_size);
     }
 
     pub(crate) fn unbind_fragment(&self, index: usize) {

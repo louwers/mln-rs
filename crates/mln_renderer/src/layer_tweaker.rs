@@ -55,10 +55,7 @@ impl LayerTweakerBase {
         context: &dyn Context,
     ) {
         let bytes: &[u8] = bytemuck::cast_slice(ubos);
-        match &self.projection_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.projection_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.projection_uniform_buffer, bytes);
         layer_uniforms.set(ID_PROJECTION_UBO, self.projection_uniform_buffer.clone());
     }
 }

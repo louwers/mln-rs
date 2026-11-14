@@ -419,8 +419,7 @@ impl LayerTweaker for PolylineLayerTweaker {
         // No GPU expressions; only the Metal line shaders read it.
         if context.backend_type() == BackendType::Metal {
             if self.expression_uniform_buffer.is_none() {
-                self.expression_uniform_buffer =
-                    Some(context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE], false, false));
+                self.expression_uniform_buffer = context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]);
             }
             layer_group.mutable_uniform_buffers().set(ID_LINE_EXPRESSION_UBO, self.expression_uniform_buffer.clone());
         }
@@ -467,10 +466,7 @@ impl LayerTweaker for PolylineLayerTweaker {
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
         layer_group.mutable_uniform_buffers().set(ID_LINE_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);
     }

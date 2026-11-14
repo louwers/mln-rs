@@ -37,7 +37,6 @@ pub mod shaders;
 pub mod surface_target;
 pub mod texture2d;
 pub mod tile_layer_group;
-pub mod uniform_buffer;
 pub mod upload_pass;
 pub mod vertex_buffer_resource;
 

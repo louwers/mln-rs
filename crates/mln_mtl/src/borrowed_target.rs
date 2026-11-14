@@ -433,6 +433,7 @@ impl FrameTarget for BorrowedTarget {
             self.event_value.set(value);
             command_buffer.encodeSignalEvent_value(ProtocolObject::<dyn MTLEvent>::from_ref(&**event), value);
         }
+        self.backend.backend_impl().flush_writes();
         command_buffer.commit();
         let sync = self.producer_sync(&command_buffer);
         Handoff::GivenBack { slot: self.resource.selected.get(), sync }

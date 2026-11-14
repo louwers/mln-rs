@@ -185,13 +185,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        let drawable_ubo_vector_size = bytes.len();
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= drawable_ubo_vector_size => buffer.update(bytes),
-            _ => {
-                self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true));
-            }
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         layer_group.mutable_uniform_buffers().set(ID_BACKGROUND_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);

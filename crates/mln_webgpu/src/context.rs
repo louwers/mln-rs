@@ -3,7 +3,7 @@
 // they drop the context; otherwise the context, and with it the device,
 // would never be freed.
 
-use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::cell::{Cell, RefCell, RefMut};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
@@ -11,6 +11,7 @@ use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::rendering_stats::RenderingStats;
@@ -19,7 +20,6 @@ use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::TextureChannelDataType;
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
 use mln_util::size::Size;
@@ -33,13 +33,11 @@ use crate::render_pass::RenderPass;
 use crate::renderer_backend::BackendImpl;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
-use crate::uniform_buffer::UniformBuffer;
 
 pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
-    global_uniform_buffers: RefCell<UniformBufferArray>,
     // `defaultVertexBuffers`: the default attribute buffers of
     // UploadPass::build_attribute_bindings, one per attribute type, with the
     // vertex count each covers.
@@ -55,10 +53,9 @@ pub(crate) struct Context {
 impl Context {
     pub(crate) fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         Rc::new_cyclic(|weak| Context {
-            base: ContextBase::default(),
+            base: ContextBase::new(Rc::clone(backend.released())),
             backend,
             weak_self: Weak::clone(weak),
-            global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             dummy_vertex_buffers: RefCell::default(),
             submissions: Cell::new(0),
             index_table: RefCell::new(None),
@@ -107,10 +104,6 @@ impl Context {
     /// The owning `Rc`, which resources keep to keep the context alive.
     pub(crate) fn rc(&self) -> Rc<Context> {
         self.weak_self.upgrade().expect("webgpu::Context used after drop")
-    }
-
-    pub(crate) fn weak(&self) -> Weak<Context> {
-        Weak::clone(&self.weak_self)
     }
 
     pub(crate) fn get_backend(&self) -> &Rc<BackendImpl> {
@@ -172,11 +165,6 @@ impl Context {
     ) -> &RefCell<HashMap<AttributeDataType, (usize, UniqueVertexBufferResource)>> {
         &self.dummy_vertex_buffers
     }
-
-    /// Creates a uniform buffer holding `data`, of the concrete type.
-    pub(crate) fn create_webgpu_uniform_buffer(&self, data: &[u8]) -> Rc<UniformBuffer> {
-        Rc::new(UniformBuffer::new(self, Some(data), data.len()))
-    }
 }
 
 impl GfxContext for Context {
@@ -191,7 +179,7 @@ impl GfxContext for Context {
     fn begin_frame(&self) {}
 
     fn end_frame(&self) {
-        // End the frame - submit WebGPU commands
+        self.destroy_released();
     }
 
     fn perform_cleanup(&self) {
@@ -224,8 +212,8 @@ impl GfxContext for Context {
         Box::new(DrawableBuilder::new())
     }
 
-    fn create_uniform_buffer(&self, data: &[u8], _persistent: bool, _ssbo: bool) -> UniformBufferPtr {
-        self.create_webgpu_uniform_buffer(data)
+    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
+        RefMut::map(self.backend.gpu().borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
 
     /// Align with Metal - just get the shader from the registry, no caching.
@@ -254,33 +242,6 @@ impl GfxContext for Context {
 
     fn create_texture_2d(&self) -> Texture2DPtr {
         self.create_webgpu_texture_2d()
-    }
-
-    fn emplace_or_update_uniform_buffer(
-        &self,
-        ptr: &mut Option<UniformBufferPtr>,
-        data: &[u8],
-        persistent: bool,
-    ) -> bool {
-        match ptr {
-            None => {
-                *ptr = Some(self.create_uniform_buffer(data, persistent, false));
-                true
-            }
-            Some(buffer) => {
-                // Update existing buffer
-                buffer.update(data);
-                false
-            }
-        }
-    }
-
-    fn get_global_uniform_buffers(&self) -> Ref<'_, UniformBufferArray> {
-        self.global_uniform_buffers.borrow()
-    }
-
-    fn mutable_global_uniform_buffers(&self) -> RefMut<'_, UniformBufferArray> {
-        self.global_uniform_buffers.borrow_mut()
     }
 
     /// In WebGPU, buffers can't be bound globally to the render pass like in

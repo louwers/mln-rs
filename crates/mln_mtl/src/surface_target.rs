@@ -169,6 +169,7 @@ impl SurfaceState {
         }
 
         command_buffer.presentDrawable(ProtocolObject::from_ref(&*drawable));
+        self.backend.flush_writes();
         command_buffer.commit();
 
         if let Some((buffer, size)) = readback {

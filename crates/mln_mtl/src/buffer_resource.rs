@@ -1,6 +1,6 @@
 // The resource reaches the device through the backend state and the
-// rendering stats through a `Weak` context: the context's global uniform
-// buffers hold resources, so an `Rc` back would keep the context alive.
+// rendering stats through a `Weak` context, which doesn't keep the context
+// alive.
 //
 // C++ render passes recognize a bound resource by its address; the port
 // gives each resource an id instead, which a later resource can't reuse.
@@ -202,11 +202,6 @@ impl BufferResource {
         self.version.set(self.version.get().wrapping_add(1));
     }
 
-    /// Whether a binding made at `version` is stale.
-    pub(crate) fn need_rebind(&self, version: VersionType) -> bool {
-        self.version.get() != version
-    }
-
     pub(crate) fn bind_vertex(
         &self,
         encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
@@ -230,28 +225,6 @@ impl BufferResource {
         }
     }
 
-    pub(crate) fn bind_fragment(
-        &self,
-        encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
-        offset: usize,
-        index: usize,
-        size: usize,
-    ) {
-        debug_assert!(offset + size <= self.size);
-        if let Some(buffer) = self.buffer.borrow().as_ref() {
-            // SAFETY: as in `bind_vertex`.
-            unsafe { encoder.setFragmentBuffer_offset_atIndex(Some(buffer), offset, index) };
-        } else {
-            let raw = self.raw.borrow();
-            if !raw.is_empty() {
-                let size = if size != 0 { size.min(self.size - offset) } else { self.size - offset };
-                // SAFETY: as in `bind_vertex`.
-                unsafe { encoder.setFragmentBytes_length_atIndex(bytes_at(&raw, offset), size, index) };
-            }
-        }
-    }
-
-    /// Moves the offset of this buffer, already bound at `index`.
     pub(crate) fn update_vertex_bind_offset(
         &self,
         encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
@@ -267,21 +240,6 @@ impl BufferResource {
             unsafe { encoder.setVertexBufferOffset_atIndex(offset, index) };
         } else {
             self.bind_vertex(encoder, offset, index, size);
-        }
-    }
-
-    pub(crate) fn update_fragment_bind_offset(
-        &self,
-        encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
-        offset: usize,
-        index: usize,
-        size: usize,
-    ) {
-        if self.buffer.borrow().is_some() {
-            // SAFETY: as in `update_vertex_bind_offset`.
-            unsafe { encoder.setFragmentBufferOffset_atIndex(offset, index) };
-        } else {
-            self.bind_fragment(encoder, offset, index, size);
         }
     }
 }

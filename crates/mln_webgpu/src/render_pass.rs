@@ -177,8 +177,12 @@ impl RenderPass {
         self.global_uniform_buffers_bound.set(bound);
     }
 
+    pub(crate) fn context(&self) -> &Context {
+        &self.context
+    }
+
     pub(crate) fn get_global_uniform_buffers(&self) -> Option<Ref<'_, UniformBufferArray>> {
-        self.global_uniform_buffers_bound.get().then(|| self.context.get_global_uniform_buffers())
+        self.global_uniform_buffers_bound.get().then(|| self.context.global_uniform_buffers())
     }
 }
 

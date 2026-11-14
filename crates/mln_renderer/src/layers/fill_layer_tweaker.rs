@@ -81,7 +81,7 @@ impl LayerTweaker for FillLayerTweaker {
                 from_scale: crossfade.from_scale,
                 to_scale: crossfade.to_scale,
             };
-            context.emplace_or_update_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
+            context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
             self.base.properties_updated = false;
         }
         layer_group
@@ -231,16 +231,10 @@ impl LayerTweaker for FillLayerTweaker {
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         let bytes: &[u8] = bytemuck::cast_slice(&tile_props_ubo_vector);
-        match &self.tile_props_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.tile_props_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.tile_props_uniform_buffer, bytes);
 
         let layer_uniforms = layer_group.mutable_uniform_buffers();
         layer_uniforms.set(ID_FILL_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());

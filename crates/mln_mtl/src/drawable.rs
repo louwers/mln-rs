@@ -40,7 +40,6 @@ use crate::mtl_fwd::{MTLBufferPtr, MTLDepthStencilStatePtr, MTLRenderPipelineSta
 use crate::render_pass::{AttachmentFormats, RenderPass};
 use crate::shaders::shader_program::{ShaderProgram, as_mtl_shader};
 use crate::texture2d::Texture2D;
-use crate::uniform_buffer::bind_uniform_buffer_array;
 use crate::upload_pass::UploadPass;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
@@ -373,7 +372,7 @@ impl drawable::Drawable for Drawable {
         Self::bind_attribute_bindings(&self.impl_.attribute_bindings, render_pass, empty.as_ref());
         Self::bind_attribute_bindings(&self.impl_.instance_bindings, render_pass, empty.as_ref());
         self.bind_textures(render_pass, shader);
-        bind_uniform_buffer_array(&self.impl_.uniform_buffers, render_pass);
+        render_pass.bind_uniform_buffers(&self.impl_.uniform_buffers);
 
         let Some(indexes) = self.impl_.indexes.clone() else {
             debug_assert!(false, "Index buffer not uploaded");

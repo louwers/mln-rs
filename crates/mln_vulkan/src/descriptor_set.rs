@@ -30,7 +30,6 @@ use crate::shaders::layout::{
 };
 use crate::shaders::shader_program::ShaderProgram;
 use crate::texture2d::Texture2D;
-use crate::uniform_buffer::UniformBuffer;
 
 /// The most buffers a set has.
 const MAX_BUFFER_BINDINGS: usize = 8;
@@ -319,26 +318,26 @@ impl UniformDescriptorSet {
 
         let current_index = context.get_current_frame_resource_index();
         let first_id = if type_ == DescriptorSetType::Global { 0 } else { LAYER_SSBO_START_ID };
+        let gpu = context.vulkan_gpu();
         for id in first_id..uniforms.allocated_size() {
-            let Some(uniform_buffer) = uniforms.get(id).and_then(|b| b.downcast_ref::<UniformBuffer>()) else {
+            let Some(uniform_buffer) = uniforms.get(id) else {
                 continue;
             };
             let Some(binding) = Self::binding_of(type_, id, uniform_buffer.is_storage()) else {
                 debug_assert!(false, "no binding for the buffer {id} in the {type_:?} set");
                 continue;
             };
-            let resource = uniform_buffer.get_buffer_resource();
-            if !resource.is_valid() {
+            let Some((buffer, allocation)) = gpu.native_buffer(uniform_buffer.id()) else {
                 continue;
-            }
-            resource.update_vulkan_buffer(current_index);
+            };
             bindings[binding as usize] = BufferBinding {
-                id: resource.allocation_id(),
-                buffer: resource.get_vulkan_buffer(),
-                offset: resource.get_vulkan_buffer_offset() as vk::DeviceSize,
-                range: resource.get_size_in_bytes().max(1) as vk::DeviceSize,
+                id: allocation,
+                buffer,
+                offset: 0,
+                range: uniform_buffer.size().max(1) as vk::DeviceSize,
             };
         }
+        drop(gpu);
 
         let frame = usize::from(current_index);
         let changed = self.written.get(frame).is_none_or(|written| written[..count] != bindings[..count]);

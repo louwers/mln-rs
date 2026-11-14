@@ -27,9 +27,9 @@ use mln_util::time::Instant;
 use crate::bind_groups::{BindGroupKey, EntryResource, SharedBindGroup};
 use crate::context::Context;
 use crate::render_pass::RenderPass;
+use crate::renderer_backend::BackendImpl;
 use crate::shaders::shader_program::{BindingInfo, BindingType, ShaderProgram, as_webgpu_shader};
 use crate::texture2d::Texture2D;
-use crate::uniform_buffer::UniformBuffer;
 use crate::upload_pass::UploadPass;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
@@ -226,17 +226,6 @@ impl Drawable {
             }
         }
 
-        // Upload uniform buffers to ensure they're ready for the GPU: only a
-        // check that each has a GPU buffer.
-        for i in 0..self.impl_.uniform_buffers.allocated_size() {
-            if let Some(ub) = self.impl_.uniform_buffers.get(i)
-                && let Some(webgpu_ub) = ub.downcast_ref::<UniformBuffer>()
-                && webgpu_ub.get_buffer().is_none()
-            {
-                Log::error(Event::Render, format!("Uniform buffer {i} has no GPU buffer!"));
-            }
-        }
-
         // Upload textures if needed
         let textures_need_upload = self.base.textures.iter().flatten().any(|t| t.borrow().needs_upload());
         if textures_need_upload {
@@ -316,10 +305,7 @@ impl Drawable {
                             valid_bindings = false;
                             break;
                         };
-                        let gpu_buffer = buffer
-                            .downcast_ref::<UniformBuffer>()
-                            .and_then(|b| Some((b.get_buffer()?.clone(), b.get_offset(), b.get_aligned_size())));
-                        let Some((gpu_buffer, offset, size)) = gpu_buffer else {
+                        let Some((gpu_buffer, offset, size)) = context.get_backend().native_buffer(buffer.id()) else {
                             if draw_call_count <= 200 {
                                 Log::warning(
                                     Event::Render,
@@ -446,12 +432,13 @@ impl Drawable {
             return false;
         }
         let global_buffers = render_pass.get_global_uniform_buffers();
+        let backend = render_pass.context().get_backend();
         self.impl_.bind_groups.iter().all(|record| {
             let resources = &record.bind_group.key.resources;
             let binding_infos = shader.binding_infos(record.group);
             binding_infos.len() == resources.len()
                 && binding_infos.iter().zip(resources).all(|(info, (binding, resource))| {
-                    info.binding == *binding && self.binds(info, resource, global_buffers.as_deref(), shader)
+                    info.binding == *binding && self.binds(info, resource, global_buffers.as_deref(), backend, shader)
                 })
         })
     }
@@ -462,6 +449,7 @@ impl Drawable {
         info: &BindingInfo,
         resource: &EntryResource,
         global_buffers: Option<&UniformBufferArray>,
+        backend: &BackendImpl,
         shader: &ShaderProgram,
     ) -> bool {
         let texture = |sampler_binding| {
@@ -476,11 +464,9 @@ impl Drawable {
                 .uniform_buffers
                 .get(info.binding as usize)
                 .or_else(|| global_buffers?.get(info.binding as usize))
-                .and_then(|buffer| buffer.downcast_ref::<UniformBuffer>())
-                .is_some_and(|buffer| {
-                    buffer.get_buffer() == Some(bound)
-                        && buffer.get_offset() == *bound_offset
-                        && buffer.get_aligned_size() == *bound_size
+                .and_then(|buffer| backend.native_buffer(buffer.id()))
+                .is_some_and(|(buffer, offset, size)| {
+                    buffer == *bound && offset == *bound_offset && size == *bound_size
                 }),
             (BindingType::Sampler, EntryResource::Sampler(bound)) => texture(true).is_some_and(|texture| {
                 texture.downcast_ref::<Texture2D>().and_then(Texture2D::get_sampler) == Some(bound)

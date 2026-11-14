@@ -46,7 +46,6 @@ mod surface_resource;
 mod surface_target;
 mod texture2d;
 mod tile_layer_group;
-mod uniform_buffer;
 mod upload_pass;
 mod vertex_buffer_resource;
 #[cfg(windows)]

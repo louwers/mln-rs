@@ -8,7 +8,6 @@ use mln_gfx::uniform_buffer::UniformBufferArray;
 use crate::context::Context;
 use crate::mtl_fwd::MTLDepthStencilStatePtr;
 use crate::render_pass::RenderPass;
-use crate::uniform_buffer::bind_uniform_buffer_array;
 
 pub(crate) struct LayerGroup {
     inner: layer_group::LayerGroup,
@@ -70,7 +69,7 @@ impl layer_group::LayerGroupBase for LayerGroup {
             }
             if !bind_ubos {
                 if let Some(render_pass) = parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>()) {
-                    bind_uniform_buffer_array(uniform_buffers, render_pass);
+                    render_pass.bind_uniform_buffers(uniform_buffers);
                 }
                 bind_ubos = true;
             }

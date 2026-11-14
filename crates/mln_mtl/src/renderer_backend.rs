@@ -16,15 +16,18 @@ use std::ffi::c_void;
 use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
+use mln_gfx::gpu::Gpu as _;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_source::BuiltIn;
+use mln_gfx::uniform_buffer::Released;
 use mln_util::logging::{Event, Log};
 use objc2_metal::{MTLDevice, MTLGPUFamily};
 
 use crate::context::Context;
 use crate::device::Device;
+use crate::gpu::MetalGpu;
 use crate::mtl_fwd::{MTLCommandQueuePtr, MTLDevicePtr};
 use crate::shaders::shader_group::ShaderGroup;
 use crate::shaders::shader_source::shader_source;
@@ -34,6 +37,12 @@ pub(crate) struct BackendImpl {
     device: MTLDevicePtr,
     command_queue: MTLCommandQueuePtr,
     base_vertex_instance_drawing_supported: bool,
+    /// The `Gpu` the renderer's uniform buffers belong to, whose writes a
+    /// frame's commands read (`flush_writes`).
+    gpu: RefCell<MetalGpu>,
+    /// The buffers the renderer dropped, which a context destroys at the
+    /// end of a frame.
+    released: Rc<Released>,
 }
 
 impl BackendImpl {
@@ -50,6 +59,22 @@ impl BackendImpl {
     #[must_use]
     pub(crate) fn is_base_vertex_instance_drawing_supported(&self) -> bool {
         self.base_vertex_instance_drawing_supported
+    }
+
+    pub(crate) fn gpu(&self) -> &RefCell<MetalGpu> {
+        &self.gpu
+    }
+
+    pub(crate) fn released(&self) -> &Rc<Released> {
+        &self.released
+    }
+
+    /// Commits the writes made to the `Gpu`'s buffers so far, ahead of a
+    /// command buffer that reads them and is committed next.
+    pub(crate) fn flush_writes(&self) {
+        if let Err(error) = self.gpu.borrow_mut().submit(&[]) {
+            Log::error(Event::Render, format!("Committing the buffer writes failed: {error}"));
+        }
     }
 }
 
@@ -118,6 +143,8 @@ impl RendererBackend {
                 device: mtl_device.clone(),
                 command_queue: device.queue().clone(),
                 base_vertex_instance_drawing_supported,
+                gpu: RefCell::new(MetalGpu::new(device)),
+                released: Rc::default(),
             }),
             device: device.clone(),
             autorelease_pools: RefCell::new(Vec::new()),
