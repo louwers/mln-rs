@@ -72,9 +72,9 @@ pub(crate) struct BackendImpl {
 }
 
 impl BackendImpl {
-    /// `init()`'s allocator and command pool on `device`, for `max_frames`
-    /// frames in flight.
-    fn new(device: &Device, max_frames: u32) -> Result<BackendImpl, Error> {
+    /// Makes the allocator and the command pool on `device`, for
+    /// `max_frames` frames in flight.
+    pub(crate) fn new(device: &Device, max_frames: u32) -> Result<BackendImpl, Error> {
         const MB: u64 = 1024 * 1024;
         let shared = &device.shared;
         let allocator = Allocator::new(&AllocatorCreateDesc {

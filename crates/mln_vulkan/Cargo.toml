@@ -36,5 +36,9 @@ windows.workspace = true
 [target.'cfg(all(unix, not(any(target_vendor = "apple", target_family = "wasm"))))'.dependencies]
 libc.workspace = true
 
+# The frame that `VulkanGpu`'s test draws.
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
+mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+
 [lints]
 workspace = true
