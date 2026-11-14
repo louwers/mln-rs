@@ -139,7 +139,11 @@ impl InternalTile {
                     0 => {}
                     1 => self.emplace(Some(Geometry::LineString(new_multi.swap_remove(0))), Arc::clone(props), id),
                     _ => {
-                        self.emplace(Some(Geometry::MultiLineString(MultiLineString(new_multi))), Arc::clone(props), id);
+                        self.emplace(
+                            Some(Geometry::MultiLineString(MultiLineString(new_multi))),
+                            Arc::clone(props),
+                            id,
+                        );
                     }
                 }
             }
