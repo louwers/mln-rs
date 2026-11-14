@@ -10,7 +10,6 @@ use mln_gfx::attribute::AttributeBindingArray;
 use crate::context::Context;
 use crate::enums;
 use crate::types::{BufferID, VertexArrayID};
-use crate::vertex_buffer_resource::VertexBufferResource;
 
 pub(crate) struct VertexArray {
     context: Weak<Context>,
@@ -44,12 +43,7 @@ impl VertexArray {
                 let Some(binding) = binding else {
                     continue;
                 };
-                let Some(buffer) = binding
-                    .vertex_buffer_resource
-                    .as_ref()
-                    .and_then(|resource| resource.downcast_ref::<VertexBufferResource>())
-                    .and_then(VertexBufferResource::get_buffer)
-                else {
+                let Some(buffer) = binding.buffer.as_ref().and_then(|buffer| context.native_buffer(buffer.id())) else {
                     // The attribute's value comes from a uniform.
                     continue;
                 };

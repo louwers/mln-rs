@@ -20,7 +20,7 @@ use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
-use mln_gfx::{AttributeDataType, Context, DrawMode, ShaderRegistry, UploadPass};
+use mln_gfx::{AttributeDataType, Context, DrawMode, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
@@ -243,7 +243,7 @@ impl drawable::Drawable for CustomDrawable {
     }
 
     /// The host draws with objects of its own, so there is nothing to upload.
-    fn upload(&mut self, _upload_pass: &dyn UploadPass) {}
+    fn upload(&mut self, _context: &dyn Context) {}
 
     fn update_vertex_attributes(
         &mut self,

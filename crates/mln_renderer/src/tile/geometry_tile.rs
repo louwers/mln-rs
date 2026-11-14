@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_actor::{ActorRef, LocalObject, Mailbox, scheduler};
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
@@ -204,14 +204,14 @@ impl TileRenderData for GeometryTileRenderData {
         Some(&self.bucket_geometry)
     }
 
-    fn upload(&self, upload_pass: &dyn UploadPass) {
+    fn upload(&self, context: &dyn Context) {
         let Some(layout_result) = &self.layout_result else {
             return;
         };
 
         for entry in layout_result.layer_render_data.values() {
             if entry.bucket.needs_upload() {
-                entry.bucket.upload(upload_pass);
+                entry.bucket.upload(context);
             }
         }
 
@@ -220,7 +220,6 @@ impl TileRenderData for GeometryTileRenderData {
             return;
         };
 
-        let context = upload_pass.get_context();
         if let Some(glyph_dynamic_texture) = &layout_result.glyph_atlas().dynamic_texture {
             glyph_dynamic_texture.upload_deferred_images(context);
             *atlas_textures.glyph.borrow_mut() = glyph_dynamic_texture.get_texture();

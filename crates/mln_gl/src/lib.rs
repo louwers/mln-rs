@@ -34,7 +34,7 @@
 //!
 //! A `GlGpu` draws through the `mln_gfx::gpu::Gpu` interface instead, on a
 //! context of its own in a device's share group. A backend's context hosts
-//! one too, which owns the renderer's uniform buffers.
+//! one too, which owns the renderer's buffers and textures.
 
 #![expect(unsafe_code, reason = "OpenGL through glow is the FFI here")]
 
@@ -53,9 +53,7 @@ mod renderer_backend;
 mod shaders;
 mod state;
 mod types;
-mod upload_pass;
 mod vertex_array;
-mod vertex_buffer_resource;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod borrowed_target;

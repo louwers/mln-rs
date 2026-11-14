@@ -135,3 +135,9 @@ mln_gl.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(target_vendor = "apple")'.dev-dependencies]
+mln_mtl.workspace = true
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-metal.workspace = true

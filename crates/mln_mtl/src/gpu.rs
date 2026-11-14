@@ -39,7 +39,6 @@ use objc2_metal::{
 };
 
 use crate::Device;
-use crate::buffer_resource::new_metal_buffer;
 use crate::mtl_fwd::{
     MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLFunctionPtr, MTLRenderPipelineStatePtr,
     MTLSamplerStatePtr, MTLTexturePtr, MTLVertexDescriptorPtr,
@@ -747,6 +746,30 @@ impl Drop for MetalGpu {
 }
 
 /// Binds the vertex buffers that `pipeline` reads.
+/// Copies `data` into a new buffer of `size` bytes, or allocates an empty
+/// one when there is no data.
+fn new_metal_buffer(
+    device: &ProtocolObject<dyn MTLDevice>,
+    data: Option<&[u8]>,
+    size: usize,
+    usage: MTLResourceOptions,
+) -> Option<MTLBufferPtr> {
+    match data.filter(|d| !d.is_empty() && size != 0) {
+        Some(data) => {
+            debug_assert!(data.len() >= size);
+            // SAFETY: `data` holds at least `size` bytes, which Metal copies.
+            unsafe {
+                device.newBufferWithBytes_length_options(
+                    NonNull::new_unchecked(data.as_ptr().cast_mut().cast::<std::ffi::c_void>()),
+                    size,
+                    usage,
+                )
+            }
+        }
+        None => device.newBufferWithLength_options(size.max(1), usage),
+    }
+}
+
 fn bind_vertex_buffers(
     encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
     pipeline: &Pipeline,

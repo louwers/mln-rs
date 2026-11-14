@@ -393,21 +393,15 @@ impl Renderer {
         parameters.evaluated_light = render_tree_parameters.light.clone(); // conformance
         parameters.opaque_pass_cutoff = render_tree_parameters.opaque_pass_cut_off;
 
-        // - UPLOAD PASS ---------------------------------------------------
+        // - UPLOAD --------------------------------------------------------
         // Uploads all required buffers and images before we do any actual
         // rendering.
-        {
-            let encoder = parameters.encoder.as_ref().expect("encoder");
-            let upload_pass = encoder.create_upload_pass("upload", &*image);
-
-            // Update all clipping IDs + upload buckets.
-            for item in render_tree.get_source_render_items() {
-                item.upload(&*upload_pass);
-            }
-            static_data.upload(&*upload_pass);
-            parameters.line_atlas.borrow_mut().upload(&*upload_pass);
-            parameters.pattern_atlas.borrow_mut().upload(&*upload_pass); // conformance
+        for item in render_tree.get_source_render_items() {
+            item.upload(context);
         }
+        static_data.upload(context);
+        parameters.line_atlas.borrow_mut().upload(context);
+        parameters.pattern_atlas.borrow_mut().upload(context); // conformance
 
         // - LAYER GROUP UPDATE --------------------------------------------
         // Updates all layer groups and process changes
@@ -424,69 +418,63 @@ impl Renderer {
         orchestrator.process_changes();
         let layers_updated = Instant::now();
 
-        // Upload layer groups
-        {
-            let encoder = parameters.encoder.as_ref().expect("encoder");
-            let upload_pass = encoder.create_upload_pass("layerGroup-upload", &*image);
+        // - LAYER GROUP UPLOAD ----------------------------------------------
+        // Update the debug layer groups
+        orchestrator.update_debug_layer_groups(render_tree, &parameters); // layers: debug
 
-            // Update the debug layer groups
-            orchestrator.update_debug_layer_groups(render_tree, &parameters); // layers: debug
-
-            // Tweakers are run in the upload pass so they can set up
-            // uniforms.
-            parameters.current_layer = 0;
-            for layer_group in orchestrator.layer_groups() {
-                orchestrator.run_tweakers(&layer_group, &parameters);
-                parameters.current_layer += 1;
-            }
-            parameters.current_layer = 0;
-            // layers: debug
-            for layer_group in orchestrator.debug_layer_groups() {
-                orchestrator.run_tweakers(&layer_group, &parameters);
-                parameters.current_layer += 1;
-            }
-
-            // Give the layers a chance to upload
-            orchestrator.visit_layer_groups(|layer_group| layer_group.upload(&*upload_pass));
-            if let Some(globe_depth) = orchestrator.get_globe_depth_layer_group() {
-                globe_depth.borrow_mut().upload(&*upload_pass);
-            }
-            if let Some(sky) = orchestrator.get_sky_layer_group() {
-                sky.borrow_mut().upload(&*upload_pass);
-            }
-            if let Some(atmosphere) = orchestrator.get_atmosphere_layer_group() {
-                atmosphere.borrow_mut().upload(&*upload_pass);
-            }
-
-            // Give the render targets a chance to upload
-            // dem-heatmap
-            for render_target in orchestrator.render_targets() {
-                render_target.borrow().upload(&*upload_pass);
-            }
-
-            // Upload the Debug layer group
-            // layers: debug
-            for layer_group in orchestrator.debug_layer_groups() {
-                layer_group.borrow_mut().upload(&*upload_pass);
-            }
-
-            // The masks of the tiles the layer groups clip to and, when any
-            // of them uses the stencil buffer, of the tile that clears it.
-            let mut clip_tiles = BTreeSet::new();
-            orchestrator.visit_layer_groups(|layer_group| {
-                if let Some(tiles) = layer_group.as_tile_layer_group().and_then(|group| group.stencil_tiles.as_ref()) {
-                    clip_tiles.extend(tiles.iter().copied().chain(parameters.stencil_clear_tile()));
-                }
-            });
-            self.clip_masks.update(
-                context,
-                &static_data.shaders,
-                parameters.state.is_globe_rendering(),
-                &clip_tiles,
-                |tile| to_projection_ubo(&parameters.projection_data_for_tile(tile, false)),
-                &*upload_pass,
-            );
+        // Tweakers run before the layer groups upload, so they can set up
+        // uniforms.
+        parameters.current_layer = 0;
+        for layer_group in orchestrator.layer_groups() {
+            orchestrator.run_tweakers(&layer_group, &parameters);
+            parameters.current_layer += 1;
         }
+        parameters.current_layer = 0;
+        // layers: debug
+        for layer_group in orchestrator.debug_layer_groups() {
+            orchestrator.run_tweakers(&layer_group, &parameters);
+            parameters.current_layer += 1;
+        }
+
+        // Give the layers a chance to upload
+        orchestrator.visit_layer_groups(|layer_group| layer_group.upload(context));
+        if let Some(globe_depth) = orchestrator.get_globe_depth_layer_group() {
+            globe_depth.borrow_mut().upload(context);
+        }
+        if let Some(sky) = orchestrator.get_sky_layer_group() {
+            sky.borrow_mut().upload(context);
+        }
+        if let Some(atmosphere) = orchestrator.get_atmosphere_layer_group() {
+            atmosphere.borrow_mut().upload(context);
+        }
+
+        // Give the render targets a chance to upload
+        // dem-heatmap
+        for render_target in orchestrator.render_targets() {
+            render_target.borrow().upload(context);
+        }
+
+        // Upload the Debug layer group
+        // layers: debug
+        for layer_group in orchestrator.debug_layer_groups() {
+            layer_group.borrow_mut().upload(context);
+        }
+
+        // The masks of the tiles the layer groups clip to and, when any
+        // of them uses the stencil buffer, of the tile that clears it.
+        let mut clip_tiles = BTreeSet::new();
+        orchestrator.visit_layer_groups(|layer_group| {
+            if let Some(tiles) = layer_group.as_tile_layer_group().and_then(|group| group.stencil_tiles.as_ref()) {
+                clip_tiles.extend(tiles.iter().copied().chain(parameters.stencil_clear_tile()));
+            }
+        });
+        self.clip_masks.update(
+            context,
+            &static_data.shaders,
+            parameters.state.is_globe_rendering(),
+            &clip_tiles,
+            |tile| to_projection_ubo(&parameters.projection_data_for_tile(tile, false)),
+        );
         parameters.clip_masks = std::mem::take(&mut self.clip_masks);
 
         let layers_uploaded = Instant::now();

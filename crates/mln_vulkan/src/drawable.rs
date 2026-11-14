@@ -23,17 +23,17 @@ use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::drawable::{self, DrawSegment, DrawableBase, Textures, UniqueDrawSegment};
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::index_vector::{IndexBufferBase, IndexVectorBasePtr};
+use mln_gfx::gpu::{BufferId, GpuError};
+use mln_gfx::index_vector::IndexVectorBasePtr;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBasePtr, same_shader};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::Texture2DPtr;
-use mln_gfx::types::{BufferUsageType, DepthMaskType};
+use mln_gfx::types::DepthMaskType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
-use mln_gfx::upload_pass::UploadPass as _;
+use mln_gfx::upload;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
-use mln_gfx::vertex_buffer::IndexBuffer as GfxIndexBuffer;
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
@@ -43,15 +43,6 @@ use crate::pipeline::PipelineInfo;
 use crate::render_pass::RenderPass;
 use crate::shaders::layout::{DescriptorSetType, UBO_INDEX_PUSH_CONSTANT_SIZE};
 use crate::shaders::shader_program::as_vulkan_shader;
-use crate::upload_pass::UploadPass;
-use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
-
-/// The uploaded buffer of an index vector.
-struct IndexBuffer {
-    buffer: GfxIndexBuffer,
-}
-
-impl IndexBufferBase for IndexBuffer {}
 
 struct DrawableImpl {
     segments: Vec<UniqueDrawSegment>,
@@ -88,8 +79,7 @@ pub(crate) struct Drawable {
 /// binding.
 #[derive(Clone, Copy, PartialEq)]
 struct InputSource {
-    /// The address of the buffer's resource.
-    buffer: *const (),
+    buffer: BufferId,
     stride: u32,
     input_rate: vk::VertexInputRate,
     /// Where in the buffer the binding starts, in bytes.
@@ -141,42 +131,33 @@ impl Drawable {
         self.impl_.stencil_for_3d = Some(*value);
     }
 
-    fn upload_in(&mut self, upload_pass: &UploadPass) {
+    fn upload_in(&mut self, context: &Context) -> Result<(), GpuError> {
         let Some(shader_ptr) = self.base.shader.clone() else {
             Log::warning(
                 Event::General,
                 format!("Missing shader for drawable {}/{}", self.base.unique_id, self.base.name),
             );
             debug_assert!(false);
-            return;
+            return Ok(());
         };
         let Some(shader) = as_vulkan_shader(&shader_ptr) else {
-            return;
+            return Ok(());
         };
-        let usage = BufferUsageType::StaticDraw;
 
         // We need either raw index data or a buffer already created from
         // them. We can have a buffer and no indexes, but only if it's not
         // marked dirty.
         let Some(indexes) = self.impl_.indexes.clone() else {
             debug_assert!(false, "Missing index data");
-            return;
+            return Ok(());
         };
         {
             let mut indexes = indexes.borrow_mut();
             if indexes.empty() && (indexes.get_buffer().is_none() || indexes.get_dirty()) {
                 debug_assert!(false, "Missing index data");
-                return;
+                return Ok(());
             }
-            if indexes.get_buffer().is_none() || indexes.get_dirty() {
-                // Create a buffer for the index data. We don't update any
-                // existing buffer because it may still be in use by the
-                // previous frame.
-                let resource = upload_pass.create_index_buffer_of(&indexes);
-                let buffer = GfxIndexBuffer::new(resource);
-                indexes.set_buffer(Some(Box::new(IndexBuffer { buffer })));
-                indexes.set_dirty(false);
-            }
+            upload::upload_indexes(context, &mut indexes)?;
         }
 
         // No vertex input yet, or a new shader's to build.
@@ -187,19 +168,16 @@ impl Drawable {
                 _ => true,
             };
 
+        let force = self.base.attribute_update_time.is_none();
         if build_attribs {
             let attrs = Rc::clone(self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr));
             // Apply drawable values to shader defaults.
-            let attribute_bindings = upload_pass.build_attribute_bindings(
-                self.impl_.vertex_count,
-                self.impl_.vertex_type,
-                /*vertex_attribute_index=*/ usize::MAX,
-                /*vertex_data=*/ &[],
+            let attribute_bindings = upload::build_attribute_bindings(
+                context,
                 shader.get_vertex_attributes(),
                 &mut attrs.borrow_mut(),
-                usage,
-                self.base.attribute_update_time,
-            );
+                force,
+            )?;
             attrs.borrow().visit_attributes(|attrib| attrib.set_dirty(false));
             if self.impl_.attribute_bindings != attribute_bindings {
                 self.impl_.attribute_bindings = attribute_bindings;
@@ -215,17 +193,12 @@ impl Drawable {
 
         if build_instance_buffer && let Some(attrs) = self.base.instance_attributes.clone() {
             // Build instance attribute buffers.
-            let count = attrs.borrow().get_min_count();
-            let instance_bindings = upload_pass.build_attribute_bindings(
-                count,
-                /*vertex_type=*/ AttributeDataType::Byte,
-                /*vertex_attribute_index=*/ usize::MAX,
-                /*vertex_data=*/ &[],
+            let instance_bindings = upload::build_attribute_bindings(
+                context,
                 shader.get_instance_attributes(),
                 &mut attrs.borrow_mut(),
-                usage,
-                self.base.attribute_update_time,
-            );
+                force,
+            )?;
             // clear dirty flag
             attrs.borrow().visit_attributes(|attrib| attrib.set_dirty(false));
             if self.impl_.instance_bindings != instance_bindings {
@@ -234,16 +207,17 @@ impl Drawable {
         }
 
         if build_attribs || build_instance_buffer {
-            self.build_vulkan_input_bindings(upload_pass.vulkan_context());
+            self.build_vulkan_input_bindings(context);
         }
 
         for texture in self.base.textures.iter().flatten() {
-            if let Err(error) = texture.borrow_mut().upload(&**upload_pass.vulkan_context()) {
+            if let Err(error) = texture.borrow_mut().upload(context) {
                 Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
             }
         }
 
         self.base.attribute_update_time = Some(Instant::now());
+        Ok(())
     }
 
     /// Builds the vertex input of the pipelines, a binding for each way the
@@ -262,6 +236,7 @@ impl Drawable {
         let mut unique_sources: Vec<Option<InputSource>> = Vec::new();
         let mut dummy_binding_index: Option<u32> = None;
 
+        let gpu = context.vulkan_gpu();
         for (bindings, input_rate) in [
             (&impl_.attribute_bindings, vk::VertexInputRate::VERTEX),
             (&impl_.instance_bindings, vk::VertexInputRate::INSTANCE),
@@ -270,12 +245,9 @@ impl Drawable {
                 let Some(binding) = binding else {
                     continue;
                 };
-                let vertex_buffer = binding
-                    .vertex_buffer_resource
-                    .as_ref()
-                    .and_then(|resource| Some((resource, resource.downcast_ref::<VertexBufferResource>()?)))
-                    .filter(|(_, buffer)| buffer.get().is_valid());
-                let Some((resource, vertex_buffer)) = vertex_buffer else {
+                let vertex_buffer =
+                    binding.buffer.as_ref().and_then(|buffer| Some((buffer.id(), gpu.native_buffer(buffer.id())?.0)));
+                let Some((id, vertex_buffer)) = vertex_buffer else {
                     // Back missing attributes with a zero-stride dummy
                     // buffer that reads a constant value, per vertex or per
                     // instance alike.
@@ -304,7 +276,7 @@ impl Drawable {
                 };
 
                 let source = InputSource {
-                    buffer: Rc::as_ptr(resource).cast(),
+                    buffer: id,
                     stride: binding.vertex_stride,
                     input_rate,
                     offset: vk::DeviceSize::from(binding.vertex_offset) * vk::DeviceSize::from(binding.vertex_stride),
@@ -321,7 +293,7 @@ impl Drawable {
                             .stride(source.stride)
                             .input_rate(input_rate),
                     );
-                    impl_.vulkan_vertex_buffers.push(vertex_buffer.get().get_vulkan_buffer());
+                    impl_.vulkan_vertex_buffers.push(vertex_buffer);
                     impl_.vulkan_vertex_offsets.push(source.offset);
                     index
                 };
@@ -354,18 +326,10 @@ impl Drawable {
             );
             if let Some(indexes) = &self.impl_.indexes {
                 let indexes = indexes.borrow();
-                let index_buffer = indexes
-                    .get_buffer()
-                    .and_then(|b| b.downcast_ref::<IndexBuffer>())
-                    .and_then(|b| b.buffer.get_resource::<IndexBufferResource>())
-                    .filter(|resource| resource.get().is_valid());
-                if let Some(index_buffer) = index_buffer {
-                    device.cmd_bind_index_buffer(
-                        command_buffer,
-                        index_buffer.get().get_vulkan_buffer(),
-                        0,
-                        vk::IndexType::UINT16,
-                    );
+                let index_buffer =
+                    indexes.get_buffer().and_then(|buffer| context.vulkan_gpu().native_buffer(buffer.id()));
+                if let Some((index_buffer, _)) = index_buffer {
+                    device.cmd_bind_index_buffer(command_buffer, index_buffer, 0, vk::IndexType::UINT16);
                 }
             }
         }
@@ -410,9 +374,12 @@ impl drawable::Drawable for Drawable {
         &mut self.base
     }
 
-    fn upload(&mut self, upload_pass: &dyn mln_gfx::upload_pass::UploadPass) {
-        if let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() {
-            self.upload_in(upload_pass);
+    fn upload(&mut self, context: &dyn mln_gfx::context::Context) {
+        let Some(context) = context.downcast_ref::<Context>() else {
+            return;
+        };
+        if let Err(error) = self.upload_in(context) {
+            Log::error(Event::Render, format!("Uploading drawable {} failed: {error}", self.base.name));
         }
     }
 

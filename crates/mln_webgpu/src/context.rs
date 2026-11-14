@@ -1,17 +1,18 @@
 // Resources hold `Rc<Context>`, so the context keeps no `Rc` to a resource
-// that points back at it. The exception is the placeholder vertex buffers, which the backends release with `release_cached_buffers` when
-// they drop the context; otherwise the context, and with it the device,
+// that points back at it; otherwise the context, and with it the device,
 // would never be freed.
 
 use std::cell::{Cell, RefCell, RefMut};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
+use mln_gfx::attribute::AttributeBindingArray;
 use mln_gfx::backend::Type as BackendType;
+use mln_gfx::buffer::{Buffer, BufferPtr};
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{BufferUsage, Gpu, GpuError};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::rendering_stats::RenderingStats;
@@ -19,8 +20,7 @@ use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::types::TextureChannelDataType;
-use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
-use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
+use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::size::Size;
 
 use crate::bind_groups::{BindGroupCache, IndexTable};
@@ -36,10 +36,9 @@ pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
-    // `defaultVertexBuffers`: the default attribute buffers of
-    // UploadPass::build_attribute_bindings, one per attribute type, with the
-    // vertex count each covers.
-    dummy_vertex_buffers: RefCell<HashMap<AttributeDataType, (usize, UniqueVertexBufferResource)>>,
+    /// The buffers of default attribute values (`bind_default_values`),
+    /// one per attribute type, with the vertex count each covers.
+    default_vertex_buffers: RefCell<HashMap<AttributeDataType, (usize, BufferPtr)>>,
     /// Command buffers the command encoders have submitted.
     submissions: Cell<u64>,
     /// The group of `globalIndex`, made with the first shader that needs it.
@@ -54,7 +53,7 @@ impl Context {
             base: ContextBase::new(Rc::clone(backend.released())),
             backend,
             weak_self: Weak::clone(weak),
-            dummy_vertex_buffers: RefCell::default(),
+            default_vertex_buffers: RefCell::default(),
             submissions: Cell::new(0),
             index_table: RefCell::new(None),
             bind_groups: BindGroupCache::default(),
@@ -128,14 +127,6 @@ impl Context {
         stats.mem_buffers -= bytes as i32;
     }
 
-    /// Counts a write of `bytes` to a GPU buffer in the stats.
-    pub(crate) fn count_buffer_update(&self, bytes: usize) {
-        let mut stats = self.rendering_stats_mut();
-        stats.buffer_updates += 1;
-        stats.buffer_obj_updates += 1;
-        stats.buffer_update_bytes = stats.buffer_update_bytes.wrapping_add(bytes);
-    }
-
     pub(crate) fn create_offscreen_texture_with(
         &self,
         size: Size,
@@ -146,17 +137,47 @@ impl Context {
         OffscreenTexture::new(self.rc(), size, type_, depth, stencil)
     }
 
-    /// Drops the placeholder vertex buffers (see
-    /// `UploadPass::dummy_vertex_buffer`), which hold an `Rc` to this context
-    /// (see the top of this file).
+    /// Drops the buffers of default attribute values, before the context
+    /// destroys what the renderer released.
     pub(crate) fn release_cached_buffers(&self) {
-        self.dummy_vertex_buffers.borrow_mut().clear();
+        self.default_vertex_buffers.borrow_mut().clear();
     }
 
-    pub(crate) fn dummy_vertex_buffers(
+    /// Binds the attributes of `bindings` that have no buffer to one of
+    /// default values for `vertex_count` vertices, since WebGPU draws need a
+    /// buffer for every attribute: white for colors (`Float4`), full
+    /// opacity (`Float2`) and zeros otherwise.
+    pub(crate) fn bind_default_values(
         &self,
-    ) -> &RefCell<HashMap<AttributeDataType, (usize, UniqueVertexBufferResource)>> {
-        &self.dummy_vertex_buffers
+        bindings: &mut AttributeBindingArray,
+        vertex_count: usize,
+    ) -> Result<(), GpuError> {
+        for binding in bindings.iter_mut().flatten().filter(|binding| binding.buffer.is_none()) {
+            binding.buffer = Some(self.default_vertex_buffer(binding.attribute.data_type, vertex_count)?);
+        }
+        Ok(())
+    }
+
+    /// A buffer of default values of `data_type` for at least
+    /// `vertex_count` vertices. The context keeps one per type, grown
+    /// geometrically; a binding keeps a replaced smaller one alive.
+    fn default_vertex_buffer(&self, data_type: AttributeDataType, vertex_count: usize) -> Result<BufferPtr, GpuError> {
+        let mut cache = self.default_vertex_buffers.borrow_mut();
+        let cached_count = match cache.get(&data_type) {
+            Some((count, buffer)) if *count >= vertex_count => return Ok(Rc::clone(buffer)),
+            Some((count, _)) => *count,
+            None => 0,
+        };
+        let count = vertex_count.max(2 * cached_count).max(1);
+        let mut data = vec![0u8; VertexAttribute::get_stride_of(data_type) * count];
+        if matches!(data_type, AttributeDataType::Float4 | AttributeDataType::Float2) {
+            for value in data.as_chunks_mut::<4>().0 {
+                value.copy_from_slice(&1.0f32.to_ne_bytes());
+            }
+        }
+        let buffer = Buffer::create(self, BufferUsage::Vertex, &data)?;
+        cache.insert(data_type, (count, Rc::clone(&buffer)));
+        Ok(buffer)
     }
 }
 

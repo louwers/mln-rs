@@ -267,11 +267,8 @@ fn render_frame(
         clip_stencil: StencilMode::disabled(),
     };
 
-    {
-        let upload_pass = parameters.encoder.create_upload_pass("layerGroup-upload", renderable);
-        tweak(context, &layer_group, bg, left_half_matrix());
-        layer_group.borrow_mut().upload(&*upload_pass);
-    }
+    tweak(context, &layer_group, bg, left_half_matrix());
+    layer_group.borrow_mut().upload(context);
 
     parameters.render_pass = Some(parameters.encoder.create_render_pass(
         "main buffer",
@@ -495,17 +492,9 @@ fn tile_clipping_masks_limit_stenciled_drawables() {
             pass: StencilOpType::Replace,
         },
     };
-    {
-        let upload_pass = parameters.encoder.create_upload_pass("layerGroup-upload", renderable);
-        tweak(
-            context,
-            &layer_group,
-            &Background { color: Color::new(1.0, 1.0, 0.0, 1.0), opacity: 1.0 },
-            full_matrix(),
-        );
-        layer_group.borrow_mut().upload(&*upload_pass);
-        mask.upload(&*upload_pass);
-    }
+    tweak(context, &layer_group, &Background { color: Color::new(1.0, 1.0, 0.0, 1.0), opacity: 1.0 }, full_matrix());
+    layer_group.borrow_mut().upload(context);
+    mask.upload(context);
     parameters.render_pass = Some(parameters.encoder.create_render_pass(
         "main buffer",
         &RenderPassDescriptor {

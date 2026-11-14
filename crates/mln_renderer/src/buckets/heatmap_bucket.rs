@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::expression::Value;
@@ -184,7 +184,7 @@ impl Bucket for HeatmapBucket {
         Ok(())
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &dyn Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 

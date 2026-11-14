@@ -6,7 +6,7 @@
 use std::rc::Rc;
 
 use glam::Vec2;
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
 use mln_style::layer;
 use mln_style_types::TranslateAnchorType;
@@ -119,8 +119,8 @@ impl RenderTile {
         self.needs_rendering
     }
 
-    pub(crate) fn upload(&self, upload_pass: &dyn UploadPass) {
-        self.render_data().upload(upload_pass);
+    pub(crate) fn upload(&self, context: &dyn Context) {
+        self.render_data().upload(context);
     }
 
     /// Prepares the render tile for drawing; `tile` is the tile it was

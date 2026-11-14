@@ -3,8 +3,8 @@
 
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::types::{
-    BufferUsageType, ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType,
-    DepthFunctionType, StencilFunctionType, StencilOpType, TextureFilterType, TextureWrapType,
+    ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
+    StencilFunctionType, StencilOpType, TextureFilterType, TextureWrapType,
 };
 
 #[must_use]
@@ -106,15 +106,6 @@ pub(crate) fn cull_face_winding(value: CullFaceWindingType) -> u32 {
     match value {
         CullFaceWindingType::Clockwise => glow::CW,
         CullFaceWindingType::CounterClockwise => glow::CCW,
-    }
-}
-
-#[must_use]
-pub(crate) fn buffer_usage(value: BufferUsageType) -> u32 {
-    match value {
-        BufferUsageType::StreamDraw => glow::STREAM_DRAW,
-        BufferUsageType::StaticDraw => glow::STATIC_DRAW,
-        BufferUsageType::DynamicDraw => glow::DYNAMIC_DRAW,
     }
 }
 

@@ -10,7 +10,7 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
@@ -123,7 +123,7 @@ pub(crate) trait Bucket: Any + Send + Sync {
     /// As long as this bucket has a Prepare render pass, this function is
     /// getting called. Typically, this only happens once when the bucket is
     /// being rendered for the first time.
-    fn upload(&self, upload_pass: &dyn UploadPass);
+    fn upload(&self, context: &dyn Context);
 
     fn has_data(&self) -> bool;
 

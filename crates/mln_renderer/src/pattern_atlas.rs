@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_gfx::texture2d::{Texture2DPtr, upload_image};
 use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
 use mln_util::image::PremultipliedImage;
@@ -145,8 +145,7 @@ impl PatternAtlas {
 
     /// Uploads the atlas image to its texture, which is made again when the
     /// atlas grew since.
-    pub(crate) fn upload(&mut self, upload_pass: &dyn UploadPass) {
-        let context = upload_pass.get_context();
+    pub(crate) fn upload(&mut self, context: &dyn Context) {
         let uploaded = match &self.atlas_texture_2d {
             None => {
                 let texture = context.create_texture_2d();

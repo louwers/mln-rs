@@ -221,7 +221,7 @@ impl Resource {
 
 impl TargetResource for Resource {
     fn bind(&self) {
-        // An upload pass and a render pass both bind the resource in one
+        // A custom layer and a render pass both bind the resource in one
         // frame, and the frame's end commits the one command buffer.
         let mut command_buffer = self.command_buffer.borrow_mut();
         if command_buffer.is_none() {

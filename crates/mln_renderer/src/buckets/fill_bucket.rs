@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
@@ -206,7 +206,7 @@ impl Bucket for FillBucket {
         self.sdf_patterns.get(layer_id).copied().unwrap_or(false)
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &dyn Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 

@@ -4,8 +4,8 @@
 //
 // Differences from C++:
 // - C++ takes the next drawable and a new command buffer in every `bind()`,
-//   which the upload pass and the render pass of a frame both call; the
-//   port keeps them until `swap()`, as the headless backend does.
+//   which a frame can call more than once (its upload pass and its render
+//   pass); the port keeps them until `swap()`, as the headless backend does.
 // - The frame is encoded on the backend's command queue; C++ makes a second
 //   queue for the window.
 // - The depth and stencil attachments are Metal textures of their own.

@@ -17,7 +17,6 @@
 #![expect(unsafe_code, reason = "Metal through objc2 is the FFI here")]
 
 pub mod borrowed_target;
-pub mod buffer_resource;
 pub mod command_encoder;
 pub mod context;
 pub mod custom_layer;
@@ -37,8 +36,6 @@ pub mod renderer_backend;
 pub mod shaders;
 pub mod surface_target;
 pub mod tile_layer_group;
-pub mod upload_pass;
-pub mod vertex_buffer_resource;
 
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, PendingReads};
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};

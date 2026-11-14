@@ -69,13 +69,13 @@ impl layer_group::LayerGroupBase for LayerGroup {
         self.inner.clear_drawables()
     }
 
-    fn upload(&mut self, upload_pass: &dyn mln_gfx::upload_pass::UploadPass) {
+    fn upload(&mut self, context: &dyn mln_gfx::context::Context) {
         if !self.inner.base.enabled {
             return;
         }
         self.inner.visit_drawables(|drawable| {
             if drawable.get_enabled() {
-                drawable.upload(upload_pass);
+                drawable.upload(context);
             }
         });
     }

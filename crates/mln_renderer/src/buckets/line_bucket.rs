@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use geometry::Point;
-use mln_gfx::UploadPass;
+use mln_gfx::Context;
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorDistances, PolylineGeneratorOptions, dist};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
@@ -300,7 +300,7 @@ impl Bucket for LineBucket {
         Ok(())
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &dyn Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 

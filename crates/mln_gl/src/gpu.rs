@@ -316,6 +316,9 @@ pub struct GlGpu {
     framebuffers: HashMap<(Option<TextureId>, Option<TextureId>), FramebufferID>,
     // Dropped before the platform's context, which the functions belong to.
     gl: Arc<Gl>,
+    /// The context `gl` calls, for the calls that take a JS array.
+    #[cfg(target_family = "wasm")]
+    webgl2: web_sys::WebGl2RenderingContext,
     /// The context the functions belong to, `None` for a renderer
     /// backend's, which deletes this backend's objects with
     /// [`release`](Self::release).
@@ -342,12 +345,24 @@ impl GlGpu {
     /// whenever this backend is called, sharing the cache of the GL state
     /// that the context's drawable path sets. Its objects go with
     /// [`release`](Self::release), not with the backend.
-    pub(crate) fn hosted(gl: Arc<Gl>, state: Rc<State>) -> GlGpu {
+    pub(crate) fn hosted(
+        gl: Arc<Gl>,
+        state: Rc<State>,
+        #[cfg(target_family = "wasm")] webgl2: web_sys::WebGl2RenderingContext,
+    ) -> GlGpu {
+        #[cfg(target_family = "wasm")]
+        return GlGpu::on(gl, state, None, webgl2);
+        #[cfg(not(target_family = "wasm"))]
         GlGpu::on(gl, state, None)
     }
 
     /// A backend on the current context of `gl`.
-    fn on(gl: Arc<Gl>, state: Rc<State>, platform: Option<Box<dyn PlatformContext>>) -> GlGpu {
+    fn on(
+        gl: Arc<Gl>,
+        state: Rc<State>,
+        platform: Option<Box<dyn PlatformContext>>,
+        #[cfg(target_family = "wasm")] webgl2: web_sys::WebGl2RenderingContext,
+    ) -> GlGpu {
         let desktop = !gl.version().is_embedded;
         // SAFETY: the context is current, and the parameters and the
         // capability are GL ES 3.0's or desktop OpenGL 3.0's.
@@ -390,6 +405,8 @@ impl GlGpu {
             bind_groups: SlotMap::with_key(),
             framebuffers: HashMap::new(),
             gl,
+            #[cfg(target_family = "wasm")]
+            webgl2,
             platform,
         }
     }
@@ -414,6 +431,12 @@ impl GlGpu {
             platform.done_current();
         }
         result
+    }
+
+    /// The GL buffer of `buffer`, `None` for a storage buffer, which has
+    /// one only once a uniform block reads it.
+    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<BufferID> {
+        self.buffers.get(buffer)?.object
     }
 
     /// The GL buffer of `buffer`, and the range of it that a uniform block
@@ -1186,6 +1209,35 @@ impl Gpu for GlGpu {
                 gpu.gl.bind_buffer(target, object);
                 gpu.gl.buffer_sub_data_u8_slice(target, offset as i32, data);
             }
+        });
+        Ok(())
+    }
+
+    /// Writes from the JS array with `bufferSubData`, except to a storage
+    /// buffer, whose bytes are kept in wasm memory.
+    #[cfg(target_family = "wasm")]
+    fn write_buffer_from_host(
+        &mut self,
+        buffer: BufferId,
+        offset: u64,
+        data: &mln_util::host_bytes::HostBytes,
+    ) -> Result<(), GpuError> {
+        let entry = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
+        let end = offset + data.len() as u64;
+        if end > entry.size {
+            return Err(GpuError::Invalid(format!("a write to bytes {offset}..{end} of a buffer of {}", entry.size)));
+        }
+        let (usage, object) = (entry.usage, entry.object);
+        let (Some(object), Some(array)) = (object, data.array()) else {
+            let mut bytes = data.to_pod_vec::<u8>();
+            bytes.resize(bytes.len().next_multiple_of(4), 0);
+            return self.write_buffer(buffer, offset, &bytes);
+        };
+        self.current(|gpu| {
+            let target = buffer_target(usage);
+            // SAFETY: the buffer is alive and holds the bytes written.
+            unsafe { gpu.gl.bind_buffer(target, Some(object)) };
+            gpu.webgl2.buffer_sub_data_with_f64_and_array_buffer_view(target, offset as f64, &array);
         });
         Ok(())
     }

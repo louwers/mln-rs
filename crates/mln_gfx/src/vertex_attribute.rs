@@ -6,9 +6,9 @@ use std::rc::Rc;
 
 use mln_util::time::Instant;
 
+use crate::buffer::BufferPtr;
 use crate::gfx_types::AttributeDataType;
 use crate::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
-use crate::vertex_buffer::UniqueVertexBufferResource;
 use crate::vertex_vector::VertexVectorBasePtr;
 
 pub struct VertexAttribute {
@@ -24,7 +24,8 @@ pub struct VertexAttribute {
     shared_offset: u32,
     shared_vertex_offset: u32,
     shared_stride: u32,
-    buffer: Option<UniqueVertexBufferResource>,
+    /// The buffer of the attribute's own data, made by its first upload.
+    buffer: Option<BufferPtr>,
 }
 
 impl VertexAttribute {
@@ -142,10 +143,10 @@ impl VertexAttribute {
         self.shared_stride = stride;
     }
 
-    pub fn get_buffer(&self) -> Option<&UniqueVertexBufferResource> {
+    pub fn get_buffer(&self) -> Option<&BufferPtr> {
         self.buffer.as_ref()
     }
-    pub fn set_buffer(&mut self, value: Option<UniqueVertexBufferResource>) {
+    pub fn set_buffer(&mut self, value: Option<BufferPtr>) {
         self.buffer = value;
     }
 }
@@ -158,7 +159,7 @@ pub struct VertexAttributeArray {
     attrs: [Option<UniqueVertexAttribute>; MAX_ATTRIBUTE_COUNT_PER_SHADER],
 }
 
-/// A shared attribute array. Drawables, builders and upload passes mutate it
+/// A shared attribute array. Drawables, builders and uploads mutate it
 /// through the shared handle.
 pub type VertexAttributeArrayPtr = Rc<RefCell<VertexAttributeArray>>;
 

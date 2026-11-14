@@ -12,6 +12,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 
 use crate::color_mode::ColorMode;
+use crate::context::Context;
 use crate::cull_face_mode::CullFaceMode;
 use crate::draw_mode::DrawMode;
 use crate::drawable_tweaker::DrawableTweakerPtr;
@@ -26,7 +27,6 @@ use crate::stencil_mode::StencilMode;
 use crate::texture2d::Texture2DPtr;
 use crate::types::DepthMaskType;
 use crate::uniform_buffer::UniformBufferArray;
-use crate::upload_pass::UploadPass;
 use crate::vertex_attribute::VertexAttributeArrayPtr;
 
 pub(crate) type DrawPriority = i64;
@@ -152,9 +152,9 @@ pub trait Drawable: Any {
     /// mutate their impl state, so `&mut self` here.)
     fn draw(&mut self, parameters: &mut dyn PaintParameters);
 
-    /// Uploads the drawable's vertices, indexes and textures in
-    /// `upload_pass`, which must be of the drawable's backend.
-    fn upload(&mut self, upload_pass: &dyn UploadPass);
+    /// Uploads the drawable's vertices, indexes and textures to `context`,
+    /// which must be of the drawable's backend.
+    fn upload(&mut self, context: &dyn Context);
 
     /// Update vertices, indices, and segments
     fn update_vertex_attributes(

@@ -103,7 +103,7 @@ pub struct Context {
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
 
-    /// The `Gpu` the renderer's uniform buffers belong to. A frame's
+    /// The `Gpu` the renderer's buffers and textures belong to. A frame's
     /// submission comes after its writes, and the buffers the renderer
     /// drops go after the frame's submission.
     gpu: RefCell<VulkanGpu>,
@@ -400,7 +400,7 @@ impl Context {
         }
     }
 
-    /// The `Gpu` the renderer's uniform buffers and textures belong to.
+    /// The `Gpu` the renderer's buffers and textures belong to.
     pub(crate) fn vulkan_gpu(&self) -> Ref<'_, VulkanGpu> {
         self.gpu.borrow()
     }
@@ -676,14 +676,8 @@ impl Context {
         }
     }
 
-    pub fn create_buffer(
-        &self,
-        data: Option<&[u8]>,
-        size: usize,
-        usage: vk::BufferUsageFlags,
-        persistent: bool,
-    ) -> BufferResource {
-        BufferResource::new(self, data, size, usage, persistent)
+    pub fn create_buffer(&self, data: Option<&[u8]>, size: usize, usage: vk::BufferUsageFlags) -> BufferResource {
+        BufferResource::new(self, data, size, usage)
     }
 
     /// Compiles the two stages of `source`, with its prelude, the program's
@@ -744,7 +738,7 @@ impl Context {
         let usage = vk::BufferUsageFlags::VERTEX_BUFFER
             | vk::BufferUsageFlags::UNIFORM_BUFFER
             | vk::BufferUsageFlags::STORAGE_BUFFER;
-        let buffer = BufferResource::new(self, None, 16, usage, false);
+        let buffer = BufferResource::new(self, None, 16, usage);
         let handle = buffer.get_vulkan_buffer();
         *self.dummy_buffer.borrow_mut() = Some(buffer);
         handle

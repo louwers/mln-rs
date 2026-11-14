@@ -133,13 +133,7 @@ pub struct BufferResource {
 impl BufferResource {
     /// Creates a buffer of `size` bytes holding `data`. Without `data` its
     /// contents are unspecified.
-    pub(crate) fn new(
-        context: &Context,
-        data: Option<&[u8]>,
-        size: usize,
-        usage: vk::BufferUsageFlags,
-        _persistent: bool,
-    ) -> Self {
+    pub(crate) fn new(context: &Context, data: Option<&[u8]>, size: usize, usage: vk::BufferUsageFlags) -> Self {
         let buffer_allocation =
             BufferAllocation::create(context.get_backend(), size, usage, MemoryLocation::CpuToGpu, "buffer")
                 .map(Rc::new);
@@ -163,15 +157,6 @@ impl BufferResource {
             stats.total_buffer_objs += 1;
         }
         resource
-    }
-
-    /// The context, unless it is gone.
-    pub(crate) fn context(&self) -> Option<Rc<Context>> {
-        self.context.upgrade()
-    }
-
-    pub(crate) fn get_size_in_bytes(&self) -> usize {
-        self.size
     }
 
     /// The buffer, null if its allocation failed.

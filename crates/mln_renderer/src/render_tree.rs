@@ -3,7 +3,7 @@
 // `std::set<LayerRenderItem>` (ordered and deduplicated by `index`) is a
 // `VecMap<u32, LayerRenderItem>`.
 
-use mln_gfx::{LayerGroupBasePtr, UploadPass}; // layers: debug
+use mln_gfx::{Context, LayerGroupBasePtr}; // layers: debug
 use mln_map_types::{MapDebugOptions, TransformState};
 use mln_util::Color;
 use mln_vec_map::VecMap;
@@ -25,7 +25,7 @@ pub(crate) type DebugLayerGroupMap = VecMap<DebugType, LayerGroupBasePtr>;
 /// The render item of a source. The layer render items are the concrete
 /// `LayerRenderItem`.
 pub(crate) trait RenderItem {
-    fn upload(&self, upload_pass: &dyn UploadPass);
+    fn upload(&self, context: &dyn Context);
     /// Updates the item's debug drawables; a no-op for the items that have
     /// none (`LayerRenderItem`, the image source). The orchestrator gives
     /// each debug layer group its tweaker (layers: debug).
