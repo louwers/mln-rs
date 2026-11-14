@@ -133,6 +133,7 @@ pub fn all() -> Vec<Case> {
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
     }
     cases.push(Case::new("Style/Replace600", style_replace));
+    cases.push(Case::new("GeoJson/Replace1000", geojson_replace));
     cases.push(Case::new("Load/Concurrent", load_concurrent));
     cases.push(Case::new("Load/GlyphCache/Private", |cx| load_glyph_cache(cx, false)));
     cases.push(Case::new("Load/GlyphCache/Shared", |cx| load_glyph_cache(cx, true)));
@@ -957,5 +958,60 @@ fn style_replace(cx: &Context) -> Metrics {
     }
     let mut metrics = meter.finish();
     metrics.lead("load_json_cpu_ms", median(&load_json));
+    metrics
+}
+
+/// 1000 points, each with the properties that maplibre-compose's fixtures
+/// give them, the second variant a little east of the first.
+fn points_geojson(variant: usize) -> String {
+    let features: Vec<String> = (0..1000)
+        .map(|i| {
+            let x = f64::from(i % 40) * 0.0025 + variant as f64 * 0.0001;
+            let y = f64::from(i / 40) * 0.0035;
+            format!(
+                r#"{{"type":"Feature","id":{i},"properties":{{"revision":{variant},"category":{},"value":{}}},"geometry":{{"type":"Point","coordinates":[{x},{y}]}}}}"#,
+                i % 4,
+                i % 100
+            )
+        })
+        .collect();
+    format!(r#"{{"type":"FeatureCollection","features":[{}]}}"#, features.join(","))
+}
+
+/// Replacing a GeoJSON source's 1000 points under one circle layer with
+/// the other variant, on a continuous map drawn on the display's clock,
+/// until it settles with every tile showing the new points, as
+/// maplibre-compose's update-points and source-completion cases do. A tile
+/// draws its old points until the new ones are cut, so a complete frame
+/// doesn't mean the new points show.
+fn geojson_replace(cx: &Context) -> Metrics {
+    let style = r##"{"version":8,"transition":{"duration":0,"delay":0},"sources":{"data":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[{"id":"points","type":"circle","source":"data","paint":{"circle-radius":5,"circle-color":"#e63946"}}]}"##;
+    let data = [points_geojson(0), points_geojson(1)];
+    let mut scene = Scene::new(Size::new(512, 512), Mode::OnDemand);
+    scene.jump(LatLng::new(0.045, 0.045).expect("a center"), 12.0);
+    scene.load_json(style);
+    scene.settle();
+    scene.set_geojson("data", &data[0]);
+    scene.settle_timed_until(|scene| scene.source_shows("data", "revision", 0), &mut Vec::new());
+    let mut meter = Meter::new();
+    let mut frames = Vec::new();
+    let mut longest = Vec::new();
+    for i in 0..cx.iterations(30) {
+        let mut times = Vec::new();
+        meter.start();
+        let variant = (i + 1) % 2;
+        scene.set_geojson("data", &data[variant]);
+        scene.settle_timed_until(|scene| scene.source_shows("data", "revision", variant as u64), &mut times);
+        meter.stop();
+        longest.push(times.iter().copied().max().map_or(0.0, ms));
+        frames.extend(times.into_iter().map(ms));
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "GeoJson/Replace1000", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", percentile(&frames, 95.0));
+    metrics.lead("update_frame_ms", median(&longest));
+    metrics.other("frames", frames.len() as f64 / longest.len() as f64);
     metrics
 }

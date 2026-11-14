@@ -47,6 +47,7 @@ mise run bench:compare main         # this checkout, uncommitted changes include
 | `Load/Concurrent`                                   | 16 renderers on threads of their own, each from loading a real-world style on a new map to its first complete still through `HeadlessFrontend::render`, as the render tests' workers draw; the GPU devices are set up before                            |
 | `Load/GlyphCache/Private`, `Load/GlyphCache/Shared` | `Load/Concurrent` over the render suite's `text-font/chinese` style (500 labels, about 2,500 CJK characters over 80 glyph ranges), each renderer with a glyph cache of its own, or all sharing one `GlyphCache`                                         |
 | `Style/Replace600`                                  | replacing a style of 600 circle layers over 100 GeoJSON points, each filtered by point id as maplibre-compose's style benchmarks build one, with its other variant, to the first complete still                                                         |
+| `GeoJson/Replace1000`                               | replacing a GeoJSON source's 1000 points under one circle layer with the other variant, until the continuous map settles with every tile showing the new points, on the display's clock                                                                 |
 | `Load/JumpWarm`, `Load/JumpCold`                    | a jump between two views that share no tile until a frame shows the new view complete, on the display's clock; cold drops the loaded tiles first                                                                                                        |
 
 In `Frame/Paced`, refreshes are absolute deadlines, and at each refresh with no
@@ -94,6 +95,8 @@ metrics only; `--verbose` also shows the others.
   once the view is complete.
 - In `Style/Replace600`: **`load_json_cpu_ms`**, the CPU time that `load_json`
   takes before the map renders.
+- In `GeoJson/Replace1000`: **`update_frame_ms`**, the longest frame of a
+  replacement, which is the frame that swaps the old data for the new.
 
 ## Comparing
 
