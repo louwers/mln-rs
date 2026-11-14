@@ -200,7 +200,7 @@ regex = { version = "1.13.1" }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 # The same engine as the C++ core's vendored SQLite, built from source like it
 # where the platform has none (crates/mln_storage).
-rusqlite = "0.41.1"
+rusqlite = ">=0.39.0, <0.42.0"
 # preserve_order: objects keep their members in document order, which the
 # style parser and the order of expression errors rely on.
 # float_roundtrip: correctly rounded float parsing (the default parser can be
