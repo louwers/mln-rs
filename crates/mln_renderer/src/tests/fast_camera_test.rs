@@ -271,6 +271,7 @@ impl Scene {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
+            triangulate_fill_outlines: false,
             image_manager: Rc::clone(&self.image_manager),
             glyph_manager: Rc::clone(&self.glyph_manager),
             dynamic_texture_atlas: Arc::clone(&self.texture_atlas),

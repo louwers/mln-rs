@@ -56,6 +56,7 @@ impl GeoJSONTileTest {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
+            triangulate_fill_outlines: false,
             image_manager: crate::image_manager::ImageManager::create(),
             glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
             dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),

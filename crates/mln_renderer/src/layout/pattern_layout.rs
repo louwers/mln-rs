@@ -90,6 +90,9 @@ pub(crate) trait PatternLayoutSpec: 'static {
     /// Sets the subdivision granularity on the buckets that have one. The
     /// default does nothing.
     fn set_subdivision_granularity(_bucket: &mut Self::Bucket, _value: &SubdivisionGranularitySetting) {}
+    /// Sets whether the buckets that draw fill outlines build them as
+    /// triangles too. The default does nothing.
+    fn set_triangulate_fill_outlines(_bucket: &mut Self::Bucket, _value: bool) {}
 }
 
 pub(crate) struct PatternLayout<S: PatternLayoutSpec> {
@@ -105,6 +108,7 @@ pub(crate) struct PatternLayout<S: PatternLayoutSpec> {
     pub(crate) source_layer_id: String,
     pub(crate) has_pattern: bool,
     pub(crate) retain_features_by_id: bool,
+    pub(crate) triangulate_fill_outlines: bool,
 
     /// The source layer the layout gets its features from again (see
     /// layout.rs); `None` when built from a borrowed layer.
@@ -263,6 +267,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             source_layer_id,
             has_pattern,
             retain_features_by_id: parameters.retain_features_by_id,
+            triangulate_fill_outlines: parameters.triangulate_fill_outlines,
             source_layer: None,
         })
     }
@@ -305,6 +310,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     ) -> Result<(), Error> {
         let mut bucket = S::create_bucket(&self.layout, &self.layer_properties_map, self.zoom, self.overscaling);
         S::set_subdivision_granularity(&mut bucket, &self.subdivision_granularity);
+        S::set_triangulate_fill_outlines(&mut bucket, self.triangulate_fill_outlines);
         bucket.set_retain_features_by_id(self.retain_features_by_id);
         bucket.reserve_features(self.features.len());
 
@@ -393,6 +399,9 @@ impl PatternLayoutSpec for FillLayoutSpec {
     }
     fn set_subdivision_granularity(bucket: &mut FillBucket, value: &SubdivisionGranularitySetting) {
         bucket.set_subdivision_granularity(value);
+    }
+    fn set_triangulate_fill_outlines(bucket: &mut FillBucket, value: bool) {
+        bucket.triangulate_outlines = value;
     }
 }
 

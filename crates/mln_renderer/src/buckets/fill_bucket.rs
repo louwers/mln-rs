@@ -49,7 +49,10 @@ pub(crate) struct FillLayoutVertex {
 pub(crate) struct FillBucket {
     pub(crate) base: BucketBase,
 
-    // MLN_TRIANGULATE_FILL_OUTLINES
+    /// Whether the outlines are built as triangles too, into the `line_*`
+    /// buffers, and not only as `basic_lines`
+    /// ([`FillBucket::triangulates_outlines`]).
+    pub(crate) triangulate_outlines: bool,
     pub(crate) line_vertices: GeometryVec<LineLayoutVertex>,
     pub(crate) line_indexes: GeometryVec<u16>,
     pub(crate) line_segments: Vec<SegmentBase>,
@@ -90,6 +93,7 @@ impl FillBucket {
         }
         FillBucket {
             base: BucketBase::default(),
+            triangulate_outlines: false,
             line_vertices: GeometryVec::default(),
             line_indexes: GeometryVec::default(),
             line_segments: Vec::new(),
@@ -107,6 +111,15 @@ impl FillBucket {
 
     pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
         self.subdivision_granularity = *value;
+    }
+
+    /// Whether the fill buckets of a renderer on `backend` build their
+    /// outlines as triangles too, for the line shader. C++ does on Metal and
+    /// WebGPU, which can't draw wide lines (`MLN_TRIANGULATE_FILL_OUTLINES`);
+    /// OpenGL and Vulkan draw only the basic lines.
+    #[must_use]
+    pub(crate) fn triangulates_outlines(backend: mln_gfx::backend::Type) -> bool {
+        matches!(backend, mln_gfx::backend::Type::Metal | mln_gfx::backend::Type::WebGPU)
     }
 
     #[must_use]
@@ -127,6 +140,7 @@ impl FillBucket {
             &mut self.basic_line_segments,
             canonical,
             self.subdivision_granularity.fill.get_granularity_for_zoom_level(canonical.z),
+            self.triangulate_outlines,
         )
     }
 

@@ -61,6 +61,7 @@ pub struct WorkerParameters {
     pub(crate) dynamic_texture_atlas: Option<DynamicTextureAtlasPtr>,
     pub(crate) font_faces: Option<Arc<FontFaces>>,
     pub(crate) capture_rendered_features: bool,
+    pub(crate) triangulate_fill_outlines: bool,
     #[serde(skip)]
     pub(crate) synchronous: bool,
 }
@@ -156,6 +157,7 @@ impl TileWorkerTransport for InProcessTransport {
             dynamic_texture_atlas,
             font_faces,
             capture_rendered_features,
+            triangulate_fill_outlines,
             synchronous,
         } = parameters;
         let make_worker = move |self_ref| {
@@ -170,6 +172,7 @@ impl TileWorkerTransport for InProcessTransport {
                 dynamic_texture_atlas,
                 font_faces,
                 capture_rendered_features,
+                triangulate_fill_outlines,
             )
         };
         if synchronous {

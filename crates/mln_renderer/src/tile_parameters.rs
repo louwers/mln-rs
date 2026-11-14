@@ -27,6 +27,9 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) is_update_synchronous: bool,
     pub(crate) capture_rendered_features: bool,
+    /// Whether fill buckets build their outlines as triangles too
+    /// (`FillBucket::triangulates_outlines`).
+    pub(crate) triangulate_fill_outlines: bool,
     // symbols:
     pub(crate) image_manager: Rc<ImageManager>,
     pub(crate) glyph_manager: Rc<GlyphManager>,

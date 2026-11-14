@@ -38,8 +38,18 @@ struct Buffers {
     basic_line_segments: Vec<SegmentBase>,
 }
 
-/// Runs `generate_fill_and_outline_buffers` into fresh buffers.
+/// Runs `generate_fill_and_outline_buffers` into fresh buffers, the outlines
+/// as triangles too.
 fn generate(geometry: &GeometryCollection, canonical: &CanonicalTileID, granularity: u32) -> Buffers {
+    generate_with(geometry, canonical, granularity, true)
+}
+
+fn generate_with(
+    geometry: &GeometryCollection,
+    canonical: &CanonicalTileID,
+    granularity: u32,
+    triangulate_outlines: bool,
+) -> Buffers {
     let mut buffers = Buffers::default();
     generate_fill_and_outline_buffers(
         geometry,
@@ -53,6 +63,7 @@ fn generate(geometry: &GeometryCollection, canonical: &CanonicalTileID, granular
         &mut buffers.basic_line_segments,
         canonical,
         granularity,
+        triangulate_outlines,
     )
     .expect("generateFillAndOutineBuffers");
     buffers
@@ -376,4 +387,33 @@ fn pretessellated_outlines_skip_rings_without_an_area() {
     let (_, lines, line_vertices) = drawn(&buffers);
     assert_eq!(earcut_lines, lines);
     assert_eq!(earcut_line_vertices, line_vertices);
+}
+
+// With the outlines as basic lines only, as on OpenGL and Vulkan, the line
+// buffers stay empty, and the fill and the basic lines are the ones built
+// beside the triangles.
+#[test]
+fn basic_line_outlines_build_no_triangles() {
+    let with_hole = GeometryCollection::from(vec![
+        vec![p(0, 0), p(4000, 0), p(4000, 4000), p(0, 4000), p(0, 0)],
+        vec![p(1000, 1000), p(1000, 2000), p(2000, 2000), p(2000, 1000), p(1000, 1000)],
+    ]);
+    let mut pretessellated = square(1000, 1000, 7000, 7000);
+    pretessellated.set_triangles(Arc::from(&[0u32, 1, 2, 0, 2, 3][..]), 0..6);
+    let canonical = CanonicalTileID::new(1, 0, 0);
+    for (case, geometry, granularity) in
+        [("earcut", &with_hole, 1), ("globe", &with_hole, 8), ("the tile's triangles", &pretessellated, 1)]
+    {
+        let triangulated = generate_with(geometry, &canonical, granularity, true);
+        let basic = generate_with(geometry, &canonical, granularity, false);
+        assert_ne!(triangulated.line_indexes, Vec::<u16>::new(), "{case}");
+        assert_eq!(basic.line_vertices, Vec::<LineLayoutVertex>::new(), "{case}");
+        assert_eq!(basic.line_indexes, Vec::<u16>::new(), "{case}");
+        assert_eq!(basic.line_segments, Vec::<SegmentBase>::new(), "{case}");
+        assert_eq!(triangulated.fill_vertices, basic.fill_vertices, "{case}");
+        assert_eq!(triangulated.fill_indexes, basic.fill_indexes, "{case}");
+        assert_eq!(triangulated.fill_segments, basic.fill_segments, "{case}");
+        assert_eq!(triangulated.basic_line_indexes, basic.basic_line_indexes, "{case}");
+        assert_eq!(triangulated.basic_line_segments, basic.basic_line_segments, "{case}");
+    }
 }

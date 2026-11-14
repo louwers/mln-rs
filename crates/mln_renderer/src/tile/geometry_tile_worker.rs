@@ -170,6 +170,7 @@ pub(crate) struct GeometryTileWorker {
     mode: MapMode,
     pixel_ratio: f32,
     capture_rendered_features: bool,
+    triangulate_fill_outlines: bool,
 
     feature_index: Option<Box<FeatureIndex>>,
     render_data: HashMap<String, LayerRenderData>,
@@ -218,6 +219,7 @@ impl GeometryTileWorker {
         dynamic_texture_atlas: Option<DynamicTextureAtlasPtr>,
         font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
         capture_rendered_features: bool,
+        triangulate_fill_outlines: bool,
     ) -> Self {
         GeometryTileWorker {
             self_ref,
@@ -227,6 +229,7 @@ impl GeometryTileWorker {
             mode,
             pixel_ratio,
             capture_rendered_features,
+            triangulate_fill_outlines,
             feature_index: None,
             render_data: HashMap::new(),
             state: State::Idle,
@@ -675,6 +678,7 @@ impl GeometryTileWorker {
                 global_state: self.global_state.clone(),
                 retain_features_by_id: self.capture_rendered_features,
                 subdivision_granularity: self.subdivision_granularity,
+                triangulate_fill_outlines: self.triangulate_fill_outlines,
             };
 
             if !data.has_layer(&leader_impl.source_layer)? {
