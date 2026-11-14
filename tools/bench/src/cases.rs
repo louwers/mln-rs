@@ -13,7 +13,7 @@ use mln_util::size::Size;
 
 use crate::latency::{set_tile_latency, take_tile_requests};
 use crate::meter::{Meter, live_heap_mib, ms, process_cpu};
-use crate::runtime_scene::{RuntimeScene, jump};
+use crate::runtime_scene::{self, RuntimeHandle, RuntimeMap, RuntimeScene, jump};
 use crate::scene::{
     BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
     basemap_center, basemap_mlt_style, basemap_north_west, basemap_point, basemap_south_east, basemap_style,
@@ -110,7 +110,7 @@ pub fn all() -> Vec<Case> {
         let name = format!("Still/{}", view.name);
         cases.push(Case::new(name, move |cx| still(cx, &view)));
     }
-    for (icons, overlap) in [(256, false), (1024, false), (1024, true)] {
+    for (icons, overlap) in [(1024, false), (1024, true)] {
         let name = format!("Still/CollidingIcons/{icons}{}", if overlap { "-overlap" } else { "" });
         cases.push(Case::new(name.clone(), move |cx| still_colliding_icons(cx, &name, icons, overlap)));
     }
@@ -134,11 +134,13 @@ pub fn all() -> Vec<Case> {
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
     }
     cases.push(Case::new("Style/Replace600", style_replace));
-    cases.push(Case::new("Runtime/Lifecycle", runtime_lifecycle));
+    cases.push(Case::new("Style/Load", style_load));
+    cases.push(Case::new("Runtime/Lifecycle", |cx| runtime_lifecycle(cx, false)));
+    cases.push(Case::new("Runtime/Startup", |cx| runtime_lifecycle(cx, true)));
+    cases.push(Case::new("Map/FourOnOneRuntime", map_four_on_one_runtime));
     cases.push(Case::new("Command/RoundTrip", command_round_trip));
     cases.push(Case::new("Command/Burst", command_burst));
     cases.push(Case::new("Memory/LeaveZoomRange", memory_leave_zoom_range));
-    cases.push(Case::new("Style/Replace600/OnDemand", style_replace_on_demand));
     cases.push(Case::new("Style/AddLayer600", style_add_layer));
     cases.push(Case::new("Style/AddRemoveLayers", style_add_remove_layers));
     cases.push(Case::new("GeoJson/Replace1000", geojson_replace));
@@ -940,51 +942,159 @@ fn partitioned_style(layers: usize, variant: usize) -> String {
     )
 }
 
-/// A scene showing `partitioned_style`'s 100 points, which span four tiles.
+/// Where a map shows `partitioned_style`'s 100 points, which span four
+/// tiles: its size, center and zoom.
+const PARTITIONED_SIZE: Size = Size::new(512, 512);
+const PARTITIONED_ZOOM: f64 = 12.0;
+
+fn partitioned_center() -> LatLng {
+    LatLng::new(0.045, 0.045).expect("a center")
+}
+
+/// A runtime map's view of `partitioned_style`'s 100 points, with `style`.
+fn partitioned_view(style: String) -> runtime_scene::View {
+    runtime_scene::View { size: PARTITIONED_SIZE, center: partitioned_center(), zoom: PARTITIONED_ZOOM, style }
+}
+
+/// A scene showing `partitioned_style`'s 100 points.
 fn partitioned_scene(mode: Mode) -> Scene {
-    let mut scene = Scene::new(Size::new(512, 512), mode);
-    scene.jump(LatLng::new(0.045, 0.045).expect("a center"), 12.0);
+    let mut scene = Scene::new(PARTITIONED_SIZE, mode);
+    scene.jump(partitioned_center(), PARTITIONED_ZOOM);
     scene
 }
 
-/// Replacing a style of 600 layers with its other variant, to the new
-/// style's first complete still, as maplibre-compose's style-publication
-/// case replaces one through maplibre-native-ffi. `load_json_cpu_ms` is the
-/// part `load_json` takes before the map renders.
+/// Replacing a style of 600 layers with its other variant on a runtime's
+/// map, until it settles complete, as maplibre-compose's style-publication
+/// and style-overlay cases replace one through maplibre-native-ffi: once the
+/// style loads, its layers, sources and JSON are read back, as
+/// maplibre-compose reads a loaded style for its binding, and a circle layer
+/// is added above the first of the 600, as style-overlay adds its overlay.
+/// `style_ready_cpu_ms` is the CPU time until the style is loaded and read
+/// back, before the map draws; `frames` is the frames drawn per replacement.
 fn style_replace(cx: &Context) -> Metrics {
     let styles = [partitioned_style(600, 0), partitioned_style(600, 1)];
-    let mut scene = partitioned_scene(Mode::Still);
-    scene.load_json(&styles[0]);
-    scene.render_still();
+    let runtime = RuntimeHandle::new(&mln_runtime::RuntimeOptions::default());
+    let mut map = RuntimeMap::new(&runtime, partitioned_view(styles[0].clone()), None);
+    map.settle();
     let mut meter = Meter::new();
-    let mut load_json = Vec::new();
+    let (mut style_ready, mut frames) = (Vec::new(), Vec::new());
     for i in 0..cx.iterations(20) {
+        let style = styles[(i + 1) % 2].clone();
         meter.start();
         let cpu = process_cpu();
-        scene.load_json(&styles[(i + 1) % 2]);
-        load_json.push(ms(process_cpu().checked_sub(cpu).unwrap_or_default()));
-        scene.render_still();
+        let commands = map.map();
+        commands.set_style_json(style).expect("a style").wait().expect("the style");
+        let layers = commands.style_layers().expect("a layer list").wait().expect("the layers");
+        let sources = commands.style_sources().expect("a source list").wait().expect("the sources");
+        let json = commands.loaded_style_json().expect("a style query").wait().expect("the style's JSON");
+        style_ready.push(ms(process_cpu().checked_sub(cpu).unwrap_or_default()));
+        assert!(layers.len() > 600 && sources.len() == 1 && !json.is_empty(), "the style didn't load");
+        commands
+            .add_style_layer_json(OVERLAY_LAYER, Some("workload-1".to_owned()))
+            .expect("a layer")
+            .wait()
+            .expect("the layer");
+        frames.push(map.settle() as f64);
         meter.stop();
     }
     if let Some(dir) = &cx.frames {
-        write_frame(dir, "Style/Replace600", &scene.render_still());
+        write_frame(dir, "Style/Replace600", &map.read_frame());
     }
     let mut metrics = meter.finish();
-    metrics.lead("load_json_cpu_ms", median(&load_json));
+    metrics.lead("style_ready_cpu_ms", median(&style_ready));
+    metrics.other("frames", median(&frames));
     metrics
 }
 
-/// Starting a runtime with the default options and releasing it, as
-/// maplibre-native-ffi's Runtime/Lifecycle does through the C API.
-fn runtime_lifecycle(cx: &Context) -> Metrics {
+/// Loading the basemap's style, or a renamed copy of it, on a runtime's map
+/// that no session draws, so no tile or glyph loads, until the load
+/// completes, as maplibre-native-ffi's case of the name does.
+fn style_load(cx: &Context) -> Metrics {
+    let style = basemap_style(&cx.fixtures);
+    let brace = style.find('{').expect("the style is an object");
+    let renamed = format!("{}\"name\":\"benchmark variant\",{}", &style[..=brace], &style[brace + 1..]);
+    let styles = [style, renamed];
+    let runtime = RuntimeHandle::new(&mln_runtime::RuntimeOptions::default());
+    let map = runtime.create_map(BASEMAP_SIZE);
+    let mut meter = Meter::new();
+    for i in 0..cx.iterations(30) {
+        let style = styles[i % 2].clone();
+        meter.time(|| map.set_style_json(style).expect("a style").wait().expect("the style"));
+    }
+    map.release().expect("the map's release").wait().expect("the map released");
+    meter.finish()
+}
+
+/// Starting a runtime until its first command, the event handler,
+/// completes, then releasing it until the release completes, as
+/// maplibre-native-ffi's Runtime/Lifecycle does through the C API. With
+/// `cache`, as maplibre-compose's runtime-startup case does: the runtime
+/// opens a cache database that holds nothing, which an untimed runtime
+/// created first, sets the ambient cache's size limit and lists the offline
+/// regions before it's released.
+fn runtime_lifecycle(cx: &Context, cache: bool) -> Metrics {
+    let directory = cache.then(|| tempfile::tempdir().expect("a directory for the cache database"));
+    let options = mln_runtime::RuntimeOptions {
+        cache_path: directory.as_ref().map(|directory| directory.path().join("cache.db")),
+        ..Default::default()
+    };
+    let start = |options: &mln_runtime::RuntimeOptions| {
+        let runtime = RuntimeHandle::new(options);
+        if cache {
+            let runtime = runtime.runtime();
+            let limit = runtime.set_maximum_ambient_cache_size(16 * 1024 * 1024).expect("a cache size");
+            let regions = runtime.offline().regions().expect("a region list").wait().expect("the regions");
+            limit.wait().expect("the cache size");
+            assert!(regions.is_empty(), "the cache database has offline regions");
+        }
+        runtime
+    };
+    drop(start(&options));
     let mut meter = Meter::new();
     for _ in 0..cx.iterations(50) {
-        meter.time(|| {
-            let runtime = mln_runtime::Runtime::new(&mln_runtime::RuntimeOptions::default()).expect("a runtime");
-            runtime.release().expect("a release").wait().expect("the release");
-        });
+        meter.time(|| drop(start(&options)));
     }
     meter.finish()
+}
+
+/// Four maps of the basemap created on one runtime one after another, each
+/// until its offscreen session has drawn its first complete frame on the
+/// host's GPU device, which they share, as maplibre-native-ffi's case of the
+/// name does. Untimed, the four settle, and `heap_mib` is the heap live
+/// then, above what it was before the runtime started; then they're
+/// released.
+fn map_four_on_one_runtime(cx: &Context) -> Metrics {
+    const MAPS: usize = 4;
+    let device = mln_runtime::Device::new(mln_runtime::DeviceOptions::default()).expect("a GPU device");
+    let start_heap = live_heap_mib();
+    let runtime = RuntimeHandle::new(&mln_runtime::RuntimeOptions::default());
+    let mut meter = Meter::new();
+    let mut heap = Vec::new();
+    let mut last = None;
+    for _ in 0..cx.iterations(5) {
+        meter.start();
+        let mut maps: Vec<RuntimeMap> = (0..MAPS)
+            .map(|_| {
+                let mut map = RuntimeMap::basemap(&runtime, cx, Some(device.clone()));
+                map.present_until_complete();
+                map
+            })
+            .collect();
+        meter.stop();
+        for map in &mut maps {
+            map.settle();
+        }
+        heap.push(live_heap_mib() - start_heap);
+        if cx.frames.is_some() {
+            last = maps.last().map(RuntimeMap::read_frame);
+        }
+    }
+    if let (Some(dir), Some(image)) = (&cx.frames, &last) {
+        write_frame(dir, "Map/FourOnOneRuntime", image);
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("heap_mib", median(&heap));
+    metrics
 }
 
 /// The two cameras the command cases jump between: the basemap's center,
@@ -992,7 +1102,7 @@ fn runtime_lifecycle(cx: &Context) -> Metrics {
 fn two_jumps() -> [mln_map::CameraUpdate; 2] {
     let center = basemap_center();
     let nudged = LatLng::new(center.latitude() + 0.0005, center.longitude() + 0.0005).expect("a center");
-    [jump(center), jump(nudged)]
+    [jump(center, BASEMAP_ZOOM), jump(nudged, BASEMAP_ZOOM)]
 }
 
 /// A camera jump sent to a runtime's settled map until its completion
@@ -1076,30 +1186,6 @@ fn memory_leave_zoom_range(cx: &Context) -> Metrics {
     metrics
 }
 
-/// As `Style/Replace600`, on a continuous map drawn on a 60 Hz display's
-/// clock, as maplibre-compose's host draws, until it settles complete.
-/// `frames` is the frames drawn per replacement.
-fn style_replace_on_demand(cx: &Context) -> Metrics {
-    let styles = [partitioned_style(600, 0), partitioned_style(600, 1)];
-    let mut scene = partitioned_scene(Mode::OnDemand);
-    scene.load_json(&styles[0]);
-    scene.settle();
-    let mut meter = Meter::new();
-    let mut frames = Vec::new();
-    for i in 0..cx.iterations(20) {
-        meter.start();
-        scene.load_json(&styles[(i + 1) % 2]);
-        frames.push(scene.settle() as f64);
-        meter.stop();
-    }
-    if let Some(dir) = &cx.frames {
-        write_frame(dir, "Style/Replace600/OnDemand", &scene.read_frame());
-    }
-    let mut metrics = meter.finish();
-    metrics.lead("frames", median(&frames));
-    metrics
-}
-
 /// The layer that maplibre-compose's overlay-update case adds over the 600
 /// layers.
 const OVERLAY_LAYER: &str =
@@ -1132,9 +1218,10 @@ fn style_add_layer(cx: &Context) -> Metrics {
     metrics
 }
 
-/// 100 filtered line layers added to the loaded basemap, then removed, as
-/// maplibre-native-ffi's case of the name does, without its frames: the
-/// style's own work for each addition and removal.
+/// 100 filtered line layers added to a runtime's settled basemap until the
+/// first complete frame that shows them all, then removed until the first
+/// complete frame without them, as maplibre-native-ffi's case of the name
+/// does. `frames` is the frames drawn per iteration.
 fn style_add_remove_layers(cx: &Context) -> Metrics {
     const KINDS: [&str; 5] = ["primary", "secondary", "tertiary", "residential", "service"];
     let layers: Vec<String> = (0..100)
@@ -1147,19 +1234,34 @@ fn style_add_remove_layers(cx: &Context) -> Metrics {
             )
         })
         .collect();
-    let mut scene = basemap(cx, Mode::Still);
+    let ids: Vec<String> = (0..layers.len()).map(|i| format!("bench-{i}")).collect();
+    let mut scene = RuntimeScene::basemap(cx);
     let mut meter = Meter::new();
-    for _ in 0..cx.iterations(50) {
+    let mut frames = Vec::new();
+    for _ in 0..cx.iterations(10) {
+        let (layers, ids) = (layers.clone(), ids.clone());
         meter.start();
-        for layer in &layers {
-            scene.add_layer_json(layer, None);
+        let mut added = None;
+        for layer in layers {
+            added = Some(scene.map().add_style_layer_json(layer, None).expect("a layer"));
         }
-        for i in 0..layers.len() {
-            scene.remove_layer(&format!("bench-{i}"));
+        added.expect("a layer").wait().expect("the layers");
+        let mut drawn = scene.present_until_complete();
+        let mut removed = None;
+        for id in ids {
+            removed = Some(scene.map().remove_style_layer(id).expect("a removal"));
         }
+        removed.expect("a removal").wait().expect("the removals");
+        drawn += scene.present_until_complete();
         meter.stop();
+        frames.push(drawn as f64);
     }
-    meter.finish()
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Style/AddRemoveLayers", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.other("frames", median(&frames));
+    metrics
 }
 
 /// 1000 points, each with the properties maplibre-compose's fixtures give
@@ -1179,34 +1281,36 @@ fn points_geojson(variant: usize) -> String {
     format!(r#"{{"type":"FeatureCollection","features":[{}]}}"#, features.join(","))
 }
 
-/// Replacing a GeoJSON source's 1000 points under one circle layer, on a
-/// continuous map, until it settles complete with the new points, as
-/// maplibre-compose's update-points and source-completion cases do. The
-/// frame that applies the new data also lets the old data go. A tile draws
-/// its old points until the new ones are cut, so a complete frame doesn't
-/// mean the new points show: the case waits for every tile to show them.
+/// Replacing a GeoJSON source's 1000 points under one circle layer on a
+/// runtime's map, until the GeoJSON command completes and the map settles
+/// with every tile showing the new points, as maplibre-compose's
+/// update-points and source-completion cases do. A tile draws its old
+/// points until the new ones are cut, so a complete frame doesn't mean the
+/// new points show.
 fn geojson_replace(cx: &Context) -> Metrics {
     let style = r##"{"version":8,"transition":{"duration":0,"delay":0},"sources":{"data":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[{"id":"points","type":"circle","source":"data","paint":{"circle-radius":5,"circle-color":"#e63946"}}]}"##;
     let data = [points_geojson(0), points_geojson(1)];
-    let mut scene = partitioned_scene(Mode::OnDemand);
-    scene.load_json(style);
-    scene.set_geojson("data", &data[0]);
-    scene.settle_timed_until(|scene| scene.source_shows("data", "revision", 0), &mut Vec::new());
+    let runtime = RuntimeHandle::new(&mln_runtime::RuntimeOptions::default());
+    let mut map = RuntimeMap::new(&runtime, partitioned_view(style.to_owned()), None);
+    map.map().set_geojson_source_data("data", data[0].clone()).expect("GeoJSON data").wait().expect("the data");
+    map.settle_until_source_shows("data", "revision", 0);
+    map.take_frame_times();
     let mut meter = Meter::new();
     let mut frames = Vec::new();
     let mut longest = Vec::new();
     for i in 0..cx.iterations(30) {
-        let mut times = Vec::new();
-        meter.start();
         let variant = (i + 1) % 2;
-        scene.set_geojson("data", &data[variant]);
-        scene.settle_timed_until(|scene| scene.source_shows("data", "revision", variant as u64), &mut times);
+        let json = data[variant].clone();
+        meter.start();
+        map.map().set_geojson_source_data("data", json).expect("GeoJSON data").wait().expect("the data");
+        map.settle_until_source_shows("data", "revision", variant as u64);
         meter.stop();
+        let times = map.take_frame_times();
         longest.push(times.iter().copied().max().map_or(0.0, ms));
         frames.extend(times.into_iter().map(ms));
     }
     if let Some(dir) = &cx.frames {
-        write_frame(dir, "GeoJson/Replace1000", &scene.read_frame());
+        write_frame(dir, "GeoJson/Replace1000", &map.read_frame());
     }
     let mut metrics = meter.finish();
     metrics.lead("frame_p95_ms", percentile(&frames, 95.0));
