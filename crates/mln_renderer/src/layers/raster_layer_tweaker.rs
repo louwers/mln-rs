@@ -117,7 +117,7 @@ impl LayerTweaker for RasterLayerTweaker {
             projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             drawable_ubo_vector[i as usize] = RasterDrawableUBO { matrix: cast_matrix(&matrix) };
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 

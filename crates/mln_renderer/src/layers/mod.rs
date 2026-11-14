@@ -83,7 +83,7 @@ pub(crate) fn drawable_binders_slot(bucket: &BucketPtr, layer_id: &str) -> Optio
 /// again. C++ drawables share the bucket's vertex vectors, which the binders
 /// update in place (feature state).
 pub(crate) fn refresh_if_bucket_updated(
-    drawable: &mut dyn Drawable,
+    drawable: &mut Drawable,
     refresh: impl FnOnce(&mut mln_gfx::vertex_attribute::VertexAttributeArray),
 ) {
     let Some(slot) = drawable.get_binders().cloned() else {
@@ -104,7 +104,7 @@ pub(crate) fn refresh_if_bucket_updated(
 
 /// The drawable's bucket and binders slot, cloned so that the drawable can be
 /// mutated while the binders are used; see `slot_bucket`.
-pub(crate) fn get_drawable_binders(drawable: &dyn Drawable) -> Option<Rc<dyn Any>> {
+pub(crate) fn get_drawable_binders(drawable: &Drawable) -> Option<Rc<dyn Any>> {
     drawable.get_binders().cloned()
 }
 
@@ -137,12 +137,12 @@ pub(crate) fn drawable_render_tile_slot(owner: &Rc<Vec<RenderTile>>, tile: &Rend
     Some(Rc::new(DrawableRenderTile { owner: Rc::clone(owner), index }))
 }
 
-pub(crate) fn get_drawable_render_tile(drawable: &dyn Drawable) -> Option<&RenderTile> {
+pub(crate) fn get_drawable_render_tile(drawable: &Drawable) -> Option<&RenderTile> {
     let slot = drawable.get_render_tile()?.downcast_ref::<DrawableRenderTile>()?;
     Some(slot.tile())
 }
 
-pub(crate) fn drawable_has_layer_tweaker(drawable: &dyn Drawable, layer_tweaker: Option<&LayerTweakerPtr>) -> bool {
+pub(crate) fn drawable_has_layer_tweaker(drawable: &Drawable, layer_tweaker: Option<&LayerTweakerPtr>) -> bool {
     let current = drawable.get_layer_tweaker().and_then(|slot| slot.downcast_ref::<LayerTweakerPtr>());
     match (current, layer_tweaker) {
         (None, None) => true,
@@ -161,7 +161,7 @@ pub(crate) fn shared_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorB
 /// Whether the drawable references the tweaker at `self_ptr`, or no tweaker
 /// at all. It takes a pointer because the running `execute` already borrows
 /// the tweaker's `RefCell` mutably.
-pub(crate) fn check_tweak_drawable_ptr<T: ?Sized>(drawable: &dyn Drawable, self_ptr: *const T) -> bool {
+pub(crate) fn check_tweak_drawable_ptr<T: ?Sized>(drawable: &Drawable, self_ptr: *const T) -> bool {
     match drawable.get_layer_tweaker().and_then(|slot| slot.downcast_ref::<LayerTweakerPtr>()) {
         None => true,
         Some(tweaker) => std::ptr::addr_eq(tweaker.as_ptr(), self_ptr),
@@ -206,7 +206,7 @@ pub(crate) trait TileDrawables: crate::render_layer::RenderLayer {
         &mut self,
         render_pass: crate::render_pass::RenderPass,
         tile_id: &mln_tile_id::OverscaledTileID,
-        mut update: impl FnMut(&mut dyn Drawable) -> bool,
+        mut update: impl FnMut(&mut Drawable) -> bool,
     ) -> bool {
         let Some(layer_group) = self.base().layer_group.clone() else {
             return false;

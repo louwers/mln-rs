@@ -5,23 +5,20 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
-use mln_gfx::gpu::{GpuError, PipelineState, VertexStep};
-use mln_gfx::shader::Shader;
+use mln_gfx::gpu::{GpuError, PipelineState, ShaderKey, VertexStep};
 use mln_gfx::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
-use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType,
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
-use mln_util::identity::SimpleIdentity;
 use mln_vec_map::VecMap;
 
-use crate::shaders::shader_source::{AttributeInfo, TextureInfo};
+use crate::shaders::shader_source::{AttributeInfo, TextureInfo, prelude, shader_source as program_source};
+use crate::shaders::wgsl_preprocessor::preprocess_wgsl;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BindingType {
@@ -256,7 +253,6 @@ type PipelineCacheKey = (PipelineState, Option<wgpu::TextureFormat>, Option<wgpu
 /// A WGSL program: its vertex and fragment modules, its bind group layouts
 /// as its sources declare them, and the pipelines made from it so far.
 pub(crate) struct ShaderProgram {
-    shader_program_id: SimpleIdentity,
     shader_name: String,
     device: wgpu::Device,
     vertex_shader_module: wgpu::ShaderModule,
@@ -277,9 +273,6 @@ pub(crate) struct ShaderProgram {
 }
 
 impl ShaderProgram {
-    /// The program's `Shader::type_name`.
-    pub(crate) const NAME: &'static str = "WebGPUShader";
-
     /// The program `name` of `vertex_source` and `fragment_source`, which
     /// are preprocessed already, with the inputs `attrs` and the textures
     /// `texts`.
@@ -333,7 +326,6 @@ impl ShaderProgram {
         });
 
         let mut program = ShaderProgram {
-            shader_program_id: SimpleIdentity::new(),
             shader_name: name.to_owned(),
             device: device.clone(),
             vertex_shader_module,
@@ -423,14 +415,6 @@ impl ShaderProgram {
                 location == binding || (!sampler && location + 1 == binding)
             })
         })
-    }
-
-    /// The id of the per-vertex or per-instance attribute at `location`.
-    pub(crate) fn attribute_id(&self, step: VertexStep, location: usize) -> Option<u32> {
-        let attributes = self.attributes(step);
-        (0..attributes.allocated_size())
-            .find(|&id| attributes.get(id).is_some_and(|attribute| attribute.get_index() as usize == location))
-            .map(|id| id as u32)
     }
 
     fn attributes(&self, step: VertexStep) -> &VertexAttributeArray {
@@ -793,30 +777,37 @@ fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, s
     }
 }
 
-impl Shader for ShaderProgram {
-    fn type_name(&self) -> &'static str {
-        Self::NAME
-    }
-}
+/// Compiles the program of `key`: the common prelude, the program's own
+/// prelude and each stage, preprocessed with the key's defines.
+pub(crate) fn compile(
+    device: &wgpu::Device,
+    index_layout: &wgpu::BindGroupLayout,
+    key: &ShaderKey,
+) -> Result<ShaderProgram, GpuError> {
+    let source = program_source(key.program())
+        .ok_or_else(|| GpuError::Unsupported(format!("no WGSL for {:?}", key.program())))?;
+    // The common prelude goes through the preprocessor with the program, so
+    // its `#ifdef`s see the defines.
+    let shader_prelude = source.wgsl.prelude.unwrap_or("");
+    let assemble = |stage: Option<&str>| format!("{}\n{shader_prelude}{}", prelude(), stage.unwrap_or(""));
+    // WGSL reads no define's value.
+    let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
+    let vertex_source = preprocess_wgsl(&assemble(source.wgsl.vertex), &defines);
+    let fragment_source = preprocess_wgsl(&assemble(source.wgsl.fragment), &defines);
 
-impl ShaderProgramBase for ShaderProgram {
-    fn get_id(&self) -> SimpleIdentity {
-        self.shader_program_id
+    let mut program = ShaderProgram::new(
+        device,
+        index_layout,
+        &vertex_source,
+        &fragment_source,
+        source.attributes,
+        source.textures,
+        source.name,
+    )?;
+    for attribute in source.instance_attributes {
+        program.init_instance_attribute(attribute);
     }
-    fn get_sampler_location(&self, id: usize) -> Option<usize> {
-        self.texture_bindings.get(id).copied().flatten()
-    }
-    fn get_vertex_attributes(&self) -> &VertexAttributeArray {
-        &self.vertex_attributes
-    }
-    fn get_instance_attributes(&self) -> &VertexAttributeArray {
-        &self.instance_attributes
-    }
-}
-
-/// The WebGPU program behind a shader handle.
-pub(crate) fn as_webgpu_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
-    shader.downcast_ref::<ShaderProgram>()
+    Ok(program)
 }
 
 /// How the vendored sources declare `globalIndex`.

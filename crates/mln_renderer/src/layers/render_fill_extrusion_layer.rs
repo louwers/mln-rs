@@ -22,7 +22,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, DrawableBuilder, ShaderRegistry,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, DrawableBuilder, ShaderRegistry, TileLayerGroup,
     UniqueDrawableBuilder,
 };
 use mln_map_types::TransformState;
@@ -193,15 +193,13 @@ fn read_paint_properties(
 
 /// The builder of a tile's depth pass or color pass drawables.
 fn create_builder(
-    context: &dyn Context,
-    shader: &mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr,
+    shader: &mln_gfx::shaders::shader_program::ShaderProgramPtr,
     enable_color: bool,
     tweaker: Option<&DrawableTweakerPtr>,
 ) -> UniqueDrawableBuilder {
-    let mut builder = context.create_drawable_builder();
+    let mut builder = DrawableBuilder::boxed();
     builder.set_shader(Some(Rc::clone(shader)));
     builder.set_is_3d(true);
-    builder.set_enable_color(enable_color);
     if enable_color {
         builder.set_color_mode(&ColorMode::alpha_blended());
     }
@@ -325,7 +323,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        _context: &dyn Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -345,14 +343,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
         // Set up a layer group
         if self.base.layer_group.is_none() {
-            match context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
+            self.set_layer_group(Some(TileLayerGroup::new_ptr(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -368,17 +359,16 @@ impl RenderLayer for RenderFillExtrusionLayer {
         let layer_tweaker = self.base.layer_tweaker.clone();
 
         if self.fill_extrusion_group.is_none() {
-            self.fill_extrusion_group = shaders.get_shader_group("FillExtrusionShader");
+            self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
         }
         if self.fill_extrusion_pattern_group.is_none() {
-            self.fill_extrusion_pattern_group = shaders.get_shader_group("FillExtrusionPatternShader");
+            self.fill_extrusion_pattern_group = shaders.shader_group("FillExtrusionPatternShader");
         }
         if self.fill_extrusion_instanced_group.is_none() {
-            self.fill_extrusion_instanced_group = shaders.get_shader_group("FillExtrusionInstancedShader");
+            self.fill_extrusion_instanced_group = shaders.shader_group("FillExtrusionInstancedShader");
         }
         if self.fill_extrusion_pattern_instanced_group.is_none() {
-            self.fill_extrusion_pattern_instanced_group =
-                shaders.get_shader_group("FillExtrusionPatternInstancedShader");
+            self.fill_extrusion_pattern_instanced_group = shaders.shader_group("FillExtrusionPatternInstancedShader");
         }
 
         let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
@@ -481,7 +471,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             }
 
             // If we already have drawables for this tile, update them.
-            let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
+            let update_existing = |drawable: &mut mln_gfx::Drawable| {
                 // A drawable produced on a previous style/bucket should not
                 // be updated.
                 drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref())
@@ -498,7 +488,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 &binders.interleaved_vertex_buffer,
                 binders.depends_on_feature_state(),
             );
-            let vertex_attrs = context.create_vertex_attribute_array();
+            let vertex_attrs = VertexAttributeArray::new_ptr();
             read_paint_properties(
                 &mut vertex_attrs.borrow_mut(),
                 binders,
@@ -506,7 +496,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 &paint,
                 &mut properties_as_uniforms,
             );
-            let instance_attrs = context.create_vertex_attribute_array();
+            let instance_attrs = VertexAttributeArray::new_ptr();
             read_paint_properties(
                 &mut instance_attrs.borrow_mut(),
                 binders,
@@ -516,18 +506,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
             );
 
             let variant = self.base.projection_variant;
-            let Some(shader) = shader_group.get_or_create_shader(context, &properties_as_uniforms, variant, "a_pos")
-            else {
-                continue;
-            };
-            let Some(instanced_shader) = instanced_shader_group.get_or_create_shader(
-                context,
-                &instance_properties_as_uniforms,
-                variant,
-                "a_pos",
-            ) else {
-                continue;
-            };
+            let shader = shader_group.shader(&properties_as_uniforms, variant);
+            let instanced_shader = instanced_shader_group.shader(&instance_properties_as_uniforms, variant);
 
             // The non-pattern path in `render()` only uses two-pass
             // rendering if there's translucency. The pattern path always
@@ -535,16 +515,16 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let do_depth_pass = !opaque || has_pattern;
 
             if do_depth_pass && depth_builder.is_none() {
-                depth_builder = Some(create_builder(context, &shader, false, tweaker.as_ref()));
+                depth_builder = Some(create_builder(&shader, false, tweaker.as_ref()));
             }
             if color_builder.is_none() {
-                color_builder = Some(create_builder(context, &shader, true, tweaker.as_ref()));
+                color_builder = Some(create_builder(&shader, true, tweaker.as_ref()));
             }
             if do_depth_pass && instanced_depth_builder.is_none() {
-                instanced_depth_builder = Some(create_builder(context, &instanced_shader, false, tweaker.as_ref()));
+                instanced_depth_builder = Some(create_builder(&instanced_shader, false, tweaker.as_ref()));
             }
             if instanced_color_builder.is_none() {
-                instanced_color_builder = Some(create_builder(context, &instanced_shader, true, tweaker.as_ref()));
+                instanced_color_builder = Some(create_builder(&instanced_shader, true, tweaker.as_ref()));
             }
 
             if has_pattern
@@ -600,7 +580,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 builder.set_vertex_attributes(Some(vertex_attrs));
             }
 
-            let instance_vertex_attrs = context.create_vertex_attribute_array();
+            let instance_vertex_attrs = VertexAttributeArray::new_ptr();
             {
                 let static_stride = size_of::<FillExtrusionStaticVertex>() as u32;
                 let mut attrs = instance_vertex_attrs.borrow_mut();
@@ -658,10 +638,10 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
             let triangles = bucket_indexes(geometry, bucket, &bucket.triangles);
             let instance_segments = [RenderStaticData::fill_extrusion_segment(vertex_count.saturating_sub(1))];
-            let finish = |builder: &mut dyn DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
+            let finish = |builder: &mut DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
                 builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(indexes)), segments);
 
-                builder.flush(context);
+                builder.flush();
 
                 let mut group = layer_group.borrow_mut();
                 let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");

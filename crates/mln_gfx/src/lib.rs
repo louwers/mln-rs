@@ -1,26 +1,23 @@
-//! The backend-independent graphics layer: the traits and types the renderer
-//! draws through, the backend-independent shader code (uniform buffer
-//! layouts, defines, shader groups), and the drawables and layer groups that
-//! the backends implement. `mln_webgpu` implements the traits on `wgpu`,
-//! `mln_mtl` on Metal, `mln_vulkan` on Vulkan and `mln_gl` on OpenGL ES 3.0.
+//! The backend-independent graphics layer: the [`gpu::Gpu`] interface a
+//! backend implements, and the renderer data drawn through it. `mln_webgpu`
+//! implements it on `wgpu`, `mln_mtl` on Metal, `mln_vulkan` on Vulkan and
+//! `mln_gl` on OpenGL ES 3.0.
 //!
-//! The layer groups (`renderer::layer_group`) and the render pass bitmask
-//! (`renderer::render_pass`) live here, and the renderer's paint parameters
-//! are seen through the `paint_parameters::PaintParameters` trait, because
-//! the backends cannot depend on `mln_renderer`. `LayerTweaker` stays in the
+//! The renderer's buffers and textures are resources of the backend's `Gpu`
+//! (`buffer`, `texture2d`). Drawables (`drawable`) and the layer groups that
+//! draw them (`renderer::layer_group`) record `gpu::RenderCommand`s, with
+//! each program's attributes from `shaders::program_info` and its variants
+//! from `shader_group`. The renderer's paint parameters are seen through the
+//! `paint_parameters::PaintParameters` trait. `LayerTweaker` stays in the
 //! renderer.
 //!
 //! The renderer runs on one thread: shared pointers are `Rc`, mutation
 //! through them uses `RefCell`/`Cell`.
-//!
-//! The `gpu` module is the id-based interface the backends move onto: a
-//! backend owns its resources, and the renderer records passes of plain
-//! commands. The renderer's buffers and textures are resources of the
-//! backend's `Gpu` already (`buffer`, `texture2d`).
 
 pub mod attribute;
 pub mod backend;
 pub mod backend_scope;
+pub mod bind_group;
 pub mod buffer;
 pub mod color_mode;
 pub mod command_encoder;
@@ -47,7 +44,6 @@ pub mod renderer;
 pub mod renderer_backend;
 pub mod rendering_stats;
 pub mod scissor_rect;
-pub mod shader;
 pub mod shader_group;
 pub mod shader_registry;
 pub mod shaders;
@@ -85,7 +81,7 @@ pub use renderer::layer_group::{LayerGroup, LayerGroupBase, LayerGroupBasePtr, T
 pub use renderer_backend::RendererBackend;
 pub use scissor_rect::ScissorRect;
 pub use shader_registry::ShaderRegistry;
-pub use shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBasePtr};
+pub use shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
 pub use stencil_mode::StencilMode;
 pub use types::DepthMaskType;
 pub use uniform_buffer::{UniformBufferArray, UniformBufferPtr};

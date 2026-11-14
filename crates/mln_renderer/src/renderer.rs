@@ -338,14 +338,8 @@ impl Renderer {
         context.begin_frame();
 
         if self.static_data.is_none() {
-            let static_data = RenderStaticData::new(Box::new(ShaderRegistry::new()));
-
-            // Initialize shaders for drawables
             let program_parameters = ProgramParameters::new(self.pixel_ratio, false);
-            backend.init_shaders(&static_data.shaders, &program_parameters);
-
-            // Notify post-shader registration
-            self.static_data = Some(static_data);
+            self.static_data = Some(RenderStaticData::new(Box::new(ShaderRegistry::new(&program_parameters))));
         }
 
         let render_tree_parameters = render_tree.get_parameters();
@@ -568,7 +562,6 @@ impl Renderer {
                 },
             ));
         }
-        context.bind_global_uniform_buffers(parameters.render_pass.as_deref().expect("render pass"));
 
         // drawableSkyPass
         if let Some(sky) = orchestrator.get_sky_layer_group() {
@@ -647,7 +640,6 @@ impl Renderer {
 
         // Give the layers a chance to do cleanup
         orchestrator.visit_layer_groups(|layer_group| layer_group.post_render(&mut parameters));
-        context.unbind_global_uniform_buffers(parameters.render_pass.as_deref().expect("render pass"));
 
         // Ends the RenderPass
         parameters.render_pass = None;

@@ -23,50 +23,26 @@
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
-use std::fmt::Write;
 use std::rc::{Rc, Weak};
 
 use ash::vk;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
-use mln_gfx::drawable_builder::UniqueDrawableBuilder;
 use mln_gfx::gpu::{Gpu, GpuError, TextureId};
-use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
-use mln_gfx::shader_group::StringIDSetsPair;
-use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
-use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
+use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
-use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::buffer_resource::BufferResource;
 use crate::command_encoder::CommandEncoder;
-use crate::descriptor_set::{DescriptorPoolGrowable, ImageBinding, UniformDescriptorSet};
 use crate::device::Device;
-use crate::drawable_builder::DrawableBuilder;
 use crate::gpu::VulkanGpu;
-use crate::layer_group::LayerGroup;
 use crate::offscreen_texture::OffscreenTexture;
-use crate::render_pass::RenderPass;
 use crate::renderer_backend::BackendImpl;
-use crate::shaders::compiler::{self, Stage};
-use crate::shaders::layout::{
-    DescriptorSetType, IMAGE_TEXTURE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE, image_sampler_binding, image_texture_binding,
-};
-use crate::shaders::shader_program::ShaderProgram;
-use crate::shaders::shader_source::GlslShaderSource;
+use crate::shaders::layout::{DescriptorSetType, IMAGE_TEXTURE_COUNT, image_sampler_binding, image_texture_binding};
 use crate::surface_resource::SurfaceResource;
 use crate::texture2d::Texture2D;
-use crate::tile_layer_group::TileLayerGroup;
-
-const GLOBAL_DESCRIPTOR_POOL_SIZE: u32 = 2;
-const LAYER_DESCRIPTOR_POOL_SIZE: u32 = 2 * 256;
-const DRAWABLE_UNIFORM_DESCRIPTOR_POOL_SIZE: u32 = 2 * 1024;
-const DRAWABLE_IMAGE_DESCRIPTOR_POOL_SIZE: u32 = DRAWABLE_UNIFORM_DESCRIPTOR_POOL_SIZE / 2;
 
 const MAXIMUM_SURFACE_UPDATE_RETRIES: u8 = 3;
 
@@ -107,13 +83,6 @@ pub struct Context {
     /// submission comes after its writes, and the buffers the renderer
     /// drops go after the frame's submission.
     gpu: RefCell<VulkanGpu>,
-    global_descriptor_set: RefCell<Option<UniformDescriptorSet>>,
-    descriptor_pools: RefCell<[DescriptorPoolGrowable; DescriptorSetType::COUNT]>,
-
-    dummy_buffer: RefCell<Option<BufferResource>>,
-    dummy_texture: RefCell<Option<Texture2D>>,
-    descriptor_set_layouts: Cell<[vk::DescriptorSetLayout; DescriptorSetType::COUNT]>,
-    general_pipeline_layout: Cell<vk::PipelineLayout>,
     render_passes: RefCell<HashMap<RenderPassKey, vk::RenderPass>>,
 
     frame_resource_index: Cell<u8>,
@@ -217,35 +186,16 @@ pub(crate) fn build_pipeline_layout(
     backend.set_debug_name(layout, name);
     Ok(layout)
 }
-
 impl Context {
     /// Creates the context of `backend`, or an error if the device can't make
-    /// the frames' command buffers, the descriptor set layouts or the pipeline
-    /// layouts.
+    /// its `Gpu` or the frames' command buffers.
     pub(crate) fn new(backend: Rc<BackendImpl>) -> Result<Rc<Context>, String> {
-        let storage = |type_: DescriptorSetType| type_.buffer_shape().storage as u32;
-        let uniform = |type_: DescriptorSetType| type_.buffer_shape().uniform as u32;
-        let (global, layer, drawable) =
-            (DescriptorSetType::Global, DescriptorSetType::Layer, DescriptorSetType::DrawableUniform);
-        let descriptor_pools = [
-            DescriptorPoolGrowable::new(GLOBAL_DESCRIPTOR_POOL_SIZE, 0, uniform(global), 0),
-            DescriptorPoolGrowable::new(LAYER_DESCRIPTOR_POOL_SIZE, storage(layer), uniform(layer), 0),
-            DescriptorPoolGrowable::new(DRAWABLE_UNIFORM_DESCRIPTOR_POOL_SIZE, 0, uniform(drawable), 0),
-            DescriptorPoolGrowable::new(DRAWABLE_IMAGE_DESCRIPTOR_POOL_SIZE, 0, 0, IMAGE_TEXTURE_COUNT as u32),
-        ];
-
         let gpu = VulkanGpu::on(Rc::clone(&backend)).map_err(|error| error.to_string())?;
         let context = Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
             backend,
             weak_self: Weak::clone(weak),
             gpu: RefCell::new(gpu),
-            global_descriptor_set: RefCell::new(None),
-            descriptor_pools: RefCell::new(descriptor_pools),
-            dummy_buffer: RefCell::new(None),
-            dummy_texture: RefCell::new(None),
-            descriptor_set_layouts: Cell::new([vk::DescriptorSetLayout::null(); DescriptorSetType::COUNT]),
-            general_pipeline_layout: Cell::new(vk::PipelineLayout::null()),
             render_passes: RefCell::new(HashMap::new()),
             frame_resource_index: Cell::new(0),
             frame_resources: RefCell::new(Vec::new()),
@@ -263,13 +213,10 @@ impl Context {
         });
         // Dropping the context destroys what a failed step leaves.
         context.init_frame_resources()?;
-        // Force placeholder texture upload before any descriptor sets.
-        context.get_dummy_texture();
         Ok(context)
     }
 
-    /// Makes the command buffer and the fence of each frame in flight, the
-    /// descriptor set layouts and the pipeline layouts.
+    /// Makes the command buffer and the fence of each frame in flight.
     fn init_frame_resources(&self) -> Result<(), String> {
         let backend = &self.backend;
         let device = backend.get_device();
@@ -296,21 +243,6 @@ impl Context {
             backend.set_debug_name(flight_frame_fence, &format!("FrameFence_{index}"));
         }
 
-        let mut layouts = [vk::DescriptorSetLayout::null(); DescriptorSetType::COUNT];
-        for type_ in DescriptorSetType::ALL {
-            let layout = build_descriptor_set_layout(backend, type_);
-            if let Ok(layout) = layout {
-                layouts[type_ as usize] = layout;
-            }
-            self.descriptor_set_layouts.set(layouts);
-            layout?;
-        }
-        self.general_pipeline_layout.set(build_pipeline_layout(
-            backend,
-            &layouts,
-            UBO_INDEX_PUSH_CONSTANT_SIZE,
-            "PipelineLayout_general",
-        )?);
         Ok(())
     }
 
@@ -353,11 +285,9 @@ impl Context {
         self.backend.wait_idle("context shutdown");
         self.frame_recording.set(false);
 
-        *self.global_descriptor_set.borrow_mut() = None;
         *self.mutable_global_uniform_buffers() = UniformBufferArray::new();
+        self.release_cached_resources();
         self.destroy_released();
-        *self.dummy_buffer.borrow_mut() = None;
-        *self.dummy_texture.borrow_mut() = None;
 
         // A deletion can enqueue another.
         loop {
@@ -385,24 +315,19 @@ impl Context {
                 device.free_command_buffers(self.backend.get_command_pool(), &[frame.command_buffer]);
                 device.destroy_fence(frame.flight_frame_fence, None);
             }
-            for pool in self.descriptor_pools.borrow_mut().iter_mut() {
-                for info in pool.pools.drain(..) {
-                    device.destroy_descriptor_pool(info.pool, None);
-                }
-            }
             for (_, render_pass) in self.render_passes.borrow_mut().drain() {
                 device.destroy_render_pass(render_pass, None);
             }
-            device.destroy_pipeline_layout(self.general_pipeline_layout.get(), None);
-            for layout in self.descriptor_set_layouts.get() {
-                device.destroy_descriptor_set_layout(layout, None);
-            }
         }
     }
-
-    /// The `Gpu` the renderer's buffers and textures belong to.
+    /// The `Gpu` the renderer's resources belong to and its draws encode
+    /// through.
     pub(crate) fn vulkan_gpu(&self) -> Ref<'_, VulkanGpu> {
         self.gpu.borrow()
+    }
+
+    pub(crate) fn vulkan_gpu_mut(&self) -> RefMut<'_, VulkanGpu> {
+        self.gpu.borrow_mut()
     }
 
     /// The texels of `texture`, a color texture of the `Gpu` that is a
@@ -680,129 +605,9 @@ impl Context {
         BufferResource::new(self, data, size, usage)
     }
 
-    /// Compiles the two stages of `source`, with its prelude, the program's
-    /// defines and `additional_defines`.
-    pub(crate) fn create_program(
-        &self,
-        name: String,
-        source: &GlslShaderSource,
-        program_parameters: &ProgramParameters,
-        additional_defines: &HashMap<String, String>,
-    ) -> Option<ShaderProgram> {
-        let mut define_str = format!("{}\n\n", program_parameters.get_defines_string());
-        let mut additional: Vec<_> = additional_defines.iter().collect();
-        additional.sort();
-        for (key, value) in additional {
-            let _ = writeln!(define_str, "#define {key} {value}");
-        }
-
-        let compile = |stage: Stage, stage_source: &str| {
-            let spirv = compiler::compile(stage, &compiler::compose(stage, &define_str, source.prelude, stage_source))
-                .map_err(|error| Log::error(Event::Shader, format!("{name} - {error}")))
-                .ok()?;
-            let create_info = vk::ShaderModuleCreateInfo::default().code(&spirv);
-            // SAFETY: the code is the SPIR-V module naga wrote.
-            unsafe { self.backend.get_device().create_shader_module(&create_info, None) }
-                .map_err(|error| Log::error(Event::Shader, format!("{name} - {error}")))
-                .ok()
-        };
-        let vertex_shader = compile(Stage::Vertex, source.vertex);
-        let fragment_shader = compile(Stage::Fragment, source.fragment);
-        let (Some(vertex_shader), Some(fragment_shader)) = (vertex_shader, fragment_shader) else {
-            // SAFETY: nothing uses the stage that did compile.
-            unsafe {
-                for module in [vertex_shader, fragment_shader].into_iter().flatten() {
-                    self.backend.get_device().destroy_shader_module(module, None);
-                }
-            }
-            debug_assert!(false, "shader compile failed");
-            return None;
-        };
-        self.backend.set_debug_name(vertex_shader, &format!("{name}.vert"));
-        self.backend.set_debug_name(fragment_shader, &format!("{name}.frag"));
-
-        Some(ShaderProgram::new(name, self, vertex_shader, fragment_shader))
-    }
-
     /// Creates a texture, of the concrete type.
     pub fn create_vulkan_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
         Rc::new(RefCell::new(Texture2D::new(self)))
-    }
-
-    /// A buffer bound where a buffer or a vertex attribute has no data.
-    /// Shaders don't read it.
-    pub(crate) fn get_dummy_buffer(&self) -> vk::Buffer {
-        if let Some(buffer) = self.dummy_buffer.borrow().as_ref() {
-            return buffer.get_vulkan_buffer();
-        }
-        let usage = vk::BufferUsageFlags::VERTEX_BUFFER
-            | vk::BufferUsageFlags::UNIFORM_BUFFER
-            | vk::BufferUsageFlags::STORAGE_BUFFER;
-        let buffer = BufferResource::new(self, None, 16, usage);
-        let handle = buffer.get_vulkan_buffer();
-        *self.dummy_buffer.borrow_mut() = Some(buffer);
-        handle
-    }
-
-    /// A texture bound where a shader's texture has no image.
-    pub(crate) fn get_dummy_texture(&self) -> Option<ImageBinding> {
-        let mut dummy = self.dummy_texture.borrow_mut();
-        let texture = if let Some(texture) = dummy.as_mut() {
-            texture
-        } else {
-            let size = Size::new(2, 2);
-            let data = vec![0xFFu8; 4 * size.width as usize * size.height as usize];
-            let mut texture = Texture2D::new(self);
-            texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
-            texture.upload_data(Some(&data), size);
-            dummy.insert(texture)
-        };
-        let image_view = texture.get_vulkan_image_view();
-        let sampler = texture.get_vulkan_sampler();
-        (image_view != vk::ImageView::null() && sampler != vk::Sampler::null()).then_some(ImageBinding {
-            image_id: 0,
-            sampler_id: None,
-            image_view,
-            image_layout: texture.get_vulkan_image_layout(),
-            sampler,
-        })
-    }
-
-    pub(crate) fn get_descriptor_set_layout(&self, type_: DescriptorSetType) -> vk::DescriptorSetLayout {
-        self.descriptor_set_layouts.get()[type_ as usize]
-    }
-
-    /// A descriptor set of `type_` for each frame in flight, and the pool
-    /// they are from (`DescriptorSet::allocate`).
-    pub(crate) fn allocate_descriptor_sets(&self, type_: DescriptorSetType) -> Option<(Vec<vk::DescriptorSet>, usize)> {
-        if self.destroyed.get() {
-            return None;
-        }
-        let sets = self.descriptor_pools.borrow_mut()[type_ as usize].allocate(
-            self.backend.get_device(),
-            self.get_descriptor_set_layout(type_),
-            self.backend.get_max_frames() as usize,
-        );
-        if sets.is_none() {
-            Log::error(Event::Render, "Vulkan descriptor set allocation failed");
-        }
-        sets
-    }
-
-    /// Takes back the sets of `allocate_descriptor_sets`.
-    pub(crate) fn give_back_descriptor_sets(
-        &self,
-        type_: DescriptorSetType,
-        pool_index: usize,
-        sets: Vec<vk::DescriptorSet>,
-    ) {
-        self.descriptor_pools.borrow_mut()[type_ as usize].give_back(pool_index, sets);
-    }
-
-    /// The layout of the drawable pipelines: the four descriptor sets, and
-    /// the drawable's index as the push constant.
-    pub(crate) fn get_general_pipeline_layout(&self) -> vk::PipelineLayout {
-        self.general_pipeline_layout.get()
     }
 
     /// The render pass over attachments of `key`'s formats, null if the
@@ -812,7 +617,8 @@ impl Context {
     /// (`RenderPassKey::color_load`). A pass with depth and stencil
     /// (`SurfaceResource::initRenderPass`) keeps the color only; a
     /// pass without (`OffscreenTextureResource::createRenderPass`) leaves
-    /// the color attachment ready to be sampled.
+    /// the color attachment ready to be sampled. Its subpass dependencies
+    /// are the `Gpu`'s, so that the `Gpu`'s pipelines fit it.
     pub(crate) fn get_render_pass(&self, key: RenderPassKey) -> vk::RenderPass {
         if let Some(&render_pass) = self.render_passes.borrow().get(&key) {
             return render_pass;
@@ -835,7 +641,6 @@ impl Context {
         let mut subpass = vk::SubpassDescription::default()
             .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
             .color_attachments(&color_attachment_ref);
-        let dependencies;
         if let Some(depth_format) = key.depth_format {
             let store = if key.depth_final_layout.is_some() {
                 vk::AttachmentStoreOp::STORE
@@ -854,54 +659,8 @@ impl Context {
                     .final_layout(key.depth_final_layout.unwrap_or(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)),
             );
             subpass = subpass.depth_stencil_attachment(&depth_attachment_ref);
-            let depth_stages =
-                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS;
-            dependencies = vec![
-                vk::SubpassDependency::default()
-                    .src_subpass(vk::SUBPASS_EXTERNAL)
-                    .dst_subpass(0)
-                    .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                    .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                    .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                    .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                    .dependency_flags(vk::DependencyFlags::BY_REGION),
-                vk::SubpassDependency::default()
-                    .src_subpass(vk::SUBPASS_EXTERNAL)
-                    .dst_subpass(0)
-                    .src_stage_mask(depth_stages)
-                    .dst_stage_mask(depth_stages)
-                    .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
-                    .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
-                    .dependency_flags(vk::DependencyFlags::BY_REGION),
-            ];
-        } else if key.color_load {
-            // The pass before wrote the color, which this one blends over.
-            dependencies = vec![
-                vk::SubpassDependency::default()
-                    .src_subpass(vk::SUBPASS_EXTERNAL)
-                    .dst_subpass(0)
-                    .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                    .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                    .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                    .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE),
-            ];
-        } else {
-            dependencies = vec![
-                vk::SubpassDependency::default()
-                    .src_subpass(vk::SUBPASS_EXTERNAL)
-                    .dst_subpass(0)
-                    .src_stage_mask(
-                        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                    )
-                    .dst_stage_mask(
-                        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-                    )
-                    .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
-                    .dst_access_mask(
-                        vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                    ),
-            ];
         }
+        let dependencies = crate::gpu::subpass_dependencies();
         let subpasses = [subpass];
         let create_info = vk::RenderPassCreateInfo::default()
             .attachments(&attachments)
@@ -928,16 +687,6 @@ impl Context {
             .iter()
             .find(|(_, made)| **made == render_pass)
             .map(|(key, _)| (key.color_format, key.depth_format))
-    }
-
-    pub(crate) fn get_current_frame_resource_index(&self) -> u8 {
-        self.frame_resource_index.get()
-    }
-
-    /// The number of the frame being recorded, or of the last one. No two
-    /// frames have the same.
-    pub(crate) fn frame_serial(&self) -> u64 {
-        self.frame_serial.get()
     }
 
     /// The command buffer of the frame.
@@ -1112,50 +861,7 @@ impl GfxContext for Context {
         Box::new(CommandEncoder::new(self.rc(), self.get_command_buffer()))
     }
 
-    fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr {
-        VertexAttributeArray::new_ptr()
-    }
-
-    fn create_drawable_builder(&self) -> UniqueDrawableBuilder {
-        Box::new(DrawableBuilder::new())
-    }
-
     fn gpu(&self) -> RefMut<'_, dyn Gpu> {
         RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
-
-    fn get_generic_shader(
-        &self,
-        registry: &ShaderRegistry,
-        name: &str,
-        variant: ProjectionVariant,
-    ) -> Option<ShaderProgramBasePtr> {
-        let shader_group = registry.get_shader_group(name)?;
-        shader_group.get_or_create_shader(self, &StringIDSetsPair::default(), variant, "")
-    }
-
-    fn create_tile_layer_group(
-        &self,
-        layer_index: i32,
-        initial_capacity: usize,
-        name: String,
-    ) -> Option<LayerGroupBasePtr> {
-        Some(Rc::new(RefCell::new(TileLayerGroup::new(layer_index, initial_capacity, name))))
-    }
-
-    fn create_layer_group(&self, layer_index: i32, initial_capacity: usize, name: String) -> Option<LayerGroupBasePtr> {
-        Some(Rc::new(RefCell::new(LayerGroup::new(layer_index, initial_capacity, name))))
-    }
-
-    fn bind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
-        let Some(render_pass) = render_pass.downcast_ref::<RenderPass>() else {
-            return;
-        };
-        let mut descriptor_set = self.global_descriptor_set.borrow_mut();
-        let descriptor_set =
-            descriptor_set.get_or_insert_with(|| UniformDescriptorSet::new(self, DescriptorSetType::Global));
-        descriptor_set.bind(self, render_pass.get_command_buffer(), &self.global_uniform_buffers());
-    }
-
-    fn unbind_global_uniform_buffers(&self, _render_pass: &dyn mln_gfx::render_pass::RenderPass) {}
 }

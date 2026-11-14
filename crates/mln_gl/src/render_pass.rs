@@ -1,6 +1,6 @@
-// A GL render pass is the framebuffer bound when it begins: its drawables
-// draw through the context, and it keeps the framebuffer to bind it again
-// after a custom layer.
+// A GL render pass is the framebuffer bound when it begins: its commands
+// draw through the context's `GlGpu`, and it keeps the framebuffer to bind it
+// again after a custom layer.
 //
 // Debug groups are GL_KHR_debug's (src/mln/gl/debugging_extension.cpp),
 // which WebGL2 doesn't have; they are not ported.
@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use mln_gfx::context::Context as _;
 use mln_gfx::debug_group::DebugGroupTarget;
+use mln_gfx::gpu::{GpuError, RenderCommand, TargetFormats, TextureFormat};
 use mln_gfx::render_pass::{self, RenderPassDescriptor};
 use mln_util::size::Size;
 
@@ -52,6 +53,21 @@ impl DebugGroupTarget for RenderPass {
 }
 
 impl render_pass::RenderPass for RenderPass {
+    /// GL pipelines don't depend on the formats they draw into, so a pass
+    /// gives the formats of the default framebuffer: RGBA, and depth and
+    /// stencil where it has a stencil buffer.
+    fn target(&self) -> Option<(Size, TargetFormats)> {
+        let (_, size, has_stencil) = self.framebuffer;
+        let depth_stencil = has_stencil.then_some(TextureFormat::Depth24PlusStencil8);
+        Some((size, TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil }))
+    }
+
+    fn encode(&self, commands: &[RenderCommand]) -> Result<(), GpuError> {
+        let (size, targets) =
+            self.target().ok_or_else(|| GpuError::Invalid("a render pass without a target".into()))?;
+        self.context.gl_gpu_mut().encode_into(size, targets, commands)
+    }
+
     /// Lends the bound framebuffer with vertex array 0 bound, then forgets the
     /// GL state the context knew, and binds the framebuffer again.
     fn lend_to_custom_layer(&self, f: &mut dyn FnMut(&mut dyn Any)) -> bool {

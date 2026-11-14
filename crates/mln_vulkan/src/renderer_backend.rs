@@ -39,16 +39,11 @@ use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
 use mln_gfx::context::Context as GfxContext;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
-use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 
 use crate::context::Context;
 use crate::device::Device;
-use crate::shaders::shader_group::ShaderGroup;
-use crate::shaders::shader_source::shader_source;
 
 /// The platform's part of a backend that renders to a window: what C++'s
 /// `SurfaceResource::createPlatformSurface` and the platform's
@@ -277,46 +272,6 @@ pub struct RendererBackend {
     context: Rc<Context>,
 }
 
-/// The shader types registered by `initShaders`, in the C++ order.
-/// `init_shaders` skips the ones without a Vulkan source in the port
-/// (`shader_source`): the wide vector shader.
-const REGISTERED_SHADERS: &[BuiltIn] = &[
-    BuiltIn::BackgroundShader,
-    BuiltIn::BackgroundPatternShader,
-    BuiltIn::SkyShader,
-    BuiltIn::AtmosphereShader,
-    BuiltIn::CircleShader,
-    BuiltIn::ClippingMaskProgram,
-    BuiltIn::CollisionBoxShader,
-    BuiltIn::CollisionCircleShader,
-    BuiltIn::ColorReliefShader,
-    BuiltIn::DebugShader,
-    BuiltIn::FillShader,
-    BuiltIn::FillOutlineShader,
-    BuiltIn::FillPatternShader,
-    BuiltIn::FillOutlinePatternShader,
-    BuiltIn::FillOutlineTriangulatedShader,
-    BuiltIn::FillExtrusionShader,
-    BuiltIn::FillExtrusionInstancedShader,
-    BuiltIn::FillExtrusionPatternShader,
-    BuiltIn::FillExtrusionPatternInstancedShader,
-    BuiltIn::HeatmapShader,
-    BuiltIn::HeatmapTextureShader,
-    BuiltIn::HillshadeShader,
-    BuiltIn::HillshadePrepareShader,
-    BuiltIn::LineShader,
-    BuiltIn::LineGradientShader,
-    BuiltIn::LineSDFShader,
-    BuiltIn::LineGradientSDFShader,
-    BuiltIn::LinePatternShader,
-    BuiltIn::RasterShader,
-    BuiltIn::SymbolIconShader,
-    BuiltIn::SymbolSDFShader,
-    BuiltIn::SymbolTextAndIconShader,
-    BuiltIn::WideVectorShader,
-    BuiltIn::GlobeDepthShader,
-];
-
 impl RendererBackend {
     /// A backend on `device` for offscreen and borrowed targets, with one
     /// frame in flight.
@@ -380,31 +335,11 @@ impl RendererBackend {
     pub(crate) fn create_context(&self) -> Rc<Context> {
         Rc::clone(&self.context)
     }
-
-    /// Registers one shader group per built-in shader. A duplicate
-    /// registration is an error, which C++ throws and this logs.
-    #[expect(clippy::unused_self, reason = "each backend registers its shaders through its own `init_shaders`")]
-    pub(crate) fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
-        for &shader_id in REGISTERED_SHADERS {
-            let Some(source) = shader_source(shader_id) else {
-                continue;
-            };
-            let group = Rc::new(ShaderGroup::new(shader_id, program_parameters.clone()));
-            if !registry.register_shader_group(group, source.name) {
-                Log::error(Event::Shader, format!("Failed to register {} with shader registry!", source.name));
-                debug_assert!(false, "duplicate shader group");
-            }
-        }
-    }
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
     fn renderer_backend_base(&self) -> &RendererBackendBase {
         &self.base
-    }
-
-    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
-        RendererBackend::init_shaders(self, registry, parameters);
     }
 
     fn create_context(&self) -> Rc<dyn GfxContext> {

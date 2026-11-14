@@ -10,7 +10,10 @@ use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
 use mln_gfx::uniform_buffer::UniformBufferPtr;
-use mln_gfx::{AttributeDataType, Context, DepthMaskType, DrawMode, ShaderProgramBasePtr, ShaderRegistry};
+use mln_gfx::{
+    AttributeDataType, Context, DepthMaskType, DrawMode, DrawableBuilder, ShaderProgramPtr, ShaderRegistry,
+    TileLayerGroup,
+};
 use mln_map_types::TransformState;
 use mln_tile_id::OverscaledTileID;
 use mln_util::range::Range;
@@ -30,7 +33,7 @@ const GLOBE_DEPTH_SHADER_NAME: &str = "GlobeDepthShader";
 #[derive(Default)]
 pub(crate) struct GlobeDepthPass {
     layer_group: Option<LayerGroupBasePtr>,
-    shader: Option<ShaderProgramBasePtr>,
+    shader: Option<ShaderProgramPtr>,
     projection_uniform_buffer: Option<UniformBufferPtr>,
     meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
 }
@@ -57,14 +60,13 @@ impl GlobeDepthPass {
         }
 
         if self.shader.is_none() {
-            self.shader = context.get_generic_shader(shaders, GLOBE_DEPTH_SHADER_NAME, ProjectionVariant::Globe);
+            self.shader = shaders.shader(GLOBE_DEPTH_SHADER_NAME, ProjectionVariant::Globe);
         }
         if self.shader.is_none() {
             return;
         }
         if self.layer_group.is_none() {
-            const INITIAL_CAPACITY: usize = 64;
-            self.layer_group = context.create_tile_layer_group(0, INITIAL_CAPACITY, "globe-depth".to_owned());
+            self.layer_group = Some(TileLayerGroup::new_ptr(0, "globe-depth"));
         }
         let Some(layer_group) = self.layer_group.clone() else {
             return;
@@ -101,11 +103,10 @@ impl GlobeDepthPass {
                 continue;
             }
             let builder = builder.get_or_insert_with(|| {
-                let mut builder = context.create_drawable_builder();
+                let mut builder = DrawableBuilder::boxed();
                 builder.set_shader(self.shader.clone());
                 builder.set_render_pass(RenderPass::Translucent);
                 builder.set_is_3d(true);
-                builder.set_enable_color(false);
                 builder.set_enable_depth(true);
                 builder.set_depth_type(DepthMaskType::ReadWrite);
                 // The far hemisphere is clockwise on screen on every backend,
@@ -125,7 +126,7 @@ impl GlobeDepthPass {
                 .or_insert_with(|| raw_globe_tile_mesh(canonical, true, SubdivisionGranularitySetting::globe().tile));
             builder.set_raw_vertices(mesh.vertices.clone(), mesh.vertex_count, AttributeDataType::Short2);
             builder.set_segments(DrawMode::Triangles(), mesh.indices.clone(), &mesh.segments);
-            builder.flush(context);
+            builder.flush();
 
             for mut drawable in builder.clear_drawables() {
                 drawable.set_tile_id(*tile_id);
@@ -140,7 +141,7 @@ impl GlobeDepthPass {
             let Some(tile_id) = drawable.get_tile_id() else {
                 return;
             };
-            drawable.set_ubo_index(projection_ubos.len() as u32);
+            drawable.ubo_index = projection_ubos.len() as u32;
             projection_ubos.push(to_projection_ubo(&state.get_projection_data(&tile_id.to_unwrapped())));
         });
         if !projection_ubos.is_empty() {

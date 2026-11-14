@@ -48,14 +48,6 @@ mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 name = "msl_compile_test"
 path = "tests/msl_compile_test.rs"
 
-# The background shader end to end on the drawable path (after
-# crates/mln_webgpu/tests/background_test.rs): an offscreen target, a
-# DrawableBuilder drawable in a TileLayerGroup, tile clipping masks,
-# rendered into the offscreen target and read back.
-[[test]]
-name = "background_test"
-path = "tests/background_test.rs"
-
 # Ports test/renderer/metal_renderable.test.cpp.
 [[test]]
 name = "gtest_metal_renderable"

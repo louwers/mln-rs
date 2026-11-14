@@ -1,15 +1,3 @@
-// Moved down from the renderer (see the crate docs): the backends implement
-// the layer groups. Differences from C++:
-// - `layerTweakers` / `addLayerTweaker` / `runTweakers` stay in mln_renderer
-//   (`LayerTweaker` needs style types); this crate has no tweaker list.
-// - `preRender`/`render`/`postRender` drop the unused `RenderOrchestrator&`.
-// - `visitDrawables` runs the callback without the C++ try/catch (which
-//   removed drawables whose callback threw and reported to the observer):
-//   Rust callbacks don't throw; a panic propagates.
-// - `TileLayerGroup` stores drawables in a `BTreeMap` keyed by (draw
-//   priority, id), the order of the C++ `sortedDrawables` set, with the
-//   (pass, tile) key alongside; C++ keeps an unordered_multimap plus the set.
-
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -17,11 +5,17 @@ use std::rc::Rc;
 
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
+use mln_util::logging::{Event, Log};
 
+use crate::bind_group::BindGroup;
 use crate::context::Context;
+use crate::depth_mode::DepthMode;
 use crate::drawable::{Drawable, UniqueDrawable};
+use crate::gpu::BindGroupId;
 use crate::paint_parameters::PaintParameters;
 use crate::renderer::render_pass::RenderPass;
+use crate::stencil_mode::StencilMode;
+use crate::types::DepthMaskType;
 use crate::uniform_buffer::UniformBufferArray;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +37,7 @@ pub struct LayerGroupBaseData {
 
 impl LayerGroupBaseData {
     #[must_use]
-    pub(crate) fn new(layer_index: i32, name: String, type_: Type) -> Self {
+    pub fn new(layer_index: i32, name: String, type_: Type) -> Self {
         LayerGroupBaseData { unique_id: SimpleIdentity::new(), type_, enabled: true, layer_index, name }
     }
 }
@@ -107,7 +101,7 @@ pub trait LayerGroupBase: Any {
 pub type LayerGroupBasePtr = Rc<RefCell<dyn LayerGroupBase>>;
 
 /// Initializes the tweakers of a drawable added to a group.
-fn init_drawable_tweakers(drawable: &mut dyn Drawable) {
+fn init_drawable_tweakers(drawable: &mut Drawable) {
     let tweakers = drawable.get_tweakers().clone();
     for tweaker in tweakers {
         tweaker.init(drawable);
@@ -123,29 +117,64 @@ pub(crate) struct TileLayerGroupTileKey {
 /// The `DrawableLessByPriority` key: (draw priority, id).
 type SortKey = (i64, SimpleIdentity);
 
-fn sort_key(drawable: &dyn Drawable) -> SortKey {
+fn sort_key(drawable: &Drawable) -> SortKey {
     (drawable.get_draw_priority(), drawable.get_id())
 }
 
-/// A layer group for tile-based drawables. Backends embed it and implement
-/// `LayerGroupBase` (render/upload, uniform buffers).
+/// The buffers a layer group binds for its drawables, and their group.
+#[derive(Default)]
+struct LayerBuffers {
+    uniform_buffers: UniformBufferArray,
+    bind_group: BindGroup,
+}
+
+impl LayerBuffers {
+    /// The group of the buffers, `None` where there are none.
+    fn bind_group(&mut self, context: &dyn Context, name: &str) -> Result<Option<BindGroupId>, ()> {
+        let entries = self.uniform_buffers.entries();
+        if entries.is_empty() {
+            return Ok(None);
+        }
+        self.bind_group.get(context, name, entries).map(Some).map_err(|error| {
+            Log::warning(Event::Render, format!("Binding the buffers of layer group {name} failed: {error}"));
+        })
+    }
+}
+
+/// Runs a drawable's tweakers and draws it.
+fn draw(drawable: &mut Drawable, parameters: &mut dyn PaintParameters, layer: Option<BindGroupId>) {
+    let tweakers = drawable.get_tweakers().clone();
+    for tweaker in tweakers {
+        tweaker.execute(drawable, parameters);
+    }
+    drawable.draw(parameters, layer);
+}
+
+/// A layer group for tile-based drawables.
 pub struct TileLayerGroup {
     pub base: LayerGroupBaseData,
     /// When stencil clipping is enabled for the layer, this is the set of
-    /// tile IDs that need to be rendered to the stencil buffer. (C++ keeps the
-    /// `RenderTiles`; only their ids are used.)
+    /// tile IDs that need to be rendered to the stencil buffer.
     pub stencil_tiles: Option<Rc<Vec<UnwrappedTileID>>>,
     drawables: BTreeMap<SortKey, (TileLayerGroupTileKey, UniqueDrawable)>,
+    buffers: LayerBuffers,
 }
 
 impl TileLayerGroup {
     #[must_use]
-    pub fn new(layer_index: i32, _initial_capacity: usize, name: String) -> Self {
+    pub fn new(layer_index: i32, name: String) -> Self {
         TileLayerGroup {
             base: LayerGroupBaseData::new(layer_index, name, Type::TileLayerGroup),
             stencil_tiles: None,
             drawables: BTreeMap::new(),
+            buffers: LayerBuffers::default(),
         }
+    }
+
+    /// A shared group.
+    #[must_use]
+    pub fn new_ptr(layer_index: i32, name: impl Into<String>) -> LayerGroupBasePtr {
+        Rc::new(RefCell::new(Self::new(layer_index, name.into())))
     }
 
     #[must_use]
@@ -174,14 +203,14 @@ impl TileLayerGroup {
     }
 
     /// Call `f` for each drawable, in draw-priority order.
-    pub fn visit_drawables(&mut self, mut f: impl FnMut(&mut dyn Drawable)) -> usize {
+    pub fn visit_drawables(&mut self, mut f: impl FnMut(&mut Drawable)) -> usize {
         for (_, drawable) in self.drawables.values_mut() {
             f(drawable.as_mut());
         }
         self.drawables.len()
     }
 
-    pub fn visit_drawables_ref(&self, mut f: impl FnMut(&dyn Drawable)) -> usize {
+    pub fn visit_drawables_ref(&self, mut f: impl FnMut(&Drawable)) -> usize {
         for (_, drawable) in self.drawables.values() {
             f(drawable.as_ref());
         }
@@ -189,7 +218,7 @@ impl TileLayerGroup {
     }
 
     /// Remove the drawables for which `f` returns true; returns the count.
-    pub fn remove_drawables_if(&mut self, mut f: impl FnMut(&mut dyn Drawable) -> bool) -> usize {
+    pub fn remove_drawables_if(&mut self, mut f: impl FnMut(&mut Drawable) -> bool) -> usize {
         let old_size = self.drawables.len();
         self.drawables.retain(|_, (_, drawable)| !f(drawable.as_mut()));
         old_size - self.drawables.len()
@@ -200,7 +229,7 @@ impl TileLayerGroup {
         &mut self,
         pass: RenderPass,
         tile_id: &OverscaledTileID,
-        mut f: impl FnMut(&mut dyn Drawable),
+        mut f: impl FnMut(&mut Drawable),
     ) -> usize {
         let key = TileLayerGroupTileKey { render_pass: pass, tile_id: *tile_id };
         let mut count = 0;
@@ -228,12 +257,23 @@ impl TileLayerGroup {
 pub struct LayerGroup {
     pub base: LayerGroupBaseData,
     drawables: BTreeMap<SortKey, UniqueDrawable>,
+    buffers: LayerBuffers,
 }
 
 impl LayerGroup {
     #[must_use]
-    pub fn new(layer_index: i32, _initial_capacity: usize, name: String) -> Self {
-        LayerGroup { base: LayerGroupBaseData::new(layer_index, name, Type::LayerGroup), drawables: BTreeMap::new() }
+    pub fn new(layer_index: i32, name: String) -> Self {
+        LayerGroup {
+            base: LayerGroupBaseData::new(layer_index, name, Type::LayerGroup),
+            drawables: BTreeMap::new(),
+            buffers: LayerBuffers::default(),
+        }
+    }
+
+    /// A shared group.
+    #[must_use]
+    pub fn new_ptr(layer_index: i32, name: impl Into<String>) -> LayerGroupBasePtr {
+        Rc::new(RefCell::new(Self::new(layer_index, name.into())))
     }
 
     #[must_use]
@@ -247,7 +287,7 @@ impl LayerGroup {
         self.drawables.insert(key, drawable);
     }
 
-    pub fn visit_drawables(&mut self, mut f: impl FnMut(&mut dyn Drawable)) -> usize {
+    pub fn visit_drawables(&mut self, mut f: impl FnMut(&mut Drawable)) -> usize {
         for drawable in self.drawables.values_mut() {
             f(drawable.as_mut());
         }
@@ -261,7 +301,181 @@ impl LayerGroup {
     }
 }
 
-pub fn visit_layer_group_drawables(layer_group: &mut dyn LayerGroupBase, f: impl FnMut(&mut dyn Drawable)) {
+impl LayerGroupBase for TileLayerGroup {
+    fn base(&self) -> &LayerGroupBaseData {
+        &self.base
+    }
+    fn base_mut(&mut self) -> &mut LayerGroupBaseData {
+        &mut self.base
+    }
+    fn as_tile_layer_group(&self) -> Option<&TileLayerGroup> {
+        Some(self)
+    }
+    fn as_tile_layer_group_mut(&mut self) -> Option<&mut TileLayerGroup> {
+        Some(self)
+    }
+
+    fn get_drawable_count(&self) -> usize {
+        self.drawables.len()
+    }
+
+    fn clear_drawables(&mut self) -> usize {
+        TileLayerGroup::clear_drawables(self)
+    }
+
+    fn upload(&mut self, context: &dyn Context) {
+        if !self.base.enabled {
+            return;
+        }
+        for (_, drawable) in self.drawables.values_mut() {
+            if drawable.enabled {
+                drawable.upload(context);
+            }
+        }
+    }
+
+    /// Draws the drawables of the pass. 3D drawables share the group's depth
+    /// mode, and each takes a stencil value of its own, or, where the group
+    /// clips to tiles, one the group's drawables share. 2D drawables clip to
+    /// their tiles' masks, which this draws first.
+    fn render(&mut self, parameters: &mut dyn PaintParameters) {
+        if !self.base.enabled || self.drawables.is_empty() || parameters.render_pass().is_none() {
+            return;
+        }
+        let pass = parameters.pass();
+        let stencil_tiles = self.stencil_tiles.clone().filter(|tiles| !tiles.is_empty());
+        let has_stencil_tiles = stencil_tiles.is_some();
+
+        // `stencil_mode_for_3d` hands out a new value each call, so the
+        // values are taken up front: one slot for each 3D stencilled
+        // drawable that takes a value of its own, by its place in the
+        // drawing order.
+        let mut features_3d = false;
+        let mut stencil_3d = false;
+        let mut own_stencil_slots: Vec<Option<usize>> = Vec::with_capacity(self.drawables.len());
+        let mut own_stencil_modes: Vec<StencilMode> = Vec::new();
+        for (_, drawable) in self.drawables.values() {
+            let mut slot = None;
+            if drawable.enabled && drawable.is_3d && drawable.has_render_pass(pass) {
+                features_3d = true;
+                if drawable.enable_stencil {
+                    stencil_3d = true;
+                    if !has_stencil_tiles {
+                        slot = Some(own_stencil_modes.len());
+                        own_stencil_modes.push(StencilMode::default());
+                    }
+                }
+            }
+            own_stencil_slots.push(slot);
+        }
+        let own_stencil_modes_taken = parameters.stencil_modes_for_3d(&mut own_stencil_modes);
+
+        let mut depth_mode_3d = DepthMode::disabled();
+        let mut stencil_mode_3d = None;
+        if features_3d {
+            depth_mode_3d = parameters.depth_mode_for_3d(DepthMaskType::ReadWrite);
+            if stencil_3d && has_stencil_tiles {
+                stencil_mode_3d = Some(parameters.stencil_mode_for_3d());
+            }
+        } else if let Some(tiles) = &stencil_tiles {
+            parameters.render_tile_clipping_masks(tiles);
+        }
+
+        let Ok(layer) = self.buffers.bind_group(parameters.context(), &self.base.name) else {
+            return;
+        };
+        for ((_, drawable), own_slot) in self.drawables.values_mut().zip(own_stencil_slots) {
+            if !drawable.enabled || !drawable.has_render_pass(pass) {
+                continue;
+            }
+            if features_3d {
+                let depth = if drawable.enable_depth { depth_mode_3d } else { DepthMode::disabled() };
+                if let Some(slot) = own_slot
+                    && !own_stencil_modes_taken
+                {
+                    // There were more drawables than stencil values: each
+                    // takes its value as it draws, so a stencil clear falls
+                    // between two draws.
+                    own_stencil_modes[slot] = parameters.stencil_mode_for_3d();
+                }
+                let stencil = match (drawable.enable_stencil, own_slot, stencil_mode_3d) {
+                    (true, Some(slot), _) => own_stencil_modes[slot],
+                    (true, None, Some(mode)) => mode,
+                    _ => StencilMode::disabled(),
+                };
+                drawable.set_3d_modes(depth, stencil);
+            }
+            draw(drawable, parameters, layer);
+        }
+    }
+
+    fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {
+        &mut self.buffers.uniform_buffers
+    }
+}
+
+impl LayerGroupBase for LayerGroup {
+    fn base(&self) -> &LayerGroupBaseData {
+        &self.base
+    }
+    fn base_mut(&mut self) -> &mut LayerGroupBaseData {
+        &mut self.base
+    }
+    fn as_layer_group_mut(&mut self) -> Option<&mut LayerGroup> {
+        Some(self)
+    }
+
+    fn get_drawable_count(&self) -> usize {
+        self.drawables.len()
+    }
+
+    fn clear_drawables(&mut self) -> usize {
+        LayerGroup::clear_drawables(self)
+    }
+
+    fn upload(&mut self, context: &dyn Context) {
+        if !self.base.enabled {
+            return;
+        }
+        for drawable in self.drawables.values_mut() {
+            if drawable.enabled {
+                drawable.upload(context);
+            }
+        }
+    }
+
+    /// Draws the drawables of the pass. A 3D drawable draws with the 3D
+    /// depth mode and no stencil test.
+    fn render(&mut self, parameters: &mut dyn PaintParameters) {
+        if !self.base.enabled || self.drawables.is_empty() || parameters.render_pass().is_none() {
+            return;
+        }
+        let pass = parameters.pass();
+        let Ok(layer) = self.buffers.bind_group(parameters.context(), &self.base.name) else {
+            return;
+        };
+        for drawable in self.drawables.values_mut() {
+            if !drawable.enabled || !drawable.has_render_pass(pass) {
+                continue;
+            }
+            if drawable.is_3d {
+                let depth = if drawable.enable_depth {
+                    parameters.depth_mode_for_3d(drawable.depth_type)
+                } else {
+                    DepthMode::disabled()
+                };
+                drawable.set_3d_modes(depth, StencilMode::disabled());
+            }
+            draw(drawable, parameters, layer);
+        }
+    }
+
+    fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {
+        &mut self.buffers.uniform_buffers
+    }
+}
+
+pub fn visit_layer_group_drawables(layer_group: &mut dyn LayerGroupBase, f: impl FnMut(&mut Drawable)) {
     match layer_group.get_type() {
         Type::LayerGroup => {
             if let Some(group) = layer_group.as_layer_group_mut() {
