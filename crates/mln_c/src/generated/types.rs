@@ -2077,12 +2077,9 @@ pub struct mln_render_session_attach_options {
     pub redraw_wake: mln_wake,
     /** Called when a session driven by MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD
  has work for mln_render_session_service_driver_work(). It isn't called
- again until a service runs.
-
- It can be called on your graphics thread from inside a service, for work
- that the same service then runs before it returns. Schedule a service from
- the wake rather than calling mln_render_session_service_driver_work() in
- it: a service inside another one fails with MLN_STATUS_BUSY.*/
+ again until a service runs. It's never called on your graphics thread
+ during a service: the service runs the work that comes while it runs, so
+ you can call mln_render_session_service_driver_work() from the wake.*/
     pub driver_work_wake: mln_wake,
     /** Whether an exported ring keeps the depth and stencil of each frame for
  you, so that you can draw into the frame depth-tested against the map, as

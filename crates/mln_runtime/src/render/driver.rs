@@ -52,8 +52,10 @@ impl DriverWork {
     /// attach, frames, the work that the handle sent, and the detach. The
     /// first service builds the session's renderer: in the browser, the first
     /// once the device that the session asked WebGPU for is there. The
-    /// session's completions and wakes may run inside it, on this thread.
-    /// Work that becomes ready after it runs the wake again.
+    /// session's completions and other wakes may run inside it, on this
+    /// thread, but its driver work wake doesn't: the service takes the work
+    /// that comes while it runs. Work that is ready after it runs the wake
+    /// again.
     ///
     /// Fails with [`ErrorKind::Busy`](mln_util::ErrorKind) inside a service
     /// that is running, which takes the work instead, and with
@@ -70,8 +72,8 @@ impl DriverWork {
         }
         let abandoned = self.shared.state.lock().lifecycle == RenderSessionState::Abandoned;
         let armed = &self.shared.driver_armed;
-        armed.store(true, Ordering::SeqCst);
         if !abandoned && self.shared.preparing.load(Ordering::SeqCst) {
+            armed.store(true, Ordering::SeqCst);
             // The session's device is on its way, and the wake runs once it
             // is here.
             self.servicing.set(false);
@@ -81,16 +83,19 @@ impl DriverWork {
             let _call = self.shared.enter_call();
             let _current = self.run_loop.enter();
             let _worker = worker::enter(&self.slot);
+            // The wake waits while the service runs, and the service runs
+            // the work that comes meanwhile, so the wake never comes on this
+            // thread during a service. It's armed again only once the loop
+            // is empty; work that came just before that runs here too.
+            armed.store(false, Ordering::SeqCst);
             worker::build(&self.shared, &self.slot);
-            // Work that came during the service may have taken the wake, and
-            // the service ran it: the wake is armed again for what comes
-            // once the loop is empty.
             loop {
                 while self.run_loop.run_once() {}
                 armed.store(true, Ordering::SeqCst);
-                if !self.run_loop.run_once() {
+                if !self.run_loop.has_pending() {
                     break;
                 }
+                armed.store(false, Ordering::SeqCst);
             }
             if abandoned || self.slot.borrow().as_ref().is_some_and(Worker::is_done) {
                 self.end();
