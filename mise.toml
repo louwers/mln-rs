@@ -47,8 +47,8 @@ auto = true
 dir = "examples/web"
 
 [hooks]
-# The pre-commit hook, and the nightly rustfmt that dprint runs.
-postinstall = ["hk install --mise", "mise run install-nightly"]
+# The nightly rustfmt that dprint runs.
+postinstall = "mise run install-nightly"
 
 [env]
 # In CI (CI set), warnings are errors and a panic prints its backtrace, unless

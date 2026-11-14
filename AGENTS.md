@@ -18,7 +18,8 @@ running its task. The common ones:
 
 - `mise run test`: every test, including the render suite.
 - `mise run check`, `mise run fix`: the formatters and linters (hk.pkl); `fix`
-  formats with dprint and the pinned nightly rustfmt.
+  formats with dprint and the pinned nightly rustfmt. `hk install --mise` adds a
+  pre-commit hook that fixes the staged files, if you want one.
 - `CI=true mise run ci:lint`: CI's lint job, warnings as errors.
 - `mise run bench:compare <ref>`: benchmarks against another commit.
 - `mise run web:build`, `mise run web:check`: build the browser build and its
