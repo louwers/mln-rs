@@ -312,10 +312,7 @@ impl Drawable {
             debug_assert!(false, "drawable {} has no shader", self.name);
             return Ok(());
         };
-        let Some(render_pass) = parameters.render_pass.as_deref() else {
-            return Ok(());
-        };
-        let Some((size, targets)) = render_pass.target() else {
+        let Some((size, targets)) = parameters.pass_target() else {
             return Ok(());
         };
         let context = parameters.context;
@@ -362,9 +359,12 @@ impl Drawable {
         let mut commands = std::mem::take(&mut self.commands);
         commands.clear();
         commands.push(RenderCommand::SetBindGroup { slot: GLOBAL_SLOT, group: global });
-        if let Some(layer) = layer {
-            commands.push(RenderCommand::SetBindGroup { slot: LAYER_SLOT, group: layer });
-        }
+        // A draw binds what it reads, so that the one before it in a pass
+        // leaves nothing behind.
+        commands.push(match layer {
+            Some(layer) => RenderCommand::SetBindGroup { slot: LAYER_SLOT, group: layer },
+            None => RenderCommand::ClearBindGroup { slot: LAYER_SLOT },
+        });
         commands.push(RenderCommand::SetBindGroup { slot: DRAWABLE_SLOT, group });
         commands.push(RenderCommand::SetGlobalIndex(self.ubo_index));
         for (slot, vertex_slot) in slots.iter().enumerate() {
@@ -383,9 +383,8 @@ impl Drawable {
             min_depth: depth_mode.range.min,
             max_depth: depth_mode.range.max,
         }));
-        if let Some(scissor) = clamped_scissor(parameters, size) {
-            commands.push(RenderCommand::SetScissor(scissor));
-        }
+        let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
+        commands.push(RenderCommand::SetScissor(clamped_scissor(parameters, size).unwrap_or(full)));
         commands.push(RenderCommand::SetStencilReference(stencil_mode.ref_ as u32));
         commands.push(RenderCommand::SetBlendConstant(self.color_mode.blend_color));
 
@@ -427,7 +426,7 @@ impl Drawable {
             });
             draws += 1;
         }
-        let encoded = if draws > 0 { render_pass.encode(&commands) } else { Ok(()) };
+        let encoded = if draws > 0 { parameters.record(&commands) } else { Ok(()) };
         self.commands = commands;
         encoded?;
         let mut stats = context.rendering_stats();

@@ -480,11 +480,6 @@ impl GlGpu {
         result
     }
 
-    /// The GL texture of `texture`, `None` for a framebuffer's attachment.
-    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<TextureID> {
-        self.textures.get(texture)?.name()
-    }
-
     /// Takes a `GL_TEXTURE_2D` texture made elsewhere, such as a host's in
     /// the context's share group, of `desc`'s size, format and usage, as a
     /// texture of this backend. Destroying it forgets it; the texture stays

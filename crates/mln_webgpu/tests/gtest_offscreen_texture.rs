@@ -1,18 +1,12 @@
-// The C++ file is `#if MLN_RENDER_BACKEND_OPENGL`. EmptyRed and
-// RenderToTexture drive OpenGL directly (glClear, GL shader programs and
-// framebuffers), so they aren't ported; ClearRenderPassColor only uses the gfx
-// abstractions, so it runs here on the WebGPU headless backend, compared
-// with the same fixture.
+// ClearRenderPassColor: a pass that clears a texture, read back and compared
+// with its fixture.
 
-use mln_gfx::backend_scope::{BackendScope, ScopeType};
-use mln_gfx::render_pass::RenderPassDescriptor;
-use mln_gfx::renderer_backend::RendererBackend as _;
-use mln_gfx::types::TextureChannelDataType;
+use mln_gfx::gpu::{ColorAttachment, Gpu as _, LoadOp, Pass, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_image::decode_image;
 use mln_util::Color;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_webgpu::{Device, RendererBackend};
+use mln_webgpu::{Device, WebGpu};
 
 fn read_fixture(path: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(path);
@@ -47,28 +41,26 @@ fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64, pi
 // gtest: OffscreenTexture.ClearRenderPassColor
 #[test]
 fn clear_render_pass_color() {
-    let backend = RendererBackend::new(&Device::new(None).expect("device"));
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    let context = backend.get_context();
-    let encoder = context.create_command_encoder();
-    let offscreen_texture = context.create_offscreen_texture(Size::new(128, 256), TextureChannelDataType::UnsignedByte);
-    let render_pass = encoder.create_render_pass(
-        "offscreen texture",
-        &RenderPassDescriptor {
-            target: offscreen_texture.draw_target(),
-            clear_color: Some(Color::new(1.0, 0.0, 0.0, 1.0)),
-            clear_depth: None,
-            clear_stencil: None,
-        },
-    );
-    drop(render_pass);
-    // The OpenGL encoder runs the clear immediately; a WebGPU command
-    // encoder records it, and releasing it (C++ `encoder.reset()`) submits
-    // nothing. `submit` submits the command buffer, as the renderer does
-    // after the texture's passes.
-    offscreen_texture.submit(&*encoder);
-    drop(encoder);
-
-    let image = offscreen_texture.read_still_image();
+    let device = Device::new(None).expect("device");
+    let mut gpu = WebGpu::new(&device);
+    let size = Size::new(128, 256);
+    let texture = gpu
+        .create_texture(&TextureDesc {
+            label: "offscreen texture",
+            size,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+        })
+        .expect("a texture");
+    let red = Color::new(1.0, 0.0, 0.0, 1.0);
+    let pass = Pass {
+        label: "offscreen texture".to_owned(),
+        color: Some(ColorAttachment { texture, load: LoadOp::Clear(red) }),
+        depth_stencil: None,
+        commands: Vec::new(),
+    };
+    gpu.submit(&[pass]).expect("the pass");
+    let texels = gpu.read_texels(texture, TextureRegion::whole(size)).expect("the texels");
+    let image = PremultipliedImage::from_vec(size, texels);
     check_image("test/fixtures/offscreen_texture/clear-render-pass-color", &image, 0.0, 0.0);
 }

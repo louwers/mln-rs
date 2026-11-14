@@ -7,7 +7,7 @@
 // renderbuffers, draw scopes and vertex array state, and the debugging and
 // timestamp query extensions.
 
-use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::cell::{Cell, RefCell, RefMut};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -23,7 +23,6 @@ use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
 use crate::gpu::GlGpu;
-use crate::offscreen_texture::OffscreenTexture;
 use crate::renderer_backend::BackendImpl;
 use crate::state::State;
 use crate::types::{FramebufferID, Gl, RenderbufferID, TextureID};
@@ -218,12 +217,6 @@ impl Context {
         crate::gpu::read_pixels(self.gl(), &self.state, size.height, TextureRegion::whole(size))
     }
 
-    /// The `Gpu` the renderer's resources belong to and its draws encode
-    /// through.
-    pub(crate) fn gl_gpu(&self) -> Ref<'_, GlGpu> {
-        self.gpu.borrow()
-    }
-
     pub(crate) fn gl_gpu_mut(&self) -> RefMut<'_, GlGpu> {
         self.gpu.borrow_mut()
     }
@@ -268,21 +261,14 @@ impl GfxContext for Context {
         unsafe { self.gl().finish() };
     }
 
-    /// Creates an offscreen texture of `size` with `type_` channels. Where a
-    /// half-float texture can't be rendered into (a WebGL2 without
-    /// `EXT_color_buffer_float`), the texture has bytes, as the heatmap's has
-    /// in C++ on such a context.
-    fn create_offscreen_texture(
-        &self,
-        size: Size,
-        type_: TextureChannelDataType,
-    ) -> Box<dyn mln_gfx::offscreen_texture::OffscreenTexture> {
-        let type_ = if type_ == TextureChannelDataType::UnsignedByte || self.half_float_renderable {
+    /// Unsigned bytes where a half-float texture can't be rendered into (a
+    /// WebGL2 without `EXT_color_buffer_float`).
+    fn render_target_type(&self, type_: TextureChannelDataType) -> TextureChannelDataType {
+        if type_ == TextureChannelDataType::UnsignedByte || self.half_float_renderable {
             type_
         } else {
             TextureChannelDataType::UnsignedByte
-        };
-        Box::new(OffscreenTexture::new(self, size, type_))
+        }
     }
 
     fn create_command_encoder(&self) -> Box<dyn mln_gfx::command_encoder::CommandEncoder> {

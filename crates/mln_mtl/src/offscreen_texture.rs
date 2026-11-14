@@ -7,11 +7,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context as _;
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
-use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -23,7 +21,7 @@ use objc2_metal::{
 };
 
 use crate::context::Context;
-use crate::draw_target::{DrawTarget, TargetResource};
+use crate::draw_target::TargetResource;
 use crate::mtl_fwd::{MTLBufferPtr, MTLCommandBufferPtr, MTLRenderPassDescriptorPtr, MTLTexturePtr};
 use crate::readback::{buffer_bytes, encode_texture_copy};
 
@@ -183,10 +181,6 @@ impl OffscreenTextureResource {
         self.copy_next_frame.set(true);
         image
     }
-
-    pub(crate) fn get_texture(&self) -> Texture2DPtr {
-        Rc::clone(&self.color_texture)
-    }
 }
 
 impl Drop for OffscreenTextureResource {
@@ -256,58 +250,5 @@ impl TargetResource for OffscreenTextureResource {
     fn get_render_pass_descriptor(&self) -> Option<MTLRenderPassDescriptorPtr> {
         debug_assert!(self.render_pass_descriptor.borrow().is_some());
         self.render_pass_descriptor.borrow().clone()
-    }
-}
-
-pub(crate) struct OffscreenTexture {
-    target: DrawTarget,
-    resource: Rc<OffscreenTextureResource>,
-    /// The resource's color texture.
-    texture: Texture2DPtr,
-}
-
-impl OffscreenTexture {
-    pub(crate) fn new(
-        context: Rc<Context>,
-        size: Size,
-        type_: TextureChannelDataType,
-        depth: bool,
-        stencil: bool,
-    ) -> Self {
-        let resource = Rc::new(OffscreenTextureResource::new(context, size, type_, depth, stencil));
-        let texture = resource.get_texture();
-        OffscreenTexture {
-            target: DrawTarget::new(size, Rc::<OffscreenTextureResource>::clone(&resource)),
-            resource,
-            texture,
-        }
-    }
-
-    pub(crate) fn resource(&self) -> &OffscreenTextureResource {
-        &self.resource
-    }
-}
-
-impl offscreen_texture::OffscreenTexture for OffscreenTexture {
-    fn draw_target(&self) -> &dyn frame::DrawTarget {
-        &self.target
-    }
-
-    /// Nothing calls it; C++ asserts so too.
-    fn is_renderable(&self) -> bool {
-        debug_assert!(false);
-        true
-    }
-
-    fn read_still_image(&self) -> PremultipliedImage {
-        self.resource.read_still_image()
-    }
-
-    fn get_texture(&self) -> Texture2DPtr {
-        Rc::clone(&self.texture)
-    }
-
-    fn submit(&self, _encoder: &dyn CommandEncoder) {
-        self.resource().commit();
     }
 }

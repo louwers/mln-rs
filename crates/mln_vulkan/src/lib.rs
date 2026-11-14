@@ -34,7 +34,6 @@ mod draw_target;
 pub mod exported_target;
 mod gpu;
 mod offscreen_target;
-mod offscreen_texture;
 mod render_pass;
 mod renderer_backend;
 mod shaders;

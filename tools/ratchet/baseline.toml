@@ -63,7 +63,6 @@
 "crates/mln_renderer/src/line_atlas.rs" = 1
 "crates/mln_renderer/src/paint_parameters.rs" = 1
 "crates/mln_renderer/src/render_layer.rs" = 1
-"crates/mln_renderer/src/render_target.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1
 "crates/mln_renderer/src/renderer.rs" = 3
 "crates/mln_renderer/src/sources/render_image_source.rs" = 2
@@ -148,10 +147,9 @@
 "crates/mln_gfx/src/vertex_vector.rs" = 13
 "crates/mln_gl/src/borrowed_target.rs" = 13
 "crates/mln_gl/src/canvas_target.rs" = 1
-"crates/mln_gl/src/context.rs" = 8
+"crates/mln_gl/src/context.rs" = 7
 "crates/mln_gl/src/exported_target.rs" = 9
 "crates/mln_gl/src/offscreen_target.rs" = 4
-"crates/mln_gl/src/offscreen_texture.rs" = 3
 "crates/mln_gl/src/surface_target.rs" = 7
 "crates/mln_gl/src/wgl_surface_target.rs" = 3
 "crates/mln_headless/src/headless_frontend.rs" = 12
@@ -190,11 +188,12 @@
 "crates/mln_renderer/src/layers/render_symbol_layer.rs" = 14
 "crates/mln_renderer/src/layers/symbol_layer_tweaker.rs" = 1
 "crates/mln_renderer/src/line_atlas.rs" = 2
+"crates/mln_renderer/src/paint_parameters.rs" = 2
 "crates/mln_renderer/src/pattern_atlas.rs" = 2
 "crates/mln_renderer/src/render_layer.rs" = 2
 "crates/mln_renderer/src/render_orchestrator.rs" = 35
 "crates/mln_renderer/src/render_source.rs" = 2
-"crates/mln_renderer/src/render_target.rs" = 6
+"crates/mln_renderer/src/render_target.rs" = 9
 "crates/mln_renderer/src/render_tree.rs" = 2
 "crates/mln_renderer/src/renderer.rs" = 14
 "crates/mln_renderer/src/renderer_event.rs" = 2
@@ -246,7 +245,6 @@
 "crates/mln_vulkan/src/context.rs" = 26
 "crates/mln_vulkan/src/exported_target.rs" = 8
 "crates/mln_vulkan/src/offscreen_target.rs" = 4
-"crates/mln_vulkan/src/offscreen_texture.rs" = 3
 "crates/mln_vulkan/src/renderer_backend.rs" = 2
 "crates/mln_vulkan/src/surface_resource.rs" = 26
 "crates/mln_web_host/src/pump.rs" = 3

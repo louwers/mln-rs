@@ -49,6 +49,11 @@ impl Released {
         self.uncounted.set(uncounted);
     }
 
+    /// Releases an attachment, which the stats don't count.
+    pub(crate) fn attachment(&self, id: TextureId) {
+        push(&self.textures, id);
+    }
+
     pub(crate) fn bind_group(&self, id: BindGroupId) {
         push(&self.bind_groups, id);
     }

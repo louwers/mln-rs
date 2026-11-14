@@ -193,7 +193,7 @@ impl LayerGroup {
 
     /// Draws the drawables of the pass.
     pub(crate) fn render(&mut self, parameters: &mut PaintParameters<'_>) {
-        if !self.enabled || parameters.render_pass.is_none() {
+        if !self.enabled || parameters.pass_target().is_none() {
             return;
         }
         if let LayerGroupKind::Custom(custom) = &self.kind {

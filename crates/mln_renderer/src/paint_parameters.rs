@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use mln_gfx::backend::Type as BackendType;
+use mln_gfx::gpu::{GpuError, Pass, RenderCommand, TargetFormats};
 use mln_gfx::render_pass::RenderPass as GfxRenderPass;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
@@ -56,11 +57,22 @@ impl TransformParameters {
     }
 }
 
+/// A pass of the backend's `Gpu` that drawables record into, and its
+/// attachments' size and formats.
+pub(crate) struct RecordedPass {
+    pub(crate) pass: Pass,
+    pub(crate) size: Size,
+    pub(crate) targets: TargetFormats,
+}
+
 pub struct PaintParameters<'a> {
     pub(crate) context: &'a dyn Context,
     pub(crate) backend: &'a dyn RendererBackend,
     pub(crate) encoder: Option<Box<dyn CommandEncoder>>,
     pub(crate) render_pass: Option<Box<dyn GfxRenderPass>>,
+    /// The pass of the backend's `Gpu` that drawables record into, while
+    /// one is begun.
+    pub(crate) recorded: RefCell<Option<RecordedPass>>,
 
     pub(crate) transform_params: &'a TransformParameters,
     pub(crate) state: &'a TransformState,
@@ -125,6 +137,7 @@ impl<'a> PaintParameters<'a> {
             backend,
             encoder: Some(context.create_command_encoder()),
             render_pass: None,
+            recorded: RefCell::new(None),
             transform_params,
             state,
             static_data,
@@ -146,6 +159,26 @@ impl<'a> PaintParameters<'a> {
             symbol_fade_change: 0.0,
             scissor_rect,
             custom_layer_frame: None,
+        }
+    }
+
+    /// The size and formats of the attachments that drawables draw into
+    /// now, `None` outside a pass.
+    pub(crate) fn pass_target(&self) -> Option<(Size, TargetFormats)> {
+        match &*self.recorded.borrow() {
+            Some(recorded) => Some((recorded.size, recorded.targets)),
+            None => self.render_pass.as_deref()?.target(),
+        }
+    }
+
+    /// Records `commands`, a drawable's, into the pass begun.
+    pub(crate) fn record(&self, commands: &[RenderCommand]) -> Result<(), GpuError> {
+        match &mut *self.recorded.borrow_mut() {
+            Some(recorded) => {
+                recorded.pass.commands.extend_from_slice(commands);
+                Ok(())
+            }
+            None => self.render_pass.as_deref().map_or(Ok(()), |render_pass| render_pass.encode(commands)),
         }
     }
 
@@ -214,7 +247,7 @@ impl<'a> PaintParameters<'a> {
     pub(crate) fn render_tile_clipping_masks(&mut self, tile_ids: &[UnwrappedTileID]) {
         let covered = self.tile_clipping_mask_ids.len() == tile_ids.len()
             && self.tile_clipping_mask_ids.keys().zip(tile_ids.iter()).all(|(a, b)| a == b);
-        if covered || self.render_pass.is_none() {
+        if covered || self.pass_target().is_none() {
             return;
         }
 
