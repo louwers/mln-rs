@@ -1,7 +1,6 @@
 use mln_gfx::gpu::conformance::clip_mask_and_background;
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_util::Color;
-use mln_util::size::Size;
 use objc2_metal::MTLCommandBuffer;
 
 use super::*;

@@ -19,6 +19,7 @@ use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType, TextureFilterType, TextureWrapType,
 };
+use mln_util::size::Size;
 use objc2::Message;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{NSObject, ProtocolObject};
@@ -1147,25 +1148,10 @@ impl Gpu for MetalGpu {
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
         let Texture { texture, format } = self.texture(texture)?;
-        let bytes_per_texel = format
-            .and_then(TextureFormat::bytes_per_texel)
-            .ok_or_else(|| GpuError::Invalid(format!("{:?} textures take no writes", texture.pixelFormat())))?;
-        let (width, height) = (region.size.width as usize, region.size.height as usize);
-        let bytes_per_row = width * bytes_per_texel as usize;
-        if data.len() != bytes_per_row * height {
-            return Err(GpuError::Invalid(format!(
-                "a write of {} bytes to a region of {}",
-                data.len(),
-                bytes_per_row * height
-            )));
-        }
-        if region.x as usize + width > texture.width() || region.y as usize + height > texture.height() {
-            return Err(GpuError::Invalid(format!(
-                "a write to {region:?} of a {}x{} texture",
-                texture.width(),
-                texture.height()
-            )));
-        }
+        let format =
+            format.ok_or_else(|| GpuError::Invalid(format!("{:?} textures take no writes", texture.pixelFormat())))?;
+        let size = Size { width: texture.width() as u32, height: texture.height() as u32 };
+        let bytes_per_row = region.write_bytes_per_row(size, format, data)?;
         if !data.is_empty() {
             let to = texture.clone();
             let from = self.uploads.push(data);

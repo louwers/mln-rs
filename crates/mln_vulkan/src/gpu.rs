@@ -1616,17 +1616,11 @@ impl Gpu for VulkanGpu {
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
         let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
-        let bytes_per_texel = entry.format.bytes_per_texel().filter(|_| entry.usage.sampled).ok_or_else(|| {
-            GpuError::Invalid(format!("{:?} textures that aren't sampled take no writes", entry.format))
-        })?;
+        if !entry.usage.sampled {
+            return Err(GpuError::Invalid("a write to a texture that isn't sampled".to_owned()));
+        }
+        region.write_bytes_per_row(entry.size, entry.format, data)?;
         let size = region.size;
-        if region.x + size.width > entry.size.width || region.y + size.height > entry.size.height {
-            return Err(GpuError::Invalid("a write outside the texture".to_owned()));
-        }
-        let expected = size.width as usize * size.height as usize * bytes_per_texel as usize;
-        if data.len() != expected {
-            return Err(GpuError::Invalid(format!("a write of {} bytes to a region of {expected}", data.len())));
-        }
         if data.is_empty() {
             return Ok(());
         }
