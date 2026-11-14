@@ -251,19 +251,19 @@ mod linux {
         static COUNTERS: OnceLock<Option<Pmus>> = OnceLock::new();
         COUNTERS
             .get_or_init(|| {
-            let pair = |pmu: u64| {
-                let config = pmu << PERF_PMU_TYPE_SHIFT;
-                Some((open(config | PERF_COUNT_HW_INSTRUCTIONS)?, open(config | PERF_COUNT_HW_CPU_CYCLES)?))
-            };
-            // A CPU with two kinds of cores, such as Intel's P and E cores
-            // or Arm's big.LITTLE, has a PMU for each, and a hardware event
-            // counts on one PMU's cores only: count on each and add them up.
-            let hybrid: Option<Vec<_>> = core_pmus().into_iter().map(pair).collect();
-            match hybrid {
-                Some(pmus) if !pmus.is_empty() => Some(Pmus(pmus)),
-                _ => pair(0).map(|pair| Pmus(vec![pair])),
-            }
-        })
+                let pair = |pmu: u64| {
+                    let config = pmu << PERF_PMU_TYPE_SHIFT;
+                    Some((open(config | PERF_COUNT_HW_INSTRUCTIONS)?, open(config | PERF_COUNT_HW_CPU_CYCLES)?))
+                };
+                // A CPU with two kinds of cores, such as Intel's P and E cores
+                // or Arm's big.LITTLE, has a PMU for each, and a hardware event
+                // counts on one PMU's cores only: count on each and add them up.
+                let hybrid: Option<Vec<_>> = core_pmus().into_iter().map(pair).collect();
+                match hybrid {
+                    Some(pmus) if !pmus.is_empty() => Some(Pmus(pmus)),
+                    _ => pair(0).map(|pair| Pmus(vec![pair])),
+                }
+            })
             .as_ref()
     }
 
