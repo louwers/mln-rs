@@ -378,8 +378,11 @@ impl MetalGpu {
         descriptor.setVertexFunction(Some(&shader.vertex));
         descriptor.setFragmentFunction(shader.fragment.as_deref());
         descriptor.setVertexDescriptor(Some(&vertex_descriptor));
-        let color_format = pixel_format(key.targets.color);
-        set_color_target(&descriptor, color_format, state.blend, state.color_mask);
+        // A pipeline without a color target leaves the attachment's format
+        // invalid, and Metal discards what the fragment function writes.
+        if let Some(format) = key.targets.color {
+            set_color_target(&descriptor, pixel_format(format), state.blend, state.color_mask);
+        }
         if let Some(format) = key.targets.depth_stencil {
             descriptor.setDepthAttachmentPixelFormat(pixel_format(format));
             if format.has_stencil() {
