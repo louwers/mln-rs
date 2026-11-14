@@ -547,6 +547,7 @@ workspace = true
 # Dependencies with a fix not yet released (patches/README.md).
 [patch.crates-io]
 fsst-rs = { path = "patches/fsst-rs" }
+gpu-allocator = { path = "patches/gpu-allocator" }
 
 # Fat LTO with one codegen unit: smaller release binaries, for a longer
 # build. The browser build adds opt-level "s" (`mise run web:build`).
