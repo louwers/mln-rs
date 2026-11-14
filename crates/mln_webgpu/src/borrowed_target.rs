@@ -237,6 +237,15 @@ impl BorrowedTarget {
     }
 }
 
+impl Drop for BorrowedTarget {
+    /// Forgets the textures of a frame begun and not ended.
+    fn drop(&mut self) {
+        if let Some((_, image)) = self.imports.take() {
+            self.destroy_imports(image);
+        }
+    }
+}
+
 impl FrameTarget for BorrowedTarget {
     fn begin_frame(&self) -> Option<FrameImage> {
         let slot = self.selected.get();

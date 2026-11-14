@@ -1,3 +1,4 @@
+mod borrowed_target_test;
 mod gpu_test;
 mod shader_group_preprocessor;
 mod shared_device_test;

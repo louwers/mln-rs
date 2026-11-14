@@ -119,6 +119,12 @@ pub struct WebGpu {
 }
 
 impl WebGpu {
+    /// How many textures the `WebGpu` has, imports included.
+    #[cfg(test)]
+    pub(crate) fn texture_count(&self) -> usize {
+        self.textures.len()
+    }
+
     #[must_use]
     pub fn new(device: &Device) -> WebGpu {
         WebGpu {
