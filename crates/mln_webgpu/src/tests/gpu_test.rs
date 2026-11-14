@@ -15,7 +15,9 @@ use mln_gfx::gpu::{
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
+use mln_gfx::shaders::shader_defines::{
+    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_CLIPPING_MASK_UBO, ID_PROJECTION_UBO,
+};
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::StencilOpType;
@@ -141,11 +143,10 @@ fn clip_mask_and_background_through_gpu() {
         .unwrap();
     let clip = ClipUBO { matrix: tile_matrix(0.0), stencil_ref: 1, ..ClipUBO::default() };
     let clip_buffer = buffer(&mut gpu, BufferUsage::Uniform, bytemuck::bytes_of(&clip));
-    // The clipping mask program declares its UBO at binding 0.
     let mask_group = gpu
         .create_bind_group(&BindGroupDesc {
             label: "clip",
-            entries: &[whole(0, clip_buffer, bytemuck::bytes_of(&clip))],
+            entries: &[whole(ID_CLIPPING_MASK_UBO, clip_buffer, bytemuck::bytes_of(&clip))],
         })
         .unwrap();
 
