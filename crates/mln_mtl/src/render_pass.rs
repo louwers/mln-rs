@@ -369,17 +369,8 @@ impl RenderPass {
         }
     }
 
-    /// Port-only: `set_bytes` for the vertex functions only.
-    pub(crate) fn set_vertex_bytes(&self, bytes: &[u8], index: usize) {
-        self.unbind_vertex(index);
-        if let Some(encoder) = self.encoder.borrow().as_ref() {
-            // SAFETY: as in `set_bytes`.
-            unsafe { encoder.setVertexBytes_length_atIndex(std::ptr::NonNull::from(bytes).cast(), bytes.len(), index) };
-        }
-    }
-
     /// Port-only: binds a Metal buffer that has no `BufferResource` (the
-    /// context's cached buffers) to the vertex functions at `index`.
+    /// context's empty vertex buffer) to the vertex functions at `index`.
     pub(crate) fn set_vertex_buffer(&self, buffer: &MTLBufferPtr, offset: usize, index: usize) {
         self.unbind_vertex(index);
         if let Some(encoder) = self.encoder.borrow().as_ref() {

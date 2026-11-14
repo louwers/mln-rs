@@ -22,9 +22,11 @@ use crate::renderer::render_pass::RenderPass;
 use crate::shaders::segment::SegmentBase;
 use crate::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
 use crate::shaders::shader_program_base::ShaderProgramBasePtr;
+use crate::stencil_mode::StencilMode;
 use crate::texture2d::Texture2DPtr;
 use crate::types::DepthMaskType;
 use crate::uniform_buffer::UniformBufferArray;
+use crate::upload_pass::UploadPass;
 use crate::vertex_attribute::VertexAttributeArrayPtr;
 
 pub(crate) type DrawPriority = i64;
@@ -74,6 +76,9 @@ pub struct DrawableBase {
     pub line_width: i32,
     pub sub_layer_index: i32,
     pub depth_type: DepthMaskType,
+    /// The stencil mode a 2D drawable draws with, in place of the mode that
+    /// clips it to its tile.
+    pub stencil_mode: Option<StencilMode>,
     /// Layer-specific data.
     pub(crate) drawable_data: Option<Box<dyn Any>>,
     pub vertex_attributes: Option<VertexAttributeArrayPtr>,
@@ -117,6 +122,7 @@ impl DrawableBase {
             line_width: 1,
             sub_layer_index: 0,
             depth_type: DepthMaskType::ReadOnly,
+            stencil_mode: None,
             drawable_data: None,
             vertex_attributes: None,
             instance_attributes: None,
@@ -145,6 +151,10 @@ pub trait Drawable: Any {
     /// Draw the drawable. (C++ `draw(PaintParameters&) const`; the backends
     /// mutate their impl state, so `&mut self` here.)
     fn draw(&mut self, parameters: &mut dyn PaintParameters);
+
+    /// Uploads the drawable's vertices, indexes and textures in
+    /// `upload_pass`, which must be of the drawable's backend.
+    fn upload(&mut self, upload_pass: &dyn UploadPass);
 
     /// Update vertices, indices, and segments
     fn update_vertex_attributes(

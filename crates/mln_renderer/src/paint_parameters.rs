@@ -2,25 +2,19 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use mln_gfx::backend::Type as BackendType;
-use mln_gfx::globe_clip_mask::GlobeClipMask;
 use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
 use mln_gfx::render_pass::RenderPass as GfxRenderPass;
-use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
-use mln_gfx::{
-    CommandEncoder, Context, DepthMaskType, DepthMode, RendererBackend, ScissorRect, ShaderRegistry, StencilMode,
-};
+use mln_gfx::{CommandEncoder, Context, DepthMaskType, DepthMode, RendererBackend, ScissorRect, StencilMode};
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState, ViewportMode};
-use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
+use mln_tile_id::UnwrappedTileID;
 use mln_util::mat4::Mat4;
 use mln_util::range::Range;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
-use crate::globe_tile_mesh::raw_globe_tile_mesh;
-use crate::layer_tweaker::to_projection_ubo;
+use crate::clip_masks::ClipMasks;
 use crate::line_atlas::LineAtlas;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
@@ -87,8 +81,9 @@ pub struct PaintParameters<'a> {
     pub(crate) renderable_size: Size,
     pub(crate) pixels_to_gl_units: [f32; 2],
 
-    pub(crate) shaders: &'a ShaderRegistry,
-
+    /// The masks of the tiles that the frame's layer groups can clip to.
+    pub(crate) clip_masks: ClipMasks,
+    /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
 
@@ -100,14 +95,6 @@ pub struct PaintParameters<'a> {
     pub(crate) scissor_rect: ScissorRect,
     /// The frame that custom layers draw into, set before their prerender.
     pub(crate) custom_layer_frame: Option<mln_style::layers::CustomLayerFrame>,
-}
-
-/// The WebGPU context's `rawGlobeTileMesh(tile, borders,
-/// SubdivisionGranularitySetting::globe().stencil)`, in the form the gfx trait
-/// takes it (see `Context::render_globe_tile_clipping_masks`).
-fn globe_clip_mesh(tile: &CanonicalTileID, borders: bool) -> (Vec<u8>, Vec<u16>) {
-    let mesh = raw_globe_tile_mesh(tile, borders, SubdivisionGranularitySetting::globe().stencil);
-    (mesh.vertices, mesh.indices)
 }
 
 impl<'a> PaintParameters<'a> {
@@ -150,7 +137,7 @@ impl<'a> PaintParameters<'a> {
             pixel_ratio,
             renderable_size,
             pixels_to_gl_units,
-            shaders: &static_data.shaders,
+            clip_masks: ClipMasks::default(),
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             // C++ leaves these uninitialized; the renderer sets them before
@@ -162,11 +149,6 @@ impl<'a> PaintParameters<'a> {
             scissor_rect,
             custom_layer_frame: None,
         }
-    }
-
-    #[must_use]
-    pub(crate) fn matrix_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> Mat4 {
-        self.projection_data_for_tile(tile_id, aligned).main_matrix
     }
 
     #[must_use]
@@ -209,113 +191,58 @@ impl<'a> PaintParameters<'a> {
         self.next_stencil_id = 1;
         self.tile_clipping_mask_ids.clear();
 
-        let render_pass = self.render_pass.as_deref().expect("render pass");
-        if self.context.backend_type() == BackendType::Vulkan {
-            // MLN_RENDER_BACKEND_VULKAN
-            render_pass.clear_stencil(0);
-        } else if self.state.is_globe_rendering() {
-            // The render pass clears the stencil only where it begins;
-            // within it, draw zero over the zoom 0 tile, as Metal does.
-            let masks = [GlobeClipMask {
-                projection: to_projection_ubo(&self.projection_data_for_tile(&UnwrappedTileID::new(0, 0, 0), false)),
-                stencil_ref: 0,
-                tile: CanonicalTileID::new(0, 0, 0),
-            }];
-            self.context.render_globe_tile_clipping_masks(render_pass, self.shaders, &masks, &globe_clip_mesh);
-        } else {
-            let matrix = self.matrix_for_tile(&UnwrappedTileID::new(0, 0, 0), false);
-            let tile_ubo = [ClipUBO {
-                matrix: std::array::from_fn(|i| matrix[i] as f32),
-                stencil_ref: 0,
-                pad1: 0.0,
-                pad2: 0.0,
-                pad3: 0.0,
-            }];
-            self.context.render_tile_clipping_masks(render_pass, self.shaders, &tile_ubo);
+        match self.stencil_clear_tile() {
+            Some(tile) => self.draw_clip_masks(&[(tile, 0)]),
+            None => self.render_pass.as_deref().expect("render pass").clear_stencil(0),
         }
         self.context.rendering_stats().stencil_clears += 1;
     }
 
-    /// Renders the clipping masks of `tile_ids`, unless the mask already
-    /// covers exactly them; false if there is no render pass.
-    pub(crate) fn render_tile_clipping_masks_for(&mut self, tile_ids: &[UnwrappedTileID]) -> bool {
-        // We can avoid updating the mask if it already contains the same set
-        // of tiles.
+    /// The tile whose mask `clear_stencil` draws zero with, where the render
+    /// pass clears the stencil buffer only where it begins.
+    #[must_use]
+    pub(crate) fn stencil_clear_tile(&self) -> Option<UnwrappedTileID> {
+        (self.context.backend_type() != BackendType::Vulkan).then(|| UnwrappedTileID::new(0, 0, 0))
+    }
+
+    fn draw_clip_masks(&mut self, masks: &[(UnwrappedTileID, i32)]) {
+        let mut clip_masks = std::mem::take(&mut self.clip_masks);
+        clip_masks.draw(masks, self);
+        self.clip_masks = clip_masks;
+    }
+
+    /// Renders the clipping masks of `tile_ids`, unless the stencil buffer
+    /// already holds exactly theirs.
+    pub(crate) fn render_tile_clipping_masks(&mut self, tile_ids: &[UnwrappedTileID]) {
         let covered = self.tile_clipping_mask_ids.len() == tile_ids.len()
             && self.tile_clipping_mask_ids.keys().zip(tile_ids.iter()).all(|(a, b)| a == b);
-        if covered {
-            return true;
-        }
-
-        if self.render_pass.is_none() {
-            return false;
+        if covered || self.render_pass.is_none() {
+            return;
         }
 
         self.tile_clipping_mask_ids.clear();
 
-        // If the stencil value will overflow, clear the target to ensure
-        // ensure that none of the new values remain set somewhere in it.
-        // Otherwise we can continue to overwrite it incrementally.
-        let count = tile_ids.len();
-        if self.next_stencil_id as usize + count > Self::MAX_STENCIL_VALUE as usize {
+        // If the stencil value would overflow, clear the stencil buffer so
+        // that none of the new values remain set somewhere in it. Otherwise
+        // the masks overwrite it incrementally.
+        if self.next_stencil_id as usize + tile_ids.len() > Self::MAX_STENCIL_VALUE as usize {
             self.clear_stencil();
         }
-        if !self.state.is_globe_rendering() {
-            self.context.release_globe_clip_masks();
-        }
 
-        // MLN_RENDER_BACKEND_METAL, MLN_RENDER_BACKEND_VULKAN and
-        // MLN_RENDER_BACKEND_WEBGPU, the same.
-        let globe = self.state.is_globe_rendering();
-        let mut tile_ubos: Vec<ClipUBO> = Vec::new();
-        let mut globe_masks: Vec<GlobeClipMask> = Vec::new();
+        let mut masks = Vec::with_capacity(tile_ids.len());
         for tile_id in tile_ids {
-            let stencil_id = self.next_stencil_id;
             if self.tile_clipping_mask_ids.contains_key(tile_id) {
                 continue;
             }
-            self.tile_clipping_mask_ids.insert(*tile_id, stencil_id);
+            self.tile_clipping_mask_ids.insert(*tile_id, self.next_stencil_id);
+            masks.push((*tile_id, self.next_stencil_id));
             self.next_stencil_id += 1;
-
-            if globe {
-                globe_masks.push(GlobeClipMask {
-                    projection: to_projection_ubo(&self.projection_data_for_tile(tile_id, false)),
-                    stencil_ref: stencil_id as u32,
-                    tile: tile_id.canonical,
-                });
-                continue;
-            }
-
-            if tile_ubos.is_empty() {
-                tile_ubos.reserve(count);
-            }
-
-            let matrix = self.matrix_for_tile(tile_id, false);
-            tile_ubos.push(ClipUBO {
-                matrix: std::array::from_fn(|i| matrix[i] as f32),
-                stencil_ref: stencil_id as u32,
-                pad1: 0.0,
-                pad2: 0.0,
-                pad3: 0.0,
-            });
         }
 
-        if !tile_ubos.is_empty() || !globe_masks.is_empty() {
-            let render_pass = self.render_pass.as_deref().expect("render pass");
-            if globe {
-                self.context.render_globe_tile_clipping_masks(
-                    render_pass,
-                    self.shaders,
-                    &globe_masks,
-                    &globe_clip_mesh,
-                );
-            } else {
-                self.context.render_tile_clipping_masks(render_pass, self.shaders, &tile_ubos);
-            }
+        if !masks.is_empty() {
+            self.draw_clip_masks(&masks);
             self.context.rendering_stats().stencil_updates += 1;
         }
-
-        true
     }
 
     #[must_use]
@@ -409,8 +336,8 @@ impl GfxPaintParameters for PaintParameters<'_> {
         PaintParameters::layer_depth(self)
     }
 
-    fn render_tile_clipping_masks(&mut self, tile_ids: &[UnwrappedTileID]) -> bool {
-        self.render_tile_clipping_masks_for(tile_ids)
+    fn render_tile_clipping_masks(&mut self, tile_ids: &[UnwrappedTileID]) {
+        PaintParameters::render_tile_clipping_masks(self, tile_ids);
     }
 
     fn stencil_mode_for_clipping(&self, tile_id: &UnwrappedTileID) -> StencilMode {

@@ -1099,19 +1099,8 @@ pub(crate) const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
     prelude: r#"
 
 enum {
-    idClippingMaskUBO = idDrawableReservedVertexOnlyUBO,
     clippingMaskUBOCount = drawableReservedUBOCount
 };
-
-struct alignas(16) ClipUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ uint32_t stencil_ref;
-    /* 68 */ float pad1;
-    /* 72 */ float pad2;
-    /* 76 */ float pad3;
-    /* 80 */
-};
-static_assert(sizeof(ClipUBO) == 5 * 16, "wrong size");
 
 "#,
     source: r"
@@ -1129,17 +1118,10 @@ struct FragmentResult {
     half4 color [[color(0)]];
 };
 
-#if defined(PROJECTION_GLOBE)
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const ProjectionUBO& projection [[buffer(idClippingMaskUBO)]]) {
+                                device const ProjectionUBO& projection [[buffer(idProjectionUBO)]]) {
     return { projectTile(float2(in.position.xy), float2(in.position.xy), projection) };
 }
-#else
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const ClipUBO& clipUBO [[buffer(idClippingMaskUBO)]]) {
-    return { clipUBO.matrix * float4(float2(in.position.xy), 0, 1) };
-}
-#endif
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);

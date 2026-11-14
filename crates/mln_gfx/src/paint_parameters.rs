@@ -32,10 +32,9 @@ pub trait PaintParameters {
         1.0
     }
 
-    /// Draws the clipping masks of the tiles in `tile_ids`. C++ passes the
-    /// render tiles, but only their ids are used. Returns true when the
-    /// clipping mask state is ready.
-    fn render_tile_clipping_masks(&mut self, tile_ids: &[UnwrappedTileID]) -> bool;
+    /// Draws the clipping masks of `tile_ids` into the stencil buffer, so
+    /// that `stencil_mode_for_clipping` clips to each of them.
+    fn render_tile_clipping_masks(&mut self, tile_ids: &[UnwrappedTileID]);
     /// Get a stencil mode for rendering constrained to the specified tile ID.
     fn stencil_mode_for_clipping(&self, tile_id: &UnwrappedTileID) -> StencilMode;
     /// Initialize a stencil mode for 3D rendering (each value is unique).

@@ -213,9 +213,7 @@ impl PaintParameters for TestPaintParameters<'_> {
             range: mln_util::range::Range::new(0.0, DEPTH_RANGE_SIZE),
         }
     }
-    fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) -> bool {
-        true
-    }
+    fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) {}
     fn stencil_mode_for_clipping(&self, _tile_id: &UnwrappedTileID) -> StencilMode {
         StencilMode::disabled()
     }

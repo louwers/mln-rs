@@ -140,11 +140,7 @@ impl ShaderProgram {
         let dynamic_values = pipeline_info.get_dynamic_states(&self.backend);
         let dynamic_state = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_values);
 
-        let pipeline_layout = if pipeline_info.use_push_constants {
-            context.get_push_constant_pipeline_layout()
-        } else {
-            context.get_general_pipeline_layout()
-        };
+        let pipeline_layout = context.get_general_pipeline_layout();
 
         let shader_stages = [
             vk::PipelineShaderStageCreateInfo::default()

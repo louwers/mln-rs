@@ -3,12 +3,6 @@
 // cache resources of its own.
 //
 // Differences from C++:
-// - The tile clipping masks are drawn here with GL calls, for the UBOs the
-//   renderer passes (`gfx::Context::render_tile_clipping_masks`), as the
-//   Metal context draws them. C++ draws the Mercator ones through its legacy
-//   `Program`, and the globe ones as drawables of the globe depth shader.
-// - The globe's clip mask meshes come from the caller, which C++ makes with
-//   the renderer's `rawGlobeTileMesh`.
 // - A drawable's uniform blocks are bound from the drawable's, the layer's
 //   and the global buffers by `bind_uniform_blocks`; the arrays have no
 //   `bind` of their own.
@@ -20,7 +14,6 @@
 // timestamp query extensions.
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use glow::HasContext;
@@ -30,19 +23,15 @@ use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
-use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBasePtr};
-use mln_gfx::stencil_mode::{StencilMode, Test};
+use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
+use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::Texture2DPtr;
-use mln_gfx::types::{StencilOpType, TextureChannelDataType};
+use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::Color;
@@ -54,12 +43,10 @@ use crate::drawable_builder::DrawableBuilder;
 use crate::layer_group::{LayerGroup, TileLayerGroup};
 use crate::offscreen_texture::OffscreenTexture;
 use crate::renderer_backend::BackendImpl;
-use crate::shaders::shader_program::{ShaderProgram, as_gl_shader};
+use crate::shaders::shader_program::ShaderProgram;
 use crate::state::State;
 use crate::texture2d::Texture2D;
-use crate::types::{
-    BufferID, FramebufferID, Gl, ProgramID, RenderbufferID, ShaderID, TextureID, UniformLocation, VertexArrayID,
-};
+use crate::types::{BufferID, FramebufferID, Gl, ProgramID, RenderbufferID, ShaderID, TextureID, VertexArrayID};
 use crate::uniform_buffer::UniformBuffer;
 
 /// The objects whose owners are gone, deleted by `perform_cleanup` while the
@@ -72,30 +59,6 @@ struct Abandoned {
     vertex_arrays: Vec<VertexArrayID>,
     framebuffers: Vec<FramebufferID>,
     renderbuffers: Vec<RenderbufferID>,
-}
-
-/// A mesh the clip masks are drawn with.
-struct ClipMesh {
-    vertex_array: VertexArrayID,
-    vertex_buffer: BufferID,
-    index_buffer: BufferID,
-    index_count: i32,
-}
-
-/// What the context keeps to draw the tile clipping masks with.
-#[derive(Default)]
-struct ClipMasks {
-    shader: Option<Weak<dyn ShaderProgramBase>>,
-    /// Where the Mercator shader takes its matrix.
-    matrix_location: Option<UniformLocation>,
-    globe_shader: Option<Weak<dyn ShaderProgramBase>>,
-    tile_mesh: Option<ClipMesh>,
-    /// The globe's clip mask meshes, by zoom, whether the tile is on the
-    /// top or bottom row (with a pole cap) and whether it has a border.
-    globe_meshes: HashMap<(u8, bool, bool, bool), ClipMesh>,
-    /// The projection blocks of the globe masks being drawn.
-    projection_buffer: Option<BufferID>,
-    projection_buffer_size: usize,
 }
 
 pub(crate) struct Context {
@@ -122,19 +85,6 @@ pub(crate) struct Context {
     framebuffer_has_stencil: Cell<bool>,
     /// A buffer of zeros, bound where a shader's block has no buffer.
     zero_uniform_buffer: RefCell<Option<(BufferID, usize)>>,
-    clip_masks: RefCell<ClipMasks>,
-}
-
-/// The stencil mode that draws a clipping mask, writing `stencil_ref`.
-fn clip_mask_stencil_mode(stencil_ref: i32) -> StencilMode {
-    StencilMode {
-        test: Test::Always,
-        ref_: stencil_ref,
-        mask: 0xFF,
-        fail: StencilOpType::Keep,
-        depth_fail: StencilOpType::Keep,
-        pass: StencilOpType::Replace,
-    }
 }
 
 impl Context {
@@ -174,7 +124,6 @@ impl Context {
             framebuffer_size: Cell::new(Size::new(0, 0)),
             framebuffer_has_stencil: Cell::new(false),
             zero_uniform_buffer: RefCell::new(None),
-            clip_masks: RefCell::new(ClipMasks::default()),
         })
     }
 
@@ -218,13 +167,6 @@ impl Context {
     pub(crate) fn release_resources(&self) {
         *self.global_uniform_buffers.borrow_mut() = UniformBufferArray::new();
         *self.layer_uniform_buffers.borrow_mut() = UniformBufferArray::new();
-        let clip_masks = std::mem::take(&mut *self.clip_masks.borrow_mut());
-        for mesh in clip_masks.tile_mesh.into_iter().chain(clip_masks.globe_meshes.into_values()) {
-            self.abandon_clip_mesh(&mesh);
-        }
-        if let Some(buffer) = clip_masks.projection_buffer {
-            self.abandon_uncounted_buffer(buffer);
-        }
         if let Some((buffer, _)) = self.zero_uniform_buffer.borrow_mut().take() {
             self.abandon_uncounted_buffer(buffer);
         }
@@ -350,12 +292,6 @@ impl Context {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn abandon_renderbuffer(&self, renderbuffer: RenderbufferID) {
         self.abandoned.borrow_mut().renderbuffers.push(renderbuffer);
-    }
-
-    fn abandon_clip_mesh(&self, mesh: &ClipMesh) {
-        self.abandon_vertex_array(mesh.vertex_array);
-        self.abandon_uncounted_buffer(mesh.vertex_buffer);
-        self.abandon_uncounted_buffer(mesh.index_buffer);
     }
 
     /// `MBGL_CHECK_ERROR`, once a frame and in debug builds only, as in
@@ -519,11 +455,6 @@ impl Context {
         (self.framebuffer.get(), self.framebuffer_size.get(), self.framebuffer_has_stencil.get())
     }
 
-    /// Whether the framebuffer being drawn into has a stencil buffer.
-    pub(crate) fn has_stencil_buffer(&self) -> bool {
-        self.framebuffer_has_stencil.get()
-    }
-
     /// Reads the RGBA pixels of the bound framebuffer, the top row first.
     pub(crate) fn read_framebuffer(&self, size: Size) -> Vec<u8> {
         let stride = size.width as usize * 4;
@@ -622,197 +553,6 @@ impl Context {
     /// Creates a texture, of the concrete type.
     pub(crate) fn create_gl_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
         Rc::new(RefCell::new(Texture2D::new(self.weak())))
-    }
-
-    // --- tile clipping masks ---
-
-    /// A vertex array of `vertices` (short2, at attribute 0) and `indices`.
-    fn create_clip_mesh(&self, vertices: &[u8], indices: &[u16]) -> Option<ClipMesh> {
-        let gl = self.gl();
-        let vertex_buffer = self.create_uncounted_buffer(glow::ARRAY_BUFFER, vertices, glow::STATIC_DRAW)?;
-        let index_buffer =
-            self.create_uncounted_buffer(glow::ELEMENT_ARRAY_BUFFER, bytemuck::cast_slice(indices), glow::STATIC_DRAW)?;
-        // SAFETY: the vertex array is new, and the buffers hold what the
-        // attribute and the indexes describe.
-        unsafe {
-            let vertex_array = gl.create_vertex_array().ok()?;
-            self.state.bind_vertex_array(gl, Some(vertex_array));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
-            gl.enable_vertex_attrib_array(0);
-            gl.vertex_attrib_pointer_f32(0, 2, glow::SHORT, false, size_of::<[i16; 2]>() as i32, 0);
-            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
-            self.state.bind_vertex_array(gl, None);
-            Some(ClipMesh { vertex_array, vertex_buffer, index_buffer, index_count: indices.len() as i32 })
-        }
-    }
-
-    /// The clipping mask shader of `variant`, kept in `cached`.
-    fn get_clip_mask_shader(
-        &self,
-        shaders: &ShaderRegistry,
-        variant: ProjectionVariant,
-        cached: &mut Option<Weak<dyn ShaderProgramBase>>,
-    ) -> Option<(ShaderProgramBasePtr, bool)> {
-        if let Some(shader) = cached.as_ref().and_then(Weak::upgrade) {
-            return Some((shader, false));
-        }
-        let group = shaders.get_shader_group("ClippingMaskProgram")?;
-        let shader = group.get_or_create_shader(self, &StringIDSetsPair::default(), variant, "")?;
-        *cached = Some(Rc::downgrade(&shader));
-        Some((shader, true))
-    }
-
-    /// The state every clip mask is drawn with: stencil writes only.
-    fn set_clip_mask_state(&self) {
-        self.set_depth_mode(&DepthMode::disabled());
-        self.set_color_mode(&ColorMode::disabled());
-        self.state.set_scissor(self.gl(), None);
-    }
-
-    fn render_tile_clipping_masks_impl(&self, shaders: &ShaderRegistry, tile_ubos: &[ClipUBO]) -> bool {
-        // Without a stencil buffer every stencil test passes.
-        if !self.has_stencil_buffer() {
-            return true;
-        }
-        let gl = self.gl();
-        let mut clip_masks = self.clip_masks.borrow_mut();
-        let Some((shader_ptr, created)) =
-            self.get_clip_mask_shader(shaders, ProjectionVariant::Mercator, &mut clip_masks.shader)
-        else {
-            debug_assert!(false, "Failed to create shader for clip masking");
-            return false;
-        };
-        let Some(shader) = as_gl_shader(&shader_ptr) else {
-            return false;
-        };
-        self.state.use_program(gl, Some(shader.get_gl_program_id()));
-        if created {
-            // SAFETY: the program is alive.
-            clip_masks.matrix_location = unsafe { gl.get_uniform_location(shader.get_gl_program_id(), "u_matrix") };
-        }
-        if clip_masks.tile_mesh.is_none() {
-            const EXTENT: i16 = 8192; // util::EXTENT
-            let vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
-            clip_masks.tile_mesh = self.create_clip_mesh(bytemuck::cast_slice(&vertices), &[0, 1, 2, 1, 2, 3]);
-        }
-        let Some(mesh) = &clip_masks.tile_mesh else {
-            return false;
-        };
-
-        self.set_clip_mask_state();
-        self.set_cull_face_mode(CullFaceMode::disabled());
-        // The shader reads none of its blocks in this variant, but WebGL2
-        // wants a buffer for each.
-        self.bind_uniform_blocks(shader, &UniformBufferArray::new(), 0);
-        self.state.bind_vertex_array(gl, Some(mesh.vertex_array));
-        for ubo in tile_ubos {
-            self.set_stencil_mode(&clip_mask_stencil_mode(ubo.stencil_ref as i32));
-            // SAFETY: the program in use has the matrix at this location,
-            // and the bound vertex array has the six indexes drawn.
-            unsafe {
-                gl.uniform_matrix_4_f32_slice(clip_masks.matrix_location.as_ref(), false, &ubo.matrix);
-                gl.draw_elements(glow::TRIANGLES, mesh.index_count, glow::UNSIGNED_SHORT, 0);
-            }
-        }
-        self.state.bind_vertex_array(gl, None);
-
-        let mut stats = self.rendering_stats();
-        stats.num_draw_calls += 1;
-        stats.total_draw_calls += 1;
-        true
-    }
-
-    /// Draws the globe's tile clipping masks, with `mesh` making a tile's
-    /// mesh in place of C++'s `rawGlobeTileMesh`.
-    fn render_globe_tile_clipping_masks_impl(
-        &self,
-        shaders: &ShaderRegistry,
-        masks: &[GlobeClipMask],
-        mesh: &GlobeClipMeshFn<'_>,
-    ) -> bool {
-        if !self.has_stencil_buffer() {
-            return true;
-        }
-        let gl = self.gl();
-        let mut clip_masks = self.clip_masks.borrow_mut();
-        let clip_masks = &mut *clip_masks;
-        let Some((shader_ptr, _)) =
-            self.get_clip_mask_shader(shaders, ProjectionVariant::Globe, &mut clip_masks.globe_shader)
-        else {
-            debug_assert!(false, "Failed to create shader for globe clip masking");
-            return false;
-        };
-        let Some(shader) = as_gl_shader(&shader_ptr) else {
-            return false;
-        };
-
-        // The masks' projection blocks, each at an offset GL can bind.
-        let block_size = size_of::<ProjectionUBO>();
-        let stride = block_size.next_multiple_of(self.uniform_buffer_offset_alignment);
-        let mut blocks = vec![0u8; stride * masks.len()];
-        for (i, mask) in masks.iter().enumerate() {
-            blocks[i * stride..i * stride + block_size].copy_from_slice(bytemuck::bytes_of(&mask.projection));
-        }
-        match clip_masks.projection_buffer {
-            Some(buffer) if clip_masks.projection_buffer_size >= blocks.len() => {
-                self.update_buffer(glow::UNIFORM_BUFFER, buffer, &blocks);
-            }
-            previous => {
-                if let Some(buffer) = previous {
-                    self.abandon_uncounted_buffer(buffer);
-                }
-                clip_masks.projection_buffer =
-                    self.create_uncounted_buffer(glow::UNIFORM_BUFFER, &blocks, glow::DYNAMIC_DRAW);
-                clip_masks.projection_buffer_size = blocks.len();
-            }
-        }
-        let Some(projection_buffer) = clip_masks.projection_buffer else {
-            return false;
-        };
-
-        self.state.use_program(gl, Some(shader.get_gl_program_id()));
-        self.set_clip_mask_state();
-        // The far side of a limb tile projects inside the disc; cull it or it
-        // overwrites the tile in front.
-        self.set_cull_face_mode(CullFaceMode::back_ccw());
-
-        // Each mask is drawn with a border first, then exactly, as GL JS
-        // does: where a tile meets finer ones, its coarser edge leaves a
-        // sliver between the masks that only a neighbor's border covers.
-        for borders in [true, false] {
-            for (i, mask) in masks.iter().enumerate() {
-                let tile = &mask.tile;
-                let key = (tile.z, tile.y == 0, tile.y == (1u32 << tile.z) - 1, borders);
-                let clip_mesh = match clip_masks.globe_meshes.entry(key) {
-                    std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        let (vertices, indices) = mesh(tile, borders);
-                        let Some(clip_mesh) = self.create_clip_mesh(&vertices, &indices) else {
-                            return false;
-                        };
-                        entry.insert(clip_mesh)
-                    }
-                };
-                self.set_stencil_mode(&clip_mask_stencil_mode(mask.stencil_ref as i32));
-                self.state.bind_uniform_buffer_range(
-                    gl,
-                    ID_PROJECTION_UBO,
-                    projection_buffer,
-                    (i * stride) as i32,
-                    block_size as i32,
-                );
-                self.state.bind_vertex_array(gl, Some(clip_mesh.vertex_array));
-                // SAFETY: the bound vertex array has the mesh's indexes,
-                // which refer to its vertices.
-                unsafe { gl.draw_elements(glow::TRIANGLES, clip_mesh.index_count, glow::UNSIGNED_SHORT, 0) };
-            }
-        }
-        self.state.bind_vertex_array(gl, None);
-
-        let mut stats = self.rendering_stats();
-        stats.num_draw_calls += 1;
-        stats.total_draw_calls += 1;
-        true
     }
 }
 
@@ -938,30 +678,4 @@ impl GfxContext for Context {
     fn bind_global_uniform_buffers(&self, _render_pass: &dyn mln_gfx::render_pass::RenderPass) {}
 
     fn unbind_global_uniform_buffers(&self, _render_pass: &dyn mln_gfx::render_pass::RenderPass) {}
-
-    fn render_tile_clipping_masks(
-        &self,
-        _render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        tile_ubos: &[ClipUBO],
-    ) -> bool {
-        self.render_tile_clipping_masks_impl(shaders, tile_ubos)
-    }
-
-    fn release_globe_clip_masks(&self) {
-        let meshes = std::mem::take(&mut self.clip_masks.borrow_mut().globe_meshes);
-        for mesh in meshes.into_values() {
-            self.abandon_clip_mesh(&mesh);
-        }
-    }
-
-    fn render_globe_tile_clipping_masks(
-        &self,
-        _render_pass: &dyn mln_gfx::render_pass::RenderPass,
-        shaders: &ShaderRegistry,
-        masks: &[GlobeClipMask],
-        mesh: &GlobeClipMeshFn<'_>,
-    ) -> bool {
-        self.render_globe_tile_clipping_masks_impl(shaders, masks, mesh)
-    }
 }

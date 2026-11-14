@@ -8,7 +8,6 @@ use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_util::logging::{Event, Log};
 
 use crate::drawable::Drawable;
-use crate::upload_pass::UploadPass;
 
 pub(crate) struct TileLayerGroup {
     inner: layer_group::TileLayerGroup,
@@ -51,13 +50,8 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
         if !self.inner.base.enabled || self.inner.get_drawable_count() == 0 {
             return;
         }
-        let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() else {
-            return;
-        };
         self.inner.visit_drawables(|drawable| {
-            if drawable.get_enabled()
-                && let Some(drawable) = drawable.downcast_mut::<Drawable>()
-            {
+            if drawable.get_enabled() {
                 drawable.upload(upload_pass);
             }
         });
