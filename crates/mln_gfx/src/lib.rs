@@ -15,7 +15,8 @@
 //!
 //! The `gpu` module is the id-based interface the backends move onto: a
 //! backend owns its resources, and the renderer records passes of plain
-//! commands.
+//! commands. The renderer's uniform buffers and textures are resources of the
+//! backend's `Gpu` already (`uniform_buffer`, `texture2d`).
 
 pub mod attribute;
 pub mod backend;
@@ -39,6 +40,7 @@ pub mod offscreen_texture;
 pub mod paint_parameters;
 pub mod polyline_generator;
 pub mod projection_variant;
+pub mod released;
 pub mod render_pass;
 pub mod renderer;
 pub mod renderer_backend;

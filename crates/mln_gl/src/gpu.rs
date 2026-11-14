@@ -26,9 +26,7 @@ use crate::renderer_backend::PlatformContext;
 use crate::shaders::glsl_sources::PRELUDE;
 use crate::shaders::shader_source::shader_source;
 use crate::state::{Rect, State};
-use crate::types::{BufferID, FramebufferID, Gl, ProgramID, ShaderID, TextureID, VertexArrayID};
-
-type SamplerID = <Gl as HasContext>::Sampler;
+use crate::types::{BufferID, FramebufferID, Gl, ProgramID, SamplerID, ShaderID, TextureID, VertexArrayID};
 
 /// `GL_TEXTURE_MAX_ANISOTROPY_EXT` (`EXT_texture_filter_anisotropic`).
 const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
@@ -237,11 +235,15 @@ impl PassState {
     }
 }
 
-/// The internal format, format and type of a texture of `format`, or `None`
-/// for a format OpenGL ES 3.0 lacks.
-fn texture_format(format: TextureFormat) -> Option<(u32, u32, u32)> {
+/// The internal format, format and type of a texture of `format` on a
+/// `desktop` context or an OpenGL ES one, or `None` for a format OpenGL ES
+/// 3.0 lacks. Desktop OpenGL has no alpha textures: its `A8Unorm` texture is
+/// a red one that [`ALPHA_SWIZZLE`] reads as alpha.
+fn texture_format(format: TextureFormat, desktop: bool) -> Option<(u32, u32, u32)> {
     Some(match format {
         TextureFormat::R8Unorm => (glow::R8, glow::RED, glow::UNSIGNED_BYTE),
+        TextureFormat::A8Unorm if desktop => (glow::R8, glow::RED, glow::UNSIGNED_BYTE),
+        TextureFormat::A8Unorm => (glow::ALPHA, glow::ALPHA, glow::UNSIGNED_BYTE),
         TextureFormat::R16Float => (glow::R16F, glow::RED, glow::HALF_FLOAT),
         TextureFormat::R32Float => (glow::R32F, glow::RED, glow::FLOAT),
         TextureFormat::Rgba8Unorm => (glow::RGBA8, glow::RGBA, glow::UNSIGNED_BYTE),
@@ -257,6 +259,15 @@ fn texture_format(format: TextureFormat) -> Option<(u32, u32, u32)> {
         TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb => return None,
     })
 }
+
+/// The `GL_TEXTURE_SWIZZLE_R`, `_G`, `_B` and `_A` of a desktop OpenGL
+/// `A8Unorm` texture.
+const ALPHA_SWIZZLE: [(u32, u32); 4] = [
+    (glow::TEXTURE_SWIZZLE_R, glow::ZERO),
+    (glow::TEXTURE_SWIZZLE_G, glow::ZERO),
+    (glow::TEXTURE_SWIZZLE_B, glow::ZERO),
+    (glow::TEXTURE_SWIZZLE_A, glow::RED),
+];
 
 /// The GL buffer target a buffer of `usage` binds to.
 fn buffer_target(usage: BufferUsage) -> u32 {
@@ -434,6 +445,15 @@ impl GlGpu {
         Some((object, index * stride as usize, block_size.max(1)))
     }
 
+    /// The GL texture of `texture`.
+    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<TextureID> {
+        self.textures.get(texture).map(|texture| texture.object)
+    }
+
+    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<SamplerID> {
+        self.samplers.get(sampler).copied()
+    }
+
     /// Deletes this backend's objects, leaving it with none. The context
     /// must be current.
     pub(crate) fn release(&mut self) {
@@ -455,6 +475,7 @@ impl GlGpu {
                 gl.delete_texture(texture.object);
             }
             for sampler in self.samplers.drain().map(|(_, sampler)| sampler) {
+                self.state.forget_sampler(sampler);
                 gl.delete_sampler(sampler);
             }
             for framebuffer in self.framebuffers.drain().map(|(_, framebuffer)| framebuffer) {
@@ -993,9 +1014,7 @@ impl GlGpu {
             for binding in textures {
                 let texture = self.textures.get(binding.texture).map(|texture| texture.object);
                 self.state.bind_texture(&self.gl, binding.unit, texture);
-                // SAFETY: the sampler is alive, and the unit is below
-                // MAX_ACTIVE_TEXTURE_UNITS.
-                unsafe { self.gl.bind_sampler(binding.unit, self.samplers.get(binding.sampler).copied()) };
+                self.state.bind_sampler(&self.gl, binding.unit, self.samplers.get(binding.sampler).copied());
             }
             state.groups_dirty = false;
         }
@@ -1182,7 +1201,7 @@ impl Gpu for GlGpu {
     }
 
     fn create_texture(&mut self, desc: &TextureDesc<'_>) -> Result<TextureId, GpuError> {
-        let (internal_format, format, type_) = texture_format(desc.format)
+        let (internal_format, format, type_) = texture_format(desc.format, self.desktop)
             .ok_or_else(|| GpuError::Unsupported(format!("{:?} textures on OpenGL ES 3.0", desc.format)))?;
         let max = self.limits.max_texture_size;
         if desc.size.width == 0 || desc.size.height == 0 || desc.size.width > max || desc.size.height > max {
@@ -1209,6 +1228,11 @@ impl Gpu for GlGpu {
                 // One level, which a sampler that filters between levels
                 // reads as the texture's every level.
                 gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
+                if desc.format == TextureFormat::A8Unorm && gpu.desktop {
+                    for (name, source) in ALPHA_SWIZZLE {
+                        gl.tex_parameter_i32(glow::TEXTURE_2D, name, source as i32);
+                    }
+                }
                 Ok::<_, GpuError>(object)
             }
         })?;
@@ -1222,7 +1246,7 @@ impl Gpu for GlGpu {
         }
         region.write_bytes_per_row(entry.size, entry.format, data)?;
         let (object, format) = (entry.object, entry.format);
-        let (_, gl_format, type_) = texture_format(format).ok_or(GpuError::UnknownId("texture"))?;
+        let (_, gl_format, type_) = texture_format(format, self.desktop).ok_or(GpuError::UnknownId("texture"))?;
         self.current(|gpu| {
             let gl = &gpu.gl;
             gpu.state.set_pixel_store_unpack_alignment(gl, 1);
@@ -1287,6 +1311,7 @@ impl Gpu for GlGpu {
     fn destroy_sampler(&mut self, sampler: SamplerId) {
         if let Some(object) = self.samplers.remove(sampler) {
             self.current(|gpu| {
+                gpu.state.forget_sampler(object);
                 // SAFETY: the sampler is alive, and only this backend has it.
                 unsafe { gpu.gl.delete_sampler(object) };
             });

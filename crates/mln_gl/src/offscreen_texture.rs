@@ -1,13 +1,13 @@
 // The texture has no depth or stencil buffer, as in C++: without them every
 // depth and stencil test passes.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::{Rc, Weak};
 
 use glow::HasContext;
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context as _;
-use mln_gfx::texture2d::{SamplerState, Texture2D as _, Texture2DPtr};
+use mln_gfx::texture2d::{SamplerState, Texture2DPtr, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
@@ -16,13 +16,13 @@ use mln_util::size::Size;
 
 use crate::context::Context;
 use crate::draw_target::{DrawTarget, TargetResource};
-use crate::texture2d::Texture2D;
 use crate::types::FramebufferID;
 
 pub(crate) struct OffscreenTextureResource {
     context: Weak<Context>,
     size: Size,
-    texture: Rc<RefCell<Texture2D>>,
+    /// A texture of the context's `Gpu`, which the renderer samples.
+    texture: Texture2DPtr,
     /// Made by the first `bind`.
     framebuffer: Cell<Option<FramebufferID>>,
 }
@@ -30,12 +30,13 @@ pub(crate) struct OffscreenTextureResource {
 impl OffscreenTextureResource {
     pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         debug_assert!(size.width != 0 && size.height != 0);
-        let texture = context.create_gl_texture_2d();
+        let texture = context.create_texture_2d();
         {
             let mut texture = texture.borrow_mut();
             texture.set_size(size);
-            texture.set_format(TexturePixelType::RGBA, type_);
-            texture.set_sampler_configuration(SamplerState {
+            texture.set_format(texture_format(TexturePixelType::RGBA, type_));
+            texture.set_render_target();
+            texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,
@@ -47,8 +48,14 @@ impl OffscreenTextureResource {
 
     fn create_framebuffer(&self, context: &Context) -> Option<FramebufferID> {
         let gl = context.gl();
-        self.texture.borrow_mut().create();
-        let texture = self.texture.borrow().get_texture_id()?;
+        let created = self.texture.borrow_mut().create(context);
+        let texture = match created {
+            Ok(texture) => context.gl_gpu().native_texture(texture)?,
+            Err(error) => {
+                Log::error(Event::GraphicsBackend, format!("Couldn't create an offscreen texture: {error}"));
+                return None;
+            }
+        };
         // SAFETY: the framebuffer is new and the texture alive.
         unsafe {
             let framebuffer = gl.create_framebuffer().ok()?;
@@ -75,7 +82,7 @@ impl OffscreenTextureResource {
     }
 
     pub(crate) fn get_texture(&self) -> Texture2DPtr {
-        Rc::<RefCell<Texture2D>>::clone(&self.texture)
+        Rc::clone(&self.texture)
     }
 }
 
@@ -99,7 +106,7 @@ impl TargetResource for OffscreenTextureResource {
             self.framebuffer.set(self.create_framebuffer(&context));
         }
         // A texture can't be read while it is rendered into.
-        if let Some(texture) = self.texture.borrow().get_texture_id() {
+        if let Some(texture) = self.texture.borrow().id().and_then(|texture| context.gl_gpu().native_texture(texture)) {
             context.state().unbind_texture(context.gl(), texture);
         }
         context.bind_framebuffer(self.framebuffer.get(), self.size, false);
@@ -141,7 +148,7 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
     }
 
     fn read_still_image(&self) -> PremultipliedImage {
-        self.resource().read_still_image()
+        self.resource.read_still_image()
     }
 
     fn get_texture(&self) -> Texture2DPtr {

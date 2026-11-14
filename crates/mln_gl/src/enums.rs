@@ -4,8 +4,7 @@
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::types::{
     BufferUsageType, ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType,
-    DepthFunctionType, StencilFunctionType, StencilOpType, TextureChannelDataType, TextureFilterType, TexturePixelType,
-    TextureWrapType,
+    DepthFunctionType, StencilFunctionType, StencilOpType, TextureFilterType, TextureWrapType,
 };
 
 #[must_use]
@@ -116,61 +115,6 @@ pub(crate) fn buffer_usage(value: BufferUsageType) -> u32 {
         BufferUsageType::StreamDraw => glow::STREAM_DRAW,
         BufferUsageType::StaticDraw => glow::STATIC_DRAW,
         BufferUsageType::DynamicDraw => glow::DYNAMIC_DRAW,
-    }
-}
-
-/// The format of the pixels of a texture of `value` pixels. Desktop OpenGL's
-/// core profile has no alpha or luminance textures, so a `desktop` context
-/// keeps them in the red channel ([`texture_swizzle`]).
-#[must_use]
-pub(crate) fn texture_pixel(value: TexturePixelType, desktop: bool) -> u32 {
-    match value {
-        TexturePixelType::RGBA => glow::RGBA,
-        TexturePixelType::Alpha | TexturePixelType::Luminance if desktop => glow::RED,
-        TexturePixelType::Alpha => glow::ALPHA,
-        TexturePixelType::Stencil => glow::STENCIL_INDEX,
-        TexturePixelType::Depth => glow::DEPTH_COMPONENT,
-        TexturePixelType::Luminance => glow::LUMINANCE,
-    }
-}
-
-/// The internal format of a texture of `value` pixels with `type_` channels,
-/// on a `desktop` context or an OpenGL ES one.
-#[must_use]
-pub(crate) fn texture_pixel_sized_for(value: TexturePixelType, type_: TextureChannelDataType, desktop: bool) -> u32 {
-    match (type_, value) {
-        (TextureChannelDataType::UnsignedByte, TexturePixelType::Alpha | TexturePixelType::Luminance) if desktop => {
-            glow::R8
-        }
-        (TextureChannelDataType::UnsignedByte, _) => texture_pixel(value, desktop),
-        (TextureChannelDataType::HalfFloat, TexturePixelType::RGBA) => glow::RGBA16F,
-        (TextureChannelDataType::Float, TexturePixelType::RGBA) => glow::RGBA32F,
-        _ => {
-            debug_assert!(false, "unsupported texture format");
-            texture_pixel(value, desktop)
-        }
-    }
-}
-
-/// The `GL_TEXTURE_SWIZZLE_R`, `_G`, `_B` and `_A` of a texture of `value`
-/// pixels on a `desktop` context, which reads its alpha or luminance
-/// textures from the red channel, or `None` where the texture reads its
-/// channels as they are.
-#[must_use]
-pub(crate) fn texture_swizzle(value: TexturePixelType, desktop: bool) -> Option<[u32; 4]> {
-    match value {
-        TexturePixelType::Alpha if desktop => Some([glow::ZERO, glow::ZERO, glow::ZERO, glow::RED]),
-        TexturePixelType::Luminance if desktop => Some([glow::RED, glow::RED, glow::RED, glow::ONE]),
-        _ => None,
-    }
-}
-
-#[must_use]
-pub(crate) fn texture_channel_data(value: TextureChannelDataType) -> u32 {
-    match value {
-        TextureChannelDataType::UnsignedByte => glow::UNSIGNED_BYTE,
-        TextureChannelDataType::HalfFloat => glow::HALF_FLOAT,
-        TextureChannelDataType::Float => glow::FLOAT,
     }
 }
 

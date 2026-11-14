@@ -55,7 +55,7 @@ impl RenderTarget {
     /// replaces the current one, and [`get_texture`](Self::get_texture)
     /// returns the new one.
     pub(crate) fn set_size(&mut self, context: &dyn Context, size: Size) {
-        if self.get_texture().borrow().get_size() != size {
+        if self.get_texture().borrow().size() != size {
             self.offscreen_texture = context.create_offscreen_texture(size, self.type_);
         }
     }
@@ -119,7 +119,7 @@ impl RenderTarget {
         }
 
         let prev_scissor_rect = parameters.scissor_rect;
-        let size = self.get_texture().borrow().get_size();
+        let size = self.get_texture().borrow().size();
         parameters.scissor_rect = ScissorRect { x: 0, y: 0, width: size.width, height: size.height };
 
         let layer_groups = self.layer_groups();

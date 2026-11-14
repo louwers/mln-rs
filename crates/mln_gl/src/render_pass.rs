@@ -57,6 +57,7 @@ impl render_pass::RenderPass for RenderPass {
     fn lend_to_custom_layer(&self, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
         let (framebuffer, size, has_stencil) = self.framebuffer;
         self.context.state().bind_vertex_array(self.context.gl(), None);
+        self.context.state().unbind_samplers(self.context.gl());
         let mut pass = CustomLayerPass { context: Rc::clone(&self.context), framebuffer, size };
         f(&mut pass);
         self.context.set_dirty_state();

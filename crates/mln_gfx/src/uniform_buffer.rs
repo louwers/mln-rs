@@ -1,8 +1,8 @@
-use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::context::Context;
 use crate::gpu::{BufferDesc, BufferId, BufferUsage, Gpu, GpuError};
+use crate::released::Released;
 use crate::rendering_stats::RenderingStats;
 use crate::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
 
@@ -96,9 +96,7 @@ impl UniformBuffer {
 
 impl Drop for UniformBuffer {
     fn drop(&mut self) {
-        let mut buffers = self.released.buffers.take();
-        buffers.push((self.id, allocated_size(self.size)));
-        self.released.buffers.set(buffers);
+        self.released.buffer(self.id, allocated_size(self.size));
     }
 }
 
@@ -108,29 +106,6 @@ fn allocated_size(size: usize) -> usize {
 }
 
 pub type UniformBufferPtr = Rc<UniformBuffer>;
-
-/// The buffers the renderer dropped. A backend destroys them with
-/// [`Context::destroy_released`] once it has submitted the frame that last
-/// used them, so a buffer dropped while a frame is recorded outlives that
-/// frame's commands.
-#[derive(Default)]
-pub struct Released {
-    /// Each buffer and the bytes it took.
-    buffers: Cell<Vec<(BufferId, usize)>>,
-}
-
-impl Released {
-    /// Destroys the buffers released so far, taking them out of `stats`.
-    pub(crate) fn destroy(&self, gpu: &mut dyn Gpu, stats: &mut RenderingStats) {
-        for (id, allocated) in self.buffers.take() {
-            gpu.destroy_buffer(id);
-            stats.num_buffers -= 1;
-            stats.mem_buffers -= allocated as i32;
-            stats.num_uniform_buffers -= 1;
-            stats.mem_uniform_buffers -= allocated as i32;
-        }
-    }
-}
 
 /// A collection of uniform buffers by id.
 #[derive(Clone, Default)]

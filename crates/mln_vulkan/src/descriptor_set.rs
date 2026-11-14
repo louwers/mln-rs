@@ -21,6 +21,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
 use mln_gfx::uniform_buffer::UniformBufferArray;
+use slotmap::Key as _;
 
 use crate::context::Context;
 use crate::shaders::layout::{
@@ -29,7 +30,6 @@ use crate::shaders::layout::{
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::shaders::shader_program::ShaderProgram;
-use crate::texture2d::Texture2D;
 
 /// The most buffers a set has.
 const MAX_BUFFER_BINDINGS: usize = 8;
@@ -432,21 +432,22 @@ impl ImageDescriptorSet {
             let Some(index) = shader.get_sampler_location(id).filter(|&index| index < IMAGE_TEXTURE_COUNT) else {
                 continue;
             };
-            let mut texture = texture.borrow_mut();
-            let Some(texture) = texture.downcast_mut::<Texture2D>() else {
+            let binding = texture.borrow_mut().binding(context);
+            let Ok((texture, sampler_id)) = binding else {
                 continue;
             };
-            let image_view = texture.get_vulkan_image_view();
-            let sampler = texture.get_vulkan_sampler();
-            if image_view == vk::ImageView::null() || sampler == vk::Sampler::null() {
+            let gpu = context.vulkan_gpu();
+            let (Some((image_view, _, image_id)), Some(sampler)) =
+                (gpu.native_texture(texture), gpu.native_sampler(sampler_id))
+            else {
                 continue;
-            }
-            let (image_id, sampler_id) = texture.get_ids();
+            };
             bindings[index] = ImageBinding {
                 image_id,
-                sampler_id,
+                // Samplers are never destroyed, so no other has this id.
+                sampler_id: sampler_id.data().as_ffi(),
                 image_view,
-                image_layout: texture.get_vulkan_image_layout(),
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 sampler,
             };
         }

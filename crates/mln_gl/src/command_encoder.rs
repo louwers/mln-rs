@@ -57,6 +57,7 @@ impl command_encoder::CommandEncoder for CommandEncoder {
     /// GL state it knew; the next pass binds its framebuffer again.
     fn lend_to_custom_layer(&self, _target: &dyn DrawTarget, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
         self.context.state().bind_vertex_array(self.context.gl(), None);
+        self.context.state().unbind_samplers(self.context.gl());
         let mut encoder = CustomLayerEncoder { context: Rc::clone(&self.context) };
         f(&mut encoder);
         self.context.set_dirty_state();

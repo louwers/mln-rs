@@ -14,9 +14,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_actor::LocalObject;
 use mln_gfx::Context;
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
+use mln_gfx::texture2d::{SamplerState, Texture2DPtr, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -182,21 +183,26 @@ impl DynamicTexture {
             {
                 let mut t = texture.borrow_mut();
                 t.set_size(self.size);
-                t.set_format(self.pixel_format, TextureChannelDataType::UnsignedByte);
-                t.set_sampler_configuration(SamplerState {
+                t.set_format(texture_format(self.pixel_format, TextureChannelDataType::UnsignedByte));
+                t.set_sampler(SamplerState {
                     filter: TextureFilterType::Linear,
                     wrap_u: TextureWrapType::Clamp,
                     wrap_v: TextureWrapType::Clamp,
                     ..SamplerState::default()
                 });
-                t.create();
+                if let Err(error) = t.create(context) {
+                    Log::error(Event::Render, format!("Making an atlas texture failed: {error}"));
+                }
             }
             *self.gpu_texture.lock() = Some(LocalObject::new(RefCell::new(Some(std::rc::Rc::clone(&texture)))));
             texture
         };
         let mut t = texture.borrow_mut();
         for (rect, data) in inner.images_to_upload.values() {
-            t.upload_sub_region(Some(data), Size::new(u32::from(rect.w), u32::from(rect.h)), rect.x, rect.y);
+            let size = Size::new(u32::from(rect.w), u32::from(rect.h));
+            if let Err(error) = t.upload_sub_region(context, data, size, rect.x, rect.y) {
+                Log::error(Event::Render, format!("Uploading to an atlas texture failed: {error}"));
+            }
         }
         inner.images_to_upload.clear();
     }

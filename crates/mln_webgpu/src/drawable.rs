@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use mln_gfx::attribute::AttributeBindingArray;
 use mln_gfx::color_mode::ColorMode;
+use mln_gfx::context::Context as _;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::drawable::{self, DrawSegment, DrawableBase, UniqueDrawSegment};
@@ -15,7 +16,7 @@ use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_program_base::{ShaderProgramBasePtr, same_shader};
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
+use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::{BufferUsageType, DepthMaskType};
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::upload_pass::UploadPass as _;
@@ -27,9 +28,7 @@ use mln_util::time::Instant;
 use crate::bind_groups::{BindGroupKey, EntryResource, SharedBindGroup};
 use crate::context::Context;
 use crate::render_pass::RenderPass;
-use crate::renderer_backend::BackendImpl;
 use crate::shaders::shader_program::{BindingInfo, BindingType, ShaderProgram, as_webgpu_shader};
-use crate::texture2d::Texture2D;
 use crate::upload_pass::UploadPass;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
@@ -226,14 +225,9 @@ impl Drawable {
             }
         }
 
-        // Upload textures if needed
-        let textures_need_upload = self.base.textures.iter().flatten().any(|t| t.borrow().needs_upload());
-        if textures_need_upload {
-            for texture in self.base.textures.iter().flatten() {
-                let mut t = texture.borrow_mut();
-                if t.needs_upload() {
-                    t.upload();
-                }
+        for texture in self.base.textures.iter().flatten() {
+            if let Err(error) = texture.borrow_mut().upload(upload_pass.get_context()) {
+                Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
             }
         }
 
@@ -327,16 +321,10 @@ impl Drawable {
                             valid_bindings = false;
                             break;
                         };
-                        let mut texture = texture.borrow_mut();
-                        let Some(texture) = texture.downcast_mut::<Texture2D>() else {
-                            valid_bindings = false;
-                            break;
-                        };
-                        if texture.get_sampler().is_none() {
-                            let state = *texture.get_sampler_state();
-                            texture.set_sampler_configuration(state);
-                        }
-                        let Some(sampler) = texture.get_sampler().cloned() else {
+                        let binding = texture.borrow_mut().binding(context);
+                        let backend = context.get_backend();
+                        let Some(sampler) = binding.ok().and_then(|(_, sampler)| backend.native_sampler(sampler))
+                        else {
                             valid_bindings = false;
                             break;
                         };
@@ -347,15 +335,11 @@ impl Drawable {
                             valid_bindings = false;
                             break;
                         };
-                        let mut texture = texture.borrow_mut();
-                        let Some(texture) = texture.downcast_mut::<Texture2D>() else {
-                            valid_bindings = false;
-                            break;
-                        };
-                        if texture.get_texture().is_none() || texture.get_texture_view().is_none() {
-                            texture.create();
-                        }
-                        let Some(view) = texture.get_texture_view().cloned() else {
+                        let binding = texture.borrow_mut().binding(context);
+                        let backend = context.get_backend();
+                        let Some(view) =
+                            binding.ok().and_then(|(texture, _)| backend.native_texture(texture).map(|(_, view)| view))
+                        else {
                             valid_bindings = false;
                             break;
                         };
@@ -432,13 +416,13 @@ impl Drawable {
             return false;
         }
         let global_buffers = render_pass.get_global_uniform_buffers();
-        let backend = render_pass.context().get_backend();
+        let context = render_pass.context();
         self.impl_.bind_groups.iter().all(|record| {
             let resources = &record.bind_group.key.resources;
             let binding_infos = shader.binding_infos(record.group);
             binding_infos.len() == resources.len()
                 && binding_infos.iter().zip(resources).all(|(info, (binding, resource))| {
-                    info.binding == *binding && self.binds(info, resource, global_buffers.as_deref(), backend, shader)
+                    info.binding == *binding && self.binds(info, resource, global_buffers.as_deref(), context, shader)
                 })
         })
     }
@@ -449,7 +433,7 @@ impl Drawable {
         info: &BindingInfo,
         resource: &EntryResource,
         global_buffers: Option<&UniformBufferArray>,
-        backend: &BackendImpl,
+        context: &Context,
         shader: &ShaderProgram,
     ) -> bool {
         let texture = |sampler_binding| {
@@ -464,18 +448,22 @@ impl Drawable {
                 .uniform_buffers
                 .get(info.binding as usize)
                 .or_else(|| global_buffers?.get(info.binding as usize))
-                .and_then(|buffer| backend.native_buffer(buffer.id()))
+                .and_then(|buffer| context.get_backend().native_buffer(buffer.id()))
                 .is_some_and(|(buffer, offset, size)| {
                     buffer == *bound && offset == *bound_offset && size == *bound_size
                 }),
             (BindingType::Sampler, EntryResource::Sampler(bound)) => texture(true).is_some_and(|texture| {
-                texture.downcast_ref::<Texture2D>().and_then(Texture2D::get_sampler) == Some(bound)
+                let sampler = context.sampler(&texture.sampler()).ok();
+                sampler.and_then(|sampler| context.get_backend().native_sampler(sampler)).as_ref() == Some(bound)
             }),
             (BindingType::Texture | BindingType::UnfilterableTexture, EntryResource::TextureView(bound)) => {
                 texture(false).is_some_and(|texture| {
-                    texture.downcast_ref::<Texture2D>().is_some_and(|texture| {
-                        texture.get_texture().is_some() && texture.get_texture_view() == Some(bound)
-                    })
+                    !texture.needs_upload()
+                        && texture
+                            .id()
+                            .and_then(|id| context.get_backend().native_texture(id).map(|(_, view)| view))
+                            .as_ref()
+                            == Some(bound)
                 })
             }
             _ => false,
