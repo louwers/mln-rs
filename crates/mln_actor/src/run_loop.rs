@@ -139,6 +139,9 @@ struct Inner {
     /// would go once its guard drops, with what they send to it.
     scheduler: scheduler::SchedulerPtr,
     handles: RefCell<Vec<Weak<AsyncHandle>>>,
+    /// The buffer that `run_once` copies the handles into, kept between
+    /// passes so that a pass doesn't allocate.
+    sending: Cell<Vec<Rc<AsyncHandle>>>,
     timers: RefCell<Vec<Weak<TimerHandle>>>,
 }
 
@@ -194,6 +197,7 @@ impl RunLoop {
                 core,
                 scheduler,
                 handles: RefCell::new(Vec::new()),
+                sending: Cell::new(Vec::new()),
                 timers: RefCell::new(Vec::new()),
             }),
         }
@@ -287,19 +291,27 @@ impl RunLoop {
             self.inner.core.process();
             did_work = true;
         }
-        self.inner.core.async_pending.store(false, Ordering::SeqCst);
-        // Snapshot: callbacks may create or drop async handles.
-        let handles: Vec<Rc<AsyncHandle>> = {
-            let mut handles = self.inner.handles.borrow_mut();
-            handles.retain(|h| h.strong_count() > 0);
-            handles.iter().filter_map(Weak::upgrade).collect()
-        };
-        for handle in handles {
+        // Every send sets `async_pending` after its handle's flag, so with no
+        // send since the last pass, no handle is pending.
+        if !self.inner.core.async_pending.swap(false, Ordering::SeqCst) {
+            return did_work;
+        }
+        // Snapshot: callbacks may create or drop async handles. A pass from a
+        // callback finds the buffer taken, and fills one of its own.
+        let mut handles = self.inner.sending.take();
+        {
+            let mut registered = self.inner.handles.borrow_mut();
+            registered.retain(|h| h.strong_count() > 0);
+            handles.extend(registered.iter().filter_map(Weak::upgrade));
+        }
+        for handle in &handles {
             if !handle.closed.get() && handle.pending.swap(false, Ordering::SeqCst) {
                 (handle.task.borrow_mut())();
                 did_work = true;
             }
         }
+        handles.clear();
+        self.inner.sending.set(handles);
         did_work
     }
 
@@ -473,6 +485,26 @@ mod tests {
         assert!(run_loop.has_pending());
         run_loop.run_once();
         assert!(!run_loop.has_pending());
+    }
+
+    #[test]
+    fn a_handle_that_a_callback_sends_runs_in_the_next_pass() {
+        let run_loop = RunLoop::new();
+        let ran = Rc::new(Cell::new(0));
+        let created = Rc::new(RefCell::new(None));
+        let (counter, slot) = (Rc::clone(&ran), Rc::clone(&created));
+        let first = crate::AsyncTask::new(move || {
+            let counter = Rc::clone(&counter);
+            let task = crate::AsyncTask::new(move || counter.set(counter.get() + 1));
+            task.send();
+            *slot.borrow_mut() = Some(task);
+        });
+        first.send();
+        assert!(run_loop.run_once());
+        assert_eq!(ran.get(), 0);
+        assert!(run_loop.run_once());
+        assert_eq!(ran.get(), 1);
+        assert!(!run_loop.run_once());
     }
 
     #[test]
