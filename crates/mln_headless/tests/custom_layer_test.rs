@@ -519,15 +519,7 @@ mod metal {
         MTLRenderCommandEncoder, MTLRenderPipelineDescriptor, MTLRenderPipelineState,
     };
 
-    use std::sync::OnceLock;
-
-    use khronos_egl as egl;
-    use mln_actor::RunLoop;
-
-    use mln_headless::HeadlessFrontend;
-    use mln_map::Map;
-
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check, session};
+    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check};
 
     /// The quad of `QUAD_WGSL`, in MSL.
     const QUAD_MSL: &str = "
