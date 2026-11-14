@@ -14,16 +14,16 @@ pub(crate) fn shift_coords(features: &mut VtFeatures, offset: f64) {
 #[must_use]
 pub(crate) fn wrap(features: &VtFeatures, buffer: f64, line_metrics: bool) -> VtFeatures {
     // left world copy
-    let mut left = clip::<0>(features, -1.0 - buffer, buffer, -1.0, 2.0, line_metrics);
+    let mut left = clip::<0>(features, -1.0 - buffer, buffer, -1.0, 2.0, line_metrics).into_owned();
     // right world copy
-    let mut right = clip::<0>(features, 1.0 - buffer, 2.0 + buffer, -1.0, 2.0, line_metrics);
+    let mut right = clip::<0>(features, 1.0 - buffer, 2.0 + buffer, -1.0, 2.0, line_metrics).into_owned();
 
     if left.is_empty() && right.is_empty() {
         return features.clone();
     }
 
     // center world copy
-    let mut merged = clip::<0>(features, -buffer, 1.0 + buffer, -1.0, 2.0, line_metrics);
+    let mut merged = clip::<0>(features, -buffer, 1.0 + buffer, -1.0, 2.0, line_metrics).into_owned();
 
     if !left.is_empty() {
         // merge left into center
