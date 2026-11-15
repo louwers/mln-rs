@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use mln_style_types::image::RectU16;
@@ -10,15 +11,30 @@ use serde::{Deserialize, Serialize};
 
 use crate::tagged_string::FontStackHash;
 
-/// Where a glyph comes from: `FontPBF` (0) for glyphs from glyph PBFs, other
-/// values are generated at runtime for HarfBuzz-shaped font faces
-/// (`gen_new_glyph_id_type`), so this is a newtype, not a Rust enum.
+/// Where a glyph comes from: glyph PBFs, or a HarfBuzz-shaped font face with a
+/// type generated at runtime (`gen_new_glyph_id_type`).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
-pub struct GlyphIDType(pub u16);
+pub enum GlyphIDType {
+    #[default]
+    FontPBF,
+    Face(NonZeroU16),
+}
 
-#[expect(non_upper_case_globals, reason = "the glyph ID types keep the C++ enumerator names")]
 impl GlyphIDType {
-    pub const FontPBF: GlyphIDType = GlyphIDType(0x00);
+    /// The type of the font face numbered `id`.
+    #[must_use]
+    pub const fn face(id: NonZeroU16) -> Self {
+        GlyphIDType::Face(id)
+    }
+
+    /// The type's number as stored in a glyph ID's upper half: 0 for `FontPBF`.
+    #[must_use]
+    pub const fn id(self) -> u16 {
+        match self {
+            GlyphIDType::FontPBF => 0,
+            GlyphIDType::Face(id) => id.get(),
+        }
+    }
 }
 
 /// `GLYPHS_PER_GLYPH_RANGE` etc. (`glyph_range.hpp`).
@@ -80,7 +96,7 @@ impl GlyphID {
     /// The `hash` member of the union (x86-64 / arm64 are little endian).
     #[must_use]
     pub(crate) fn hash(self) -> u32 {
-        (u32::from(self.type_.0) << 16) | u32::from(self.code)
+        (u32::from(self.type_.id()) << 16) | u32::from(self.code)
     }
 }
 
@@ -388,23 +404,19 @@ pub struct GlyphPosition {
 pub(crate) type GlyphPositionMap = BTreeMap<GlyphID, GlyphPosition>;
 pub type GlyphPositions = VecMap<FontStackHash, GlyphPositionMap>;
 
-/// Advances the process-wide glyph type counter, skipping `FontPBF` when it
-/// wraps.
-fn gen_new_glyph_id_type_counter(counter: &mut i16) -> GlyphIDType {
-    *counter = counter.wrapping_add(1);
-    if *counter == GlyphIDType::FontPBF.0 as i16 {
-        *counter = counter.wrapping_add(1);
-    }
-    GlyphIDType(*counter as u16)
+/// Advances the process-wide glyph type counter, skipping zero when it wraps.
+fn gen_new_glyph_id_type_counter(counter: &mut u16) -> NonZeroU16 {
+    *counter = counter.wrapping_add(1).max(1);
+    NonZeroU16::new(*counter).expect("the counter is at least 1")
 }
 
 struct GlyphTypes {
-    counter: i16,
-    types: VecMap<String, VecMap<String, VecMap<usize, GlyphIDType>>>,
+    counter: u16,
+    types: VecMap<String, VecMap<String, VecMap<usize, NonZeroU16>>>,
 }
 
 static GLYPH_TYPES: Mutex<GlyphTypes> =
-    Mutex::new(GlyphTypes { counter: GlyphIDType::FontPBF.0 as i16, types: VecMap::new() });
+    Mutex::new(GlyphTypes { counter: 0, types: VecMap::new() });
 
 /// Boost's `hash_combine`, with libstdc++'s identity `std::hash<uint32_t>`.
 fn hash_combine(seed: &mut usize, v: u32) {
@@ -430,11 +442,8 @@ pub fn gen_new_glyph_id_type(url: &str, font_stack: &FontStack, pairs: &[(u32, u
         .entry(family)
         .or_default()
         .entry(hash)
-        .or_insert(GlyphIDType::FontPBF);
-    if *entry == GlyphIDType::FontPBF {
-        *entry = gen_new_glyph_id_type_counter(&mut state.counter);
-    }
-    *entry
+        .or_insert_with(|| gen_new_glyph_id_type_counter(&mut state.counter));
+    GlyphIDType::Face(*entry)
 }
 
 #[cfg(test)]
@@ -444,7 +453,7 @@ mod tests {
     #[test]
     fn glyph_id_order_is_the_union_hash() {
         let a = GlyphID::with_type(0xFFFF, GlyphIDType::FontPBF);
-        let b = GlyphID::with_type(0, GlyphIDType(1));
+        let b = GlyphID::with_type(0, GlyphIDType::face(NonZeroU16::MIN));
         assert!(a < b);
         assert_eq!(b.hash(), 0x10000);
         assert_eq!(GlyphID::new(0x1F600).code, 0xF600);

@@ -5,6 +5,8 @@
 // --name-IDs='*'`), and its static instances
 // at 400 and 100 (`fonttools varLib.instancer cjk-vf.otf wght=400`).
 
+use std::num::NonZeroU16;
+
 use crate::glyph::{Glyph, GlyphIDType};
 use crate::weight::at_regular_weight;
 use crate::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
@@ -16,7 +18,7 @@ const KHMER: &[u8] = include_bytes!("../../tests/fixtures/khmer.ttf");
 
 /// The positions and glyphs of "中A", shaped and rasterized.
 fn shape(font: &[u8]) -> (Vec<HBShapeAdjust>, Vec<Glyph>) {
-    let shaper = HBShaper::new(GlyphIDType(1), font.to_vec(), &FreeTypeLibrary::new());
+    let shaper = HBShaper::new(GlyphIDType::face(NonZeroU16::MIN), font.to_vec(), &FreeTypeLibrary::new());
     assert!(shaper.valid());
     let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
     shaper.create_complex_glyph_ids(&[0x4E2D, 0x41], false, &mut ids, &mut adjusts);

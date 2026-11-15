@@ -4,6 +4,7 @@
 // fontTools (`fonttools subset --text=ខ្មែរ --layout-features='*'
 // --name-IDs='*' [--flavor=woff|woff2]`).
 
+use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use crate::face::Face;
@@ -20,7 +21,7 @@ const WOFF2: &[u8] = include_bytes!("../../tests/fixtures/khmer.woff2");
 const KHMER: &str = "ខ្មែរ";
 
 fn shape(font: &[u8]) -> (Vec<GlyphID>, Vec<HBShapeAdjust>, Vec<crate::glyph::Glyph>) {
-    let type_ = GlyphIDType(1);
+    let type_ = GlyphIDType::face(NonZeroU16::MIN);
     let shaper = HBShaper::new(type_, font.to_vec(), &FreeTypeLibrary::new());
     assert!(shaper.valid());
     let text: Vec<u16> = KHMER.encode_utf16().collect();
