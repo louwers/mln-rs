@@ -13,7 +13,7 @@ use mln_util::tileset::PartialTileset;
 use mln_util::{Color, LatLng};
 
 use super::util::{FixtureLog, parse_json, read_file};
-use crate::image;
+use crate::expression::Functions;
 use crate::layer::Layer;
 use crate::layers::line_layer::{Impl as LineLayerImpl, LineLayer};
 use crate::observer::{Observer, SourceObserver};
@@ -24,6 +24,7 @@ use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::tile_source::TileSource;
 use crate::style::{Impl, Style};
 use crate::transition_options::TransitionOptions;
+use crate::{StyleRegistry, image};
 
 /// A style impl over a stub file source, with pixel ratio 1.
 fn stub_style() -> Impl {
@@ -32,7 +33,7 @@ fn stub_style() -> Impl {
         &run_loop,
         mln_storage::stub_file_source::ResponseType::Asynchronous,
     );
-    Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop)
+    Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop)
 }
 
 // gtest: Style.Properties
@@ -585,7 +586,11 @@ fn sky_presence_and_replacement() {
     assert_float_eq(0.4, *sky.impl_.properties.sky_atmosphere_blend.value.as_constant());
 
     let mut replacement = Sky::new();
-    assert!(replacement.set_property("fog-color", &Convertible::from(&serde_json::json!("red"))).is_none());
+    assert!(
+        replacement
+            .set_property("fog-color", &Convertible::from(&serde_json::json!("red")), &Functions::with_builtins())
+            .is_none()
+    );
     style.set_sky(Some(replacement));
     let sky = style.get_sky().expect("sky");
     assert!(sky.impl_.properties.sky_color.value.is_undefined());
@@ -681,7 +686,8 @@ fn public_load_state_does_not_wait_for_resources() {
         &run_loop,
         mln_storage::stub_file_source::ResponseType::Manual,
     );
-    let mut style = Style::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
+    let mut style =
+        Style::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop);
 
     assert!(!style.is_loaded());
 
@@ -754,7 +760,7 @@ fn stub_with_style_response(
         mln_storage::stub_file_source::ResponseType::Asynchronous,
     );
     file_source.set_response(mln_storage::Kind::Style, responder);
-    let mut style = Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
+    let mut style = Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop);
     let observer = Rc::new(ResponseObserver::default());
     style.set_observer(Some(Rc::<ResponseObserver>::clone(&observer)));
     (style, observer, run_loop)
@@ -870,6 +876,7 @@ fn load_json_cancels_pending_load_url() {
         Some(response)
     });
     let mut style = Impl::with_file_source(
+        StyleRegistry::with_builtins(),
         Some(Arc::<mln_storage::stub_file_source::StubFileSource>::clone(&file_source)),
         1.0,
         &run_loop,

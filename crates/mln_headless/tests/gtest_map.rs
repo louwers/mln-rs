@@ -32,7 +32,7 @@ use mln_storage::{
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::custom_tile_loader::TileFunction;
-use mln_style::expression::{Formatted, FormattedSection, Image};
+use mln_style::expression::{Formatted, FormattedSection, Functions, Image};
 use mln_style::layer::Layer;
 use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::fill_layer::FillLayer;
@@ -48,7 +48,7 @@ use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::tile_source::TileSource;
 use mln_style::sprite::Sprite;
 use mln_style::style_property::Kind as StylePropertyKind;
-use mln_style::{PropertyValue, TransitionOptions, source};
+use mln_style::{PropertyValue, StyleRegistry, TransitionOptions, source};
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_test_server::HttpServer;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
@@ -2041,7 +2041,10 @@ fn empty_image_name_is_no_image() {
         FormattedSection::new("a".to_owned(), None, None, None),
         FormattedSection::from_image(Image::new("")),
     ]));
-    test.map().style_mut().add_layer(Box::new(SymbolLayer::from_impl(Arc::new(text))), None).unwrap();
+    test.map()
+        .style_mut()
+        .add_layer(Box::new(SymbolLayer::from_impl(Arc::new(text), Functions::with_builtins())), None)
+        .unwrap();
     test.render();
 
     assert!(missing.borrow().is_empty(), "{:?}", missing.borrow());
@@ -3726,7 +3729,7 @@ fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous:
     );
     let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
     test.map().style_mut().add_layer(layer, None).unwrap();
 }
@@ -4325,7 +4328,7 @@ fn layer_added_with_global_state_change_shows_new_state() {
     )
     .unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
     test.map().style_mut().add_layer(layer, None).unwrap();
 
@@ -4584,7 +4587,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
     );
     let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
 
     // The layer joins the render tree in the same update as a write to a key its ramp does not read.

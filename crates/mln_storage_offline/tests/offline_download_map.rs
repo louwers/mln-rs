@@ -19,6 +19,7 @@ use mln_storage::resource::{Priority, Usage};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
 use mln_storage_offline::{Downloads, OfflineDownload, Post};
+use mln_style::StyleRegistry;
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
 
@@ -72,8 +73,10 @@ fn resource_offline_usage_unset() {
         });
     });
     let network: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
-    *host.borrow_mut() =
-        Some((OfflineDatabase::new(filename.as_str()), Downloads::new(Some(network), Arc::clone(&post))));
+    *host.borrow_mut() = Some((
+        OfflineDatabase::new(filename.as_str()),
+        Downloads::new(Some(network), Arc::clone(&post), StyleRegistry::with_builtins()),
+    ));
     let with = |f: &mut dyn FnMut(&mut OfflineDatabase, &mut Downloads)| {
         let mut host = host.borrow_mut();
         let (db, downloads) = host.as_mut().expect("the host");
@@ -115,6 +118,7 @@ fn resource_offline_usage_unset() {
         .into(),
         Arc::<StubFileSource>::clone(&file_source),
         Arc::clone(&post),
+        StyleRegistry::with_builtins(),
     );
 
     let s = Rc::clone(&size);

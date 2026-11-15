@@ -3,6 +3,8 @@
 // order (mln_conversion's borrowed_conversion.rs). The message of a JSON
 // syntax error is serde_json's.
 
+use std::sync::Arc;
+
 use mln_conversion::borrowed_conversion::{Json, JsonObject, borrowed_json_to_value, member, members};
 use mln_conversion::{Convertible, Error};
 use mln_util::LatLng;
@@ -12,11 +14,12 @@ use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
 use crate::conversion::layer::{InvalidProperty, convert_layer_with, set_paint_properties};
-use crate::conversion::{Converter, convert, convert_source};
+use crate::conversion::{convert, convert_light, convert_projection, convert_sky, convert_source};
 use crate::expression::GlobalStateMap;
 use crate::layer::{FontStack, Layer};
 use crate::light::Light;
 use crate::projection::Projection;
+use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source::Source;
 use crate::sprite::Sprite;
@@ -26,10 +29,13 @@ use crate::transition_options::TransitionOptions;
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
 pub(crate) type StyleParseResult = Result<(), mln_util::Error>;
 
+/// Reads a style's JSON, against the expression functions and layer types of
+/// a [`StyleRegistry`].
 pub struct Parser {
+    registry: Arc<StyleRegistry>,
     pub sprites: Vec<Sprite>,
     pub glyph_url: String,
-    pub font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
+    pub font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
     pub sources: Vec<Box<dyn Source>>,
     pub(crate) layers: Vec<Box<dyn Layer>>,
 
@@ -51,9 +57,12 @@ pub struct Parser {
     pub(crate) center_altitude: f64,
 }
 
-impl Default for Parser {
-    fn default() -> Self {
+impl Parser {
+    /// A parser of styles whose layers and expressions are `registry`'s.
+    #[must_use]
+    pub fn new(registry: &Arc<StyleRegistry>) -> Self {
         Parser {
+            registry: Arc::clone(registry),
             sprites: Vec::new(),
             glyph_url: String::new(),
             font_faces: None,
@@ -195,7 +204,7 @@ impl Parser {
         if let Some(faces) = member(object, "font-faces")
             && let Some(faces) = faces.as_object()
         {
-            self.font_faces = Some(std::sync::Arc::new(parse_font_faces(faces)));
+            self.font_faces = Some(Arc::new(parse_font_faces(faces)));
         }
 
         // Call for side effect of logging warnings for invalid values.
@@ -216,7 +225,7 @@ impl Parser {
 
     fn parse_light(&mut self, value: &Json<'_>) {
         let mut error = Error::default();
-        let Some(converted) = <Light as Converter>::convert(&Convertible::from(value), &mut error) else {
+        let Some(converted) = convert_light(&Convertible::from(value), self.registry.functions(), &mut error) else {
             Log::warning(Event::ParseStyle, &error.message);
             return;
         };
@@ -226,7 +235,7 @@ impl Parser {
 
     fn parse_sky(&mut self, value: &Json<'_>) {
         let mut error = Error::default();
-        let Some(converted) = <Sky as Converter>::convert(&Convertible::from(value), &mut error) else {
+        let Some(converted) = convert_sky(&Convertible::from(value), self.registry.functions(), &mut error) else {
             Log::warning(Event::ParseStyle, &error.message);
             return;
         };
@@ -236,7 +245,8 @@ impl Parser {
 
     fn parse_projection(&mut self, value: &Json<'_>) {
         let mut error = Error::default();
-        let Some(converted) = <Projection as Converter>::convert(&Convertible::from(value), &mut error) else {
+        let Some(converted) = convert_projection(&Convertible::from(value), self.registry.functions(), &mut error)
+        else {
             Log::warning(Event::ParseStyle, &error.message);
             return;
         };
@@ -273,7 +283,8 @@ impl Parser {
 
         for (id, property) in members(object) {
             let mut error = Error::default();
-            let Some(source) = convert_source(&Convertible::from(property), &mut error, id) else {
+            let Some(source) = convert_source(&Convertible::from(property), &mut error, id, self.registry.functions())
+            else {
                 Log::warning(Event::ParseStyle, &error.message);
                 continue;
             };
@@ -355,7 +366,7 @@ impl Parser {
 
         for id in &ids {
             if layers_map.contains_key(id) {
-                parse_layer(id, &mut layers_map, &mut stack);
+                parse_layer(&self.registry, id, &mut layers_map, &mut stack);
             }
         }
 
@@ -380,7 +391,12 @@ struct LayerEntry<'a> {
     layer: Option<Box<dyn Layer>>,
 }
 
-fn parse_layer(id: &str, layers_map: &mut HashMap<String, LayerEntry<'_>>, stack: &mut Vec<String>) {
+fn parse_layer(
+    registry: &StyleRegistry,
+    id: &str,
+    layers_map: &mut HashMap<String, LayerEntry<'_>>,
+    stack: &mut Vec<String>,
+) {
     let Some(entry) = layers_map.get(id) else {
         return;
     };
@@ -410,7 +426,7 @@ fn parse_layer(id: &str, layers_map: &mut HashMap<String, LayerEntry<'_>>, stack
 
         // Recursively parse the referenced layer.
         stack.insert(0, id.to_owned());
-        parse_layer(ref_, layers_map, stack);
+        parse_layer(registry, ref_, layers_map, stack);
         stack.remove(0);
 
         let Some(reference) = layers_map.get(ref_).and_then(|e| e.layer.as_ref()) else {
@@ -426,7 +442,9 @@ fn parse_layer(id: &str, layers_map: &mut HashMap<String, LayerEntry<'_>>, stack
         }
     } else {
         let mut error = Error::default();
-        let Some(converted) = convert_layer_with(&Convertible::from(value), &mut error, InvalidProperty::Skip) else {
+        let Some(converted) =
+            convert_layer_with(registry, &Convertible::from(value), &mut error, InvalidProperty::Skip)
+        else {
             Log::warning(Event::ParseStyle, &error.message);
             return;
         };

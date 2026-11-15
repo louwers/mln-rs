@@ -149,8 +149,8 @@ pub(crate) fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
 
 #[cfg(test)]
 mod tests {
-    use mln_style::conversion::{Convertible, Error, convert};
-    use mln_style::expression::Dependency;
+    use mln_style::conversion::{Convertible, Error, convert_filter};
+    use mln_style::expression::{Dependency, Functions};
     use mln_style::filter::Filter;
     use mln_style::layer::Layer;
     use mln_style::layer_properties::LayerPropertiesBase;
@@ -179,7 +179,7 @@ mod tests {
     /// A filter of its own, which shares no expression with another.
     fn filter(json: &str) -> Filter {
         let json: serde_json::Value = serde_json::from_str(json).unwrap();
-        convert::<Filter>(&Convertible::from(&json), &mut Error::default()).expect("filter")
+        convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut Error::default()).expect("filter")
     }
 
     fn layer(mut layer: impl Layer, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn LayerProperties> {

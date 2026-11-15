@@ -317,8 +317,13 @@ impl Scene {
     pub(crate) fn add_layer_json(&mut self, json: &str, before: Option<&str>) {
         let value: serde_json::Value = serde_json::from_str(json).expect("a layer is JSON");
         let mut error = mln_style::conversion::Error::default();
-        let layer = mln_style::conversion::convert_layer(&mln_style::conversion::Convertible::from(&value), &mut error)
-            .expect("a valid layer");
+        let registry = self.map.style().registry();
+        let layer = mln_style::conversion::convert_layer(
+            registry,
+            &mln_style::conversion::Convertible::from(&value),
+            &mut error,
+        )
+        .expect("a valid layer");
         self.map.style_mut().add_layer(layer, before).expect("a new layer");
     }
 

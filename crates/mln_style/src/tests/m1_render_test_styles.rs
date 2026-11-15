@@ -18,10 +18,12 @@ use mln_util::time::Instant;
 use mln_util::{Color, UnitBezier};
 
 use super::util::FixtureLog;
+use crate::expression::Functions;
 use crate::layer::downcast_arc;
 use crate::layers::BackgroundPaintProperties;
 use crate::layers::background_layer::Impl as BackgroundLayerImpl;
 use crate::map::zoom_history::ZoomHistory;
+use crate::registry::StyleRegistry;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::transition_parameters::TransitionParameters;
 use crate::style::Impl;
@@ -52,7 +54,7 @@ fn load(test: &str) -> Impl {
     };
     file_source.set_response(mln_storage::Kind::SpriteJSON, failed);
     file_source.set_response(mln_storage::Kind::SpriteImage, failed);
-    let mut style = Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
+    let mut style = Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop);
     style.load_json(&json);
     assert!(style.loaded, "{test} did not load");
     assert!(style.is_loaded(), "{test}: style not fully loaded");
@@ -141,9 +143,10 @@ fn background_color_function() {
 
 /// The colorSpace tests' stops, interpolated by `operator` at their zoom, 5.
 fn color_space_expected(operator: &str) -> Color {
-    let expression = crate::expression::dsl::create_expression_from_str(&format!(
-        r#"["{operator}", ["linear"], ["zoom"], 0, "rgb(118,0,118)", 10, "rgb(255,155,0)"]"#
-    ))
+    let expression = crate::expression::dsl::create_expression_from_str(
+        &format!(r#"["{operator}", ["linear"], ["zoom"], 0, "rgb(118,0,118)", 10, "rgb(255,155,0)"]"#),
+        &Functions::with_builtins(),
+    )
     .unwrap();
     crate::property_expression::PropertyExpression::<Color>::from_expr(expression)
         .evaluate(&crate::expression::EvaluationContext::new(5.0), Color::black())

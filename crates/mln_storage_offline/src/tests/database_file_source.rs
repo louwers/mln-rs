@@ -12,6 +12,7 @@ use mln_storage::offline::{
     OfflineTilePyramidRegionDefinition,
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
+use mln_style::StyleRegistry;
 use mln_util::geo::{LatLng, LatLngBounds};
 
 use super::TempDir;
@@ -28,7 +29,11 @@ fn wait<T: Send + 'static>(operation: impl FnOnce(Box<dyn FnOnce(T) + Send>)) ->
 
 /// A database file source with its database in `dir`.
 fn database_file_source(dir: &TempDir) -> RegionDatabase {
-    region_database(&dir.path("cache.db"), Some(std::sync::Arc::new(OnlineFileSource::new())))
+    region_database(
+        &dir.path("cache.db"),
+        Some(std::sync::Arc::new(OnlineFileSource::new())),
+        StyleRegistry::with_builtins(),
+    )
 }
 
 fn definition(style_url: &str) -> OfflineRegionDefinition {

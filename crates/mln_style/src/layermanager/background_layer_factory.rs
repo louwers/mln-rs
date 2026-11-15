@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use mln_conversion::Convertible;
 
 use super::layer_factory::LayerFactory;
+use crate::expression::Functions;
 use crate::layer::{Layer, LayerTypeInfo};
 use crate::layers::background_layer::{BackgroundLayer, Impl};
 
@@ -11,7 +14,7 @@ impl LayerFactory for BackgroundLayerFactory {
         Impl::static_type_info()
     }
 
-    fn create_layer(&self, id: &str, _value: &Convertible<'_>) -> Option<Box<dyn Layer>> {
-        Some(Box::new(BackgroundLayer::new(id)))
+    fn create_layer(&self, id: &str, _value: &Convertible<'_>, functions: &Arc<Functions>) -> Option<Box<dyn Layer>> {
+        Some(Box::new(BackgroundLayer::with_functions(Arc::clone(functions), id)))
     }
 }

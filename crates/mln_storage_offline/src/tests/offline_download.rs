@@ -16,6 +16,7 @@ use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, LoadingMethod, Resource, Responder, Response};
+use mln_style::StyleRegistry;
 use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
@@ -170,7 +171,7 @@ impl OfflineTest {
         let network: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
         let host = Rc::new(RefCell::new(Host {
             db: OfflineDatabase::new(path),
-            downloads: Downloads::new(Some(network), Arc::clone(&post)),
+            downloads: Downloads::new(Some(network), Arc::clone(&post), StyleRegistry::with_builtins()),
         }));
         let _ = slot.set(LocalObject::from_rc(Rc::clone(&host)));
         OfflineTest { run_loop, file_source, host, post, size: Rc::new(Cell::new(0)) }
@@ -187,7 +188,13 @@ impl OfflineTest {
         definition: OfflineRegionDefinition,
         file_source: Arc<dyn FileSource>,
     ) -> TestDownload {
-        let download = OfflineDownload::new(region_id, definition, file_source, Arc::clone(&self.post));
+        let download = OfflineDownload::new(
+            region_id,
+            definition,
+            file_source,
+            Arc::clone(&self.post),
+            StyleRegistry::with_builtins(),
+        );
         self.host.borrow_mut().downloads.insert(download);
         TestDownload { host: Rc::clone(&self.host), post: Arc::clone(&self.post), id: region_id }
     }

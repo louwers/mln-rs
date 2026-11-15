@@ -9,7 +9,6 @@
 "crates/mln_expression/src/assertion.rs" = 1
 "crates/mln_expression/src/coercion.rs" = 1
 "crates/mln_expression/src/comparison.rs" = 1
-"crates/mln_expression/src/compound_expression.rs" = 1
 "crates/mln_expression/src/dsl.rs" = 3
 "crates/mln_expression/src/match_.rs" = 2
 "crates/mln_gfx/src/polyline_generator.rs" = 5

@@ -8,6 +8,7 @@
 
 pub mod cases;
 pub mod compare;
+mod expressions;
 mod latency;
 pub mod meter;
 mod runtime_scene;

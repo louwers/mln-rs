@@ -423,6 +423,7 @@ impl RuntimeCore {
             Arc::new(mln_storage_offline::region_database(
                 &self.resource_options.cache_path,
                 Some(Arc::clone(self.network())),
+                mln_style::StyleRegistry::with_builtins(),
             ))
         })
     }

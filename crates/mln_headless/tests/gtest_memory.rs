@@ -9,6 +9,7 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
+use mln_style::StyleRegistry;
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use support::read_bytes;
@@ -222,8 +223,11 @@ fn rendering_stats_count_live_resources() {
     let labels = serde_json::json!({"id": "labels", "type": "symbol", "source": "openmaptiles",
         "source-layer": "poi_label", "layout": {"text-field": "x", "text-allow-overlap": true}});
     let mut error = mln_style::conversion::Error::default();
-    let labels =
-        mln_style::conversion::layer::convert_layer(&mln_style::conversion::Convertible::from(&labels), &mut error);
+    let labels = mln_style::conversion::layer::convert_layer(
+        &StyleRegistry::with_builtins(),
+        &mln_style::conversion::Convertible::from(&labels),
+        &mut error,
+    );
     map.style_mut().add_layer(labels.expect("a layer"), None).expect("added");
     frontend.render(&mut map).expect("render");
     let loaded = live_resources(&frontend);

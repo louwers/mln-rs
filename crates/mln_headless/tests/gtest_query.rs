@@ -7,10 +7,10 @@ use mln_map::{CameraOptions, MapMode};
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::conversion::{Convertible, Error, convert};
-use mln_style::expression::Value as ExpressionValue;
+use mln_style::conversion::{Convertible, Error, convert_filter};
 use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_style::expression::expression::FeatureState;
+use mln_style::expression::{Functions, Value as ExpressionValue};
 use mln_style::filter::Filter;
 use mln_style::layers::circle_layer::CircleLayer;
 use mln_style::layers::symbol_layer::SymbolLayer;
@@ -74,7 +74,8 @@ fn ll(lat: f64, lon: f64) -> LatLng {
 fn parse_filter(expression: &str) -> Filter {
     let json: serde_json::Value = serde_json::from_str(expression).expect("filter JSON");
     let mut error = Error::default();
-    convert::<Filter>(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("filter: {}", error.message))
+    convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut error)
+        .unwrap_or_else(|| panic!("filter: {}", error.message))
 }
 
 fn filter(expression: mln_style::expression::Expr) -> Filter {

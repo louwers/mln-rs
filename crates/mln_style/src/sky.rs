@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};
 
+use crate::expression::Functions;
 use crate::property_table::{self, SetPropertyError};
 pub use crate::sky_impl::{Impl, SkyProperties};
 use crate::style_property::StyleProperty;
@@ -29,9 +30,10 @@ impl Sky {
         Sky { impl_ }
     }
 
-    /// Sets a property (or `<name>-transition`) from a style JSON value.
-    pub fn set_property(&mut self, name: &str, value: &Convertible<'_>) -> Option<Error> {
-        match property_table::set_property(&mut self.impl_, name, value) {
+    /// Sets a property (or `<name>-transition`) from a style JSON value,
+    /// whose expressions parse against `functions`.
+    pub fn set_property(&mut self, name: &str, value: &Convertible<'_>, functions: &Arc<Functions>) -> Option<Error> {
+        match property_table::set_property(&mut self.impl_, name, value, functions) {
             Ok(()) => None,
             Err(SetPropertyError::Invalid(error)) => Some(error),
             Err(SetPropertyError::Unknown) => Some(Error::new("sky doesn't support this property")),

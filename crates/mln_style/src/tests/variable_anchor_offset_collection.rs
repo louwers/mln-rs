@@ -2,8 +2,9 @@ use mln_conversion::Convertible;
 use mln_style_types::{AnchorOffsetPair, SymbolAnchorType, VariableAnchorOffsetCollection};
 
 use super::util::parse_json;
+use crate::StyleRegistry;
 use crate::conversion::{Converter, Error, convert_layer, convert_property_value};
-use crate::expression::EvaluationContext;
+use crate::expression::{EvaluationContext, Functions};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
 
@@ -94,7 +95,7 @@ fn style_conversion() {
             }
         }"#,
         );
-        let layer = convert_layer(&Convertible::from(&json), &mut error);
+        let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error);
         assert!(layer.is_some(), "{}", error.message);
         let value = layer.unwrap().serialize();
         match value {
@@ -110,7 +111,13 @@ fn expression() {
     let mut error = Error::default();
     let json_to_property_value = |json: &str, error: &mut Error| {
         let value = parse_json(json);
-        convert_property_value::<VariableAnchorOffsetCollection>(&Convertible::from(&value), error, true, false)
+        convert_property_value::<VariableAnchorOffsetCollection>(
+            &Convertible::from(&value),
+            error,
+            true,
+            false,
+            &Functions::with_builtins(),
+        )
     };
     let json_to_expression = |json: &str, error: &mut Error| -> PropertyExpression<VariableAnchorOffsetCollection> {
         match json_to_property_value(json, error) {

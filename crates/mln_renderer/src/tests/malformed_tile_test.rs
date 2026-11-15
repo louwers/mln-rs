@@ -9,6 +9,7 @@ use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
+use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
@@ -42,7 +43,8 @@ enum Outcome {
 /// A layer of the given style JSON, as the worker gets it.
 fn layer(json: &serde_json::Value) -> Arc<dyn LayerProperties> {
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
+    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(json), &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message));
     let base_impl = layer.base_impl();
     match json["type"].as_str().unwrap() {
         "line" => Arc::new(LineLayerProperties::new(downcast_arc(&base_impl))),

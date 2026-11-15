@@ -51,6 +51,7 @@ use crate::map::camera::CameraOptions;
 use crate::observer::{NullObserver, Observer, SourceObserver};
 use crate::parser::Parser;
 use crate::projection::{self, Projection};
+use crate::registry::StyleRegistry;
 use crate::sky::{self, Sky};
 use crate::source::{self, Source};
 use crate::sprite::Sprite;
@@ -258,6 +259,8 @@ pub struct Impl {
     pixel_ratio: f32,
     /// The parsed style's sprites.
     sprites: Vec<Sprite>,
+    /// What the style's JSON, layers and filters parse against.
+    registry: Arc<StyleRegistry>,
 
     pub(crate) mutated: bool,
     pub(crate) loaded: bool,
@@ -274,18 +277,20 @@ impl std::fmt::Debug for Impl {
 }
 
 impl Impl {
-    /// A style without a file source (`Impl(nullptr, pixelRatio,
-    /// threadPool)`), on `run_loop`.
+    /// A style without a file source, on `run_loop`, that parses against
+    /// `registry`.
     #[must_use]
-    pub(crate) fn new(pixel_ratio: f32, run_loop: &RunLoop) -> Self {
-        Self::with_file_source(None, pixel_ratio, run_loop)
+    pub(crate) fn new(registry: Arc<StyleRegistry>, pixel_ratio: f32, run_loop: &RunLoop) -> Self {
+        Self::with_file_source(registry, None, pixel_ratio, run_loop)
     }
 
-    /// A style that loads its resources from `file_source`. Its responses and
-    /// background work answer on `run_loop`, and its background work runs on
-    /// the loop's pool, under a tag of the style's own.
+    /// A style that parses against `registry` and loads its resources from
+    /// `file_source`. Its responses and background work answer on
+    /// `run_loop`, and its background work runs on the loop's pool, under a
+    /// tag of the style's own.
     #[must_use]
     pub(crate) fn with_file_source(
+        registry: Arc<StyleRegistry>,
         file_source: Option<Arc<dyn FileSource>>,
         pixel_ratio: f32,
         run_loop: &RunLoop,
@@ -331,6 +336,7 @@ impl Impl {
             default_camera: CameraOptions::default(),
             pixel_ratio,
             sprites: Vec::new(),
+            registry,
             mutated: false,
             loaded: false,
         }
@@ -440,7 +446,7 @@ impl Impl {
     /// Replaces the style with the one `json` describes; returns whether it
     /// parsed.
     fn parse(&mut self, json: &str) -> bool {
-        let mut parser = Parser::default();
+        let mut parser = Parser::new(&self.registry);
 
         if let Err(error) = parser.parse(json) {
             let message = format!("Failed to parse style: {error}");
@@ -532,6 +538,11 @@ impl Impl {
         self.loaded = true;
         self.observer().on_style_loaded();
         true
+    }
+
+    /// What the style's JSON, layers and filters parse against.
+    pub(crate) fn registry(&self) -> &Arc<StyleRegistry> {
+        &self.registry
     }
 
     pub(crate) fn get_json(&self) -> String {

@@ -2,11 +2,13 @@
 //! style specification defines them by. The parser then types and checks
 //! them as it does any other expression.
 
+use std::sync::Arc;
+
 use feature::{Value, ValueObject};
 use mln_conversion::Convertible;
 
 use super::Error;
-use crate::expression::{Expr, ParsingContext, Type};
+use crate::expression::{Expr, Functions, ParsingContext, Type};
 
 /// The parser's errors for an expression a conversion wrote, without their
 /// positions: those are in that expression, not in the style.
@@ -319,20 +321,27 @@ fn identity(type_: &Type, property: &str, default: Option<Value>) -> Value {
 
 /// `function`, a legacy function, as the expression it stands for, whose
 /// output is `type_`. With `convert_tokens`, the `{token}`s of a zoom
-/// function's string outputs read the feature's properties.
+/// function's string outputs read the feature's properties. The expression
+/// parses against `functions`.
 pub fn parse_function(
     function: &Convertible<'_>,
     type_: &Type,
     convert_tokens: bool,
+    functions: &Arc<Functions>,
     error: &mut Error,
 ) -> Option<Expr> {
-    parse_converted(&function_expression(function, type_, convert_tokens, error)?, type_, error)
+    parse_converted(&function_expression(function, type_, convert_tokens, error)?, type_, functions, error)
 }
 
 /// Parses `expression`, which a conversion wrote, as a property's
-/// expression whose output is `type_`.
-pub(crate) fn parse_converted(expression: &Value, type_: &Type, error: &mut Error) -> Option<Expr> {
-    let mut ctx = ParsingContext::with_expected(type_.clone());
+/// expression whose output is `type_`, against `functions`.
+pub(crate) fn parse_converted(
+    expression: &Value,
+    type_: &Type,
+    functions: &Arc<Functions>,
+    error: &mut Error,
+) -> Option<Expr> {
+    let mut ctx = ParsingContext::with_expected(functions, type_.clone());
     let parsed = ctx.parse_layer_property_expression(&Convertible::from(expression));
     if parsed.is_none() {
         error.message = conversion_errors(&ctx);

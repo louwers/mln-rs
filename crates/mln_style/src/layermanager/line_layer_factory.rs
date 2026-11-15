@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use mln_conversion::Convertible;
 
 use super::layer_factory::{LayerFactory, get_source};
+use crate::expression::Functions;
 use crate::layer::{Layer, LayerTypeInfo};
 use crate::layers::line_layer::{Impl, LineLayer};
 
@@ -11,8 +14,8 @@ impl LayerFactory for LineLayerFactory {
         Impl::static_type_info()
     }
 
-    fn create_layer(&self, id: &str, value: &Convertible<'_>) -> Option<Box<dyn Layer>> {
+    fn create_layer(&self, id: &str, value: &Convertible<'_>, functions: &Arc<Functions>) -> Option<Box<dyn Layer>> {
         let source = get_source(value)?;
-        Some(Box::new(LineLayer::new(id, &source)))
+        Some(Box::new(LineLayer::with_functions(Arc::clone(functions), id, &source)))
     }
 }

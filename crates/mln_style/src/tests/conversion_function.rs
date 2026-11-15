@@ -4,8 +4,8 @@ use mln_conversion::{Convertible, Error};
 
 use super::util::parse_json;
 use crate::conversion::convert_property_value;
-use crate::expression::Formatted;
 use crate::expression::dsl::{format, get, literal_str};
+use crate::expression::{Formatted, Functions};
 use crate::property_value::PropertyValue;
 
 fn convert_json<T>(json: &str, error: &mut Error, allow_data_expressions: bool) -> Option<PropertyValue<T>>
@@ -13,7 +13,13 @@ where
     T: crate::conversion::Converter + crate::expression::ValueConverter + Clone,
 {
     let value = parse_json(json);
-    convert_property_value::<T>(&Convertible::from(&value), error, allow_data_expressions, false)
+    convert_property_value::<T>(
+        &Convertible::from(&value),
+        error,
+        allow_data_expressions,
+        false,
+        &Functions::with_builtins(),
+    )
 }
 
 // gtest: StyleConversion.Function

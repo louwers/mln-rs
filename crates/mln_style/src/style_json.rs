@@ -2,6 +2,7 @@
 //! as text, so a caller on another thread hands over text and the style's
 //! own thread parses it.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use feature::Value;
@@ -10,14 +11,13 @@ use mln_conversion::{Convertible, value_to_json};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 
-use crate::conversion::{Converter, convert_layer, convert_source};
+use crate::conversion::{Converter, convert_layer, convert_light, convert_projection, convert_sky, convert_source};
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
 use crate::layer::layer_type_info;
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::property_table::{Properties, defined_properties};
-use crate::sky::Sky;
 use crate::style::Style;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -37,7 +37,8 @@ impl Style {
         let context = format!("style source {}", quote(id));
         let value = parse(json, &context)?;
         let mut error = mln_conversion::Error::default();
-        let Some(source) = convert_source(&Convertible::from(&value), &mut error, id) else {
+        let functions = Arc::clone(self.registry().functions());
+        let Some(source) = convert_source(&Convertible::from(&value), &mut error, id, &functions) else {
             return Err(conversion_error(&context, &error));
         };
         self.add_source(source)
@@ -63,7 +64,7 @@ impl Style {
 
         let value = parse(json, "style layer")?;
         let mut error = mln_conversion::Error::default();
-        let Some(layer) = convert_layer(&Convertible::from(&value), &mut error) else {
+        let Some(layer) = convert_layer(self.registry(), &Convertible::from(&value), &mut error) else {
             return Err(conversion_error("style layer", &error));
         };
 
@@ -103,7 +104,7 @@ impl Style {
     pub fn add_custom_layer(
         &mut self,
         id: &str,
-        host: std::sync::Arc<dyn crate::layers::CustomLayerHost>,
+        host: Arc<dyn crate::layers::CustomLayerHost>,
         before_layer_id: Option<&str>,
     ) -> Result<(), Error> {
         self.require_loaded()?;
@@ -115,7 +116,8 @@ impl Style {
         if self.get_layer(id).is_some() {
             return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
         }
-        self.add_layer(Box::new(crate::layers::CustomLayer::new(id, host)), before_layer_id)
+        let functions = Arc::clone(self.registry().functions());
+        self.add_layer(Box::new(crate::layers::CustomLayer::with_functions(functions, id, host)), before_layer_id)
     }
 
     /// Moves the layer named `id` below the layer named `before_layer_id`,
@@ -254,12 +256,14 @@ impl Style {
         let value = parse(json, &context)?;
         let convertible = Convertible::from(&value);
         let mut error = mln_conversion::Error::default();
+        let functions = Arc::clone(self.registry().functions());
         match name {
             "light" => {
                 let light = if value.is_null() {
                     Light::default()
                 } else {
-                    Light::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, &error))?
+                    convert_light(&convertible, &functions, &mut error)
+                        .ok_or_else(|| conversion_error(&context, &error))?
                 };
                 self.set_light(light);
             }
@@ -267,7 +271,10 @@ impl Style {
                 let sky = if value.is_null() {
                     None
                 } else {
-                    Some(Sky::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, &error))?)
+                    Some(
+                        convert_sky(&convertible, &functions, &mut error)
+                            .ok_or_else(|| conversion_error(&context, &error))?,
+                    )
                 };
                 self.set_sky(sky);
             }
@@ -275,7 +282,8 @@ impl Style {
                 let projection = if value.is_null() {
                     Projection::default()
                 } else {
-                    Projection::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, &error))?
+                    convert_projection(&convertible, &functions, &mut error)
+                        .ok_or_else(|| conversion_error(&context, &error))?
                 };
                 self.set_projection(projection);
             }
@@ -354,7 +362,8 @@ impl Style {
         self.require_loaded()?;
         let context = format!("style light property {}", quote(name));
         let value = parse(json, &context)?;
-        match self.get_light_mut().set_property(name, &Convertible::from(&value)) {
+        let functions = Arc::clone(self.registry().functions());
+        match self.get_light_mut().set_property(name, &Convertible::from(&value), &functions) {
             None => Ok(()),
             Some(error) => Err(conversion_error(&context, &error)),
         }

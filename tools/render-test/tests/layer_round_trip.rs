@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};
+use mln_style::StyleRegistry;
 use mln_style::conversion::convert_layer;
+use mln_style::expression::functions;
 use mln_style::layer::Layer;
 use mln_style::layer_impl::Impl;
 
@@ -39,7 +41,7 @@ fn every_style() -> Vec<PathBuf> {
 
 /// The layers of every style, with their style's path. Layers that don't
 /// parse in the first place (tests of invalid styles) are left out.
-fn every_layer() -> Vec<(PathBuf, Box<dyn Layer>)> {
+fn every_layer(registry: &StyleRegistry) -> Vec<(PathBuf, Box<dyn Layer>)> {
     let mut layers = Vec::new();
     for path in every_style() {
         let style: serde_json::Value = match serde_json::from_str(&fs::read_to_string(&path).unwrap()) {
@@ -48,7 +50,7 @@ fn every_layer() -> Vec<(PathBuf, Box<dyn Layer>)> {
         };
         let Some(style_layers) = style.get("layers").and_then(|layers| layers.as_array()) else { continue };
         for json in style_layers {
-            if let Some(layer) = convert_layer(&Convertible::from(json), &mut Error::default()) {
+            if let Some(layer) = convert_layer(registry, &Convertible::from(json), &mut Error::default()) {
                 layers.push((path.clone(), layer));
             }
         }
@@ -59,11 +61,12 @@ fn every_layer() -> Vec<(PathBuf, Box<dyn Layer>)> {
 
 #[test]
 fn every_layer_crosses() {
-    let layers = every_layer();
+    let registry = StyleRegistry::with_builtins();
+    let layers = every_layer(&registry);
     let mut failures = Vec::new();
     for (path, layer) in &layers {
         let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
-        match mln_wire::from_slice::<Crossing>(&encoded) {
+        match functions::decode_with(registry.functions(), || mln_wire::from_slice::<Crossing>(&encoded)) {
             Ok(decoded) => {
                 if mln_wire::to_vec(&decoded).unwrap() != encoded {
                     failures.push(format!("{}: crosses as another layer\n  {:?}", path.display(), layer.serialize()));
@@ -86,7 +89,8 @@ const NOT_REPARSED: [&str; 2] = [
 
 #[test]
 fn every_layer_reparses() {
-    let layers = every_layer();
+    let registry = StyleRegistry::with_builtins();
+    let layers = every_layer(&registry);
     let mut failures = Vec::new();
     for (path, layer) in &layers {
         if NOT_REPARSED.iter().any(|style| path.ends_with(style)) {
@@ -94,7 +98,7 @@ fn every_layer_reparses() {
         }
         let serialized = layer.serialize();
         let mut error = Error::default();
-        match convert_layer(&Convertible::from(&serialized), &mut error) {
+        match convert_layer(&registry, &Convertible::from(&serialized), &mut error) {
             // Compared as text, so that NaN equals itself.
             Some(reparsed) if format!("{:?}", reparsed.serialize()) == format!("{serialized:?}") => {}
             Some(reparsed) => failures.push(format!(

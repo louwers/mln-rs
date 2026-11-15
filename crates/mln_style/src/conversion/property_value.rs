@@ -1,19 +1,22 @@
+use std::sync::Arc;
+
 use mln_util::Color;
 
 use super::function::{has_tokens, parse_converted, parse_function, token_string_expression};
 use super::{Converter, Convertible, Error, convert};
-use crate::expression::{ParsingContext, Type, ValueConverter, is_expression};
+use crate::expression::{Functions, ParsingContext, Type, ValueConverter, is_expression};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
 
 /// Converts a property's value: a constant, an expression, or a legacy
 /// function or (with `convert_tokens`) `{token}` string, which become the
-/// expressions they stand for.
+/// expressions they stand for. Expressions parse against `functions`.
 pub fn convert_property_value<T>(
     value: &Convertible<'_>,
     error: &mut Error,
     allow_data_expressions: bool,
     convert_tokens: bool,
+    functions: &Arc<Functions>,
 ) -> Option<PropertyValue<T>>
 where
     T: Converter + ValueConverter + Clone,
@@ -23,8 +26,8 @@ where
     }
 
     let mut default_value = None;
-    let parsed = if is_expression(value) {
-        let mut ctx = ParsingContext::with_expected(T::expression_type());
+    let parsed = if is_expression(value, functions) {
+        let mut ctx = ParsingContext::with_expected(functions, T::expression_type());
         let parsed = ctx.parse_layer_property_expression(value);
         if parsed.is_none() {
             error.message = ctx.get_combined_errors();
@@ -43,9 +46,9 @@ where
             };
             default_value = Some(default);
         }
-        parse_function(value, &type_, convert_tokens, error)?
+        parse_function(value, &type_, convert_tokens, functions, error)?
     } else if let Some(string) = value.to_string().filter(|s| convert_tokens && has_tokens(s)) {
-        parse_converted(&token_string_expression(&string), &T::expression_type(), error)?
+        parse_converted(&token_string_expression(&string), &T::expression_type(), functions, error)?
     } else {
         return Some(PropertyValue::Constant(convert::<T>(value, error)?));
     };

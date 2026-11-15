@@ -1,6 +1,9 @@
 // Port-only: the map side of the worker codec (mod.rs), for one worker
 // instance: encodes the jobs for that instance and decodes their replies.
 
+use std::sync::Arc;
+
+use mln_style::expression::{Functions, functions};
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
@@ -14,11 +17,14 @@ pub(crate) struct MapCodec {
     /// The keys of what the instance has of this side's: source styles,
     /// layers, their properties and expressions, and sets of images.
     tables: shared::Tables,
+    /// What the expressions in replies resolve against.
+    functions: Arc<Functions>,
 }
 
 impl Default for MapCodec {
     fn default() -> Self {
         MapCodec {
+            functions: Functions::with_builtins(),
             tables: shared::Tables::new()
                 .origin::<SharedSourceStyle>()
                 .origin::<SharedAvailableImages>()
@@ -52,7 +58,9 @@ impl MapCodec {
     /// `Failed`.
     pub(crate) fn decode_result(&mut self, body: Encoded) -> JobResult {
         let Encoded { bytes, payloads } = body;
-        payload::decode(payloads, || self.tables.open(|| envelope::decode::<JobResult>(&bytes)))
+        let Self { tables, functions } = self;
+        let decode = || tables.open(|| envelope::decode::<JobResult>(&bytes));
+        payload::decode(payloads, || functions::decode_with(functions, decode))
             .unwrap_or_else(|error| JobResult::Failed(Error::native(format!("a tile worker's reply: {error}"))))
     }
 }

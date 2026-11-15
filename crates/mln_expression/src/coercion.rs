@@ -385,6 +385,7 @@ impl Coercion {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::functions::Functions;
     use crate::value::Value;
 
     /// Strings `ToNumber` reads, with the values JS gives.
@@ -440,7 +441,7 @@ mod tests {
     #[test]
     fn projection_definition_coercion_parses_back() {
         let parse = |json: &serde_json::Value| {
-            ParsingContext::with_expected(Type::ProjectionDefinition)
+            ParsingContext::with_expected(&Functions::with_builtins(), Type::ProjectionDefinition)
                 .parse_expression(&Convertible::from(json), None)
                 .unwrap()
         };

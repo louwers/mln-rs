@@ -22,6 +22,7 @@ use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::evaluated::Evaluated;
+use crate::expression::Functions;
 use crate::format_section_override::{format_section_override as new_override, set_overrides};
 use crate::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides as MockOverrides;
 use crate::layers::{SymbolLayoutProperties, SymbolPaintProperties};
@@ -69,8 +70,8 @@ fn create_override(prop_value: Evaluated<Color>, prop_name: &str) -> Arc<Expr> {
 fn parse_expression(json: &str, expected: Option<Type>) -> Option<Expr> {
     let document: serde_json::Value = serde_json::from_str(json).unwrap();
     let mut ctx = match expected {
-        Some(t) => ParsingContext::with_expected(t),
-        None => ParsingContext::new(),
+        Some(t) => ParsingContext::with_expected(&Functions::with_builtins(), t),
+        None => ParsingContext::new(&Functions::with_builtins()),
     };
     ctx.parse_expression(&Convertible::from(&document), None)
 }
@@ -310,7 +311,7 @@ fn symbol_layer_overrides() {
             ..SymbolPaintProperties::PossiblyEvaluated::default()
         };
 
-        let mut ctx = ParsingContext::new();
+        let mut ctx = ParsingContext::new(&Functions::with_builtins());
         let state_expression = mln_expression::compound_expression::create_compound_expression(
             "global-state",
             vec![literal_str("labelColor")],

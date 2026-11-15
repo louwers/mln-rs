@@ -4,6 +4,7 @@ use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
 use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
+use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
@@ -73,7 +74,8 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
         json["layout"][sort_key_name] = sort_key;
     }
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
+    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message));
     let base_impl = layer.base_impl();
     match json["type"].as_str().unwrap() {
         "fill" => Arc::new(FillLayerProperties::new(downcast_arc(&base_impl))),

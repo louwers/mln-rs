@@ -10,14 +10,17 @@ use feature::Value;
 use mln_conversion::{Convertible, Error};
 
 use super::util::parse_json;
+use crate::StyleRegistry;
 use crate::conversion::convert_layer;
+use crate::expression::{Functions, functions};
 use crate::layer::Layer;
 use crate::layer_impl::Impl;
 use crate::layers::fill_extrusion_layer::FillExtrusionLayer;
 
 fn parse(json: &serde_json::Value) -> Box<dyn Layer> {
     let mut error = Error::default();
-    convert_layer(&Convertible::from(json), &mut error).unwrap_or_else(|| panic!("{json}: {}", error.message))
+    convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(json), &mut error)
+        .unwrap_or_else(|| panic!("{json}: {}", error.message))
 }
 
 #[derive(mln_wire::Wire)]
@@ -27,8 +30,8 @@ struct Crossing(#[wire(with = "crate::serialization::shared_layer")] Arc<dyn Imp
 /// to one that encodes the same.
 fn round_trip(layer: &dyn Layer) -> Value {
     let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
-    let decoded: Crossing =
-        mln_wire::from_slice(&encoded).unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
+    let decoded: Crossing = functions::decode_with(&Functions::with_builtins(), || mln_wire::from_slice(&encoded))
+        .unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
     assert_eq!(mln_wire::to_vec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());
     layer.serialize()
 }
@@ -175,8 +178,9 @@ fn boolean_filters() {
     let mut fill = layer("fill", "paint", "{}");
     let mut error = Error::default();
     // What `setFilter(null)` sets.
-    let filter = crate::conversion::convert::<crate::filter::Filter>(&Convertible::from(&Value::Null), &mut error)
-        .unwrap_or_else(|| panic!("{}", error.message));
+    let filter =
+        crate::conversion::convert_filter(&Convertible::from(&Value::Null), &Functions::with_builtins(), &mut error)
+            .unwrap_or_else(|| panic!("{}", error.message));
     fill.set_filter(&filter);
     round_trip(fill.as_ref());
 }
@@ -196,7 +200,9 @@ fn style_parser_fixture_layers() {
             continue;
         };
         for json in style.get("layers").and_then(|layers| layers.as_array()).into_iter().flatten() {
-            if let Some(layer) = convert_layer(&Convertible::from(json), &mut Error::default()) {
+            if let Some(layer) =
+                convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(json), &mut Error::default())
+            {
                 round_trip(layer.as_ref());
                 count += 1;
             }
@@ -226,13 +232,14 @@ fn expressions_cross_as_data() {
     ];
     for json in expressions {
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let mut context = crate::expression::ParsingContext::new();
+        let mut context = crate::expression::ParsingContext::new(&Functions::with_builtins());
         let expression = context
             .parse_expression(&Convertible::from(&value), None)
             .unwrap_or_else(|| panic!("{json}: {}", context.get_combined_errors()));
         let encoded = mln_wire::to_vec(&expression).unwrap();
         let decoded: crate::expression::Expr =
-            mln_wire::from_slice(&encoded).unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
+            functions::decode_with(&Functions::with_builtins(), || mln_wire::from_slice(&encoded))
+                .unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
         assert!(decoded == expression, "{json}");
         assert_eq!(decoded.dependencies(), expression.dependencies(), "{json}");
         assert_eq!(decoded.serialize(), expression.serialize(), "{json}");

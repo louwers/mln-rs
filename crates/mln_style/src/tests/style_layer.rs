@@ -5,13 +5,14 @@ use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType, Visibility
 use mln_util::Color;
 
 use super::util::parse_json;
-use crate::conversion::convert;
-use crate::expression::Image;
+use crate::conversion::convert_filter;
+use crate::expression::{Functions, Image};
 use crate::filter::Filter;
 use crate::layer::Layer;
 use crate::layers::background_layer::BackgroundLayer;
 use crate::layers::{CircleLayer, FillExtrusionLayer, FillLayer, LineLayer, RasterLayer};
 use crate::property_value::PropertyValue;
+use crate::registry::StyleRegistry;
 use crate::style_impl::Impl as StyleImpl;
 
 fn color() -> Color {
@@ -50,7 +51,7 @@ fn c<T>(t: T) -> PropertyValue<T> {
 fn parse_filter(expression: &str) -> Filter {
     let mut error = Error::default();
     let json = parse_json(expression);
-    convert::<Filter>(&Convertible::from(&json), &mut error).expect("filter")
+    convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut error).expect("filter")
 }
 
 /// Sets the property `name` of `layer` from style JSON.
@@ -244,7 +245,7 @@ fn fixture(path: &str) -> String {
 fn duplicate_layer() {
     // Setup style
     let run_loop = mln_actor::RunLoop::new();
-    let mut style = StyleImpl::new(1.0, &run_loop);
+    let mut style = StyleImpl::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
     style.load_json(&fixture("test/fixtures/resources/style-unused-sources.json"));
 
     // Add initial layer
@@ -263,7 +264,7 @@ fn duplicate_layer() {
 fn incompatible_layer() {
     // Setup style
     let run_loop = mln_actor::RunLoop::new();
-    let mut style = StyleImpl::new(1.0, &run_loop);
+    let mut style = StyleImpl::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
     style.load_json(&fixture("test/fixtures/resources/style-unused-sources.json"));
 
     // Try to add duplicate

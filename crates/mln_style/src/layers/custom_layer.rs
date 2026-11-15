@@ -16,7 +16,7 @@ use feature::Value;
 use mln_conversion::{Convertible, Error};
 use mln_map_types::{FrameProjection, MapView};
 
-use crate::expression::Dependency;
+use crate::expression::{Dependency, Functions};
 use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serialize_base};
 use crate::layer_properties::{LayerProperties, LayerPropertiesBase};
 use crate::style_property::StyleProperty;
@@ -149,6 +149,7 @@ impl layer::Impl for Impl {
 pub struct CustomLayer {
     base_impl: Arc<Impl>,
     host: Arc<dyn CustomLayerHost>,
+    functions: Arc<Functions>,
 }
 
 impl std::fmt::Debug for CustomLayer {
@@ -158,9 +159,17 @@ impl std::fmt::Debug for CustomLayer {
 }
 
 impl CustomLayer {
+    /// A layer whose filter and visibility parse against the built-in
+    /// expression functions.
     #[must_use]
     pub fn new(layer_id: &str, host: Arc<dyn CustomLayerHost>) -> Self {
-        CustomLayer { base_impl: Arc::new(Impl::new(layer_id.to_owned(), &host)), host }
+        CustomLayer::with_functions(Functions::with_builtins(), layer_id, host)
+    }
+
+    /// A layer whose filter and visibility parse against `functions`.
+    #[must_use]
+    pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str, host: Arc<dyn CustomLayerHost>) -> Self {
+        CustomLayer { base_impl: Arc::new(Impl::new(layer_id.to_owned(), &host)), host, functions }
     }
 
     #[must_use]
@@ -188,6 +197,10 @@ impl Layer for CustomLayer {
         StyleProperty::default()
     }
 
+    fn functions(&self) -> &Arc<Functions> {
+        &self.functions
+    }
+
     fn serialize(&self) -> Value {
         serialize_base(self)
     }
@@ -196,7 +209,11 @@ impl Layer for CustomLayer {
     fn clone_ref(&self, id: &str) -> Box<dyn Layer> {
         let mut impl_ = (*self.base_impl).clone();
         impl_.base.id = id.to_owned();
-        Box::new(CustomLayer { base_impl: Arc::new(impl_), host: Arc::clone(&self.host) })
+        Box::new(CustomLayer {
+            base_impl: Arc::new(impl_),
+            host: Arc::clone(&self.host),
+            functions: Arc::clone(&self.functions),
+        })
     }
 
     fn set_property_internal(&mut self, name: &str, _value: &Convertible<'_>) -> Option<Error> {

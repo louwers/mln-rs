@@ -9,6 +9,7 @@ use crate::layer::Layer;
 use crate::light::Light;
 use crate::map::camera::CameraOptions;
 use crate::projection::Projection;
+use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source::Source;
 pub(crate) use crate::style_impl::{Impl, LayerRefMut, LightRefMut, ProjectionRefMut};
@@ -41,21 +42,29 @@ pub struct Style {
 }
 
 impl Style {
-    /// A style without a file source, on `run_loop` (see `Impl::new`).
+    /// A style without a file source, on `run_loop`, whose JSON, layers and
+    /// filters parse against `registry` (see `Impl::new`).
     #[must_use]
-    pub fn new(pixel_ratio: f32, run_loop: &mln_actor::RunLoop) -> Self {
-        Style { impl_: Box::new(Impl::new(pixel_ratio, run_loop)) }
+    pub fn new(registry: Arc<StyleRegistry>, pixel_ratio: f32, run_loop: &mln_actor::RunLoop) -> Self {
+        Style { impl_: Box::new(Impl::new(registry, pixel_ratio, run_loop)) }
     }
 
-    /// A style that loads its resources from `file_source`, on `run_loop`
-    /// (see `Impl::with_file_source`).
+    /// A style that parses against `registry` and loads its resources from
+    /// `file_source`, on `run_loop` (see `Impl::with_file_source`).
     #[must_use]
     pub fn with_file_source(
+        registry: Arc<StyleRegistry>,
         file_source: Option<Arc<dyn mln_storage::FileSource>>,
         pixel_ratio: f32,
         run_loop: &mln_actor::RunLoop,
     ) -> Self {
-        Style { impl_: Box::new(Impl::with_file_source(file_source, pixel_ratio, run_loop)) }
+        Style { impl_: Box::new(Impl::with_file_source(registry, file_source, pixel_ratio, run_loop)) }
+    }
+
+    /// What the style's JSON, layers and filters parse against.
+    #[must_use]
+    pub fn registry(&self) -> &Arc<StyleRegistry> {
+        self.impl_.registry()
     }
 
     pub fn load_json(&mut self, json: &str) {

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use feature::{Feature, Identifier, PropertyMap};
 use geo_types::{Geometry, LineString, Polygon};
 use mln_map_types::MapMode;
+use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -27,7 +28,8 @@ use crate::tile::tile_workers::InlineWorkers;
 fn layer(mut json: serde_json::Value) -> Arc<dyn LayerProperties> {
     json["source"] = json!("s");
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
+    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message));
     let render_layer = layermanager::create_render_layer(&layer.base_impl()).unwrap();
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)

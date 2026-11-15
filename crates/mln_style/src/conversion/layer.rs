@@ -2,7 +2,7 @@ use mln_util::logging::{Event, Log};
 
 use super::{Convertible, Error};
 use crate::layer::{Layer, PropertyScope, layer_type_info};
-use crate::layermanager::LayerManager;
+use crate::registry::StyleRegistry;
 
 fn set_object_member(layer: &mut Box<dyn Layer>, value: &Convertible<'_>, member: &str, error: &mut Error) -> bool {
     if let Some(member_value) = value.object_member(member)
@@ -57,14 +57,16 @@ pub(crate) fn set_paint_properties(
     set_properties(layer, &paint_value, PropertyScope::Paint, invalid)
 }
 
-/// Converts a [layer](https://maplibre.org/maplibre-style-spec/layers/). Fails
-/// on the first error, including a layout or paint property that the layer
-/// can't set.
-pub fn convert_layer(value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Layer>> {
-    convert_layer_with(value, error, InvalidProperty::Fail)
+/// Converts a [layer](https://maplibre.org/maplibre-style-spec/layers/) of
+/// one of `registry`'s types, whose expressions parse against its functions.
+/// Fails on the first error, including a layout or paint property that the
+/// layer can't set.
+pub fn convert_layer(registry: &StyleRegistry, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Layer>> {
+    convert_layer_with(registry, value, error, InvalidProperty::Fail)
 }
 
 pub(crate) fn convert_layer_with(
+    registry: &StyleRegistry,
     value: &Convertible<'_>,
     error: &mut Error,
     invalid: InvalidProperty,
@@ -94,7 +96,7 @@ pub(crate) fn convert_layer_with(
         return None;
     };
 
-    let mut layer = LayerManager::get().create_layer(&type_, &id, value, error)?;
+    let mut layer = registry.create_layer(&type_, &id, value, error)?;
 
     if !set_object_member(&mut layer, value, "minzoom", error) {
         return None;

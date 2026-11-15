@@ -1,6 +1,9 @@
 // Port-only: a worker instance's side of the worker codec (mod.rs): decodes
 // the jobs the map side sends and encodes their replies.
 
+use std::sync::Arc;
+
+use mln_style::expression::{Functions, functions};
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
@@ -13,6 +16,8 @@ use crate::tile::job::{Job, JobResult, JobTimes, Reply};
 pub(crate) struct WorkerCodec {
     /// The values the map side defined, by key.
     tables: shared::Tables,
+    /// What the expressions in jobs resolve against.
+    functions: Arc<Functions>,
 }
 
 impl Default for WorkerCodec {
@@ -23,7 +28,7 @@ impl Default for WorkerCodec {
             .copies::<SharedLayer>()
             .copies::<SharedLayerProperties>()
             .copies::<SharedExpression>();
-        WorkerCodec { tables }
+        WorkerCodec { tables, functions: Functions::with_builtins() }
     }
 }
 
@@ -37,7 +42,7 @@ impl WorkerCodec {
     pub(crate) fn decode_job(&mut self, body: &[u8]) -> Result<Job, String> {
         let (forget, job): (Vec<(String, Vec<u64>)>, &[u8]) = envelope::take(body)?;
         self.tables.forget(&forget);
-        self.tables.open(|| envelope::decode(job))
+        functions::decode_with(&self.functions, || self.tables.open(|| envelope::decode(job)))
     }
 
     /// Encodes `reply`, with how long its stages took, its arrays as

@@ -18,7 +18,7 @@ use crate::conversion::{Converter, convert_color_ramp_property_value, convert_pr
 use crate::conversion_impl::{
     ValueFactory, make_color_ramp_style_property, make_style_property, make_transition_style_property,
 };
-use crate::expression::ValueConverter;
+use crate::expression::{Functions, ValueConverter};
 use crate::layer::PropertyScope;
 use crate::properties::Transitionable;
 use crate::property_value::PropertyValue;
@@ -95,8 +95,9 @@ impl PropertyTable {
 
 /// A style value a property holds: a [`PropertyValue`], or a color ramp.
 pub(crate) trait StyleValue: Clone + Default + PartialEq + 'static {
-    /// Converts a style JSON value for the property `info`.
-    fn convert(value: &Convertible<'_>, info: &PropertyInfo) -> Result<Self, Error>;
+    /// Converts a style JSON value for the property `info`, parsing
+    /// expressions against `functions`.
+    fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error>;
 
     fn style_property(&self) -> StyleProperty;
 }
@@ -105,9 +106,9 @@ impl<T> StyleValue for PropertyValue<T>
 where
     T: Converter + ValueConverter + ValueFactory + Clone + PartialEq + 'static,
 {
-    fn convert(value: &Convertible<'_>, info: &PropertyInfo) -> Result<Self, Error> {
+    fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error> {
         let mut error = Error::default();
-        convert_property_value::<T>(value, &mut error, info.data_driven, info.tokens).ok_or(error)
+        convert_property_value::<T>(value, &mut error, info.data_driven, info.tokens, functions).ok_or(error)
     }
 
     fn style_property(&self) -> StyleProperty {
@@ -116,9 +117,10 @@ where
 }
 
 impl StyleValue for ColorRampPropertyValue {
-    fn convert(value: &Convertible<'_>, _info: &PropertyInfo) -> Result<Self, Error> {
+    /// A color ramp is always an expression, so `info`'s flags don't apply.
+    fn convert(value: &Convertible<'_>, _info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error> {
         let mut error = Error::default();
-        convert_color_ramp_property_value(value, &mut error).ok_or(error)
+        convert_color_ramp_property_value(value, &mut error, functions).ok_or(error)
     }
 
     fn style_property(&self) -> StyleProperty {
@@ -204,16 +206,19 @@ fn paint_style_property<V: StyleValue>(property: &Transitionable<V>, transition:
 }
 
 /// Sets the property `name` (or a paint property's `<name>-transition`) of
-/// `owner` from a style JSON value. `owner` is copied only if the value
-/// changes it and it is shared.
+/// `owner` from a style JSON value, whose expressions parse against
+/// `functions`. `owner` is copied only if the value changes it and it is
+/// shared.
 pub(crate) fn set_property<S: Properties>(
     owner: &mut Arc<S>,
     name: &str,
     value: &Convertible<'_>,
+    functions: &Arc<Functions>,
 ) -> Result<(), SetPropertyError> {
     struct Set<'a, 'v, S> {
         owner: &'a mut Arc<S>,
         value: &'a Convertible<'v>,
+        functions: &'a Arc<Functions>,
         info: &'static PropertyInfo,
         transition: bool,
         error: &'a mut Option<Error>,
@@ -232,7 +237,8 @@ pub(crate) fn set_property<S: Properties>(
             get_mut: fn(&mut S) -> &mut Transitionable<V>,
         ) {
             let mut change = PaintChange::None;
-            if paint_change(get(self.owner), self.value, self.info, self.transition, &mut change, self.error) {
+            let current = get(self.owner);
+            if paint_change(current, self.value, self.functions, self.info, self.transition, &mut change, self.error) {
                 apply_paint_change(get_mut(make_mut(self.owner)), &mut change);
             }
         }
@@ -240,7 +246,7 @@ pub(crate) fn set_property<S: Properties>(
         #[inline(never)]
         fn layout<V: StyleValue>(self, get: fn(&S) -> &V, get_mut: fn(&mut S) -> &mut V) {
             let mut change = None;
-            if changed_value(get(self.owner), self.value, self.info, &mut change, self.error) {
+            if changed_value(get(self.owner), self.value, self.functions, self.info, &mut change, self.error) {
                 store(get_mut(make_mut(self.owner)), &mut change);
             }
         }
@@ -249,7 +255,8 @@ pub(crate) fn set_property<S: Properties>(
     let (slot, transition) = S::TABLE.resolve(name).ok_or(SetPropertyError::Unknown)?;
     let info = &S::TABLE.properties[slot];
     let mut error = None;
-    S::visit(slot, Set { owner, value, info, transition, error: &mut error }).ok_or(SetPropertyError::Unknown)?;
+    S::visit(slot, Set { owner, value, functions, info, transition, error: &mut error })
+        .ok_or(SetPropertyError::Unknown)?;
     error.map_or(Ok(()), |error| Err(SetPropertyError::Invalid(error)))
 }
 
@@ -260,11 +267,12 @@ pub(crate) fn set_property<S: Properties>(
 fn changed_value<V: StyleValue>(
     current: &V,
     value: &Convertible<'_>,
+    functions: &Arc<Functions>,
     info: &PropertyInfo,
     change: &mut Option<V>,
     error: &mut Option<Error>,
 ) -> bool {
-    match V::convert(value, info) {
+    match V::convert(value, info, functions) {
         Ok(value) if *current != value => {
             *change = Some(value);
             true
@@ -291,6 +299,7 @@ enum PaintChange<V> {
 fn paint_change<V: StyleValue>(
     current: &Transitionable<V>,
     value: &Convertible<'_>,
+    functions: &Arc<Functions>,
     info: &PropertyInfo,
     transition: bool,
     change: &mut PaintChange<V>,
@@ -305,7 +314,7 @@ fn paint_change<V: StyleValue>(
         }
     } else {
         let mut new_value = None;
-        changed_value(&current.value, value, info, &mut new_value, error);
+        changed_value(&current.value, value, functions, info, &mut new_value, error);
         if let Some(value) = new_value {
             *change = PaintChange::Value(value);
         }

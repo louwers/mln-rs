@@ -3,6 +3,7 @@
 
 use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::conversion::convert_color_ramp_property_value;
+use crate::expression::Functions;
 use crate::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
 use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
 use mln_conversion::{Convertible, Error};
@@ -73,6 +74,6 @@ pub fn default_heatmap_color() -> ColorRampPropertyValue {
         1,
         "red"
     ]);
-    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error)
+    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error, &Functions::with_builtins())
         .expect("the heatmap-color default converts")
 }

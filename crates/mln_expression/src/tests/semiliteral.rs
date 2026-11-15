@@ -1,6 +1,7 @@
 use feature::Feature;
 use mln_conversion::Convertible;
 
+use crate::Functions;
 use crate::expression::{EvaluationContext, evaluate_feature};
 use crate::parsing_context::{ParseResult, ParsingContext, ParsingError};
 use crate::type_::Type;
@@ -15,7 +16,7 @@ fn parse_semiliteral(json: &str, ctx: &mut ParsingContext, property: bool) -> Pa
 // gtest: Semiliteral.ConstantFolding
 #[test]
 fn constant_folding() {
-    let mut ctx = ParsingContext::new();
+    let mut ctx = ParsingContext::new(&Functions::with_builtins());
     let result = parse_semiliteral(r#"["semiliteral", [1, ["+", 2, 3]]]"#, &mut ctx, false).unwrap();
     assert!(result.literal_value().is_some());
     assert_eq!(result.get_type(), Type::array_n(Type::Number, 2));
@@ -35,7 +36,7 @@ fn invalid() {
         r#"["semiliteral", [[1, 2]]]"#,
         r#"["semiliteral", [{}]]"#,
     ] {
-        let mut ctx = ParsingContext::new();
+        let mut ctx = ParsingContext::new(&Functions::with_builtins());
         assert!(parse_semiliteral(json, &mut ctx, false).is_none(), "{json}");
         assert_ne!(ctx.get_errors(), Vec::<ParsingError>::new());
     }
@@ -46,7 +47,7 @@ fn invalid() {
         r#"["semiliteral", [1, "x"]]"#,
         r#"["semiliteral", [["zoom"], 1]]"#,
     ] {
-        let mut ctx = ParsingContext::with_expected(Type::array_n(Type::Number, 2));
+        let mut ctx = ParsingContext::with_expected(&Functions::with_builtins(), Type::array_n(Type::Number, 2));
         assert!(parse_semiliteral(json, &mut ctx, true).is_none(), "{json}");
     }
 }
@@ -54,7 +55,7 @@ fn invalid() {
 // gtest: Semiliteral.FirstError
 #[test]
 fn first_error() {
-    let mut errors = ParsingContext::new();
+    let mut errors = ParsingContext::new(&Functions::with_builtins());
     let failing =
         parse_semiliteral(r#"["semiliteral", [["number", ["get", "x"]], ["error", "second"]]]"#, &mut errors, false)
             .unwrap();

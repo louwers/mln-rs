@@ -21,6 +21,7 @@ use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
+use mln_style::StyleRegistry;
 use mln_style::parser::Parser;
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::{GeoJSONSource, TileSource};
@@ -115,13 +116,15 @@ pub struct Downloads {
     downloads: HashMap<i64, OfflineDownload>,
     network: Option<Arc<dyn FileSource>>,
     post: Post,
+    registry: Arc<StyleRegistry>,
 }
 
 impl Downloads {
-    /// Downloads that load through `network`, and come back through `post`.
+    /// Downloads that load through `network`, come back through `post`, and
+    /// read their styles against `registry`.
     #[must_use]
-    pub fn new(network: Option<Arc<dyn FileSource>>, post: Post) -> Self {
-        Downloads { downloads: HashMap::default(), network, post }
+    pub fn new(network: Option<Arc<dyn FileSource>>, post: Post, registry: Arc<StyleRegistry>) -> Self {
+        Downloads { downloads: HashMap::default(), network, post, registry }
     }
 
     /// The download of the region `region_id`, made at its first use. Fails
@@ -138,7 +141,13 @@ impl Downloads {
                     return Err(DatabaseError::Runtime("Network file source unavailable.".to_owned()));
                 };
                 let definition = db.get_region(region_id)?.ok_or(DatabaseError::RegionNotFound(region_id))?.definition;
-                let download = OfflineDownload::new(region_id, definition, Arc::clone(network), Arc::clone(&self.post));
+                let download = OfflineDownload::new(
+                    region_id,
+                    definition,
+                    Arc::clone(network),
+                    Arc::clone(&self.post),
+                    Arc::clone(&self.registry),
+                );
                 Ok(entry.insert(download))
             }
         }
@@ -211,6 +220,8 @@ pub struct OfflineDownload {
     definition: OfflineRegionDefinition,
     network: Arc<dyn FileSource>,
     post: Post,
+    /// What the region's style is read against.
+    registry: Arc<StyleRegistry>,
     /// The most requests the download has in flight at once.
     maximum_concurrent_requests: u32,
     status: OfflineRegionStatus,
@@ -225,15 +236,22 @@ pub struct OfflineDownload {
 }
 
 impl OfflineDownload {
-    /// The download of the region `id`, which loads through `network` and
-    /// comes back through `post`.
+    /// The download of the region `id`, which loads through `network`, comes
+    /// back through `post`, and reads the region's style against `registry`.
     #[must_use]
-    pub fn new(id: i64, definition: OfflineRegionDefinition, network: Arc<dyn FileSource>, post: Post) -> Self {
+    pub fn new(
+        id: i64,
+        definition: OfflineRegionDefinition,
+        network: Arc<dyn FileSource>,
+        post: Post,
+        registry: Arc<StyleRegistry>,
+    ) -> Self {
         OfflineDownload {
             id,
             definition,
             network,
             post,
+            registry,
             maximum_concurrent_requests: DEFAULT_MAXIMUM_CONCURRENT_REQUESTS,
             status: OfflineRegionStatus::default(),
             observer: Box::new(NullObserver),
@@ -303,7 +321,7 @@ impl OfflineDownload {
 
         result.required_resource_count += 1;
         let style_response = db.get(&Resource::style(self.definition.style_url()));
-        let mut parser = Parser::default();
+        let mut parser = Parser::new(&self.registry);
         // A download reports a style it can't read, and the count stays
         // imprecise.
         let Some(style_data) = style_response.and_then(|response| response.data) else {
@@ -426,7 +444,7 @@ impl OfflineDownload {
         let Some(style_data) = &style_response.data else {
             return Err("the style has no content".to_owned());
         };
-        let mut parser = Parser::default();
+        let mut parser = Parser::new(&self.registry);
         parser.parse(&String::from_utf8_lossy(style_data)).map_err(|error| error.to_string())?;
         self.status.required_resource_count_is_precise = true;
 

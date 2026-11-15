@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ::mln_runtime::{Applied, CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind};
+use mln_expression::Functions;
 use mln_style::TransitionOptions;
 use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
 use mln_style::sources::TileDataFormat;
@@ -428,7 +429,7 @@ unsafe fn geojson_options(options: *const mln_geo_json_source_options) -> Result
         // The header rejects malformed cluster properties from the call
         // itself, so they parse here first, on the parse thread.
         let checked = result.clone();
-        parse_thread::run(move || checked.check_cluster_properties())??;
+        parse_thread::run(move || checked.check_cluster_properties(&Functions::with_builtins()))??;
     }
     Ok(result)
 }

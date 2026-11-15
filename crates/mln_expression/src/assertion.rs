@@ -4,8 +4,9 @@ use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 
 use crate::check_subtype::check_subtype;
-use crate::compound_expression::Op;
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, Node, Output};
+use crate::functions::Role;
+use crate::functions::builtin::{feature_unavailable, identifier_to_mbgl};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
 use crate::value::{Value, type_of};
@@ -223,17 +224,18 @@ impl Assertion {
 /// it, and `None` when `input` is another expression.
 fn read_feature(input: &Expr, params: &EvaluationContext<'_>) -> Option<EvalResult<Option<MbglValue>>> {
     let compound = input.as_compound()?;
-    match compound.signature().op {
-        Op::Get => {
+    let overload = compound.overload();
+    match overload.role {
+        Role::FeatureProperty if overload.result == Type::Value => {
             let key = compound.args()[0].literal_value()?.as_str()?;
             Some(match params.feature {
                 Some(feature) => Ok(feature.get_value(key)),
-                None => Err(crate::compound_expression::feature_unavailable()),
+                None => Err(feature_unavailable()),
             })
         }
-        Op::Id => Some(match params.feature {
-            Some(feature) => Ok(crate::compound_expression::identifier_to_mbgl(feature.get_id())),
-            None => Err(crate::compound_expression::feature_unavailable()),
+        Role::FeatureId => Some(match params.feature {
+            Some(feature) => Ok(identifier_to_mbgl(feature.get_id())),
+            None => Err(feature_unavailable()),
         }),
         _ => None,
     }

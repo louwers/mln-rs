@@ -9,7 +9,7 @@ use mln_vec_map::VecSet;
 use super::util::parse_json;
 use crate::conversion::convert_property_value;
 use crate::evaluated::Evaluated;
-use crate::expression::{EvaluationContext, GlobalStateMap, Image, dsl};
+use crate::expression::{EvaluationContext, Functions, GlobalStateMap, Image, dsl};
 use crate::light::LightProperties;
 use crate::map::zoom_history::ZoomHistory;
 use crate::properties::{Transitionable, Transitioning};
@@ -204,7 +204,8 @@ fn possibly_evaluated_evaluate_per_feature() {
 fn global_state_value(key: &str) -> PropertyValue<f32> {
     let json = parse_json(&format!(r#"["global-state", "{key}"]"#));
     let mut error = Error::default();
-    let value = convert_property_value::<f32>(&Convertible::from(&json), &mut error, false, false);
+    let value =
+        convert_property_value::<f32>(&Convertible::from(&json), &mut error, false, false, &Functions::with_builtins());
     value.unwrap_or_else(|| panic!("{}", error.message))
 }
 
@@ -307,8 +308,14 @@ fn global_state_change_with_layer_change_transitions_from_prior_state() {
 fn global_state_change_snaps_pattern_image() {
     let json = parse_json(r#"["image", ["global-state", "pattern"]]"#);
     let mut error = Error::default();
-    let pattern = convert_property_value::<Image>(&Convertible::from(&json), &mut error, true, false)
-        .unwrap_or_else(|| panic!("{}", error.message));
+    let pattern = convert_property_value::<Image>(
+        &Convertible::from(&json),
+        &mut error,
+        true,
+        false,
+        &Functions::with_builtins(),
+    )
+    .unwrap_or_else(|| panic!("{}", error.message));
     let value = Transitionable { value: pattern, options: TransitionOptions::default() };
     let mut property = value.transition(&untransitioned(), Transitioning::default());
 

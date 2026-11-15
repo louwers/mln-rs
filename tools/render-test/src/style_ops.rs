@@ -55,7 +55,8 @@ pub(crate) fn add_layer(style: &mut Style, json: &str) -> Result<(), MapError> {
         Err(e) => return Err(MapError::Conversion(e.to_string())),
     };
     let mut error = mln_conversion::Error::default();
-    let Some(layer) = mln_style::conversion::layer::convert_layer(&Convertible::from(&value), &mut error) else {
+    let Some(layer) = mln_style::conversion::convert_layer(style.registry(), &Convertible::from(&value), &mut error)
+    else {
         return Err(MapError::Conversion(error.message));
     };
     // C++ Style::addLayer throws (uncaught by the runner) on a duplicate id.
@@ -71,7 +72,7 @@ pub(crate) fn set_layer_filter(
 ) -> Result<(), MapError> {
     let mut error = mln_conversion::Error::default();
     let Some(filter) =
-        mln_style::conversion::convert::<mln_style::filter::Filter>(&Convertible::from(filter), &mut error)
+        mln_style::conversion::convert_filter(&Convertible::from(filter), style.registry().functions(), &mut error)
     else {
         return Err(MapError::Conversion(error.message));
     };
@@ -102,8 +103,9 @@ pub(crate) fn add_source(style: &mut Style, source_name: &str, json: &str) -> Re
         Err(e) => return Err(MapError::Conversion(e.to_string())),
     };
     let mut error = mln_conversion::Error::default();
+    let functions = style.registry().functions();
     let Some(source) =
-        mln_style::conversion::source::convert_source(&Convertible::from(&value), &mut error, source_name)
+        mln_style::conversion::convert_source(&Convertible::from(&value), &mut error, source_name, functions)
     else {
         return Err(MapError::Conversion(error.message));
     };
@@ -118,7 +120,8 @@ pub(crate) fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
         Err(e) => return Err(MapError::Conversion(e.to_string())),
     };
     let mut error = mln_conversion::Error::default();
-    let Some(light) = mln_style::conversion::convert::<mln_style::light::Light>(&Convertible::from(&value), &mut error)
+    let Some(light) =
+        mln_style::conversion::convert_light(&Convertible::from(&value), style.registry().functions(), &mut error)
     else {
         return Err(MapError::Conversion(error.message));
     };
@@ -133,6 +136,8 @@ pub(crate) fn remove_source(style: &mut Style, source_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use mln_style::StyleRegistry;
+
     use super::*;
 
     fn style_json(id: &str) -> String {
@@ -146,7 +151,7 @@ mod tests {
     #[test]
     fn transition_test_style() {
         let run_loop = mln_actor::RunLoop::new();
-        let mut style = Style::new(1.0, &run_loop);
+        let mut style = Style::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
         load_json(&mut style, &style_json("background-color/transition"));
         assert!(style.get_layer("background").is_some());
         assert_eq!(
@@ -162,7 +167,7 @@ mod tests {
     #[test]
     fn default_camera_of_a_test_style() {
         let run_loop = mln_actor::RunLoop::new();
-        let mut style = Style::new(1.0, &run_loop);
+        let mut style = Style::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
         load_json(&mut style, &style_json("background-color/colorSpace-hcl"));
         assert_eq!(default_camera(&style).zoom, Some(5.0));
     }
@@ -170,7 +175,7 @@ mod tests {
     #[test]
     fn layers() {
         let run_loop = mln_actor::RunLoop::new();
-        let mut style = Style::new(1.0, &run_loop);
+        let mut style = Style::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
         load_json(&mut style, &style_json("background-visibility/none"));
         assert_eq!(set_layer_zoom_range(&mut style, "background", 1.0, 2.0), Ok(()));
         assert_eq!(set_layer_zoom_range(&mut style, "nope", 1.0, 2.0), Err(MapError::LayerNotFound));

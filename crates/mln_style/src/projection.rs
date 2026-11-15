@@ -12,6 +12,8 @@ use mln_style_types::ProjectionDefinition;
 #[cfg(test)]
 use crate::conversion::convert_property_value;
 use crate::conversion_impl::make_style_property;
+#[cfg(test)]
+use crate::expression::Functions;
 pub(crate) use crate::projection_impl::Impl;
 use crate::property_value::PropertyValue;
 use crate::style_property::StyleProperty;
@@ -45,12 +47,18 @@ impl Projection {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_property(&mut self, name: &str, value: &Convertible<'_>) -> Option<Error> {
+    pub(crate) fn set_property(
+        &mut self,
+        name: &str,
+        value: &Convertible<'_>,
+        functions: &Arc<Functions>,
+    ) -> Option<Error> {
         if name != "type" {
             return Some(Error::new("projection doesn't support this property"));
         }
         let mut error = Error::default();
-        let Some(type_) = convert_property_value::<ProjectionDefinition>(value, &mut error, false, false) else {
+        let Some(type_) = convert_property_value::<ProjectionDefinition>(value, &mut error, false, false, functions)
+        else {
             return Some(error);
         };
         self.set_type(type_);

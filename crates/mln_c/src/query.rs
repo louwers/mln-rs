@@ -1,7 +1,10 @@
 //! `query.h`: the features that a render session drew or loaded, and the
 //! clusters of its clustered GeoJSON sources.
 
+use std::sync::Arc;
+
 use ::mln_runtime::{RenderSession, RenderedQueryGeometry, RenderedQueryOptions, SourceQueryOptions};
+use mln_style::expression::Functions;
 use mln_style::filter::Filter;
 use mln_util::geo::ScreenCoordinate;
 
@@ -86,13 +89,13 @@ unsafe fn texts(views: *const mln_buffer_view, count: usize, name: &str) -> Resu
         .collect()
 }
 
-/// The filter that a caller's JSON names, parsed on the parse thread, or
-/// none for an empty view.
+/// The filter that a caller's JSON names, parsed against `functions` on the
+/// parse thread, or none for an empty view.
 ///
 /// # Safety
 ///
 /// As for [`buffer::text`].
-unsafe fn filter(view: mln_buffer_view) -> Result<Option<Filter>, Error> {
+unsafe fn filter(view: mln_buffer_view, functions: Arc<Functions>) -> Result<Option<Filter>, Error> {
     // SAFETY: the caller's contract.
     let json = unsafe { buffer::text(view, "query filter") }?;
     if json.is_empty() {
@@ -103,7 +106,7 @@ unsafe fn filter(view: mln_buffer_view) -> Result<Option<Filter>, Error> {
         let document: serde_json::Value = serde_json::from_str(&json)
             .map_err(|error| Error::invalid_argument(format!("query filter is not valid JSON: {error}")))?;
         let mut error = mln_style::conversion::Error::default();
-        mln_style::conversion::convert::<Filter>(&mln_conversion::Convertible::from(&document), &mut error)
+        mln_style::conversion::convert_filter(&mln_conversion::Convertible::from(&document), &functions, &mut error)
             .map(Some)
             .ok_or_else(|| Error::invalid_argument(format!("query filter is invalid: {}", error.message)))
     })?
@@ -130,7 +133,7 @@ unsafe fn rendered_options(options: *const mln_rendered_feature_query_options) -
         .map(|()| unsafe { texts(options.layer_ids, options.layer_id_count, "query layer IDs") })
         .transpose()?;
     // SAFETY: the caller's contract.
-    let filter = unsafe { filter(options.filter) }?;
+    let filter = unsafe { filter(options.filter, Functions::with_builtins()) }?;
     Ok(RenderedQueryOptions::new(layer_ids, filter))
 }
 
@@ -155,7 +158,7 @@ unsafe fn source_options(options: *const mln_source_feature_query_options) -> Re
         .map(|()| unsafe { texts(options.source_layer_ids, options.source_layer_id_count, "query source layer IDs") })
         .transpose()?;
     // SAFETY: the caller's contract.
-    let filter = unsafe { filter(options.filter) }?;
+    let filter = unsafe { filter(options.filter, Functions::with_builtins()) }?;
     Ok(SourceQueryOptions::new(source_layers, filter))
 }
 

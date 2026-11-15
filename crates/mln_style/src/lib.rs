@@ -1,9 +1,11 @@
 //! The map style: `Style` and its `style::Impl`, the style JSON parser,
 //! layers and sources, the property system and the typed converters
 //! (`conversion`). It also holds the parts of the renderer and the map that
-//! the property system needs (`renderer`, `map`) and the style half of the
-//! layer manager (`layermanager`), so that crates don't depend on each other
-//! in a cycle.
+//! the property system needs (`renderer`, `map`), so that crates don't
+//! depend on each other in a cycle.
+//!
+//! A style parses against a [`StyleRegistry`]: the expression functions and
+//! layer types its JSON, property values and filters may name.
 //!
 //! Layers:
 //! - `layer::Layer` is the layer trait. A layer's data is an
@@ -47,6 +49,7 @@ pub mod properties;
 pub mod property_expression;
 mod property_table;
 pub mod property_value;
+pub mod registry;
 pub mod renderer;
 pub mod serialization;
 pub mod sky;
@@ -71,6 +74,7 @@ pub(crate) use properties::{
     __possibly_evaluated_methods, __property_data_driven, __property_evaluation, __property_value, properties,
 };
 pub use property_value::PropertyValue;
+pub use registry::StyleRegistry;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
 pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 pub use style::{Style, StyleLoadError};

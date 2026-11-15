@@ -166,8 +166,8 @@ mod tests {
     use std::sync::Arc;
 
     use feature::Value;
-    use mln_style::conversion::{Convertible, Error, convert};
-    use mln_style::expression::{EvaluationContext, GlobalStateMap};
+    use mln_style::conversion::{Convertible, Error, convert_filter};
+    use mln_style::expression::{EvaluationContext, Functions, GlobalStateMap};
     use mln_tile::{MltTile, MvtTile, TileData};
     use mln_tile_id::CanonicalTileID;
     use mln_util::hash::HashMap;
@@ -297,7 +297,7 @@ mod tests {
 
     fn parse_filter(json: &str) -> Filter {
         let json: serde_json::Value = serde_json::from_str(json).unwrap();
-        convert::<Filter>(&Convertible::from(&json), &mut Error::default()).expect("filter")
+        convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut Error::default()).expect("filter")
     }
 
     /// Asserts that filters select the same features of `layer`, the source

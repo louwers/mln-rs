@@ -78,6 +78,7 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     if heatmap_color.is_some() {
         imports.push("crate::color_ramp_property_value::ColorRampPropertyValue".into());
         imports.push("crate::conversion::convert_color_ramp_property_value".into());
+        imports.push("crate::expression::Functions".into());
         imports.push("mln_conversion::{Convertible, Error}".into());
     }
     w.imports(imports);
@@ -116,7 +117,7 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
         w.line("    let raw_value = serde_json::json!([");
         w.line(&format!("        {}", items.join(",\n        ")));
         w.line("    ]);");
-        w.line("    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error)");
+        w.line("    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error, &Functions::with_builtins())");
         w.line("        .expect(\"the heatmap-color default converts\")");
         w.line("}");
     }

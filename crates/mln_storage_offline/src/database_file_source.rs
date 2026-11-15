@@ -13,17 +13,23 @@ use mln_storage::offline::{
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::{DatabaseFileSource, FileSource};
+use mln_style::StyleRegistry;
 
 use crate::offline_download::{Downloads, Post};
 
 /// A database whose worker downloads its offline regions.
 pub type RegionDatabase = DatabaseFileSource<Downloads>;
 
-/// A database at `cache_path` whose regions download through `network`.
+/// A database at `cache_path` whose regions download through `network` and
+/// read their styles against `registry`.
 #[must_use]
-pub fn region_database(cache_path: &str, network: Option<Arc<dyn FileSource>>) -> RegionDatabase {
+pub fn region_database(
+    cache_path: &str,
+    network: Option<Arc<dyn FileSource>>,
+    registry: Arc<StyleRegistry>,
+) -> RegionDatabase {
     DatabaseFileSource::with_extension(cache_path, network, false, |worker, network| {
-        Downloads::new(network, post_to(worker))
+        Downloads::new(network, post_to(worker), registry)
     })
 }
 

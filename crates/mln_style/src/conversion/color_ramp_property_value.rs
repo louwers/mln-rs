@@ -2,17 +2,19 @@ use std::sync::Arc;
 
 use super::{Convertible, Error};
 use crate::color_ramp_property_value::ColorRampPropertyValue;
-use crate::expression::{Dependency, ParsingContext, Type, is_expression};
+use crate::expression::{Dependency, Functions, ParsingContext, Type, is_expression};
 
-/// Converts a color ramp property value.
+/// Converts a color ramp property value, an expression that parses against
+/// `functions`.
 pub(crate) fn convert_color_ramp_property_value(
     value: &Convertible<'_>,
     error: &mut Error,
+    functions: &Arc<Functions>,
 ) -> Option<ColorRampPropertyValue> {
     if value.is_undefined() {
         Some(ColorRampPropertyValue::default())
-    } else if is_expression(value) {
-        let mut ctx = ParsingContext::with_expected(Type::Color);
+    } else if is_expression(value, functions) {
+        let mut ctx = ParsingContext::with_expected(functions, Type::Color);
         let Some(expression) = ctx.parse_layer_property_expression(value) else {
             error.message = ctx.get_combined_errors();
             return None;

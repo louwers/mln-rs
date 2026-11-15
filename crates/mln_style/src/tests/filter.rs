@@ -3,13 +3,13 @@ use mln_conversion::Convertible;
 use mln_util::geometry::FeatureType;
 
 use super::util::{StubGeometryTileFeature, parse_json, property_map};
-use crate::conversion::{Converter, Error};
-use crate::expression::EvaluationContext;
+use crate::conversion::{Error, convert_filter};
+use crate::expression::{EvaluationContext, Functions};
 use crate::filter::Filter;
 
 fn convert_json(json: &str, error: &mut Error) -> Option<Filter> {
     let value = parse_json(json);
-    <Filter as Converter>::convert(&Convertible::from(&value), error)
+    convert_filter(&Convertible::from(&value), &Functions::with_builtins(), error)
 }
 
 fn filter_full(json: &str, properties: &[(&str, Value)], id: Identifier, type_: FeatureType, zoom: f32) -> bool {
@@ -418,7 +418,7 @@ fn short() {
 fn legacy_expression_invalid_type() {
     let value = serde_json::json!("string");
     let mut error = Error::default();
-    let result = <Filter as Converter>::convert(&Convertible::from(&value), &mut error);
+    let result = convert_filter(&Convertible::from(&value), &Functions::with_builtins(), &mut error);
     assert!(result.is_none());
 }
 

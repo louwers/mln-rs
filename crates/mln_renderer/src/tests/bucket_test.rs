@@ -19,7 +19,7 @@ use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::layers::{FillLayer, LineLayer};
 use mln_style::property_value::PropertyValue;
-use mln_style::{CrossfadeParameters, PropertyEvaluationParameters};
+use mln_style::{CrossfadeParameters, PropertyEvaluationParameters, StyleRegistry};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
@@ -179,7 +179,8 @@ fn fill_extrusion_bucket_rounds_corners() {
 fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     let json = serde_json::json!({"type": "fill", "id": "fill", "source": "s", "paint": {"fill-color": fill_color}});
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
+    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message));
     let evaluated = FillPaintProperties::PossiblyEvaluated {
         fill_color: Evaluated::PerFeature {
             expression: layer
@@ -704,7 +705,8 @@ fn line_bucket_vertices(
 ) -> Vec<LineLayoutVertex> {
     let json = serde_json::json!({"type": "line", "id": "line", "source": "s", "layout": layout});
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
+    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message));
     let layout = layer
         .downcast_ref::<LineLayer>()
         .expect("line layer")

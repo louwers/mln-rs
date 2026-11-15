@@ -375,7 +375,7 @@ impl TryFrom<MbglValue> for Within {
     type Error = String;
 
     fn try_from(value: MbglValue) -> Result<Self, String> {
-        let mut ctx = ParsingContext::default();
+        let mut ctx = ParsingContext::without_functions();
         parse_value(&Convertible::from(&value), &mut ctx)
             .and_then(|geojson_source| Within::from_source(geojson_source, &mut ctx))
             .ok_or_else(|| ctx.get_combined_errors())
@@ -446,12 +446,13 @@ mod tests {
     use std::borrow::Cow;
 
     use super::*;
+    use crate::Functions;
     use crate::value::Value;
 
     #[test]
     fn empty_feature_collection_is_a_parse_error() {
         let document = serde_json::json!(["within", {"type": "FeatureCollection", "features": []}]);
-        let mut ctx = ParsingContext::new();
+        let mut ctx = ParsingContext::new(&Functions::with_builtins());
         assert!(ctx.parse_expression(&Convertible::from(&document), None).is_none());
         assert_eq!(ctx.get_errors().len(), 1);
         assert_eq!(ctx.get_errors()[0].message, POLYGON_REQUIRED);
@@ -479,7 +480,7 @@ mod tests {
     #[test]
     fn nothing_is_within_an_empty_multi_polygon() {
         let document = serde_json::json!(["within", {"type": "MultiPolygon", "coordinates": []}]);
-        let mut ctx = ParsingContext::new();
+        let mut ctx = ParsingContext::new(&Functions::with_builtins());
         let within = ctx.parse_expression(&Convertible::from(&document), None).expect("parses");
         let feature = PointFeature(vec![vec![Point::new(10, 10)]].into());
         let canonical = CanonicalTileID::new(3, 3, 3);

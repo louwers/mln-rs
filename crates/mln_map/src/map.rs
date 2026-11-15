@@ -20,7 +20,7 @@ use mln_storage::{FileSource, Loader, ResourceOptions};
 use mln_style::observer::{Observer as StyleObserver, SourceObserver};
 use mln_style::source::Source;
 use mln_style::sprite::Sprite;
-use mln_style::{Style, StyleLoadError};
+use mln_style::{Style, StyleLoadError, StyleRegistry};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
@@ -213,7 +213,8 @@ impl Map {
         let style_events = EventQueue::new();
         let renderer_events = RendererEvents::new();
         let pixel_ratio = map_options.pixel_ratio;
-        let mut style = Style::with_file_source(file_source.clone(), pixel_ratio, run_loop);
+        let registry = StyleRegistry::with_builtins();
+        let mut style = Style::with_file_source(registry, file_source.clone(), pixel_ratio, run_loop);
         style.impl_.set_observer(Some(Rc::new(StyleEvents(style_events.clone()))));
         let mut transform = Transform::new(map_options.constrain_mode, map_options.viewport_mode);
         transform.set_north_orientation(map_options.north_orientation);

@@ -4,7 +4,9 @@ use feature::Value;
 use mln_conversion::{Convertible, Error};
 
 use super::util::{parse_json, value_to_json};
-use crate::conversion::{convert, convert_layer};
+use crate::StyleRegistry;
+use crate::conversion::{convert_filter, convert_layer};
+use crate::expression::Functions;
 use crate::filter::Filter;
 use crate::layer::Layer;
 use crate::layers::background_layer::BackgroundLayer;
@@ -12,7 +14,7 @@ use crate::layers::background_layer::BackgroundLayer;
 fn parse_layer(src: &str) -> Option<Box<dyn Layer>> {
     let mut error = Error::default();
     let json = parse_json(src);
-    convert_layer(&Convertible::from(&json), &mut error)
+    convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
 }
 
 fn object_len(value: &Value) -> usize {
@@ -100,7 +102,7 @@ fn stringify_layer(value: &Value) -> String {
 fn parse_filter(expression: &str) -> Filter {
     let mut error = Error::default();
     let json = parse_json(expression);
-    convert::<Filter>(&Convertible::from(&json), &mut error).expect("filter")
+    convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut error).expect("filter")
 }
 
 // gtest: StyleConversion.OverrideDefaults
@@ -195,7 +197,10 @@ fn text_field_array_not_an_expression() {
         let src =
             format!(r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{"text-field": {field}}}}}"#);
         let mut error = Error::default();
-        assert!(convert_layer(&Convertible::from(&parse_json(&src)), &mut error).is_none(), "{field}");
+        assert!(
+            convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&parse_json(&src)), &mut error).is_none(),
+            "{field}"
+        );
         assert_eq!(error.message, "value must be a string");
     }
 }
@@ -205,7 +210,7 @@ fn text_field_array_not_an_expression() {
 fn image_array_not_an_expression() {
     let src = r#"{"id": "symbol", "type": "symbol", "source": "s", "layout": {"icon-image": [["foo"]]}}"#;
     let mut error = Error::default();
-    assert!(convert_layer(&Convertible::from(&parse_json(src)), &mut error).is_none());
+    assert!(convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&parse_json(src)), &mut error).is_none());
     assert_eq!(error.message, "value must be a string");
 }
 
@@ -222,6 +227,10 @@ fn viewport_glyph_only_for_text_rotation_alignment() {
             r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{"{property}": "viewport-glyph"}}}}"#
         );
         let mut error = Error::default();
-        assert_eq!(convert_layer(&Convertible::from(&parse_json(&src)), &mut error).is_some(), parses, "{property}");
+        assert_eq!(
+            convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&parse_json(&src)), &mut error).is_some(),
+            parses,
+            "{property}"
+        );
     }
 }

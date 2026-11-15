@@ -17,9 +17,9 @@ use mln_conversion::{Convertible, Error};
 use mln_style_types::VisibilityType;
 use mln_util::logging::{Event, Log};
 
-use crate::conversion::{Converter, convert};
+use crate::conversion::{Converter, convert, convert_filter};
 use crate::expression::{
-    Dependency, EvaluationContext, Expr, GlobalStateMap, ParsingContext, Type, from_expression_value,
+    Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
 use crate::filter::Filter;
 pub(crate) use crate::layer_impl::FontStack;
@@ -111,6 +111,10 @@ pub trait Layer: Any + Send + Sync {
     fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase));
 
     fn get_property(&self, name: &str) -> StyleProperty;
+
+    /// The expression functions that the layer's property values, filter and
+    /// visibility parse against.
+    fn functions(&self) -> &Arc<Functions>;
 
     /// Serializes the layer as a style JSON value; implementations start from
     /// `serialize_base`.
@@ -330,7 +334,7 @@ pub(crate) fn set_property_base(
             return None;
         }
     } else if name == "filter" {
-        if let Some(filter) = convert::<Filter>(value, &mut error) {
+        if let Some(filter) = convert_filter(value, layer.functions(), &mut error) {
             layer.set_filter(&filter);
             return None;
         }
@@ -371,7 +375,7 @@ fn set_visibility_value(layer: &mut (impl Layer + ?Sized), value: &Convertible<'
 
     if value.is_array() {
         // Per the style specification, visibility expressions may only use "global-state".
-        let mut ctx = ParsingContext::with_expected(Type::String);
+        let mut ctx = ParsingContext::with_expected(layer.functions(), Type::String);
         let Some(parsed) = ctx.parse_expression(value, None) else {
             return Some(Error::new(ctx.get_combined_errors()));
         };
@@ -419,12 +423,18 @@ macro_rules! layer_type {
         #[derive(Debug)]
         pub struct $name {
             base_impl: ::std::sync::Arc<Impl>,
+            functions: ::std::sync::Arc<$crate::expression::Functions>,
         }
 
         impl $name {
+            /// The layer of `impl_`, whose property values parse against
+            /// `functions`.
             #[must_use]
-            pub fn from_impl(impl_: ::std::sync::Arc<Impl>) -> Self {
-                $name { base_impl: impl_ }
+            pub fn from_impl(
+                impl_: ::std::sync::Arc<Impl>,
+                functions: ::std::sync::Arc<$crate::expression::Functions>,
+            ) -> Self {
+                $name { base_impl: impl_, functions }
             }
 
             #[must_use]
@@ -450,6 +460,10 @@ macro_rules! layer_type {
                 $crate::property_table::get_property(&*self.base_impl, name)
             }
 
+            fn functions(&self) -> &::std::sync::Arc<$crate::expression::Functions> {
+                &self.functions
+            }
+
             fn serialize(&self) -> ::feature::Value {
                 let mut result = $crate::layer::serialize_base(self);
                 if let ::feature::Value::Object(object) = &mut result {
@@ -462,7 +476,7 @@ macro_rules! layer_type {
                 let mut impl_ = (*self.base_impl).clone();
                 impl_.base.id = id.to_owned();
                 impl_.paint = Default::default();
-                Box::new($name::from_impl(::std::sync::Arc::new(impl_)))
+                Box::new($name::from_impl(::std::sync::Arc::new(impl_), ::std::sync::Arc::clone(&self.functions)))
             }
 
             fn set_property_internal(
@@ -470,7 +484,7 @@ macro_rules! layer_type {
                 name: &str,
                 value: &::mln_conversion::Convertible<'_>,
             ) -> Option<::mln_conversion::Error> {
-                match $crate::property_table::set_property(&mut self.base_impl, name, value) {
+                match $crate::property_table::set_property(&mut self.base_impl, name, value, &self.functions) {
                     Ok(()) => None,
                     Err($crate::property_table::SetPropertyError::Invalid(error)) => Some(error),
                     Err($crate::property_table::SetPropertyError::Unknown) => Some(::mln_conversion::Error::new(

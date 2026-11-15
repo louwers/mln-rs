@@ -1040,7 +1040,7 @@ impl TryFrom<MbglValue> for Distance {
     type Error = String;
 
     fn try_from(value: MbglValue) -> Result<Self, String> {
-        let mut ctx = ParsingContext::default();
+        let mut ctx = ParsingContext::without_functions();
         parse_value(&Convertible::from(&value), &mut ctx)
             .and_then(|geojson_source| Distance::from_source(geojson_source, &mut ctx))
             .ok_or_else(|| ctx.get_combined_errors())
@@ -1109,6 +1109,7 @@ mod tests {
     use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
 
     use super::*;
+    use crate::Functions;
     use crate::dsl::create_expression_from_str;
     use crate::expression::EvaluationResult;
     use crate::value::Value;
@@ -1139,14 +1140,14 @@ mod tests {
     const CANONICAL: CanonicalTileID = CanonicalTileID { z: 15, x: 18653, y: 9484 };
 
     fn evaluate(expression: &str, feature: &Feature) -> EvaluationResult {
-        let expression =
-            create_expression_from_str(expression).unwrap_or_else(|| panic!("{expression} fails to parse"));
+        let expression = create_expression_from_str(expression, &Functions::with_builtins())
+            .unwrap_or_else(|| panic!("{expression} fails to parse"));
         expression.evaluate(&EvaluationContext::from_feature(Some(feature)).with_canonical_tile_id(Some(&CANONICAL)))
     }
 
     fn parse_errors(expression: &str) -> Vec<String> {
         let document: serde_json::Value = serde_json::from_str(expression).expect("test JSON");
-        let mut ctx = ParsingContext::new();
+        let mut ctx = ParsingContext::new(&Functions::with_builtins());
         let parsed = ctx.parse_expression(&Convertible::from(&document), None);
         assert!(parsed.is_none(), "{expression} parsed");
         ctx.get_errors().into_iter().map(|e| e.message).collect()
@@ -1207,7 +1208,7 @@ mod tests {
         let good_point = tile_feature(FeatureType::Point, vec![vec![(10, 10)]]);
         for expression in [short_line, short_ring, no_rings, empty_points] {
             let document: serde_json::Value = serde_json::from_str(expression).expect("test JSON");
-            let mut ctx = ParsingContext::new();
+            let mut ctx = ParsingContext::new(&Functions::with_builtins());
             match ctx.parse_expression(&Convertible::from(&document), None) {
                 Some(parsed) => {
                     let params =
@@ -1229,7 +1230,7 @@ mod tests {
             assert!(evaluate(point, feature).is_err(), "{:?}", feature.geometry);
         }
 
-        let expression = create_expression_from_str(point).expect("expression parses");
+        let expression = create_expression_from_str(point, &Functions::with_builtins()).expect("expression parses");
         assert!(expression.evaluate(&EvaluationContext::from_feature(Some(&good_point))).is_err());
         assert!(expression.evaluate(&EvaluationContext::default()).is_err());
     }
@@ -1237,7 +1238,7 @@ mod tests {
     #[test]
     fn serializes_its_geojson() {
         let expression = r#"["distance", {"type": "LineString", "coordinates": [[0, 0], [0, 5], [5, 5]]}]"#;
-        let parsed = create_expression_from_str(expression).expect("expression parses");
+        let parsed = create_expression_from_str(expression, &Functions::with_builtins()).expect("expression parses");
         let MbglValue::Array(serialized) = parsed.serialize() else {
             panic!("not an array");
         };
