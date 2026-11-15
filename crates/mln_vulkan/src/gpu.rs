@@ -74,6 +74,11 @@ impl NativeBuffer {
     fn buffer(&self) -> vk::Buffer {
         self.allocation.as_ref().map_or(vk::Buffer::null(), BufferAllocation::buffer)
     }
+
+    /// The mapped memory of a buffer in host-visible memory, else null.
+    fn mapped(&self) -> *mut u8 {
+        self.allocation.as_ref().map_or(std::ptr::null_mut(), BufferAllocation::mapped_buffer)
+    }
 }
 
 impl Drop for NativeBuffer {
@@ -88,8 +93,40 @@ struct Buffer {
     native: Rc<NativeBuffer>,
     size: u64,
     usage: BufferUsage,
-    /// The `uploads_epoch` of the last write to it.
+    /// The `uploads_epoch` of the last write to it, for a buffer that
+    /// writes reach through `uploads`.
     written: u64,
+    /// The windows of a uniform or storage buffer.
+    windows: Option<Windows>,
+}
+
+/// A uniform or storage buffer's contents, and its windows in host-visible
+/// memory: one for each batch that may be in flight, so that the CPU writes
+/// the window of the batch being built while the GPU reads the others.
+struct Windows {
+    contents: Vec<u8>,
+    /// The bytes from the start of one window to the next.
+    stride: u64,
+    /// A bit for each window that holds `contents`.
+    current: u32,
+}
+
+impl Windows {
+    /// Copies `contents[start..end]` into `window` of `native`.
+    fn copy(&self, native: &NativeBuffer, window: usize, start: usize, end: usize) {
+        let into = native.mapped();
+        debug_assert!(!into.is_null() && end <= self.contents.len());
+        // SAFETY: the mapping holds `stride` bytes for each window, each at
+        // least `contents.len()`, outside `contents`. The batches that read
+        // this window have finished (`VulkanGpu::open_window`).
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.contents.as_ptr().add(start),
+                into.add(window * self.stride as usize + start),
+                end - start,
+            );
+        }
+    }
 }
 
 /// A texture's image: one this backend made, or one it imported, which
@@ -258,10 +295,11 @@ struct SetKey {
 
 /// A descriptor set, which keeps what it binds and goes back to its pool
 /// once the last bindings that hold it drop and the submits that may use it
-/// have finished.
+/// have finished. A set that binds a uniform or storage buffer has one for
+/// each of their windows; another has one.
 struct DescriptorSet {
-    set: vk::DescriptorSet,
-    pool: usize,
+    /// The set of each window, with the pool it came from.
+    sets: Vec<(vk::DescriptorSet, usize)>,
     key: SetKey,
     /// The native resources it binds, which it keeps.
     _held: Vec<Rc<dyn Any>>,
@@ -270,15 +308,18 @@ struct DescriptorSet {
 
 impl Drop for DescriptorSet {
     fn drop(&mut self) {
-        self.discard.push(Garbage::DescriptorSet(self.key.set, self.pool, self.set));
+        for &(set, pool) in &self.sets {
+            self.discard.push(Garbage::DescriptorSet(self.key.set, pool, set));
+        }
     }
 }
 
-/// A shader's descriptor sets, by set index, `null` for a set it doesn't
-/// read.
+/// A shader's descriptor sets, by set index.
 struct Bindings {
     sets: [Option<Rc<DescriptorSet>>; DescriptorSetType::COUNT],
-    handles: [vk::DescriptorSet; DescriptorSetType::COUNT],
+    /// The sets to bind in each window, by set index, `null` for a set the
+    /// shader doesn't read.
+    handles: Vec<[vk::DescriptorSet; DescriptorSetType::COUNT]>,
     tags: BindingsTags,
 }
 
@@ -414,6 +455,12 @@ pub struct VulkanGpu {
     render_passes: HashMap<RenderPassKey, vk::RenderPass>,
     framebuffers: HashMap<FramebufferKey, vk::Framebuffer>,
 
+    /// The windows of each uniform and storage buffer.
+    window_count: usize,
+    /// The serial of the batch whose window is ready, and its window.
+    window: (u64, usize),
+    /// The buffers that some window doesn't hold the contents of.
+    stale: Vec<BufferId>,
     /// The commands of the writes since the last flush.
     uploads: Option<vk::CommandBuffer>,
     /// A number that changes at each barrier between writes in `uploads`,
@@ -626,6 +673,9 @@ impl VulkanGpu {
         let line_widths = (backend.get_device_features().wide_lines == vk::TRUE)
             .then(|| (limits.line_width_range[0], limits.line_width_range[1]));
         let discard = Rc::new(Discard { next_serial: Cell::new(1), garbage: Cell::default() });
+        // At least two, so that the CPU writes the next batch's while the
+        // GPU runs the last.
+        let window_count = backend.get_max_frames().max(2) as usize;
 
         // Made with null handles, which `drop` destroys as it does the
         // others if a step below fails.
@@ -657,6 +707,9 @@ impl VulkanGpu {
             descriptor_sets: HashMap::default(),
             render_passes: HashMap::default(),
             framebuffers: HashMap::default(),
+            window_count,
+            window: (0, 0),
+            stale: Vec::new(),
             uploads: None,
             uploads_epoch: 0,
             frame: None,
@@ -953,6 +1006,33 @@ impl VulkanGpu {
         let frame = self.begin_command_buffer()?;
         self.frame = Some(frame);
         Ok(frame)
+    }
+
+    /// The window of uniform and storage buffers that the batch being built
+    /// reads. Its first call in a batch waits for the batch that read the
+    /// window before, then brings the window up to date.
+    fn open_window(&mut self) -> Result<usize, GpuError> {
+        let serial = self.discard.next_serial.get();
+        if self.window.0 == serial {
+            return Ok(self.window.1);
+        }
+        let count = self.window_count as u64;
+        if serial > count {
+            self.wait_for(serial - count)?;
+        }
+        let window = (serial % count) as usize;
+        let all = (1 << self.window_count) - 1;
+        let buffers = &mut self.buffers;
+        self.stale.retain(|&id| {
+            let Some(Buffer { native, windows: Some(windows), .. }) = buffers.get_mut(id) else { return false };
+            if windows.current & (1 << window) == 0 {
+                windows.copy(native, window, 0, windows.contents.len());
+                windows.current |= 1 << window;
+            }
+            windows.current != all
+        });
+        self.window = (serial, window);
+        Ok(window)
     }
 
     /// Takes back what the finished submits used, and destroys what waited
@@ -1321,6 +1401,8 @@ impl VulkanGpu {
         let resource = |binding: u32| key.resources.iter().find(|(b, _)| *b == binding).map(|&(_, resource)| resource);
 
         let mut buffer_infos = Vec::new();
+        // The bytes between the windows of each buffer, 0 for one without.
+        let mut strides = Vec::new();
         let mut image_infos = Vec::new();
         // The descriptors in binding order: (binding, type, index into the
         // infos).
@@ -1359,23 +1441,24 @@ impl VulkanGpu {
             let shape = type_.buffer_shape();
             for binding in 0..(shape.storage + shape.uniform) as u32 {
                 let storage = (binding as usize) < shape.storage;
-                let info = match resource(binding) {
-                    Some(Resource::Buffer(id, offset, size)) => {
-                        let buffer = self.buffers.get(id).ok_or(GpuError::UnknownId("buffer"))?;
-                        let expected = if storage { BufferUsage::Storage } else { BufferUsage::Uniform };
-                        if buffer.usage != expected {
-                            return Err(GpuError::Invalid(format!(
-                                "a {:?} buffer bound where the shader reads a {expected:?} buffer",
-                                buffer.usage
-                            )));
-                        }
-                        held.push(Rc::<NativeBuffer>::clone(&buffer.native));
-                        vk::DescriptorBufferInfo::default().buffer(buffer.native.buffer()).offset(offset).range(size)
+                let info = if let Some(Resource::Buffer(id, offset, size)) = resource(binding) {
+                    let buffer = self.buffers.get(id).ok_or(GpuError::UnknownId("buffer"))?;
+                    let expected = if storage { BufferUsage::Storage } else { BufferUsage::Uniform };
+                    if buffer.usage != expected {
+                        return Err(GpuError::Invalid(format!(
+                            "a {:?} buffer bound where the shader reads a {expected:?} buffer",
+                            buffer.usage
+                        )));
                     }
-                    _ => vk::DescriptorBufferInfo::default()
+                    held.push(Rc::<NativeBuffer>::clone(&buffer.native));
+                    strides.push(buffer.windows.as_ref().map_or(0, |windows| windows.stride));
+                    vk::DescriptorBufferInfo::default().buffer(buffer.native.buffer()).offset(offset).range(size)
+                } else {
+                    strides.push(0);
+                    vk::DescriptorBufferInfo::default()
                         .buffer(self.placeholder_buffer.buffer())
                         .offset(0)
-                        .range(vk::WHOLE_SIZE),
+                        .range(vk::WHOLE_SIZE)
                 };
                 let descriptor_type =
                     if storage { vk::DescriptorType::STORAGE_BUFFER } else { vk::DescriptorType::UNIFORM_BUFFER };
@@ -1385,28 +1468,42 @@ impl VulkanGpu {
         }
 
         let device = self.backend.get_device();
-        let (set, pool) = self.descriptor_pools[type_ as usize]
-            .allocate(device, self.set_layouts[type_ as usize])
-            .ok_or_else(|| GpuError::Invalid("Vulkan couldn't allocate a descriptor set".to_owned()))?;
-        let writes: Vec<vk::WriteDescriptorSet<'_>> = descriptors
-            .iter()
-            .map(|&(binding, descriptor_type, index)| {
-                let write = vk::WriteDescriptorSet::default()
-                    .dst_set(set)
-                    .dst_binding(binding)
-                    .descriptor_type(descriptor_type);
-                if type_ == DescriptorSetType::DrawableImage {
-                    write.image_info(std::slice::from_ref(&image_infos[index]))
-                } else {
-                    write.buffer_info(std::slice::from_ref(&buffer_infos[index]))
+        let windows = if strides.iter().any(|&stride| stride > 0) { self.window_count } else { 1 };
+        let mut sets = Vec::with_capacity(windows);
+        for window in 0..windows {
+            let Some((set, pool)) =
+                self.descriptor_pools[type_ as usize].allocate(device, self.set_layouts[type_ as usize])
+            else {
+                for &(set, pool) in &sets {
+                    self.descriptor_pools[type_ as usize].give_back(pool, set);
                 }
-            })
-            .collect();
-        // SAFETY: the set is new, and the writes name live resources of
-        // the descriptor types of its layout.
-        unsafe { device.update_descriptor_sets(&writes, &[]) };
-        let set =
-            Rc::new(DescriptorSet { set, pool, key: key.clone(), _held: held, discard: Rc::clone(&self.discard) });
+                return Err(GpuError::Invalid("Vulkan couldn't allocate a descriptor set".to_owned()));
+            };
+            let window_infos: Vec<vk::DescriptorBufferInfo> = buffer_infos
+                .iter()
+                .zip(&strides)
+                .map(|(&info, &stride)| info.offset(info.offset + window as u64 * stride))
+                .collect();
+            let writes: Vec<vk::WriteDescriptorSet<'_>> = descriptors
+                .iter()
+                .map(|&(binding, descriptor_type, index)| {
+                    let write = vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(binding)
+                        .descriptor_type(descriptor_type);
+                    if type_ == DescriptorSetType::DrawableImage {
+                        write.image_info(std::slice::from_ref(&image_infos[index]))
+                    } else {
+                        write.buffer_info(std::slice::from_ref(&window_infos[index]))
+                    }
+                })
+                .collect();
+            // SAFETY: the set is new, and the writes name live resources of
+            // the descriptor types of its layout.
+            unsafe { device.update_descriptor_sets(&writes, &[]) };
+            sets.push((set, pool));
+        }
+        let set = Rc::new(DescriptorSet { sets, key: key.clone(), _held: held, discard: Rc::clone(&self.discard) });
         self.descriptor_sets.insert(key, Rc::downgrade(&set));
         Ok(set)
     }
@@ -1832,17 +1929,38 @@ impl Gpu for VulkanGpu {
             BufferUsage::Storage => vk::BufferUsageFlags::STORAGE_BUFFER,
         };
         let size = desc.size.max(4).next_multiple_of(4);
-        let allocation = BufferAllocation::create(
-            &self.backend,
-            size as usize,
-            usage | vk::BufferUsageFlags::TRANSFER_DST,
-            MemoryLocation::GpuOnly,
-            desc.label,
-        )
+        let windowed = matches!(desc.usage, BufferUsage::Uniform | BufferUsage::Storage);
+        let stride = size.next_multiple_of(u64::from(self.caps.buffer_offset_alignment));
+        let allocation = if windowed {
+            BufferAllocation::create(
+                &self.backend,
+                (stride * self.window_count as u64) as usize,
+                usage,
+                MemoryLocation::CpuToGpu,
+                desc.label,
+            )
+            .filter(|allocation| !allocation.mapped_buffer().is_null())
+        } else {
+            BufferAllocation::create(
+                &self.backend,
+                size as usize,
+                usage | vk::BufferUsageFlags::TRANSFER_DST,
+                MemoryLocation::GpuOnly,
+                desc.label,
+            )
+        }
         .ok_or_else(|| GpuError::Invalid(format!("{}: Vulkan couldn't make the buffer", desc.label)))?;
         self.backend.set_debug_name(allocation.buffer(), desc.label);
+        let windows = windowed.then(|| {
+            // SAFETY: the mapping holds every window, which nothing reads
+            // yet.
+            unsafe {
+                std::ptr::write_bytes(allocation.mapped_buffer(), 0, (stride * self.window_count as u64) as usize);
+            };
+            Windows { contents: vec![0; size as usize], stride, current: (1 << self.window_count) - 1 }
+        });
         let native = Rc::new(NativeBuffer { allocation: Some(allocation), discard: Rc::clone(&self.discard) });
-        Ok(self.buffers.insert(Buffer { native, size, usage: desc.usage, written: 0 }))
+        Ok(self.buffers.insert(Buffer { native, size, usage: desc.usage, written: 0, windows }))
     }
 
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
@@ -1855,6 +1973,28 @@ impl Gpu for VulkanGpu {
             )));
         }
         if data.is_empty() {
+            return Ok(());
+        }
+        let (start, end) = (offset as usize, (offset + length) as usize);
+        if let Some(windows) = &entry.windows {
+            if windows.contents[start..end] == *data {
+                return Ok(());
+            }
+            let window = self.open_window()?;
+            let all = (1 << self.window_count) - 1;
+            let Some(Buffer { native, windows: Some(windows), .. }) = self.buffers.get_mut(buffer) else {
+                return Err(GpuError::UnknownId("buffer"));
+            };
+            windows.contents[start..end].copy_from_slice(data);
+            // The window holds the rest of the contents already, or gets
+            // all of them.
+            let (start, end) =
+                if windows.current & (1 << window) != 0 { (start, end) } else { (0, windows.contents.len()) };
+            windows.copy(native, window, start, end);
+            if windows.current == all {
+                self.stale.push(buffer);
+            }
+            windows.current = 1 << window;
             return Ok(());
         }
         let target = entry.native.buffer();
@@ -2114,7 +2254,13 @@ impl Gpu for VulkanGpu {
             validation::check_bindings(desc, &shader.reads, self.caps.buffer_offset_alignment, &lookup)?
         };
         let sets = self.descriptor_sets(desc.shader, desc.entries)?;
-        let handles = sets.each_ref().map(|set| set.as_ref().map_or(vk::DescriptorSet::null(), |set| set.set));
+        let handles = (0..self.window_count)
+            .map(|window| {
+                sets.each_ref().map(|set| {
+                    set.as_ref().map_or(vk::DescriptorSet::null(), |set| set.sets[window % set.sets.len()].0)
+                })
+            })
+            .collect();
         let tags = BindingsTags { shader: desc.shader, elements };
         Ok(self.bindings.insert(Bindings { sets, handles, tags }))
     }
@@ -2206,6 +2352,7 @@ impl Gpu for VulkanGpu {
             let (_, texture) = self.lookup();
             validation::check_pass(desc, &texture)?
         };
+        self.open_window()?;
         let frame = self.frame()?;
         self.acquire_attachments(frame, desc);
         let (render_pass, extent) = self.begin_render_pass(frame, desc)?;
@@ -2246,8 +2393,9 @@ impl Gpu for VulkanGpu {
             unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline.pipeline) };
             open.pipeline = Some(draw.pipeline);
         }
+        let handles = &bindings.handles[self.window.1];
         for type_ in DescriptorSetType::ALL {
-            let set = bindings.handles[type_ as usize];
+            let set = handles[type_ as usize];
             if set != vk::DescriptorSet::null() && open.sets[type_ as usize] != set {
                 unsafe {
                     device.cmd_bind_descriptor_sets(
