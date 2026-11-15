@@ -3,7 +3,7 @@
 //! the platform's where it has them, else a crate:
 //!
 //! - Apple platforms: Foundation's localized string comparison,
-//!   `NSNumberFormatter` and `NSLocale`.
+//!   `NSNumberFormatter`, `NSMeasurementFormatter` and `NSLocale`.
 //! - wasm (the browser build): the browser's `Intl.Collator` and
 //!   `Intl.NumberFormat`.
 //! - Everywhere else: ICU4X, with the CLDR data it compiles into the library.

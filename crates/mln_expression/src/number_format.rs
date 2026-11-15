@@ -266,6 +266,39 @@ mod tests {
         }
     }
 
+    #[cfg(target_vendor = "apple")]
+    fn format_unit(number: f64, locale: &str, unit: &str, min: Option<u8>, max: Option<u8>) -> String {
+        format_number(number, locale, "", unit, min, max).expect("formatted number")
+    }
+
+    #[test]
+    #[cfg(target_vendor = "apple")]
+    fn units_take_the_locale_short_pattern() {
+        assert_eq!(format_unit(1234.567, "en-US", "meter", None, None), "1,234.567 m");
+        assert_eq!(format_unit(1234.567, "en-US", "celsius", None, None), "1,234.567°C");
+        assert_eq!(format_unit(1234.567, "en-US", "kilobyte", None, None), "1,234.567 kB");
+        assert_eq!(format_unit(1234.567, "de-DE", "kilometer-per-hour", None, None), "1.234,567 km/h");
+        assert_eq!(format_unit(2.5, "en-US", "liter", Some(2), None), "2.50 L");
+        assert_eq!(format_unit(-1234.5678, "en-US", "meter", None, None), "-1,234.568 m");
+        assert_eq!(format_unit(f64::NAN, "en-US", "meter", None, None), "NaN m");
+        assert_eq!(format_unit(f64::INFINITY, "en-US", "meter", None, None), "∞ m");
+    }
+
+    #[test]
+    #[cfg(target_vendor = "apple")]
+    fn percent_is_already_a_percentage() {
+        assert_eq!(format_unit(0.5, "en-US", "percent", None, None), "0.5%");
+        assert_eq!(format_unit(1234.567, "en-US", "percent", None, None), "1,234.567%");
+        assert_eq!(format_unit(1234.567, "fr-FR", "percent", None, Some(1)), "1\u{202f}234,6\u{a0}%");
+    }
+
+    #[test]
+    #[cfg(target_vendor = "apple")]
+    fn units_foundation_lacks_fail() {
+        assert!(format_number(1.0, "en-US", "", "day", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "", "liter-per-kilometer", None, None).is_err());
+    }
+
     #[test]
     fn a_unit_that_intl_does_not_take_fails() {
         assert!(format_number(1.0, "en-US", "", "square-meter", None, None).is_err());

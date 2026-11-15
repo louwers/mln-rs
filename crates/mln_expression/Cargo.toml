@@ -48,10 +48,13 @@ objc2-foundation = { workspace = true, features = [
   "NSArray",
   "NSFormatter",
   "NSLocale",
+  "NSMeasurement",
+  "NSMeasurementFormatter",
   "NSNumberFormatter",
   "NSObjCRuntime",
   "NSRange",
   "NSString",
+  "NSUnit",
   "NSValue",
 ] }
 
