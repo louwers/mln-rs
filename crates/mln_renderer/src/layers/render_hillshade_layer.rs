@@ -60,7 +60,6 @@ use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HillshadeLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), HillshadeLayerImpl::static_type_info()));
     impl_.downcast_ref::<HillshadeLayerImpl>().expect("RenderHillshadeLayer: not a hillshade layer impl")
 }
 

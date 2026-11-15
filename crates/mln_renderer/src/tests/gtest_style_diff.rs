@@ -1,46 +1,12 @@
 use std::sync::Arc;
 
-use mln_style::layer::{Impl, ImplBase, LayerTypeInfo, layer_type_info};
+use mln_style::layer::Impl;
+use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
 
 use crate::style_diff::diff_layers;
 
-#[derive(Debug)]
-struct TestLayerImpl {
-    base: ImplBase,
-}
-
-impl TestLayerImpl {
-    fn create(layer_id: &str, source_id: &str) -> Arc<dyn Impl> {
-        Arc::new(TestLayerImpl { base: ImplBase::new(layer_id.to_owned(), source_id.to_owned()) })
-    }
-}
-
-static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
-    type_: "test",
-    source: layer_type_info::Source::NotRequired,
-    pass3d: layer_type_info::Pass3D::NotRequired,
-    layout: layer_type_info::Layout::NotRequired,
-    fading_tiles: layer_type_info::FadingTiles::NotRequired,
-    cross_tile_index: layer_type_info::CrossTileIndex::NotRequired,
-    tile_kind: layer_type_info::TileKind::NotRequired,
-};
-
-impl Impl for TestLayerImpl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-
-    fn has_layout_difference(&self, _other: &dyn Impl) -> bool {
-        false
-    }
-
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        &TYPE_INFO
-    }
+fn layer(layer_id: &str, source_id: &str) -> Arc<dyn Impl> {
+    Arc::new(BackgroundLayerImpl::new(layer_id.to_owned(), source_id.to_owned()))
 }
 
 type ImmutableLayer = Arc<dyn Impl>;
@@ -59,8 +25,8 @@ fn empty() {
 // gtest: StyleDiff.Add
 #[test]
 fn add() {
-    let l1 = TestLayerImpl::create("id-1", "src-1");
-    let l2 = TestLayerImpl::create("id-2", "src-2");
+    let l1 = layer("id-1", "src-1");
+    let l2 = layer("id-2", "src-2");
 
     let a: Vec<ImmutableLayer> = vec![Arc::clone(&l1)];
     let b: Vec<ImmutableLayer> = vec![Arc::clone(&l1), Arc::clone(&l2)];
@@ -75,8 +41,8 @@ fn add() {
 // gtest: StyleDiff.Remove
 #[test]
 fn remove() {
-    let l1 = TestLayerImpl::create("id-1", "src-1");
-    let l2 = TestLayerImpl::create("id-2", "src-2");
+    let l1 = layer("id-1", "src-1");
+    let l2 = layer("id-2", "src-2");
 
     let a: Vec<ImmutableLayer> = vec![Arc::clone(&l1), Arc::clone(&l2)];
     let b: Vec<ImmutableLayer> = vec![Arc::clone(&l1)];
@@ -92,8 +58,8 @@ fn remove() {
 // gtest: StyleDiff.Compare
 #[test]
 fn compare() {
-    let a: Vec<ImmutableLayer> = vec![TestLayerImpl::create("id-1", "src-1"), TestLayerImpl::create("id-2", "src-2")];
-    let b: Vec<ImmutableLayer> = vec![TestLayerImpl::create("id-1", "src-1"), TestLayerImpl::create("id-2", "src-2")];
+    let a: Vec<ImmutableLayer> = vec![layer("id-1", "src-1"), layer("id-2", "src-2")];
+    let b: Vec<ImmutableLayer> = vec![layer("id-1", "src-1"), layer("id-2", "src-2")];
 
     let diff = diff_layers(&Arc::new(a), &Arc::new(b));
 
@@ -106,8 +72,8 @@ fn compare() {
 // gtest: StyleDiff.Order
 #[test]
 fn order() {
-    let l1 = TestLayerImpl::create("id-1", "src-1");
-    let l2 = TestLayerImpl::create("id-2", "src-2");
+    let l1 = layer("id-1", "src-1");
+    let l2 = layer("id-2", "src-2");
 
     let a: Vec<ImmutableLayer> = vec![Arc::clone(&l1), Arc::clone(&l2)];
     let b: Vec<ImmutableLayer> = vec![Arc::clone(&l2), Arc::clone(&l1)];

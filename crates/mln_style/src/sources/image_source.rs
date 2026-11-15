@@ -12,8 +12,7 @@ use mln_util::LatLng;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 
-use crate::layer::LayerTypeInfo;
-use crate::layer::layer_type_info::TileKind;
+use crate::layer::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
@@ -209,8 +208,8 @@ impl Source for ImageSource {
         *self.inner.req.borrow_mut() = Some(req);
     }
 
-    fn supports_layer_type(&self, info: &LayerTypeInfo) -> bool {
-        TileKind::Raster as u8 == info.tile_kind as u8
+    fn supports_layer_type(&self, info: LayerTypeInfo) -> bool {
+        info.source == SourceKind::Raster
     }
 
     fn create_mutable(&self) -> Box<dyn source_impl::Impl> {

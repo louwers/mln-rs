@@ -447,7 +447,7 @@ fn source_info(source: &dyn Source) -> SourceInfo {
 fn layer_info(layer: &dyn mln_style::Layer) -> LayerInfo {
     LayerInfo {
         id: layer.get_id(),
-        layer_type: layer.get_type_info().type_,
+        layer_type: layer.get_type_info().name,
         source_id: Some(layer.get_source_id()).filter(|id| !id.is_empty()),
         source_layer: Some(layer.get_source_layer()).filter(|id| !id.is_empty()),
         min_zoom: Some(f64::from(layer.get_min_zoom())).filter(|zoom| zoom.is_finite()),

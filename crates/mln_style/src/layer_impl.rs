@@ -1,8 +1,6 @@
-// C++ `Layer::Impl` is an abstract base class with data members. In Rust the
-// data members are `ImplBase` and the virtual interface is the `Impl` trait
-// (re-exported as `layer::Impl`); a concrete impl such as
-// `background_layer::Impl` holds an `ImplBase` and implements the trait.
-// `dyn Impl` derefs to its `ImplBase`, so `impl_.id` reads as in C++.
+// A layer's style data is a `LayerStyle<T>` of its type `T`, shared as a
+// `dyn Impl` (`ErasedLayerStyle`). `ImplBase` holds the members every layer
+// has, and `dyn Impl` derefs to it, so `impl_.id` reads them.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -12,7 +10,7 @@ use mln_vec_map::VecSet;
 
 use crate::expression::{Dependency, Expr};
 use crate::filter::Filter;
-use crate::layer::LayerTypeInfo;
+pub use crate::layer_type::ErasedLayerStyle as Impl;
 use crate::serialization::shared_expression;
 
 pub(crate) type FontStack = Vec<String>;
@@ -27,7 +25,7 @@ pub fn font_stacks<L: AsRef<dyn Impl>>(layers: impl IntoIterator<Item = L>) -> V
     result
 }
 
-/// The data members of `Layer::Impl`.
+/// The members every layer has.
 #[derive(Clone, Debug, mln_wire::Wire)]
 pub struct ImplBase {
     // Backs an expression-valued "visibility" layout value; the evaluated
@@ -67,46 +65,11 @@ impl ImplBase {
         }
     }
 
-    /// The base `Layer::Impl::collectLayoutGlobalStateRefs` (the filter's
-    /// global-state refs), which overrides call as
-    /// `Layer::Impl::collectLayoutGlobalStateRefs(refs)`.
+    /// Adds the global-state keys that the filter reads to `refs`.
     pub(crate) fn collect_filter_global_state_refs(&self, refs: &mut VecSet<String>) {
         if let Some(expression) = &self.filter.expression {
             crate::expression::collect_global_state_refs(expression.as_ref(), refs);
         }
-    }
-}
-
-/// The virtual interface of `Layer::Impl`.
-pub trait Impl: Any + Send + Sync {
-    fn base(&self) -> &ImplBase;
-    fn base_mut(&mut self) -> &mut ImplBase;
-
-    /// Returns true buckets if properties affecting layout have changed: i.e.
-    /// filter, visibility, layout properties, or data-driven paint properties.
-    fn has_layout_difference(&self, other: &dyn Impl) -> bool;
-
-    /// Returns the statically allocated layer type info structure.
-    fn get_type_info(&self) -> &'static LayerTypeInfo;
-
-    /// Populates the given `font_stack` with fonts being used by the layer.
-    fn populate_font_stack(&self, _font_stack: &mut VecSet<FontStack>) {}
-
-    /// Collect the style dependencies for this layer
-    fn get_dependencies(&self) -> Dependency {
-        Dependency::NONE
-    }
-
-    /// Collect the dependencies of properties that affect tile layout:
-    /// the filter and the layout properties.
-    fn get_layout_dependencies(&self) -> Dependency {
-        self.base().get_filter_dependencies()
-    }
-
-    /// Collect the global-state properties referenced by expressions that
-    /// affect tile layout, mirroring `get_layout_dependencies()`.
-    fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>) {
-        self.base().collect_filter_global_state_refs(refs);
     }
 }
 
@@ -144,7 +107,7 @@ impl std::fmt::Debug for dyn Impl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Layer::Impl")
             .field("id", &self.base().id)
-            .field("type", &self.get_type_info().type_)
+            .field("type", &self.get_type_info().name)
             .finish_non_exhaustive()
     }
 }

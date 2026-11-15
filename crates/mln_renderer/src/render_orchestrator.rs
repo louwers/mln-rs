@@ -12,7 +12,7 @@ use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_la
 use mln_map_types::{MapMode, TransformState};
 use mln_style::collection::ImmutableVector;
 use mln_style::expression::{Dependency, GlobalStateMap};
-use mln_style::layer::layer_type_info;
+use mln_style::layer::SourceKind;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
@@ -714,9 +714,9 @@ impl RenderOrchestrator {
                 let layer = layer_ptr.borrow();
                 let base_impl = &layer.base().base_impl;
                 let layer_info = base_impl.get_type_info();
-                render_tree_parameters.has_3d |= layer_info.pass3d == layer_type_info::Pass3D::Required;
+                render_tree_parameters.has_3d |= layer_info.pass_3d;
 
-                if layer_info.source != layer_type_info::Source::NotRequired {
+                if layer_info.source != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
                     // source check goes before anything else is read.
                     if let Some(source_impl) = &source_impl
@@ -1416,9 +1416,7 @@ impl RenderOrchestrator {
     ) -> Result<(), Error> {
         let cross_tile_symbol_index_layers: crate::geometry::feature_index::QueryLayers<'_> = layers
             .iter()
-            .filter(|(_, layer)| {
-                layer.base().base_impl.get_type_info().cross_tile_index == layer_type_info::CrossTileIndex::Required
-            })
+            .filter(|(_, layer)| layer.base().base_impl.get_type_info().cross_tile_index)
             .map(|(id, layer)| (id.clone(), *layer))
             .collect();
 

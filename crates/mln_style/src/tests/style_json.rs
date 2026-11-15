@@ -144,7 +144,7 @@ fn a_layer_requires_a_source_that_supports_its_type() {
     let hillshade = r#"{"id":"hillshade","type":"hillshade","source":"dem"}"#;
     style.add_layer_json(hillshade, None).unwrap();
     let layer = style.get_layer("hillshade").unwrap();
-    assert_eq!(layer.get_type_info().type_, "hillshade");
+    assert_eq!(layer.get_type_info().name, "hillshade");
     assert_eq!(layer.get_source_id(), "dem");
     assert_fails(
         style.add_layer_json(hillshade, None),

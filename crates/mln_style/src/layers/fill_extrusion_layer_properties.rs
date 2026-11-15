@@ -2,7 +2,7 @@
 // (tools/style-codegen/v8.json). Do not edit.
 
 use crate::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
-use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
+use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 
 crate::properties!(
     /// The layout properties of a fill-extrusion layer.
@@ -49,21 +49,18 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[0, 1, 2, 3, 4, 8, 5, 6, 7],
 );
 
-impl Properties for FillExtrusionLayerImpl {
-    const TABLE: &'static PropertyTable = &PROPERTIES;
-
-    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
-        Some(match slot {
-            0 => visitor.paint(|s| &s.paint.fill_extrusion_base, |s| &mut s.paint.fill_extrusion_base),
-            1 => visitor.paint(|s| &s.paint.fill_extrusion_color, |s| &mut s.paint.fill_extrusion_color),
-            2 => visitor.paint(|s| &s.paint.fill_extrusion_height, |s| &mut s.paint.fill_extrusion_height),
-            3 => visitor.paint(|s| &s.paint.fill_extrusion_opacity, |s| &mut s.paint.fill_extrusion_opacity),
-            4 => visitor.paint(|s| &s.paint.fill_extrusion_pattern, |s| &mut s.paint.fill_extrusion_pattern),
-            5 => visitor.paint(|s| &s.paint.fill_extrusion_translate, |s| &mut s.paint.fill_extrusion_translate),
-            6 => visitor.paint(|s| &s.paint.fill_extrusion_translate_anchor, |s| &mut s.paint.fill_extrusion_translate_anchor),
-            7 => visitor.paint(|s| &s.paint.fill_extrusion_vertical_gradient, |s| &mut s.paint.fill_extrusion_vertical_gradient),
-            8 => visitor.layout(|s| &s.layout.fill_extrusion_rounded_corner_distance, |s| &mut s.layout.fill_extrusion_rounded_corner_distance),
-            _ => return None,
-        })
-    }
+/// Calls `visitor` with the field of the property in `slot`.
+pub(crate) fn visit<V: PropertyVisitor<FillExtrusionLayerImpl>>(slot: usize, visitor: V) -> Option<V::Output> {
+    Some(match slot {
+        0 => visitor.paint(|s| &s.paint.fill_extrusion_base, |s| &mut s.paint.fill_extrusion_base),
+        1 => visitor.paint(|s| &s.paint.fill_extrusion_color, |s| &mut s.paint.fill_extrusion_color),
+        2 => visitor.paint(|s| &s.paint.fill_extrusion_height, |s| &mut s.paint.fill_extrusion_height),
+        3 => visitor.paint(|s| &s.paint.fill_extrusion_opacity, |s| &mut s.paint.fill_extrusion_opacity),
+        4 => visitor.paint(|s| &s.paint.fill_extrusion_pattern, |s| &mut s.paint.fill_extrusion_pattern),
+        5 => visitor.paint(|s| &s.paint.fill_extrusion_translate, |s| &mut s.paint.fill_extrusion_translate),
+        6 => visitor.paint(|s| &s.paint.fill_extrusion_translate_anchor, |s| &mut s.paint.fill_extrusion_translate_anchor),
+        7 => visitor.paint(|s| &s.paint.fill_extrusion_vertical_gradient, |s| &mut s.paint.fill_extrusion_vertical_gradient),
+        8 => visitor.layout(|s| &s.layout.fill_extrusion_rounded_corner_distance, |s| &mut s.layout.fill_extrusion_rounded_corner_distance),
+        _ => return None,
+    })
 }

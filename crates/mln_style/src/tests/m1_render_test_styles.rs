@@ -64,7 +64,7 @@ fn load(test: &str) -> Impl {
 fn background_impl(style: &Impl, id: &str) -> Arc<BackgroundLayerImpl> {
     let impls = style.get_layer_impls();
     let impl_ = impls.iter().find(|impl_| impl_.id == id).unwrap_or_else(|| panic!("no layer {id}"));
-    assert!(std::ptr::eq(impl_.get_type_info(), BackgroundLayerImpl::static_type_info()));
+    assert_eq!(impl_.get_type_info().name, "background");
     downcast_arc::<BackgroundLayerImpl>(impl_)
 }
 

@@ -12,7 +12,7 @@ use mln_conversion::{Convertible, Error};
 use super::util::parse_json;
 use crate::StyleRegistry;
 use crate::conversion::convert_layer;
-use crate::expression::{Functions, functions};
+use crate::expression::Functions;
 use crate::layer::Layer;
 use crate::layer_impl::Impl;
 use crate::layers::fill_extrusion_layer::FillExtrusionLayer;
@@ -30,7 +30,7 @@ struct Crossing(#[wire(with = "crate::serialization::shared_layer")] Arc<dyn Imp
 /// to one that encodes the same.
 fn round_trip(layer: &dyn Layer) -> Value {
     let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
-    let decoded: Crossing = functions::decode_with(&Functions::with_builtins(), || mln_wire::from_slice(&encoded))
+    let decoded: Crossing = crate::decode_with(&StyleRegistry::with_builtins(), || mln_wire::from_slice(&encoded))
         .unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
     assert_eq!(mln_wire::to_vec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());
     layer.serialize()
@@ -238,7 +238,7 @@ fn expressions_cross_as_data() {
             .unwrap_or_else(|| panic!("{json}: {}", context.get_combined_errors()));
         let encoded = mln_wire::to_vec(&expression).unwrap();
         let decoded: crate::expression::Expr =
-            functions::decode_with(&Functions::with_builtins(), || mln_wire::from_slice(&encoded))
+            crate::decode_with(&StyleRegistry::with_builtins(), || mln_wire::from_slice(&encoded))
                 .unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
         assert!(decoded == expression, "{json}");
         assert_eq!(decoded.dependencies(), expression.dependencies(), "{json}");

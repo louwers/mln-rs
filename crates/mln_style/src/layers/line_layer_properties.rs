@@ -2,7 +2,7 @@
 // (tools/style-codegen/v8.json). Do not edit.
 
 use crate::layers::line_layer_impl::Impl as LineLayerImpl;
-use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
+use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 
 crate::properties!(
     /// The layout properties of a line layer.
@@ -67,28 +67,25 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[0, 11, 1, 2, 3, 4, 12, 13, 5, 6, 7, 14, 15, 8, 9, 10],
 );
 
-impl Properties for LineLayerImpl {
-    const TABLE: &'static PropertyTable = &PROPERTIES;
-
-    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
-        Some(match slot {
-            0 => visitor.paint(|s| &s.paint.line_blur, |s| &mut s.paint.line_blur),
-            1 => visitor.paint(|s| &s.paint.line_color, |s| &mut s.paint.line_color),
-            2 => visitor.paint(|s| &s.paint.line_dasharray, |s| &mut s.paint.line_dasharray),
-            3 => visitor.paint(|s| &s.paint.line_gap_width, |s| &mut s.paint.line_gap_width),
-            4 => visitor.paint(|s| &s.paint.line_gradient, |s| &mut s.paint.line_gradient),
-            5 => visitor.paint(|s| &s.paint.line_offset, |s| &mut s.paint.line_offset),
-            6 => visitor.paint(|s| &s.paint.line_opacity, |s| &mut s.paint.line_opacity),
-            7 => visitor.paint(|s| &s.paint.line_pattern, |s| &mut s.paint.line_pattern),
-            8 => visitor.paint(|s| &s.paint.line_translate, |s| &mut s.paint.line_translate),
-            9 => visitor.paint(|s| &s.paint.line_translate_anchor, |s| &mut s.paint.line_translate_anchor),
-            10 => visitor.paint(|s| &s.paint.line_width, |s| &mut s.paint.line_width),
-            11 => visitor.layout(|s| &s.layout.line_cap, |s| &mut s.layout.line_cap),
-            12 => visitor.layout(|s| &s.layout.line_join, |s| &mut s.layout.line_join),
-            13 => visitor.layout(|s| &s.layout.line_miter_limit, |s| &mut s.layout.line_miter_limit),
-            14 => visitor.layout(|s| &s.layout.line_round_limit, |s| &mut s.layout.line_round_limit),
-            15 => visitor.layout(|s| &s.layout.line_sort_key, |s| &mut s.layout.line_sort_key),
-            _ => return None,
-        })
-    }
+/// Calls `visitor` with the field of the property in `slot`.
+pub(crate) fn visit<V: PropertyVisitor<LineLayerImpl>>(slot: usize, visitor: V) -> Option<V::Output> {
+    Some(match slot {
+        0 => visitor.paint(|s| &s.paint.line_blur, |s| &mut s.paint.line_blur),
+        1 => visitor.paint(|s| &s.paint.line_color, |s| &mut s.paint.line_color),
+        2 => visitor.paint(|s| &s.paint.line_dasharray, |s| &mut s.paint.line_dasharray),
+        3 => visitor.paint(|s| &s.paint.line_gap_width, |s| &mut s.paint.line_gap_width),
+        4 => visitor.paint(|s| &s.paint.line_gradient, |s| &mut s.paint.line_gradient),
+        5 => visitor.paint(|s| &s.paint.line_offset, |s| &mut s.paint.line_offset),
+        6 => visitor.paint(|s| &s.paint.line_opacity, |s| &mut s.paint.line_opacity),
+        7 => visitor.paint(|s| &s.paint.line_pattern, |s| &mut s.paint.line_pattern),
+        8 => visitor.paint(|s| &s.paint.line_translate, |s| &mut s.paint.line_translate),
+        9 => visitor.paint(|s| &s.paint.line_translate_anchor, |s| &mut s.paint.line_translate_anchor),
+        10 => visitor.paint(|s| &s.paint.line_width, |s| &mut s.paint.line_width),
+        11 => visitor.layout(|s| &s.layout.line_cap, |s| &mut s.layout.line_cap),
+        12 => visitor.layout(|s| &s.layout.line_join, |s| &mut s.layout.line_join),
+        13 => visitor.layout(|s| &s.layout.line_miter_limit, |s| &mut s.layout.line_miter_limit),
+        14 => visitor.layout(|s| &s.layout.line_round_limit, |s| &mut s.layout.line_round_limit),
+        15 => visitor.layout(|s| &s.layout.line_sort_key, |s| &mut s.layout.line_sort_key),
+        _ => return None,
+    })
 }

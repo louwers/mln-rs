@@ -1,4 +1,5 @@
 use crate::defaults::{default_value, rust_value};
+use crate::emit_table::Visit;
 use crate::spec::{LayerSpec, Property};
 use crate::types::{camelize, evaluated_type, is_color_ramp, is_data_driven, snake};
 use crate::writer::{Writer, imports_for, layer_file_name};
@@ -73,7 +74,7 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     w.blank();
 
     let mut imports = vec![format!("crate::layers::{file}_layer_impl::Impl as {t}LayerImpl")];
-    imports.extend(crate::emit_table::imports());
+    imports.extend(crate::emit_table::imports(&Visit::Function));
     let heatmap_color = layer.paint_properties.iter().find(|p| p.name == "heatmap-color");
     if heatmap_color.is_some() {
         imports.push("crate::color_ramp_property_value::ColorRampPropertyValue".into());
@@ -98,7 +99,7 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     w.blank();
 
     let entries = crate::emit_table::layer_entries(&layer.paint_properties, &layer.layout_properties);
-    crate::emit_table::emit(&mut w, &format!("{t}LayerImpl"), &entries);
+    crate::emit_table::emit(&mut w, &format!("{t}LayerImpl"), &entries, &Visit::Function);
 
     if let Some(property) = heatmap_color {
         // The renderer falls back to this default when the style leaves the

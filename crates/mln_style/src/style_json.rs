@@ -14,7 +14,7 @@ use mln_util::error::Error;
 use crate::conversion::{Converter, convert_layer, convert_light, convert_projection, convert_sky, convert_source};
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
-use crate::layer::layer_type_info;
+use crate::layer::SourceKind;
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::property_table::{Properties, defined_properties};
@@ -73,7 +73,7 @@ impl Style {
             return Err(Error::already_exists(format!("layer {} already exists", quote(&id))));
         }
         let type_info = layer.get_type_info();
-        if type_info.source == layer_type_info::Source::Required {
+        if type_info.source != SourceKind::None {
             let source_id = layer.get_source_id();
             let Some(source) = self.get_source(&source_id) else {
                 return Err(Error::not_found(format!(
@@ -86,7 +86,7 @@ impl Style {
                 return Err(Error::invalid_argument(format!(
                     "source {} does not support {} layer {}",
                     quote(&source_id),
-                    type_info.type_,
+                    type_info.name,
                     quote(&id)
                 )));
             }
@@ -175,11 +175,11 @@ impl Style {
         };
 
         let type_info = layer.get_type_info();
-        if (name == "source" || name == "source-layer") && type_info.source != layer_type_info::Source::Required {
+        if (name == "source" || name == "source-layer") && type_info.source == SourceKind::None {
             // A layer that takes no source would ignore the value.
             return Err(Error::invalid_argument(format!(
                 "{} layer {} does not take a {name}",
-                type_info.type_,
+                type_info.name,
                 quote(layer_id)
             )));
         }

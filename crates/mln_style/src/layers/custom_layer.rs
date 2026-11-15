@@ -17,19 +17,11 @@ use mln_conversion::{Convertible, Error};
 use mln_map_types::{FrameProjection, MapView};
 
 use crate::expression::{Dependency, Functions};
-use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serialize_base};
+use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, SourceKind, serialize_base};
 use crate::layer_properties::{LayerProperties, LayerPropertiesBase};
+use crate::layer_type::{LayerStyle, NoProperties, StyleLayerType};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 use crate::style_property::StyleProperty;
-
-static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
-    type_: "custom",
-    source: layer_type_info::Source::NotRequired,
-    pass3d: layer_type_info::Pass3D::NotRequired,
-    layout: layer_type_info::Layout::NotRequired,
-    fading_tiles: layer_type_info::FadingTiles::NotRequired,
-    cross_tile_index: layer_type_info::CrossTileIndex::NotRequired,
-    tile_kind: layer_type_info::TileKind::NotRequired,
-};
 
 /// The frame that a custom layer draws into.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -89,59 +81,72 @@ pub trait CustomLayerHost: Send + Sync {
     fn context_lost(&self) {}
 }
 
-#[derive(Clone)]
-pub struct Impl {
-    pub base: ImplBase,
-    /// The host, while the style has the layer or a renderer draws it.
-    host: Weak<dyn CustomLayerHost>,
-}
+/// The `custom` layer type, whose layers a [`CustomLayerHost`] draws.
+pub struct Custom;
 
-impl std::fmt::Debug for Impl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomLayer::Impl").field("base", &self.base).finish_non_exhaustive()
+/// The style data of a `custom` layer.
+pub type Impl = LayerStyle<Custom>;
+
+static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+impl StyleLayerType for Custom {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "custom",
+        source: SourceKind::None,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: false,
+    };
+    const PROPERTIES: &'static PropertyTable = &PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = CustomHost;
+
+    fn visit_property<V: PropertyVisitor<Impl>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
+    }
+
+    fn layout_difference(_a: &Impl, _b: &Impl) -> bool {
+        false
     }
 }
 
-impl Impl {
+/// The host of a custom layer, while the style has the layer or a renderer
+/// draws it.
+#[derive(Clone)]
+pub struct CustomHost(Weak<dyn CustomLayerHost>);
+
+impl Default for CustomHost {
+    /// No host.
+    fn default() -> Self {
+        struct NoHost;
+        impl CustomLayerHost for NoHost {}
+        CustomHost(Weak::<NoHost>::new())
+    }
+}
+
+impl LayerStyle<Custom> {
+    /// A layer named `layer_id` that `host` draws.
     #[must_use]
-    pub fn new(layer_id: String, host: &Arc<dyn CustomLayerHost>) -> Self {
-        Impl { base: ImplBase::new(layer_id, String::new()), host: Arc::downgrade(host) }
+    pub fn with_host(layer_id: String, host: &Arc<dyn CustomLayerHost>) -> Self {
+        let mut style = LayerStyle::new(layer_id, String::new());
+        style.extra = CustomHost(Arc::downgrade(host));
+        style
     }
 
     /// The layer's host, unless the style no longer has the layer and no
     /// renderer draws it.
     #[must_use]
     pub fn host(&self) -> Option<Arc<dyn CustomLayerHost>> {
-        self.host.upgrade()
+        self.extra.0.upgrade()
     }
 
     /// Whether `host` is the layer's.
     #[must_use]
     pub fn has_host(&self, host: &Arc<dyn CustomLayerHost>) -> bool {
-        std::ptr::addr_eq(self.host.as_ptr(), Arc::as_ptr(host))
-    }
-
-    #[must_use]
-    pub fn static_type_info() -> &'static LayerTypeInfo {
-        &TYPE_INFO
-    }
-}
-
-impl layer::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-
-    fn has_layout_difference(&self, _other: &dyn layer::Impl) -> bool {
-        false
-    }
-
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        &TYPE_INFO
+        std::ptr::addr_eq(self.extra.0.as_ptr(), Arc::as_ptr(host))
     }
 }
 
@@ -169,7 +174,7 @@ impl CustomLayer {
     /// A layer whose filter and visibility parse against `functions`.
     #[must_use]
     pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str, host: Arc<dyn CustomLayerHost>) -> Self {
-        CustomLayer { base_impl: Arc::new(Impl::new(layer_id.to_owned(), &host)), host, functions }
+        CustomLayer { base_impl: Arc::new(Impl::with_host(layer_id.to_owned(), &host)), host, functions }
     }
 
     #[must_use]

@@ -2,7 +2,7 @@
 // (tools/style-codegen/v8.json). Do not edit.
 
 use crate::layers::background_layer_impl::Impl as BackgroundLayerImpl;
-use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
+use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 
 crate::properties!(
     /// The paint properties of a background layer.
@@ -30,15 +30,12 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[0, 1, 2],
 );
 
-impl Properties for BackgroundLayerImpl {
-    const TABLE: &'static PropertyTable = &PROPERTIES;
-
-    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
-        Some(match slot {
-            0 => visitor.paint(|s| &s.paint.background_color, |s| &mut s.paint.background_color),
-            1 => visitor.paint(|s| &s.paint.background_opacity, |s| &mut s.paint.background_opacity),
-            2 => visitor.paint(|s| &s.paint.background_pattern, |s| &mut s.paint.background_pattern),
-            _ => return None,
-        })
-    }
+/// Calls `visitor` with the field of the property in `slot`.
+pub(crate) fn visit<V: PropertyVisitor<BackgroundLayerImpl>>(slot: usize, visitor: V) -> Option<V::Output> {
+    Some(match slot {
+        0 => visitor.paint(|s| &s.paint.background_color, |s| &mut s.paint.background_color),
+        1 => visitor.paint(|s| &s.paint.background_opacity, |s| &mut s.paint.background_opacity),
+        2 => visitor.paint(|s| &s.paint.background_pattern, |s| &mut s.paint.background_pattern),
+        _ => return None,
+    })
 }

@@ -1,47 +1,42 @@
-use crate::layer::{self, ImplBase, LayerTypeInfo};
-use crate::layers::background_layer_properties::BackgroundPaintProperties;
+use std::sync::Arc;
 
-#[derive(Clone, Debug, mln_wire::Wire)]
-pub struct Impl {
-    pub(crate) base: ImplBase,
-    pub paint: BackgroundPaintProperties::Transitionable,
-}
+use crate::expression::Functions;
+use crate::layer::{Layer, LayerTypeInfo, SourceKind};
+use crate::layer_type::{LayerStyle, NoProperties, StyleLayerType};
+use crate::layers::background_layer::BackgroundLayer;
+use crate::layers::background_layer_properties::{self, BackgroundPaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-impl Impl {
-    #[must_use]
-    pub(crate) fn new(layer_id: String, source_id: String) -> Self {
-        Impl { base: ImplBase::new(layer_id, source_id), paint: BackgroundPaintProperties::Transitionable::default() }
-    }
-}
+/// The `background` layer type.
+pub struct Background;
 
-/// The base members read as `impl_.id`, `impl_.visibility`, and so on.
-impl std::ops::Deref for Impl {
-    type Target = ImplBase;
-    fn deref(&self) -> &ImplBase {
-        &self.base
-    }
-}
+/// The style data of a `background` layer.
+pub type Impl = LayerStyle<Background>;
 
-impl std::ops::DerefMut for Impl {
-    fn deref_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-}
+impl StyleLayerType for Background {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "background",
+        source: SourceKind::None,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &background_layer_properties::PROPERTIES;
 
-impl layer::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
+    type LayoutProperties = NoProperties;
+    type PaintProperties = BackgroundPaintProperties::Transitionable;
+    type Extra = ();
 
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        background_layer_properties::visit(slot, visitor)
     }
 
-    fn has_layout_difference(&self, _other: &dyn layer::Impl) -> bool {
+    fn layout_difference(_a: &Impl, _b: &Impl) -> bool {
         false
     }
 
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        Impl::static_type_info()
+    fn into_layer(style: Arc<Impl>, functions: Arc<Functions>) -> Option<Box<dyn Layer>> {
+        Some(Box::new(BackgroundLayer::from_impl(style, functions)))
     }
 }

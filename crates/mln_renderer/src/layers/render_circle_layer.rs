@@ -44,7 +44,6 @@ use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &CircleLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), CircleLayerImpl::static_type_info()));
     impl_.downcast_ref::<CircleLayerImpl>().expect("RenderCircleLayer: not a circle layer impl")
 }
 

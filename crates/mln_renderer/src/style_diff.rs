@@ -98,7 +98,7 @@ pub(crate) fn diff_layers(
     a: &ImmutableVector<dyn layer::Impl>,
     b: &ImmutableVector<dyn layer::Impl>,
 ) -> LayerDifference {
-    diff(a, b, |l| l.id.clone(), |lhs, rhs| lhs.id == rhs.id && lhs.get_type_info().type_ == rhs.get_type_info().type_)
+    diff(a, b, |l| l.id.clone(), |lhs, rhs| lhs.id == rhs.id && lhs.get_type_info().name == rhs.get_type_info().name)
 }
 
 #[must_use]

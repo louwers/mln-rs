@@ -11,7 +11,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
-use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::symbol_layer_impl::Impl as SymbolLayerImpl;
 use mln_style::property_value::PropertyValue;
@@ -697,7 +696,7 @@ impl SourceTiles {
             let hold_for_fade = tile.hold_for_fade();
             for layer_properties in update.layers {
                 let type_info = layer_properties.base_impl.get_type_info();
-                if hold_for_fade && type_info.fading_tiles == layer_type_info::FadingTiles::NotRequired {
+                if hold_for_fade && !type_info.fading_tiles {
                     continue;
                 }
                 let updated = tile.layer_properties_updated(layer_properties);

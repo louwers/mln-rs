@@ -2,8 +2,10 @@
 // the `mln_wire` encoding, for a tile worker in another wasm instance
 // (mln_renderer's tile/worker_codec).
 //
-// A `Layer::Impl` and a `LayerProperties` are trait objects, so each crosses
-// as the concrete type of its layer type, tagged with it. An expression
+// A layer's style data crosses as its type's name, then the value, and the
+// reading side resolves the name against the registry of its
+// `registry::decode_with`. A `LayerProperties` crosses as the concrete type
+// of its layer type, tagged with it. An expression
 // crosses as its parsed node tree, so the other side doesn't parse it again;
 // tools/render-test's `layer_round_trip` test sends every layer of the
 // render and query suites across.
@@ -36,34 +38,13 @@ use crate::layers::{
     background_layer_impl, circle_layer_impl, color_relief_layer_impl, fill_extrusion_layer_impl, fill_layer_impl,
     heatmap_layer_impl, hillshade_layer_impl, line_layer_impl, raster_layer_impl, symbol_layer_impl,
 };
+use crate::registry::decoding_layer_type;
 
 /// For each layer type: the tag, its `Layer::Impl` and its
-/// `LayerProperties`. A layer or its properties cross as the index of its
-/// type, then the concrete value.
+/// `LayerProperties`. Properties cross as the index of their type, then the
+/// concrete value.
 macro_rules! layer_types {
     ($($tag:ident: $impl_:ty, $properties:ty;)+) => {
-        fn write_impl(impl_: &dyn Impl, w: &mut Writer) {
-            let mut index = 0u32;
-            $(if let Some(impl_) = impl_.downcast_ref::<$impl_>() {
-                mln_wire::write_tag(w, index);
-                return impl_.write(w);
-            }
-            index += 1;)+
-            let _ = index;
-            w.fail(format!("no wire form for {} layers", impl_.get_type_info().type_));
-        }
-
-        fn read_impl(r: &mut Reader<'_>) -> Option<Arc<dyn Impl>> {
-            let tag = r.tag()?;
-            let mut index = 0u32;
-            $(if tag == index {
-                return Some(Arc::new(<$impl_>::read(r)?));
-            }
-            index += 1;)+
-            let _ = index;
-            r.fail_tag()
-        }
-
         fn write_properties(properties: &dyn LayerProperties, w: &mut Writer) {
             let mut index = 0u32;
             $(if let Some(properties) = properties.downcast_ref::<$properties>() {
@@ -72,7 +53,7 @@ macro_rules! layer_types {
             }
             index += 1;)+
             let _ = index;
-            let type_ = properties.base().base_impl.get_type_info().type_;
+            let type_ = properties.base().base_impl.get_type_info().name;
             w.fail(format!("no wire form for {type_} layer properties"));
         }
 
@@ -118,11 +99,16 @@ impl Kind for SharedLayer {
 
 impl WireKind for SharedLayer {
     fn write(impl_: &dyn Impl, w: &mut Writer) {
-        write_impl(impl_, w);
+        mln_wire::write_str(w, impl_.get_type_info().name);
+        impl_.write(w);
     }
 
     fn read(r: &mut Reader<'_>) -> Option<Arc<dyn Impl>> {
-        read_impl(r)
+        let name = mln_wire::read_str(r)?;
+        match decoding_layer_type(name) {
+            Ok(layer_type) => layer_type.read_style(r),
+            Err(message) => r.fail(message),
+        }
     }
 }
 

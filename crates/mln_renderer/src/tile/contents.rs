@@ -57,7 +57,7 @@ impl LayoutResult {
     /// nothing.
     pub(crate) fn get_layer_render_data(&self, layer_impl: &dyn layer::Impl) -> Option<&LayerRenderData> {
         let result = self.layer_render_data.get(&layer_impl.id)?;
-        if result.layer_properties.base_impl.get_type_info().type_ != layer_impl.get_type_info().type_ {
+        if result.layer_properties.base_impl.get_type_info().name != layer_impl.get_type_info().name {
             return None;
         }
         Some(result)

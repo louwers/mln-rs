@@ -2,7 +2,7 @@
 // `set_overrides`, which builds `FormatSectionOverride` expressions, is in
 // format_section_override.rs.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use mln_expression::format_expression::FormatExpressionSection;
 use mln_expression::value::from_expression_value;
@@ -11,11 +11,14 @@ use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
 use crate::evaluated::Evaluated;
-use crate::expression::{Dependency, Expr, Formatted, FormattedSection, Type};
-use crate::layer::{self, FontStack, ImplBase, LayerTypeInfo};
-use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
+use crate::expression::{Expr, Formatted, FormattedSection, Functions, Type};
+use crate::layer::{FontStack, Layer, LayerTypeInfo, SourceKind};
+use crate::layer_type::{LayerStyle, StyleLayerType};
+use crate::layers::symbol_layer::SymbolLayer;
+use crate::layers::symbol_layer_properties::{self, SymbolLayoutProperties, SymbolPaintProperties};
 use crate::properties::OverridableSection;
 use crate::property_expression::PropertyExpression;
+use crate::property_table::{PropertyTable, PropertyVisitor};
 use crate::property_value::PropertyValue;
 
 /// The alternatives of a `PropertyValue<Formatted>` or an
@@ -161,77 +164,46 @@ impl SymbolLayerPaintPropertyOverrides {
     }
 }
 
-#[derive(Clone, Debug, mln_wire::Wire)]
-pub struct Impl {
-    pub(crate) base: ImplBase,
-    pub layout: SymbolLayoutProperties::Unevaluated,
-    pub paint: SymbolPaintProperties::Transitionable,
-    #[wire(skip)]
-    has_format_section_overrides_: OnceLock<bool>,
-}
+/// The `symbol` layer type.
+pub struct Symbol;
 
-impl Impl {
-    #[must_use]
-    pub(crate) fn new(layer_id: String, source_id: String) -> Self {
-        Impl {
-            base: ImplBase::new(layer_id, source_id),
-            layout: SymbolLayoutProperties::Unevaluated::default(),
-            paint: SymbolPaintProperties::Transitionable::default(),
-            has_format_section_overrides_: OnceLock::new(),
-        }
+/// The style data of a `symbol` layer.
+pub type Impl = LayerStyle<Symbol>;
+
+impl StyleLayerType for Symbol {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "symbol",
+        source: SourceKind::Geometry,
+        pass_3d: false,
+        fading_tiles: true,
+        cross_tile_index: true,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &symbol_layer_properties::PROPERTIES;
+
+    type LayoutProperties = SymbolLayoutProperties::Unevaluated;
+    type PaintProperties = SymbolPaintProperties::Transitionable;
+    type Extra = OnceLock<bool>;
+
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        symbol_layer_properties::visit(slot, visitor)
     }
 
-    fn has_format_section_overrides(&self) -> bool {
-        *self
-            .has_format_section_overrides_
-            .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field))
-    }
-}
-
-/// The base members read as `impl_.id`, `impl_.visibility`, and so on.
-impl std::ops::Deref for Impl {
-    type Target = ImplBase;
-    fn deref(&self) -> &ImplBase {
-        &self.base
-    }
-}
-
-impl std::ops::DerefMut for Impl {
-    fn deref_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-}
-
-impl layer::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
+    fn layout_difference(a: &Impl, b: &Impl) -> bool {
+        a.filter != b.filter
+            || a.visibility != b.visibility
+            || a.layout != b.layout
+            || a.paint.has_data_driven_property_difference(&b.paint)
+            || (has_format_section_overrides(a)
+                && SymbolLayerPaintPropertyOverrides::has_paint_property_difference(&a.paint, &b.paint))
     }
 
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-
-    fn has_layout_difference(&self, other: &dyn layer::Impl) -> bool {
-        debug_assert!(std::ptr::eq(other.get_type_info(), layer::Impl::get_type_info(self)));
-        let impl_ = other.downcast_ref::<Impl>().expect("SymbolLayer::Impl::hasLayoutDifference: not a symbol layer");
-        self.filter != impl_.filter
-            || self.visibility != impl_.visibility
-            || self.layout != impl_.layout
-            || self.paint.has_data_driven_property_difference(&impl_.paint)
-            || (self.has_format_section_overrides()
-                && SymbolLayerPaintPropertyOverrides::has_paint_property_difference(&self.paint, &impl_.paint))
-    }
-
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        Impl::static_type_info()
-    }
-
-    fn populate_font_stack(&self, font_stack: &mut VecSet<FontStack>) {
-        if self.layout.text_field.is_undefined() {
+    fn populate_font_stack(style: &Impl, font_stack: &mut VecSet<FontStack>) {
+        if style.layout.text_field.is_undefined() {
             return;
         }
 
-        match &self.layout.text_font {
+        match &style.layout.text_font {
             PropertyValue::Undefined => {
                 font_stack
                     .insert(vec![LAST_RESORT_ALPHABETIC_FONT.to_owned(), LAST_RESORT_PAN_UNICODE_FONT.to_owned()]);
@@ -249,7 +221,7 @@ impl layer::Impl for Impl {
                             format!(
                                 "Layer '{}' has an invalid value for text-font and will not render text. Output \
                                  values must be contained as literals within the expression.",
-                                self.id
+                                style.id
                             ),
                         );
                         break;
@@ -259,12 +231,12 @@ impl layer::Impl for Impl {
         }
     }
 
-    fn get_layout_dependencies(&self) -> Dependency {
-        self.layout.get_dependencies() | self.base.get_filter_dependencies()
+    fn into_layer(style: Arc<Impl>, functions: Arc<Functions>) -> Option<Box<dyn Layer>> {
+        Some(Box::new(SymbolLayer::from_impl(style, functions)))
     }
+}
 
-    fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>) {
-        self.layout.collect_global_state_refs(refs);
-        self.base.collect_filter_global_state_refs(refs);
-    }
+/// Whether a section of `style`'s `text-field` overrides a paint property.
+fn has_format_section_overrides(style: &Impl) -> bool {
+    *style.extra.get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(&style.layout.text_field))
 }

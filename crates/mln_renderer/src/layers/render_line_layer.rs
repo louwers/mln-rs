@@ -63,7 +63,6 @@ fn dash_pattern_cap(bucket: &LineBucket) -> LinePatternCap {
 }
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &LineLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), LineLayerImpl::static_type_info()));
     impl_.downcast_ref::<LineLayerImpl>().expect("RenderLineLayer: not a line layer impl")
 }
 

@@ -14,7 +14,6 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::expression::Dependency;
-use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{TranslateAnchorType, VisibilityType};
@@ -696,8 +695,7 @@ pub trait RenderLayer {
 
     /// Returns true if the layer has to be placed.
     fn needs_placement(&self) -> bool {
-        self.base().base_impl.get_type_info().cross_tile_index == layer_type_info::CrossTileIndex::Required
-            && !self.base().placement_data.is_empty()
+        self.base().base_impl.get_type_info().cross_tile_index && !self.base().placement_data.is_empty()
     }
 
     // symbols: `getPlacementData()`.

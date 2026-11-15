@@ -94,7 +94,7 @@ pub trait Source: Any {
     /// one to load. Its responses and background work answer on `run_loop`.
     fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop);
 
-    fn supports_layer_type(&self, type_info: &LayerTypeInfo) -> bool;
+    fn supports_layer_type(&self, type_info: LayerTypeInfo) -> bool;
 
     /// A copy of the current impl.
     fn create_mutable(&self) -> Box<dyn Impl>;

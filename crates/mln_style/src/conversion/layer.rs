@@ -1,7 +1,7 @@
 use mln_util::logging::{Event, Log};
 
 use super::{Convertible, Error};
-use crate::layer::{Layer, PropertyScope, layer_type_info};
+use crate::layer::{Layer, PropertyScope, SourceKind};
 use crate::registry::StyleRegistry;
 
 fn set_object_member(layer: &mut Box<dyn Layer>, value: &Convertible<'_>, member: &str, error: &mut Error) -> bool {
@@ -107,8 +107,7 @@ pub(crate) fn convert_layer_with(
     if !set_object_member(&mut layer, value, "filter", error) {
         return None;
     }
-    if layer.get_type_info().source == layer_type_info::Source::Required
-        && !set_object_member(&mut layer, value, "source-layer", error)
+    if layer.get_type_info().source != SourceKind::None && !set_object_member(&mut layer, value, "source-layer", error)
     {
         return None;
     }

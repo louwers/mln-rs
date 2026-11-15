@@ -1,47 +1,42 @@
-use crate::layer::{self, ImplBase, LayerTypeInfo};
-use crate::layers::color_relief_layer_properties::ColorReliefPaintProperties;
+use std::sync::Arc;
 
-#[derive(Clone, Debug, mln_wire::Wire)]
-pub struct Impl {
-    pub(crate) base: ImplBase,
-    pub paint: ColorReliefPaintProperties::Transitionable,
-}
+use crate::expression::Functions;
+use crate::layer::{Layer, LayerTypeInfo, SourceKind};
+use crate::layer_type::{LayerStyle, NoProperties, StyleLayerType};
+use crate::layers::color_relief_layer::ColorReliefLayer;
+use crate::layers::color_relief_layer_properties::{self, ColorReliefPaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-impl Impl {
-    #[must_use]
-    pub(crate) fn new(layer_id: String, source_id: String) -> Self {
-        Impl { base: ImplBase::new(layer_id, source_id), paint: ColorReliefPaintProperties::Transitionable::default() }
-    }
-}
+/// The `color-relief` layer type.
+pub struct ColorRelief;
 
-/// The base members read as `impl_.id`, `impl_.visibility`, and so on.
-impl std::ops::Deref for Impl {
-    type Target = ImplBase;
-    fn deref(&self) -> &ImplBase {
-        &self.base
-    }
-}
+/// The style data of a `color-relief` layer.
+pub type Impl = LayerStyle<ColorRelief>;
 
-impl std::ops::DerefMut for Impl {
-    fn deref_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-}
+impl StyleLayerType for ColorRelief {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "color-relief",
+        source: SourceKind::RasterDem,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &color_relief_layer_properties::PROPERTIES;
 
-impl layer::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
+    type LayoutProperties = NoProperties;
+    type PaintProperties = ColorReliefPaintProperties::Transitionable;
+    type Extra = ();
 
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        color_relief_layer_properties::visit(slot, visitor)
     }
 
-    fn has_layout_difference(&self, _other: &dyn layer::Impl) -> bool {
+    fn layout_difference(_a: &Impl, _b: &Impl) -> bool {
         false
     }
 
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        Impl::static_type_info()
+    fn into_layer(style: Arc<Impl>, functions: Arc<Functions>) -> Option<Box<dyn Layer>> {
+        Some(Box::new(ColorReliefLayer::from_impl(style, functions)))
     }
 }

@@ -83,7 +83,7 @@ const RED: &str = r##""#ff0000""##;
 #[test]
 fn background_properties() {
     let mut layer = BackgroundLayer::new("background");
-    assert_eq!("background", layer.get_type_info().type_);
+    assert_eq!("background", layer.get_type_info().name);
 
     // Paint properties
 
@@ -96,7 +96,7 @@ fn background_properties() {
 #[test]
 fn circle_properties() {
     let mut layer = CircleLayer::new("circle", "source");
-    assert_eq!("circle", layer.get_type_info().type_);
+    assert_eq!("circle", layer.get_type_info().name);
 
     // Paint properties
 
@@ -112,7 +112,7 @@ fn circle_properties() {
 #[test]
 fn fill_properties() {
     let mut layer = FillLayer::new("fill", "source");
-    assert_eq!("fill", layer.get_type_info().type_);
+    assert_eq!("fill", layer.get_type_info().name);
 
     // Paint properties
 
@@ -139,7 +139,7 @@ fn fill_extrusion_layout_difference() {
 #[test]
 fn line_properties() {
     let mut layer = LineLayer::new("line", "source");
-    assert_eq!("line", layer.get_type_info().type_);
+    assert_eq!("line", layer.get_type_info().name);
 
     // Layout properties
 
@@ -168,7 +168,7 @@ fn line_properties() {
 #[test]
 fn raster_properties() {
     let mut layer = RasterLayer::new("raster", "source");
-    assert_eq!("raster", layer.get_type_info().type_);
+    assert_eq!("raster", layer.get_type_info().name);
 
     // Paint properties
 

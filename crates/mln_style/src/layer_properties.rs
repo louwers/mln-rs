@@ -104,7 +104,7 @@ impl std::fmt::Debug for dyn LayerProperties {
         let base_impl = &self.base().base_impl;
         f.debug_struct("LayerProperties")
             .field("id", &base_impl.base().id)
-            .field("type", &base_impl.get_type_info().type_)
+            .field("type", &base_impl.get_type_info().name)
             .finish_non_exhaustive()
     }
 }

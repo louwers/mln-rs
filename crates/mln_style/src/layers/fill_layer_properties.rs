@@ -2,7 +2,7 @@
 // (tools/style-codegen/v8.json). Do not edit.
 
 use crate::layers::fill_layer_impl::Impl as FillLayerImpl;
-use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
+use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 
 crate::properties!(
     /// The layout properties of a fill layer.
@@ -47,20 +47,17 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[0, 1, 2, 3, 4, 7, 5, 6],
 );
 
-impl Properties for FillLayerImpl {
-    const TABLE: &'static PropertyTable = &PROPERTIES;
-
-    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
-        Some(match slot {
-            0 => visitor.paint(|s| &s.paint.fill_antialias, |s| &mut s.paint.fill_antialias),
-            1 => visitor.paint(|s| &s.paint.fill_color, |s| &mut s.paint.fill_color),
-            2 => visitor.paint(|s| &s.paint.fill_opacity, |s| &mut s.paint.fill_opacity),
-            3 => visitor.paint(|s| &s.paint.fill_outline_color, |s| &mut s.paint.fill_outline_color),
-            4 => visitor.paint(|s| &s.paint.fill_pattern, |s| &mut s.paint.fill_pattern),
-            5 => visitor.paint(|s| &s.paint.fill_translate, |s| &mut s.paint.fill_translate),
-            6 => visitor.paint(|s| &s.paint.fill_translate_anchor, |s| &mut s.paint.fill_translate_anchor),
-            7 => visitor.layout(|s| &s.layout.fill_sort_key, |s| &mut s.layout.fill_sort_key),
-            _ => return None,
-        })
-    }
+/// Calls `visitor` with the field of the property in `slot`.
+pub(crate) fn visit<V: PropertyVisitor<FillLayerImpl>>(slot: usize, visitor: V) -> Option<V::Output> {
+    Some(match slot {
+        0 => visitor.paint(|s| &s.paint.fill_antialias, |s| &mut s.paint.fill_antialias),
+        1 => visitor.paint(|s| &s.paint.fill_color, |s| &mut s.paint.fill_color),
+        2 => visitor.paint(|s| &s.paint.fill_opacity, |s| &mut s.paint.fill_opacity),
+        3 => visitor.paint(|s| &s.paint.fill_outline_color, |s| &mut s.paint.fill_outline_color),
+        4 => visitor.paint(|s| &s.paint.fill_pattern, |s| &mut s.paint.fill_pattern),
+        5 => visitor.paint(|s| &s.paint.fill_translate, |s| &mut s.paint.fill_translate),
+        6 => visitor.paint(|s| &s.paint.fill_translate_anchor, |s| &mut s.paint.fill_translate_anchor),
+        7 => visitor.layout(|s| &s.layout.fill_sort_key, |s| &mut s.layout.fill_sort_key),
+        _ => return None,
+    })
 }

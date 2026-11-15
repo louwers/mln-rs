@@ -9,11 +9,12 @@
 //!
 //! Layers:
 //! - `layer::Layer` is the layer trait. A layer's data is an
-//!   `Arc<dyn layer::Impl>`; `layer::ImplBase` holds the members every layer
-//!   type has.
-//! - Each layer type has a module such as
-//!   `layers::background_layer::{BackgroundLayer, Impl}`, and property sets
-//!   such as
+//!   `Arc<dyn layer::Impl>`, a `layer_type::LayerStyle<T>` of its type `T`;
+//!   `layer::ImplBase` holds the members every layer type has.
+//! - Each layer type is a marker type that implements
+//!   `layer_type::StyleLayerType`, such as `layers::Background`, with a
+//!   module such as `layers::background_layer::{BackgroundLayer, Impl}` and
+//!   property sets such as
 //!   `layers::BackgroundPaintProperties::{Transitionable, Unevaluated, PossiblyEvaluated, Evaluated}`.
 //! - Each layer type, the light and the sky have a property table, which
 //!   `property_table` reads to get, set and serialize properties by name.
@@ -34,7 +35,7 @@ pub mod image;
 pub mod layer;
 pub mod layer_impl;
 pub mod layer_properties;
-mod layermanager;
+pub mod layer_type;
 pub mod layers;
 pub mod light;
 mod light_impl;
@@ -47,7 +48,8 @@ pub mod projection;
 mod projection_impl;
 pub mod properties;
 pub mod property_expression;
-mod property_table;
+#[doc(hidden)]
+pub mod property_table;
 pub mod property_value;
 pub mod registry;
 pub mod renderer;
@@ -74,7 +76,7 @@ pub(crate) use properties::{
     __possibly_evaluated_methods, __property_data_driven, __property_evaluation, __property_value, properties,
 };
 pub use property_value::PropertyValue;
-pub use registry::StyleRegistry;
+pub use registry::{StyleRegistry, decode_with};
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
 pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 pub use style::{Style, StyleLoadError};

@@ -71,7 +71,6 @@ use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &SymbolLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), SymbolLayerImpl::static_type_info()));
     impl_.downcast_ref::<SymbolLayerImpl>().expect("RenderSymbolLayer: not a symbol layer impl")
 }
 

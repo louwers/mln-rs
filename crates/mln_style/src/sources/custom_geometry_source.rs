@@ -19,8 +19,7 @@ use mln_util::range::Range;
 
 use super::geojson_source::TileFeatures;
 use crate::custom_tile_loader::{CustomTileLoader, TileFunction};
-use crate::layer::LayerTypeInfo;
-use crate::layer::layer_type_info::TileKind;
+use crate::layer::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
@@ -316,8 +315,8 @@ impl Source for CustomGeometrySource {
         self.inner.base.observer().on_source_loaded(self);
     }
 
-    fn supports_layer_type(&self, info: &LayerTypeInfo) -> bool {
-        TileKind::Geometry as u8 == info.tile_kind as u8
+    fn supports_layer_type(&self, info: LayerTypeInfo) -> bool {
+        info.source == SourceKind::Geometry
     }
 
     fn create_mutable(&self) -> Box<dyn source_impl::Impl> {

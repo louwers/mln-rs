@@ -1,69 +1,45 @@
-use mln_vec_map::VecSet;
+use std::sync::Arc;
 
-use crate::expression::Dependency;
-use crate::layer::{self, ImplBase, LayerTypeInfo};
-use crate::layers::circle_layer_properties::{CircleLayoutProperties, CirclePaintProperties};
+use crate::expression::Functions;
+use crate::layer::{Layer, LayerTypeInfo, SourceKind};
+use crate::layer_type::{LayerStyle, StyleLayerType};
+use crate::layers::circle_layer::CircleLayer;
+use crate::layers::circle_layer_properties::{self, CircleLayoutProperties, CirclePaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-#[derive(Clone, Debug, mln_wire::Wire)]
-pub struct Impl {
-    pub(crate) base: ImplBase,
-    pub layout: CircleLayoutProperties::Unevaluated,
-    pub paint: CirclePaintProperties::Transitionable,
-}
+/// The `circle` layer type.
+pub struct Circle;
 
-impl Impl {
-    #[must_use]
-    pub(crate) fn new(layer_id: String, source_id: String) -> Self {
-        Impl {
-            base: ImplBase::new(layer_id, source_id),
-            layout: CircleLayoutProperties::Unevaluated::default(),
-            paint: CirclePaintProperties::Transitionable::default(),
-        }
-    }
-}
+/// The style data of a `circle` layer.
+pub type Impl = LayerStyle<Circle>;
 
-/// The base members read as `impl_.id`, `impl_.visibility`, and so on.
-impl std::ops::Deref for Impl {
-    type Target = ImplBase;
-    fn deref(&self) -> &ImplBase {
-        &self.base
-    }
-}
+impl StyleLayerType for Circle {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "circle",
+        source: SourceKind::Geometry,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &circle_layer_properties::PROPERTIES;
 
-impl std::ops::DerefMut for Impl {
-    fn deref_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-}
+    type LayoutProperties = CircleLayoutProperties::Unevaluated;
+    type PaintProperties = CirclePaintProperties::Transitionable;
+    type Extra = ();
 
-impl layer::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        circle_layer_properties::visit(slot, visitor)
     }
 
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
+    fn layout_difference(a: &Impl, b: &Impl) -> bool {
+        a.filter != b.filter
+            || a.visibility != b.visibility
+            || a.layout != b.layout
+            || a.paint.has_data_driven_property_difference(&b.paint)
     }
 
-    fn has_layout_difference(&self, other: &dyn layer::Impl) -> bool {
-        debug_assert!(std::ptr::eq(other.get_type_info(), layer::Impl::get_type_info(self)));
-        let impl_ = other.downcast_ref::<Impl>().expect("CircleLayer::Impl::hasLayoutDifference: not a circle layer");
-        self.filter != impl_.filter
-            || self.visibility != impl_.visibility
-            || self.layout != impl_.layout
-            || self.paint.has_data_driven_property_difference(&impl_.paint)
-    }
-
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        Impl::static_type_info()
-    }
-
-    fn get_layout_dependencies(&self) -> Dependency {
-        self.layout.get_dependencies() | self.base.get_filter_dependencies()
-    }
-
-    fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>) {
-        self.layout.collect_global_state_refs(refs);
-        self.base.collect_filter_global_state_refs(refs);
+    fn into_layer(style: Arc<Impl>, functions: Arc<Functions>) -> Option<Box<dyn Layer>> {
+        Some(Box::new(CircleLayer::from_impl(style, functions)))
     }
 }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
-use mln_style::layer::{LayerTypeInfo, layer_type_info};
+use mln_style::layer::LayerTypeInfo;
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
@@ -62,7 +62,7 @@ pub(crate) struct LayoutInput<'a> {
 }
 
 impl LayoutInput<'_> {
-    fn bucket_parameters(&self, layer_type: &'static LayerTypeInfo) -> BucketParameters {
+    fn bucket_parameters(&self, layer_type: LayerTypeInfo) -> BucketParameters {
         BucketParameters {
             tile_id: self.id,
             mode: self.params.mode,
@@ -180,25 +180,24 @@ pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
             continue;
         }
         let layer_type = leader_impl.get_type_info();
-        let layout = if layer_type.layout == layer_type_info::Layout::Required
-            && layermanager::layout_can_need_dependencies(layer_type, &layers)
-        {
-            layermanager::create_layout(
-                &mut LayoutParameters {
-                    bucket_parameters: &input.bucket_parameters(layer_type),
-                    font_faces: input.font_faces.cloned(),
-                    glyph_dependencies: &mut discovered.dependencies.glyphs,
-                    image_dependencies: &mut discovered.dependencies.images,
-                    available_images: input.available_images,
-                    unavailable_images: &unavailable_images,
-                    filter_groups: &mut discovered.filter_groups,
-                },
-                SourceLayer::new(data.clone(), leader_impl.source_layer.clone()),
-                &layers,
-            )?
-        } else {
-            None
-        };
+        let layout =
+            if layermanager::lays_out(layer_type) && layermanager::layout_can_need_dependencies(layer_type, &layers) {
+                layermanager::create_layout(
+                    &mut LayoutParameters {
+                        bucket_parameters: &input.bucket_parameters(layer_type),
+                        font_faces: input.font_faces.cloned(),
+                        glyph_dependencies: &mut discovered.dependencies.glyphs,
+                        image_dependencies: &mut discovered.dependencies.images,
+                        available_images: input.available_images,
+                        unavailable_images: &unavailable_images,
+                        filter_groups: &mut discovered.filter_groups,
+                    },
+                    SourceLayer::new(data.clone(), leader_impl.source_layer.clone()),
+                    &layers,
+                )?
+            } else {
+                None
+            };
         discovered.groups.push(DiscoveredGroup { layers, layout });
     }
 
@@ -280,7 +279,7 @@ fn build_group(
     let parameters = input.bucket_parameters(layer_type);
     let canonical = &input.id.canonical;
 
-    if layer_type.layout == layer_type_info::Layout::Required {
+    if layermanager::lays_out(layer_type) {
         // Layouts of groups that need no glyphs or images record nothing.
         let layout = layermanager::create_layout(
             &mut LayoutParameters {

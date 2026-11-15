@@ -11,7 +11,7 @@ pub(crate) struct BucketParameters {
     pub(crate) tile_id: OverscaledTileID,
     pub(crate) mode: MapMode,
     pub(crate) pixel_ratio: f32,
-    pub(crate) layer_type: &'static LayerTypeInfo,
+    pub(crate) layer_type: LayerTypeInfo,
     /// The style's global state, used by "global-state" expressions.
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) retain_features_by_id: bool,

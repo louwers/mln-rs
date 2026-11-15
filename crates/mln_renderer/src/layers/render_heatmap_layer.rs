@@ -54,7 +54,6 @@ use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HeatmapLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), HeatmapLayerImpl::static_type_info()));
     impl_.downcast_ref::<HeatmapLayerImpl>().expect("RenderHeatmapLayer: not a heatmap layer impl")
 }
 

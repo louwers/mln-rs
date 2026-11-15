@@ -2,7 +2,7 @@
 // (tools/style-codegen/v8.json). Do not edit.
 
 use crate::layers::circle_layer_impl::Impl as CircleLayerImpl;
-use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
+use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 
 crate::properties!(
     /// The layout properties of a circle layer.
@@ -55,24 +55,21 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[0, 1, 2, 3, 4, 5, 11, 6, 7, 8, 9, 10],
 );
 
-impl Properties for CircleLayerImpl {
-    const TABLE: &'static PropertyTable = &PROPERTIES;
-
-    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
-        Some(match slot {
-            0 => visitor.paint(|s| &s.paint.circle_blur, |s| &mut s.paint.circle_blur),
-            1 => visitor.paint(|s| &s.paint.circle_color, |s| &mut s.paint.circle_color),
-            2 => visitor.paint(|s| &s.paint.circle_opacity, |s| &mut s.paint.circle_opacity),
-            3 => visitor.paint(|s| &s.paint.circle_pitch_alignment, |s| &mut s.paint.circle_pitch_alignment),
-            4 => visitor.paint(|s| &s.paint.circle_pitch_scale, |s| &mut s.paint.circle_pitch_scale),
-            5 => visitor.paint(|s| &s.paint.circle_radius, |s| &mut s.paint.circle_radius),
-            6 => visitor.paint(|s| &s.paint.circle_stroke_color, |s| &mut s.paint.circle_stroke_color),
-            7 => visitor.paint(|s| &s.paint.circle_stroke_opacity, |s| &mut s.paint.circle_stroke_opacity),
-            8 => visitor.paint(|s| &s.paint.circle_stroke_width, |s| &mut s.paint.circle_stroke_width),
-            9 => visitor.paint(|s| &s.paint.circle_translate, |s| &mut s.paint.circle_translate),
-            10 => visitor.paint(|s| &s.paint.circle_translate_anchor, |s| &mut s.paint.circle_translate_anchor),
-            11 => visitor.layout(|s| &s.layout.circle_sort_key, |s| &mut s.layout.circle_sort_key),
-            _ => return None,
-        })
-    }
+/// Calls `visitor` with the field of the property in `slot`.
+pub(crate) fn visit<V: PropertyVisitor<CircleLayerImpl>>(slot: usize, visitor: V) -> Option<V::Output> {
+    Some(match slot {
+        0 => visitor.paint(|s| &s.paint.circle_blur, |s| &mut s.paint.circle_blur),
+        1 => visitor.paint(|s| &s.paint.circle_color, |s| &mut s.paint.circle_color),
+        2 => visitor.paint(|s| &s.paint.circle_opacity, |s| &mut s.paint.circle_opacity),
+        3 => visitor.paint(|s| &s.paint.circle_pitch_alignment, |s| &mut s.paint.circle_pitch_alignment),
+        4 => visitor.paint(|s| &s.paint.circle_pitch_scale, |s| &mut s.paint.circle_pitch_scale),
+        5 => visitor.paint(|s| &s.paint.circle_radius, |s| &mut s.paint.circle_radius),
+        6 => visitor.paint(|s| &s.paint.circle_stroke_color, |s| &mut s.paint.circle_stroke_color),
+        7 => visitor.paint(|s| &s.paint.circle_stroke_opacity, |s| &mut s.paint.circle_stroke_opacity),
+        8 => visitor.paint(|s| &s.paint.circle_stroke_width, |s| &mut s.paint.circle_stroke_width),
+        9 => visitor.paint(|s| &s.paint.circle_translate, |s| &mut s.paint.circle_translate),
+        10 => visitor.paint(|s| &s.paint.circle_translate_anchor, |s| &mut s.paint.circle_translate_anchor),
+        11 => visitor.layout(|s| &s.layout.circle_sort_key, |s| &mut s.layout.circle_sort_key),
+        _ => return None,
+    })
 }

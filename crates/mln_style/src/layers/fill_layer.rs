@@ -1,25 +1,7 @@
 use std::sync::Arc;
 
 use crate::expression::Functions;
-use crate::layer::{LayerTypeInfo, layer_type_info};
 pub use crate::layers::fill_layer_impl::Impl;
-
-static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
-    type_: "fill",
-    source: layer_type_info::Source::Required,
-    pass3d: layer_type_info::Pass3D::NotRequired,
-    layout: layer_type_info::Layout::Required,
-    fading_tiles: layer_type_info::FadingTiles::NotRequired,
-    cross_tile_index: layer_type_info::CrossTileIndex::NotRequired,
-    tile_kind: layer_type_info::TileKind::Geometry,
-};
-
-impl Impl {
-    #[must_use]
-    pub fn static_type_info() -> &'static LayerTypeInfo {
-        &TYPE_INFO
-    }
-}
 
 crate::layer::layer_type!(
     /// A `fill` layer.

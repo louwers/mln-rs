@@ -19,10 +19,11 @@
 //!   their parsed node trees (`mln_style::serialization`), and tile data as
 //!   what it is made from (`mln_tile::TileData`); an instance keeps the tile
 //!   data of its jobs in a cache of its own, so a later job can name it.
-//! - Trait objects cross as the types they can be (fields.rs): layers and
-//!   their properties as their layer type's, buckets as their bucket type's.
-//!   Compound expressions cross as their function's name, which the reading
-//!   side resolves against its own [`Registry`]. The first frame of a map
+//! - Trait objects cross as the types they can be (fields.rs): layers'
+//!   style data and compound expressions as their layer type's or function's
+//!   name, which the reading side resolves against its own [`Registry`];
+//!   layers' properties as their layer type's, buckets as their bucket
+//!   type's. The first frame of a map
 //!   side carries its registry's digest, and an instance whose registry
 //!   differs fails every job instead of decoding them against other
 //!   registrations.
@@ -37,8 +38,6 @@
 //! `TileWorkers`.
 
 use std::sync::Arc;
-
-use mln_style::expression::functions;
 
 use crate::Registry;
 
@@ -57,7 +56,7 @@ pub use transport::{RemoteWorkers, ReplySink, ThreadWorkerInstances, WorkerInsta
 /// Runs `f`, in which the values that the codec reads resolve the
 /// registrations they name against `registry`.
 fn session<R>(registry: &Arc<Registry>, f: impl FnOnce() -> R) -> R {
-    functions::decode_with(registry.functions(), f)
+    mln_style::decode_with(registry.style(), f)
 }
 
 #[cfg(test)]

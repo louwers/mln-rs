@@ -151,4 +151,15 @@ mod tests {
         register_builtins(&mut builder).unwrap();
         assert!(matches!(register_builtins(&mut builder), Err(RegisterError::Duplicate(_))));
     }
+
+    #[test]
+    fn builtins_register_the_builtin_layer_types() {
+        let registry = Registry::with_builtins();
+        let registered: Vec<_> =
+            registry.style().layer_types().map(mln_style::layer_type::ErasedStyleLayerType::info).collect();
+        let mut builtins: Vec<_> =
+            mln_style::layer_type::BUILTIN_STYLE_TYPES.iter().map(|layer_type| layer_type.info()).collect();
+        builtins.sort_by_key(|info| info.name);
+        assert_eq!(registered, builtins);
+    }
 }

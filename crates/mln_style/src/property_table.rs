@@ -4,7 +4,7 @@
 //!
 //! A table lists each property's name, whether it is paint or layout, and how
 //! its value converts. A property's slot is its index in the table. The type
-//! that holds the values implements [`Properties`], which maps a slot to the
+//! that holds the values implements `Properties`, which maps a slot to the
 //! field that holds it, typed, so that reading, converting and comparing a
 //! value needs no downcast.
 
@@ -27,7 +27,7 @@ use crate::transition_options::TransitionOptions;
 
 /// One property in a [`PropertyTable`].
 #[derive(Debug)]
-pub(crate) struct PropertyInfo {
+pub struct PropertyInfo {
     /// The style-spec name.
     pub(crate) name: &'static str,
     pub(crate) scope: PropertyScope,
@@ -62,7 +62,7 @@ impl PropertyInfo {
 /// The properties of one layer type, the light or the sky, in the style
 /// spec's order: paint properties, then layout properties.
 #[derive(Debug)]
-pub(crate) struct PropertyTable {
+pub struct PropertyTable {
     properties: &'static [PropertyInfo],
     /// The slots, sorted by property name.
     by_name: &'static [u8],
@@ -71,7 +71,7 @@ pub(crate) struct PropertyTable {
 impl PropertyTable {
     /// `by_name` lists the slots of `properties` sorted by name.
     #[must_use]
-    pub(crate) const fn new(properties: &'static [PropertyInfo], by_name: &'static [u8]) -> Self {
+    pub const fn new(properties: &'static [PropertyInfo], by_name: &'static [u8]) -> Self {
         PropertyTable { properties, by_name }
     }
 
@@ -94,7 +94,7 @@ impl PropertyTable {
 }
 
 /// A style value a property holds: a [`PropertyValue`], or a color ramp.
-pub(crate) trait StyleValue: Clone + Default + PartialEq + 'static {
+pub trait StyleValue: Clone + Default + PartialEq + 'static {
     /// Converts a style JSON value for the property `info`, parsing
     /// expressions against `functions`.
     fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error>;
@@ -130,7 +130,7 @@ impl StyleValue for ColorRampPropertyValue {
 
 /// What to do with the field that holds a property, given functions that
 /// borrow it from the properties' owner `S`.
-pub(crate) trait PropertyVisitor<S> {
+pub trait PropertyVisitor<S> {
     type Output;
 
     fn paint<V: StyleValue>(

@@ -1,51 +1,42 @@
-use crate::layer::{self, ImplBase, LayerTypeInfo};
-use crate::layers::heatmap_layer_properties::HeatmapPaintProperties;
+use std::sync::Arc;
 
-#[derive(Clone, Debug, mln_wire::Wire)]
-pub struct Impl {
-    pub(crate) base: ImplBase,
-    pub paint: HeatmapPaintProperties::Transitionable,
-}
+use crate::expression::Functions;
+use crate::layer::{Layer, LayerTypeInfo, SourceKind};
+use crate::layer_type::{LayerStyle, NoProperties, StyleLayerType};
+use crate::layers::heatmap_layer::HeatmapLayer;
+use crate::layers::heatmap_layer_properties::{self, HeatmapPaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-impl Impl {
-    #[must_use]
-    pub(crate) fn new(layer_id: String, source_id: String) -> Self {
-        Impl { base: ImplBase::new(layer_id, source_id), paint: HeatmapPaintProperties::Transitionable::default() }
-    }
-}
+/// The `heatmap` layer type.
+pub struct Heatmap;
 
-/// The base members read as `impl_.id`, `impl_.visibility`, and so on.
-impl std::ops::Deref for Impl {
-    type Target = ImplBase;
-    fn deref(&self) -> &ImplBase {
-        &self.base
-    }
-}
+/// The style data of a `heatmap` layer.
+pub type Impl = LayerStyle<Heatmap>;
 
-impl std::ops::DerefMut for Impl {
-    fn deref_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-}
+impl StyleLayerType for Heatmap {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "heatmap",
+        source: SourceKind::Geometry,
+        pass_3d: true,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &heatmap_layer_properties::PROPERTIES;
 
-impl layer::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
+    type LayoutProperties = NoProperties;
+    type PaintProperties = HeatmapPaintProperties::Transitionable;
+    type Extra = ();
 
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        heatmap_layer_properties::visit(slot, visitor)
     }
 
-    fn has_layout_difference(&self, other: &dyn layer::Impl) -> bool {
-        debug_assert!(std::ptr::eq(other.get_type_info(), layer::Impl::get_type_info(self)));
-        let impl_ = other.downcast_ref::<Impl>().expect("HeatmapLayer::Impl::hasLayoutDifference: not a heatmap layer");
-        self.filter != impl_.filter
-            || self.visibility != impl_.visibility
-            || self.paint.has_data_driven_property_difference(&impl_.paint)
+    fn layout_difference(a: &Impl, b: &Impl) -> bool {
+        a.filter != b.filter || a.visibility != b.visibility || a.paint.has_data_driven_property_difference(&b.paint)
     }
 
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        Impl::static_type_info()
+    fn into_layer(style: Arc<Impl>, functions: Arc<Functions>) -> Option<Box<dyn Layer>> {
+        Some(Box::new(HeatmapLayer::from_impl(style, functions)))
     }
 }

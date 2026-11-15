@@ -61,7 +61,6 @@ use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::update_parameters::UpdateParameters;
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &RasterLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), RasterLayerImpl::static_type_info()));
     impl_.downcast_ref::<RasterLayerImpl>().expect("RenderRasterLayer: not a raster layer impl")
 }
 

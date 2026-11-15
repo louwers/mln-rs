@@ -32,7 +32,6 @@ use crate::update_parameters::UpdateParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &BackgroundLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), BackgroundLayerImpl::static_type_info()));
     impl_.downcast_ref::<BackgroundLayerImpl>().expect("RenderBackgroundLayer: not a background layer impl")
 }
 

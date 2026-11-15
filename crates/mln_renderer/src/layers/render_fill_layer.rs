@@ -62,7 +62,6 @@ const FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME: &str = "FillOutlinePatternInst
 const LINE_WIDTH: f32 = 2.0;
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), FillLayerImpl::static_type_info()));
     impl_.downcast_ref::<FillLayerImpl>().expect("RenderFillLayer: not a fill layer impl")
 }
 

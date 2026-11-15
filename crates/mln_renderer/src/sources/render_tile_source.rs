@@ -26,8 +26,10 @@ use mln_gfx::{ColorMode, CullFaceMode};
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
 use mln_style::expression::Dependency;
-use mln_style::layer::{LayerTypeInfo, layer_type_info};
+use mln_style::layer::{LayerTypeInfo, SourceKind};
 use mln_style::layer_properties::{LayerProperties, LayerPropertiesBase};
+use mln_style::layer_type::{LayerStyle, NoProperties, StyleLayerType};
+use mln_style::property_table::{PropertyTable, PropertyVisitor};
 use mln_style::source::downcast_arc;
 use mln_style::sources::custom_vector_source::{CustomVectorTileData, TileDataFormat};
 use mln_style::sources::geojson_source::{GeoJSONData, TileFeatures};
@@ -317,33 +319,32 @@ impl RenderItem for TileSourceRenderItem {
 
 // layers: debug --------------------------------------------------------------
 
-#[derive(Debug)]
-struct PolylineLayerImpl {
-    base: layer::ImplBase,
-}
+/// The layer type of the debug polylines, which no registry holds.
+struct Polyline;
 
-static POLYLINE_LAYER_TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
-    type_: "debugPolyline",
-    source: layer_type_info::Source::NotRequired,
-    pass3d: layer_type_info::Pass3D::NotRequired,
-    layout: layer_type_info::Layout::NotRequired,
-    fading_tiles: layer_type_info::FadingTiles::NotRequired,
-    cross_tile_index: layer_type_info::CrossTileIndex::NotRequired,
-    tile_kind: layer_type_info::TileKind::NotRequired,
-};
+static POLYLINE_PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
 
-impl layer::Impl for PolylineLayerImpl {
-    fn base(&self) -> &layer::ImplBase {
-        &self.base
+impl StyleLayerType for Polyline {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "debugPolyline",
+        source: SourceKind::None,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: false,
+    };
+    const PROPERTIES: &'static PropertyTable = &POLYLINE_PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
     }
-    fn base_mut(&mut self) -> &mut layer::ImplBase {
-        &mut self.base
-    }
-    fn has_layout_difference(&self, _other: &dyn layer::Impl) -> bool {
+
+    fn layout_difference(_a: &LayerStyle<Self>, _b: &LayerStyle<Self>) -> bool {
         false
-    }
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        &POLYLINE_LAYER_TYPE_INFO
     }
 }
 
@@ -377,8 +378,7 @@ pub(crate) struct PolylineLayerTweaker {
 impl PolylineLayerTweaker {
     #[must_use]
     pub(crate) fn new(properties: LineEvaluatedPropsUBO) -> Self {
-        let layer_impl: Arc<dyn layer::Impl> =
-            Arc::new(PolylineLayerImpl { base: layer::ImplBase::new(String::new(), String::new()) });
+        let layer_impl: Arc<dyn layer::Impl> = Arc::new(LayerStyle::<Polyline>::new(String::new(), String::new()));
         let layer_properties: Arc<dyn LayerProperties> =
             Arc::new(PolylineLayerProperties { base: LayerPropertiesBase::new(layer_impl) });
         PolylineLayerTweaker {

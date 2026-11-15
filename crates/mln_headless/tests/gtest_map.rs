@@ -2565,7 +2565,7 @@ fn disabled_placed_symbol_data() {
         .style()
         .get_layers()
         .iter()
-        .filter(|l| l.base_impl().get_type_info().type_ == "symbol")
+        .filter(|l| l.base_impl().get_type_info().name == "symbol")
         .map(|l| l.get_id())
         .collect();
 

@@ -24,68 +24,8 @@ use crate::expression::{
 use crate::filter::Filter;
 pub(crate) use crate::layer_impl::FontStack;
 pub use crate::layer_impl::{Impl, ImplBase, downcast_arc, font_stacks};
+pub use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::style_property::StyleProperty;
-
-/// The enums nested in C++ `LayerTypeInfo`.
-pub mod layer_type_info {
-    /// Whether the layer type requires a source.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Source {
-        Required,
-        NotRequired,
-    }
-
-    /// Whether the layer type requires the 3D rendering pass.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Pass3D {
-        Required,
-        NotRequired,
-    }
-
-    /// Whether the layer type requires layouting.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Layout {
-        Required,
-        NotRequired,
-    }
-
-    /// Whether the layer type requires rendering on fading tiles.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum FadingTiles {
-        Required,
-        NotRequired,
-    }
-
-    /// Whether the layer type requires cross-tile indexing and placement.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum CrossTileIndex {
-        Required,
-        NotRequired,
-    }
-
-    /// The supported tile type; the values correspond to `Tile::Kind`.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    #[repr(u8)]
-    pub enum TileKind {
-        Geometry,
-        Raster,
-        RasterDEM,
-        NotRequired,
-    }
-}
-
-/// Holds static data for a certain layer type, which `type_` identifies.
-#[derive(Debug)]
-pub struct LayerTypeInfo {
-    /// The layer type as defined in the style specification.
-    pub type_: &'static str,
-    pub source: layer_type_info::Source,
-    pub pass3d: layer_type_info::Pass3D,
-    pub layout: layer_type_info::Layout,
-    pub fading_tiles: layer_type_info::FadingTiles,
-    pub cross_tile_index: layer_type_info::CrossTileIndex,
-    pub tile_kind: layer_type_info::TileKind,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PropertyScope {
@@ -227,13 +167,8 @@ pub trait Layer: Any + Send + Sync {
         self.mutate_base_impl(&mut |impl_| impl_.max_zoom = max_zoom);
     }
 
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
+    fn get_type_info(&self) -> LayerTypeInfo {
         self.base_impl_ref().get_type_info()
-    }
-
-    /// Collect dependencies
-    fn get_dependencies(&self) -> Dependency {
-        self.base_impl_ref().get_dependencies()
     }
 }
 
@@ -270,7 +205,7 @@ fn evaluate_visibility_expression(expression: &Expr, global_state: &GlobalStateM
 pub(crate) fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
     let mut result = ValueObject::new();
     result.insert("id".to_owned(), Value::String(layer.get_id()));
-    result.insert("type".to_owned(), Value::String(layer.get_type_info().type_.to_owned()));
+    result.insert("type".to_owned(), Value::String(layer.get_type_info().name.to_owned()));
 
     let source = layer.get_source_id();
     if !source.is_empty() {
@@ -338,7 +273,7 @@ pub(crate) fn set_property_base(
         }
     } else if name == "source-layer" {
         if let Some(source_layer) = convert::<String>(value, &mut error) {
-            if layer.get_type_info().source != layer_type_info::Source::Required {
+            if layer.get_type_info().source == SourceKind::None {
                 // Quirk kept: no space between "to" and "the".
                 Log::warning(
                     Event::General,
@@ -352,7 +287,7 @@ pub(crate) fn set_property_base(
     } else if name == "source"
         && let Some(source_id) = convert::<String>(value, &mut error)
     {
-        if layer.get_type_info().source != layer_type_info::Source::Required {
+        if layer.get_type_info().source == SourceKind::None {
             Log::warning(
                 Event::General,
                 format!("'source' property cannot be set tothe layer {}", layer.base_impl().id),
@@ -408,7 +343,7 @@ fn set_visibility_value(layer: &mut (impl Layer + ?Sized), value: &Convertible<'
 impl std::fmt::Debug for dyn Layer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let base = self.base_impl();
-        f.debug_struct("Layer").field("id", &base.id).field("type", &base.get_type_info().type_).finish_non_exhaustive()
+        f.debug_struct("Layer").field("id", &base.id).field("type", &base.get_type_info().name).finish_non_exhaustive()
     }
 }
 

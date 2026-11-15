@@ -2,7 +2,7 @@
 // (tools/style-codegen/v8.json). Do not edit.
 
 use crate::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
-use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
+use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 
 crate::properties!(
     /// The paint properties of a color-relief layer.
@@ -30,15 +30,12 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[0, 1, 2],
 );
 
-impl Properties for ColorReliefLayerImpl {
-    const TABLE: &'static PropertyTable = &PROPERTIES;
-
-    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
-        Some(match slot {
-            0 => visitor.paint(|s| &s.paint.color_relief_color, |s| &mut s.paint.color_relief_color),
-            1 => visitor.paint(|s| &s.paint.color_relief_opacity, |s| &mut s.paint.color_relief_opacity),
-            2 => visitor.paint(|s| &s.paint.resampling, |s| &mut s.paint.resampling),
-            _ => return None,
-        })
-    }
+/// Calls `visitor` with the field of the property in `slot`.
+pub(crate) fn visit<V: PropertyVisitor<ColorReliefLayerImpl>>(slot: usize, visitor: V) -> Option<V::Output> {
+    Some(match slot {
+        0 => visitor.paint(|s| &s.paint.color_relief_color, |s| &mut s.paint.color_relief_color),
+        1 => visitor.paint(|s| &s.paint.color_relief_opacity, |s| &mut s.paint.color_relief_opacity),
+        2 => visitor.paint(|s| &s.paint.resampling, |s| &mut s.paint.resampling),
+        _ => return None,
+    })
 }

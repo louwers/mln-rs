@@ -12,7 +12,6 @@ use std::sync::Arc;
 use mln_conversion::{Convertible, Error};
 use mln_style::StyleRegistry;
 use mln_style::conversion::convert_layer;
-use mln_style::expression::functions;
 use mln_style::layer::Layer;
 use mln_style::layer_impl::Impl;
 
@@ -66,7 +65,7 @@ fn every_layer_crosses() {
     let mut failures = Vec::new();
     for (path, layer) in &layers {
         let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
-        match functions::decode_with(registry.functions(), || mln_wire::from_slice::<Crossing>(&encoded)) {
+        match mln_style::decode_with(&registry, || mln_wire::from_slice::<Crossing>(&encoded)) {
             Ok(decoded) => {
                 if mln_wire::to_vec(&decoded).unwrap() != encoded {
                     failures.push(format!("{}: crosses as another layer\n  {:?}", path.display(), layer.serialize()));
