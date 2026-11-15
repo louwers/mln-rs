@@ -108,11 +108,14 @@ jobs:
           echo "VERSION=$(jq -r '.packages[] | select(.name == "mln-rs") | .version' <<< "$metadata")" >> "$GITHUB_ENV"
           echo "PACKAGES=$(jq -r '[.packages[] | select(.publish == null) | .name] | join(" ")' <<< "$metadata")" >> "$GITHUB_ENV"
 
-      # Builds each package from its packaged sources. Packages resolve each
-      # other locally, so this works before any of them is on crates.io. The
-      # desktop app is never released (the `package` task).
+      # Builds each package to publish from its packaged sources. Packages
+      # resolve each other locally, so this works before any of them is on
+      # crates.io. The publish = false ones aren't packaged: their
+      # dependencies on each other would resolve from crates.io.
       - name: Package
-        run: cargo package --workspace --locked --exclude mln-rs-desktop
+        run: |
+          read -ra packages <<< "$PACKAGES"
+          cargo package --locked "${packages[@]/#/--package=}"
 
       # In dependency order, waiting for each to reach the index. Package
       # verified these exact packages, so skip the second build. A 429 is
