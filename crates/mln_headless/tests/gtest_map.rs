@@ -32,11 +32,13 @@ use mln_storage::{
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::custom_tile_loader::TileFunction;
+use mln_style::expression::{Formatted, FormattedSection, Image};
 use mln_style::layer::Layer;
 use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::raster_layer::RasterLayer;
+use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::projection::Projection;
 use mln_style::sources::custom_geometry_source::{
     CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
@@ -2028,11 +2030,18 @@ fn empty_image_name_is_no_image() {
       },
       "layers": [
         {"id": "fill", "type": "fill", "source": "polygon", "paint": {"fill-pattern": ["get", "image"]}},
-        {"id": "symbol", "type": "symbol", "source": "polygon", "layout": {"icon-image": ["get", "image"]}},
-        {"id": "text", "type": "symbol", "source": "polygon", "layout": {"text-field": [["a"], [["image", ""]]]}}
+        {"id": "symbol", "type": "symbol", "source": "polygon", "layout": {"icon-image": ["get", "image"]}}
       ]
     }"#,
     );
+    // A `format` expression drops an empty image section, so only the API can
+    // set one.
+    let mut text = SymbolLayer::new("text", "polygon").impl_().clone();
+    text.layout.text_field = PropertyValue::Constant(Formatted::new(vec![
+        FormattedSection::new("a".to_owned(), None, None, None),
+        FormattedSection::from_image(Image::new("")),
+    ]));
+    test.map().style_mut().add_layer(Box::new(SymbolLayer::from_impl(Arc::new(text))), None).unwrap();
     test.render();
 
     assert!(missing.borrow().is_empty(), "{:?}", missing.borrow());

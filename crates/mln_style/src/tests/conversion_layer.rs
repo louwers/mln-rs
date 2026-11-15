@@ -187,15 +187,15 @@ fn set_generic_properties() {
     assert_eq!(22.0_f32, layer.get_max_zoom());
 }
 
-// Port-only: a `text-field` section that is not an array (the C++ reads it as
-// one: undefined behaviour) is a conversion error, not a panic.
+// A `text-field` array that isn't an expression, such as an array of sections,
+// is a conversion error.
 #[test]
-fn text_field_section_not_an_array() {
-    for field in [r#"["foo"]"#, "[1]", r#"[["foo"], 2]"#] {
+fn text_field_array_not_an_expression() {
+    for field in [r#"[["foo"]]"#, r#"[["foo", {"font-scale": 2}], [["image", "bar"]]]"#, "[1]"] {
         let src =
             format!(r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{"text-field": {field}}}}}"#);
         let mut error = Error::default();
         assert!(convert_layer(&Convertible::from(&parse_json(&src)), &mut error).is_none(), "{field}");
-        assert_eq!(error.message, "Section has to contain a text and std::optional parameters or an image.");
+        assert_eq!(error.message, "value must be a string");
     }
 }

@@ -124,104 +124,13 @@ impl Formatted {
     }
 }
 
-/// Converts a color string, for the `Formatted` converter.
-fn convert_color(value: &Convertible<'_>, error: &mut Error) -> Option<Color> {
-    let Some(string) = value.to_string() else {
-        error.message = "value must be a string".to_owned();
-        return None;
-    };
-
-    let color = Color::parse(&string);
-    if color.is_none() {
-        error.message = "value must be a valid color".to_owned();
-        return None;
-    }
-    color
-}
-
+/// Converts a plain string. A `text-field` array is a `["format", ...]`
+/// expression, which the property value conversion parses before this.
 pub fn convert_formatted(value: &Convertible<'_>, error: &mut Error) -> Option<Formatted> {
-    if value.is_array() {
-        let mut sections = Vec::new();
-        for i in 0..value.array_length() {
-            let section = value.array_member(i);
-            let section_length = section.array_length();
-            if section_length < 1 {
-                error.message = "Section has to contain a text and std::optional parameters or an image.".to_owned();
-                return None;
-            }
-
-            let first_element = section.array_member(0);
-            if first_element.is_array() {
-                if first_element.array_length() < 2 {
-                    error.message = "Image section has to contain image name.".to_owned();
-                    return None;
-                }
-
-                let image_op = first_element.array_member(0).to_string();
-                if image_op.as_deref() != Some("image") {
-                    error.message = "Serialized image section has to contain 'image' operator.".to_owned();
-                    return None;
-                }
-
-                let Some(image_arg) = first_element.array_member(1).to_string() else {
-                    error.message = "Serialized image section argument has to be of a String type.".to_owned();
-                    return None;
-                };
-
-                sections.push(FormattedSection::from_image(Image::new(image_arg)));
-                continue;
-            }
-
-            let Some(section_text) = first_element.to_string() else {
-                error.message = "Section has to contain a text.".to_owned();
-                return None;
-            };
-
-            let mut font_scale = None;
-            let mut text_font = None;
-            let mut text_color = None;
-            if section_length > 1 {
-                let section_params = section.array_member(1);
-                if !section_params.is_object() {
-                    error.message = "Parameters have to be enclosed in an object.".to_owned();
-                    return None;
-                }
-
-                if let Some(font_scale_member) = section_params.object_member(K_FORMATTED_SECTION_FONT_SCALE) {
-                    font_scale = font_scale_member.to_double();
-                }
-
-                if let Some(text_font_member) = section_params.object_member(K_FORMATTED_SECTION_TEXT_FONT) {
-                    if text_font_member.is_array() {
-                        let mut fonts_vector = Vec::new();
-                        for j in 0..text_font_member.array_length() {
-                            if let Some(font) = text_font_member.array_member(j).to_string() {
-                                fonts_vector.push(font);
-                            } else {
-                                error.message = "Font has to be a string.".to_owned();
-                                return None;
-                            }
-                        }
-                        text_font = Some(fonts_vector);
-                    } else {
-                        error.message = "Font stack has to be an array.".to_owned();
-                        return None;
-                    }
-                }
-
-                if let Some(text_color_member) = section_params.object_member(K_FORMATTED_SECTION_TEXT_COLOR) {
-                    text_color = convert_color(&text_color_member, error);
-                    text_color?;
-                }
-            }
-
-            sections.push(FormattedSection::new(section_text, font_scale, text_font, text_color));
-        }
-        Some(Formatted::new(sections))
-    } else if let Some(result) = value.to_string() {
+    if let Some(result) = value.to_string() {
         Some(Formatted::from_plain(&result))
     } else {
-        error.message = "Formatted must be plain string or array type.".to_owned();
+        error.message = "value must be a string".to_owned();
         None
     }
 }
