@@ -114,6 +114,11 @@ impl TileCache {
         self.tiles.get(key).map(AsRef::as_ref)
     }
 
+    /// The cached tiles.
+    pub(crate) fn tiles(&self) -> impl Iterator<Item = &dyn Tile> + '_ {
+        self.tiles.values().map(AsRef::as_ref)
+    }
+
     #[cfg(test)]
     #[must_use]
     pub(crate) fn has(&self, key: &OverscaledTileID) -> bool {

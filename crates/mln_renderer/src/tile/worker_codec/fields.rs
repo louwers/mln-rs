@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::shared_layer_properties;
-use mln_util::serialization::shared::{self, Kind, WireKind};
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::bucket::{Bucket, BucketPtr};
@@ -18,60 +17,8 @@ use crate::buckets::heatmap_bucket::HeatmapBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndex;
-use crate::gfx::dynamic_texture::DynamicTexture;
 use crate::render_layer::LayerRenderData;
-use crate::tile::geometry_tile::{LayoutAtlases, LayoutResult};
-
-/// The `shared::Kind` of the textures of a worker instance's atlas, which
-/// come from the instance: the map side keeps a copy of each
-/// (`map_side.rs`, `AtlasMirror`), made from its size and pixel type.
-pub(crate) struct SharedTexture;
-
-impl Kind for SharedTexture {
-    type Value = DynamicTexture;
-    const NAME: &'static str = "texture";
-}
-
-impl WireKind for SharedTexture {
-    fn write(texture: &DynamicTexture, w: &mut Writer) {
-        texture.get_size().write(w);
-        texture.get_pixel_format().write(w);
-    }
-
-    fn read(r: &mut Reader<'_>) -> Option<Arc<DynamicTexture>> {
-        let size = Wire::read(r)?;
-        let pixel_type = Wire::read(r)?;
-        Some(Arc::new(DynamicTexture::new(size, pixel_type)))
-    }
-}
-
-/// `#[wire(with)]` for an `Option<DynamicTexturePtr>`.
-pub(crate) mod texture {
-    use super::{Arc, DynamicTexture, Reader, SharedTexture, Writer, shared};
-
-    #[expect(clippy::ref_option, reason = "`#[wire(with)]` passes the field by reference")]
-    pub(crate) fn write(texture: &Option<Arc<DynamicTexture>>, w: &mut Writer) {
-        shared::write_option::<SharedTexture>(texture, w);
-    }
-
-    #[expect(clippy::option_option, reason = "a read that can fail, of an `Option`")]
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Option<Arc<DynamicTexture>>> {
-        shared::read_option::<SharedTexture>(r)
-    }
-}
-
-/// `#[wire(with)]` for a `DynamicTexturePtr`.
-pub(crate) mod shared_texture {
-    use super::{Arc, DynamicTexture, Reader, SharedTexture, Writer, shared};
-
-    pub(crate) fn write(texture: &Arc<DynamicTexture>, w: &mut Writer) {
-        shared::write::<SharedTexture>(texture, w);
-    }
-
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<DynamicTexture>> {
-        shared::read::<SharedTexture>(r)
-    }
-}
+use crate::tile::geometry_tile::LayoutResult;
 
 /// `#[wire(with)]` for the layers of a `setLayers`.
 pub(crate) mod layers {
@@ -179,9 +126,6 @@ pub(super) fn encode_buckets(result: &LayoutResult) -> Vec<u8> {
 
 /// A `LayoutResult` crosses as each bucket once, with the layers that render
 /// it (a layer group's layers share their bucket), and the feature index.
-/// The atlases cross apart from the layout (envelope.rs), so that the map
-/// side releases their bins even when it can't read the rest; a layout read
-/// back has empty ones until the codec sets them.
 impl Wire for LayoutResult {
     fn write(&self, w: &mut Writer) {
         self.write_buckets(w);
@@ -200,10 +144,6 @@ impl Wire for LayoutResult {
                 layer_render_data.insert(layer_id, LayerRenderData { bucket: Arc::clone(&bucket), layer_properties });
             }
         }
-        Some(LayoutResult {
-            layer_render_data,
-            feature_index: Arc::new(FeatureIndex::read(r)?),
-            atlases: Arc::new(LayoutAtlases::default()),
-        })
+        Some(LayoutResult { layer_render_data, feature_index: Arc::new(FeatureIndex::read(r)?) })
     }
 }

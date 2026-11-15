@@ -18,20 +18,19 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 
-use crate::image_manager::ImageManager;
 use crate::paint_parameters::TransformParameters;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderItem;
 use crate::sources::render_geojson_source::RenderGeoJSONSource;
 use crate::sources::render_raster_source::RenderRasterSource;
 use crate::sources::render_vector_source::RenderVectorSource;
+use crate::tile::geometry_tile::GeometryTile;
 use crate::tile::tile::{TileBase, TileOperation};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile_parameters::TileParameters;
 
 pub(crate) struct SourcePrepareParameters<'a> {
     pub(crate) transform: &'a TransformParameters,
-    pub(crate) image_manager: &'a ImageManager,
     pub(crate) debug_options: MapDebugOptions,
     pub(crate) source_name: String,
 }
@@ -70,6 +69,8 @@ impl RenderTiles {
 /// which is all the orchestrator reads of the source.
 pub(crate) trait RenderSourceObserver {
     fn on_tile_changed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {}
+    /// A tile waits for the next update to resolve its dependencies.
+    fn on_dependencies_requested(&self, _source_id: &str, _tile_id: &OverscaledTileID) {}
     fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, _error: Error) {}
     fn on_tile_action(&self, _source_id: &str, _op: TileOperation, _tile_id: &OverscaledTileID, _tile_source_id: &str) {
     }
@@ -93,6 +94,10 @@ impl RenderSourceTileObserver {
 impl TileObserver for RenderSourceTileObserver {
     fn on_tile_changed(&self, tile: &TileBase) {
         self.observer().on_tile_changed(&self.source_id, &tile.id());
+    }
+
+    fn on_dependencies_requested(&self, tile: &TileBase) {
+        self.observer().on_dependencies_requested(&self.source_id, &tile.id());
     }
 
     fn on_tile_error(&self, tile: &TileBase, error: Error) {
@@ -158,6 +163,10 @@ pub(crate) trait RenderSource {
 
     fn update_fading_tiles(&mut self);
     fn has_fading_tiles(&self) -> bool;
+
+    /// Calls `f` with each of the source's geometry tiles, the cached ones
+    /// included.
+    fn for_each_geometry_tile(&self, _f: &mut dyn FnMut(&GeometryTile)) {}
 
     /// If supported, returns a shared list of `RenderTiles`, sorted by tile id
     /// and excluding tiles hold for fade; returns `None` otherwise.

@@ -74,9 +74,8 @@ impl RasterTileTest {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: crate::image_manager::ImageManager::on(Some(self.run_loop.scheduler())),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &self.run_loop),
-            dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
+            available_images: Arc::default(),
+            font_faces: None,
             tile_worker_transport: std::rc::Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
                 self.thread_pool.clone(),
             )),

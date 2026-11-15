@@ -8,6 +8,6 @@ pub(crate) mod collision_index;
 pub(crate) mod cross_tile_symbol_index;
 pub mod font_face_engine;
 pub(crate) mod get_anchors;
-pub(crate) mod glyph_manager;
+pub(crate) mod glyph_store;
 pub mod placement;
 pub(crate) mod quads;

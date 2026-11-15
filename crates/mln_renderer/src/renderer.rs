@@ -453,7 +453,8 @@ impl Renderer {
 
         // - UPLOAD --------------------------------------------------------
         // Uploads all required buffers and images before we do any actual
-        // rendering.
+        // rendering. The atlas goes first: the tiles bind its textures.
+        orchestrator.upload_atlas(context);
         for item in render_tree.get_source_render_items() {
             item.upload(context);
         }

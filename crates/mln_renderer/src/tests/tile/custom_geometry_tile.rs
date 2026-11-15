@@ -195,7 +195,7 @@ fn invoke_tile_changed() {
         assert!(tile.layer_properties_updated(&properties));
     }));
 
-    tile.set_layers(&[layer_properties], None);
+    tile.set_layers(&[layer_properties], None, &Arc::default());
     tile.set_observer(observer);
     let mut result = Vec::new();
     tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();

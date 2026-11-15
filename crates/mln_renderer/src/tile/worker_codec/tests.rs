@@ -25,9 +25,10 @@ use super::envelope::{self, Request};
 use super::fields;
 use super::map_side::{MapCodec, Reply};
 use super::worker_side::{WorkerAction, WorkerCodec};
-use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, ImageVersionMap};
+use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layermanager;
-use crate::text::glyph_manager::HBShapeResults;
+use crate::layout::tile_layout::Resolved;
+use crate::text::glyph_store::HBShapeResults;
 use crate::tile::geometry_tile::LayoutResult;
 use crate::tile::geometry_tile_worker::{GeometryTileWorker, TileMessage, WorkerMessage};
 use crate::tile::tile_worker_transport::{TileEndpoint, WorkerParameters};
@@ -95,7 +96,6 @@ fn parameters() -> WorkerParameters {
         mode: MapMode::Static,
         pixel_ratio: 1.0,
         show_collision_boxes: false,
-        dynamic_texture_atlas: Some(Arc::new(DynamicTextureAtlas::new())),
         font_faces: None,
         capture_rendered_features: true,
         synchronous: true,
@@ -117,48 +117,47 @@ fn set_data(data: &TileData, correlation_id: u64) -> WorkerMessage {
     WorkerMessage::SetData { data: Some(data.clone()), available_images: Arc::new(VecSet::new()), correlation_id }
 }
 
-/// What the tile answers a worker's glyph and image requests with: the
-/// glyphs of the 0-255 fixture range, for any font stack, and the images of
-/// the emerald sprite.
+/// What the tile answers a worker's dependency requests with: the glyphs of
+/// the 0-255 fixture range, for any font stack, and the images of the
+/// emerald sprite, packed into a fresh atlas.
 fn answer(request: &TileMessage) -> WorkerMessage {
-    match request {
-        TileMessage::GetGlyphs(dependencies) => {
-            let range = GlyphRange::new(0, 255, GlyphIDType::FontPBF);
-            let glyphs = parse_glyph_pbf(&range, &fixture("test/fixtures/resources/glyphs.pbf")).unwrap();
-            let mut glyph_map = GlyphMap::new();
-            for (font_stack, ids) in &dependencies.glyphs {
-                let font_glyphs = glyph_map.entry(font_stack_hash(font_stack)).or_default();
-                for id in ids {
-                    let glyph = glyphs.iter().find(|glyph| glyph.id == *id).cloned().map(Arc::new);
-                    font_glyphs.insert(*id, glyph);
-                }
-            }
-            WorkerMessage::GlyphsAvailable { glyph_map, results: HBShapeResults::new() }
+    let TileMessage::GetDependencies { dependencies, request } = request else {
+        panic!("not a request");
+    };
+    let range = GlyphRange::new(0, 255, GlyphIDType::FontPBF);
+    let glyphs = parse_glyph_pbf(&range, &fixture("test/fixtures/resources/glyphs.pbf")).unwrap();
+    let mut glyph_map = GlyphMap::new();
+    for (font_stack, ids) in &dependencies.glyphs.glyphs {
+        let font_glyphs = glyph_map.entry(font_stack_hash(font_stack)).or_default();
+        for id in ids {
+            let glyph = glyphs.iter().find(|glyph| glyph.id == *id).cloned().map(Arc::new);
+            font_glyphs.insert(*id, glyph);
         }
-        TileMessage::GetImages((dependencies, image_correlation_id)) => {
-            let sprite = mln_sprite::sprite_parser::parse_sprite(
-                "default",
-                &fixture("test/fixtures/annotations/emerald.png"),
-                &fixture("test/fixtures/annotations/emerald.json"),
-            )
-            .unwrap();
-            let (mut icon_map, mut pattern_map) = (ImageMap::new(), ImageMap::new());
-            for image in sprite {
-                match dependencies.get(&image.id) {
-                    Some(ImageType::Icon) => icon_map.insert(image.id.clone(), image),
-                    Some(ImageType::Pattern) => pattern_map.insert(image.id.clone(), image),
-                    None => None,
-                };
-            }
-            WorkerMessage::ImagesAvailable {
-                icon_map,
-                pattern_map,
-                version_map: ImageVersionMap::default(),
-                image_correlation_id: *image_correlation_id,
-            }
-        }
-        _ => panic!("not a request"),
     }
+    let sprite = mln_sprite::sprite_parser::parse_sprite(
+        "default",
+        &fixture("test/fixtures/annotations/emerald.png"),
+        &fixture("test/fixtures/annotations/emerald.json"),
+    )
+    .unwrap();
+    let (mut icon_map, mut pattern_map) = (ImageMap::new(), ImageMap::new());
+    for image in sprite {
+        match dependencies.images.get(&image.id) {
+            Some(ImageType::Icon) => icon_map.insert(image.id.clone(), image),
+            Some(ImageType::Pattern) => pattern_map.insert(image.id.clone(), image),
+            None => None,
+        };
+    }
+    let mut atlas = DynamicTextureAtlas::new();
+    let glyph_page = atlas.pack_glyphs(&glyph_map);
+    let image_page = atlas.pack_images(&icon_map, &pattern_map);
+    let resolved = Resolved {
+        glyphs: glyph_page.positions,
+        shaping: HBShapeResults::new(),
+        icons: image_page.icons,
+        patterns: image_page.patterns,
+    };
+    WorkerMessage::Resolved { resolved, request: *request }
 }
 
 /// A synchronous worker (no actor) that sends its messages to `replies`.
@@ -171,7 +170,6 @@ fn worker(parameters: WorkerParameters, replies: &Replies) -> GeometryTileWorker
         parameters.mode,
         parameters.pixel_ratio,
         parameters.show_collision_boxes,
-        parameters.dynamic_texture_atlas,
         parameters.font_faces,
         parameters.capture_rendered_features,
     )
@@ -191,7 +189,7 @@ fn direct(messages: Vec<WorkerMessage>) -> LayoutResult {
             match reply {
                 TileMessage::Layout { result, .. } => layouts.push(result),
                 TileMessage::Error { error, .. } => panic!("{error}"),
-                request => worker.handle(answer(&request)),
+                request @ TileMessage::GetDependencies { .. } => worker.handle(answer(&request)),
             }
         }
         if let Some(layout) = layouts.pop() {
@@ -226,11 +224,11 @@ impl ThroughCodec {
     fn send(&mut self, message: &WorkerMessage) -> Vec<TileMessage> {
         let request = self.map.message(TILE, message).unwrap();
         self.handle(&request);
-        self.replies.take().into_iter().map(|reply| self.reply(reply)).collect()
+        self.replies.take().iter().map(|reply| self.reply(reply)).collect()
     }
 
     /// A reply of the worker, encoded and decoded.
-    fn reply(&mut self, reply: TileMessage) -> TileMessage {
+    fn reply(&mut self, reply: &TileMessage) -> TileMessage {
         let encoded = self.worker_codec.encode(TILE, reply);
         let Some((TILE, Reply::Geometry(message))) = self.map.decode(encoded).unwrap() else {
             panic!("not a message for the tile");
@@ -244,7 +242,6 @@ impl ThroughCodec {
                 let message = self.worker_codec.decode_message(&message).unwrap();
                 self.worker.handle(message);
             }
-            WorkerAction::None => {}
             _ => panic!("not a message for the tile"),
         }
     }
@@ -262,7 +259,7 @@ impl ThroughCodec {
                 match reply {
                     TileMessage::Layout { result, .. } => return result,
                     TileMessage::Error { error, .. } => panic!("{error}"),
-                    request => next.extend(self.send(&answer(&request))),
+                    request @ TileMessage::GetDependencies { .. } => next.extend(self.send(&answer(&request))),
                 }
             }
             replies = next;
@@ -270,11 +267,11 @@ impl ThroughCodec {
     }
 }
 
-/// What of a layout tells it apart: the encodings of its buckets, feature
-/// index and atlases outside a codec's session, with every value in full.
-/// (The feature index without its data, which may no longer have its bytes.)
-fn comparable(result: &LayoutResult) -> [Vec<u8>; 3] {
-    [fields::encode_buckets(result), result.feature_index.encode_grid(), mln_wire::to_vec(&*result.atlases).unwrap()]
+/// What of a layout tells it apart: the encodings of its buckets and feature
+/// index outside a codec's session, with every value in full. (The feature
+/// index without its data, which may no longer have its bytes.)
+fn comparable(result: &LayoutResult) -> [Vec<u8>; 2] {
+    [fields::encode_buckets(result), result.feature_index.encode_grid()]
 }
 
 /// Lays the tile out with `layers` and `data` through the codec, then
@@ -379,37 +376,32 @@ fn every_geometry_layer_type_crosses() {
     assert!(shares(result.feature_index.get_data().unwrap(), &data));
 }
 
-/// Symbol layers cross too: the worker's glyph and image requests reach
-/// the tile and its answers the worker, the symbol buckets come back, and
-/// the map side's copy of the worker's atlas gets the glyphs' and icons'
-/// pixels. Once the map side drops the layout, the worker's atlas frees
-/// their bins.
+/// Symbol layers cross too: the worker's dependency request reaches the
+/// tile and its answer, positions only, the worker, and the symbol buckets
+/// come back.
 #[test]
 fn symbol_layouts_cross_with_their_glyphs_and_images() {
-    let (mut codec, result) = cross(&layers(&[LABELS, LABELS_HALO]), &tile_data());
+    let mut codec = ThroughCodec::new();
+    codec.send(&set_layers(&layers(&[LABELS, LABELS_HALO]), 1));
+    let replies = codec.send(&set_data(&tile_data(), 2));
+    let [request @ TileMessage::GetDependencies { dependencies, .. }] = replies.as_slice() else {
+        panic!("expected one dependency request");
+    };
+    assert!(!dependencies.glyphs.glyphs.is_empty());
+    assert_eq!(dependencies.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
+
+    let answer = answer(request);
+    let WorkerMessage::Resolved { resolved, .. } = &answer else { unreachable!() };
+    assert!(!resolved.glyphs.is_empty() && resolved.icons.contains_key("interstate_1"));
+    let replies = codec.send(&answer);
+    let [TileMessage::Layout { result, correlation_id: 2, request: 1, resolved: true }] = replies.as_slice() else {
+        panic!("expected the layout");
+    };
     for render_data in result.layer_render_data.values() {
         let symbols = render_data.bucket.downcast_ref::<crate::buckets::symbol_bucket::SymbolBucket>().unwrap();
         assert!(symbols.has_text_data() && symbols.has_icon_data());
         assert!(!symbols.state().symbol_instances.is_empty());
     }
-    assert!(!result.glyph_atlas().glyph_positions.is_empty() && !result.image_atlas().icon_positions.is_empty());
-
-    // The copies of the worker's textures have every bin's pixels.
-    let glyph_texture = result.glyph_atlas().dynamic_texture.clone().unwrap();
-    let glyph_bins = result.glyph_atlas().texture_handles.len();
-    assert!(glyph_bins > 0);
-    assert_eq!(glyph_texture.take_uploads().len(), glyph_bins);
-    let image_texture = result.image_atlas().dynamic_texture.clone().unwrap();
-    assert_eq!(image_texture.take_uploads().len(), result.image_atlas().texture_handles.len());
-
-    // Dropped, the layout releases its bins, and the worker's atlas frees
-    // them and its textures.
-    let worker_textures = codec.worker_codec.atlas().textures().len();
-    drop((result, glyph_texture, image_texture));
-    let releases = codec.map.releases().expect("releases");
-    codec.handle(&releases);
-    assert_eq!(codec.worker_codec.atlas().textures().len(), worker_textures - 2);
-    assert!(codec.map.releases().is_none());
 }
 
 /// A text color in a format section overrides the paint property, which
@@ -445,7 +437,6 @@ fn mlt_tiles_cross() {
 #[test]
 fn pattern_layouts_cross() {
     let (_, result) = cross(&layers(&[FILL_PATTERN, LINE_PATTERN, EXTRUSION_PATTERN]), &tile_data());
-    assert!(result.image_atlas().pattern_positions.contains_key("grass_pattern"));
     let extrusion = result.layer_render_data["extrusion-pattern"]
         .bucket
         .downcast_ref::<crate::buckets::fill_extrusion_bucket::FillExtrusionBucket>()
@@ -583,11 +574,11 @@ fn layouts_have_the_layers_they_answer() {
     codec.send(&set_layers(&sent, 1));
     let request = codec.map.message(TILE, &set_data(&tile_data(), 2)).unwrap();
     codec.handle(&request);
-    let reply = codec.worker_codec.encode(TILE, codec.replies.take().remove(0));
+    let reply = codec.worker_codec.encode(TILE, &codec.replies.take().remove(0));
     codec.map.message(TILE, &set_layers(&newer, 3)).unwrap();
     drop(newer);
 
-    let Some((_, Reply::Geometry(TileMessage::Layout { result, correlation_id: 2 }))) =
+    let Some((_, Reply::Geometry(TileMessage::Layout { result, correlation_id: 2, .. }))) =
         codec.map.decode(reply).unwrap()
     else {
         panic!("not a layout");
@@ -637,24 +628,25 @@ fn layers_are_defined_once() {
     assert_eq!((forgotten("layer"), forgotten("expression"), forgotten("layer properties")), (1, 1, 3));
 }
 
-/// An image travels once per worker instance.
+/// A dependency answer crosses as positions: no glyph bitmaps or image
+/// pixels, so a CJK tile's answer stays small.
 #[test]
-fn images_are_defined_once() {
+fn answers_cross_without_pixels() {
     let mut map = map_codec();
-    let dependencies = [("interstate_1".to_owned(), ImageType::Icon)].into_iter().collect();
-    let WorkerMessage::ImagesAvailable { icon_map, .. } = answer(&TileMessage::GetImages((dependencies, 1))) else {
-        unreachable!()
+    let ids = (0..256).map(mln_text::glyph::GlyphID::new).collect();
+    let dependencies = crate::layout::tile_layout::Dependencies {
+        glyphs: mln_text::glyph::GlyphDependencies {
+            glyphs: [(vec!["Open Sans Regular".to_owned()], ids)].into_iter().collect(),
+            shapes: mln_vec_map::VecMap::default(),
+        },
+        images: [("interstate_1".to_owned(), ImageType::Icon)].into_iter().collect(),
+        unavailable_images: VecSet::new(),
     };
-    assert_eq!(icon_map.len(), 1);
-    let images = |image_correlation_id| WorkerMessage::ImagesAvailable {
-        icon_map: icon_map.clone(),
-        pattern_map: ImageMap::new(),
-        version_map: ImageVersionMap::default(),
-        image_correlation_id,
-    };
-    let first = map.message(TILE, &images(1)).unwrap();
-    let second = map.message(TILE, &images(2)).unwrap();
-    assert!(second.len() * 20 < first.len(), "{} bytes, then {}", first.len(), second.len());
+    let answer = answer(&TileMessage::GetDependencies { dependencies, request: 1 });
+    let request = map.message(TILE, &answer).unwrap();
+    // Positions and metrics: tens of bytes a glyph, where its bitmap is
+    // hundreds.
+    assert!(request.len() < 256 * 40, "{} bytes", request.len());
 }
 
 /// Layer properties of a type without a wire form.

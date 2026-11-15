@@ -444,7 +444,7 @@ mod tests {
 
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
     use mln_style::property_value::PropertyValue;
-    use mln_style_types::image::ImageMap;
+    use mln_style_types::image::ImagePositions;
     use mln_style_types::{
         AnchorOffsetPair, ProjectionDefinition, SymbolAnchorType, SymbolPlacementType, VariableAnchorOffsetCollection,
     };
@@ -462,7 +462,7 @@ mod tests {
 
     fn make_symbol_instance(x: f32, y: f32, key: &str) -> SymbolInstance {
         let line = GeometryCoordinates::new();
-        let image_map = ImageMap::new();
+        let image_map = ImagePositions::default();
         let shaping = ShapedTextOrientations::default();
         let layout = SymbolLayoutProperties::Values::default();
         let subfeature = IndexedSubfeature {

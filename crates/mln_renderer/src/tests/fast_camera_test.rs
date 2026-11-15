@@ -31,12 +31,9 @@ use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
 
-use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::image_manager::ImageManager;
 use crate::render_source::RenderSource;
 use crate::sources::render_raster_source::RenderRasterSource;
 use crate::sources::render_vector_source::RenderVectorSource;
-use crate::text::glyph_manager::GlyphManager;
 use crate::tile::tile_worker_transport::InProcessTransport;
 use crate::tile_parameters::TileParameters;
 use crate::tile_pyramid::TilePyramid;
@@ -160,9 +157,6 @@ struct Scene {
     vector_render_source: RenderVectorSource,
     raster_render_source: RenderRasterSource,
     transport: Rc<InProcessTransport>,
-    image_manager: Rc<ImageManager>,
-    glyph_manager: Rc<GlyphManager>,
-    texture_atlas: Arc<DynamicTextureAtlas>,
     laid_out: bool,
 }
 
@@ -194,8 +188,6 @@ impl Scene {
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(size).unwrap();
 
-        let image_manager = ImageManager::on(Some(run_loop.scheduler()));
-        let glyph_manager = GlyphManager::new(None, &run_loop);
         Scene {
             vector_render_source: RenderVectorSource::new(source::downcast_arc(&vector.base_impl())),
             raster_render_source: RenderRasterSource::new(source::downcast_arc(&raster.base_impl())),
@@ -208,9 +200,6 @@ impl Scene {
             raster,
             fill_layers,
             raster_layers,
-            image_manager,
-            glyph_manager,
-            texture_atlas: Arc::new(DynamicTextureAtlas::new()),
             laid_out: false,
         }
     }
@@ -247,9 +236,8 @@ impl Scene {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: Rc::clone(&self.image_manager),
-            glyph_manager: Rc::clone(&self.glyph_manager),
-            dynamic_texture_atlas: Arc::clone(&self.texture_atlas),
+            available_images: Arc::default(),
+            font_faces: None,
             tile_worker_transport: Rc::<InProcessTransport>::clone(&self.transport),
             thread_pool: self.thread_pool.clone(),
         };

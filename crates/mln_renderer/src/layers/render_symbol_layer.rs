@@ -1464,8 +1464,8 @@ impl RenderLayer for RenderSymbolLayer {
             let Some(atlases) = tile.get_atlas_textures() else {
                 continue;
             };
-            let has_icon_texture = atlases.icon.borrow().is_some();
-            let has_glyph_texture = atlases.glyph.borrow().is_some();
+            let has_icon_texture = atlases.icon().is_some();
+            let has_glyph_texture = atlases.glyph().is_some();
 
             if !state_guard.icon.segments.is_empty() && has_icon_texture {
                 add_renderables(&state_guard.icon, SymbolType::IconRGBA);

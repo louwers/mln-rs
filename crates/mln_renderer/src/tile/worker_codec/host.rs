@@ -229,7 +229,6 @@ impl TileWorkerHost {
                     obsolete.store(true, Ordering::SeqCst);
                 }
             }
-            Ok(WorkerAction::None) => {}
             Err(error) => Log::error(Event::General, format!("Not a tile worker request: {error}")),
         }
     }
@@ -309,7 +308,7 @@ struct EncodingTile {
 
 impl TileEndpoint for EncodingTile {
     fn send(&self, message: TileMessage) {
-        let reply = self.codec.lock().encode(self.tile, message);
+        let reply = self.codec.lock().encode(self.tile, &message);
         (self.replies)(reply);
     }
 }

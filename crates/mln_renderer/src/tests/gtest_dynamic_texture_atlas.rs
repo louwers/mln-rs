@@ -5,13 +5,13 @@
 
 use std::sync::Arc;
 
-use mln_style_types::image::{ImageMap, ImagePosition, ImageType, Impl as ImageImpl};
+use mln_style_types::image::{ImageMap, ImagePosition, Impl as ImageImpl};
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
 
-use crate::gfx::dynamic_texture::DynamicTextureBinId;
-use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphAtlas, ImageAtlas, ImageVersionMap};
+use crate::gfx::dynamic_texture::{DynamicTextureBinId, TextureHandle};
+use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphPage, ImagePage};
 
 fn make_glyph(code: char) -> Arc<Glyph> {
     Arc::new(Glyph {
@@ -51,40 +51,43 @@ fn image_map(image: &Arc<ImageImpl>) -> ImageMap {
     ImageMap::from([(image.id.clone(), Arc::clone(image))])
 }
 
+/// An atlas, and the pages it packed, which keep their bins as a tile's
+/// layout would.
 struct DynamicTextureAtlasTest {
     atlas: DynamicTextureAtlas,
-    atlases: Vec<ImageAtlas>,
-    glyph_atlases: Vec<GlyphAtlas>,
+    image_pages: Vec<ImagePage>,
+    glyph_pages: Vec<GlyphPage>,
 }
 
 impl DynamicTextureAtlasTest {
     fn new() -> Self {
-        DynamicTextureAtlasTest { atlas: DynamicTextureAtlas::new(), atlases: Vec::new(), glyph_atlases: Vec::new() }
+        DynamicTextureAtlasTest { atlas: DynamicTextureAtlas::new(), image_pages: Vec::new(), glyph_pages: Vec::new() }
     }
 
-    fn upload_glyphs(&mut self, glyphs: &GlyphMap) -> &GlyphAtlas {
-        let glyph_atlas = self.atlas.upload_glyphs(glyphs);
-        self.glyph_atlases.push(glyph_atlas);
-        self.glyph_atlases.last().unwrap()
+    fn upload_glyphs(&mut self, glyphs: &GlyphMap) -> &GlyphPage {
+        let page = self.atlas.pack_glyphs(glyphs);
+        self.glyph_pages.push(page);
+        self.glyph_pages.last().unwrap()
     }
 
-    fn upload_pattern(&mut self, image: &Arc<ImageImpl>) -> &ImageAtlas {
-        let image_atlas =
-            self.atlas.upload_icons_and_patterns(&ImageMap::new(), &image_map(image), &ImageVersionMap::default());
-        self.atlases.push(image_atlas);
-        self.atlases.last().unwrap()
+    fn upload_images(&mut self, icons: &ImageMap, patterns: &ImageMap) -> &ImagePage {
+        let page = self.atlas.pack_images(icons, patterns);
+        self.image_pages.push(page);
+        self.image_pages.last().unwrap()
+    }
+
+    fn upload_pattern(&mut self, image: &Arc<ImageImpl>) -> &ImagePage {
+        self.upload_images(&ImageMap::new(), &image_map(image))
+    }
+
+    /// Uploads `image` as an icon, keeping its page alive.
+    fn upload_icon(&mut self, image: &Arc<ImageImpl>) -> &ImagePage {
+        self.upload_images(&image_map(image), &ImageMap::new())
     }
 }
 
-impl Drop for DynamicTextureAtlasTest {
-    fn drop(&mut self) {
-        for image_atlas in &self.atlases {
-            self.atlas.remove_textures(&image_atlas.texture_handles, image_atlas.dynamic_texture.as_ref());
-        }
-        for glyph_atlas in &self.glyph_atlases {
-            self.atlas.remove_textures(&glyph_atlas.texture_handles, glyph_atlas.dynamic_texture.as_ref());
-        }
-    }
+fn handle(page: &ImagePage) -> TextureHandle {
+    page.lease.texture_handles()[0]
 }
 
 // gtest: DynamicTextureAtlasTest.SharesAllocationWithinImageRevision
@@ -93,8 +96,8 @@ fn shares_allocation_within_image_revision() {
     let mut test = DynamicTextureAtlasTest::new();
     let image = make_image("pattern", false);
 
-    let first = test.upload_pattern(&image).texture_handles[0];
-    let second = test.upload_pattern(&image).texture_handles[0];
+    let first = handle(test.upload_pattern(&image));
+    let second = handle(test.upload_pattern(&image));
 
     assert_eq!(first.get_id(), second.get_id());
     assert_eq!(first.get_rectangle(), second.get_rectangle());
@@ -105,9 +108,9 @@ fn shares_allocation_within_image_revision() {
 fn replaced_same_size_image_gets_fresh_allocation() {
     let mut test = DynamicTextureAtlasTest::new();
     // Each revision keeps its layout alive, as a tile still rendering an older layout would.
-    let original = test.upload_pattern(&make_image("pattern", false)).texture_handles[0];
-    let sdf = test.upload_pattern(&make_image("pattern", true)).texture_handles[0];
-    let toggled_back = test.upload_pattern(&make_image("pattern", false)).texture_handles[0];
+    let original = handle(test.upload_pattern(&make_image("pattern", false)));
+    let sdf = handle(test.upload_pattern(&make_image("pattern", true)));
+    let toggled_back = handle(test.upload_pattern(&make_image("pattern", false)));
 
     assert_ne!(original.get_rectangle(), sdf.get_rectangle());
     assert_ne!(original.get_rectangle(), toggled_back.get_rectangle());
@@ -120,13 +123,11 @@ fn icon_and_pattern_usage_do_not_share_allocation() {
     let mut test = DynamicTextureAtlasTest::new();
     let image = make_image("image", false);
 
-    let image_atlas =
-        test.atlas.upload_icons_and_patterns(&image_map(&image), &image_map(&image), &ImageVersionMap::default());
-    test.atlases.push(image_atlas);
-    let image_atlas = test.atlases.last().unwrap();
+    let page = test.upload_images(&image_map(&image), &image_map(&image));
 
-    assert_eq!(2, image_atlas.texture_handles.len());
-    assert_ne!(image_atlas.texture_handles[0].get_rectangle(), image_atlas.texture_handles[1].get_rectangle());
+    let handles = page.lease.texture_handles();
+    assert_eq!(2, handles.len());
+    assert_ne!(handles[0].get_rectangle(), handles[1].get_rectangle());
 }
 
 // gtest: DynamicTextureAtlasTest.ResizedImageWithSameAreaGetsItsOwnShape
@@ -137,8 +138,8 @@ fn resized_image_with_same_area_gets_its_own_shape() {
     let wide = make_sized_image("image", false, Size::new(20, 10));
 
     // The layout of the tall image still holds its allocation while the wide one is laid out.
-    test.upload_icon(&tall, 0);
-    let position = &test.upload_icon(&wide, 0).icon_positions["image"];
+    test.upload_icon(&tall);
+    let position = &test.upload_icon(&wide).icons["image"];
 
     let padding = 2 * ImagePosition::PADDING;
     assert_eq!(u32::from(position.padded_rect.w - padding), wide.image.size.width);
@@ -149,14 +150,16 @@ fn resized_image_with_same_area_gets_its_own_shape() {
 #[test]
 fn released_revision_gets_fresh_allocation() {
     let mut test = DynamicTextureAtlasTest::new();
+    // Keeps the page.
+    test.upload_icon(&make_image("other", false));
     let image = make_image("pattern", false);
-    let released =
-        test.atlas.upload_icons_and_patterns(&ImageMap::new(), &image_map(&image), &ImageVersionMap::default());
-    let released_id = released.texture_handles[0].get_id();
-    test.atlas.remove_textures(&released.texture_handles, released.dynamic_texture.as_ref());
+    let released = test.atlas.pack_images(&ImageMap::new(), &image_map(&image));
+    let released_id = handle(&released).get_id();
+    drop(released);
 
     // The revision was forgotten on its last release, so it is packed and uploaded again under a new id.
-    assert_ne!(released_id, test.upload_pattern(&image).texture_handles[0].get_id());
+    let page = test.upload_pattern(&image);
+    assert_ne!(released_id, handle(page).get_id());
 }
 
 // gtest: DynamicTextureAtlasTest.GlyphsOfDifferentFontStacksGetTheirOwnAllocations
@@ -168,11 +171,12 @@ fn glyphs_of_different_font_stacks_get_their_own_allocations() {
     // one drew the other.
     let b = make_glyph('B');
     let a = make_glyph('A');
-    let glyph_atlas = test.upload_glyphs(&GlyphMap::from([(0, glyphs(&b)), (4, glyphs(&a))]));
+    let page = test.upload_glyphs(&GlyphMap::from([(0, glyphs(&b)), (4, glyphs(&a))]));
 
-    assert_eq!(glyph_atlas.texture_handles.len(), 2);
-    assert_ne!(glyph_atlas.texture_handles[0].get_rectangle(), glyph_atlas.texture_handles[1].get_rectangle());
-    assert_ne!(glyph_atlas.glyph_positions[&0][&b.id].rect, glyph_atlas.glyph_positions[&4][&a.id].rect);
+    let handles = page.lease.texture_handles();
+    assert_eq!(handles.len(), 2);
+    assert_ne!(handles[0].get_rectangle(), handles[1].get_rectangle());
+    assert_ne!(page.positions[&0][&b.id].unwrap().rect, page.positions[&4][&a.id].unwrap().rect);
 }
 
 // gtest: DynamicTextureAtlasTest.FontStacksShareTheAllocationOfTheSameGlyph
@@ -180,38 +184,82 @@ fn glyphs_of_different_font_stacks_get_their_own_allocations() {
 fn font_stacks_share_the_allocation_of_the_same_glyph() {
     let mut test = DynamicTextureAtlasTest::new();
     let glyph = make_glyph('A');
-    let glyph_atlas = test.upload_glyphs(&GlyphMap::from([(1, glyphs(&glyph)), (2, glyphs(&glyph))]));
+    let page = test.upload_glyphs(&GlyphMap::from([(1, glyphs(&glyph)), (2, glyphs(&glyph))]));
 
-    assert_eq!(glyph_atlas.texture_handles.len(), 2);
-    assert_eq!(glyph_atlas.texture_handles[0].get_id(), glyph_atlas.texture_handles[1].get_id());
+    let handles = page.lease.texture_handles();
+    assert_eq!(handles.len(), 2);
+    assert_eq!(handles[0].get_id(), handles[1].get_id());
 }
 
-impl DynamicTextureAtlasTest {
-    /// Uploads `image` as an icon at `version`, keeping its atlas alive.
-    fn upload_icon(&mut self, image: &Arc<ImageImpl>, version: u32) -> &ImageAtlas {
-        let version_map = ImageVersionMap::from_iter([(image.id.clone(), version)]);
-        let image_atlas = self.atlas.upload_icons_and_patterns(&image_map(image), &ImageMap::new(), &version_map);
-        self.atlases.push(image_atlas);
-        self.atlases.last().unwrap()
-    }
+/// A glyph no font has stays missing, and one without a bitmap has its
+/// metrics and no bin.
+#[test]
+fn missing_and_blank_glyphs_take_no_bin() {
+    let mut test = DynamicTextureAtlasTest::new();
+    let drawn = make_glyph('A');
+    let blank = Arc::new(Glyph {
+        id: GlyphID::new(' ' as u32),
+        bitmap: AlphaImage::default(),
+        metrics: GlyphMetrics { advance: 6, ..Default::default() },
+    });
+    let mut font = glyphs(&drawn);
+    font.insert(blank.id, Some(Arc::clone(&blank)));
+    font.insert(GlyphID::new('B' as u32), None);
+    let page = test.upload_glyphs(&GlyphMap::from([(1, font)]));
+
+    assert_eq!(page.lease.texture_handles().len(), 1);
+    let positions = &page.positions[&1];
+    assert!(positions[&GlyphID::new('B' as u32)].is_none());
+    let blank_position = positions[&blank.id].unwrap();
+    assert_eq!((blank_position.rect.w, blank_position.metrics.advance), (0, 6));
+    assert_ne!(positions[&drawn.id].unwrap().rect.w, 0);
+}
+
+/// Dropping the last lease on a page's bins frees them, and the page with
+/// them, the next time the atlas packs or uploads.
+#[test]
+fn dropped_leases_free_their_bins_and_empty_pages() {
+    let mut atlas = DynamicTextureAtlas::new();
+    let image = make_image("icon", false);
+    let first = atlas.pack_images(&image_map(&image), &ImageMap::new());
+    let second = atlas.pack_images(&image_map(&image), &ImageMap::new());
+    assert_eq!(first.lease.page(), second.lease.page());
+    assert_eq!(atlas.page_count(), 1);
+
+    drop(first);
+    atlas.free_released();
+    assert_eq!(atlas.page_count(), 1, "the second lease still holds the bin");
+    drop(second);
+    atlas.free_released();
+    assert_eq!(atlas.page_count(), 0);
+
+    // An empty pack takes the bin of a 1×1 page, which isn't packed into,
+    // and goes with its last lease.
+    let empty = atlas.pack_images(&ImageMap::new(), &ImageMap::new());
+    assert_eq!(empty.lease.texture_handles().len(), 1);
+    let second = atlas.pack_images(&ImageMap::new(), &ImageMap::new());
+    assert_eq!(second.lease.page(), empty.lease.page());
+    assert_eq!(atlas.page_count(), 0);
+    let page = empty.lease.page();
+    drop((empty, second));
+    atlas.free_released();
+    assert_ne!(atlas.pack_images(&ImageMap::new(), &ImageMap::new()).lease.page(), page);
 }
 
 // Port-only: the icon cases of maplibre/maplibre-native#4751's
 // DynamicTextureAtlas.UpdatedImageGetsSeparateRegion and
 // ManyLiveVersionsGetSeparateRegions. Allocations here are keyed by image
-// revision rather than by the version map, so a re-upload of the same
-// revision shares its bin and every live revision gets its own.
+// revision, so a re-upload of the same revision shares its bin and every
+// live revision gets its own.
 #[test]
 fn updated_icon_gets_fresh_allocation() {
     let mut test = DynamicTextureAtlasTest::new();
     let original_image = make_image("marker", false);
-    let original = test.upload_icon(&original_image, 0).texture_handles[0];
-    let shared = test.upload_icon(&original_image, 0).texture_handles[0];
+    let original = handle(test.upload_icon(&original_image));
+    let shared = handle(test.upload_icon(&original_image));
     assert_eq!(original.get_id(), shared.get_id());
 
-    let updated_atlas = test.upload_icon(&make_image("marker", false), 1);
-    assert_eq!(updated_atlas.icon_positions["marker"].version, 1);
-    let updated = updated_atlas.texture_handles[0];
+    let updated = handle(test.upload_icon(&make_image("marker", false)));
     assert_ne!(original.get_rectangle(), updated.get_rectangle());
 }
 
@@ -219,9 +267,8 @@ fn updated_icon_gets_fresh_allocation() {
 fn many_live_icon_revisions_get_their_own_allocations() {
     const REVISIONS: u32 = 64;
     let mut test = DynamicTextureAtlasTest::new();
-    let ids: mln_util::hash::HashSet<DynamicTextureBinId> = (0..REVISIONS)
-        .map(|version| test.upload_icon(&make_image("marker", false), version).texture_handles[0].get_id())
-        .collect();
+    let ids: mln_util::hash::HashSet<DynamicTextureBinId> =
+        (0..REVISIONS).map(|_| handle(test.upload_icon(&make_image("marker", false))).get_id()).collect();
     assert_eq!(ids.len(), REVISIONS as usize);
 }
 
@@ -234,26 +281,25 @@ fn make_gradient_image(id: &str) -> Arc<ImageImpl> {
     Arc::new(ImageImpl::new(id.to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None).expect("image"))
 }
 
-// Port-only: a same-size image update copies the new pixels into the bin
-// that the layout holds, with a pattern's wrapped edges.
+// Port-only: a same-size image update copies the new pixels into the bins of
+// the revisions that layouts hold, with a pattern's wrapped edges.
 #[test]
 fn patched_pattern_is_queued_for_its_bin() {
     let mut test = DynamicTextureAtlasTest::new();
-    let image_atlas = test.upload_pattern(&make_image("pattern", false));
-    let texture = image_atlas.dynamic_texture.clone().expect("dynamic texture");
-    texture.take_uploads();
+    test.upload_pattern(&make_image("pattern", false));
+    let page = test.image_pages[0].lease.page();
+    let tex_handle = handle(&test.image_pages[0]);
+    let queued =
+        |test: &DynamicTextureAtlasTest| test.atlas.queued_uploads(page).unwrap()[&tex_handle.get_id()].clone();
+    let original = queued(&test);
 
-    assert!(!image_atlas.patch_image(&make_sized_image("pattern", false, Size::new(8, 8)), ImageType::Pattern));
-    assert!(!image_atlas.patch_image(&make_image("pattern", false), ImageType::Icon));
-    assert!(!image_atlas.patch_image(&make_image("other", false), ImageType::Pattern));
-    assert_eq!(texture.take_uploads(), Vec::new());
+    test.atlas.patch_image(&make_sized_image("pattern", false, Size::new(8, 8)));
+    test.atlas.patch_image(&make_gradient_image("other"));
+    assert_eq!(queued(&test), original);
 
-    assert!(image_atlas.patch_image(&make_gradient_image("pattern"), ImageType::Pattern));
-    let uploads = texture.take_uploads();
-    assert_eq!(uploads.len(), 1);
-    let (id, rect, data) = &uploads[0];
-    let tex_handle = image_atlas.texture_handles[0];
-    assert_eq!((*id, rect), (tex_handle.get_id(), tex_handle.get_rectangle()));
+    test.atlas.patch_image(&make_gradient_image("pattern"));
+    let (rect, data) = queued(&test);
+    assert_eq!(&rect, tex_handle.get_rectangle());
 
     // The image starts two pixels in: one of padding, one of wrapped edge.
     let pixel = |x: usize, y: usize| {

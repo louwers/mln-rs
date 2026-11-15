@@ -570,7 +570,7 @@ impl RenderLayer for RenderFillLayer {
                 };
 
                 // getAtlasTweaker()
-                let atlas_tweaker = tile.get_atlas_textures().filter(|a| a.icon.borrow().is_some()).map(|atlases| {
+                let atlas_tweaker = tile.get_atlas_textures().filter(|a| a.icon().is_some()).map(|atlases| {
                     Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
                         Some(Rc::clone(atlases)),
                         None,

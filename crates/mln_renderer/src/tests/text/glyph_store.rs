@@ -1,11 +1,16 @@
+// The C++ GlyphManager notifies requestors; the port's GlyphStore answers
+// waits that ask it again (`resolve`). The fixture here keeps the waits of
+// its requestors and asks the store again whenever it wakes the renderer,
+// as the renderer's update does for waiting tiles.
+
 use std::cell::{Cell, RefCell};
 use std::num::NonZeroU16;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use mln_actor::{RunLoop, Timer};
+use mln_actor::{AsyncTask, RunLoop, Timer};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
@@ -26,10 +31,10 @@ use mln_util::size::Size;
 use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 
-use super::glyph_manager_bitmaps::{SDF_BITMAP, STUB_BITMAP};
+use super::glyph_store_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::{SquelchLog, read_file};
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
-use crate::text::glyph_manager::{GlyphManager, GlyphManagerObserver, GlyphRequestor, glyph_requestor_key};
+use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver, GlyphWait, HBShapeResults};
 
 fn stub_glyph(glyph_id: GlyphID) -> Glyph {
     Glyph {
@@ -80,13 +85,13 @@ type ErrorFn = Box<dyn FnMut(&FontStack, &GlyphRange, Error)>;
 type RequestedFn = Box<dyn FnMut(&FontStack, &GlyphRange)>;
 
 #[derive(Default)]
-struct StubGlyphManagerObserver {
+struct StubGlyphStoreObserver {
     glyphs_loaded: RefCell<Option<LoadedFn>>,
     glyphs_error: RefCell<Option<ErrorFn>>,
     glyphs_requested: RefCell<Option<RequestedFn>>,
 }
 
-impl GlyphManagerObserver for StubGlyphManagerObserver {
+impl GlyphStoreObserver for StubGlyphStoreObserver {
     fn on_glyphs_loaded(&self, font_stack: &FontStack, range: GlyphRange) {
         if let Some(f) = self.glyphs_loaded.borrow_mut().as_mut() {
             f(font_stack, &range);
@@ -109,74 +114,161 @@ impl GlyphManagerObserver for StubGlyphManagerObserver {
 type OnGlyphsAvailable = Rc<dyn Fn(GlyphMap)>;
 
 /// A glyph requestor stub. The callback is an `Rc<dyn Fn>` because
-/// `local_cjk_glyph_prefers_local_rasterization_over_range` calls
-/// `get_glyphs` from inside it, which notifies the requestor again.
+/// `local_cjk_glyph_prefers_local_rasterization_over_range` requests glyphs
+/// from inside it.
 #[derive(Default)]
 struct StubGlyphRequestor {
     glyphs_available: RefCell<Option<OnGlyphsAvailable>>,
-    missing_glyph_retries: Cell<usize>,
+    /// The shaping of the last answer.
+    shaping: RefCell<Option<HBShapeResults>>,
+    /// Whether the last answer lacked glyphs of a failed range.
+    failed: Cell<bool>,
 }
 
-impl GlyphRequestor for StubGlyphRequestor {
-    fn on_glyphs_available(&self, glyphs: GlyphMap, _requests: HBShapeRequests) {
-        let f = self.glyphs_available.borrow().clone();
-        if let Some(f) = f {
-            f(glyphs);
+/// A request's wait for its answer.
+struct Wait {
+    requestor: Rc<StubGlyphRequestor>,
+    dependencies: GlyphDependencies,
+    wait: GlyphWait,
+}
+
+/// A store and the waits of its requestors, which it answers when it wakes.
+struct Store {
+    store: RefCell<GlyphStore>,
+    file_source: Arc<dyn FileSource>,
+    waits: RefCell<Vec<Wait>>,
+    _wake: AsyncTask,
+}
+
+impl Store {
+    fn new(
+        local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
+        glyph_cache: Arc<GlyphCache>,
+        engine: Arc<dyn FontFaceEngine>,
+        file_source: Arc<dyn FileSource>,
+        run_loop: &RunLoop,
+    ) -> Rc<Store> {
+        Rc::new_cyclic(|this: &Weak<Store>| {
+            let this = Weak::clone(this);
+            let wake = AsyncTask::new(run_loop, move || {
+                if let Some(this) = this.upgrade() {
+                    this.store.borrow_mut().update();
+                    this.answer();
+                }
+            });
+            let sender = wake.sender();
+            let store = GlyphStore::new(
+                Some(local_glyph_rasterizer),
+                glyph_cache,
+                engine,
+                run_loop.clone(),
+                Rc::new(move || sender.send()),
+            );
+            Store { store: RefCell::new(store), file_source, waits: RefCell::default(), _wake: wake }
+        })
+    }
+
+    /// Asks for `dependencies` for `requestor`, which gets them once the
+    /// store has them.
+    fn get_glyphs(&self, requestor: &Rc<StubGlyphRequestor>, dependencies: GlyphDependencies) {
+        self.waits.borrow_mut().push(Wait {
+            requestor: Rc::clone(requestor),
+            dependencies,
+            wait: GlyphWait::default(),
+        });
+        self.answer();
+    }
+
+    /// Answers the waits the store can answer now.
+    fn answer(&self) {
+        let waits = std::mem::take(&mut *self.waits.borrow_mut());
+        let mut answered = Vec::new();
+        for mut wait in waits {
+            let resolved = self.store.borrow_mut().resolve(&wait.dependencies, &mut wait.wait, Some(&self.file_source));
+            match resolved {
+                Some(resolved) => answered.push((wait.requestor, resolved)),
+                None => self.waits.borrow_mut().push(wait),
+            }
+        }
+        for (requestor, resolved) in answered {
+            *requestor.shaping.borrow_mut() = Some(resolved.shaping);
+            requestor.failed.set(resolved.failed);
+            let f = requestor.glyphs_available.borrow().clone();
+            if let Some(f) = f {
+                f(resolved.glyphs);
+            }
         }
     }
-
-    fn retry_missing_glyphs(&self) {
-        self.missing_glyph_retries.set(self.missing_glyph_retries.get() + 1);
-    }
 }
 
-struct GlyphManagerTest {
+struct GlyphStoreTest {
     run_loop: RunLoop,
     file_source: Arc<StubFileSource>,
-    observer: Rc<StubGlyphManagerObserver>,
+    observer: Rc<StubGlyphStoreObserver>,
     requestor: Rc<StubGlyphRequestor>,
-    glyph_manager: Rc<GlyphManager>,
+    store: Rc<Store>,
     squelch_log: Option<SquelchLog>,
 }
 
-impl GlyphManagerTest {
+impl GlyphStoreTest {
     fn new() -> Self {
         Self::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Asynchronous)
     }
 
     fn with(local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>, response_type: ResponseType) -> Self {
+        Self::with_all(
+            local_glyph_rasterizer,
+            response_type,
+            Arc::default(),
+            crate::text::font_face_engine::default_engine(),
+        )
+    }
+
+    fn with_glyph_cache(local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>, glyph_cache: Arc<GlyphCache>) -> Self {
+        Self::with_all(
+            local_glyph_rasterizer,
+            ResponseType::Asynchronous,
+            glyph_cache,
+            crate::text::font_face_engine::default_engine(),
+        )
+    }
+
+    fn with_all(
+        local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
+        response_type: ResponseType,
+        glyph_cache: Arc<GlyphCache>,
+        engine: Arc<dyn FontFaceEngine>,
+    ) -> Self {
         let run_loop = RunLoop::new();
-        GlyphManagerTest {
-            file_source: Arc::new(StubFileSource::new(&run_loop, response_type)),
-            observer: Rc::new(StubGlyphManagerObserver::default()),
+        let file_source = Arc::new(StubFileSource::new(&run_loop, response_type));
+        let observer = Rc::new(StubGlyphStoreObserver::default());
+        let source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
+        let store = Store::new(local_glyph_rasterizer, glyph_cache, engine, source, &run_loop);
+        store.store.borrow_mut().set_observer(Some(Rc::<StubGlyphStoreObserver>::clone(&observer)));
+        GlyphStoreTest {
+            file_source,
+            observer,
             requestor: Rc::new(StubGlyphRequestor::default()),
-            glyph_manager: GlyphManager::new(Some(local_glyph_rasterizer), &run_loop),
+            store,
             run_loop,
             squelch_log: None,
         }
     }
 
-    fn with_glyph_cache(local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>, glyph_cache: Arc<GlyphCache>) -> Self {
-        let mut test = Self::new();
-        test.glyph_manager = GlyphManager::with_glyph_cache(Some(local_glyph_rasterizer), glyph_cache, &test.run_loop);
-        test
+    fn glyph_store(&self) -> std::cell::RefMut<'_, GlyphStore> {
+        self.store.store.borrow_mut()
     }
 
-    fn file_source(&self) -> Arc<dyn FileSource> {
-        Arc::<StubFileSource>::clone(&self.file_source)
-    }
-
-    fn requestor(&self) -> Rc<dyn GlyphRequestor> {
-        Rc::<StubGlyphRequestor>::clone(&self.requestor)
+    fn get_glyphs(&self, dependencies: GlyphDependencies) {
+        self.store.get_glyphs(&self.requestor, dependencies);
     }
 
     fn run(&mut self, url: &str, dependencies: GlyphDependencies) {
         // Squelch logging.
         self.squelch_log = Some(SquelchLog::new());
 
-        self.glyph_manager.set_url(url);
-        self.glyph_manager.set_observer(Some(Rc::<StubGlyphManagerObserver>::clone(&self.observer)));
-        self.glyph_manager.get_glyphs(&self.requestor(), dependencies, Some(&self.file_source()));
+        self.glyph_store().set_url(url);
+        self.get_glyphs(dependencies);
 
         self.run_loop.run();
     }
@@ -221,7 +313,7 @@ fn glyphs_response(path: &'static str) -> impl Fn(&Resource) -> Option<Response>
 // gtest: GlyphManager.LoadingSuccess
 #[test]
 fn loading_success() {
-    let mut test = GlyphManagerTest::new();
+    let mut test = GlyphStoreTest::new();
 
     test.file_source.set_response(Kind::Glyphs, |resource: &Resource| {
         assert_eq!(Kind::Glyphs, resource.kind);
@@ -256,39 +348,38 @@ fn loading_success() {
     assert!(available.get());
 }
 
-/// The requestor's `glyphsAvailable` and the observer's `glyphsError` for
-/// `LoadingFail` / `LoadingCorrupted`: the requestor gets the range's glyphs as
-/// missing before the error is reported.
-fn expect_error(test: &GlyphManagerTest, message: &'static str) -> Rc<Cell<bool>> {
+/// The observer's `glyphsError` and the requestor's `glyphsAvailable` for
+/// `LoadingFail` / `LoadingCorrupted`: the error is reported as the store
+/// takes the response in, and the requestor then gets the range's glyphs as
+/// missing.
+fn expect_error(test: &GlyphStoreTest, message: &'static str) -> Rc<Cell<bool>> {
+    let reported = Rc::new(Cell::new(false));
+    let r = Rc::clone(&reported);
+    *test.observer.glyphs_error.borrow_mut() = Some(Box::new(move |font_stack, glyph_range, error| {
+        assert_eq!(*font_stack, test_stack());
+        assert_eq!(*glyph_range, GlyphRange::new(0, 255, GlyphIDType::FontPBF));
+        assert_eq!(error.to_string(), message);
+        r.set(true);
+    }));
+
     let answered = Rc::new(Cell::new(false));
-    let a = Rc::clone(&answered);
+    let (a, run_loop) = (Rc::clone(&answered), test.run_loop.clone());
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
         assert_eq!(test_positions.len(), 2);
         assert!(test_positions[&gid('a')].is_none());
         assert!(test_positions[&gid('å')].is_none());
+        assert!(reported.get());
         a.set(true);
-    }));
-
-    let called = Rc::new(Cell::new(false));
-    let (c, run_loop) = (Rc::clone(&called), test.run_loop.clone());
-    *test.observer.glyphs_error.borrow_mut() = Some(Box::new(move |font_stack, glyph_range, error| {
-        assert_eq!(*font_stack, test_stack());
-        assert_eq!(*glyph_range, GlyphRange::new(0, 255, GlyphIDType::FontPBF));
-
-        assert_eq!(error.to_string(), message);
-
-        assert!(answered.get());
-        c.set(true);
         run_loop.stop();
     }));
-    called
+    answered
 }
 
 // gtest: GlyphManager.LoadingFail
 #[test]
 fn loading_fail() {
-    let mut test = GlyphManagerTest::new();
+    let mut test = GlyphStoreTest::new();
 
     test.file_source.set_response(Kind::Glyphs, |_: &Resource| {
         let mut response = Response::new();
@@ -316,7 +407,7 @@ fn fails_first_then_glyphs(requests: Rc<Cell<u32>>) -> impl Fn(&Resource) -> Opt
     }
 }
 
-fn count_requests(test: &GlyphManagerTest) -> Rc<Cell<u32>> {
+fn count_requests(test: &GlyphStoreTest) -> Rc<Cell<u32>> {
     let requests = Rc::new(Cell::new(0));
     let r = Rc::clone(&requests);
     *test.observer.glyphs_requested.borrow_mut() = Some(Box::new(move |_, _| r.set(r.get() + 1)));
@@ -326,16 +417,15 @@ fn count_requests(test: &GlyphManagerTest) -> Rc<Cell<u32>> {
 // gtest: GlyphManager.LoadingFailRequestsTheRangeAgain
 #[test]
 fn loading_fail_requests_the_range_again() {
-    let mut test = GlyphManagerTest::new();
+    let mut test = GlyphStoreTest::new();
     let requests = count_requests(&test);
     test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
 
     let answers = Rc::new(Cell::new(0));
     let retry = Rc::new(Timer::new(&test.run_loop));
     let (n, run_loop) = (Rc::clone(&answers), test.run_loop.clone());
-    let glyph_manager = Rc::downgrade(&test.glyph_manager);
+    let store = Rc::downgrade(&test.store);
     let requestor = Rc::downgrade(&test.requestor);
-    let file_source = test.file_source();
     let retry_timer = Rc::clone(&retry);
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
@@ -344,11 +434,9 @@ fn loading_fail_requests_the_range_again() {
             assert!(test_positions[&gid('a')].is_none());
             // C++ asks again through `loop.invoke`, after this response is
             // processed.
-            let (glyph_manager, requestor, file_source) =
-                (std::rc::Weak::clone(&glyph_manager), std::rc::Weak::clone(&requestor), Arc::clone(&file_source));
+            let (store, requestor) = (Weak::clone(&store), Weak::clone(&requestor));
             retry_timer.start(Duration::ZERO, Duration::ZERO, move || {
-                let requestor: Rc<dyn GlyphRequestor> = requestor.upgrade().unwrap();
-                glyph_manager.upgrade().unwrap().get_glyphs(&requestor, dependencies(&['a']), Some(&file_source));
+                store.upgrade().unwrap().get_glyphs(&requestor.upgrade().unwrap(), dependencies(&['a']));
             });
         } else {
             assert!(test_positions[&gid('a')].is_some());
@@ -366,55 +454,60 @@ fn loading_fail_requests_the_range_again() {
     assert_eq!(answers.get(), 2);
 }
 
-// A still image asks the requestors answered without a failed range to
-// request their glyphs again, once, and requests nothing itself.
+// A wait answered without the glyphs of a range that failed while it waited
+// says so, so that a still image lays its tile out again; that layout's wait
+// requests the range again.
 #[test]
-fn retry_failed_requests_asks_the_requestors_missing_glyphs() {
-    let mut test = GlyphManagerTest::new();
+fn an_answer_says_a_range_it_needed_failed() {
+    let mut test = GlyphStoreTest::new();
     let requests = count_requests(&test);
     test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
     let run_loop = test.run_loop.clone();
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
 
-    test.glyph_manager.retry_failed_requests();
-    assert_eq!(test.requestor.missing_glyph_retries.get(), 0);
-
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
-    test.glyph_manager.retry_failed_requests();
-    assert_eq!(test.requestor.missing_glyph_retries.get(), 1);
+    assert!(test.requestor.failed.get());
     assert_eq!(requests.get(), 1);
 
-    test.glyph_manager.retry_failed_requests();
-    assert_eq!(test.requestor.missing_glyph_retries.get(), 1);
-
-    // The requestor's own request requests the range again, which loads.
+    // A wait that began after the failure requests the range again, which
+    // loads.
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
     assert_eq!(requests.get(), 2);
-    test.glyph_manager.retry_failed_requests();
-    assert_eq!(test.requestor.missing_glyph_retries.get(), 1);
+    assert!(!test.requestor.failed.get());
 }
 
+/// A wait for a range that fails while it waits gets the range's glyphs as
+/// missing however often it asks again: a failure can't leave it waiting.
 #[test]
-fn retry_failed_requests_skips_removed_requestors() {
-    let mut test = GlyphManagerTest::new();
+fn a_wait_resolves_a_range_that_failed_during_it_as_missing() {
+    let test = GlyphStoreTest::new();
+    let requests = count_requests(&test);
     test.file_source.set_response(Kind::Glyphs, |_: &Resource| {
         let mut response = Response::new();
         response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
         Some(response)
     });
-    let run_loop = test.run_loop.clone();
-    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
+    let _log = SquelchLog::new();
+    test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
 
-    test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
-    test.glyph_manager.remove_requestor_key(glyph_requestor_key(&test.requestor()));
-    test.glyph_manager.retry_failed_requests();
-    assert_eq!(test.requestor.missing_glyph_retries.get(), 0);
+    let file_source = Arc::clone(&test.store.file_source);
+    let mut wait = GlyphWait::default();
+    assert!(test.glyph_store().resolve(&dependencies(&['a']), &mut wait, Some(&file_source)).is_none());
+    test.run_loop.run_once();
+    test.glyph_store().update();
+    for _ in 0..2 {
+        let resolved =
+            test.glyph_store().resolve(&dependencies(&['a']), &mut wait, Some(&file_source)).expect("answered");
+        assert!(resolved.failed);
+        assert!(resolved.glyphs[&font_stack_hash(&test_stack())][&gid('a')].is_none());
+    }
+    assert_eq!(requests.get(), 1);
 }
 
 // gtest: GlyphManager.LoadingFailStillAnswersWithTheOtherRanges
 #[test]
 fn loading_fail_still_answers_with_the_other_ranges() {
-    let mut test = GlyphManagerTest::new();
+    let mut test = GlyphStoreTest::new();
 
     test.file_source.set_response(Kind::Glyphs, |resource: &Resource| {
         let mut response = Response::new();
@@ -449,7 +542,7 @@ fn loading_fail_still_answers_with_the_other_ranges() {
 // gtest: GlyphManager.LoadingCorrupted
 #[test]
 fn loading_corrupted() {
-    let mut test = GlyphManagerTest::new();
+    let mut test = GlyphStoreTest::new();
 
     test.file_source.set_response(Kind::Glyphs, |_: &Resource| {
         let mut response = Response::new();
@@ -468,10 +561,10 @@ fn loading_corrupted() {
 fn shares_parsed_glyphs_between_managers_and_font_stacks() {
     let cache = Arc::new(GlyphCache::new());
     let load = |font_stack: &str| {
-        let mut test = GlyphManagerTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), Arc::clone(&cache));
+        let mut test = GlyphStoreTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), Arc::clone(&cache));
         let font_stack = vec![font_stack.to_owned()];
         test.load(font_stack.clone(), &['a']);
-        test.glyph_manager.get_glyph(&font_stack, gid('a'))
+        test.glyph_store().get_glyph(&font_stack, gid('a'))
     };
 
     let first = load("Test Stack");
@@ -483,9 +576,9 @@ fn shares_parsed_glyphs_between_managers_and_font_stacks() {
 #[test]
 fn keeps_its_own_glyphs_without_a_cache() {
     let load = || {
-        let mut test = GlyphManagerTest::new();
+        let mut test = GlyphStoreTest::new();
         test.load(test_stack(), &['a']);
-        test.glyph_manager.get_glyph(&test_stack(), gid('a'))
+        test.glyph_store().get_glyph(&test_stack(), gid('a'))
     };
 
     let first = load();
@@ -497,20 +590,20 @@ fn keeps_its_own_glyphs_without_a_cache() {
 #[test]
 fn releases_the_glyphs_of_evicted_font_stacks() {
     let cache = Arc::new(GlyphCache::new());
-    let mut test = GlyphManagerTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), Arc::clone(&cache));
+    let mut test = GlyphStoreTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), Arc::clone(&cache));
     test.load(test_stack(), &['a']);
     assert_ne!(0, cache.size());
 
-    test.glyph_manager.evict(&VecSet::new());
+    test.glyph_store().evict(&VecSet::new());
 
     assert_eq!(0, cache.size());
 }
 
-// Evicting keeps the font stacks a requestor still waits to be answered with:
-// the one still loading, and the one it already has.
+// A wait whose font stacks are evicted, the one still loading and the one it
+// already has, requests them again and is answered with both.
 #[test]
-fn evict_keeps_the_font_stacks_requestors_wait_for() {
-    let mut test = GlyphManagerTest::new();
+fn a_wait_requests_the_font_stacks_evicted_while_it_waits_again() {
+    let mut test = GlyphStoreTest::new();
     let loaded_stack = vec!["Loaded Stack".to_owned()];
     test.load(loaded_stack.clone(), &['a']);
 
@@ -525,9 +618,11 @@ fn evict_keeps_the_font_stacks_requestors_wait_for() {
         glyphs: VecMap::from([(loaded_stack.clone(), ids.clone()), (test_stack(), ids)]),
         shapes: HBShapeRequests::default(),
     };
-    test.glyph_manager.get_glyphs(&test.requestor(), dependencies, Some(&test.file_source()));
+    test.get_glyphs(dependencies);
 
-    test.glyph_manager.evict(&VecSet::new());
+    test.glyph_store().evict(&VecSet::new());
+    // The renderer's update asks the waiting tiles again after an eviction.
+    test.store.answer();
 
     let timeout = Timer::new(&test.run_loop);
     let run_loop = test.run_loop.clone();
@@ -546,7 +641,7 @@ fn evict_keeps_the_font_stacks_requestors_wait_for() {
 fn does_not_keep_the_range_glyphs_it_draws_locally() {
     let loaded_glyphs = |rasterizer: Box<dyn LocalGlyphRasterizer>| {
         let cache = Arc::new(GlyphCache::new());
-        let mut test = GlyphManagerTest::with_glyph_cache(rasterizer, Arc::clone(&cache));
+        let mut test = GlyphStoreTest::with_glyph_cache(rasterizer, Arc::clone(&cache));
         test.load(test_stack(), &['a', 'å']);
         cache.size()
     };
@@ -560,7 +655,7 @@ fn does_not_keep_the_range_glyphs_it_draws_locally() {
 // gtest: GlyphManager.LoadingCancel
 #[test]
 fn loading_cancel() {
-    let mut test = GlyphManagerTest::new();
+    let mut test = GlyphStoreTest::new();
 
     let run_loop = test.run_loop.clone();
     test.file_source.set_response(Kind::Glyphs, move |_: &Resource| {
@@ -576,7 +671,7 @@ fn loading_cancel() {
 // gtest: GlyphManager.LoadLocalCJKGlyph
 #[test]
 fn load_local_cjk_glyph() {
-    let mut test = GlyphManagerTest::new();
+    let mut test = GlyphStoreTest::new();
     let glyph_responses = Rc::new(Cell::new(0));
 
     let g = Rc::clone(&glyph_responses);
@@ -623,7 +718,7 @@ fn load_local_cjk_glyph() {
 // gtest: GlyphManager.LoadLocalCJKSymbols
 #[test]
 fn load_local_cjk_symbols() {
-    let mut test = GlyphManagerTest::new();
+    let mut test = GlyphStoreTest::new();
     let glyph_responses = Rc::new(Cell::new(0));
 
     let g = Rc::clone(&glyph_responses);
@@ -660,7 +755,7 @@ fn local_cjk_glyph_prefers_local_rasterization_over_range() {
     // Verifies that locally-rasterized glyphs (like テ) are produced by the
     // local rasterizer instead of using a glyph from an already-loaded PBF
     // range.
-    let mut test = GlyphManagerTest::with(Box::new(KatakanaOnlyLocalGlyphRasterizer), ResponseType::Asynchronous);
+    let mut test = GlyphStoreTest::with(Box::new(KatakanaOnlyLocalGlyphRasterizer), ResponseType::Asynchronous);
     let first_glyph_response = Rc::new(Cell::new(false));
 
     let f = Rc::clone(&first_glyph_response);
@@ -673,9 +768,8 @@ fn local_cjk_glyph_prefers_local_rasterization_over_range() {
 
     let done = Rc::new(Cell::new(false));
     let (f, d, run_loop) = (Rc::clone(&first_glyph_response), Rc::clone(&done), test.run_loop.clone());
-    let glyph_manager = Rc::downgrade(&test.glyph_manager);
+    let store = Rc::downgrade(&test.store);
     let requestor = Rc::downgrade(&test.requestor);
-    let file_source = test.file_source();
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
 
@@ -687,11 +781,9 @@ fn local_cjk_glyph_prefers_local_rasterization_over_range() {
             // Katakana letter te, should be locally rasterized
             //  instead of using the glyph received from the range
             //  for the ideagraphic mark
-            let requestor: Rc<dyn GlyphRequestor> = requestor.upgrade().unwrap();
-            glyph_manager.upgrade().unwrap().get_glyphs(
-                &requestor,
+            store.upgrade().unwrap().get_glyphs(
+                &requestor.upgrade().unwrap(),
                 dependencies(&['テ']), // 0x30c6
-                Some(&file_source),
             );
         } else {
             assert_eq!(test_positions.len(), 1);
@@ -721,7 +813,7 @@ fn local_cjk_glyph_prefers_local_rasterization_over_range() {
 // gtest: GlyphManager.LoadingInvalid
 #[test]
 fn loading_invalid() {
-    let mut test = GlyphManagerTest::new();
+    let mut test = GlyphStoreTest::new();
 
     test.file_source.set_response(Kind::Glyphs, |resource: &Resource| {
         assert_eq!(Kind::Glyphs, resource.kind);
@@ -757,9 +849,9 @@ fn loading_invalid() {
 // gtest: GlyphManager.ImmediateFileSource
 #[test]
 fn immediate_file_source() {
-    // `GlyphManagerTestSynchronous`: the default GlyphManager (no local
+    // `GlyphManagerTestSynchronous`: the default store (no local
     // rasterizer) and a synchronous StubFileSource.
-    let mut test = GlyphManagerTest::with(
+    let mut test = GlyphStoreTest::with(
         Box::new(mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer::new(None)),
         ResponseType::Synchronous,
     );
@@ -783,7 +875,7 @@ fn immediate_file_source() {
 // gtest: GlyphManager.ImmediateFileSourceFailureRequestsTheRangeAgain
 #[test]
 fn immediate_file_source_failure_requests_the_range_again() {
-    let test = GlyphManagerTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
+    let test = GlyphStoreTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
     let _log = SquelchLog::new();
     let requests = count_requests(&test);
     test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
@@ -794,11 +886,13 @@ fn immediate_file_source_failure_requests_the_range_again() {
         a.borrow_mut().push(glyphs[&font_stack_hash(&test_stack())][&gid('a')].is_some());
     }));
 
-    test.glyph_manager.set_url("test/fixtures/resources/glyphs.pbf");
-    test.glyph_manager.set_observer(Some(Rc::<StubGlyphManagerObserver>::clone(&test.observer)));
+    test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
 
-    test.glyph_manager.get_glyphs(&test.requestor(), dependencies(&['a']), Some(&test.file_source()));
-    test.glyph_manager.get_glyphs(&test.requestor(), dependencies(&['a']), Some(&test.file_source()));
+    // The failure is taken in when the store wakes the renderer.
+    test.get_glyphs(dependencies(&['a']));
+    test.run_loop.run_once();
+    test.get_glyphs(dependencies(&['a']));
+    test.run_loop.run_once();
 
     assert_eq!(requests.get(), 2);
     assert_eq!(*answers.borrow(), vec![false, true]);
@@ -871,14 +965,14 @@ impl FontFaceShaper for FakeShaper {
 
 const FONT_FACE: GlyphIDType = GlyphIDType::face(NonZeroU16::new(7).unwrap());
 
-/// A manager on `engine` with one font face, and a synchronous file source
+/// A store on `engine` with one font face, and a synchronous file source
 /// that answers its file with "font".
-fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphManagerTest {
-    let mut test = GlyphManagerTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
-    test.glyph_manager = GlyphManager::with_font_face_engine(
-        Some(Box::new(StubLocalGlyphRasterizer)),
+fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphStoreTest {
+    let test = GlyphStoreTest::with_all(
+        Box::new(StubLocalGlyphRasterizer),
+        ResponseType::Synchronous,
+        Arc::default(),
         Arc::<DeferredEngine>::clone(engine),
-        &test.run_loop,
     );
     test.file_source.set_response(Kind::Glyphs, |resource: &Resource| {
         assert_eq!(resource.url, "test://face.ttf");
@@ -893,23 +987,29 @@ fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphManagerTest {
         ranges: vec![],
         data: None,
     };
-    test.glyph_manager.set_font_faces(Some(Arc::new(vec![face])));
-    test.squelch_log = Some(SquelchLog::new());
-    test
+    test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
+    GlyphStoreTest { squelch_log: Some(SquelchLog::new()), ..test }
 }
 
-/// Requests glyph 0 of the font face; returns what the requestor got.
-fn request_font_face(test: &GlyphManagerTest) -> Rc<RefCell<Option<GlyphMap>>> {
+/// Requests the font face's file and the shaping of "\u{5}\u{6}" with it;
+/// returns what the requestor got.
+fn request_font_face(test: &GlyphStoreTest) -> Rc<RefCell<Option<GlyphMap>>> {
     let available: Rc<RefCell<Option<GlyphMap>>> = Rc::default();
     let a = Rc::clone(&available);
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         *a.borrow_mut() = Some(glyphs);
     }));
     let ids: GlyphIDs = [GlyphID::with_type(0, FONT_FACE)].into_iter().collect();
-    let dependencies =
-        GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: HBShapeRequests::default() };
-    test.glyph_manager.get_glyphs(&test.requestor(), dependencies, Some(&test.file_source()));
+    let shapes = VecMap::from([(test_stack(), VecMap::from([(FONT_FACE, [vec![5, 6]].into_iter().collect())]))]);
+    test.get_glyphs(GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes });
     available
+}
+
+/// The shaping of "\u{5}\u{6}" in the requestor's last answer.
+fn shaped(test: &GlyphStoreTest) -> Vec<u16> {
+    let shaping = test.requestor.shaping.borrow();
+    let shaping = shaping.as_ref().expect("an answer");
+    shaping[&test_stack()][&FONT_FACE][&vec![5, 6]].str_.clone()
 }
 
 #[test]
@@ -925,23 +1025,22 @@ fn font_face_waits_for_the_engine() {
     test.run_loop.run_once();
     assert!(available.borrow().is_none());
     assert_eq!(engine.loads.load(Ordering::SeqCst), 0);
-    assert!(test.glyph_manager.get_hb_shaper(&test_stack(), FONT_FACE).is_none());
 
-    // Once it is, the RunLoop parses the file and notifies the requestor.
+    // Once it is, the store wakes the renderer, which parses the file and
+    // answers the wait.
     engine.report(&Ok(()));
     assert!(available.borrow().is_none());
+    test.run_loop.run_once();
     test.run_loop.run_once();
     assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
     assert_eq!(engine.prepares.load(Ordering::SeqCst), 1);
     let glyphs = available.borrow_mut().take().expect("notified");
-    assert!(glyphs[&font_stack_hash(&test_stack())][&GlyphID::with_type(0, FONT_FACE)].is_some());
-
-    // Shaping and rasterizing are synchronous from then on.
-    let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-    test.glyph_manager.hb_shaping(&[5, 6], false, &test_stack(), FONT_FACE, &mut ids, &mut adjusts);
-    assert_eq!(ids, vec![GlyphID::with_type(5, FONT_FACE), GlyphID::with_type(6, FONT_FACE)]);
-    assert_eq!(adjusts.len(), 2);
-    let glyph = test.glyph_manager.get_glyph(&test_stack(), GlyphID::with_type(5, FONT_FACE));
+    let glyphs = &glyphs[&font_stack_hash(&test_stack())];
+    // The file's glyph 0 only marks it as a dependency; the shaped glyphs
+    // are drawn.
+    assert!(glyphs[&GlyphID::with_type(0, FONT_FACE)].is_none());
+    assert_eq!(shaped(&test), [5, 6]);
+    let glyph = glyphs[&GlyphID::with_type(5, FONT_FACE)].clone().expect("shaped glyph");
     assert_eq!(glyph.id, GlyphID::with_type(5, FONT_FACE));
     assert_eq!(glyph.metrics.width, 24);
 
@@ -957,11 +1056,11 @@ fn font_face_engine_failure_leaves_the_face_out() {
     let available = request_font_face(&test);
     engine.report(&Err("no shaper".to_owned()));
     test.run_loop.run_once();
-    // Notified, as for a file that isn't a font: without the glyph.
+    test.run_loop.run_once();
+    // Answered, as for a file that isn't a font: without shaping.
     assert_eq!(engine.loads.load(Ordering::SeqCst), 0);
-    let glyphs = available.borrow_mut().take().expect("notified");
-    assert!(glyphs[&font_stack_hash(&test_stack())][&GlyphID::with_type(0, FONT_FACE)].is_none());
-    assert!(test.glyph_manager.get_hb_shaper(&test_stack(), FONT_FACE).is_none());
+    assert!(available.borrow_mut().take().is_some());
+    assert_eq!(shaped(&test), Vec::<u16>::new());
 }
 
 // Port-only: a face that holds its font file, as an app's fallback faces
@@ -975,12 +1074,12 @@ fn font_face_with_data_needs_no_request() {
     });
     let face = FontFace { type_: FONT_FACE, ..FontFace::new("", "app://face.ttf", vec![(0, 0xFFFF)]) }
         .with_data(FontData::new(Arc::new(b"font".to_vec())));
-    test.glyph_manager.set_font_faces(Some(Arc::new(vec![face])));
+    test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
     engine.report(&Ok(()));
+    test.run_loop.run_once();
 
     let available = request_font_face(&test);
-    test.run_loop.run_once();
     assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
-    let glyphs = available.borrow_mut().take().expect("notified");
-    assert!(glyphs[&font_stack_hash(&test_stack())][&GlyphID::with_type(0, FONT_FACE)].is_some());
+    assert!(available.borrow_mut().take().is_some(), "answered at once");
+    assert_eq!(shaped(&test), [5, 6]);
 }

@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use mln_expression::image_expression::UnavailableImages;
-use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions};
-use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
+use mln_style_types::image::{ImageDependencies, ImagePositions};
+use mln_text::glyph::{GlyphDependencies, GlyphPositions};
 use mln_tile::{TileData, TileLayer};
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
@@ -18,7 +18,7 @@ use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::layout::filter_groups::FilterGroups;
 use crate::render_layer::LayerRenderData;
-use crate::text::glyph_manager::HBShapeResults;
+use crate::text::glyph_store::HBShapeResults;
 
 /// The layer a layout reads: its tile data and its name.
 #[derive(Clone)]
@@ -63,14 +63,7 @@ pub(crate) trait Layout: Send {
 
     /// Prepares a symbol layout's symbols once its glyphs and images are
     /// available. The default does nothing.
-    fn prepare_symbols(
-        &mut self,
-        _glyph_map: &GlyphMap,
-        _glyph_positions: &GlyphPositions,
-        _image_map: &ImageMap,
-        _image_positions: &ImagePositions,
-    ) {
-    }
+    fn prepare_symbols(&mut self, _glyphs: &GlyphPositions, _icons: &ImagePositions) {}
 
     fn need_finalize_symbols(&self) -> bool {
         false

@@ -152,12 +152,6 @@ impl SerializingTransport {
             Ok(None) => {}
             Err(error) => Log::error(Event::General, format!("Not a tile worker reply: {error}")),
         }
-        // What the layouts the tiles replaced released, so the instance can
-        // reuse those bins without waiting for the next request.
-        let releases = self.codecs[instance].borrow_mut().releases();
-        if let Some(releases) = releases {
-            self.instances.post(instance, releases);
-        }
     }
 
     fn deliver(&self, tile: u64, message: Reply) {

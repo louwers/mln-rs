@@ -1,4 +1,4 @@
-// What GlyphManager shapes and rasterizes a style's "font-faces" with: the
+// What GlyphStore shapes and rasterizes a style's "font-faces" with: the
 // C++ core's HBShaper (src/mln/text/harfbuzz.hpp) behind a trait, so that a
 // host can load it elsewhere. Not a C++ type.
 //
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use mln_text::HBShapeAdjust;
 use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 
-/// A font file loaded for shaping: what `HBShaper` does for `GlyphManager`.
+/// A font file loaded for shaping: what `HBShaper` does for `GlyphStore`.
 pub trait FontFaceShaper {
     /// Appends the glyphs of `text` (UTF-16), one run of one direction in
     /// logical order, in visual order, and their positions.

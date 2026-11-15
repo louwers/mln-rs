@@ -10,6 +10,9 @@ use crate::tile::tile::{TileBase, TileOperation};
 /// nothing.
 pub(crate) trait TileObserver {
     fn on_tile_changed(&self, _tile: &TileBase) {}
+    /// The tile waits for the renderer's next update to resolve the glyphs
+    /// and images its worker asked for.
+    fn on_dependencies_requested(&self, _tile: &TileBase) {}
     fn on_tile_error(&self, _tile: &TileBase, _error: Error) {}
     fn on_tile_action(&self, _id: &OverscaledTileID, _source_id: &str, _op: TileOperation) {}
 }

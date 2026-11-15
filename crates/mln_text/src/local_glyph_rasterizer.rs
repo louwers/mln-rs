@@ -5,7 +5,7 @@ use crate::glyph::{Glyph, GlyphID};
 /// Given a font stack and a glyph ID, platform-specific implementations of
 /// `LocalGlyphRasterizer` will decide which, if any, local fonts to use and
 /// then generate a matching glyph object with a greyscale rasterization of
-/// the glyph and appropriate metrics. `GlyphManager` will then use TinySDF to
+/// the glyph and appropriate metrics. `GlyphStore` will then use TinySDF to
 /// transform the rasterized bitmap into an SDF.
 ///
 /// The shared default codepoint filter is

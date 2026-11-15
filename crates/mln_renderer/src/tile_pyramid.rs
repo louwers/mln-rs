@@ -25,6 +25,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::tile::geometry_tile::GeometryTile;
 use crate::tile::tile::{Tile, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_cache::TileCache;
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
@@ -124,14 +125,14 @@ where
         let tile = if let Some(tile) = tile {
             // A tile cached before the pixel ratio changed.
             if tile.set_pixel_ratio(self.parameters.pixel_ratio) {
-                tile.set_layers(self.layers, self.parameters.global_state.clone());
+                tile.set_layers(self.layers, self.parameters.global_state.clone(), &self.parameters.available_images);
             }
             tile
         } else {
             let tile = (self.create_tile)(id, Rc::clone(self.observer))?;
             tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
             tile.set_pixel_ratio(self.parameters.pixel_ratio);
-            tile.set_layers(self.layers, self.parameters.global_state.clone());
+            tile.set_layers(self.layers, self.parameters.global_state.clone(), &self.parameters.available_images);
             tile
         };
 
@@ -162,7 +163,7 @@ where
         let pixel_ratio_changed = tile.set_pixel_ratio(self.parameters.pixel_ratio);
         if self.needs_relayout || pixel_ratio_changed {
             tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
-            tile.set_layers(self.layers, self.parameters.global_state.clone());
+            tile.set_layers(self.layers, self.parameters.global_state.clone(), &self.parameters.available_images);
         }
     }
 
@@ -1023,6 +1024,11 @@ impl TilePyramid {
         for tile in self.tiles.values() {
             tile.dump_debug_logs();
         }
+    }
+
+    /// The geometry tiles of the pyramid and of its cache.
+    pub(crate) fn geometry_tiles(&self) -> impl Iterator<Item = &GeometryTile> + '_ {
+        self.tiles.values().map(AsRef::as_ref).chain(self.cache.tiles()).filter_map(Tile::as_geometry_tile)
     }
 
     #[must_use]

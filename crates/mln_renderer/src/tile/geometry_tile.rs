@@ -4,8 +4,7 @@
 // the tile's mailbox on the render thread; `GeometryTile` owns it, the
 // mailbox and the worker actor. Correlation between GeometryTile and
 // GeometryTileWorker works as in C++ (see the C++ file's comment):
-// `correlationID` for the tile's pending state, the worker's
-// `imageCorrelationID` for image replies.
+// `correlationID` for the tile's pending state.
 //
 // The tile reaches its worker through the `TileWorkerTransport` of its
 // TileParameters (tile_worker_transport.rs): it sends `WorkerMessage`s to
@@ -15,10 +14,12 @@
 // it (`TileParameters::isUpdateSynchronous`, e.g. a GeoJSON source with
 // `synchronousUpdate`); its messages to the tile are then direct calls.
 //
-// symbols: the tile is the GlyphRequestor and ImageRequestor of its worker
-// (getGlyphs/getImages through the managers, onGlyphsAvailable/
-// onImagesAvailable forwarded to the worker), and LayoutResult carries the
-// glyph/image atlases of the shared DynamicTextureAtlas.
+// symbols: the worker asks for the glyphs and images its layout needs
+// (`TileMessage::GetDependencies`). The tile waits until the renderer's
+// update resolves them (`resolve_dependencies`, through the glyph and image
+// stores), packs them into one glyph page and one image page of the atlas,
+// and sends the worker their positions (`WorkerMessage::Resolved`). It holds
+// leases on the bins until no layout can use them.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -33,27 +34,24 @@ use mln_style::layer;
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::VisibilityType;
-use mln_style_types::image::{ImageMap, ImagePosition, ImageType};
-use mln_text::BiDi;
-use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
+use mln_style_types::image::{ImagePosition, ImagePositions};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
-use parking_lot::Mutex;
 
 use crate::bucket::BucketPtr;
 use crate::bucket_geometry::BucketGeometry;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
-use crate::gfx::dynamic_texture_atlas::{GlyphAtlas, ImageAtlas, ImageVersionMap, TextureAtlas};
-use crate::image_manager::{ImageManager, ImageRequestPair, ImageRequestor, ImageRequestorBase, requestor_key};
+use crate::gfx::dynamic_texture_atlas::{AtlasLease, DynamicTextureAtlas};
+use crate::image_store::{ImageStore, ImageWait};
+use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::render_layer::LayerRenderData;
 use crate::render_orchestrator::drop_on_workers;
-use crate::render_source::SourcePrepareParameters;
-use crate::text::glyph_manager::{GlyphManager, GlyphRequestor, HBShapeResults, glyph_requestor_key};
+use crate::text::glyph_store::{GlyphStore, GlyphWait};
 use crate::tile::geometry_tile_worker::{TileMessage, WorkerMessage};
 use crate::tile::tile::{Kind, Tile, TileBase, TileOperation};
 use crate::tile::tile_observer::TileObserver;
@@ -61,106 +59,17 @@ use crate::tile::tile_worker_transport::{SynchronousTile, TileEndpoint, WorkerEn
 use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::{TileAtlasTextures, TileRenderData};
 
-/// The atlases of a `LayoutResult`; dropping the last reference releases
-/// their bins (C++ `~LayoutResult`). Shared, so that copies of a
-/// `LayoutResult` release them once.
-///
-/// Port-only: the codec writes the atlases without the atlas they release their
-/// bins to, which is the side's that gets them (`tile/worker_codec`).
-#[derive(Default, mln_wire::Wire)]
-pub(crate) struct LayoutAtlases {
-    pub(crate) glyph_atlas: GlyphAtlas,
-    pub(crate) image_atlas: ImageAtlas,
-    #[wire(skip)]
-    pub(crate) dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
-    /// The image versions that `update_images` last saw, where they differ
-    /// from the layout's.
-    #[wire(skip)]
-    seen_image_versions: Mutex<SeenImageVersions>,
-}
-
-#[derive(Default)]
-struct SeenImageVersions {
-    icons: ImageVersionMap,
-    patterns: ImageVersionMap,
-}
-
-impl LayoutAtlases {
-    /// Copies the images that replaced ones of the same size into their
-    /// bins, so the layout shows them without laying out again.
-    fn update_images(&self, image_manager: &ImageManager) {
-        let image_atlas = &self.image_atlas;
-        if image_atlas.icon_positions.is_empty() && image_atlas.pattern_positions.is_empty() {
-            return;
-        }
-        let mut seen = self.seen_image_versions.lock();
-        let SeenImageVersions { icons, patterns } = &mut *seen;
-        image_manager.for_each_updated_image(|image, version| {
-            for (type_, positions, seen) in [
-                (ImageType::Icon, &image_atlas.icon_positions, &mut *icons),
-                (ImageType::Pattern, &image_atlas.pattern_positions, &mut *patterns),
-            ] {
-                let Some(position) = positions.get(&image.id) else {
-                    continue;
-                };
-                // Versions restart when an image changes size, so any
-                // difference means new pixels. An image of another size
-                // can't go in the bin, and waits for the layout that its
-                // size change started.
-                if seen.get(&image.id).copied().unwrap_or(position.version) != version {
-                    image_atlas.patch_image(image, type_);
-                    seen.insert(image.id.clone(), version);
-                }
-            }
-        });
-    }
-}
-
-impl Drop for LayoutAtlases {
-    fn drop(&mut self) {
-        if let Some(atlas) = &self.dynamic_texture_atlas {
-            atlas.remove_textures(&self.glyph_atlas.texture_handles, self.glyph_atlas.dynamic_texture.as_ref());
-            atlas.remove_textures(&self.image_atlas.texture_handles, self.image_atlas.dynamic_texture.as_ref());
-        }
-    }
-}
-
+/// A worker's layout: each layer's bucket, and the feature index.
 #[derive(Clone)]
 pub struct LayoutResult {
     pub(crate) layer_render_data: HashMap<String, LayerRenderData>,
     pub(crate) feature_index: Arc<FeatureIndex>,
-    pub(crate) atlases: Arc<LayoutAtlases>,
 }
 
 impl LayoutResult {
     #[must_use]
-    pub(crate) fn new(
-        layer_render_data: HashMap<String, LayerRenderData>,
-        feature_index: Arc<FeatureIndex>,
-        glyph_atlas: GlyphAtlas,
-        image_atlas: ImageAtlas,
-        dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
-    ) -> Self {
-        LayoutResult {
-            layer_render_data,
-            feature_index,
-            atlases: Arc::new(LayoutAtlases {
-                glyph_atlas,
-                image_atlas,
-                dynamic_texture_atlas,
-                seen_image_versions: Mutex::default(),
-            }),
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn glyph_atlas(&self) -> &GlyphAtlas {
-        &self.atlases.glyph_atlas
-    }
-
-    #[must_use]
-    pub(crate) fn image_atlas(&self) -> &ImageAtlas {
-        &self.atlases.image_atlas
+    pub(crate) fn new(layer_render_data: HashMap<String, LayerRenderData>, feature_index: Arc<FeatureIndex>) -> Self {
+        LayoutResult { layer_render_data, feature_index }
     }
 
     pub(crate) fn get_layer_render_data(&self, layer_impl: &dyn layer::Impl) -> Option<&LayerRenderData> {
@@ -173,45 +82,82 @@ impl LayoutResult {
     }
 }
 
-/// Port-only: lets go of a tile's layout result. The last reference frees
-/// the buckets and the feature index on the orchestrator's workers, since a
-/// view that drops many tiles would otherwise spend frames freeing them.
-/// The atlases drop here, on the render thread, where their dynamic
-/// textures must be released.
-fn release_layout(layout_result: Rc<LayoutResult>, thread_pool: &TaggedScheduler) {
-    if let Some(LayoutResult { layer_render_data, feature_index, atlases }) = Rc::into_inner(layout_result) {
+/// The atlas pages a layout draws its glyphs and images from. Dropping it
+/// gives their bins back.
+pub(crate) struct TileAtlases {
+    glyphs: AtlasLease,
+    images: AtlasLease,
+    /// Where the layout's patterns are, which drawing them and feature state
+    /// read.
+    pattern_positions: ImagePositions,
+}
+
+/// The layout a tile shows: its worker's result, the atlas pages it draws
+/// from if it waited for glyphs or images, and the render thread's copies of
+/// its bucket geometry.
+#[derive(Clone)]
+pub(crate) struct TileLayout {
+    pub(crate) result: LayoutResult,
+    pub(crate) atlases: Option<Rc<TileAtlases>>,
+    textures: Rc<TileAtlasTextures>,
+    bucket_geometry: Rc<BucketGeometry>,
+}
+
+impl TileLayout {
+    fn new(result: LayoutResult, atlases: Option<TileAtlases>) -> Self {
+        let textures = atlases.as_ref().map_or_else(TileAtlasTextures::default, |atlases| {
+            TileAtlasTextures::new(Rc::clone(atlases.glyphs.page_texture()), Rc::clone(atlases.images.page_texture()))
+        });
+        TileLayout {
+            result,
+            atlases: atlases.map(Rc::new),
+            textures: Rc::new(textures),
+            bucket_geometry: Rc::default(),
+        }
+    }
+
+    fn pattern_positions(&self) -> Option<&ImagePositions> {
+        self.atlases.as_ref().map(|atlases| &atlases.pattern_positions)
+    }
+}
+
+/// Port-only: lets go of a tile's layout. The last reference frees the
+/// buckets and the feature index on the orchestrator's workers, since a view
+/// that drops many tiles would otherwise spend frames freeing them. The
+/// atlas leases drop here, on the render thread.
+fn release_layout(layout: Rc<TileLayout>, thread_pool: &TaggedScheduler) {
+    if let Some(TileLayout { result: LayoutResult { layer_render_data, feature_index }, atlases, .. }) =
+        Rc::into_inner(layout)
+    {
         drop_on_workers(thread_pool, (layer_render_data, feature_index));
         drop(atlases);
     }
 }
 
 struct GeometryTileRenderData {
-    atlas_textures: Option<Rc<TileAtlasTextures>>,
-    layout_result: Option<Rc<LayoutResult>>,
-    bucket_geometry: Rc<BucketGeometry>,
+    layout: Option<Rc<TileLayout>>,
     thread_pool: TaggedScheduler,
 }
 
 impl Drop for GeometryTileRenderData {
     fn drop(&mut self) {
-        if let Some(layout_result) = self.layout_result.take() {
-            release_layout(layout_result, &self.thread_pool);
+        if let Some(layout) = self.layout.take() {
+            release_layout(layout, &self.thread_pool);
         }
     }
 }
 
 impl TileRenderData for GeometryTileRenderData {
     fn get_atlas_textures(&self) -> Option<&Rc<TileAtlasTextures>> {
-        self.atlas_textures.as_ref()
+        self.layout.as_ref().map(|layout| &layout.textures)
     }
 
     fn get_pattern(&self, pattern: &str) -> Option<ImagePosition> {
-        let layout_result = self.layout_result.as_ref()?;
-        layout_result.image_atlas().pattern_positions.get(pattern).cloned()
+        self.layout.as_ref()?.pattern_positions()?.get(pattern).cloned()
     }
 
     fn get_layer_render_data(&self, layer_impl: &dyn layer::Impl) -> Option<&LayerRenderData> {
-        self.layout_result.as_ref().and_then(|result| result.get_layer_render_data(layer_impl))
+        self.layout.as_ref().and_then(|layout| layout.result.get_layer_render_data(layer_impl))
     }
 
     fn get_bucket(&self, layer_impl: &dyn layer::Impl) -> Option<&BucketPtr> {
@@ -219,42 +165,22 @@ impl TileRenderData for GeometryTileRenderData {
     }
 
     fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
-        self.layout_result.as_ref().map(|result| Arc::clone(&result.feature_index))
+        self.layout.as_ref().map(|layout| Arc::clone(&layout.result.feature_index))
     }
 
     fn get_bucket_geometry(&self) -> Option<&BucketGeometry> {
-        Some(&self.bucket_geometry)
+        self.layout.as_ref().map(|layout| &*layout.bucket_geometry)
     }
 
     fn upload(&self, context: &Context) {
-        let Some(layout_result) = &self.layout_result else {
+        let Some(layout) = &self.layout else {
             return;
         };
 
-        for entry in layout_result.layer_render_data.values() {
+        for entry in layout.result.layer_render_data.values() {
             if entry.bucket.needs_upload() {
                 entry.bucket.upload(context);
             }
-        }
-
-        debug_assert!(self.atlas_textures.is_some());
-        let Some(atlas_textures) = &self.atlas_textures else {
-            return;
-        };
-
-        if let Some(glyph_dynamic_texture) = &layout_result.glyph_atlas().dynamic_texture {
-            glyph_dynamic_texture.upload_deferred_images(context);
-            *atlas_textures.glyph.borrow_mut() = glyph_dynamic_texture.get_texture();
-        }
-        if let Some(image_dynamic_texture) = &layout_result.image_atlas().dynamic_texture {
-            image_dynamic_texture.upload_deferred_images(context);
-            *atlas_textures.icon.borrow_mut() = image_dynamic_texture.get_texture();
-        }
-    }
-
-    fn prepare(&mut self, parameters: &SourcePrepareParameters<'_>) {
-        if let Some(layout_result) = &self.layout_result {
-            layout_result.atlases.update_images(parameters.image_manager);
         }
     }
 }
@@ -267,17 +193,49 @@ enum FadeState {
     CanRemove,
 }
 
+/// What the tiles resolve their worker's dependency requests with.
+pub(crate) struct DependencyStores<'a> {
+    pub(crate) glyphs: &'a mut GlyphStore,
+    pub(crate) images: &'a mut ImageStore,
+    pub(crate) atlas: &'a mut DynamicTextureAtlas,
+}
+
+/// The worker's latest dependency request.
+struct DependencyRequest {
+    id: u64,
+    dependencies: Dependencies,
+    /// `None` once answered.
+    wait: Option<DependencyWait>,
+    /// Whether the answer lacked glyphs of a range that failed to load.
+    glyphs_failed: bool,
+}
+
+/// A dependency request's wait for the stores.
+#[derive(Default)]
+struct DependencyWait {
+    glyphs: GlyphWait,
+    images: ImageWait,
+    /// The stores' revisions at the last try, which only another revision
+    /// can change the outcome of.
+    revisions: Option<(u64, u64)>,
+}
+
+/// The tile's side of its worker's dependency requests.
+struct DependencyState {
+    /// The images the worker was last told exist.
+    available_images: Arc<VecSet<String>>,
+    latest: Option<DependencyRequest>,
+    /// The atlas pages of each answer a layout may still use, by request id.
+    sent: Vec<(u64, TileAtlases)>,
+}
+
 /// The render-thread state of a `GeometryTile`, also the target of its
 /// worker's replies.
 pub(crate) struct GeometryTileInner {
     pub(crate) base: TileBase,
 
-    // symbols: the requestor side (C++ GlyphRequestor/ImageRequestor bases).
-    self_weak: Weak<GeometryTileInner>,
-    image_requestor_base: ImageRequestorBase,
     file_source: Option<Arc<dyn FileSource>>,
-    glyph_manager: Rc<GlyphManager>,
-    image_manager: Rc<ImageManager>,
+    dependencies: RefCell<DependencyState>,
 
     /// Used to signal the worker that it should abandon parsing this tile as
     /// soon as possible.
@@ -294,12 +252,9 @@ pub(crate) struct GeometryTileInner {
     /// lays out without data but isn't renderable.
     pub(crate) missing: Cell<bool>,
 
-    layout_result: RefCell<Option<Rc<LayoutResult>>>,
-    /// Where the layout result's data is freed (`release_layout`).
+    layout: RefCell<Option<Rc<TileLayout>>>,
+    /// Where the layout's data is freed (`release_layout`).
     thread_pool: TaggedScheduler,
-    /// The render thread's copies of the layout result's bucket geometry.
-    bucket_geometry: RefCell<Rc<BucketGeometry>>,
-    atlas_textures: RefCell<Option<Rc<TileAtlasTextures>>>,
 
     mode: MapMode,
 
@@ -311,10 +266,6 @@ pub(crate) struct GeometryTileInner {
 }
 
 impl GeometryTileInner {
-    fn available_images(&self) -> Arc<VecSet<String>> {
-        self.image_manager.get_available_images()
-    }
-
     /// The `obsolete` flag.
     pub(crate) fn is_obsolete(&self) -> bool {
         self.obsolete.load(Ordering::SeqCst)
@@ -353,7 +304,7 @@ impl GeometryTileInner {
 
         self.correlation_id.set(self.correlation_id.get() + 1);
         let correlation_id = self.correlation_id.get();
-        let available_images = self.available_images();
+        let available_images = Arc::clone(&self.dependencies.borrow().available_images);
         self.worker.send(WorkerMessage::SetData { data, available_images, correlation_id });
     }
 
@@ -378,7 +329,25 @@ impl GeometryTileInner {
         self.worker.send(WorkerMessage::Reset { correlation_id });
     }
 
-    pub(crate) fn on_layout(&self, result: LayoutResult, result_correlation_id: u64) {
+    /// Installs a layout. `request` is the worker's last dependency request
+    /// and `resolved` whether the layout used its answer.
+    fn on_layout(&self, result: LayoutResult, result_correlation_id: u64, request: u64, resolved: bool) {
+        let atlases = {
+            let mut dependencies = self.dependencies.borrow_mut();
+            let state = &mut *dependencies;
+            let atlases = resolved
+                .then(|| state.sent.iter().position(|(id, _)| *id == request))
+                .flatten()
+                .map(|index| state.sent.remove(index).1);
+            // The worker answers only its last request, which this layout
+            // used or abandoned.
+            state.sent.retain(|(id, _)| *id > request);
+            if !resolved && state.latest.as_ref().is_some_and(|latest| latest.id <= request) {
+                state.latest = None;
+            }
+            atlases
+        };
+
         self.base.loaded.set(true);
         self.base.renderable.set(!self.missing.get());
         if result_correlation_id == self.correlation_id.get() {
@@ -386,12 +355,8 @@ impl GeometryTileInner {
             self.base.on_tile_action(TileOperation::EndParse);
         }
 
-        *self.layout_result.borrow_mut() = Some(Rc::new(result));
-        *self.bucket_geometry.borrow_mut() = Rc::default();
+        *self.layout.borrow_mut() = Some(Rc::new(TileLayout::new(result, atlases)));
         self.base.feature_state_version.set(0);
-        if self.atlas_textures.borrow().is_none() {
-            *self.atlas_textures.borrow_mut() = Some(Rc::new(TileAtlasTextures::default()));
-        }
 
         self.base.observer().on_tile_changed(&self.base);
     }
@@ -405,110 +370,101 @@ impl GeometryTileInner {
         self.base.observer().on_tile_error(&self.base, err);
     }
 
-    /// Requests the images in `pair` from the image manager.
-    pub(crate) fn get_images(&self, pair: ImageRequestPair) {
-        let Some(this) = self.self_weak.upgrade() else {
-            return;
-        };
-        let requestor: Rc<dyn ImageRequestor> = this;
-        self.image_manager.get_images(&requestor, pair);
+    /// Waits for the renderer's next update to resolve what the worker asked
+    /// for.
+    fn on_dependencies_requested(&self, dependencies: Dependencies, request: u64) {
+        self.dependencies.borrow_mut().latest = Some(DependencyRequest {
+            id: request,
+            dependencies,
+            wait: Some(DependencyWait::default()),
+            glyphs_failed: false,
+        });
+        self.base.observer().on_dependencies_requested(&self.base);
     }
 
-    pub(crate) fn get_glyphs(&self, glyph_dependencies: GlyphDependencies) {
-        if let Some(file_source) = &self.file_source {
-            let Some(this) = self.self_weak.upgrade() else {
-                return;
-            };
-            let requestor: Rc<dyn GlyphRequestor> = this;
-            self.glyph_manager.get_glyphs(&requestor, glyph_dependencies, Some(file_source));
-        }
-    }
-
-    /// Runs the member function a worker's message stands for.
-    pub(crate) fn handle_worker_message(&self, message: TileMessage) {
-        match message {
-            TileMessage::Layout { result, correlation_id } => self.on_layout(result, correlation_id),
-            TileMessage::Error { error, correlation_id } => self.on_error(error, correlation_id),
-            TileMessage::GetGlyphs(dependencies) => self.get_glyphs(dependencies),
-            TileMessage::GetImages(pair) => self.get_images(pair),
-        }
-    }
-
-    pub(crate) fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
-        self.layout_result.borrow().as_ref().map(|result| Arc::clone(&result.feature_index))
-    }
-}
-
-impl GlyphRequestor for GeometryTileInner {
-    fn on_glyphs_available(&self, mut glyph_map: GlyphMap, requests: HBShapeRequests) {
-        let mut results = HBShapeResults::new();
-        let mut bidi = BiDi::new();
-        for (font_stack, font_types) in &requests {
-            for (type_, strs) in font_types {
-                for str_ in strs {
-                    let mut shaped_glyph_ids = Vec::new();
-                    let mut shaped_adjusts = Vec::new();
-                    // Shapes each run in its own direction, in visual order.
-                    for run in bidi.visual_runs(str_) {
-                        self.glyph_manager.hb_shaping(
-                            &run.text,
-                            run.rtl,
-                            font_stack,
-                            *type_,
-                            &mut shaped_glyph_ids,
-                            &mut shaped_adjusts,
-                        );
-                    }
-                    let mut shaped_str: Vec<u16> = Vec::with_capacity(shaped_glyph_ids.len());
-                    for glyph_id in &shaped_glyph_ids {
-                        shaped_str.push(glyph_id.code);
-
-                        let font_stack_hash = mln_text::tagged_string::font_stack_hash(font_stack);
-                        let need_shape =
-                            !glyph_map.get(&font_stack_hash).is_some_and(|glyphs| glyphs.contains_key(glyph_id));
-                        if need_shape {
-                            let glyph = self.glyph_manager.get_glyph(font_stack, *glyph_id);
-                            glyph_map.entry(font_stack_hash).or_default().entry(glyph.id).or_insert(Some(glyph));
-                        }
-                    }
-
-                    results.entry(font_stack.clone()).or_default().entry(*type_).or_default().insert(
-                        str_.clone(),
-                        crate::text::glyph_manager::HBShapeResult {
-                            str_: shaped_str,
-                            adjusts: Arc::new(shaped_adjusts),
-                        },
-                    );
-                }
-            }
-        }
-        self.worker.send(WorkerMessage::GlyphsAvailable { glyph_map, results });
-    }
-
-    /// Lays the tile out again with the glyphs it got as missing requested
-    /// again; the tile is pending until then.
-    fn retry_missing_glyphs(&self) {
+    /// Answers the worker's dependency request once the stores have
+    /// everything it needs, or know it missing, packing it into the atlas.
+    /// Does nothing for a tile that waits for nothing, or whose stores
+    /// haven't changed since it last tried. Returns whether it answered.
+    pub(crate) fn resolve_dependencies(&self, stores: &mut DependencyStores<'_>) -> bool {
         if self.is_obsolete() {
-            return;
+            return false;
         }
-        if !self.base.pending.get() {
-            self.base.on_tile_action(TileOperation::StartParse);
-        }
-        self.base.pending.set(true);
+        let revisions = (stores.glyphs.revision(), stores.images.revision());
+        let (resolved, request) = {
+            let mut dependencies = self.dependencies.borrow_mut();
+            let state = &mut *dependencies;
+            let Some(latest) = state.latest.as_mut() else {
+                return false;
+            };
+            let Some(wait) = latest.wait.as_mut() else {
+                return false;
+            };
+            if wait.revisions == Some(revisions) {
+                return false;
+            }
 
-        self.correlation_id.set(self.correlation_id.get() + 1);
-        let correlation_id = self.correlation_id.get();
-        self.worker.send(WorkerMessage::RetryMissingGlyphs { correlation_id });
+            // A layout that branched on an image that came or went since the
+            // worker was told which exist isn't the one to answer: lay it out
+            // again. An image it names but didn't branch on just resolves.
+            let current = stores.images.available_images();
+            let sent = &state.available_images;
+            if latest.dependencies.unavailable_images.iter().any(|id| current.contains(id))
+                || latest.dependencies.images.keys().any(|id| sent.contains(id) && !current.contains(id))
+            {
+                let current = Arc::clone(current);
+                state.latest = None;
+                drop(dependencies);
+                self.relayout(current);
+                return false;
+            }
+
+            let glyphs =
+                stores.glyphs.resolve(&latest.dependencies.glyphs, &mut wait.glyphs, self.file_source.as_ref());
+            let images = stores.images.resolve(&latest.dependencies.images, &mut wait.images);
+            let (Some(glyphs), Some(images)) = (glyphs, images) else {
+                wait.revisions = Some((stores.glyphs.revision(), stores.images.revision()));
+                return false;
+            };
+
+            let glyph_page = stores.atlas.pack_glyphs(&glyphs.glyphs);
+            let image_page = stores.atlas.pack_images(&images.icons, &images.patterns);
+            latest.wait = None;
+            latest.glyphs_failed = glyphs.failed;
+            let request = latest.id;
+            state.sent.push((
+                request,
+                TileAtlases {
+                    glyphs: glyph_page.lease,
+                    images: image_page.lease,
+                    pattern_positions: image_page.patterns.clone(),
+                },
+            ));
+            let resolved = Resolved {
+                glyphs: glyph_page.positions,
+                shaping: glyphs.shaping,
+                icons: image_page.icons,
+                patterns: image_page.patterns,
+            };
+            (resolved, request)
+        };
+        self.worker.send(WorkerMessage::Resolved { resolved, request });
+        true
     }
-}
 
-impl ImageRequestor for GeometryTileInner {
-    fn requestor_base(&self) -> &ImageRequestorBase {
-        &self.image_requestor_base
+    /// Calls `f` with the worker's latest dependencies, which name the
+    /// images the tile's layout changes with, whether they were answered,
+    /// and whether their answer lacked glyphs of a range that failed to
+    /// load. `None` if the worker asked for none.
+    pub(crate) fn latest_dependencies<R>(&self, f: impl FnOnce(&Dependencies, bool, bool) -> R) -> Option<R> {
+        let dependencies = self.dependencies.borrow();
+        let latest = dependencies.latest.as_ref()?;
+        Some(f(&latest.dependencies, latest.wait.is_none(), latest.glyphs_failed))
     }
 
-    /// Parses again with the added image.
-    fn on_requested_image_added(&self) {
+    /// Parses again with `available_images`: the tile is pending until its
+    /// layout arrives.
+    pub(crate) fn relayout(&self, available_images: Arc<VecSet<String>>) {
         if self.is_obsolete() {
             return;
         }
@@ -520,23 +476,25 @@ impl ImageRequestor for GeometryTileInner {
 
         self.correlation_id.set(self.correlation_id.get() + 1);
         let correlation_id = self.correlation_id.get();
-        let available_images = self.available_images();
+        self.dependencies.borrow_mut().available_images = Arc::clone(&available_images);
         self.worker.send(WorkerMessage::SetAvailableImages { available_images, correlation_id });
     }
 
-    fn on_images_available(
-        &self,
-        images: ImageMap,
-        patterns: ImageMap,
-        version_map: ImageVersionMap,
-        image_correlation_id: u64,
-    ) {
-        self.worker.send(WorkerMessage::ImagesAvailable {
-            icon_map: images,
-            pattern_map: patterns,
-            version_map,
-            image_correlation_id,
-        });
+    /// Runs the member function a worker's message stands for.
+    pub(crate) fn handle_worker_message(&self, message: TileMessage) {
+        match message {
+            TileMessage::Layout { result, correlation_id, request, resolved } => {
+                self.on_layout(result, correlation_id, request, resolved);
+            }
+            TileMessage::Error { error, correlation_id } => self.on_error(error, correlation_id),
+            TileMessage::GetDependencies { dependencies, request } => {
+                self.on_dependencies_requested(dependencies, request);
+            }
+        }
+    }
+
+    pub(crate) fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
+        self.layout.borrow().as_ref().map(|layout| Arc::clone(&layout.result.feature_index))
     }
 }
 
@@ -562,8 +520,7 @@ impl GeometryTile {
             mode: parameters.mode,
             pixel_ratio: parameters.pixel_ratio,
             show_collision_boxes,
-            dynamic_texture_atlas: Some(Arc::clone(&parameters.dynamic_texture_atlas)),
-            font_faces: parameters.glyph_manager.get_font_faces(),
+            font_faces: parameters.font_faces.clone(),
             capture_rendered_features: parameters.capture_rendered_features,
             synchronous,
         };
@@ -577,21 +534,20 @@ impl GeometryTile {
             };
             GeometryTileInner {
                 base: TileBase::new(Kind::Geometry, id, source_id, observer),
-                self_weak: Weak::clone(self_weak),
-                image_requestor_base: ImageRequestorBase::default(),
                 file_source: parameters.file_source.clone(),
-                glyph_manager: Rc::clone(&parameters.glyph_manager),
-                image_manager: Rc::clone(&parameters.image_manager),
+                dependencies: RefCell::new(DependencyState {
+                    available_images: Arc::clone(&parameters.available_images),
+                    latest: None,
+                    sent: Vec::new(),
+                }),
                 obsolete,
                 worker: parameters.tile_worker_transport.create(worker_parameters, tile),
                 mailbox: Arc::clone(&mailbox),
                 correlation_id: Cell::new(0),
                 has_data: Cell::new(false),
                 missing: Cell::new(false),
-                layout_result: RefCell::new(None),
+                layout: RefCell::new(None),
                 thread_pool: parameters.thread_pool.clone(),
-                bucket_geometry: RefCell::default(),
-                atlas_textures: RefCell::new(None),
                 mode: parameters.mode,
                 show_collision_boxes: Cell::new(show_collision_boxes),
                 subdivision_granularity: Cell::new(SubdivisionGranularitySetting::none()),
@@ -633,24 +589,15 @@ impl Drop for GeometryTile {
     fn drop(&mut self) {
         self.inner.mark_obsolete();
 
-        self.inner.glyph_manager.remove_requestor_key(glyph_requestor_key(&self.inner));
-        self.inner.image_manager.remove_requestor_key(requestor_key(&self.inner));
-
         if self.inner.base.pending.get() {
             // This tile never finished loading or was abandoned, emit a
             // cancellation event
             self.inner.base.on_tile_action(TileOperation::Cancelled);
         }
 
-        // C++ runs `dynamicTextureAtlas->removeUnusedDynamicTextures()` on
-        // the render thread once the layout result is gone.
-        let layout_result = self.inner.layout_result.borrow_mut().take();
-        if let Some(layout_result) = layout_result {
-            let atlas = layout_result.atlases.dynamic_texture_atlas.clone();
-            release_layout(layout_result, &self.inner.thread_pool);
-            if let Some(atlas) = atlas {
-                atlas.remove_unused_dynamic_textures();
-            }
+        let layout = self.inner.layout.borrow_mut().take();
+        if let Some(layout) = layout {
+            release_layout(layout, &self.inner.thread_pool);
         }
     }
 }
@@ -662,9 +609,7 @@ impl Tile for GeometryTile {
 
     fn create_render_data(&self) -> Box<dyn TileRenderData> {
         Box::new(GeometryTileRenderData {
-            atlas_textures: self.inner.atlas_textures.borrow().clone(),
-            layout_result: self.inner.layout_result.borrow().clone(),
-            bucket_geometry: self.inner.bucket_geometry.borrow().clone(),
+            layout: self.inner.layout.borrow().clone(),
             thread_pool: self.inner.thread_pool.clone(),
         })
     }
@@ -673,7 +618,12 @@ impl Tile for GeometryTile {
         self.inner.mark_obsolete();
     }
 
-    fn set_layers(&self, layers: &[Arc<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
+    fn set_layers(
+        &self,
+        layers: &[Arc<dyn LayerProperties>],
+        global_state: Option<Arc<GlobalStateMap>>,
+        available_images: &Arc<VecSet<String>>,
+    ) {
         let inner = &self.inner;
         // Mark the tile as pending again if it was complete before to
         // prevent signaling a complete state despite pending parse
@@ -702,7 +652,8 @@ impl Tile for GeometryTile {
 
         inner.correlation_id.set(inner.correlation_id.get() + 1);
         let correlation_id = inner.correlation_id.get();
-        let available_images = inner.available_images();
+        let available_images = Arc::clone(available_images);
+        inner.dependencies.borrow_mut().available_images = Arc::clone(&available_images);
         let subdivision_granularity = inner.subdivision_granularity.get();
         inner.worker.send(WorkerMessage::SetLayers {
             layers: impls,
@@ -739,19 +690,21 @@ impl Tile for GeometryTile {
 
     // layers: feature state
     fn set_feature_state(&self, states: &crate::bucket::LayerFeatureStates) {
-        let layout_result = self.inner.layout_result.borrow();
-        let Some(layout_result) = layout_result.as_ref() else {
+        let layout = self.inner.layout.borrow();
+        let Some(layout) = layout.as_ref() else {
             return;
         };
         // getData(): latestFeatureIndex->getData()
-        let Some(layers) = layout_result.feature_index.get_data() else {
+        let Some(layers) = layout.result.feature_index.get_data() else {
             return;
         };
         if states.is_empty() {
             return;
         }
+        let no_patterns = ImagePositions::default();
+        let pattern_positions = layout.pattern_positions().unwrap_or(&no_patterns);
 
-        for (layer_id, render_data) in &layout_result.layer_render_data {
+        for (layer_id, render_data) in &layout.result.layer_render_data {
             let source_layer_id = &render_data.layer_properties.base_impl.source_layer;
             // The worker got the layer from the same data.
             if let Ok(Some(source_layer)) = layers.layer(source_layer_id) {
@@ -762,24 +715,19 @@ impl Tile for GeometryTile {
                     continue;
                 }
                 if render_data.bucket.has_data() {
-                    render_data.bucket.update(
-                        feature_states,
-                        &source_layer,
-                        layer_id,
-                        &layout_result.image_atlas().pattern_positions,
-                    );
+                    render_data.bucket.update(feature_states, &source_layer, layer_id, pattern_positions);
                 }
             }
         }
     }
 
     fn layer_properties_updated(&self, layer_properties: &Arc<dyn LayerProperties>) -> bool {
-        let mut layout_result = self.inner.layout_result.borrow_mut();
-        let Some(result) = layout_result.as_mut() else {
+        let mut layout = self.inner.layout.borrow_mut();
+        let Some(layout) = layout.as_mut() else {
             return false;
         };
         let layer_impl = &layer_properties.base_impl;
-        let Some(render_data) = result.get_layer_render_data(&**layer_impl) else {
+        let Some(render_data) = layout.result.get_layer_render_data(&**layer_impl) else {
             return false;
         };
 
@@ -790,8 +738,8 @@ impl Tile for GeometryTile {
             // created from it before (the previous frame's RenderTiles) see
             // the change too, but are replaced in the next prepare. The port
             // updates a copy if the result is shared.
-            let result = Rc::make_mut(result);
-            if let Some(render_data) = result.layer_render_data.get_mut(&layer_impl.id) {
+            let layout = Rc::make_mut(layout);
+            if let Some(render_data) = layout.result.layer_render_data.get_mut(&layer_impl.id) {
                 render_data.layer_properties = Arc::clone(layer_properties);
             }
         }
@@ -824,11 +772,11 @@ impl Tile for GeometryTile {
 
     // query
     fn get_query_padding(&self, layers: &QueryLayers<'_>) -> f32 {
-        let layout_result = self.inner.layout_result.borrow();
+        let layout = self.inner.layout.borrow();
         let mut query_padding: f32 = 0.0;
         for layer in layers.values() {
             let Some(data) =
-                layout_result.as_ref().and_then(|result| result.get_layer_render_data(&*layer.base().base_impl))
+                layout.as_ref().and_then(|layout| layout.result.get_layer_render_data(&*layer.base().base_impl))
             else {
                 continue;
             };
@@ -854,12 +802,12 @@ impl Tile for GeometryTile {
         proj_matrix: &Mat4,
         feature_state: &SourceFeatureState,
     ) -> Result<(), Error> {
-        let layout_result = self.inner.layout_result.borrow().clone();
+        let layout = self.inner.layout.borrow().clone();
         // `if (!getData()) return;`
-        let Some(layout_result) = layout_result else {
+        let Some(layout) = layout else {
             return Ok(());
         };
-        if layout_result.feature_index.get_data().is_none() {
+        if layout.result.feature_index.get_data().is_none() {
             return Ok(());
         }
 
@@ -872,7 +820,7 @@ impl Tile for GeometryTile {
             transform_state.get_projection_data_with(&id.to_unwrapped(), proj_matrix),
         );
 
-        layout_result.feature_index.query(
+        layout.result.feature_index.query(
             result,
             query_geometry,
             transform_state,
@@ -894,12 +842,12 @@ impl Tile for GeometryTile {
         options: &SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
     ) -> Result<(), Error> {
-        let layout_result = self.inner.layout_result.borrow().clone();
+        let layout = self.inner.layout.borrow().clone();
         // Data not yet available, or tile is empty
-        let Some(layout_result) = layout_result else {
+        let Some(layout) = layout else {
             return Ok(());
         };
-        let Some(data) = layout_result.feature_index.get_data() else {
+        let Some(data) = layout.result.feature_index.get_data() else {
             return Ok(());
         };
 
@@ -963,13 +911,14 @@ pub(crate) fn query_layer_source_features(
 
 #[cfg(test)]
 mod tests {
-    use std::thread::ThreadId;
-
     use mln_actor::scheduler::{Scheduler, Task};
+    use mln_style_types::image::{ImageMap, Impl as ImageImpl};
     use mln_util::identity::SimpleIdentity;
+    use mln_util::image::PremultipliedImage;
+    use mln_util::size::Size;
+    use parking_lot::Mutex;
 
     use super::*;
-    use crate::gfx::dynamic_texture::{DynamicTexturePtr, TextureHandle};
 
     /// A scheduler that runs its tasks only when it is waited for.
     #[derive(Default)]
@@ -988,21 +937,8 @@ mod tests {
         }
     }
 
-    /// An atlas that records the threads its textures are released on.
-    #[derive(Default)]
-    struct Atlas(Mutex<Vec<ThreadId>>);
-
-    impl TextureAtlas for Atlas {
-        fn remove_textures(&self, _texture_handles: &[TextureHandle], _dynamic_texture: Option<&DynamicTexturePtr>) {
-            self.0.lock().push(std::thread::current().id());
-        }
-
-        fn remove_unused_dynamic_textures(&self) {}
-    }
-
     /// The last reference to a layout frees its feature index, and the tile
-    /// data in it, on the workers, and releases its atlases on the render
-    /// thread.
+    /// data in it, on the workers, and gives its atlas bins back here.
     #[test]
     fn a_layout_frees_its_data_on_the_workers_and_its_atlases_here() {
         let workers = Arc::new(Held::default());
@@ -1010,23 +946,35 @@ mod tests {
         let thread_pool = TaggedScheduler::new(scheduler, SimpleIdentity::new());
         let features = Arc::new(Vec::new());
         let data = Arc::downgrade(&features);
-        let atlas = Arc::new(Atlas::default());
-        let texture_atlas: Arc<dyn TextureAtlas> = Arc::<Atlas>::clone(&atlas);
-        let result = LayoutResult::new(
-            HashMap::default(),
-            Arc::new(FeatureIndex::new(Some(TileData::Features(features)))),
-            GlyphAtlas::default(),
-            ImageAtlas::default(),
-            Some(texture_atlas),
+        let mut atlas = DynamicTextureAtlas::new();
+        let image = Arc::new(
+            ImageImpl::new(
+                "icon".to_owned(),
+                PremultipliedImage::new(Size::new(4, 4)),
+                1.0,
+                false,
+                Vec::new(),
+                Vec::new(),
+                None,
+                None,
+                None,
+            )
+            .expect("image"),
         );
-        let layout = Rc::new(result);
+        let images = atlas.pack_images(&ImageMap::from([(image.id.clone(), image)]), &ImageMap::new());
+        let glyphs = atlas.pack_glyphs(&mln_text::glyph::GlyphMap::new());
+        let atlases = TileAtlases { glyphs: glyphs.lease, images: images.lease, pattern_positions: images.patterns };
+        let result =
+            LayoutResult::new(HashMap::default(), Arc::new(FeatureIndex::new(Some(TileData::Features(features)))));
+        let layout = Rc::new(TileLayout::new(result, Some(atlases)));
         let render_data = Rc::clone(&layout);
 
         release_layout(layout, &thread_pool);
-        assert!(atlas.0.lock().is_empty(), "the render data still holds the layout");
+        atlas.free_released();
+        assert_eq!(atlas.page_count(), 1, "the render data still holds the layout");
         release_layout(render_data, &thread_pool);
-        let here = std::thread::current().id();
-        assert_eq!(*atlas.0.lock(), [here, here], "both atlases release here");
+        atlas.free_released();
+        assert_eq!(atlas.page_count(), 0, "the bins went back to the atlas");
         assert!(data.upgrade().is_some(), "the data waits for the workers");
         workers.wait_for_empty();
         assert!(data.upgrade().is_none(), "the workers freed the data");

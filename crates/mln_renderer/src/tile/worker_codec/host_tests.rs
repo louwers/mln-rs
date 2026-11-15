@@ -20,10 +20,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::envelope::{self, Action, MessageKind, Request};
 use super::*;
-use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::image_manager::{ImageManager, ImageRequestor};
 use crate::layermanager;
-use crate::text::glyph_manager::GlyphManager;
 use crate::tile::geometry_tile::GeometryTile;
 use crate::tile::tile::{Tile, TileBase};
 use crate::tile::tile_observer::TileObserver;
@@ -101,9 +98,8 @@ impl Test {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: ImageManager::on(Some(run_loop.scheduler())),
-            glyph_manager: GlyphManager::new(None, &run_loop),
-            dynamic_texture_atlas: Arc::new(DynamicTextureAtlas::new()),
+            available_images: Arc::default(),
+            font_faces: None,
             tile_worker_transport: transport,
             thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
         };
@@ -129,7 +125,7 @@ impl Test {
     }
 
     fn set_layers(&self, layer: &Arc<dyn LayerProperties>) {
-        self.tile.set_layers(std::slice::from_ref(layer), None);
+        self.tile.set_layers(std::slice::from_ref(layer), None, &Arc::default());
         self.wait();
     }
 
@@ -245,7 +241,7 @@ fn failed_set_data() {
 fn requested_image_added_in(mode: MapMode) {
     let (test, fill) = loaded(mode);
 
-    test.tile.inner().on_requested_image_added();
+    test.tile.inner().relayout(Arc::default());
     test.wait();
     assert_eq!(test.errors(), 0);
     assert!(test.laid_out(&fill));
@@ -254,7 +250,7 @@ fn requested_image_added_in(mode: MapMode) {
     test.set_data();
     assert_eq!(test.errors(), 1);
 
-    test.tile.inner().on_requested_image_added();
+    test.tile.inner().relayout(Arc::default());
     test.wait();
     assert_eq!(test.errors(), 2);
 

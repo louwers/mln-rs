@@ -10,8 +10,8 @@ use mln_util::size::Size;
 
 use crate::bidi::BiDi;
 use crate::glyph::{
-    Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph,
-    PositionedLine, Shaping, WritingModeType, gen_new_glyph_id_type,
+    GlyphID, GlyphIDType, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
+    WritingModeType, gen_new_glyph_id_type,
 };
 use crate::harfbuzz::HBShapeAdjust;
 use crate::shaping::{PositionedIcon, get_shaping};
@@ -22,7 +22,6 @@ fn u(s: &str) -> Vec<u16> {
 }
 
 fn add_stub_glyph(
-    glyphs: &mut GlyphMap,
     glyph_positions: &mut GlyphPositions,
     font_stack_hash: FontStackHash,
     code_point: u16,
@@ -30,15 +29,11 @@ fn add_stub_glyph(
 ) {
     let glyph_id = GlyphID::with_type(code_point, type_);
     let metrics = GlyphMetrics { width: 10, height: 18, left: 1.0, top: -8.0, advance: 12, ..Default::default() };
-
-    let glyph = Glyph { id: glyph_id, metrics, ..Default::default() };
-    glyphs.entry(font_stack_hash).or_default().insert(glyph_id, Some(Arc::new(glyph)));
-
     let position = GlyphPosition { metrics, ..Default::default() };
-    glyph_positions.entry(font_stack_hash).or_default().insert(glyph_id, position);
+    glyph_positions.entry(font_stack_hash).or_default().insert(glyph_id, Some(position));
 }
 
-fn add_stub_glyphs(string: &TaggedString, glyphs: &mut GlyphMap, glyph_positions: &mut GlyphPositions) {
+fn add_stub_glyphs(string: &TaggedString, glyph_positions: &mut GlyphPositions) {
     for i in 0..string.length() {
         let code_point = string.get_char_code_at(i);
 
@@ -47,11 +42,11 @@ fn add_stub_glyphs(string: &TaggedString, glyphs: &mut GlyphMap, glyph_positions
             continue;
         }
 
-        add_stub_glyph(glyphs, glyph_positions, section.font_stack_hash, code_point, section.type_);
+        add_stub_glyph(glyph_positions, section.font_stack_hash, code_point, section.type_);
         if section.type_ == GlyphIDType::FontPBF {
             let vertical_code_point = i18n::verticalize_punctuation(code_point);
             if vertical_code_point != 0 {
-                add_stub_glyph(glyphs, glyph_positions, section.font_stack_hash, vertical_code_point, section.type_);
+                add_stub_glyph(glyph_positions, section.font_stack_hash, vertical_code_point, section.type_);
             }
         }
     }
@@ -63,9 +58,8 @@ fn shape_tagged_text(
     allow_vertical_placement: bool,
     image_positions: &ImagePositions,
 ) -> Shaping {
-    let mut glyphs = GlyphMap::new();
     let mut glyph_positions = GlyphPositions::new();
-    add_stub_glyphs(string, &mut glyphs, &mut glyph_positions);
+    add_stub_glyphs(string, &mut glyph_positions);
 
     let mut bidi = BiDi::new();
     get_shaping(
@@ -78,7 +72,6 @@ fn shape_tagged_text(
         &[0.0, 0.0],
         writing_mode,
         &mut bidi,
-        &glyphs,
         &glyph_positions,
         image_positions,
         ONE_EM,
@@ -125,18 +118,16 @@ fn zwsp() {
     let metrics = GlyphMetrics { width: 18, height: 18, left: 2.0, top: -8.0, advance: 21, ..Default::default() };
     let glyph_position = GlyphPosition { metrics, ..Default::default() };
 
-    let glyph = Glyph { id: GlyphID::from('中' as u16), metrics, ..Default::default() };
-
     let mut bidi = BiDi::new();
-    let immutable_glyph = Arc::new(glyph);
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let section_options = SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, 0, None);
     let layout_text_size = 16.0f32;
     let layout_text_size_at_bucket_zoom_level = 16.0f32;
-    let mut glyphs = GlyphMap::new();
-    glyphs.entry(font_stack_hash(&font_stack)).or_default().insert(GlyphID::from('中' as u16), Some(immutable_glyph));
     let mut glyph_positions = GlyphPositions::new();
-    glyph_positions.entry(font_stack_hash(&font_stack)).or_default().insert(GlyphID::from('中' as u16), glyph_position);
+    glyph_positions
+        .entry(font_stack_hash(&font_stack))
+        .or_default()
+        .insert(GlyphID::from('中' as u16), Some(glyph_position));
     let image_positions = ImagePositions::default();
 
     let mut test_get_shaping = |string: &TaggedString, max_width_in_chars: u32| {
@@ -150,7 +141,6 @@ fn zwsp() {
             &[0.0, 0.0], // translate
             WritingModeType::Horizontal,
             &mut bidi,
-            &glyphs,
             &glyph_positions,
             &image_positions,
             layout_text_size,
@@ -450,11 +440,9 @@ fn vertical_missing_glyph_preserves_indices() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let hash = font_stack_hash(&font_stack);
     let text = TaggedString::new(u("what 国21号"), SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, 0, None));
-    let mut glyphs = GlyphMap::new();
     let mut glyph_positions = GlyphPositions::new();
-    add_stub_glyphs(&text, &mut glyphs, &mut glyph_positions);
+    add_stub_glyphs(&text, &mut glyph_positions);
     // Missing "w" must not shift the character index used for the remaining glyphs.
-    glyphs.get_mut(&hash).unwrap().remove(&GlyphID::from('w' as u16));
     glyph_positions.get_mut(&hash).unwrap().remove(&GlyphID::from('w' as u16));
 
     let mut bidi = BiDi::new();
@@ -468,7 +456,6 @@ fn vertical_missing_glyph_preserves_indices() {
         &[0.0, 0.0],
         WritingModeType::Vertical,
         &mut bidi,
-        &glyphs,
         &glyph_positions,
         &ImagePositions::default(),
         ONE_EM,
@@ -620,7 +607,7 @@ fn vertical_glyph_orientation_delimits_inline_images() {
     )
     .unwrap();
     let mut image_positions = ImagePositions::default();
-    image_positions.insert("image".to_string(), ImagePosition::new(RectU16 { x: 0, y: 0, w: 14, h: 26 }, &image, 0));
+    image_positions.insert("image".to_string(), ImagePosition::new(RectU16 { x: 0, y: 0, w: 14, h: 26 }, &image));
 
     let shaped_line_label = shape_tagged_text(&text, WritingModeType::Vertical, false, &image_positions);
     assert_eq!(shaped_line_label.positioned_lines.len(), 1);
@@ -773,7 +760,6 @@ fn test_apply_text_fit(
             text_fit_height,
         )
         .unwrap(),
-        0,
     );
     let mut shaped_icon = PositionedIcon::shape_icon(&image, &[0.0, 0.0], SymbolAnchorType::TopLeft);
     shaped_icon.fit_icon_to_text(shaped_text, IconTextFitType::Both, &[0.0, 0.0, 0.0, 0.0], &[0.0, 0.0], font_scale);
@@ -793,13 +779,10 @@ fn break_before_left_parenthesis() {
     let mut bidi = BiDi::new();
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let section_options = SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, 0, None);
-    let mut glyphs = GlyphMap::new();
     let mut glyph_positions = GlyphPositions::new();
     for id in ['o', 'a', '(', ')', ' '] {
         let id = GlyphID::from(id as u16);
-        let glyph = Glyph { id, metrics, ..Default::default() };
-        glyphs.entry(font_stack_hash(&font_stack)).or_default().entry(id).or_insert(Some(Arc::new(glyph)));
-        glyph_positions.entry(font_stack_hash(&font_stack)).or_default().entry(id).or_insert(glyph_position);
+        glyph_positions.entry(font_stack_hash(&font_stack)).or_default().entry(id).or_insert(Some(glyph_position));
     }
     let image_positions = ImagePositions::default();
 
@@ -814,7 +797,6 @@ fn break_before_left_parenthesis() {
             &[0.0, 0.0], // translate
             WritingModeType::Horizontal,
             &mut bidi,
-            &glyphs,
             &glyph_positions,
             &image_positions,
             16.0, // layoutTextSize

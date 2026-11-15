@@ -16,6 +16,7 @@ use crate::render_tile::RenderTile;
 use crate::render_tree::RenderItem;
 use crate::sources::render_tile_source::RenderTileSource;
 use crate::tile::geojson_tile::GeoJSONTile;
+use crate::tile::geometry_tile::GeometryTile;
 use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
@@ -176,6 +177,10 @@ impl RenderSource for RenderGeoJSONSource {
 
     fn has_fading_tiles(&self) -> bool {
         self.tile_source.has_fading_tiles()
+    }
+
+    fn for_each_geometry_tile(&self, f: &mut dyn FnMut(&GeometryTile)) {
+        self.tile_source.tile_pyramid.geometry_tiles().for_each(f);
     }
 
     fn get_render_tiles(&self) -> Option<RenderTiles> {

@@ -804,7 +804,7 @@ impl RenderLayer for RenderLineLayer {
                 add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
 
                 // texture
-                if let Some(atlases) = tile.get_atlas_textures().filter(|a| a.icon.borrow().is_some()) {
+                if let Some(atlases) = tile.get_atlas_textures().filter(|a| a.icon().is_some()) {
                     let icon_tweaker = Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
                         Some(Rc::clone(atlases)),
                         None,

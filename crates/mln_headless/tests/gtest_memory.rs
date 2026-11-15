@@ -217,6 +217,15 @@ fn rendering_stats_count_live_resources() {
 
     map.style_mut().load_url("https://example.com/maps/streets");
     frontend.render(&mut map).expect("render");
+    // Labels, so that the map draws from the atlas's textures: the style's
+    // own labels read source layers the tile doesn't have.
+    let labels = serde_json::json!({"id": "labels", "type": "symbol", "source": "openmaptiles",
+        "source-layer": "poi_label", "layout": {"text-field": "x", "text-allow-overlap": true}});
+    let mut error = mln_style::conversion::Error::default();
+    let labels =
+        mln_style::conversion::layer::convert_layer(&mln_style::conversion::Convertible::from(&labels), &mut error);
+    map.style_mut().add_layer(labels.expect("a layer"), None).expect("added");
+    frontend.render(&mut map).expect("render");
     let loaded = live_resources(&frontend);
     for (name, value) in &loaded {
         assert!(*value > 0, "{name} is {value} with the map loaded");

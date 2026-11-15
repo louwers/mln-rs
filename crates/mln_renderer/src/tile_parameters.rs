@@ -5,11 +5,10 @@ use mln_actor::{SchedulerPtr, TaggedScheduler};
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
+use mln_text::glyph::FontFaces;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::VecSet;
 
-use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlasPtr;
-use crate::image_manager::ImageManager;
-use crate::text::glyph_manager::GlyphManager;
 use crate::tile::tile_worker_transport::TileWorkerTransport;
 
 pub(crate) struct TileParameters<'a> {
@@ -31,9 +30,10 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) is_update_synchronous: bool,
     pub(crate) capture_rendered_features: bool,
     // symbols:
-    pub(crate) image_manager: Rc<ImageManager>,
-    pub(crate) glyph_manager: Rc<GlyphManager>,
-    pub(crate) dynamic_texture_atlas: DynamicTextureAtlasPtr,
+    /// The images that exist, which tiles lay out for.
+    pub(crate) available_images: Arc<VecSet<String>>,
+    /// The style's font faces, which the tiles' workers shape text with.
+    pub(crate) font_faces: Option<Arc<FontFaces>>,
     /// Port-only: creates the tiles' workers (`tile_worker_transport.rs`).
     pub(crate) tile_worker_transport: Rc<dyn TileWorkerTransport>,
     /// Port-only: the orchestrator's workers, which free the data of the

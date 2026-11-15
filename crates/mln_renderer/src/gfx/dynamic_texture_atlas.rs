@@ -1,53 +1,30 @@
-// The atlas is shared by the render thread and the tile workers
-// (`DynamicTextureAtlasPtr`, C++ `std::shared_ptr`), so it is `Send + Sync`
-// with its state behind a mutex, as in C++. `Context::createDynamicTexture`
-// needs no context here: the GPU texture is created when the frame uploads
-// (see dynamic_texture.rs).
+// The atlas of the glyphs and images the tiles' layouts draw, owned by the
+// render thread. A tile's dependencies are packed into one glyph page and one
+// image page; the tile holds `AtlasLease`s on the bins it was given until
+// its layout goes, and dropping a lease queues its bins for the atlas to free
+// the next time it packs or uploads.
 
+use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use geometry::Point;
 use mln_gfx::types::TexturePixelType;
 use mln_style_types::image::{ImageMap, ImagePosition, ImagePositions, ImageType, Impl as ImageImpl, RectU16};
 use mln_text::glyph::{Glyph, GlyphMap, GlyphPosition, GlyphPositions};
-use mln_util::hash::HashMap;
+use mln_util::hash::{HashMap, RandomState};
 use mln_util::image::{AlphaImage, PremultipliedImage};
-use mln_util::serialization::sorted;
 use mln_util::size::Size;
-use parking_lot::Mutex;
 
-use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, DynamicTexturePtr, TextureHandle};
-use crate::tile::worker_codec::fields;
-
-pub(crate) type ImageVersionMap = HashMap<String, u32>;
-
-pub(crate) type DynamicTextureAtlasPtr = Arc<DynamicTextureAtlas>;
-
-/// Port-only: what a `LayoutResult`'s atlases release their bins to. In
-/// C++ that is always the map's `DynamicTextureAtlas`; for a tile worker in
-/// another wasm instance it is the map side's mirror of that instance's
-/// atlas (`tile/worker_codec`), which sends the releases on.
-pub(crate) trait TextureAtlas: Send + Sync {
-    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: Option<&DynamicTexturePtr>);
-    /// Drops the dynamic textures that are no longer in use. Render thread
-    /// only.
-    fn remove_unused_dynamic_textures(&self);
-}
-
-impl TextureAtlas for DynamicTextureAtlas {
-    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: Option<&DynamicTexturePtr>) {
-        DynamicTextureAtlas::remove_textures(self, texture_handles, dynamic_texture);
-    }
-
-    fn remove_unused_dynamic_textures(&self) {
-        DynamicTextureAtlas::remove_unused_dynamic_textures(self);
-    }
-}
+use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, PageTexture, TextureHandle};
+use crate::gfx::context::Context;
 
 const EXTRA_PADDING: u16 = 1;
 const PADDING: u16 = ImagePosition::PADDING + EXTRA_PADDING;
 const START_SIZE: Size = Size { width: 512, height: 512 };
 const DUMMY_SIZE: Size = Size { width: 1, height: 1 };
+/// The bin of a 1×1 page: the first of its page.
+const DUMMY_BIN: DynamicTextureBinId = DynamicTextureBinId::first();
 
 fn rect_without_extra_padding(rect: RectU16) -> RectU16 {
     RectU16 {
@@ -80,67 +57,69 @@ fn padded_image(image: &PremultipliedImage, bin: RectU16, type_: ImageType) -> P
     padded
 }
 
-/// Where a tile's glyphs are in the dynamic texture. Serde writes the
-/// texture by key, as the worker instance's (`tile/worker_codec`).
-#[derive(Clone, Default, mln_wire::Wire)]
-pub(crate) struct GlyphAtlas {
-    pub(crate) glyph_positions: GlyphPositions,
-    pub(crate) texture_handles: Vec<TextureHandle>,
-    #[wire(with = "fields::texture")]
-    pub(crate) dynamic_texture: Option<DynamicTexturePtr>,
+/// A page of the atlas, as the atlas numbers it. Never reused within an
+/// atlas.
+type PageId = u64;
+
+/// Bins a lease gives back: the page's id and the handles.
+type Release = (PageId, Vec<TextureHandle>);
+
+/// A hold on bins of one atlas page, for a layout that draws from them.
+/// Dropping it gives the bins back; the atlas frees them the next time it
+/// packs or uploads.
+pub(crate) struct AtlasLease {
+    page: PageId,
+    texture_handles: Vec<TextureHandle>,
+    texture: PageTexture,
+    releases: Sender<Release>,
 }
 
-/// Where a tile's icons and patterns are in the dynamic texture. Serde
-/// writes the texture by key, as the worker instance's (`tile/worker_codec`).
-#[derive(Clone, Default, mln_wire::Wire)]
-pub(crate) struct ImageAtlas {
-    #[wire(with = "sorted::map")]
-    pub(crate) icon_positions: ImagePositions,
-    #[wire(with = "sorted::map")]
-    pub(crate) pattern_positions: ImagePositions,
-    pub(crate) texture_handles: Vec<TextureHandle>,
-    #[wire(with = "fields::texture")]
-    pub(crate) dynamic_texture: Option<DynamicTexturePtr>,
-}
+impl AtlasLease {
+    /// The page's GPU texture, which the atlas makes in its first upload of
+    /// the page.
+    pub(crate) fn page_texture(&self) -> &PageTexture {
+        &self.texture
+    }
 
-impl ImageAtlas {
-    /// Copies `image` into the bin of the `type_` image with its id, where
-    /// the frame's next upload puts it on the texture. False when this atlas
-    /// has no such image at `image`'s size.
-    pub(crate) fn patch_image(&self, image: &ImageImpl, type_: ImageType) -> bool {
-        let positions = match type_ {
-            ImageType::Icon => &self.icon_positions,
-            ImageType::Pattern => &self.pattern_positions,
-        };
-        let (Some(position), Some(texture)) = (positions.get(&image.id), &self.dynamic_texture) else {
-            return false;
-        };
-        let rect = position.padded_rect;
-        let padding = 2 * u32::from(ImagePosition::PADDING);
-        if u32::from(rect.w) != image.image.size.width + padding
-            || u32::from(rect.h) != image.image.size.height + padding
-        {
-            return false;
-        }
-        let bin = RectU16 {
-            x: rect.x - EXTRA_PADDING,
-            y: rect.y - EXTRA_PADDING,
-            w: rect.w + 2 * EXTRA_PADDING,
-            h: rect.h + 2 * EXTRA_PADDING,
-        };
-        let Some(tex_handle) = self.texture_handles.iter().find(|handle| *handle.get_rectangle() == bin) else {
-            return false;
-        };
-        texture.queue_upload(tex_handle.get_id(), bin, padded_image(&image.image, bin, type_).data);
-        true
+    /// The handles of the bins the lease holds, one per use.
+    #[cfg(test)]
+    pub(crate) fn texture_handles(&self) -> &[TextureHandle] {
+        &self.texture_handles
+    }
+
+    /// The id of the page the bins are on.
+    #[cfg(test)]
+    pub(crate) fn page(&self) -> PageId {
+        self.page
     }
 }
 
-/// Identifies an image's allocation: (dynamic texture, image revision,
-/// usage).
+impl Drop for AtlasLease {
+    fn drop(&mut self) {
+        if !self.texture_handles.is_empty() {
+            // The atlas may be gone, and its bins with it.
+            let _ = self.releases.send((self.page, std::mem::take(&mut self.texture_handles)));
+        }
+    }
+}
+
+/// Where a tile's glyphs are, on one page.
+pub(crate) struct GlyphPage {
+    pub(crate) positions: GlyphPositions,
+    pub(crate) lease: AtlasLease,
+}
+
+/// Where a tile's icons and patterns are, on one page.
+pub(crate) struct ImagePage {
+    pub(crate) icons: ImagePositions,
+    pub(crate) patterns: ImagePositions,
+    pub(crate) lease: AtlasLease,
+}
+
+/// Identifies an image's allocation: (page, image revision, usage).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct ImageAllocationKey {
-    dynamic_texture: usize,
+    page: PageId,
     /// The revision's address (an identity; the allocation keeps the image
     /// alive).
     image: usize,
@@ -149,17 +128,17 @@ struct ImageAllocationKey {
 
 struct ImageAllocation {
     // Keeps the revision alive so its address can't be reused by another
-    // image while the bin exists.
-    _image: Arc<ImageImpl>,
+    // image while the bin exists, and gives a same-size update its id and
+    // size.
+    image: Arc<ImageImpl>,
     bin_id: DynamicTextureBinId,
 }
 
-/// Identifies a glyph's allocation: (dynamic texture, glyph). The font stacks
-/// that hold the same immutable glyph, which has the same pixels, share its
-/// allocation.
+/// Identifies a glyph's allocation: (page, glyph). The font stacks that hold
+/// the same immutable glyph, which has the same pixels, share its allocation.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct GlyphAllocationKey {
-    dynamic_texture: usize,
+    page: PageId,
     /// The glyph's address (an identity; the allocation keeps the glyph
     /// alive).
     glyph: usize,
@@ -174,38 +153,46 @@ struct GlyphAllocation {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct BinKey {
-    dynamic_texture: usize,
+    page: PageId,
     bin_id: DynamicTextureBinId,
 }
 
-#[derive(Default)]
-struct State {
-    dynamic_textures: Vec<DynamicTexturePtr>,
-    dummy_dynamic_texture: HashMap<u8, DynamicTexturePtr>,
+struct Page {
+    id: PageId,
+    texture: DynamicTexture,
+}
+
+/// The pages of the glyphs and images that layouts draw, with their bins
+/// shared and refcounted by glyph or image revision.
+pub(crate) struct DynamicTextureAtlas {
+    pages: Vec<Page>,
+    /// A 1×1 page for each pixel type, for layouts with nothing on a page,
+    /// while one of them holds it.
+    dummies: Vec<Page>,
+    next_page: PageId,
     image_allocations: HashMap<ImageAllocationKey, ImageAllocation>,
     image_allocation_keys: HashMap<BinKey, ImageAllocationKey>,
     glyph_allocations: HashMap<GlyphAllocationKey, GlyphAllocation>,
     glyph_allocation_keys: HashMap<BinKey, GlyphAllocationKey>,
+    releases: Sender<Release>,
+    released: Receiver<Release>,
 }
 
-#[derive(Default)]
-pub(crate) struct DynamicTextureAtlas {
-    state: Mutex<State>,
-}
-
-impl Drop for DynamicTextureAtlas {
-    /// Frees the GPU textures with the atlas (render thread): textures still
-    /// referenced elsewhere must not keep the map's device alive.
-    fn drop(&mut self) {
-        let state = self.state.get_mut();
-        for texture in state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()) {
-            texture.release_gpu_texture();
+impl Default for DynamicTextureAtlas {
+    fn default() -> Self {
+        let (releases, released) = channel();
+        DynamicTextureAtlas {
+            pages: Vec::new(),
+            dummies: Vec::new(),
+            next_page: 0,
+            image_allocations: HashMap::default(),
+            image_allocation_keys: HashMap::default(),
+            glyph_allocations: HashMap::default(),
+            glyph_allocation_keys: HashMap::default(),
+            releases,
+            released,
         }
     }
-}
-
-fn pixel_type_key(t: TexturePixelType) -> u8 {
-    t as u8
 }
 
 impl DynamicTextureAtlas {
@@ -214,326 +201,290 @@ impl DynamicTextureAtlas {
         DynamicTextureAtlas::default()
     }
 
-    pub(crate) fn upload_glyphs(&self, glyphs: &GlyphMap) -> GlyphAtlas {
-        let mut state = self.state.lock();
-
-        let mut glyph_atlas = GlyphAtlas::default();
-        if glyphs.is_empty() {
-            let texture = Arc::clone(
-                state.dummy_dynamic_texture.entry(pixel_type_key(TexturePixelType::Alpha)).or_insert_with(|| {
-                    let mut dummy_image = AlphaImage::new(DUMMY_SIZE);
-                    dummy_image.fill(0);
-                    let texture = Arc::new(DynamicTexture::new(DUMMY_SIZE, TexturePixelType::Alpha));
-                    texture.add_image(&dummy_image.data, DUMMY_SIZE, None);
-                    texture
-                }),
-            );
-            glyph_atlas.dynamic_texture = Some(texture);
-            return glyph_atlas;
+    fn lease(&self, page: &Page, texture_handles: Vec<TextureHandle>) -> AtlasLease {
+        AtlasLease {
+            page: page.id,
+            texture_handles,
+            texture: Rc::clone(page.texture.texture()),
+            releases: self.releases.clone(),
         }
-
-        let mut dyn_tex_index = 0usize;
-        let mut dyn_tex_size = START_SIZE;
-        let mut glyphs_to_upload: Vec<(TextureHandle, Arc<Glyph>, u64)> = Vec::new();
-
-        while glyph_atlas.dynamic_texture.is_none() {
-            let texture = if dyn_tex_index < state.dynamic_textures.len() {
-                let t = Arc::clone(&state.dynamic_textures[dyn_tex_index]);
-                dyn_tex_index += 1;
-                t
-            } else {
-                let t = Arc::new(DynamicTexture::new(dyn_tex_size, TexturePixelType::Alpha));
-                dyn_tex_size = Size::new(dyn_tex_size.width * 2, dyn_tex_size.height * 2);
-                dyn_tex_index += 1;
-                t
-            };
-
-            if texture.get_pixel_format() != TexturePixelType::Alpha {
-                continue;
-            }
-            glyph_atlas.dynamic_texture = Some(Arc::clone(&texture));
-
-            let mut has_space = true;
-            for (&font_stack, font_glyphs) in glyphs {
-                for glyph in font_glyphs.values() {
-                    let Some(glyph) = glyph else { continue };
-                    if !glyph.bitmap.valid() {
-                        continue;
-                    }
-                    if let Some(tex_handle) = Self::reserve_glyph(&mut state, &texture, glyph) {
-                        glyphs_to_upload.push((tex_handle, Arc::clone(glyph), font_stack));
-                    } else {
-                        has_space = false;
-                        break;
-                    }
-                }
-                if !has_space {
-                    for (tex_handle, _, _) in &glyphs_to_upload {
-                        Self::release_texture(&mut state, &texture, tex_handle);
-                    }
-                    glyphs_to_upload.clear();
-                    glyph_atlas.dynamic_texture = None;
-                    break;
-                }
-            }
-        }
-        let texture = glyph_atlas.dynamic_texture.clone().expect("dynamic texture");
-        if dyn_tex_index > state.dynamic_textures.len() {
-            state.dynamic_textures.push(Arc::clone(&texture));
-        }
-
-        for (mut tex_handle, glyph, font_stack) in glyphs_to_upload {
-            let rect = *tex_handle.get_rectangle();
-
-            if tex_handle.is_upload_needed() {
-                let mut padded_image = AlphaImage::new(Size::new(u32::from(rect.w), u32::from(rect.h)));
-                padded_image.fill(0);
-                let _ = AlphaImage::copy(
-                    &glyph.bitmap,
-                    &mut padded_image,
-                    Point::new(0, 0),
-                    Point::new(u32::from(PADDING), u32::from(PADDING)),
-                    glyph.bitmap.size,
-                );
-                texture.upload_image(&padded_image.data, &mut tex_handle);
-            }
-            glyph_atlas.texture_handles.push(tex_handle);
-            glyph_atlas
-                .glyph_positions
-                .entry(font_stack)
-                .or_default()
-                .entry(glyph.id)
-                .or_insert(GlyphPosition { rect: rect_without_extra_padding(rect), metrics: glyph.metrics });
-        }
-        glyph_atlas
     }
 
-    pub(crate) fn upload_icons_and_patterns(
-        &self,
-        icons: &ImageMap,
-        patterns: &ImageMap,
-        version_map: &ImageVersionMap,
-    ) -> ImageAtlas {
-        let mut state = self.state.lock();
+    /// A lease on the bin of the 1×1 page of `pixel_type`.
+    fn dummy_lease(&mut self, pixel_type: TexturePixelType) -> AtlasLease {
+        let existing = self.dummies.iter().position(|page| page.texture.get_pixel_format() == pixel_type);
+        let index = if let Some(index) = existing {
+            index
+        } else {
+            let id = self.new_page_id();
+            self.dummies.push(Page { id, texture: DynamicTexture::new(DUMMY_SIZE, pixel_type) });
+            self.dummies.len() - 1
+        };
+        let texture = &mut self.dummies[index].texture;
+        let handle = if texture.is_empty() {
+            let bytes = DUMMY_SIZE.width as usize * if pixel_type == TexturePixelType::Alpha { 1 } else { 4 };
+            texture.add_image(&vec![0; bytes], DUMMY_SIZE, None)
+        } else {
+            texture.reserve_size(DUMMY_SIZE, Some(DUMMY_BIN))
+        };
+        self.lease(&self.dummies[index], handle.into_iter().collect())
+    }
 
-        let mut image_atlas = ImageAtlas::default();
+    fn new_page_id(&mut self) -> PageId {
+        self.next_page += 1;
+        self.next_page
+    }
+
+    /// Packs `glyphs` into one page. A glyph that is `None` is `None` in the
+    /// positions too, and one without a bitmap has an empty rectangle.
+    pub(crate) fn pack_glyphs(&mut self, glyphs: &GlyphMap) -> GlyphPage {
+        self.free_released();
+        let drawn: Vec<&Arc<Glyph>> =
+            glyphs.values().flat_map(|glyphs| glyphs.values().flatten()).filter(|glyph| glyph.bitmap.valid()).collect();
+        let (lease, texture_handles) = if drawn.is_empty() {
+            (self.dummy_lease(TexturePixelType::Alpha), Vec::new())
+        } else {
+            let (index, mut texture_handles) = self.place(TexturePixelType::Alpha, |atlas, page, handles| {
+                for glyph in &drawn {
+                    let Some(handle) = atlas.reserve_glyph(page, glyph) else {
+                        return false;
+                    };
+                    handles.push(handle);
+                }
+                true
+            });
+            let texture = &mut self.pages[index].texture;
+            for (tex_handle, glyph) in texture_handles.iter_mut().zip(&drawn) {
+                if tex_handle.is_upload_needed() {
+                    let rect = *tex_handle.get_rectangle();
+                    let mut padded_image = AlphaImage::new(Size::new(u32::from(rect.w), u32::from(rect.h)));
+                    padded_image.fill(0);
+                    let _ = AlphaImage::copy(
+                        &glyph.bitmap,
+                        &mut padded_image,
+                        Point::new(0, 0),
+                        Point::new(u32::from(PADDING), u32::from(PADDING)),
+                        glyph.bitmap.size,
+                    );
+                    texture.upload_image(&padded_image.data, tex_handle);
+                }
+            }
+            let rects: Vec<RectU16> = texture_handles.iter().map(|handle| *handle.get_rectangle()).collect();
+            (self.lease(&self.pages[index], texture_handles), rects)
+        };
+
+        let mut rects = texture_handles.into_iter();
+        let mut positions = GlyphPositions::new();
+        for (&font_stack, font_glyphs) in glyphs {
+            let font_positions = positions.entry(font_stack).or_default();
+            for (&id, glyph) in font_glyphs {
+                let position = glyph.as_ref().map(|glyph| GlyphPosition {
+                    rect: if glyph.bitmap.valid() {
+                        rects.next().map_or_else(RectU16::default, rect_without_extra_padding)
+                    } else {
+                        RectU16::default()
+                    },
+                    metrics: glyph.metrics,
+                });
+                font_positions.insert(id, position);
+            }
+        }
+        GlyphPage { positions, lease }
+    }
+
+    /// Packs `icons` and `patterns` into one page.
+    pub(crate) fn pack_images(&mut self, icons: &ImageMap, patterns: &ImageMap) -> ImagePage {
+        self.free_released();
+        let mut positions = (
+            ImagePositions::with_capacity_and_hasher(icons.len(), RandomState::default()),
+            ImagePositions::with_capacity_and_hasher(patterns.len(), RandomState::default()),
+        );
         if icons.is_empty() && patterns.is_empty() {
-            let texture = Arc::clone(
-                state.dummy_dynamic_texture.entry(pixel_type_key(TexturePixelType::RGBA)).or_insert_with(|| {
-                    let mut dummy_image = PremultipliedImage::new(DUMMY_SIZE);
-                    dummy_image.fill(0);
-                    let texture = Arc::new(DynamicTexture::new(DUMMY_SIZE, TexturePixelType::RGBA));
-                    texture.add_image(&dummy_image.data, DUMMY_SIZE, None);
-                    texture
-                }),
-            );
-            image_atlas.dynamic_texture = Some(texture);
-            return image_atlas;
+            let lease = self.dummy_lease(TexturePixelType::RGBA);
+            return ImagePage { icons: positions.0, patterns: positions.1, lease };
         }
+        let images: Vec<(&Arc<ImageImpl>, ImageType)> = icons
+            .values()
+            .map(|icon| (icon, ImageType::Icon))
+            .chain(patterns.values().map(|pattern| (pattern, ImageType::Pattern)))
+            .collect();
+        let (index, mut texture_handles) = self.place(TexturePixelType::RGBA, |atlas, page, handles| {
+            for (image, type_) in &images {
+                let Some(handle) = atlas.reserve_image(page, image, *type_) else {
+                    return false;
+                };
+                handles.push(handle);
+            }
+            true
+        });
 
-        let mut dyn_tex_index = 0usize;
-        let mut dyn_tex_size = START_SIZE;
-        let mut icons_to_upload: Vec<(TextureHandle, Arc<ImageImpl>)> = Vec::with_capacity(icons.len());
-        let mut patterns_to_upload: Vec<(TextureHandle, Arc<ImageImpl>)> = Vec::with_capacity(patterns.len());
-
-        while image_atlas.dynamic_texture.is_none() {
-            let texture = if dyn_tex_index < state.dynamic_textures.len() {
-                let t = Arc::clone(&state.dynamic_textures[dyn_tex_index]);
-                dyn_tex_index += 1;
-                t
-            } else {
-                let t = Arc::new(DynamicTexture::new(dyn_tex_size, TexturePixelType::RGBA));
-                dyn_tex_size = Size::new(dyn_tex_size.width * 2, dyn_tex_size.height * 2);
-                dyn_tex_index += 1;
-                t
+        let texture = &mut self.pages[index].texture;
+        for (tex_handle, (image, type_)) in texture_handles.iter_mut().zip(&images) {
+            let rect = *tex_handle.get_rectangle();
+            if tex_handle.is_upload_needed() {
+                texture.upload_image(&padded_image(&image.image, rect, *type_).data, tex_handle);
+            }
+            let positions = match type_ {
+                ImageType::Icon => &mut positions.0,
+                ImageType::Pattern => &mut positions.1,
             };
-
-            if texture.get_pixel_format() != TexturePixelType::RGBA {
-                continue;
-            }
-
-            let mut has_space = true;
-            for icon in icons.values() {
-                if let Some(tex_handle) = Self::reserve_image(&mut state, &texture, icon, ImageType::Icon) {
-                    icons_to_upload.push((tex_handle, Arc::clone(icon)));
-                } else {
-                    has_space = false;
-                    break;
-                }
-            }
-            if has_space {
-                for pattern in patterns.values() {
-                    if let Some(tex_handle) = Self::reserve_image(&mut state, &texture, pattern, ImageType::Pattern) {
-                        patterns_to_upload.push((tex_handle, Arc::clone(pattern)));
-                    } else {
-                        has_space = false;
-                        break;
-                    }
-                }
-            }
-            if !has_space {
-                for (tex_handle, _) in &icons_to_upload {
-                    Self::release_texture(&mut state, &texture, tex_handle);
-                }
-                icons_to_upload.clear();
-                for (tex_handle, _) in &patterns_to_upload {
-                    Self::release_texture(&mut state, &texture, tex_handle);
-                }
-                patterns_to_upload.clear();
-                continue;
-            }
-            image_atlas.dynamic_texture = Some(texture);
+            positions
+                .entry(image.id.clone())
+                .or_insert_with(|| ImagePosition::new(rect_without_extra_padding(rect), image));
         }
-        let texture = image_atlas.dynamic_texture.clone().expect("dynamic texture");
-        if dyn_tex_index > state.dynamic_textures.len() {
-            state.dynamic_textures.push(Arc::clone(&texture));
-        }
-
-        image_atlas.icon_positions.reserve(icons.len());
-        for (mut tex_handle, icon) in icons_to_upload {
-            let rect = *tex_handle.get_rectangle();
-
-            if tex_handle.is_upload_needed() {
-                texture.upload_image(&padded_image(&icon.image, rect, ImageType::Icon).data, &mut tex_handle);
-            }
-            image_atlas.texture_handles.push(tex_handle);
-            let version = version_map.get(&icon.id).copied().unwrap_or(0);
-            image_atlas
-                .icon_positions
-                .entry(icon.id.clone())
-                .or_insert_with(|| ImagePosition::new(rect_without_extra_padding(rect), &icon, version));
-        }
-
-        image_atlas.pattern_positions.reserve(patterns.len());
-        for (mut tex_handle, pattern) in patterns_to_upload {
-            let rect = *tex_handle.get_rectangle();
-
-            if tex_handle.is_upload_needed() {
-                texture.upload_image(&padded_image(&pattern.image, rect, ImageType::Pattern).data, &mut tex_handle);
-            }
-            image_atlas.texture_handles.push(tex_handle);
-            let version = version_map.get(&pattern.id).copied().unwrap_or(0);
-            image_atlas
-                .pattern_positions
-                .entry(pattern.id.clone())
-                .or_insert_with(|| ImagePosition::new(rect_without_extra_padding(rect), &pattern, version));
-        }
-
-        image_atlas
+        let lease = self.lease(&self.pages[index], texture_handles);
+        ImagePage { icons: positions.0, patterns: positions.1, lease }
     }
 
-    fn reserve_image(
-        state: &mut State,
-        dynamic_texture: &DynamicTexturePtr,
-        image: &Arc<ImageImpl>,
-        type_: ImageType,
-    ) -> Option<TextureHandle> {
+    /// The index of the first page of `pixel_type` that `reserve` fits on,
+    /// in a new page if none does, and the handles it reserved there. A
+    /// page that `reserve` doesn't fit on gets back what it reserved.
+    fn place(
+        &mut self,
+        pixel_type: TexturePixelType,
+        mut reserve: impl FnMut(&mut Self, usize, &mut Vec<TextureHandle>) -> bool,
+    ) -> (usize, Vec<TextureHandle>) {
+        let mut handles = Vec::new();
+        for index in 0..self.pages.len() {
+            if self.pages[index].texture.get_pixel_format() != pixel_type {
+                continue;
+            }
+            if reserve(self, index, &mut handles) {
+                return (index, handles);
+            }
+            self.release_handles(index, &handles);
+            handles.clear();
+        }
+        let mut size = START_SIZE;
+        loop {
+            let id = self.new_page_id();
+            self.pages.push(Page { id, texture: DynamicTexture::new(size, pixel_type) });
+            let index = self.pages.len() - 1;
+            if reserve(self, index, &mut handles) {
+                return (index, handles);
+            }
+            self.release_handles(index, &handles);
+            handles.clear();
+            self.pages.pop();
+            size = Size::new(size.width * 2, size.height * 2);
+        }
+    }
+
+    fn reserve_image(&mut self, index: usize, image: &Arc<ImageImpl>, type_: ImageType) -> Option<TextureHandle> {
+        let page = &mut self.pages[index];
         let size = Size::new(
             image.image.size.width + 2 * u32::from(PADDING),
             image.image.size.height + 2 * u32::from(PADDING),
         );
-        let key =
-            ImageAllocationKey { dynamic_texture: dynamic_texture.id(), image: Arc::as_ptr(image) as usize, type_ };
+        let key = ImageAllocationKey { page: page.id, image: Arc::as_ptr(image) as usize, type_ };
 
         // Reuse the bin of this exact revision; otherwise let the shelf pack
         // assign a fresh id.
-        let existing = state.image_allocations.get(&key).map(|a| a.bin_id);
-        let tex_handle = dynamic_texture.reserve_size(size, existing);
+        let existing = self.image_allocations.get(&key).map(|a| a.bin_id);
+        let tex_handle = page.texture.reserve_size(size, existing);
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {
-            state
-                .image_allocations
-                .insert(key, ImageAllocation { _image: Arc::clone(image), bin_id: tex_handle.get_id() });
-            state
-                .image_allocation_keys
-                .insert(BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() }, key);
+            self.image_allocations
+                .insert(key, ImageAllocation { image: Arc::clone(image), bin_id: tex_handle.get_id() });
+            self.image_allocation_keys.insert(BinKey { page: page.id, bin_id: tex_handle.get_id() }, key);
         }
         tex_handle
     }
 
-    fn reserve_glyph(
-        state: &mut State,
-        dynamic_texture: &DynamicTexturePtr,
-        glyph: &Arc<Glyph>,
-    ) -> Option<TextureHandle> {
+    fn reserve_glyph(&mut self, index: usize, glyph: &Arc<Glyph>) -> Option<TextureHandle> {
+        let page = &mut self.pages[index];
         let size = Size::new(
             glyph.bitmap.size.width + 2 * u32::from(PADDING),
             glyph.bitmap.size.height + 2 * u32::from(PADDING),
         );
-        let key = GlyphAllocationKey { dynamic_texture: dynamic_texture.id(), glyph: Arc::as_ptr(glyph) as usize };
+        let key = GlyphAllocationKey { page: page.id, glyph: Arc::as_ptr(glyph) as usize };
 
         // Reuse the bin of this exact glyph; otherwise let the shelf pack
         // assign a fresh id.
-        let existing = state.glyph_allocations.get(&key).map(|a| a.bin_id);
-        let tex_handle = dynamic_texture.reserve_size(size, existing);
+        let existing = self.glyph_allocations.get(&key).map(|a| a.bin_id);
+        let tex_handle = page.texture.reserve_size(size, existing);
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {
-            state
-                .glyph_allocations
+            self.glyph_allocations
                 .insert(key, GlyphAllocation { _glyph: Arc::clone(glyph), bin_id: tex_handle.get_id() });
-            state
-                .glyph_allocation_keys
-                .insert(BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() }, key);
+            self.glyph_allocation_keys.insert(BinKey { page: page.id, bin_id: tex_handle.get_id() }, key);
         }
         tex_handle
     }
 
-    fn release_texture(state: &mut State, dynamic_texture: &DynamicTexturePtr, tex_handle: &TextureHandle) {
-        if !dynamic_texture.remove_texture(tex_handle) {
-            return;
-        }
-
-        // The last handle was released, so forget the image revision or
-        // glyph; its bin may now be reused.
-        let bin_key = BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() };
-        if let Some(key) = state.image_allocation_keys.remove(&bin_key) {
-            state.image_allocations.remove(&key);
-        }
-        if let Some(key) = state.glyph_allocation_keys.remove(&bin_key) {
-            state.glyph_allocations.remove(&key);
-        }
-    }
-
-    pub(crate) fn remove_textures(
-        &self,
-        texture_handles: &[TextureHandle],
-        dynamic_texture: Option<&DynamicTexturePtr>,
-    ) {
-        let Some(dynamic_texture) = dynamic_texture else {
-            return;
-        };
-
-        let mut state = self.state.lock();
-
+    fn release_handles(&mut self, index: usize, texture_handles: &[TextureHandle]) {
+        let page = &mut self.pages[index];
         for tex_handle in texture_handles {
-            Self::release_texture(&mut state, dynamic_texture, tex_handle);
+            if !page.texture.remove_texture(tex_handle) {
+                continue;
+            }
+            // The last handle was released, so forget the image revision or
+            // glyph; its bin may now be reused.
+            let bin_key = BinKey { page: page.id, bin_id: tex_handle.get_id() };
+            if let Some(key) = self.image_allocation_keys.remove(&bin_key) {
+                self.image_allocations.remove(&key);
+            }
+            if let Some(key) = self.glyph_allocation_keys.remove(&bin_key) {
+                self.glyph_allocations.remove(&key);
+            }
         }
     }
 
-    /// Port-only: the textures of the atlas, the dummy ones included, for
-    /// the map side's mirror of a tile worker's atlas in another wasm
-    /// instance (`tile/worker_codec`).
-    pub(crate) fn textures(&self) -> Vec<DynamicTexturePtr> {
-        let state = self.state.lock();
-        state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()).cloned().collect()
+    /// Frees the bins of the leases dropped since, and the pages left
+    /// without bins.
+    pub(crate) fn free_released(&mut self) {
+        let mut freed = false;
+        while let Ok((page, texture_handles)) = self.released.try_recv() {
+            if let Some(index) = self.pages.iter().position(|candidate| candidate.id == page) {
+                self.release_handles(index, &texture_handles);
+            } else if let Some(dummy) = self.dummies.iter_mut().find(|candidate| candidate.id == page) {
+                for tex_handle in &texture_handles {
+                    dummy.texture.remove_texture(tex_handle);
+                }
+            }
+            freed = true;
+        }
+        if freed {
+            self.pages.retain(|page| !page.texture.is_empty());
+            self.dummies.retain(|page| !page.texture.is_empty());
+        }
     }
 
-    /// Drops the empty dynamic textures that no atlas references any more,
-    /// so the last reference goes on the render thread. Render thread only.
-    pub(crate) fn remove_unused_dynamic_textures(&self) {
-        let mut state = self.state.lock();
-
-        // release textures not referenced elsewhere (by an atlas still alive
-        // on a worker thread), so the last reference is always dropped on
-        // the render thread
-        state.dynamic_textures.retain(|dynamic_texture| {
-            let unused = Arc::strong_count(dynamic_texture) == 1 && dynamic_texture.is_empty();
-            if unused {
-                dynamic_texture.release_gpu_texture();
+    /// Copies `image` into the bins of every revision of it of the same size,
+    /// so the layouts that draw them show it without laying out again.
+    pub(crate) fn patch_image(&mut self, image: &ImageImpl) {
+        for (key, allocation) in &self.image_allocations {
+            if allocation.image.id != image.id || allocation.image.image.size != image.image.size {
+                continue;
             }
-            !unused
-        });
+            let Some(page) = self.pages.iter_mut().find(|page| page.id == key.page) else {
+                continue;
+            };
+            if let Some(bin) = page.texture.bin(allocation.bin_id) {
+                page.texture.queue_upload(allocation.bin_id, bin, padded_image(&image.image, bin, key.type_).data);
+            }
+        }
+    }
+
+    /// Makes the pages' GPU textures and uploads what was queued for them.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        self.free_released();
+        for page in self.pages.iter_mut().chain(&mut self.dummies) {
+            page.texture.upload(context);
+        }
+    }
+
+    /// The pages, for tests.
+    #[cfg(test)]
+    pub(crate) fn page_count(&self) -> usize {
+        self.pages.len()
+    }
+
+    /// The pixels queued for the page with id `page`, for tests.
+    #[cfg(test)]
+    pub(crate) fn queued_uploads(&self, page: PageId) -> Option<&HashMap<DynamicTextureBinId, (RectU16, Vec<u8>)>> {
+        self.pages.iter().find(|candidate| candidate.id == page).map(|page| page.texture.queued_uploads())
     }
 }

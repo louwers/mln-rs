@@ -1,7 +1,7 @@
 use glam::Vec2;
 use mln_math::{deg2radf, fmaxf, fminf};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style_types::image::{ImageMap, ImagePosition, ImageStretches, RectU16};
+use mln_style_types::image::{ImagePosition, ImagePositions, ImageStretches, RectU16};
 use mln_style_types::{AlignmentType, SymbolPlacementType};
 use mln_text::PositionedIcon;
 use mln_text::glyph::{Shaping, WritingModeType};
@@ -283,7 +283,7 @@ pub(crate) fn get_glyph_quads(
     text_offset: [f32; 2],
     layout: &SymbolLayoutProperties::Values,
     placement: SymbolPlacementType,
-    image_map: &ImageMap,
+    icons: &ImagePositions,
     allow_vertical_placement: bool,
 ) -> SymbolQuads {
     let text_rotate = deg2radf(layout.text_rotate);
@@ -317,7 +317,7 @@ pub(crate) fn get_glyph_quads(
             }
 
             if let Some(image_id) = &positioned_glyph.image_id {
-                let Some(image) = image_map.get(image_id) else {
+                let Some(image) = icons.get(image_id) else {
                     continue;
                 };
                 pixel_ratio = image.pixel_ratio;
@@ -516,7 +516,7 @@ mod tests {
         ));
 
         let layout = SymbolLayoutProperties::Values::default();
-        let image_map = ImageMap::new();
+        let image_map = ImagePositions::default();
         let quads1x =
             get_glyph_quads(&shaped_text1x, [0.0, 0.0], &layout, SymbolPlacementType::Point, &image_map, false);
         let quads2x =
@@ -543,7 +543,7 @@ mod tests {
     fn get_icon_quads_normal() {
         let _layout = SymbolLayoutProperties::Values::default();
         let _anchor = Anchor::new(2.0, 3.0, 0.0, Some(0));
-        let image = ImagePosition::new(rect(0, 0, 15, 11), &test_image_impl(), 0);
+        let image = ImagePosition::new(rect(0, 0, 15, 11), &test_image_impl());
 
         let shaped_icon = PositionedIcon::shape_icon(&image, &[-6.5, -4.5], SymbolAnchorType::Center);
 
@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn get_icon_quads_style() {
         let _anchor = Anchor::new(0.0, 0.0, 0.0, Some(0));
-        let image = ImagePosition::new(rect(0, 0, 20, 20), &test_image_impl(), 0);
+        let image = ImagePosition::new(rect(0, 0, 20, 20), &test_image_impl());
 
         let _line = GeometryCoordinates::new();
         let mut shaped_text = Shaping { top: -10.0, bottom: 30.0, left: -60.0, right: 20.0, ..Default::default() };

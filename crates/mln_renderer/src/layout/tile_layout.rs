@@ -12,13 +12,14 @@ use mln_map_types::MapMode;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer::{LayerTypeInfo, layer_type_info};
 use mln_style::layer_properties::LayerProperties;
-use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, ImageType};
-use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphMap, GlyphPositions};
+use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
+use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
+use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
@@ -31,7 +32,7 @@ use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::render_layer::LayerRenderData;
-use crate::text::glyph_manager::HBShapeResults;
+use crate::text::glyph_store::HBShapeResults;
 
 /// How a tile is laid out, apart from its style and data.
 #[derive(Clone, Copy, Debug)]
@@ -75,25 +76,39 @@ impl LayoutInput<'_> {
 }
 
 /// What a tile's layout needs from glyphs and images.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Dependencies {
+#[derive(Clone, Debug, Default, mln_wire::Wire)]
+pub struct Dependencies {
     /// The glyph ids per font stack, and the text that font faces shape.
     pub(crate) glyphs: GlyphDependencies,
     /// The icons and patterns. The images that `image` expressions found
     /// unavailable are icons here too, so that adding one lays the tile out
     /// again.
+    #[wire(with = "sorted::map")]
     pub(crate) images: ImageDependencies,
+    /// The images that `image` expressions found unavailable, which the
+    /// layout branched on.
+    pub(crate) unavailable_images: VecSet<String>,
 }
 
-/// What the dependencies of a layout resolved to.
-pub(crate) struct ResolvedDependencies<'a> {
-    pub(crate) glyphs: &'a GlyphMap,
-    pub(crate) glyph_positions: &'a GlyphPositions,
-    pub(crate) icons: &'a ImageMap,
-    pub(crate) icon_positions: &'a ImagePositions,
-    pub(crate) pattern_positions: &'a ImagePositions,
-    /// The shaping of the text that font faces draw.
-    pub(crate) shaping: &'a HBShapeResults,
+impl Dependencies {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.glyphs.glyphs.is_empty() && self.glyphs.shapes.is_empty() && self.images.is_empty()
+    }
+}
+
+/// What a layout's dependencies resolved to: where its glyphs and images are
+/// in the atlas pages the render thread packed them into, and the shaping of
+/// the text that font faces draw. No bitmaps or pixels.
+#[derive(Debug, Default, mln_wire::Wire)]
+pub struct Resolved {
+    pub(crate) glyphs: GlyphPositions,
+    pub(crate) shaping: HBShapeResults,
+    /// A requested icon absent here is missing.
+    #[wire(with = "sorted::map")]
+    pub(crate) icons: ImagePositions,
+    /// A requested pattern absent here is missing.
+    #[wire(with = "sorted::map")]
+    pub(crate) patterns: ImagePositions,
 }
 
 /// A tile's layer groups, as [`discover`] left them for [`build`].
@@ -175,7 +190,8 @@ pub(crate) fn discover(input: &LayoutInput<'_>, obsolete: &AtomicBool) -> Result
     }
 
     for id in unavailable_images.into_inner() {
-        discovered.dependencies.images.entry(id).or_insert(ImageType::Icon);
+        discovered.dependencies.images.entry(id.clone()).or_insert(ImageType::Icon);
+        discovered.dependencies.unavailable_images.insert(id);
     }
     Ok(Some(discovered))
 }
@@ -187,7 +203,7 @@ pub(crate) fn discover(input: &LayoutInput<'_>, obsolete: &AtomicBool) -> Result
 pub(crate) fn build(
     discovered: Discovered,
     input: &LayoutInput<'_>,
-    resolved: &ResolvedDependencies<'_>,
+    resolved: &Resolved,
     obsolete: &AtomicBool,
 ) -> Result<Option<Built>, Error> {
     // Avoid small reallocations for populated cells. If we had a total
@@ -235,14 +251,14 @@ pub(crate) fn build(
             return Ok(None);
         }
         if layout.need_finalize_symbols() {
-            layout.finalize_symbols(resolved.shaping);
+            layout.finalize_symbols(&resolved.shaping);
         }
-        layout.prepare_symbols(resolved.glyphs, resolved.glyph_positions, resolved.icons, resolved.icon_positions);
+        layout.prepare_symbols(&resolved.glyphs, &resolved.icons);
         if !layout.has_symbol_instances() {
             continue;
         }
         layout.create_bucket(
-            resolved.pattern_positions,
+            &resolved.patterns,
             &mut built.feature_index,
             &mut built.render_data,
             first_load,

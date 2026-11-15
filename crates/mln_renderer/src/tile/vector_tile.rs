@@ -6,6 +6,7 @@ use mln_style::layer_properties::LayerProperties;
 use mln_tile_id::OverscaledTileID;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
+use mln_vec_map::VecSet;
 
 use crate::tile::geometry_tile::GeometryTile;
 use crate::tile::tile::{Tile, TileBase, TileLoadOrder, TileNecessity, TileUpdateParameters};
@@ -114,8 +115,17 @@ impl Tile for VectorTile {
         self.tile.set_feature_state(states);
     }
 
-    fn set_layers(&self, layers: &[Arc<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
-        self.tile.set_layers(layers, global_state);
+    fn set_layers(
+        &self,
+        layers: &[Arc<dyn LayerProperties>],
+        global_state: Option<Arc<GlobalStateMap>>,
+        available_images: &Arc<VecSet<String>>,
+    ) {
+        self.tile.set_layers(layers, global_state, available_images);
+    }
+
+    fn as_geometry_tile(&self) -> Option<&GeometryTile> {
+        Some(&self.tile)
     }
 
     fn hold_for_fade(&self) -> bool {

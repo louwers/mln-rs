@@ -25,22 +25,13 @@ use mln_actor::actor::PoolActorRef;
 use mln_map_types::MapMode;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
-use mln_style_types::image::{ImageDependencies, ImageMap, shared_image_map};
-use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
-use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
-pub(crate) use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
-use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlasPtr, GlyphAtlas, ImageAtlas, TextureAtlas};
-use crate::image_manager::ImageRequestPair;
-use crate::layout::tile_layout::{
-    Dependencies, Discovered, LayoutInput, LayoutParams, ResolvedDependencies, build, discover,
-};
-use crate::text::glyph_manager::HBShapeResults;
+use crate::layout::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::geometry_tile::LayoutResult;
 use crate::tile::tile_worker_transport::TileEndpoint;
 use crate::tile::worker_codec::fields;
@@ -85,28 +76,16 @@ pub enum WorkerMessage {
         show_collision_boxes: bool,
         correlation_id: u64,
     },
-    /// Forget the glyphs that came back missing and lay out again, which
-    /// requests them again.
-    RetryMissingGlyphs {
-        correlation_id: u64,
-    },
-    GlyphsAvailable {
-        glyph_map: GlyphMap,
-        results: HBShapeResults,
-    },
-    ImagesAvailable {
-        #[wire(with = "shared_image_map")]
-        icon_map: ImageMap,
-        #[wire(with = "shared_image_map")]
-        pattern_map: ImageMap,
-        version_map: ImageVersionMap,
-        image_correlation_id: u64,
+    /// The answer to the worker's `GetDependencies` with id `request`.
+    Resolved {
+        resolved: Resolved,
+        request: u64,
     },
 }
 
 impl WorkerMessage {
-    /// The message's correlation id, or 0 for the glyph and image replies,
-    /// which have none.
+    /// The message's correlation id, or 0 for the answer to a dependency
+    /// request, which has none.
     #[must_use]
     pub(crate) fn correlation_id(&self) -> u64 {
         match self {
@@ -114,9 +93,8 @@ impl WorkerMessage {
             | WorkerMessage::SetLayers { correlation_id, .. }
             | WorkerMessage::SetAvailableImages { correlation_id, .. }
             | WorkerMessage::Reset { correlation_id }
-            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. }
-            | WorkerMessage::RetryMissingGlyphs { correlation_id } => *correlation_id,
-            WorkerMessage::GlyphsAvailable { .. } | WorkerMessage::ImagesAvailable { .. } => 0,
+            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. } => *correlation_id,
+            WorkerMessage::Resolved { .. } => 0,
         }
     }
 }
@@ -126,10 +104,27 @@ impl WorkerMessage {
 /// a worker in another wasm instance (`tile/worker_codec`).
 #[derive(mln_wire::Wire)]
 pub enum TileMessage {
-    Layout { result: LayoutResult, correlation_id: u64 },
-    Error { error: Error, correlation_id: u64 },
-    GetGlyphs(GlyphDependencies),
-    GetImages(ImageRequestPair),
+    /// A layout. `request` is the id of the worker's last `GetDependencies`
+    /// (0 before its first), and `resolved` whether the layout used its
+    /// answer: the tile frees the atlas bins of the answers no layout can
+    /// use any more.
+    Layout {
+        result: LayoutResult,
+        correlation_id: u64,
+        request: u64,
+        resolved: bool,
+    },
+    Error {
+        error: Error,
+        correlation_id: u64,
+    },
+    /// The glyphs and images the layout of the worker's latest parse needs,
+    /// which the tile answers with `WorkerMessage::Resolved`. Requests are
+    /// numbered from 1.
+    GetDependencies {
+        dependencies: Dependencies,
+        request: u64,
+    },
 }
 
 /// The worker's reference to itself: `None` for the synchronous worker, whose
@@ -159,7 +154,12 @@ pub(crate) struct GeometryTileWorker {
 
     state: State,
     correlation_id: u64,
-    image_correlation_id: u64,
+    /// The id of the last `GetDependencies`.
+    request: u64,
+    /// Whether the last parse's layout waits for the answer to `request`.
+    awaiting: bool,
+    /// The answer to `request`, while `awaiting`.
+    resolved: Option<Resolved>,
 
     // `None` until the worker has received the layers.
     layers: Option<Vec<Arc<dyn LayerProperties>>>,
@@ -169,17 +169,7 @@ pub(crate) struct GeometryTileWorker {
     // layout.
     global_state: Option<Arc<GlobalStateMap>>,
 
-    // symbols:
-    pending_glyph_dependencies: GlyphDependencies,
-    glyph_map: GlyphMap,
-    shaping: HBShapeResults,
-    dynamic_texture_atlas: Option<DynamicTextureAtlasPtr>,
     font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
-
-    pending_image_dependencies: ImageDependencies,
-    icon_map: ImageMap,
-    pattern_map: ImageMap,
-    version_map: ImageVersionMap,
     available_images: Arc<VecSet<String>>,
 
     show_collision_boxes: bool,
@@ -188,7 +178,7 @@ pub(crate) struct GeometryTileWorker {
 }
 
 impl GeometryTileWorker {
-    #[expect(clippy::too_many_arguments, reason = "the worker's tile, parent, render mode and atlases, which it keeps")]
+    #[expect(clippy::too_many_arguments, reason = "the worker's tile, parent and render mode, which it keeps")]
     pub(crate) fn new(
         self_ref: SelfRef,
         parent: Box<dyn TileEndpoint>,
@@ -197,7 +187,6 @@ impl GeometryTileWorker {
         mode: MapMode,
         pixel_ratio: f32,
         show_collision_boxes: bool,
-        dynamic_texture_atlas: Option<DynamicTextureAtlasPtr>,
         font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
         capture_rendered_features: bool,
     ) -> Self {
@@ -212,19 +201,13 @@ impl GeometryTileWorker {
             discovered: None,
             state: State::Idle,
             correlation_id: 0,
-            image_correlation_id: 0,
+            request: 0,
+            awaiting: false,
+            resolved: None,
             layers: None,
             data: ReceivedData::Pending,
             global_state: None,
-            pending_glyph_dependencies: GlyphDependencies::default(),
-            glyph_map: GlyphMap::new(),
-            shaping: HBShapeResults::new(),
-            dynamic_texture_atlas,
             font_faces,
-            pending_image_dependencies: ImageDependencies::default(),
-            icon_map: ImageMap::new(),
-            pattern_map: ImageMap::new(),
-            version_map: ImageVersionMap::default(),
             available_images: Arc::new(VecSet::new()),
             show_collision_boxes,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
@@ -280,11 +263,7 @@ impl GeometryTileWorker {
             WorkerMessage::SetShowCollisionBoxes { show_collision_boxes, correlation_id } => {
                 self.set_show_collision_boxes(show_collision_boxes, correlation_id);
             }
-            WorkerMessage::RetryMissingGlyphs { correlation_id } => self.retry_missing_glyphs(correlation_id),
-            WorkerMessage::GlyphsAvailable { glyph_map, results } => self.on_glyphs_available(glyph_map, results),
-            WorkerMessage::ImagesAvailable { icon_map, pattern_map, version_map, image_correlation_id } => {
-                self.on_images_available(icon_map, pattern_map, version_map, image_correlation_id);
-            }
+            WorkerMessage::Resolved { resolved, request } => self.on_resolved(resolved, request),
         }
     }
 
@@ -403,6 +382,8 @@ impl GeometryTileWorker {
         self.layers = None;
         self.data = ReceivedData::Pending;
         self.discovered = None;
+        self.awaiting = false;
+        self.resolved = None;
         self.correlation_id = correlation_id;
 
         match self.state {
@@ -431,29 +412,6 @@ impl GeometryTileWorker {
                     this.state = State::NeedsSymbolLayout;
                 }
                 State::NeedsSymbolLayout | State::NeedsParse => {}
-            }
-            Ok(())
-        });
-    }
-
-    /// Forgets the glyphs that came back missing and parses again, so the
-    /// layout requests them again.
-    pub(crate) fn retry_missing_glyphs(&mut self, correlation_id: u64) {
-        self.guarded(|this| {
-            for glyphs in this.glyph_map.values_mut() {
-                glyphs.retain(|_, glyph| glyph.is_some());
-            }
-            this.correlation_id = correlation_id;
-
-            match this.state {
-                State::Idle => {
-                    this.parse()?;
-                    this.coalesce();
-                }
-                State::Coalescing | State::NeedsSymbolLayout => {
-                    this.state = State::NeedsParse;
-                }
-                State::NeedsParse => {}
             }
             Ok(())
         });
@@ -519,135 +477,37 @@ impl GeometryTileWorker {
         }
     }
 
-    pub(crate) fn on_glyphs_available(&mut self, new_glyph_map: GlyphMap, results: HBShapeResults) {
-        // C++ moves the pending glyphs out of `newGlyphMap` in the first loop
-        // and adds the rest (the shaped glyphs) in the second.
-        let mut shaped_glyph_map = new_glyph_map.clone();
-        for (font_stack, new_glyphs) in new_glyph_map {
-            let glyphs = self.glyph_map.entry(font_stack).or_default();
-            for (pending_font_stack, pending_glyph_ids) in &mut self.pending_glyph_dependencies.glyphs {
-                // Linear lookup here to handle reverse of FontStackHash ->
-                // FontStack, since dependencies need the full font stack
-                // name to make a request. There should not be many
-                // fontstacks to look through
-                if font_stack_hash(pending_font_stack) == font_stack {
-                    for (glyph_id, glyph) in &new_glyphs {
-                        if pending_glyph_ids.remove(glyph_id) {
-                            if glyph_id.code != 0 || glyph_id.type_ == GlyphIDType::FontPBF {
-                                glyphs.entry(*glyph_id).or_insert_with(|| glyph.clone());
-                            }
-                            // moved-from in C++: the second loop sees an
-                            // empty optional, which `emplace` won't add over
-                            // this entry anyway.
-                            if let Some(shaped) = shaped_glyph_map.get_mut(&font_stack) {
-                                shaped.remove(glyph_id);
-                            }
-                        }
-                    }
-                }
-            }
+    /// Takes the answer to the dependency request `request`, unless the
+    /// worker parsed again since.
+    pub(crate) fn on_resolved(&mut self, resolved: Resolved, request: u64) {
+        if !self.awaiting || request != self.request {
+            return;
         }
-
-        if !results.is_empty() {
-            self.pending_glyph_dependencies.shapes.clear();
-
-            for (font_stack, new_glyphs) in &shaped_glyph_map {
-                let glyphs = self.glyph_map.entry(*font_stack).or_default();
-                for (glyph_id, glyph) in new_glyphs {
-                    if glyph_id.code != 0 || glyph_id.type_ == GlyphIDType::FontPBF {
-                        glyphs.entry(*glyph_id).or_insert_with(|| glyph.clone());
-                    }
-                }
-            }
-
-            // A font shapes a string the same way each time, so the results
-            // of earlier requests stay valid.
-            for (font_stack, types) in results {
-                let shaping = self.shaping.entry(font_stack).or_default();
-                for (type_, strings) in types {
-                    shaping.entry(type_).or_default().extend(strings);
-                }
-            }
-        }
-
-        self.symbol_dependencies_changed();
-    }
-
-    fn request_new_dependencies(&mut self, dependencies: &Dependencies) {
-        for (font_stack, glyph_ids) in &dependencies.glyphs.glyphs {
-            let font_glyphs = self.glyph_map.get(&font_stack_hash(font_stack));
-            for glyph_id in glyph_ids {
-                if font_glyphs.is_none_or(|glyphs| !glyphs.contains_key(glyph_id)) {
-                    self.pending_glyph_dependencies.glyphs.entry(font_stack.clone()).or_default().insert(*glyph_id);
-                }
-            }
-        }
-        for (font_stack, type_dependencies) in &dependencies.glyphs.shapes {
-            for (type_, strs) in type_dependencies {
-                for str_ in strs {
-                    self.pending_glyph_dependencies
-                        .shapes
-                        .entry(font_stack.clone())
-                        .or_default()
-                        .entry(*type_)
-                        .or_default()
-                        .insert(str_.clone());
-                }
-            }
-        }
-        // Record both before requesting either, so that a glyph answer
-        // handled before the image request goes out can't finalize the layout
-        // with an empty icon map.
-        self.pending_image_dependencies.clone_from(&dependencies.images);
-
-        if !self.pending_glyph_dependencies.glyphs.is_empty() {
-            self.parent.send(TileMessage::GetGlyphs(self.pending_glyph_dependencies.clone()));
-        }
-        if !self.pending_image_dependencies.is_empty() {
-            self.image_correlation_id += 1;
-            let pair = (self.pending_image_dependencies.clone(), self.image_correlation_id);
-            self.parent.send(TileMessage::GetImages(pair));
-        }
-    }
-
-    pub(crate) fn on_images_available(
-        &mut self,
-        new_icon_map: ImageMap,
-        new_pattern_map: ImageMap,
-        new_version_map: ImageVersionMap,
-        image_correlation_id: u64,
-    ) {
-        if self.image_correlation_id != image_correlation_id {
-            return; // Ignore outdated image request replies.
-        }
-        self.icon_map = new_icon_map;
-        self.pattern_map = new_pattern_map;
-        self.version_map = new_version_map;
-        self.pending_image_dependencies.clear();
+        self.resolved = Some(resolved);
         self.symbol_dependencies_changed();
     }
 
     fn parse(&mut self) -> Result<(), Error> {
         self.discovered = None;
+        self.awaiting = false;
+        self.resolved = None;
         let Some(input) = self.layout_input() else {
             return Ok(());
         };
-        let Some(discovered) = discover(&input, &self.obsolete)? else {
+        let Some(mut discovered) = discover(&input, &self.obsolete)? else {
             return Ok(());
         };
-        self.request_new_dependencies(&discovered.dependencies);
+        // A layout that waits for nothing still asks for the images it found
+        // unavailable, so that the tile lays it out again when one comes.
+        if discovered.has_waiting_layouts() || !discovered.dependencies.is_empty() {
+            self.request += 1;
+            self.awaiting = true;
+            let dependencies = std::mem::take(&mut discovered.dependencies);
+            self.parent.send(TileMessage::GetDependencies { dependencies, request: self.request });
+        }
         self.discovered = Some(discovered);
 
         self.finalize_layout()
-    }
-
-    fn has_pending_dependencies(&self) -> bool {
-        for glyph_ids in self.pending_glyph_dependencies.glyphs.values() {
-            if !glyph_ids.is_empty() {
-                return true;
-            }
-        }
-        !self.pending_image_dependencies.is_empty()
     }
 
     fn has_pending_parse_result(&self) -> bool {
@@ -655,52 +515,32 @@ impl GeometryTileWorker {
     }
 
     fn finalize_layout(&mut self) -> Result<(), Error> {
-        if self.has_pending_dependencies() {
+        if self.awaiting && self.resolved.is_none() {
             return Ok(());
         }
         let Some(discovered) = self.discovered.take() else {
             return Ok(());
         };
-
-        let atlas = self.dynamic_texture_atlas.as_ref();
-        let image_atlas = atlas.map_or_else(ImageAtlas::default, |atlas| {
-            atlas.upload_icons_and_patterns(&self.icon_map, &self.pattern_map, &self.version_map)
-        });
-        let glyph_atlas = match atlas {
-            Some(atlas) if discovered.has_waiting_layouts() => atlas.upload_glyphs(&self.glyph_map),
-            _ => GlyphAtlas::default(),
-        };
+        let resolved = self.resolved.take().unwrap_or_default();
+        let used = std::mem::take(&mut self.awaiting);
 
         // `discovered` is only set while the worker has its data and layers.
         let Some(input) = self.layout_input() else {
             return Ok(());
         };
-        let resolved = ResolvedDependencies {
-            glyphs: &self.glyph_map,
-            glyph_positions: &glyph_atlas.glyph_positions,
-            icons: &self.icon_map,
-            icon_positions: &image_atlas.icon_positions,
-            pattern_positions: &image_atlas.pattern_positions,
-            shaping: &self.shaping,
-        };
         let Some(built) = build(discovered, &input, &resolved, &self.obsolete)? else {
-            if let Some(atlas) = atlas {
-                atlas.remove_textures(&glyph_atlas.texture_handles, glyph_atlas.dynamic_texture.as_ref());
-                atlas.remove_textures(&image_atlas.texture_handles, image_atlas.dynamic_texture.as_ref());
-            }
             return Ok(());
         };
 
         self.first_load = false;
 
-        let layout_result = LayoutResult::new(
-            built.render_data,
-            Arc::new(built.feature_index),
-            glyph_atlas,
-            image_atlas,
-            self.dynamic_texture_atlas.clone().map(|atlas| -> Arc<dyn TextureAtlas> { atlas }),
-        );
-        self.parent.send(TileMessage::Layout { result: layout_result, correlation_id: self.correlation_id });
+        let result = LayoutResult::new(built.render_data, Arc::new(built.feature_index));
+        self.parent.send(TileMessage::Layout {
+            result,
+            correlation_id: self.correlation_id,
+            request: self.request,
+            resolved: used,
+        });
         Ok(())
     }
 }

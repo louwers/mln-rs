@@ -32,7 +32,6 @@ use mln_map_types::MapMode;
 use mln_text::glyph::FontFaces;
 use mln_tile_id::OverscaledTileID;
 
-use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlasPtr;
 use crate::tile::geometry_tile::GeometryTileInner;
 use crate::tile::geometry_tile_worker::{GeometryTileWorker, TileMessage, WorkerMessage};
 use crate::tile::raster_dem_tile::{
@@ -44,9 +43,10 @@ use crate::tile::raster_tile::{RasterTileInner, RasterTileMessage, RasterTileWor
 /// passes, plus whether the worker runs synchronously
 /// (`TileParameters::isUpdateSynchronous`).
 ///
-/// Serde writes them for a worker in another worker instance (`worker_codec`),
-/// without what can't cross: there, the instance's host gives the worker an
-/// `obsolete` flag and an atlas of its own, and the worker runs as an actor.
+/// The codec writes them for a worker in another worker instance
+/// (`worker_codec`), without what can't cross: there, the instance's host
+/// gives the worker an `obsolete` flag of its own, and the worker runs as an
+/// actor.
 #[derive(Clone, mln_wire::Wire)]
 pub struct WorkerParameters {
     pub(crate) id: OverscaledTileID,
@@ -56,8 +56,6 @@ pub struct WorkerParameters {
     pub(crate) mode: MapMode,
     pub(crate) pixel_ratio: f32,
     pub(crate) show_collision_boxes: bool,
-    #[wire(skip)]
-    pub(crate) dynamic_texture_atlas: Option<DynamicTextureAtlasPtr>,
     pub(crate) font_faces: Option<Arc<FontFaces>>,
     pub(crate) capture_rendered_features: bool,
     #[wire(skip)]
@@ -152,7 +150,6 @@ impl TileWorkerTransport for InProcessTransport {
             mode,
             pixel_ratio,
             show_collision_boxes,
-            dynamic_texture_atlas,
             font_faces,
             capture_rendered_features,
             synchronous,
@@ -166,7 +163,6 @@ impl TileWorkerTransport for InProcessTransport {
                 mode,
                 pixel_ratio,
                 show_collision_boxes,
-                dynamic_texture_atlas,
                 font_faces,
                 capture_rendered_features,
             )
@@ -227,8 +223,8 @@ impl WorkerEndpoint<RasterDEMWorkerMessage> for PoolWorker<RasterDEMTileWorker> 
 /// The worker on the render thread, for synchronous updates.
 ///
 /// The worker can't be re-entered, so a message sent while another is being
-/// handled (e.g. the glyph and image managers answering inside `parse` from
-/// what they already hold) waits in `nested`. It is handled as soon as the
+/// handled (a tile that answers its worker from inside the worker's call)
+/// waits in `nested`. It is handled as soon as the
 /// message being handled returns, before `send` returns to its caller. C++
 /// makes such a nested call into the worker directly.
 struct SynchronousWorker {

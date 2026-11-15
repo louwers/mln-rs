@@ -31,8 +31,8 @@ use mln_util::tileset::PartialTileset;
 use proptest::prelude::*;
 use serde_json::json;
 
-use crate::image_manager::ImageManagerObserver;
 use crate::render_source::{self as render_source, RenderSourceObserver};
+use crate::tests::TileDependencyStores;
 use crate::tile_parameters::TileParameters;
 
 /// What the render source reported for the tile.
@@ -68,10 +68,6 @@ impl RenderSourceObserver for Observer {
         self.report(Outcome::Error(error.to_string()));
     }
 }
-
-struct AnswerMissingImages;
-
-impl ImageManagerObserver for AnswerMissingImages {}
 
 /// A layer of the given style JSON, as the worker gets it.
 fn layer(json: &serde_json::Value) -> Arc<dyn LayerProperties> {
@@ -120,29 +116,28 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     let source = TileSource::vector("source", None, tileset);
     mln_style::source::Source::load_description(&source, &*file_source, &run_loop);
     let base_impl = mln_style::source::Source::base_impl(&source);
-    let mut render_source = render_source::create(&base_impl);
-    render_source.set_observer(Rc::<Observer>::clone(&observer));
+    let render_source = Rc::new(RefCell::new(render_source::create(&base_impl)));
+    render_source.borrow().set_observer(Rc::<Observer>::clone(&observer));
     let file_source: Arc<dyn FileSource> = file_source;
-    // A loaded sprite with the icon "v" answers the symbol layer's request.
-    // The observer answers missing icons as Map::Impl does, and the timer
-    // stands in for the RenderOrchestrator updates that then notify the
-    // tile.
-    let image_manager = crate::image_manager::ImageManager::on(Some(run_loop.scheduler()));
-    image_manager.set_observer(Some(Rc::new(AnswerMissingImages)));
-    let frame = Timer::new(&run_loop);
-    {
-        let image_manager = Rc::clone(&image_manager);
-        frame.start(Duration::from_millis(10), Duration::from_millis(10), move || {
-            image_manager.notify_if_missing_image_added();
-        });
-    }
+    // A loaded sprite with the icon "v" answers the symbol layer's request,
+    // and missing icons stay missing. The timer stands in for the
+    // RenderOrchestrator updates that answer the tile's requests.
+    let mut stores = TileDependencyStores::new(&run_loop);
     let mut icon = PremultipliedImage::new(Size::new(1, 1));
     icon.data.fill(255);
-    image_manager.add_image(Arc::new(
+    stores.images.add_image(Arc::new(
         ImageImpl::new("v".to_owned(), icon, 1.0, false, Vec::new(), Vec::new(), None, None, None).unwrap(),
     ));
-    image_manager.set_loaded(true);
-    render_source.update(
+    stores.images.set_loaded(true);
+    let available_images = Arc::clone(stores.images.available_images());
+    let frame = Timer::new(&run_loop);
+    {
+        let render_source = Rc::clone(&render_source);
+        frame.start(Duration::from_millis(10), Duration::from_millis(10), move || {
+            stores.resolve_source(&**render_source.borrow());
+        });
+    }
+    render_source.borrow_mut().update(
         base_impl,
         layers,
         true,
@@ -164,9 +159,8 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: Rc::clone(&image_manager),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &run_loop),
-            dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
+            available_images,
+            font_faces: None,
             tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
                 thread_pool.clone(),
             )),
@@ -175,6 +169,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     );
 
     run_loop.run();
+    drop(frame);
     drop(render_source);
     thread_pool.wait_for_empty();
     observer.outcome.take().unwrap()

@@ -18,7 +18,6 @@ use super::*;
 use crate::bucket::BucketBase;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
-use crate::tile::geometry_tile::LayoutAtlases;
 use crate::tile::raster_dem_tile::{RasterDEMTileMessage, RasterDEMTileWorker, RasterDEMWorkerMessage};
 use crate::tile::raster_tile::{RasterTileMessage, RasterTileWorker, RasterWorkerMessage};
 use crate::tile::tile_worker_transport::TileEndpoint;
@@ -225,17 +224,10 @@ fn raster_dem_tiles_cross() {
 
 /// A reply of `TILE` with `message`, as a worker instance encodes it.
 fn reply<M: Wire>(message: &M) -> Encoded {
-    let head = ReplyHead::<&LayoutAtlases> {
-        tile: TILE,
-        textures: Vec::new(),
-        uploads: Vec::new(),
-        forget: Vec::new(),
-        atlases: None,
-        correlation_id: CORRELATION_ID,
-    };
+    let head = ReplyHead { tile: TILE, correlation_id: CORRELATION_ID };
     let (bytes, payloads) = mln_util::serialization::payload::encode(|| {
         let mut bytes = Vec::new();
-        envelope::append_with(&mut bytes, |w| head.write(w)).unwrap();
+        envelope::append(&mut bytes, &head).unwrap();
         envelope::append(&mut bytes, message).unwrap();
         bytes
     });

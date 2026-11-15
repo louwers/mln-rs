@@ -209,7 +209,7 @@ fn set_mlt_tile_data() {
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn LayerProperties> =
         Arc::new(FillLayerProperties::new(downcast_arc::<FillLayerImpl>(&layer.base_impl())));
-    tile.set_layers(&[layer_properties], None);
+    tile.set_layers(&[layer_properties], None, &Arc::default());
 
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test/fixtures/map/issue12432/0-0-0.mlt");
     let data = Arc::new(std::fs::read(path).unwrap());

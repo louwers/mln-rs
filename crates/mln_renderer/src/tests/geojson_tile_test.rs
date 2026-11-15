@@ -57,9 +57,8 @@ impl GeoJSONTileTest {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: crate::image_manager::ImageManager::on(Some(self.run_loop.scheduler())),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &self.run_loop),
-            dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
+            available_images: Arc::default(),
+            font_faces: None,
             tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
                 self.thread_pool.clone(),
             )),
@@ -132,7 +131,7 @@ fn synchronous_update() {
     tile_parameters.is_update_synchronous = true;
     let tile = GeoJSONTile::new(OverscaledTileID::from_zxy(0, 0, 0), "source".to_owned(), &tile_parameters, data, None);
     let layers = vec![circle_layer_properties()];
-    tile.set_layers(&layers, tile_parameters.global_state);
+    tile.set_layers(&layers, tile_parameters.global_state, &Arc::default());
     assert!(tile.is_complete());
     assert!(tile.is_renderable());
 }
@@ -168,7 +167,7 @@ fn issue_7648() {
     }
 
     let layers = vec![Arc::clone(&layer_properties)];
-    tile.set_layers(&layers, tile_parameters.global_state.clone());
+    tile.set_layers(&layers, tile_parameters.global_state.clone(), &Arc::default());
     tile.set_observer(Rc::<StubTileObserver>::clone(&observer));
 
     while !tile.is_complete() {
@@ -195,7 +194,7 @@ fn issue_9927() {
 
     let layer_properties = circle_layer_properties();
     let layers = vec![Arc::clone(&layer_properties)];
-    tile.set_layers(&layers, tile_parameters.global_state);
+    tile.set_layers(&layers, tile_parameters.global_state, &Arc::default());
 
     while !tile.is_complete() {
         test.run_loop.run_once();
@@ -252,7 +251,7 @@ fn synchronous_update_with_the_serializing_transport() {
         None,
     );
     let layer_properties = evaluated_circle_layer_properties();
-    tile.set_layers(std::slice::from_ref(&layer_properties), tile_parameters.global_state);
+    tile.set_layers(std::slice::from_ref(&layer_properties), tile_parameters.global_state, &Arc::default());
     assert!(tile.is_complete());
     assert!(tile.is_renderable());
     assert!(tile.layer_properties_updated(&layer_properties));
@@ -272,7 +271,11 @@ fn update_through_the_codec() {
         .map(|x| {
             let id = OverscaledTileID::from_zxy(1, x, 0);
             let tile = GeoJSONTile::new(id, "source".to_owned(), &tile_parameters, point_data(), None);
-            tile.set_layers(std::slice::from_ref(&layer_properties), tile_parameters.global_state.clone());
+            tile.set_layers(
+                std::slice::from_ref(&layer_properties),
+                tile_parameters.global_state.clone(),
+                &Arc::default(),
+            );
             tile
         })
         .collect();

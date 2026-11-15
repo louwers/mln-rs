@@ -91,8 +91,8 @@ pub(crate) type LayerPlacementData = Vec<BucketPlacementData>;
 
 pub struct LayerPrepareParameters<'a> {
     pub(crate) source: Option<&'a dyn RenderSource>,
-    /// conformance: `ImageManager& imageManager` (background-pattern).
-    pub(crate) image_manager: &'a crate::image_manager::ImageManager,
+    /// conformance: `ImageManager& imageManager` (background-pattern): the image store.
+    pub(crate) images: &'a crate::image_store::ImageStore,
     pub(crate) pattern_atlas: &'a RefCell<PatternAtlas>,
     pub(crate) line_atlas: &'a RefCell<LineAtlas>,
 }

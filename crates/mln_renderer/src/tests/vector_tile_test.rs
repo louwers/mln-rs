@@ -68,9 +68,8 @@ impl VectorTileTest {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: crate::image_manager::ImageManager::on(Some(self.run_loop.scheduler())),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &self.run_loop),
-            dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
+            available_images: Arc::default(),
+            font_faces: None,
             tile_worker_transport: Rc::clone(&self.transport),
             thread_pool: self.thread_pool.clone(),
         }
@@ -192,7 +191,7 @@ fn tile_and_worker_talk_through_the_transport() {
         Rc::new(RecordingTransport { inner: InProcessTransport::new(test.thread_pool.clone()), log: Arc::clone(&log) });
     let tile = mvt_tile(&test);
     tile.geometry_tile().set_data(None);
-    tile.geometry_tile().set_layers(&[], None);
+    tile.geometry_tile().set_layers(&[], None, &Arc::default());
 
     let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(10);
     while !tile.is_complete() {

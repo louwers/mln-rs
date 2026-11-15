@@ -18,6 +18,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::VecSet;
 
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_mask::TileMask;
@@ -284,7 +285,20 @@ pub(crate) trait Tile: Any {
         false
     }
 
-    fn set_layers(&self, _layers: &[Arc<dyn LayerProperties>], _global_state: Option<Arc<GlobalStateMap>>) {}
+    /// Lays the tile out with `layers`, for the images in
+    /// `available_images`.
+    fn set_layers(
+        &self,
+        _layers: &[Arc<dyn LayerProperties>],
+        _global_state: Option<Arc<GlobalStateMap>>,
+        _available_images: &Arc<VecSet<String>>,
+    ) {
+    }
+
+    /// The geometry tile this tile lays out with, if it is one.
+    fn as_geometry_tile(&self) -> Option<&crate::tile::geometry_tile::GeometryTile> {
+        None
+    }
 
     fn set_mask(&self, _mask: TileMask) {}
 

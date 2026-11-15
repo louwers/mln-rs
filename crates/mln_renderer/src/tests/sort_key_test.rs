@@ -8,8 +8,8 @@ use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::{CircleLayerProperties, FillLayerProperties, LineLayerProperties, SymbolLayerProperties};
-use mln_style_types::image::{ImageDependencies, ImageMap, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
-use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
+use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
+use mln_text::glyph::{GlyphDependencies, GlyphPositions};
 use mln_tile_id::OverscaledTileID;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
@@ -154,10 +154,9 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
     );
     let image_positions = ImagePositions::from_iter([(
         "marker".to_owned(),
-        ImagePosition::new(RectU16 { x: 0, y: 0, w: 18, h: 18 }, &marker, 0),
+        ImagePosition::new(RectU16 { x: 0, y: 0, w: 18, h: 18 }, &marker),
     )]);
-    let images = ImageMap::from_iter([("marker".to_owned(), marker)]);
-    layout.prepare_symbols(&GlyphMap::new(), &GlyphPositions::new(), &images, &image_positions);
+    layout.prepare_symbols(&GlyphPositions::new(), &image_positions);
     let mut feature_index = FeatureIndex::new(Some(data));
     let mut render_data: HashMap<String, LayerRenderData> = HashMap::default();
     layout

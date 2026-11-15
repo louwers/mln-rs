@@ -2794,17 +2794,20 @@ fn still_image_retries_failed_glyph_range() {
     };
 
     assert_eq!(test.try_render().err().map(|e| e.message).as_deref(), Some("failed"));
-    assert_eq!(requests.get(), 1);
+    // The renderer takes the failure in at its next update; the stub file
+    // source may retry the request before then.
+    let failed = requests.get();
+    assert!(failed >= 1);
     assert_eq!(labels(&test), 0);
 
     // The tile laid out without the range lays out again with it.
     failing.set(false);
     assert!(test.try_render().is_ok());
-    assert_eq!(requests.get(), 2);
+    assert_eq!(requests.get(), failed + 1);
     assert_eq!(labels(&test), 1);
 
     assert!(test.try_render().is_ok());
-    assert_eq!(requests.get(), 2);
+    assert_eq!(requests.get(), failed + 1);
 }
 
 /// Answers every tile request with a server error.

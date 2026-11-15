@@ -6,19 +6,14 @@ use std::sync::Arc;
 
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
-use mln_style_types::image::SharedImage;
 use mln_tile::TileData;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::{payload, shared};
 use mln_wire::Wire;
-use parking_lot::Mutex;
 
-use super::envelope::{self, About, Action, Encoded, MessageKind, ReplyHead, Request, TextureRelease};
-use super::fields::SharedTexture;
-use crate::gfx::dynamic_texture::{DynamicTexturePtr, TextureHandle};
-use crate::gfx::dynamic_texture_atlas::TextureAtlas;
+use super::envelope::{self, About, Action, Encoded, MessageKind, ReplyHead, Request};
 use crate::tile::geometry_tile_worker::{TileMessage, WorkerMessage};
 use crate::tile::raster_dem_tile::{RasterDEMTileMessage, RasterDEMWorkerMessage};
 use crate::tile::raster_tile::{RasterTileMessage, RasterWorkerMessage};
@@ -43,11 +38,8 @@ enum WorkerType {
 /// The map side of one worker instance.
 pub(crate) struct MapCodec {
     /// The keys of what the instance has of this side's: layers, their
-    /// properties and expressions, images and tile data; and the copies of
-    /// the instance's textures.
+    /// properties and expressions, and tile data.
     tables: shared::Tables,
-    /// What the layouts' atlases release, for the instance.
-    atlas: Arc<AtlasMirror>,
     tiles: HashMap<u64, TileState>,
 }
 
@@ -77,11 +69,8 @@ impl Default for MapCodec {
                 .origin::<SharedLayer>()
                 .origin::<SharedLayerProperties>()
                 .origin::<SharedExpression>()
-                .origin::<SharedImage>()
                 .origin::<mln_tile::TileBytes>()
-                .origin::<mln_tile::TileFeatures>()
-                .copies::<SharedTexture>(),
-            atlas: Arc::default(),
+                .origin::<mln_tile::TileFeatures>(),
             tiles: HashMap::default(),
         }
     }
@@ -105,10 +94,9 @@ impl MapCodec {
         };
         // After the message, which keeps alive what it defines.
         let forget = self.tables.forget_dead();
-        let release = self.atlas.take_releases();
         let mut bytes = self.tables.open(|| {
             let mut bytes = Vec::new();
-            envelope::append(&mut bytes, &Request { forget, release, action })?;
+            envelope::append(&mut bytes, &Request { forget, action })?;
             Ok::<_, String>(bytes)
         })?;
         bytes.extend_from_slice(&message);
@@ -154,12 +142,6 @@ impl MapCodec {
     pub(crate) fn remove(&mut self, tile: u64) -> Vec<u8> {
         self.tiles.remove(&tile);
         self.bare_request(Action::Remove { tile })
-    }
-
-    /// A request that only carries the releases of bins of the instance's
-    /// atlas, if any are waiting (the next request carries them otherwise).
-    pub(crate) fn releases(&mut self) -> Option<Vec<u8>> {
-        self.atlas.has_releases().then(|| self.bare_request(Action::None))
     }
 
     /// The request that sends `message` to the worker of `tile`. Fails for
@@ -219,34 +201,20 @@ impl MapCodec {
     pub(crate) fn decode(&mut self, reply: Encoded) -> Result<Option<(u64, Reply)>, String> {
         let Encoded { bytes, payloads } = reply;
         payload::decode(payloads, || {
-            let (head, message) = self.tables.open(|| envelope::take_with(&bytes, ReplyHead::read))?;
-            for upload in head.uploads {
-                upload.texture.queue_upload(upload.bin, upload.rect, upload.pixels);
-            }
-            self.tables.forget(&head.forget);
-            // Before anything can fail: their bins are released when they
-            // drop.
-            let atlases = head.atlases.map(|mut atlases| {
-                atlases.dynamic_texture_atlas = Some(Arc::<AtlasMirror>::clone(&self.atlas));
-                Arc::new(atlases)
-            });
+            let (head, message): (ReplyHead, &[u8]) = envelope::take(&bytes)?;
             let Some(worker_type) = self.tiles.get(&head.tile).map(|state| state.worker_type) else {
                 return Ok(None);
             };
             let correlation_id = head.correlation_id;
             let reply = match worker_type {
                 WorkerType::Geometry => Reply::Geometry(match self.decode_message(message) {
-                    Ok(TileMessage::Layout { mut result, correlation_id }) => match atlases {
-                        Some(atlases) => {
-                            result.atlases = atlases;
-                            if let Some(state) = self.tiles.get_mut(&head.tile) {
-                                drop_stale(&mut state.layers, correlation_id);
-                                drop_stale(&mut state.data, correlation_id);
-                            }
-                            TileMessage::Layout { result, correlation_id }
+                    Ok(TileMessage::Layout { result, correlation_id, request, resolved }) => {
+                        if let Some(state) = self.tiles.get_mut(&head.tile) {
+                            drop_stale(&mut state.layers, correlation_id);
+                            drop_stale(&mut state.data, correlation_id);
                         }
-                        None => error("a layout without its atlases", correlation_id),
-                    },
+                        TileMessage::Layout { result, correlation_id, request, resolved }
+                    }
                     Ok(message) => message,
                     Err(message) => error(message, correlation_id),
                 }),
@@ -268,39 +236,4 @@ impl MapCodec {
 
 fn error(message: impl Into<String>, correlation_id: u64) -> TileMessage {
     TileMessage::Error { error: Error::native(message.into()), correlation_id }
-}
-
-/// What the layouts of one worker instance release their atlases' bins to:
-/// it queues them for the instance, whose atlas frees a bin only then, so a
-/// bin's pixels never change while a layout here uses them. The textures
-/// are this side's copies of the instance's (`SharedTexture`), which upload
-/// the pixels the instance queued for them.
-#[derive(Default)]
-pub(crate) struct AtlasMirror {
-    released: Mutex<Vec<(DynamicTexturePtr, Vec<TextureHandle>)>>,
-}
-
-impl AtlasMirror {
-    fn has_releases(&self) -> bool {
-        !self.released.lock().is_empty()
-    }
-
-    fn take_releases(&self) -> Vec<TextureRelease> {
-        let released = std::mem::take(&mut *self.released.lock());
-        released.into_iter().map(|(texture, handles)| TextureRelease { texture: Some(texture), handles }).collect()
-    }
-}
-
-impl TextureAtlas for AtlasMirror {
-    /// Queues the releases for the instance.
-    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: Option<&DynamicTexturePtr>) {
-        if let Some(texture) = dynamic_texture
-            && !texture_handles.is_empty()
-        {
-            self.released.lock().push((Arc::clone(texture), texture_handles.to_vec()));
-        }
-    }
-
-    /// The copies go with the instance's textures (`SharedTexture`).
-    fn remove_unused_dynamic_textures(&self) {}
 }

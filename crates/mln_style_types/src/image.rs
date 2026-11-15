@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::serialization::shared;
 use mln_util::size::Size;
 
 pub type ImageStretch = (f32, f32);
@@ -236,14 +235,13 @@ pub struct ImagePosition {
     pub content: Option<ImageContent>,
     pub text_fit_width: Option<TextFit>,
     pub text_fit_height: Option<TextFit>,
-    pub version: u32,
 }
 
 impl ImagePosition {
     pub const PADDING: u16 = 1;
 
     #[must_use]
-    pub fn new(rect: RectU16, image: &Impl, version: u32) -> Self {
+    pub fn new(rect: RectU16, image: &Impl) -> Self {
         ImagePosition {
             padded_rect: rect,
             pixel_ratio: image.pixel_ratio,
@@ -253,7 +251,6 @@ impl ImagePosition {
             content: image.content,
             text_fit_width: image.text_fit_width,
             text_fit_height: image.text_fit_height,
-            version,
         }
     }
 
@@ -292,49 +289,3 @@ impl ImagePosition {
 }
 
 pub type ImagePositions = mln_util::hash::HashMap<String, ImagePosition>;
-
-/// Port-only: the `shared::Kind` of the images of an `ImageMap`, which cross
-/// once per pair of sides, then by key (`mln_util::serialization::shared)`: a
-/// tile worker in another wasm instance gets the same icons and patterns for
-/// every tile.
-pub struct SharedImage;
-
-impl shared::Kind for SharedImage {
-    type Value = Impl;
-    const NAME: &'static str = "image";
-}
-
-impl shared::WireKind for SharedImage {
-    fn write(image: &Impl, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(image, w);
-    }
-
-    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Arc<Impl>> {
-        <Impl as mln_wire::Wire>::read(r).map(Arc::new)
-    }
-}
-
-/// Port-only: `#[wire(with)]` for an `ImageMap`: its images (keyed by their
-/// ids), in id order.
-pub mod shared_image_map {
-    use super::{Arc, ImageMap, Impl, SharedImage, shared};
-
-    pub fn write(images: &ImageMap, w: &mut mln_wire::Writer) {
-        let mut images: Vec<&Arc<Impl>> = images.values().collect();
-        images.sort_unstable_by(|a, b| a.id.cmp(&b.id));
-        mln_wire::Wire::write(&images.len(), w);
-        for image in images {
-            shared::write::<SharedImage>(image, w);
-        }
-    }
-
-    pub fn read(r: &mut mln_wire::Reader<'_>) -> Option<ImageMap> {
-        let len = r.length()?;
-        let mut images = ImageMap::new();
-        for _ in 0..len {
-            let image = shared::read::<SharedImage>(r)?;
-            images.insert(image.id.clone(), image);
-        }
-        Some(images)
-    }
-}

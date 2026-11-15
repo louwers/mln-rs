@@ -17,12 +17,12 @@ use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::property_value::PropertyValue;
-use mln_style_types::image::{ImageMap, ImagePositions, ImageType};
+use mln_style_types::image::{ImagePositions, ImageType};
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
     TextJustifyType, TextTransformType, TextVariableAnchorType, TextWritingModeType, VariableAnchorOffsetCollection,
 };
-use mln_text::glyph::{GlyphID, GlyphIDType, GlyphMap, GlyphPositions, Shaping, WritingModeType};
+use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping, WritingModeType};
 use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
 use mln_text::tagged_string::SectionOptions;
 use mln_text::{BiDi, TaggedString, apply_arabic_shaping, starts_right_to_left};
@@ -52,7 +52,7 @@ use crate::layout::symbol_instance::{ShapedTextOrientations, SymbolContent, Symb
 use crate::render_layer::LayerRenderData;
 use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
-use crate::text::glyph_manager::{HBShapeResult, HBShapeResults};
+use crate::text::glyph_store::{HBShapeResult, HBShapeResults};
 use crate::text::quads::{SymbolQuad, SymbolQuads};
 
 /// Whether `text-field` is set: a constant that is not empty, or an
@@ -745,7 +745,7 @@ impl SymbolLayout {
         feature: &SymbolFeature,
         shaped_text_orientations: &ShapedTextOrientations,
         mut shaped_icon: Option<PositionedIcon>,
-        image_map: &ImageMap,
+        icons: &ImagePositions,
         text_offset: [f32; 2],
         layout_text_size: f32,
         layout_icon_size: f32,
@@ -858,7 +858,7 @@ impl SymbolLayout {
                 &evaluated_layout_properties,
                 text_placement,
                 text_offset,
-                image_map,
+                icons,
                 icon_rotation,
                 icon_type,
                 has_icon_text_fit,
@@ -1512,13 +1512,7 @@ impl Layout for SymbolLayout {
         clippy::unnecessary_unwrap,
         reason = "the text is borrowed where it is used, as `feature` is also passed on in between"
     )]
-    fn prepare_symbols(
-        &mut self,
-        glyph_map: &GlyphMap,
-        glyph_positions: &GlyphPositions,
-        image_map: &ImageMap,
-        image_positions: &ImagePositions,
-    ) {
+    fn prepare_symbols(&mut self, glyphs: &GlyphPositions, icons: &ImagePositions) {
         let layout = Arc::clone(&self.layout);
         let zoom = self.zoom;
         let canonical = self.canonical_id;
@@ -1621,9 +1615,8 @@ impl Layout for SymbolLayout {
                         text_offset,
                         writing_mode,
                         bidi,
-                        glyph_map,
-                        glyph_positions,
-                        image_positions,
+                        glyphs,
+                        icons,
                         layout_text_size,
                         layout_text_size_at_bucket_zoom_level,
                         allow_vertical_placement,
@@ -1734,22 +1727,20 @@ impl Layout for SymbolLayout {
             // if feature has icon, get sprite atlas position
             let mut icon_type = SymbolContent::None;
             if let Some(icon) = &feature.icon
-                && let Some(image) = image_map.get(icon.id())
+                && let Some(image) = icons.get(icon.id())
             {
                 icon_type = SymbolContent::IconRGBA;
-                if let Some(position) = image_positions.get(icon.id()) {
-                    shaped_icon = Some(PositionedIcon::shape_icon(
-                        position,
-                        &layout.icon_offset.evaluate(
-                            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                                .with_canonical_tile_id(Some(&canonical)),
-                        ),
-                        layout.icon_anchor.evaluate(
-                            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                                .with_canonical_tile_id(Some(&canonical)),
-                        ),
-                    ));
-                }
+                shaped_icon = Some(PositionedIcon::shape_icon(
+                    image,
+                    &layout.icon_offset.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_canonical_tile_id(Some(&canonical)),
+                    ),
+                    layout.icon_anchor.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_canonical_tile_id(Some(&canonical)),
+                    ),
+                ));
                 if image.sdf {
                     icon_type = SymbolContent::IconSDF;
                 }
@@ -1768,7 +1759,7 @@ impl Layout for SymbolLayout {
                     feature,
                     &shaped_text_orientations,
                     shaped_icon,
-                    image_map,
+                    icons,
                     text_offset,
                     layout_text_size,
                     layout_icon_size,

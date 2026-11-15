@@ -10,8 +10,8 @@ use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use mln_style_types::image::{ImageMap, ImagePositions, ImageType};
-use mln_text::glyph::{GlyphID, GlyphMap, GlyphPositions};
+use mln_style_types::image::ImageType;
+use mln_text::glyph::GlyphID;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -19,10 +19,8 @@ use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 use serde_json::json;
 
-use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
 use crate::layermanager;
-use crate::layout::tile_layout::{LayoutInput, LayoutParams, ResolvedDependencies, build, discover};
-use crate::text::glyph_manager::HBShapeResults;
+use crate::layout::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::geometry_tile_worker::{GeometryTileWorker, TileMessage, WorkerMessage};
 use crate::tile::tile_worker_transport::TileEndpoint;
 
@@ -113,15 +111,7 @@ fn build_indexes_the_layouts_that_waited_last() {
     let input = input(&data, &layers, &available);
     let obsolete = AtomicBool::new(false);
     let discovered = discover(&input, &obsolete).unwrap().unwrap();
-    let resolved = ResolvedDependencies {
-        glyphs: &GlyphMap::new(),
-        glyph_positions: &GlyphPositions::new(),
-        icons: &ImageMap::new(),
-        icon_positions: &ImagePositions::default(),
-        pattern_positions: &ImagePositions::default(),
-        shaping: &HBShapeResults::new(),
-    };
-    let built = build(discovered, &input, &resolved, &obsolete).unwrap().unwrap();
+    let built = build(discovered, &input, &Resolved::default(), &obsolete).unwrap().unwrap();
 
     assert_eq!(built.feature_index.leaders(), ["outline", "outline", "patterned", "patterned"]);
     assert!(built.render_data.contains_key("outline"));
@@ -160,7 +150,6 @@ fn a_layout_waiting_only_for_unavailable_images_finishes() {
         1.0,
         false,
         None,
-        None,
         false,
     );
     let icon_image = json!([
@@ -181,15 +170,64 @@ fn a_layout_waiting_only_for_unavailable_images_finishes() {
     worker.handle(WorkerMessage::SetData { data: Some(data()), available_images: available, correlation_id: 1 });
 
     let requests = std::mem::take(&mut *replies.0.lock());
-    let [TileMessage::GetImages((images, image_correlation_id))] = requests.as_slice() else {
-        panic!("expected one image request");
+    let [TileMessage::GetDependencies { dependencies, request }] = requests.as_slice() else {
+        panic!("expected one dependency request");
     };
-    assert_eq!(images.keys().collect::<Vec<_>>(), ["missing"]);
-    worker.handle(WorkerMessage::ImagesAvailable {
-        icon_map: ImageMap::new(),
-        pattern_map: ImageMap::new(),
-        version_map: ImageVersionMap::default(),
-        image_correlation_id: *image_correlation_id,
+    assert!(dependencies.glyphs.glyphs.is_empty());
+    assert_eq!(dependencies.images.keys().collect::<Vec<_>>(), ["missing"]);
+    worker.handle(WorkerMessage::Resolved { resolved: Resolved::default(), request: *request });
+    assert!(matches!(
+        replies.0.lock().as_slice(),
+        [TileMessage::Layout { correlation_id: 1, request: 1, resolved: true, .. }]
+    ));
+}
+
+/// An answer to a request the worker made before it parsed again is
+/// outdated: the worker waits for the answer to its latest request.
+#[test]
+fn the_worker_ignores_answers_to_earlier_requests() {
+    let replies = Replies::default();
+    let mut worker = GeometryTileWorker::new(
+        None,
+        Box::new(replies.clone()),
+        OverscaledTileID::from_zxy(0, 0, 0),
+        Arc::new(AtomicBool::new(false)),
+        MapMode::Static,
+        1.0,
+        false,
+        None,
+        false,
+    );
+    let available = Arc::new(VecSet::new());
+    let symbols = vec![layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": "marker"}}))];
+    worker.handle(WorkerMessage::SetLayers {
+        layers: symbols,
+        global_state: None,
+        available_images: Arc::clone(&available),
+        subdivision_granularity: SubdivisionGranularitySetting::none(),
+        pixel_ratio: 1.0,
+        correlation_id: 1,
     });
-    assert!(matches!(replies.0.lock().as_slice(), [TileMessage::Layout { correlation_id: 1, .. }]));
+    worker.handle(WorkerMessage::SetData {
+        data: Some(data()),
+        available_images: Arc::clone(&available),
+        correlation_id: 2,
+    });
+    worker.handle(WorkerMessage::SetAvailableImages { available_images: available, correlation_id: 3 });
+    let requests: Vec<u64> = std::mem::take(&mut *replies.0.lock())
+        .into_iter()
+        .filter_map(|message| match message {
+            TileMessage::GetDependencies { request, .. } => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(requests, [1, 2]);
+
+    worker.handle(WorkerMessage::Resolved { resolved: Resolved::default(), request: 1 });
+    assert!(replies.0.lock().is_empty(), "the answer to the first request is outdated");
+    worker.handle(WorkerMessage::Resolved { resolved: Resolved::default(), request: 2 });
+    assert!(matches!(
+        replies.0.lock().as_slice(),
+        [TileMessage::Layout { correlation_id: 3, request: 2, resolved: true, .. }]
+    ));
 }

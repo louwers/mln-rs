@@ -25,7 +25,7 @@ use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
-use mln_util::hash::HashMap;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
@@ -33,8 +33,8 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::context::Context;
-use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, DynamicTextureAtlasPtr};
-use crate::image_manager::ImageManager;
+use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
+use crate::image_store::{ImageStore, ImageStoreObserver};
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweaker;
 use crate::layermanager;
@@ -48,8 +48,9 @@ use crate::renderer_event::{EventSink, RendererEvent, RendererEvents};
 use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
 use crate::style_diff::{diff_images, diff_layers, diff_sources, has_layout_difference};
 use crate::text::cross_tile_symbol_index::AddLayerResult;
-use crate::text::glyph_manager::GlyphManager;
+use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver};
 use crate::text::placement::Placement;
+use crate::tile::geometry_tile::{DependencyStores, GeometryTile};
 use crate::tile::tile::TileOperation;
 use crate::tile::tile_worker_transport::{InProcessTransport, TileWorkerTransport};
 use crate::tile_parameters::TileParameters;
@@ -76,17 +77,17 @@ fn diff_global_state_keys(previous: &GlobalStateMap, current: &GlobalStateMap) -
     keys
 }
 
-/// The `ImageManagerObserver` half of `RenderOrchestrator`.
+/// The `ImageStoreObserver` half of `RenderOrchestrator`.
 struct OrchestratorImageObserver {
     events: EventSink,
 }
 
-impl crate::image_manager::ImageManagerObserver for OrchestratorImageObserver {
-    /// The map hears of the image and may add it to the style. Meanwhile
-    /// the requestors lay out without it, and relayout when it arrives.
-    fn on_style_image_missing(&self, id: &str, done: Box<dyn FnOnce()>) {
+impl ImageStoreObserver for OrchestratorImageObserver {
+    /// The map hears of the image and may add it to the style before the
+    /// next update. If it doesn't, the tiles lay out without it, and again
+    /// when it arrives.
+    fn on_style_image_missing(&self, id: &str) {
         self.events.emit(RendererEvent::StyleImageMissing(id.to_owned()));
-        done();
     }
 
     fn on_remove_unused_style_images(&self, ids: &[String]) {
@@ -94,12 +95,12 @@ impl crate::image_manager::ImageManagerObserver for OrchestratorImageObserver {
     }
 }
 
-/// symbols: the `GlyphManagerObserver` half of `RenderOrchestrator`.
+/// symbols: the `GlyphStoreObserver` half of `RenderOrchestrator`.
 struct OrchestratorGlyphObserver {
     events: EventSink,
 }
 
-impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObserver {
+impl GlyphStoreObserver for OrchestratorGlyphObserver {
     fn on_glyphs_error(
         &self,
         font_stack: &mln_util::font_stack::FontStack,
@@ -145,6 +146,10 @@ impl RenderSourceObserver for OrchestratorSourceObserver {
         self.events.emit(RendererEvent::Invalidate);
     }
 
+    fn on_dependencies_requested(&self, _source_id: &str, _tile_id: &OverscaledTileID) {
+        self.events.emit(RendererEvent::Invalidate);
+    }
+
     fn on_tile_error(&self, source_id: &str, tile_id: &OverscaledTileID, error: Error) {
         Log::error(Event::Style, format!("Failed to load tile {tile_id} for source {source_id}: {error}"));
         self.events.emit(RendererEvent::ResourceError(error));
@@ -180,12 +185,13 @@ pub(crate) struct RenderOrchestrator {
     still_image_request_id: u64,
     transform_state: TransformState,
 
-    // symbols: the glyph and image managers (shared with the tiles), and the
-    // dynamic texture atlas (C++ Renderer::Impl owns it and passes it to
-    // createRenderTree; see `reset_dynamic_texture_atlas`).
-    glyph_manager: Rc<GlyphManager>,
-    image_manager: Rc<ImageManager>,
-    dynamic_texture_atlas: DynamicTextureAtlasPtr,
+    // symbols: the glyph and image stores, which the tiles resolve their
+    // dependencies with, and the atlas they pack them into (C++
+    // Renderer::Impl owns it and passes it to createRenderTree; see
+    // `reset_dynamic_texture_atlas`).
+    glyph_store: GlyphStore,
+    image_store: ImageStore,
+    dynamic_texture_atlas: DynamicTextureAtlas,
     line_atlas: Rc<RefCell<LineAtlas>>,
     pattern_atlas: Rc<RefCell<PatternAtlas>>,
 
@@ -265,16 +271,22 @@ impl RenderOrchestrator {
     ) -> Self {
         let events = EventSink::default();
         // `imageManager->setObserver(this)`.
-        let image_manager = ImageManager::on(Some(run_loop.scheduler()));
-        image_manager.set_observer(Some(Rc::new(OrchestratorImageObserver { events: events.clone() })));
-        // symbols: `glyphManager->setObserver(this)`.
-        let glyph_manager = GlyphManager::with_cache_and_engine(
+        let mut image_store = ImageStore::default();
+        image_store.set_observer(Some(Rc::new(OrchestratorImageObserver { events: events.clone() })));
+        // symbols: `glyphManager->setObserver(this)`. A response asks for the
+        // update that takes it in.
+        let wake = {
+            let events = events.clone();
+            Rc::new(move || events.emit(RendererEvent::Invalidate))
+        };
+        let mut glyph_store = GlyphStore::new(
             Some(Box::new(DefaultLocalGlyphRasterizer::new(local_font_family))),
             glyph_cache,
             font_face_engine,
             run_loop.clone(),
+            wake,
         );
-        glyph_manager.set_observer(Some(Rc::new(OrchestratorGlyphObserver { events: events.clone() })));
+        glyph_store.set_observer(Some(Rc::new(OrchestratorGlyphObserver { events: events.clone() })));
         let thread_pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
         RenderOrchestrator {
             scheduler: run_loop.scheduler(),
@@ -283,11 +295,11 @@ impl RenderOrchestrator {
             zoom_history: ZoomHistory::default(),
             still_image_request_id: 0,
             transform_state: TransformState::default(),
-            glyph_manager,
-            image_manager,
+            glyph_store,
+            image_store,
             cross_tile_symbol_index: crate::text::cross_tile_symbol_index::CrossTileSymbolIndex::default(),
             placement_controller: crate::text::placement::PlacementController::new(),
-            dynamic_texture_atlas: Arc::new(DynamicTextureAtlas::new()),
+            dynamic_texture_atlas: DynamicTextureAtlas::new(),
             line_atlas: Rc::new(RefCell::new(LineAtlas::new())),
             pattern_atlas: Rc::new(RefCell::new(PatternAtlas::new())),
             image_impls: Arc::new(Vec::new()),
@@ -425,15 +437,15 @@ impl RenderOrchestrator {
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             capture_rendered_features: update_parameters.capture_rendered_features,
-            image_manager: Rc::clone(&self.image_manager),
-            glyph_manager: Rc::clone(&self.glyph_manager),
-            dynamic_texture_atlas: Arc::clone(&self.dynamic_texture_atlas),
+            available_images: Arc::default(),
+            font_faces: update_parameters.font_faces.clone(),
             tile_worker_transport: Rc::clone(&self.tile_worker_transport),
             thread_pool: self.thread_pool.clone(),
         };
 
-        self.glyph_manager.set_url(&update_parameters.glyph_url);
-        self.glyph_manager.set_font_faces(update_parameters.font_faces.clone());
+        self.glyph_store.set_url(&update_parameters.glyph_url);
+        self.glyph_store.set_font_faces(update_parameters.font_faces.clone());
+        self.glyph_store.update();
 
         // Update light. (conformance)
         let light_changed = !Arc::ptr_eq(&self.render_light.impl_, &update_parameters.light);
@@ -482,32 +494,41 @@ impl RenderOrchestrator {
         let image_diff = diff_images(&self.image_impls, &update_parameters.images);
         self.image_impls = Arc::clone(&update_parameters.images);
 
-        // Removing an image changes layout for tiles that use it, and
-        // updating one does when its size changes. The image manager
-        // relayouts the tiles that asked for an added image itself.
-        let mut has_image_diff = !image_diff.removed.is_empty();
-
-        // Remove removed images from sprite atlas.
+        // Adding or removing an image changes the layout of the tiles whose
+        // dependencies name it, and updating one does when its size or SDF
+        // flag changes. An update of the same size patches its atlas bins.
+        self.image_store.begin_update();
+        let mut relayout_images: HashSet<String> = HashSet::default();
         for id in image_diff.removed.keys() {
-            self.image_manager.remove_image(id);
+            self.image_store.remove_image(id);
             self.pattern_atlas.borrow_mut().remove_pattern(id);
+            relayout_images.insert(id.clone());
         }
-
-        // Add added images to sprite atlas.
         for image in image_diff.added.values() {
-            self.image_manager.add_image(Arc::clone(image));
+            self.image_store.add_image(Arc::clone(image));
+            relayout_images.insert(image.id.clone());
         }
-
-        // Update changed images.
         for change in image_diff.changed.values() {
-            if self.image_manager.update_image(Arc::clone(&change.after)) {
+            if self.image_store.update_image(Arc::clone(&change.after)) {
                 self.pattern_atlas.borrow_mut().remove_pattern(&change.after.id);
-                has_image_diff = true;
+                relayout_images.insert(change.after.id.clone());
             }
+            self.dynamic_texture_atlas.patch_image(&change.after);
         }
-
-        self.image_manager.notify_if_missing_image_added();
-        self.image_manager.set_loaded(update_parameters.sprite_loaded);
+        self.image_store.set_loaded(update_parameters.sprite_loaded);
+        tile_parameters.available_images = Arc::clone(self.image_store.available_images());
+        if !relayout_images.is_empty() {
+            self.for_each_geometry_tile(|tile| {
+                // A tile still waiting for its answer gets the images as they
+                // are now.
+                let uses_them = tile.inner().latest_dependencies(|dependencies, answered, _| {
+                    answered && dependencies.images.keys().any(|id| relayout_images.contains(id))
+                });
+                if uses_them == Some(true) {
+                    tile.inner().relayout(Arc::clone(&tile_parameters.available_images));
+                }
+            });
+        }
 
         let layer_diff = diff_layers(&self.layer_impls, &update_parameters.layers);
         self.layer_impls = Arc::clone(&update_parameters.layers);
@@ -579,7 +600,7 @@ impl RenderOrchestrator {
         debug_assert_eq!(self.ordered_layers.len(), self.render_layers.len());
 
         if layers_added_or_removed || !layer_diff.changed.is_empty() {
-            self.glyph_manager.evict(&layer::font_stacks(self.layer_impls.iter()));
+            self.glyph_store.evict(&layer::font_stacks(self.layer_impls.iter()));
         }
 
         // Update layers for class and zoom changes.
@@ -668,7 +689,14 @@ impl RenderOrchestrator {
             && update_parameters.still_image_request_id != self.still_image_request_id
         {
             self.still_image_request_id = update_parameters.still_image_request_id;
-            self.glyph_manager.retry_failed_requests();
+            // A tile laid out without the glyphs of a failed range lays out
+            // again, which requests the range again.
+            let available_images = &tile_parameters.available_images;
+            self.for_each_geometry_tile(|tile| {
+                if tile.inner().latest_dependencies(|_, _, glyphs_failed| glyphs_failed) == Some(true) {
+                    tile.inner().relayout(Arc::clone(available_images));
+                }
+            });
             for render_source in self.render_sources.values_mut() {
                 render_source.retry_failed_tiles();
             }
@@ -754,7 +782,6 @@ impl RenderOrchestrator {
                             }
                         };
                         source_needs_relayout = source_needs_relayout
-                            || has_image_diff
                             || constants_mask_changed.contains(&layer_id)
                             || has_layout_difference(&layer_diff, &layer_id)
                             || global_state_requires_relayout;
@@ -818,6 +845,13 @@ impl RenderOrchestrator {
             }
         }
 
+        // A synchronous source's tile laid out by its answer isn't in this
+        // update's render tiles yet: the next update has it.
+        let answered = self.resolve_tile_dependencies();
+        if answered {
+            self.events.emit(RendererEvent::Invalidate);
+        }
+
         // Update all layers with their new renderability status, if it
         // changed.
         for (i, will_render) in update_list.iter().enumerate() {
@@ -828,7 +862,7 @@ impl RenderOrchestrator {
         }
         self.add_changes(&mut changes);
 
-        render_tree_parameters.loaded = update_parameters.style_loaded && self.is_loaded();
+        render_tree_parameters.loaded = update_parameters.style_loaded && !answered && self.is_loaded();
         if !is_map_mode_continuous && !render_tree_parameters.loaded {
             return None;
         }
@@ -839,7 +873,6 @@ impl RenderOrchestrator {
             if render_source.is_enabled() {
                 render_source.prepare(&SourcePrepareParameters {
                     transform: &render_tree_parameters.transform_params,
-                    image_manager: &self.image_manager,
                     debug_options: update_parameters.debug_options,
                     source_name: name.clone(),
                 });
@@ -856,7 +889,7 @@ impl RenderOrchestrator {
             let source = render_item.source.as_ref().and_then(|id| self.render_sources.get(id)).map(AsRef::as_ref);
             render_layer.prepare(&mut LayerPrepareParameters {
                 source,
-                image_manager: &self.image_manager, // conformance
+                images: &self.image_store, // conformance
                 pattern_atlas: &self.pattern_atlas,
                 line_atlas: &self.line_atlas,
             });
@@ -958,7 +991,9 @@ impl RenderOrchestrator {
         if !render_tree_parameters.needs_repaint && render_tree_parameters.loaded {
             // Notify observer about unused images when map is fully loaded
             // and there are no ongoing transitions.
-            self.image_manager.reduce_memory_use_if_cache_size_exceeds_limit();
+            if self.image_store.exceeds_cache_size_limit() {
+                self.image_store.reduce_memory_use(&self.images_used_by_tiles());
+            }
         }
 
         let mut source_render_items: Vec<Box<dyn RenderItem>> = Vec::new();
@@ -1013,7 +1048,7 @@ impl RenderOrchestrator {
     pub(crate) fn is_loaded(&self) -> bool {
         // do the simple boolean check before iterating over all the tiles in
         // all the sources
-        if !self.image_manager.is_loaded() {
+        if !self.image_store.is_loaded() {
             return false;
         }
 
@@ -1060,8 +1095,8 @@ impl RenderOrchestrator {
             self.pattern_atlas = Rc::new(RefCell::new(PatternAtlas::new()));
         }
 
-        self.image_manager.clear();
-        self.glyph_manager.evict(&VecSet::new());
+        self.image_store.clear();
+        self.glyph_store.evict(&VecSet::new());
     }
 
     /// Drops what holds the renderer's shaders: the render layers, the sky
@@ -1080,7 +1115,49 @@ impl RenderOrchestrator {
     /// when the style changed (`impl->dynamicTextureAtlas` is owned by the
     /// renderer and handed to createRenderTree).
     pub(crate) fn reset_dynamic_texture_atlas(&mut self) {
-        self.dynamic_texture_atlas = Arc::new(DynamicTextureAtlas::new());
+        self.dynamic_texture_atlas = DynamicTextureAtlas::new();
+    }
+
+    /// Makes the atlas's GPU textures and uploads what its pages queued.
+    pub(crate) fn upload_atlas(&mut self, context: &Context) {
+        self.dynamic_texture_atlas.upload(context);
+    }
+
+    /// Calls `f` with each geometry tile of each source, in the style's
+    /// source order.
+    fn for_each_geometry_tile(&self, mut f: impl FnMut(&GeometryTile)) {
+        for source_impl in self.source_impls.iter() {
+            if let Some(source) = self.render_sources.get(&source_impl.base().id) {
+                source.for_each_geometry_tile(&mut f);
+            }
+        }
+    }
+
+    /// Answers the dependency requests of the tiles that wait for glyphs
+    /// and images the stores now have, or know missing. Returns whether it
+    /// answered any.
+    fn resolve_tile_dependencies(&mut self) -> bool {
+        let mut stores = DependencyStores {
+            glyphs: &mut self.glyph_store,
+            images: &mut self.image_store,
+            atlas: &mut self.dynamic_texture_atlas,
+        };
+        let mut answered = false;
+        for source_impl in self.source_impls.iter() {
+            if let Some(source) = self.render_sources.get(&source_impl.base().id) {
+                source.for_each_geometry_tile(&mut |tile| answered |= tile.inner().resolve_dependencies(&mut stores));
+            }
+        }
+        answered
+    }
+
+    /// The images the tiles' dependencies name.
+    fn images_used_by_tiles(&self) -> HashSet<String> {
+        let mut used = HashSet::default();
+        self.for_each_geometry_tile(|tile| {
+            tile.inner().latest_dependencies(|dependencies, _, _| used.extend(dependencies.images.keys().cloned()));
+        });
+        used
     }
 
     fn add_changes(&mut self, changes: &mut UniqueChangeRequestVec) {
@@ -1527,7 +1604,7 @@ impl RenderOrchestrator {
         for source in self.render_sources.values() {
             source.dump_debug_logs();
         }
-        self.image_manager.dump_debug_logs();
+        self.image_store.dump_debug_logs();
     }
 
     // layers: feature state
@@ -1584,7 +1661,7 @@ impl RenderOrchestrator {
         for source in self.render_sources.values_mut() {
             source.reduce_memory_use();
         }
-        self.image_manager.reduce_memory_use();
+        self.image_store.reduce_memory_use(&self.images_used_by_tiles());
         self.events.emit(RendererEvent::Invalidate);
     }
 
