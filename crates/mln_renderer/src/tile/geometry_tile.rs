@@ -1,44 +1,34 @@
-// C++ `GeometryTile` is both the tile the TilePyramid owns and the target of
-// its worker's replies (an actor reference to `this`). Here the state the
-// replies change is `GeometryTileInner`, an `Rc` registered as the target of
-// the tile's mailbox on the render thread; `GeometryTile` owns it, the
-// mailbox and the worker actor. Correlation between GeometryTile and
-// GeometryTileWorker works as in C++ (see the C++ file's comment):
-// `correlationID` for the tile's pending state.
+// A geometry tile drives one layout job at a time (tile/job.rs). Each change
+// of an input (its data, its source's style, its layout parameters, an image
+// its layout used or asked for, the lane running its job) takes a new
+// generation from its source's counters, and the tile applies a reply only
+// if it names the current generation: a stale result is dropped, and the
+// tile keeps showing its current layout while it lays out again.
 //
-// The tile reaches its worker through the `TileWorkerTransport` of its
-// TileParameters (tile_worker_transport.rs): it sends `WorkerMessage`s to
-// the transport's endpoint, and the worker's `TileMessage`s come back
-// through the tile's mailbox (`handle_worker_message`). As in C++, the
-// worker runs synchronously on the render thread when the source asks for
-// it (`TileParameters::isUpdateSynchronous`, e.g. a GeoJSON source with
-// `synchronousUpdate`); its messages to the tile are then direct calls.
-//
-// symbols: the worker asks for the glyphs and images its layout needs
-// (`TileMessage::GetDependencies`). The tile waits until the renderer's
-// update resolves them (`resolve_dependencies`, through the glyph and image
-// stores), packs them into one glyph page and one image page of the atlas,
-// and sends the worker their positions (`WorkerMessage::Resolved`). It holds
-// leases on the bins until no layout can use them.
+// The renderer's update drives the tiles (`take_reply` before the sources
+// update, `drive` after): a job that answers `NeedsDeps` waits for the
+// update to resolve its glyphs and images through the stores, which pack
+// them into one glyph page and one image page of the atlas, and the job runs
+// again with their positions. The tile holds leases on those bins until no
+// layout it shows or runs uses them. A tile of a source with synchronous
+// updates runs its jobs on the render thread as soon as its inputs change.
 
 use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_actor::{ActorRef, LocalObject, Mailbox, TaggedScheduler};
+use mln_actor::TaggedScheduler;
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer;
-use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
-use mln_style_types::VisibilityType;
 use mln_style_types::image::{ImagePosition, ImagePositions};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
-use mln_util::hash::HashMap;
+use mln_util::hash::{HashMap, HashSet};
+use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
@@ -48,20 +38,20 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, DynamicTextureAtlas};
 use crate::image_store::{ImageStore, ImageWait};
-use crate::layout::tile_layout::{Dependencies, Resolved};
+use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::render_layer::LayerRenderData;
 use crate::render_orchestrator::drop_on_workers;
 use crate::text::glyph_store::{GlyphStore, GlyphWait};
-use crate::tile::geometry_tile_worker::{TileMessage, WorkerMessage};
+use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle, TileKey};
 use crate::tile::tile::{Kind, Tile, TileBase, TileOperation};
 use crate::tile::tile_observer::TileObserver;
-use crate::tile::tile_worker_transport::{SynchronousTile, TileEndpoint, WorkerEndpoint, WorkerParameters};
+use crate::tile::tile_workers::{InlineWorkers, Lane, SourceCounters, TileJobs};
 use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::{TileAtlasTextures, TileRenderData};
 
-/// A worker's layout: each layer's bucket, and the feature index.
+/// A layout: each layer's bucket, and the feature index.
 #[derive(Clone)]
-pub struct LayoutResult {
+pub(crate) struct LayoutResult {
     pub(crate) layer_render_data: HashMap<String, LayerRenderData>,
     pub(crate) feature_index: Arc<FeatureIndex>,
 }
@@ -92,32 +82,39 @@ pub(crate) struct TileAtlases {
     pattern_positions: ImagePositions,
 }
 
-/// The layout a tile shows: its worker's result, the atlas pages it draws
-/// from if it waited for glyphs or images, and the render thread's copies of
-/// its bucket geometry.
+/// What a tile's dependencies resolved to, with the leases on the atlas
+/// bins their positions name. `atlases` is `None` for a layout that waited
+/// for nothing.
+#[derive(Clone, Default)]
+struct Answer {
+    resolved: Arc<Resolved>,
+    atlases: Option<Rc<TileAtlases>>,
+    /// Whether it lacked glyphs of a range that failed to load.
+    glyphs_failed: bool,
+}
+
+/// The layout a tile shows: its job's result, the dependencies it used and
+/// what they resolved to, and the render thread's copies of its bucket
+/// geometry.
 #[derive(Clone)]
 pub(crate) struct TileLayout {
     pub(crate) result: LayoutResult,
-    pub(crate) atlases: Option<Rc<TileAtlases>>,
+    answer: Answer,
+    deps: Rc<Dependencies>,
     textures: Rc<TileAtlasTextures>,
     bucket_geometry: Rc<BucketGeometry>,
 }
 
 impl TileLayout {
-    fn new(result: LayoutResult, atlases: Option<TileAtlases>) -> Self {
-        let textures = atlases.as_ref().map_or_else(TileAtlasTextures::default, |atlases| {
+    fn new(result: LayoutResult, answer: Answer, deps: Dependencies) -> Self {
+        let textures = answer.atlases.as_ref().map_or_else(TileAtlasTextures::default, |atlases| {
             TileAtlasTextures::new(Rc::clone(atlases.glyphs.page_texture()), Rc::clone(atlases.images.page_texture()))
         });
-        TileLayout {
-            result,
-            atlases: atlases.map(Rc::new),
-            textures: Rc::new(textures),
-            bucket_geometry: Rc::default(),
-        }
+        TileLayout { result, answer, deps: Rc::new(deps), textures: Rc::new(textures), bucket_geometry: Rc::default() }
     }
 
     fn pattern_positions(&self) -> Option<&ImagePositions> {
-        self.atlases.as_ref().map(|atlases| &atlases.pattern_positions)
+        self.answer.atlases.as_ref().map(|atlases| &atlases.pattern_positions)
     }
 }
 
@@ -126,11 +123,11 @@ impl TileLayout {
 /// that drops many tiles would otherwise spend frames freeing them. The
 /// atlas leases drop here, on the render thread.
 fn release_layout(layout: Rc<TileLayout>, thread_pool: &TaggedScheduler) {
-    if let Some(TileLayout { result: LayoutResult { layer_render_data, feature_index }, atlases, .. }) =
+    if let Some(TileLayout { result: LayoutResult { layer_render_data, feature_index }, answer, .. }) =
         Rc::into_inner(layout)
     {
         drop_on_workers(thread_pool, (layer_render_data, feature_index));
-        drop(atlases);
+        drop(answer);
     }
 }
 
@@ -193,24 +190,14 @@ enum FadeState {
     CanRemove,
 }
 
-/// What the tiles resolve their worker's dependency requests with.
+/// What the tiles resolve their jobs' dependencies with.
 pub(crate) struct DependencyStores<'a> {
     pub(crate) glyphs: &'a mut GlyphStore,
     pub(crate) images: &'a mut ImageStore,
     pub(crate) atlas: &'a mut DynamicTextureAtlas,
 }
 
-/// The worker's latest dependency request.
-struct DependencyRequest {
-    id: u64,
-    dependencies: Dependencies,
-    /// `None` once answered.
-    wait: Option<DependencyWait>,
-    /// Whether the answer lacked glyphs of a range that failed to load.
-    glyphs_failed: bool,
-}
-
-/// A dependency request's wait for the stores.
+/// A wait for the stores to resolve a job's dependencies.
 #[derive(Default)]
 struct DependencyWait {
     glyphs: GlyphWait,
@@ -220,43 +207,105 @@ struct DependencyWait {
     revisions: Option<(u64, u64)>,
 }
 
-/// The tile's side of its worker's dependency requests.
-struct DependencyState {
-    /// The images the worker was last told exist.
-    available_images: Arc<VecSet<String>>,
-    latest: Option<DependencyRequest>,
-    /// The atlas pages of each answer a layout may still use, by request id.
-    sent: Vec<(u64, TileAtlases)>,
+/// Where a tile's layout stands.
+enum Work {
+    /// Nothing to do for this generation: the tile shows its layout, failed,
+    /// or waits for the data or style it lacks.
+    Current,
+    /// The generation has no job yet.
+    Outdated,
+    /// A job is in flight, of this generation or (when stale) an earlier
+    /// one.
+    Running(Running),
+    /// The job answered `NeedsDeps`: the tile waits for the stores.
+    Waiting { lane: Lane, needs: Dependencies, wait: DependencyWait },
+    /// The next job is ready but waits for a lane with room: a resume with
+    /// its answer, or a job sent again with its data.
+    Ready(Next),
 }
 
-/// The render-thread state of a `GeometryTile`, also the target of its
-/// worker's replies.
+struct Running {
+    id: JobId,
+    lane: Lane,
+    /// The job is a resume, whose `answer` resolves `known`.
+    known: Option<Dependencies>,
+    answer: Answer,
+}
+
+struct Next {
+    /// The lane of the job before, for a resume.
+    lane: Option<Lane>,
+    known: Option<Dependencies>,
+    answer: Answer,
+}
+
+/// The tile's data, as it arrived: `None` for a tile without data.
+struct Loaded {
+    key: DataKey,
+    data: Option<TileData>,
+}
+
+/// A tile's side of its jobs.
+struct Driver {
+    generation: u64,
+    work: Work,
+    /// `None` until the data arrives, and after a reset.
+    data: Option<Loaded>,
+    /// `None` until the source's style arrives, and after a reset.
+    style: Option<Arc<SourceStyle>>,
+    /// The images that exist, as the tile last heard.
+    available_images: Arc<VecSet<String>>,
+    /// The parameters of the next job; `first_load` is set as it starts.
+    params: LayoutParams,
+    /// The lane that last got the data lost it: the next job carries it.
+    full: bool,
+    /// The shown layout's answer resolved glyphs or images that changed
+    /// since: the next first try starts without it.
+    answer_outdated: bool,
+}
+
+impl Driver {
+    /// Takes a new generation: a job in flight becomes stale, and anything
+    /// else outdated.
+    fn bump(&mut self, source: &SourceCounters) {
+        self.generation = source.next_generation();
+        if !matches!(self.work, Work::Running(_)) {
+            self.work = Work::Outdated;
+        }
+    }
+
+    /// The dependencies the tile's latest work names, apart from what it
+    /// shows.
+    fn pending_dependencies(&self) -> Option<&Dependencies> {
+        match &self.work {
+            Work::Running(Running { known, .. }) | Work::Ready(Next { known, .. }) => known.as_ref(),
+            Work::Waiting { needs, .. } => Some(needs),
+            Work::Current | Work::Outdated => None,
+        }
+    }
+}
+
+/// The render-thread state of a `GeometryTile`.
 pub(crate) struct GeometryTileInner {
     pub(crate) base: TileBase,
 
+    source: Rc<SourceCounters>,
     file_source: Option<Arc<dyn FileSource>>,
-    dependencies: RefCell<DependencyState>,
-
-    /// Used to signal the worker that it should abandon parsing this tile as
-    /// soon as possible.
-    obsolete: Arc<AtomicBool>,
-
-    /// The tile's worker, behind its transport.
-    worker: Box<dyn WorkerEndpoint>,
-    mailbox: Arc<Mailbox>,
-
-    correlation_id: Cell<u64>,
-    /// The worker has data to parse: set by `set_data`, cleared by `reset`.
-    has_data: Cell<bool>,
+    /// Set once the tile is cancelled or dropped: it takes no more data.
+    obsolete: Cell<bool>,
     /// The tileset has no tile here (`LoaderTile::set_missing`): the tile
     /// lays out without data but isn't renderable.
     pub(crate) missing: Cell<bool>,
 
+    driver: RefCell<Driver>,
     layout: RefCell<Option<Rc<TileLayout>>>,
-    /// Where the layout's data is freed (`release_layout`).
+    /// Where the layouts' data is freed (`release_layout`).
     thread_pool: TaggedScheduler,
 
     mode: MapMode,
+    /// The tile's source updates synchronously: its jobs run on this thread
+    /// as soon as its inputs change.
+    synchronous: bool,
 
     show_collision_boxes: Cell<bool>,
     subdivision_granularity: Cell<SubdivisionGranularitySetting>,
@@ -266,29 +315,26 @@ pub(crate) struct GeometryTileInner {
 }
 
 impl GeometryTileInner {
-    /// The `obsolete` flag.
+    /// Whether the tile was cancelled.
     pub(crate) fn is_obsolete(&self) -> bool {
-        self.obsolete.load(Ordering::SeqCst)
+        self.obsolete.get()
     }
 
-    fn mark_obsolete(&self) {
-        self.obsolete.store(true, Ordering::SeqCst);
-        // `mailbox->abandon()`: no reply reaches the tile any more.
-        self.mailbox.close();
+    fn key(&self) -> TileKey {
+        TileKey { source: self.source.key(), id: self.base.id() }
     }
 
     pub(crate) fn set_error(&self, err: Error) {
         self.base.loaded.set(true);
-        // Without data, the worker has nothing to parse, so the tile is
-        // complete.
-        if !self.has_data.get() {
+        // Without data, the tile has nothing to lay out, so it is complete.
+        if self.driver.borrow().data.is_none() {
             self.base.pending.set(false);
         }
         self.base.observer().on_tile_error(&self.base, err);
     }
 
     pub(crate) fn set_data(&self, data: Option<TileData>) {
-        if self.obsolete.load(Ordering::SeqCst) {
+        if self.is_obsolete() {
             return;
         }
 
@@ -300,16 +346,29 @@ impl GeometryTileInner {
         // prevent signaling a complete state despite pending parse
         // operations.
         self.base.pending.set(true);
-        self.has_data.set(true);
 
-        self.correlation_id.set(self.correlation_id.get() + 1);
-        let correlation_id = self.correlation_id.get();
-        let available_images = Arc::clone(&self.dependencies.borrow().available_images);
-        self.worker.send(WorkerMessage::SetData { data, available_images, correlation_id });
+        let key = DataKey { source: self.source.key(), tile: self.base.id().canonical, load: self.source.next_load() };
+        self.change(|driver| {
+            driver.data = Some(Loaded { key, data });
+            driver.full = false;
+        });
+        self.advance();
     }
 
-    /// Resets the tile's data and layers and leaves the tile in pending
-    /// state, waiting for the new data and layers to come.
+    /// Changes an input of the tile's layout, which takes a new generation.
+    fn change(&self, f: impl FnOnce(&mut Driver)) {
+        let mut driver = self.driver.borrow_mut();
+        f(&mut driver);
+        driver.bump(&self.source);
+    }
+
+    /// The layout the tile shows.
+    fn layout(&self) -> Option<Rc<TileLayout>> {
+        self.layout.borrow().clone()
+    }
+
+    /// Drops the tile's data and style and leaves the tile pending, waiting
+    /// for new ones.
     pub(crate) fn reset(&self) {
         // If there is pending work, indicate that work has been cancelled.
         // Clear the pending status.
@@ -321,180 +380,365 @@ impl GeometryTileInner {
         // Reset the tile to an unloaded state to avoid signaling completion
         // after clearing the tile's pending status.
         self.base.loaded.set(false);
-        self.has_data.set(false);
 
-        // Reset the worker to the `NeedsParse` state.
-        self.correlation_id.set(self.correlation_id.get() + 1);
-        let correlation_id = self.correlation_id.get();
-        self.worker.send(WorkerMessage::Reset { correlation_id });
+        self.change(|driver| {
+            driver.data = None;
+            driver.style = None;
+        });
     }
 
-    /// Installs a layout. `request` is the worker's last dependency request
-    /// and `resolved` whether the layout used its answer.
-    fn on_layout(&self, result: LayoutResult, result_correlation_id: u64, request: u64, resolved: bool) {
-        let atlases = {
-            let mut dependencies = self.dependencies.borrow_mut();
-            let state = &mut *dependencies;
-            let atlases = resolved
-                .then(|| state.sent.iter().position(|(id, _)| *id == request))
-                .flatten()
-                .map(|index| state.sent.remove(index).1);
-            // The worker answers only its last request, which this layout
-            // used or abandoned.
-            state.sent.retain(|(id, _)| *id > request);
-            if !resolved && state.latest.as_ref().is_some_and(|latest| latest.id <= request) {
-                state.latest = None;
-            }
-            atlases
+    /// Lays the tile out with `style`, for the pixel ratio and subdivision
+    /// granularity set since the last style.
+    fn set_style(&self, style: &Arc<SourceStyle>) {
+        let mut has_data = false;
+        self.change(|driver| {
+            has_data = driver.data.is_some();
+            driver.style = Some(Arc::clone(style));
+            driver.params.pixel_ratio = self.pixel_ratio.get();
+            driver.params.subdivision_granularity = self.subdivision_granularity.get();
+        });
+        // Mark the tile as pending again if it was complete before to prevent
+        // signaling a complete state despite pending parse operations. A tile
+        // whose data failed to load has nothing to lay out.
+        if !self.base.pending.get() && (has_data || !self.base.loaded.get()) {
+            self.base.pending.set(true);
+            self.base.on_tile_action(TileOperation::StartParse);
+        }
+        self.advance();
+    }
+
+    /// Lays the tile out again, with its data and style, for glyphs or
+    /// images that changed: without the answer they had. The tile is
+    /// pending until its layout arrives.
+    fn relayout(&self) {
+        if !self.base.pending.get() {
+            self.base.pending.set(true);
+            self.base.on_tile_action(TileOperation::StartParse);
+        }
+        self.change(|driver| driver.answer_outdated = true);
+        self.advance();
+    }
+
+    /// Takes in a change of images: the ones in `changed` were added,
+    /// removed or resized, and `available` exist now. Lays the tile out
+    /// again if its layout, or the layout it runs or waits for, named one of
+    /// `changed`, or if its first try is running against another set of
+    /// images.
+    pub(crate) fn images_changed(&self, changed: &HashSet<String>, available: &Arc<VecSet<String>>) {
+        let relayout = {
+            let mut driver = self.driver.borrow_mut();
+            let set_changed = !Arc::ptr_eq(&driver.available_images, available);
+            driver.available_images = Arc::clone(available);
+            let names = |deps: &Dependencies| deps.images.keys().any(|id| changed.contains(id));
+            let shown = self.layout().is_some_and(|layout| names(&layout.deps));
+            let first_try_running = matches!(&driver.work, Work::Running(Running { known: None, .. }));
+            shown || driver.pending_dependencies().is_some_and(names) || (set_changed && first_try_running)
         };
+        if relayout {
+            self.relayout();
+        }
+    }
+
+    /// Lays the tile out again if its layout, or the one it runs, lacked
+    /// glyphs of a range that failed to load, which asks for the range
+    /// again.
+    pub(crate) fn retry_failed_glyphs(&self) {
+        let failed = {
+            let driver = self.driver.borrow();
+            let running = match &driver.work {
+                Work::Running(Running { answer, .. }) | Work::Ready(Next { answer, .. }) => answer.glyphs_failed,
+                Work::Current | Work::Outdated | Work::Waiting { .. } => false,
+            };
+            running || self.layout().is_some_and(|layout| layout.answer.glyphs_failed)
+        };
+        if failed {
+            self.relayout();
+        }
+    }
+
+    /// Calls `f` with the dependencies of the layout the tile shows and of
+    /// the one it lays out.
+    pub(crate) fn for_each_dependencies(&self, mut f: impl FnMut(&Dependencies)) {
+        if let Some(layout) = self.layout() {
+            f(&layout.deps);
+        }
+        if let Some(deps) = self.driver.borrow().pending_dependencies() {
+            f(deps);
+        }
+    }
+
+    /// Takes the reply to the tile's job, if it arrived, and gives up the
+    /// job if its lane was lost. A stale reply stays with `jobs`, undecoded.
+    /// Returns whether the tile shows a new layout.
+    pub(crate) fn take_reply(&self, jobs: &mut TileJobs) -> bool {
+        let mut driver = self.driver.borrow_mut();
+        let (id, lane) = match &driver.work {
+            Work::Running(running) => (running.id, running.lane),
+            Work::Waiting { lane, .. } | Work::Ready(Next { lane: Some(lane), .. }) => {
+                if jobs.is_lost(*lane) {
+                    driver.bump(&self.source);
+                }
+                return false;
+            }
+            Work::Current | Work::Outdated | Work::Ready(_) => return false,
+        };
+        if !jobs.has_reply(&id) {
+            if jobs.is_lost(lane) {
+                // Its reply never comes, and its leases go.
+                driver.bump(&self.source);
+                driver.work = Work::Outdated;
+            }
+            return false;
+        }
+        if id.generation != driver.generation {
+            // The tile lays out its newest generation instead.
+            driver.work = Work::Outdated;
+            drop(driver);
+            self.base.observer().on_update_needed(&self.base);
+            return false;
+        }
+        let Work::Running(running) = std::mem::replace(&mut driver.work, Work::Outdated) else {
+            return false;
+        };
+        drop(driver);
+        match jobs.take_reply(&id) {
+            Some(result) => self.apply(running, result),
+            None => false,
+        }
+    }
+
+    /// Applies the result of `running`, the tile's job. Returns whether the
+    /// tile shows a new layout.
+    fn apply(&self, running: Running, result: JobResult) -> bool {
+        let Running { id, lane, known, answer } = running;
+        let mut driver = self.driver.borrow_mut();
+        if id.generation != driver.generation {
+            // Stale: the tile lays out its newest generation instead.
+            driver.work = Work::Outdated;
+            drop(driver);
+            drop_on_workers(&self.thread_pool, result);
+            self.base.observer().on_update_needed(&self.base);
+            return false;
+        }
+        match result {
+            JobResult::Laid(output) => {
+                driver.work = Work::Current;
+                let data = driver.data.as_ref().and_then(|loaded| loaded.data.clone());
+                drop(driver);
+                self.install(output, answer, data);
+                true
+            }
+            JobResult::NeedsDeps(needs) if known.is_none() => {
+                driver.work = Work::Waiting { lane, needs, wait: DependencyWait::default() };
+                drop(driver);
+                self.base.observer().on_update_needed(&self.base);
+                false
+            }
+            JobResult::NeedsDeps(_) => {
+                driver.work = Work::Current;
+                drop(driver);
+                Log::error(
+                    Event::General,
+                    format!("Tile {} asked again for the dependencies it was given", id.tile.id),
+                );
+                self.on_error(Error::native("a layout asked again for the dependencies it was given"));
+                false
+            }
+            JobResult::NeedsData => {
+                driver.full = true;
+                driver.work = Work::Ready(Next { lane: None, known, answer });
+                drop(driver);
+                self.base.observer().on_update_needed(&self.base);
+                false
+            }
+            JobResult::Failed(error) => {
+                driver.work = Work::Current;
+                drop(driver);
+                self.on_error(error);
+                false
+            }
+        }
+    }
+
+    /// Shows a layout of the current generation, built from `data`.
+    fn install(&self, output: LayoutOutput, answer: Answer, data: Option<TileData>) {
+        let LayoutOutput { mut result, deps } = output;
+        // The index crossed without its data, or with the data it was built
+        // from, which is the tile's.
+        if let Some(feature_index) = Arc::get_mut(&mut result.feature_index) {
+            feature_index.set_data(data);
+        }
 
         self.base.loaded.set(true);
         self.base.renderable.set(!self.missing.get());
-        if result_correlation_id == self.correlation_id.get() {
-            self.base.pending.set(false);
-            self.base.on_tile_action(TileOperation::EndParse);
-        }
+        self.base.pending.set(false);
+        self.base.on_tile_action(TileOperation::EndParse);
 
-        *self.layout.borrow_mut() = Some(Rc::new(TileLayout::new(result, atlases)));
+        *self.layout.borrow_mut() = Some(Rc::new(TileLayout::new(result, answer, deps)));
         self.base.feature_state_version.set(0);
 
         self.base.observer().on_tile_changed(&self.base);
     }
 
-    pub(crate) fn on_error(&self, err: Error, result_correlation_id: u64) {
+    pub(crate) fn on_error(&self, err: Error) {
         self.base.loaded.set(true);
-        if result_correlation_id == self.correlation_id.get() {
-            self.base.pending.set(false);
-            self.base.on_tile_action(TileOperation::Error);
-        }
+        self.base.pending.set(false);
+        self.base.on_tile_action(TileOperation::Error);
         self.base.observer().on_tile_error(&self.base, err);
     }
 
-    /// Waits for the renderer's next update to resolve what the worker asked
-    /// for.
-    fn on_dependencies_requested(&self, dependencies: Dependencies, request: u64) {
-        self.dependencies.borrow_mut().latest = Some(DependencyRequest {
-            id: request,
-            dependencies,
-            wait: Some(DependencyWait::default()),
-            glyphs_failed: false,
-        });
-        self.base.observer().on_dependencies_requested(&self.base);
-    }
-
-    /// Answers the worker's dependency request once the stores have
-    /// everything it needs, or know it missing, packing it into the atlas.
-    /// Does nothing for a tile that waits for nothing, or whose stores
-    /// haven't changed since it last tried. Returns whether it answered.
-    pub(crate) fn resolve_dependencies(&self, stores: &mut DependencyStores<'_>) -> bool {
-        if self.is_obsolete() {
-            return false;
+    /// Moves the tile's layout on: resolves the dependencies it waits for,
+    /// once the stores have them all or know them missing, and submits its
+    /// next job if a lane has room. Returns whether the tile shows a new
+    /// layout (a tile of a source with synchronous updates).
+    pub(crate) fn drive(&self, jobs: &mut TileJobs, stores: &mut DependencyStores<'_>) -> bool {
+        self.resolve(stores);
+        if self.synchronous {
+            return self.run_inline();
         }
-        let revisions = (stores.glyphs.revision(), stores.images.revision());
-        let (resolved, request) = {
-            let mut dependencies = self.dependencies.borrow_mut();
-            let state = &mut *dependencies;
-            let Some(latest) = state.latest.as_mut() else {
-                return false;
-            };
-            let Some(wait) = latest.wait.as_mut() else {
-                return false;
-            };
-            if wait.revisions == Some(revisions) {
-                return false;
-            }
-
-            // A layout that branched on an image that came or went since the
-            // worker was told which exist isn't the one to answer: lay it out
-            // again. An image it names but didn't branch on just resolves.
-            let current = stores.images.available_images();
-            let sent = &state.available_images;
-            if latest.dependencies.unavailable_images.iter().any(|id| current.contains(id))
-                || latest.dependencies.images.keys().any(|id| sent.contains(id) && !current.contains(id))
-            {
-                let current = Arc::clone(current);
-                state.latest = None;
-                drop(dependencies);
-                self.relayout(current);
-                return false;
-            }
-
-            let glyphs =
-                stores.glyphs.resolve(&latest.dependencies.glyphs, &mut wait.glyphs, self.file_source.as_ref());
-            let images = stores.images.resolve(&latest.dependencies.images, &mut wait.images);
-            let (Some(glyphs), Some(images)) = (glyphs, images) else {
-                wait.revisions = Some((stores.glyphs.revision(), stores.images.revision()));
-                return false;
-            };
-
-            let glyph_page = stores.atlas.pack_glyphs(&glyphs.glyphs);
-            let image_page = stores.atlas.pack_images(&images.icons, &images.patterns);
-            latest.wait = None;
-            latest.glyphs_failed = glyphs.failed;
-            let request = latest.id;
-            state.sent.push((
-                request,
-                TileAtlases {
-                    glyphs: glyph_page.lease,
-                    images: image_page.lease,
-                    pattern_positions: image_page.patterns.clone(),
-                },
-            ));
-            let resolved = Resolved {
-                glyphs: glyph_page.positions,
-                shaping: glyphs.shaping,
-                icons: image_page.icons,
-                patterns: image_page.patterns,
-            };
-            (resolved, request)
+        let Some((run, running)) = self.next_job(|key, full| jobs.place(key, full)) else {
+            return false;
         };
-        self.worker.send(WorkerMessage::Resolved { resolved, request });
-        true
+        jobs.submit(running.lane, run);
+        self.driver.borrow_mut().work = Work::Running(running);
+        false
     }
 
-    /// Calls `f` with the worker's latest dependencies, which name the
-    /// images the tile's layout changes with, whether they were answered,
-    /// and whether their answer lacked glyphs of a range that failed to
-    /// load. `None` if the worker asked for none.
-    pub(crate) fn latest_dependencies<R>(&self, f: impl FnOnce(&Dependencies, bool, bool) -> R) -> Option<R> {
-        let dependencies = self.dependencies.borrow();
-        let latest = dependencies.latest.as_ref()?;
-        Some(f(&latest.dependencies, latest.wait.is_none(), latest.glyphs_failed))
+    /// Whether the tile has a job it can submit, or dependencies to resolve.
+    pub(crate) fn has_work(&self) -> bool {
+        let driver = self.driver.borrow();
+        match driver.work {
+            Work::Waiting { .. } => true,
+            Work::Outdated | Work::Ready(_) => !self.is_obsolete() && driver.data.is_some() && driver.style.is_some(),
+            Work::Current | Work::Running(_) => false,
+        }
     }
 
-    /// Parses again with `available_images`: the tile is pending until its
-    /// layout arrives.
-    pub(crate) fn relayout(&self, available_images: Arc<VecSet<String>>) {
+    /// Runs a synchronous tile's job now, and wakes the renderer's update
+    /// for another tile's.
+    fn advance(&self) {
+        if self.synchronous {
+            self.run_inline();
+        } else {
+            self.base.observer().on_update_needed(&self.base);
+        }
+    }
+
+    /// Runs a synchronous tile's jobs until one waits for dependencies or
+    /// the tile shows its layout. Returns whether it does.
+    fn run_inline(&self) -> bool {
+        let mut installed = false;
+        while let Some((run, running)) = self.next_job(|_, _| Some((Lane(0), false))) {
+            let reply = InlineWorkers::run(run);
+            installed |= self.apply(running, reply.result);
+        }
+        installed
+    }
+
+    /// The tile's next job, placed by `place`, and its running state; `None`
+    /// if the tile has no job to run, lacks its data or style, or `place`
+    /// finds no lane.
+    fn next_job(&self, place: impl FnOnce(DataKey, bool) -> Option<(Lane, bool)>) -> Option<(Run, Running)> {
         if self.is_obsolete() {
+            return None;
+        }
+        let mut driver = self.driver.borrow_mut();
+        let driver = &mut *driver;
+        let (Some(loaded), Some(style)) = (&driver.data, &driver.style) else {
+            return None;
+        };
+        let layout = self.layout();
+        let next = match std::mem::replace(&mut driver.work, Work::Outdated) {
+            Work::Outdated => Next {
+                lane: None,
+                known: None,
+                answer: layout
+                    .as_ref()
+                    .filter(|_| !driver.answer_outdated)
+                    .map(|layout| layout.answer.clone())
+                    .unwrap_or_default(),
+            },
+            Work::Ready(next) => next,
+            work @ (Work::Current | Work::Running(_) | Work::Waiting { .. }) => {
+                driver.work = work;
+                return None;
+            }
+        };
+        let Some((lane, cached)) = place(loaded.key, driver.full || loaded.data.is_none()) else {
+            // A first try needs nothing kept; a resume keeps its answer.
+            if next.known.is_some() || driver.full {
+                driver.work = Work::Ready(next);
+            }
+            return None;
+        };
+        driver.full = false;
+        driver.answer_outdated = false;
+        let data = if cached {
+            DataInput::Cached(loaded.key)
+        } else {
+            DataInput::Full { key: loaded.key, data: loaded.data.clone() }
+        };
+        let id = JobId { tile: self.key(), generation: driver.generation };
+        let params = LayoutParams { first_load: layout.is_none(), ..driver.params };
+        let job = LayoutJob {
+            style: Arc::clone(style),
+            available_images: Arc::clone(&driver.available_images),
+            data,
+            params,
+            resolved: Arc::clone(&next.answer.resolved),
+        };
+        Some((Run { id, job: Job::Layout(job) }, Running { id, lane, known: next.known, answer: next.answer }))
+    }
+
+    /// Resolves the dependencies the tile's job waits for once the stores
+    /// have them all or know them missing, packing them into the atlas. Does
+    /// nothing for a tile that waits for nothing, or whose stores haven't
+    /// changed since it last tried.
+    fn resolve(&self, stores: &mut DependencyStores<'_>) {
+        let mut driver = self.driver.borrow_mut();
+        let Work::Waiting { lane, needs, wait } = &mut driver.work else {
+            return;
+        };
+        let revisions = (stores.glyphs.revision(), stores.images.revision());
+        if wait.revisions == Some(revisions) {
             return;
         }
+        let glyphs = stores.glyphs.resolve(&needs.glyphs, &mut wait.glyphs, self.file_source.as_ref());
+        let images = stores.images.resolve(&needs.images, &mut wait.images);
+        let (Some(glyphs), Some(images)) = (glyphs, images) else {
+            wait.revisions = Some((stores.glyphs.revision(), stores.images.revision()));
+            return;
+        };
 
-        if !self.base.pending.get() {
-            self.base.pending.set(true);
-            self.base.on_tile_action(TileOperation::StartParse);
-        }
-
-        self.correlation_id.set(self.correlation_id.get() + 1);
-        let correlation_id = self.correlation_id.get();
-        self.dependencies.borrow_mut().available_images = Arc::clone(&available_images);
-        self.worker.send(WorkerMessage::SetAvailableImages { available_images, correlation_id });
-    }
-
-    /// Runs the member function a worker's message stands for.
-    pub(crate) fn handle_worker_message(&self, message: TileMessage) {
-        match message {
-            TileMessage::Layout { result, correlation_id, request, resolved } => {
-                self.on_layout(result, correlation_id, request, resolved);
-            }
-            TileMessage::Error { error, correlation_id } => self.on_error(error, correlation_id),
-            TileMessage::GetDependencies { dependencies, request } => {
-                self.on_dependencies_requested(dependencies, request);
-            }
-        }
+        let glyph_page = stores.atlas.pack_glyphs(&glyphs.glyphs);
+        let image_page = stores.atlas.pack_images(&images.icons, &images.patterns);
+        let missing_images = needs
+            .images
+            .keys()
+            .filter(|id| !images.icons.contains_key(*id) && !images.patterns.contains_key(*id))
+            .cloned()
+            .collect();
+        let atlases = TileAtlases {
+            glyphs: glyph_page.lease,
+            images: image_page.lease,
+            pattern_positions: image_page.patterns.clone(),
+        };
+        let resolved = Resolved {
+            glyphs: glyph_page.positions,
+            shaping: glyphs.shaping,
+            icons: image_page.icons,
+            patterns: image_page.patterns,
+            missing_images,
+        };
+        let answer =
+            Answer { resolved: Arc::new(resolved), atlases: Some(Rc::new(atlases)), glyphs_failed: glyphs.failed };
+        let lane = Some(*lane);
+        let known = Some(std::mem::take(needs));
+        driver.work = Work::Ready(Next { lane, known, answer });
     }
 
     pub(crate) fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
-        self.layout.borrow().as_ref().map(|layout| Arc::clone(&layout.result.feature_index))
+        self.layout().map(|layout| Arc::clone(&layout.result.feature_index))
     }
 }
 
@@ -510,54 +754,42 @@ impl GeometryTile {
         parameters: &TileParameters<'_>,
         observer: Option<Rc<dyn TileObserver>>,
     ) -> Self {
-        let obsolete = Arc::new(AtomicBool::new(false));
-        let mailbox = Mailbox::new();
+        let source = Rc::clone(&parameters.source);
         let show_collision_boxes = parameters.debug_options.contains(MapDebugOptions::COLLISION);
-        let synchronous = parameters.is_update_synchronous;
-        let worker_parameters = WorkerParameters {
-            id,
-            obsolete: Arc::clone(&obsolete),
-            mode: parameters.mode,
-            pixel_ratio: parameters.pixel_ratio,
-            show_collision_boxes,
-            font_faces: parameters.font_faces.clone(),
-            capture_rendered_features: parameters.capture_rendered_features,
-            synchronous,
-        };
-        let inner = Rc::new_cyclic(|self_weak: &Weak<GeometryTileInner>| {
-            // OptionalActorRef<GeometryTile>(isUpdateSynchronous, *this,
-            // mailbox).
-            let tile: Box<dyn TileEndpoint> = if synchronous {
-                Box::new(SynchronousTile(LocalObject::new(Weak::clone(self_weak))))
-            } else {
-                Box::new(ActorRef::<GeometryTileInner>::new(&mailbox))
-            };
-            GeometryTileInner {
-                base: TileBase::new(Kind::Geometry, id, source_id, observer),
-                file_source: parameters.file_source.clone(),
-                dependencies: RefCell::new(DependencyState {
-                    available_images: Arc::clone(&parameters.available_images),
-                    latest: None,
-                    sent: Vec::new(),
-                }),
-                obsolete,
-                worker: parameters.tile_worker_transport.create(worker_parameters, tile),
-                mailbox: Arc::clone(&mailbox),
-                correlation_id: Cell::new(0),
-                has_data: Cell::new(false),
-                missing: Cell::new(false),
-                layout: RefCell::new(None),
-                thread_pool: parameters.thread_pool.clone(),
+        let driver = Driver {
+            generation: source.next_generation(),
+            work: Work::Outdated,
+            data: None,
+            style: None,
+            available_images: Arc::clone(&parameters.available_images),
+            params: LayoutParams {
                 mode: parameters.mode,
-                show_collision_boxes: Cell::new(show_collision_boxes),
-                subdivision_granularity: Cell::new(SubdivisionGranularitySetting::none()),
-                pixel_ratio: Cell::new(parameters.pixel_ratio),
-                fade_state: Cell::new(FadeState::Loaded),
-            }
-        });
-        // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        mailbox.open(&parameters.scheduler, Rc::<GeometryTileInner>::clone(&inner));
-        GeometryTile { inner }
+                pixel_ratio: parameters.pixel_ratio,
+                show_collision_boxes,
+                subdivision_granularity: SubdivisionGranularitySetting::none(),
+                first_load: true,
+                capture_rendered_features: parameters.capture_rendered_features,
+            },
+            full: false,
+            answer_outdated: false,
+        };
+        let inner = GeometryTileInner {
+            base: TileBase::new(Kind::Geometry, id, source_id, observer),
+            source,
+            file_source: parameters.file_source.clone(),
+            obsolete: Cell::new(false),
+            missing: Cell::new(false),
+            driver: RefCell::new(driver),
+            layout: RefCell::new(None),
+            thread_pool: parameters.thread_pool.clone(),
+            mode: parameters.mode,
+            synchronous: parameters.is_update_synchronous,
+            show_collision_boxes: Cell::new(show_collision_boxes),
+            subdivision_granularity: Cell::new(SubdivisionGranularitySetting::none()),
+            pixel_ratio: Cell::new(parameters.pixel_ratio),
+            fade_state: Cell::new(FadeState::Loaded),
+        };
+        GeometryTile { inner: Rc::new(inner) }
     }
 
     #[must_use]
@@ -587,7 +819,7 @@ impl GeometryTile {
 
 impl Drop for GeometryTile {
     fn drop(&mut self) {
-        self.inner.mark_obsolete();
+        self.inner.obsolete.set(true);
 
         if self.inner.base.pending.get() {
             // This tile never finished loading or was abandoned, emit a
@@ -608,70 +840,22 @@ impl Tile for GeometryTile {
     }
 
     fn create_render_data(&self) -> Box<dyn TileRenderData> {
-        Box::new(GeometryTileRenderData {
-            layout: self.inner.layout.borrow().clone(),
-            thread_pool: self.inner.thread_pool.clone(),
-        })
+        Box::new(GeometryTileRenderData { layout: self.inner.layout(), thread_pool: self.inner.thread_pool.clone() })
     }
 
     fn cancel(&self) {
-        self.inner.mark_obsolete();
+        self.inner.obsolete.set(true);
     }
 
-    fn set_layers(
-        &self,
-        layers: &[Arc<dyn LayerProperties>],
-        global_state: Option<Arc<GlobalStateMap>>,
-        available_images: &Arc<VecSet<String>>,
-    ) {
-        let inner = &self.inner;
-        // Mark the tile as pending again if it was complete before to
-        // prevent signaling a complete state despite pending parse
-        // operations. A tile whose data failed to load has nothing to parse.
-        if !inner.base.pending.get() && (inner.has_data.get() || !inner.base.loaded.get()) {
-            inner.base.pending.set(true);
-            inner.base.on_tile_action(TileOperation::StartParse);
-        }
-
-        let id = inner.base.id();
-        let mut impls: Vec<Arc<dyn LayerProperties>> = Vec::with_capacity(layers.len());
-
-        for layer in layers {
-            // Skip irrelevant layers.
-            let layer_impl = &layer.base_impl;
-            debug_assert_ne!(layer_impl.get_type_info().source, layer_type_info::Source::NotRequired);
-            debug_assert_eq!(layer_impl.source, inner.base.source_id);
-            debug_assert_ne!(layer_impl.visibility, VisibilityType::None);
-            let overscaled_z = f32::from(id.overscaled_z);
-            if overscaled_z < layer_impl.min_zoom.floor() || overscaled_z >= layer_impl.max_zoom.ceil() {
-                continue;
-            }
-
-            impls.push(Arc::clone(layer));
-        }
-
-        inner.correlation_id.set(inner.correlation_id.get() + 1);
-        let correlation_id = inner.correlation_id.get();
-        let available_images = Arc::clone(available_images);
-        inner.dependencies.borrow_mut().available_images = Arc::clone(&available_images);
-        let subdivision_granularity = inner.subdivision_granularity.get();
-        inner.worker.send(WorkerMessage::SetLayers {
-            layers: impls,
-            global_state,
-            available_images,
-            subdivision_granularity,
-            pixel_ratio: inner.pixel_ratio.get(),
-            correlation_id,
-        });
+    fn set_style(&self, style: &Arc<SourceStyle>) {
+        self.inner.set_style(style);
     }
 
     fn set_show_collision_boxes(&self, show_collision_boxes: bool) {
         let inner = &self.inner;
-        if inner.show_collision_boxes.get() != show_collision_boxes {
-            inner.show_collision_boxes.set(show_collision_boxes);
-            inner.correlation_id.set(inner.correlation_id.get() + 1);
-            let correlation_id = inner.correlation_id.get();
-            inner.worker.send(WorkerMessage::SetShowCollisionBoxes { show_collision_boxes, correlation_id });
+        if inner.show_collision_boxes.replace(show_collision_boxes) != show_collision_boxes {
+            inner.change(|driver| driver.params.show_collision_boxes = show_collision_boxes);
+            inner.advance();
         }
     }
 
@@ -690,8 +874,7 @@ impl Tile for GeometryTile {
 
     // layers: feature state
     fn set_feature_state(&self, states: &crate::bucket::LayerFeatureStates) {
-        let layout = self.inner.layout.borrow();
-        let Some(layout) = layout.as_ref() else {
+        let Some(layout) = self.inner.layout() else {
             return;
         };
         // getData(): latestFeatureIndex->getData()
@@ -772,7 +955,7 @@ impl Tile for GeometryTile {
 
     // query
     fn get_query_padding(&self, layers: &QueryLayers<'_>) -> f32 {
-        let layout = self.inner.layout.borrow();
+        let layout = self.inner.layout();
         let mut query_padding: f32 = 0.0;
         for layer in layers.values() {
             let Some(data) =
@@ -802,7 +985,7 @@ impl Tile for GeometryTile {
         proj_matrix: &Mat4,
         feature_state: &SourceFeatureState,
     ) -> Result<(), Error> {
-        let layout = self.inner.layout.borrow().clone();
+        let layout = self.inner.layout();
         // `if (!getData()) return;`
         let Some(layout) = layout else {
             return Ok(());
@@ -842,7 +1025,7 @@ impl Tile for GeometryTile {
         options: &SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
     ) -> Result<(), Error> {
-        let layout = self.inner.layout.borrow().clone();
+        let layout = self.inner.layout();
         // Data not yet available, or tile is empty
         let Some(layout) = layout else {
             return Ok(());
@@ -853,7 +1036,7 @@ impl Tile for GeometryTile {
 
         // No source layers, specified, nothing to do
         let Some(source_layers) = &options.source_layers else {
-            mln_util::logging::Log::warning(mln_util::logging::Event::General, "At least one sourceLayer required");
+            Log::warning(Event::General, "At least one sourceLayer required");
             return Ok(());
         };
 
@@ -966,7 +1149,8 @@ mod tests {
         let atlases = TileAtlases { glyphs: glyphs.lease, images: images.lease, pattern_positions: images.patterns };
         let result =
             LayoutResult::new(HashMap::default(), Arc::new(FeatureIndex::new(Some(TileData::Features(features)))));
-        let layout = Rc::new(TileLayout::new(result, Some(atlases)));
+        let answer = Answer { atlases: Some(Rc::new(atlases)), ..Answer::default() };
+        let layout = Rc::new(TileLayout::new(result, answer, Dependencies::default()));
         let render_data = Rc::clone(&layout);
 
         release_layout(layout, &thread_pool);

@@ -20,6 +20,10 @@ use mln_actor::scheduler;
 use mln_util::time::Instant;
 use wasm_bindgen::prelude::*;
 
+/// How long each slice runs the scheduler's tasks. The steps run in every
+/// slice, however long they take.
+const SLICE: Duration = Duration::from_millis(4);
+
 /// What a step runs in each slice. It returns `false` once it is done, which
 /// removes it.
 type StepFn = Box<dyn FnMut() -> bool>;
@@ -37,7 +41,6 @@ struct Pump {
     scheduled: Cell<bool>,
     running: Cell<bool>,
     stopped: Cell<bool>,
-    slice: Cell<Duration>,
     /// The time the slices spent on the scheduler's tasks since
     /// [`take_scheduler_time`] last took it.
     scheduler_time: Cell<Duration>,
@@ -71,7 +74,6 @@ impl Pump {
                 scheduled: Cell::new(false),
                 running: Cell::new(false),
                 stopped: Cell::new(false),
-                slice: Cell::new(Duration::from_millis(4)),
                 scheduler_time: Cell::new(Duration::ZERO),
                 steps: RefCell::new(Vec::new()),
                 _on_message: on_message,
@@ -93,7 +95,7 @@ impl Pump {
         if self.stopped.get() || self.running.replace(true) {
             return;
         }
-        let deadline = Instant::now() + self.slice.get();
+        let deadline = Instant::now() + SLICE;
         self.run_steps();
         let tasks = Instant::now();
         let more = scheduler::cooperative().is_some_and(|scheduler| scheduler.run_until(Some(deadline)));
@@ -169,12 +171,6 @@ pub fn wake() {
 #[must_use]
 pub fn waker() -> Arc<dyn Fn() + Send + Sync> {
     Arc::new(wake)
-}
-
-/// Sets how long each slice runs the scheduler's tasks: 4 ms unless set.
-/// The steps run in every slice, however long they take.
-pub(crate) fn set_slice(slice: Duration) {
-    PUMP.with(|pump| pump.slice.set(slice));
 }
 
 /// The time the slices spent on the scheduler's tasks since the last call,

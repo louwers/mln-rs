@@ -41,28 +41,28 @@ mod source_test;
 mod drop_on_workers_test;
 // Port-only: malformed vector tiles become tile errors, not panics.
 mod malformed_tile_test;
-// Port-only: a tile answers its worker's dependency requests from the
-// renderer's stores.
-mod tile_dependencies_test;
+// Port-only: a tile drives its layout jobs.
+mod tile_jobs_test;
 // Port-only: a tile's layout in two stages, and the worker over them.
 mod tile_layout_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 
-/// Port-only: the renderer's glyph and image stores and atlas, which answer
-/// the dependency requests of the tiles under test as the renderer's update
-/// does.
-pub(crate) struct TileDependencyStores {
+/// Port-only: drives the geometry tiles under test as the renderer's update
+/// does: their jobs run on `jobs`' workers, and the renderer's glyph and
+/// image stores and atlas resolve what the jobs need.
+pub(crate) struct TileDriver {
     pub(crate) glyphs: crate::text::glyph_store::GlyphStore,
     pub(crate) images: crate::image_store::ImageStore,
     pub(crate) atlas: crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas,
+    pub(crate) jobs: crate::tile::tile_workers::TileJobs,
 }
 
-impl TileDependencyStores {
-    /// Stores whose glyph responses arrive on `run_loop`, with no images and
-    /// no sprite loaded.
-    pub(crate) fn new(run_loop: &mln_actor::RunLoop) -> Self {
-        TileDependencyStores {
+impl TileDriver {
+    /// A driver whose jobs run on `workers`, whose glyph responses arrive on
+    /// `run_loop`, with no images and no sprite loaded.
+    pub(crate) fn new(run_loop: &mln_actor::RunLoop, workers: Box<dyn crate::tile::tile_workers::TileWorkers>) -> Self {
+        TileDriver {
             glyphs: crate::text::glyph_store::GlyphStore::new(
                 None,
                 std::sync::Arc::default(),
@@ -72,31 +72,72 @@ impl TileDependencyStores {
             ),
             images: crate::image_store::ImageStore::default(),
             atlas: crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new(),
+            jobs: crate::tile::tile_workers::TileJobs::new(workers),
         }
     }
 
-    /// Starts an update, as the renderer's does: takes in the glyph
-    /// responses that arrived, and gives the images asked for their update.
-    pub(crate) fn update(&mut self) {
-        self.glyphs.update();
-        self.images.begin_update();
+    /// A driver whose jobs run inside their submission.
+    pub(crate) fn inline(run_loop: &mln_actor::RunLoop) -> Self {
+        Self::new(run_loop, Box::new(crate::tile::tile_workers::InlineWorkers::default()))
     }
 
-    /// Answers `tile`'s dependency request, if the stores can; returns
-    /// whether they did.
-    pub(crate) fn resolve(&mut self, tile: &crate::tile::geometry_tile::GeometryTile) -> bool {
-        tile.inner().resolve_dependencies(&mut crate::tile::geometry_tile::DependencyStores {
+    /// A driver whose jobs run on `thread_pool`.
+    pub(crate) fn pool(run_loop: &mln_actor::RunLoop, thread_pool: &mln_actor::TaggedScheduler) -> Self {
+        let workers = crate::tile::tile_workers::PoolWorkers::new(thread_pool.clone(), 8, std::sync::Arc::new(|| {}));
+        Self::new(run_loop, Box::new(workers))
+    }
+
+    /// One update of `tiles`, as the renderer's: takes in the glyph
+    /// responses, gives the images asked for their update, applies the
+    /// replies that arrived, resolves what the jobs wait for and submits the
+    /// next jobs. Returns whether a tile shows a new layout.
+    pub(crate) fn update(&mut self, tiles: &[&crate::tile::geometry_tile::GeometryTile]) -> bool {
+        self.glyphs.update();
+        self.images.begin_update();
+        self.jobs.receive();
+        let mut laid_out = false;
+        for tile in tiles {
+            laid_out |= tile.inner().take_reply(&mut self.jobs);
+        }
+        drop(self.jobs.end_receive());
+        let mut stores = crate::tile::geometry_tile::DependencyStores {
             glyphs: &mut self.glyphs,
             images: &mut self.images,
             atlas: &mut self.atlas,
-        })
+        };
+        for tile in tiles {
+            laid_out |= tile.inner().drive(&mut self.jobs, &mut stores);
+        }
+        laid_out
     }
 
-    /// Starts an update and answers the requests of `source`'s tiles.
-    pub(crate) fn resolve_source(&mut self, source: &dyn crate::render_source::RenderSource) {
-        self.update();
-        source.for_each_geometry_tile(&mut |tile| {
-            self.resolve(tile);
-        });
+    /// One update of `tile`, a geometry tile.
+    pub(crate) fn update_tile(&mut self, tile: &dyn crate::tile::tile::Tile) -> bool {
+        self.update(&[tile.as_geometry_tile().expect("a geometry tile")])
     }
+
+    /// One update of `source`'s tiles.
+    pub(crate) fn update_source(&mut self, source: &dyn crate::render_source::RenderSource) -> bool {
+        let mut tiles = Vec::new();
+        source.for_each_geometry_tile(&mut |tile| tiles.push(tile));
+        self.update(&tiles)
+    }
+}
+
+/// Port-only: a source's style of `layers`, without global state or font
+/// faces.
+pub(crate) fn style(
+    layers: &[std::sync::Arc<dyn mln_style::layer_properties::LayerProperties>],
+) -> std::sync::Arc<crate::tile::job::SourceStyle> {
+    std::sync::Arc::new(crate::tile::job::SourceStyle {
+        version: 0,
+        layers: layers.to_vec(),
+        global_state: None,
+        font_faces: None,
+    })
+}
+
+/// Port-only: the counters of a source under test.
+pub(crate) fn test_source() -> std::rc::Rc<crate::tile::tile_workers::SourceCounters> {
+    std::rc::Rc::new(crate::tile::tile_workers::SourceCounters::new(crate::tile::job::SourceKey(1)))
 }

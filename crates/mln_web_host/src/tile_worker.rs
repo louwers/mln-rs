@@ -1,10 +1,10 @@
 //! The side of a Web Worker that runs tile workers: its own wasm instance,
 //! with its own memory, and a `TileWorkerHost` for each map side that
 //! connected a port to it ([`tile_workers`](crate::tile_workers) describes
-//! the messages). The hosts' workers (vector and GeoJSON tiles' layouts,
-//! raster tiles' images and raster-dem tiles' DEMs) run on the instance's
-//! cooperative scheduler, in the [`pump`](crate::pump)'s slices of 10 ms, so
-//! that requests (a tile's removal, newer data) get in between them.
+//! the messages). A host runs a tile's job as its message arrives, one job
+//! per message, so the browser's event loop runs between jobs; raster
+//! tiles' images and raster-dem tiles' DEMs decode on the instance's
+//! cooperative scheduler, which the [`pump`](crate::pump) runs.
 //!
 //! The JavaScript that runs the Web Worker sends `{fatal: message}` over
 //! each port instead when the instance panics, which it sees as an `error`
@@ -13,7 +13,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
 
 use mln_actor::TaggedScheduler;
 use mln_renderer::tile::worker_codec::{Encoded, TileWorkerHost};
@@ -48,7 +47,6 @@ pub fn serve(port: &web_sys::MessagePort) {
     crate::set_panic_hook();
     let scheduler = crate::install_cooperative_scheduler();
     scheduler.set_waker(Some(pump::waker()));
-    pump::set_slice(Duration::from_millis(10));
     let replies = Arc::new(Mutex::new(Vec::new()));
     let workers = TaggedScheduler::new(scheduler, SimpleIdentity::new());
     let sink = Arc::clone(&replies);

@@ -8,7 +8,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{RunLoop, SchedulerPtr, TaggedScheduler};
+use mln_actor::{ActorRef, Mailbox, RunLoop, SchedulerPtr, TaggedScheduler};
 use mln_gfx::ShaderRegistry;
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_map_types::{MapMode, TransformState};
@@ -51,8 +51,11 @@ use crate::text::cross_tile_symbol_index::AddLayerResult;
 use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver};
 use crate::text::placement::Placement;
 use crate::tile::geometry_tile::{DependencyStores, GeometryTile};
+use crate::tile::job::SourceKey;
 use crate::tile::tile::TileOperation;
 use crate::tile::tile_worker_transport::{InProcessTransport, TileWorkerTransport};
+use crate::tile::tile_workers::{PoolWorkers, SourceCounters, TileJobs, Waker};
+use crate::tile::worker_codec::{RemoteJobs, RemoteWorkers};
 use crate::tile_parameters::TileParameters;
 use crate::update_parameters::UpdateParameters;
 
@@ -136,6 +139,15 @@ impl GlyphStoreObserver for OrchestratorGlyphObserver {
     }
 }
 
+/// The jobs a native thread of the pool takes at once.
+const JOBS_PER_THREAD: usize = 2;
+
+/// The target of the mailbox through which a tile worker, on any thread,
+/// asks for an update.
+struct UpdateRequests {
+    events: EventSink,
+}
+
 /// The `RenderSourceObserver` half of `RenderOrchestrator`.
 struct OrchestratorSourceObserver {
     events: EventSink,
@@ -146,7 +158,7 @@ impl RenderSourceObserver for OrchestratorSourceObserver {
         self.events.emit(RendererEvent::Invalidate);
     }
 
-    fn on_dependencies_requested(&self, _source_id: &str, _tile_id: &OverscaledTileID) {
+    fn on_update_needed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {
         self.events.emit(RendererEvent::Invalidate);
     }
 
@@ -223,8 +235,17 @@ pub(crate) struct RenderOrchestrator {
     filtered_layers_for_source: Vec<Arc<dyn LayerProperties>>,
 
     thread_pool: TaggedScheduler,
-    /// Port-only: creates the tiles' workers (`tile_worker_transport.rs`).
+    /// Port-only: creates the workers of raster and raster-dem tiles
+    /// (`tile_worker_transport.rs`).
     tile_worker_transport: Rc<dyn TileWorkerTransport>,
+    /// Where the geometry tiles' jobs run.
+    tile_jobs: TileJobs,
+    /// Asks for an update when a tile worker replies.
+    waker: Waker,
+    _update_requests: Arc<Mailbox>,
+    /// The counters of each render source's tiles, by source id.
+    source_counters: HashMap<String, Rc<SourceCounters>>,
+    next_source_key: u64,
 
     global_state: Option<Arc<GlobalStateMap>>,
 
@@ -288,6 +309,16 @@ impl RenderOrchestrator {
         );
         glyph_store.set_observer(Some(Rc::new(OrchestratorGlyphObserver { events: events.clone() })));
         let thread_pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
+        let update_requests =
+            Mailbox::with_target(&run_loop.scheduler(), Rc::new(UpdateRequests { events: events.clone() }));
+        let waker: Waker = {
+            let requests = ActorRef::<UpdateRequests>::new(&update_requests);
+            Arc::new(move || {
+                requests.invoke(|requests: &UpdateRequests| requests.events.emit(RendererEvent::Invalidate));
+            })
+        };
+        let pool_workers =
+            PoolWorkers::new(thread_pool.clone(), JOBS_PER_THREAD * mln_actor::BACKGROUND_THREADS, Arc::clone(&waker));
         RenderOrchestrator {
             scheduler: run_loop.scheduler(),
             events: events.clone(),
@@ -318,6 +349,11 @@ impl RenderOrchestrator {
             remake_render_layers: false,
             filtered_layers_for_source: Vec::new(),
             tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
+            tile_jobs: TileJobs::new(Box::new(pool_workers)),
+            waker,
+            _update_requests: update_requests,
+            source_counters: HashMap::default(),
+            next_source_key: 0,
             _wait_for_thread_pool: WaitOnDrop(thread_pool.clone()),
             thread_pool,
             global_state: None,
@@ -333,11 +369,13 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Port-only: the transport that creates the workers of the tiles
-    /// created from now on (by default `InProcessTransport`, on the thread
-    /// pool).
-    pub(crate) fn set_tile_worker_transport(&mut self, transport: Rc<dyn TileWorkerTransport>) {
-        self.tile_worker_transport = transport;
+    /// Port-only: runs the tiles' jobs, and the workers of the raster tiles
+    /// created from now on, in `workers` (by default on the thread pool).
+    /// The jobs in flight elsewhere run again there.
+    pub(crate) fn set_tile_workers(&mut self, workers: &Rc<RemoteWorkers>) {
+        workers.set_waker(Arc::clone(&self.waker));
+        self.tile_worker_transport = Rc::<RemoteWorkers>::clone(workers);
+        self.tile_jobs.set_workers(Box::new(RemoteJobs(Rc::clone(workers))));
     }
 
     /// Sets the queue the orchestrator and its parts push their events to.
@@ -437,6 +475,7 @@ impl RenderOrchestrator {
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             capture_rendered_features: update_parameters.capture_rendered_features,
+            source: Rc::new(SourceCounters::new(SourceKey(0))),
             available_images: Arc::default(),
             font_faces: update_parameters.font_faces.clone(),
             tile_worker_transport: Rc::clone(&self.tile_worker_transport),
@@ -446,6 +485,10 @@ impl RenderOrchestrator {
         self.glyph_store.set_url(&update_parameters.glyph_url);
         self.glyph_store.set_font_faces(update_parameters.font_faces.clone());
         self.glyph_store.update();
+
+        // The replies before the sources update, so that a tile laid out
+        // since the last update renders in this one.
+        self.take_tile_replies();
 
         // Update light. (conformance)
         let light_changed = !Arc::ptr_eq(&self.render_light.impl_, &update_parameters.light);
@@ -518,16 +561,8 @@ impl RenderOrchestrator {
         self.image_store.set_loaded(update_parameters.sprite_loaded);
         tile_parameters.available_images = Arc::clone(self.image_store.available_images());
         if !relayout_images.is_empty() {
-            self.for_each_geometry_tile(|tile| {
-                // A tile still waiting for its answer gets the images as they
-                // are now.
-                let uses_them = tile.inner().latest_dependencies(|dependencies, answered, _| {
-                    answered && dependencies.images.keys().any(|id| relayout_images.contains(id))
-                });
-                if uses_them == Some(true) {
-                    tile.inner().relayout(Arc::clone(&tile_parameters.available_images));
-                }
-            });
+            let available_images = &tile_parameters.available_images;
+            self.for_each_geometry_tile(|tile| tile.inner().images_changed(&relayout_images, available_images));
         }
 
         let layer_diff = diff_layers(&self.layer_impls, &update_parameters.layers);
@@ -661,10 +696,14 @@ impl RenderOrchestrator {
         // Remove render layers for removed sources.
         for id in source_diff.removed.keys() {
             self.render_sources.remove(id);
+            self.source_counters.remove(id);
         }
 
         // Create render sources for newly added sources.
         for (id, impl_) in &source_diff.added {
+            self.next_source_key += 1;
+            let counters = Rc::new(SourceCounters::new(SourceKey(self.next_source_key)));
+            self.source_counters.entry(id.clone()).or_insert(counters);
             let mut render_source = render_source::create(impl_);
             render_source.set_observer(Rc::<OrchestratorSourceObserver>::clone(&self.source_observer));
             render_source.set_cache_enabled(self.tile_cache_enabled);
@@ -691,12 +730,7 @@ impl RenderOrchestrator {
             self.still_image_request_id = update_parameters.still_image_request_id;
             // A tile laid out without the glyphs of a failed range lays out
             // again, which requests the range again.
-            let available_images = &tile_parameters.available_images;
-            self.for_each_geometry_tile(|tile| {
-                if tile.inner().latest_dependencies(|_, _, glyphs_failed| glyphs_failed) == Some(true) {
-                    tile.inner().relayout(Arc::clone(available_images));
-                }
-            });
+            self.for_each_geometry_tile(|tile| tile.inner().retry_failed_glyphs());
             for render_source in self.render_sources.values_mut() {
                 render_source.retry_failed_tiles();
             }
@@ -828,6 +862,9 @@ impl RenderOrchestrator {
             }
             if let Some(source_impl) = &source_impl {
                 tile_parameters.is_update_synchronous = source_impl.is_update_synchronous();
+                if let Some(counters) = self.source_counters.get(&source_impl.base().id) {
+                    tile_parameters.source = Rc::clone(counters);
+                }
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
                 // C++ `renderSources.at(sourceImpl->id)`; a source type
                 // without a render source has none.
@@ -847,7 +884,7 @@ impl RenderOrchestrator {
 
         // A synchronous source's tile laid out by its answer isn't in this
         // update's render tiles yet: the next update has it.
-        let answered = self.resolve_tile_dependencies();
+        let answered = self.drive_tiles();
         if answered {
             self.events.emit(RendererEvent::Invalidate);
         }
@@ -1081,6 +1118,7 @@ impl RenderOrchestrator {
         self.debug_layer_groups.clear(); // layers: debug
         self.debug_layer_tweakers.clear(); // layers: debug
         self.render_sources.clear();
+        self.source_counters.clear();
         self.render_layers.clear();
         // C++ keeps orderedLayers here and rebuilds it on the next
         // createRenderTree (the layer diff then reports additions).
@@ -1133,29 +1171,57 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Answers the dependency requests of the tiles that wait for glyphs
-    /// and images the stores now have, or know missing. Returns whether it
-    /// answered any.
-    fn resolve_tile_dependencies(&mut self) -> bool {
+    /// Gives the tiles the replies to their jobs that arrived, and the lanes
+    /// lost; frees the stale replies on the workers.
+    fn take_tile_replies(&mut self) {
+        let jobs = &mut self.tile_jobs;
+        jobs.receive();
+        for source_impl in self.source_impls.iter() {
+            if let Some(source) = self.render_sources.get(&source_impl.base().id) {
+                source.for_each_geometry_tile(&mut |tile| {
+                    tile.inner().take_reply(jobs);
+                });
+            }
+        }
+        let stale = jobs.end_receive();
+        if !stale.is_empty() {
+            drop_on_workers(&self.thread_pool, stale);
+        }
+    }
+
+    /// Resolves the dependencies the tiles' jobs wait for, once the stores
+    /// have them or know them missing, and submits the tiles' next jobs, the
+    /// view's first, while the workers have room. Returns whether a tile of
+    /// a source with synchronous updates laid out.
+    fn drive_tiles(&mut self) -> bool {
         let mut stores = DependencyStores {
             glyphs: &mut self.glyph_store,
             images: &mut self.image_store,
             atlas: &mut self.dynamic_texture_atlas,
         };
-        let mut answered = false;
+        let mut tiles: Vec<&GeometryTile> = Vec::new();
         for source_impl in self.source_impls.iter() {
             if let Some(source) = self.render_sources.get(&source_impl.base().id) {
-                source.for_each_geometry_tile(&mut |tile| answered |= tile.inner().resolve_dependencies(&mut stores));
+                source.for_each_geometry_tile(&mut |tile| {
+                    if tile.inner().has_work() {
+                        tiles.push(tile);
+                    }
+                });
             }
         }
-        answered
+        tiles.sort_by_key(|tile| tile.inner().base.load_order.get());
+        let mut laid_out = false;
+        for tile in tiles {
+            laid_out |= tile.inner().drive(&mut self.tile_jobs, &mut stores);
+        }
+        laid_out
     }
 
     /// The images the tiles' dependencies name.
     fn images_used_by_tiles(&self) -> HashSet<String> {
         let mut used = HashSet::default();
         self.for_each_geometry_tile(|tile| {
-            tile.inner().latest_dependencies(|dependencies, _, _| used.extend(dependencies.images.keys().cloned()));
+            tile.inner().for_each_dependencies(|dependencies| used.extend(dependencies.images.keys().cloned()));
         });
         used
     }
@@ -1605,6 +1671,7 @@ impl RenderOrchestrator {
             source.dump_debug_logs();
         }
         self.image_store.dump_debug_logs();
+        self.tile_jobs.log_stats();
     }
 
     // layers: feature state
@@ -1716,6 +1783,7 @@ impl Drop for WaitOnDrop {
 
 impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
+        self.tile_jobs.log_stats();
         // Destroy the render sources (and their tiles and workers) before
         // waiting for the thread pool, as the C++ members' destructors do.
         self.render_sources.clear();

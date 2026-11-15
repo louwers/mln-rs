@@ -53,7 +53,7 @@ fn full_mask() -> TileMask {
 /// and the tile backfills from its neighbours; the geometry is the tile's
 /// (`set_mask`) and the render state this side's.
 #[derive(mln_wire::Wire)]
-pub struct HillshadeBucket {
+pub(crate) struct HillshadeBucket {
     pub(crate) base: BucketBase,
     #[wire(skip, default = "unmasked")]
     geometry: Mutex<HillshadeBucketGeometry>,

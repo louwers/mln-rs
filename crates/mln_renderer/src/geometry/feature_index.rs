@@ -124,6 +124,11 @@ impl FeatureIndex {
         self.tile_data.as_ref()
     }
 
+    /// Sets the tile data the index's features are in.
+    pub(crate) fn set_data(&mut self, tile_data: Option<TileData>) {
+        self.tile_data = tile_data;
+    }
+
     /// Set the expected number of elements per cell to avoid small
     /// re-allocations for populated cells.
     pub(crate) fn reserve(&mut self, value: usize) {
@@ -532,19 +537,19 @@ impl FeatureIndex {
     }
 }
 
+/// An index crosses without its tile data, which the side that reads it
+/// sets (`set_data`).
 impl mln_wire::Wire for FeatureIndex {
     fn write(&self, w: &mut mln_wire::Writer) {
         match self.wire_grid() {
             Ok(grid) => grid.write(w),
-            Err(error) => return w.fail(error.to_owned()),
+            Err(error) => w.fail(error.to_owned()),
         }
-        self.tile_data.write(w);
     }
 
     fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
         let parts = Grid::read(r)?;
-        let tile_data = mln_wire::Wire::read(r)?;
-        let mut index = FeatureIndex::new(tile_data);
+        let mut index = FeatureIndex::new(None);
         let strings: Vec<Arc<str>> = parts.strings.iter().map(|string| index.intern_layer_name(string)).collect();
         for (leader, layer_ids) in &parts.bucket_layer_ids {
             index.set_bucket_layer_ids(leader, layer_ids);

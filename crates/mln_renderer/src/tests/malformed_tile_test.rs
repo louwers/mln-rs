@@ -32,7 +32,7 @@ use proptest::prelude::*;
 use serde_json::json;
 
 use crate::render_source::{self as render_source, RenderSourceObserver};
-use crate::tests::TileDependencyStores;
+use crate::tests::TileDriver;
 use crate::tile_parameters::TileParameters;
 
 /// What the render source reported for the tile.
@@ -121,8 +121,8 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     let file_source: Arc<dyn FileSource> = file_source;
     // A loaded sprite with the icon "v" answers the symbol layer's request,
     // and missing icons stay missing. The timer stands in for the
-    // RenderOrchestrator updates that answer the tile's requests.
-    let mut stores = TileDependencyStores::new(&run_loop);
+    // RenderOrchestrator updates that run the tile's jobs.
+    let mut stores = TileDriver::pool(&run_loop, &thread_pool);
     let mut icon = PremultipliedImage::new(Size::new(1, 1));
     icon.data.fill(255);
     stores.images.add_image(Arc::new(
@@ -134,7 +134,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     {
         let render_source = Rc::clone(&render_source);
         frame.start(Duration::from_millis(10), Duration::from_millis(10), move || {
-            stores.resolve_source(&**render_source.borrow());
+            stores.update_source(&**render_source.borrow());
         });
     }
     render_source.borrow_mut().update(
@@ -159,6 +159,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
+            source: crate::tests::test_source(),
             available_images,
             font_faces: None,
             tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(

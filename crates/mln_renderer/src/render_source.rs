@@ -69,8 +69,8 @@ impl RenderTiles {
 /// which is all the orchestrator reads of the source.
 pub(crate) trait RenderSourceObserver {
     fn on_tile_changed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {}
-    /// A tile waits for the next update to resolve its dependencies.
-    fn on_dependencies_requested(&self, _source_id: &str, _tile_id: &OverscaledTileID) {}
+    /// A tile has work for the next update.
+    fn on_update_needed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {}
     fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, _error: Error) {}
     fn on_tile_action(&self, _source_id: &str, _op: TileOperation, _tile_id: &OverscaledTileID, _tile_source_id: &str) {
     }
@@ -96,8 +96,8 @@ impl TileObserver for RenderSourceTileObserver {
         self.observer().on_tile_changed(&self.source_id, &tile.id());
     }
 
-    fn on_dependencies_requested(&self, tile: &TileBase) {
-        self.observer().on_dependencies_requested(&self.source_id, &tile.id());
+    fn on_update_needed(&self, tile: &TileBase) {
+        self.observer().on_update_needed(&self.source_id, &tile.id());
     }
 
     fn on_tile_error(&self, tile: &TileBase, error: Error) {
@@ -166,7 +166,7 @@ pub(crate) trait RenderSource {
 
     /// Calls `f` with each of the source's geometry tiles, the cached ones
     /// included.
-    fn for_each_geometry_tile(&self, _f: &mut dyn FnMut(&GeometryTile)) {}
+    fn for_each_geometry_tile<'s>(&'s self, _f: &mut dyn FnMut(&'s GeometryTile)) {}
 
     /// If supported, returns a shared list of `RenderTiles`, sorted by tile id
     /// and excluding tiles hold for fade; returns `None` otherwise.

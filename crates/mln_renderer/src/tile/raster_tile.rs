@@ -33,7 +33,7 @@ use crate::tile_render_data::{SharedBucketTileRenderData, TileRenderData};
 /// public member functions. Port-only: the codec writes them for a worker
 /// in another wasm instance (`tile/worker_codec`).
 #[derive(mln_wire::Wire)]
-pub enum RasterWorkerMessage {
+pub(crate) enum RasterWorkerMessage {
     Parse {
         #[wire(with = "shared_bytes::option")]
         data: Option<Data>,
@@ -45,7 +45,7 @@ pub enum RasterWorkerMessage {
 /// member functions the worker calls. Port-only: the codec writes them for
 /// a worker in another wasm instance (`tile/worker_codec`).
 #[derive(mln_wire::Wire)]
-pub enum RasterTileMessage {
+pub(crate) enum RasterTileMessage {
     Parsed { bucket: Option<Arc<RasterBucket>>, correlation_id: u64 },
     Error { error: Error, correlation_id: u64 },
 }

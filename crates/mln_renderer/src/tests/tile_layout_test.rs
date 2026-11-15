@@ -1,8 +1,7 @@
-// A tile's layout in two stages (layout/tile_layout.rs), and the worker that
+// A tile's layout in two stages (layout/tile_layout.rs), and the job that
 // runs them.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use feature::{Feature, Identifier, PropertyMap};
 use geo_types::{Geometry, LineString, Polygon};
@@ -13,16 +12,14 @@ use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParam
 use mln_style_types::image::ImageType;
 use mln_text::glyph::GlyphID;
 use mln_tile::TileData;
-use mln_tile_id::OverscaledTileID;
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
-use parking_lot::Mutex;
 use serde_json::json;
 
 use crate::layermanager;
 use crate::layout::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
-use crate::tile::geometry_tile_worker::{GeometryTileWorker, TileMessage, WorkerMessage};
-use crate::tile::tile_worker_transport::TileEndpoint;
+use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, Run, SourceKey, TileKey, run_job};
 
 /// A layer from its style JSON on source `s`, evaluated at zoom 0 as the
 /// `RenderOrchestrator` evaluates it.
@@ -48,6 +45,17 @@ fn data() -> TileData {
     TileData::Features(Arc::new(vec![square(100), square(1000)]))
 }
 
+fn params() -> LayoutParams {
+    LayoutParams {
+        mode: MapMode::Static,
+        pixel_ratio: 1.0,
+        show_collision_boxes: false,
+        subdivision_granularity: SubdivisionGranularitySetting::none(),
+        first_load: true,
+        capture_rendered_features: false,
+    }
+}
+
 fn input<'a>(
     data: &'a TileData,
     layers: &'a [Arc<dyn LayerProperties>],
@@ -60,14 +68,7 @@ fn input<'a>(
         global_state: None,
         font_faces: None,
         available_images: available,
-        params: LayoutParams {
-            mode: MapMode::Static,
-            pixel_ratio: 1.0,
-            show_collision_boxes: false,
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
-            first_load: true,
-            capture_rendered_features: false,
-        },
+        params: params(),
     }
 }
 
@@ -85,7 +86,7 @@ fn discover_records_what_the_layouts_need() {
     ];
     let data = data();
     let available = VecSet::from_iter(["marker".to_owned()]);
-    let discovered = discover(&input(&data, &layers, &available), &AtomicBool::new(false)).unwrap().unwrap();
+    let discovered = discover(&input(&data, &layers, &available)).unwrap();
 
     let glyphs = &discovered.dependencies.glyphs.glyphs;
     assert_eq!(glyphs.keys().collect::<Vec<_>>(), [&vec!["Test".to_owned()]]);
@@ -97,7 +98,6 @@ fn discover_records_what_the_layouts_need() {
         discovered.dependencies.images.iter().map(|(id, type_)| (id.as_str(), *type_)).collect();
     images.sort_by_key(|(id, _)| *id);
     assert_eq!(images, [("marker", ImageType::Icon), ("missing", ImageType::Icon), ("stripes", ImageType::Pattern)]);
-    assert!(discovered.has_waiting_layouts());
 }
 
 #[test]
@@ -109,125 +109,73 @@ fn build_indexes_the_layouts_that_waited_last() {
     let data = data();
     let available = VecSet::new();
     let input = input(&data, &layers, &available);
-    let obsolete = AtomicBool::new(false);
-    let discovered = discover(&input, &obsolete).unwrap().unwrap();
-    let built = build(discovered, &input, &Resolved::default(), &obsolete).unwrap().unwrap();
+    let discovered = discover(&input).unwrap();
+    let built = build(discovered, &input, &Resolved::default()).unwrap();
 
     assert_eq!(built.feature_index.leaders(), ["outline", "outline", "patterned", "patterned"]);
     assert!(built.render_data.contains_key("outline"));
 }
 
-#[test]
-fn discover_stops_when_obsolete() {
-    let layers = [layer(json!({"id": "outline", "type": "line"}))];
-    let data = data();
-    let available = VecSet::new();
-    assert!(discover(&input(&data, &layers, &available), &AtomicBool::new(true)).unwrap().is_none());
-}
-
-/// Where a test worker's messages go.
-#[derive(Clone, Default)]
-struct Replies(Arc<Mutex<Vec<TileMessage>>>);
-
-impl TileEndpoint for Replies {
-    fn send(&self, message: TileMessage) {
-        self.0.lock().push(message);
-    }
+/// The result of a job that lays tile 0/0/0 out with `layers`, `data` and
+/// `resolved`.
+fn run(layers: &[Arc<dyn LayerProperties>], available: &[&str], resolved: Resolved) -> JobResult {
+    let tile = TileKey { source: SourceKey(1), id: OverscaledTileID::from_zxy(0, 0, 0) };
+    let key = DataKey { source: SourceKey(1), tile: CanonicalTileID::new(0, 0, 0), load: 1 };
+    let job = LayoutJob {
+        style: crate::tests::style(layers),
+        available_images: Arc::new(available.iter().map(|id| (*id).to_owned()).collect()),
+        data: DataInput::Full { key, data: Some(data()) },
+        params: params(),
+        resolved: Arc::new(resolved),
+    };
+    let mut result = None;
+    run_job(Run { id: JobId { tile, generation: 1 }, job: Job::Layout(job) }, None, |reply, _| {
+        result = Some(reply.result);
+    });
+    result.unwrap()
 }
 
 /// A symbol layer whose only feature has no icon, but whose `icon-image`
-/// asked for an unavailable image on the way: its layout waits for that
-/// image and nothing else.
+/// asked for an unavailable image on the way: its first job needs that
+/// image and nothing else, and a job that knows it missing lays out.
 #[test]
 fn a_layout_waiting_only_for_unavailable_images_finishes() {
-    let replies = Replies::default();
-    let mut worker = GeometryTileWorker::new(
-        None,
-        Box::new(replies.clone()),
-        OverscaledTileID::from_zxy(0, 0, 0),
-        Arc::new(AtomicBool::new(false)),
-        MapMode::Static,
-        1.0,
-        false,
-        None,
-        false,
-    );
     let icon_image = json!([
         "case",
         ["==", ["to-string", ["coalesce", ["image", "missing"], ["image", "marker"]]], "marker"],
         "",
         "marker"
     ]);
-    let available = Arc::new(VecSet::from_iter(["marker".to_owned()]));
-    worker.handle(WorkerMessage::SetLayers {
-        layers: vec![layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": icon_image}}))],
-        global_state: None,
-        available_images: Arc::clone(&available),
-        subdivision_granularity: SubdivisionGranularitySetting::none(),
-        pixel_ratio: 1.0,
-        correlation_id: 1,
-    });
-    worker.handle(WorkerMessage::SetData { data: Some(data()), available_images: available, correlation_id: 1 });
-
-    let requests = std::mem::take(&mut *replies.0.lock());
-    let [TileMessage::GetDependencies { dependencies, request }] = requests.as_slice() else {
-        panic!("expected one dependency request");
+    let layers = [layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": icon_image}}))];
+    let JobResult::NeedsDeps(needs) = run(&layers, &["marker"], Resolved::default()) else {
+        panic!("expected the dependencies");
     };
-    assert!(dependencies.glyphs.glyphs.is_empty());
-    assert_eq!(dependencies.images.keys().collect::<Vec<_>>(), ["missing"]);
-    worker.handle(WorkerMessage::Resolved { resolved: Resolved::default(), request: *request });
-    assert!(matches!(
-        replies.0.lock().as_slice(),
-        [TileMessage::Layout { correlation_id: 1, request: 1, resolved: true, .. }]
-    ));
+    assert!(needs.glyphs.glyphs.is_empty());
+    assert_eq!(needs.images.keys().collect::<Vec<_>>(), ["missing"]);
+    let resolved = Resolved { missing_images: needs.images.keys().cloned().collect(), ..Resolved::default() };
+    assert!(matches!(run(&layers, &["marker"], resolved), JobResult::Laid(_)));
 }
 
-/// An answer to a request the worker made before it parsed again is
-/// outdated: the worker waits for the answer to its latest request.
+/// A layout that uses no glyphs or images lays out in its first job, and
+/// reports that it needs none.
 #[test]
-fn the_worker_ignores_answers_to_earlier_requests() {
-    let replies = Replies::default();
-    let mut worker = GeometryTileWorker::new(
-        None,
-        Box::new(replies.clone()),
-        OverscaledTileID::from_zxy(0, 0, 0),
-        Arc::new(AtomicBool::new(false)),
-        MapMode::Static,
-        1.0,
-        false,
-        None,
-        false,
-    );
-    let available = Arc::new(VecSet::new());
-    let symbols = vec![layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": "marker"}}))];
-    worker.handle(WorkerMessage::SetLayers {
-        layers: symbols,
-        global_state: None,
-        available_images: Arc::clone(&available),
-        subdivision_granularity: SubdivisionGranularitySetting::none(),
-        pixel_ratio: 1.0,
-        correlation_id: 1,
-    });
-    worker.handle(WorkerMessage::SetData {
-        data: Some(data()),
-        available_images: Arc::clone(&available),
-        correlation_id: 2,
-    });
-    worker.handle(WorkerMessage::SetAvailableImages { available_images: available, correlation_id: 3 });
-    let requests: Vec<u64> = std::mem::take(&mut *replies.0.lock())
-        .into_iter()
-        .filter_map(|message| match message {
-            TileMessage::GetDependencies { request, .. } => Some(request),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(requests, [1, 2]);
+fn a_layout_without_dependencies_takes_one_job() {
+    let layers = [layer(json!({"id": "outline", "type": "line"}))];
+    let JobResult::Laid(output) = run(&layers, &[], Resolved::default()) else {
+        panic!("expected the layout");
+    };
+    assert!(output.deps.glyphs.glyphs.is_empty() && output.deps.images.is_empty());
+    assert!(output.result.layer_render_data.contains_key("outline"));
+}
 
-    worker.handle(WorkerMessage::Resolved { resolved: Resolved::default(), request: 1 });
-    assert!(replies.0.lock().is_empty(), "the answer to the first request is outdated");
-    worker.handle(WorkerMessage::Resolved { resolved: Resolved::default(), request: 2 });
-    assert!(matches!(
-        replies.0.lock().as_slice(),
-        [TileMessage::Layout { correlation_id: 3, request: 2, resolved: true, .. }]
-    ));
+/// A job lays out only its tile's zoom's layers.
+#[test]
+fn a_job_lays_out_the_layers_of_its_zoom() {
+    let layers =
+        [layer(json!({"id": "outline", "type": "line"})), layer(json!({"id": "near", "type": "line", "minzoom": 4}))];
+    let JobResult::Laid(output) = run(&layers, &[], Resolved::default()) else {
+        panic!("expected the layout");
+    };
+    assert!(output.result.layer_render_data.contains_key("outline"));
+    assert!(!output.result.layer_render_data.contains_key("near"));
 }

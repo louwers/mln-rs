@@ -5,16 +5,16 @@
 //! session's loop run on the thread that made them, in the slices of the
 //! instance's pump (`mln_web_host::pump`), which the loops and the
 //! cooperative scheduler wake. Nothing waits: a command runs in a later
-//! slice, never inside the call that sent it. Each session's renderer puts
-//! its tiles' workers in Web Workers of the instance's own
-//! ([`tile_worker_transport`]), and shapes font faces with the shaper module
+//! slice, never inside the call that sent it. Each session's renderer runs
+//! its tiles' jobs in Web Workers of the instance's own ([`tile_workers`]),
+//! and shapes font faces with the shaper module
 //! (the runtime's font-face engine) once a style declares them.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mln_actor::RunLoop;
-use mln_renderer::tile::worker_codec::SerializingTransport;
+use mln_renderer::tile::worker_codec::RemoteWorkers;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_web_host::{pump, tile_workers};
@@ -95,11 +95,11 @@ pub(crate) fn run_session_now(id: SessionId) {
     }
 }
 
-/// A transport that puts the tiles' workers of a renderer on `scheduler`'s
-/// loop in the instance's tile worker Web Workers, or `None` where
-/// none start, which leaves the workers on the cooperative scheduler, in the
-/// pump's slices.
-pub(crate) fn tile_worker_transport(scheduler: &mln_actor::SchedulerPtr) -> Option<Rc<SerializingTransport>> {
+/// Tile workers for a renderer on `scheduler`'s loop, in the instance's tile
+/// worker Web Workers, or `None` where none start, which leaves the tiles'
+/// jobs on the cooperative scheduler, in the pump's slices. A Web Worker
+/// that panics is replaced by a new one.
+pub(crate) fn tile_workers(scheduler: &mln_actor::SchedulerPtr) -> Option<Rc<RemoteWorkers>> {
     let ports = match tile_workers::connect() {
         Ok(ports) => ports,
         Err(error) => {
@@ -114,5 +114,10 @@ pub(crate) fn tile_worker_transport(scheduler: &mln_actor::SchedulerPtr) -> Opti
         let message = message.as_string().unwrap_or_else(|| format!("{message:?}"));
         Log::error(Event::General, format!("Tile worker {instance} panicked: {message}"));
     };
-    Some(tile_workers::transport(scheduler, ports, |_| {}, fatal))
+    let respawn = |instance: usize| {
+        tile_workers::respawn(instance)
+            .inspect_err(|error| Log::error(Event::General, format!("No tile worker took {instance}'s place: {error}")))
+            .ok()
+    };
+    Some(tile_workers::workers(scheduler, ports, |_| {}, fatal, respawn))
 }

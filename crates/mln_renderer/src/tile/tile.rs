@@ -18,7 +18,6 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecSet;
 
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_mask::TileMask;
@@ -130,6 +129,9 @@ pub(crate) struct TileBase {
     /// tile with. A tile retained as optional only looks in the cache, so
     /// one that isn't renderable then loads nothing.
     pub(crate) retained_necessity: Cell<TileNecessity>,
+    /// Port-only: where the tile's pyramid last ranked it, which orders its
+    /// jobs among the other tiles'.
+    pub(crate) load_order: Cell<TileLoadOrder>,
 
     /// The [`SourceFeatureState`](crate::source_state::SourceFeatureState)
     /// version this tile's buckets hold; 0 for buckets that have none.
@@ -158,6 +160,7 @@ impl TileBase {
             pending: Cell::new(false),
             loaded: Cell::new(false),
             retained_necessity: Cell::new(TileNecessity::Optional),
+            load_order: Cell::new(TileLoadOrder::UNWANTED),
             feature_state_version: Cell::new(0),
             observer: RefCell::new(observer.unwrap_or_else(|| Rc::new(NullTileObserver))),
         }
@@ -274,26 +277,19 @@ pub(crate) trait Tile: Any {
 
     fn set_show_collision_boxes(&self, _show: bool) {}
 
-    /// Takes effect with the next `set_layers`, so a relayout costs one
-    /// parse.
+    /// Takes effect with the next `set_style`, so a relayout costs one
+    /// job.
     fn set_subdivision_granularity(&self, _value: &SubdivisionGranularitySetting) {}
 
     /// Sets the pixel ratio the tile lays its layers out for, from the next
-    /// `set_layers` on. Returns whether the tile needs laying out again for
+    /// `set_style` on. Returns whether the tile needs laying out again for
     /// it.
     fn set_pixel_ratio(&self, _pixel_ratio: f32) -> bool {
         false
     }
 
-    /// Lays the tile out with `layers`, for the images in
-    /// `available_images`.
-    fn set_layers(
-        &self,
-        _layers: &[Arc<dyn LayerProperties>],
-        _global_state: Option<Arc<GlobalStateMap>>,
-        _available_images: &Arc<VecSet<String>>,
-    ) {
-    }
+    /// Lays the tile out with its source's `style`.
+    fn set_style(&self, _style: &Arc<crate::tile::job::SourceStyle>) {}
 
     /// The geometry tile this tile lays out with, if it is one.
     fn as_geometry_tile(&self) -> Option<&crate::tile::geometry_tile::GeometryTile> {

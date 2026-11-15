@@ -10,17 +10,11 @@ use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
-use parking_lot::Mutex;
 
 use crate::query::SourceQueryOptions;
-use crate::tile::geometry_tile_worker::{TileMessage, WorkerMessage};
-use crate::tile::raster_dem_tile::{RasterDEMTileMessage, RasterDEMWorkerMessage};
-use crate::tile::raster_tile::{RasterTileMessage, RasterWorkerMessage};
 use crate::tile::tile::Tile;
 use crate::tile::tile_loader::{LoaderTile, VectorTileEncoding};
-use crate::tile::tile_worker_transport::{
-    InProcessTransport, TileEndpoint, TileWorkerTransport, WorkerEndpoint, WorkerParameters,
-};
+use crate::tile::tile_worker_transport::{InProcessTransport, TileWorkerTransport};
 use crate::tile::vector_tile::VectorTile;
 use crate::tile_parameters::TileParameters;
 
@@ -68,6 +62,7 @@ impl VectorTileTest {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
+            source: crate::tests::test_source(),
             available_images: Arc::default(),
             font_faces: None,
             tile_worker_transport: Rc::clone(&self.transport),
@@ -103,7 +98,7 @@ fn set_error() {
 fn on_error() {
     let test = VectorTileTest::new();
     let tile = mvt_tile(&test);
-    tile.geometry_tile().inner().on_error(Error::native("test"), 0);
+    tile.geometry_tile().inner().on_error(Error::native("test"));
 
     assert!(!tile.is_renderable());
     assert!(tile.is_loaded());
@@ -120,85 +115,4 @@ fn issue_8542() {
     let mut result = Vec::new();
     tile.query_source_features(&mut result, &SourceQueryOptions::new(Some(vec!["layer".to_owned()]), None), None)
         .unwrap();
-}
-
-/// Port-only: an in-process transport that records the messages between a
-/// tile and its worker.
-struct RecordingTransport {
-    inner: InProcessTransport,
-    log: Arc<Mutex<Vec<&'static str>>>,
-}
-
-struct RecordingWorker {
-    inner: Box<dyn WorkerEndpoint>,
-    log: Arc<Mutex<Vec<&'static str>>>,
-}
-
-struct RecordingTile {
-    inner: Box<dyn TileEndpoint>,
-    log: Arc<Mutex<Vec<&'static str>>>,
-}
-
-impl TileWorkerTransport for RecordingTransport {
-    fn create(&self, parameters: WorkerParameters, tile: Box<dyn TileEndpoint>) -> Box<dyn WorkerEndpoint> {
-        self.log.lock().push("create");
-        let tile = Box::new(RecordingTile { inner: tile, log: Arc::clone(&self.log) });
-        Box::new(RecordingWorker { inner: self.inner.create(parameters, tile), log: Arc::clone(&self.log) })
-    }
-
-    fn create_raster(
-        &self,
-        tile: Box<dyn TileEndpoint<RasterTileMessage>>,
-    ) -> Box<dyn WorkerEndpoint<RasterWorkerMessage>> {
-        self.inner.create_raster(tile)
-    }
-
-    fn create_raster_dem(
-        &self,
-        tile: Box<dyn TileEndpoint<RasterDEMTileMessage>>,
-    ) -> Box<dyn WorkerEndpoint<RasterDEMWorkerMessage>> {
-        self.inner.create_raster_dem(tile)
-    }
-}
-
-impl WorkerEndpoint for RecordingWorker {
-    fn send(&self, message: WorkerMessage) {
-        self.log.lock().push(match &message {
-            WorkerMessage::SetData { .. } => "setData",
-            WorkerMessage::SetLayers { .. } => "setLayers",
-            _ => "other",
-        });
-        self.inner.send(message);
-    }
-}
-
-impl TileEndpoint for RecordingTile {
-    fn send(&self, message: TileMessage) {
-        self.log.lock().push(match &message {
-            TileMessage::Layout { .. } => "onLayout",
-            _ => "other",
-        });
-        self.inner.send(message);
-    }
-}
-
-// Port-only: the tile and its worker talk only through the transport.
-#[test]
-fn tile_and_worker_talk_through_the_transport() {
-    let mut test = VectorTileTest::new();
-    let log = Arc::new(Mutex::new(Vec::new()));
-    test.transport =
-        Rc::new(RecordingTransport { inner: InProcessTransport::new(test.thread_pool.clone()), log: Arc::clone(&log) });
-    let tile = mvt_tile(&test);
-    tile.geometry_tile().set_data(None);
-    tile.geometry_tile().set_layers(&[], None, &Arc::default());
-
-    let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !tile.is_complete() {
-        assert!(mln_util::time::Instant::now() < deadline, "the worker did not reply");
-        test.run_loop.run_once();
-        std::thread::yield_now();
-    }
-    assert!(tile.is_renderable());
-    assert_eq!(*log.lock(), ["create", "setData", "setLayers", "onLayout"]);
 }

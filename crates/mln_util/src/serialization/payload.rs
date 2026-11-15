@@ -27,13 +27,19 @@ pub enum Payload {
 }
 
 impl Payload {
+    /// The number of bytes.
     #[must_use]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         match self {
             Payload::Bytes(bytes) => bytes.len(),
             #[cfg(target_family = "wasm")]
             Payload::Host(bytes) => bytes.len(),
         }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// The bytes in wasm memory: a JS array's, copied.

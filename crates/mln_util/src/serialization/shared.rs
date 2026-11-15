@@ -2,7 +2,7 @@
 //! (serialization/mod.rs).
 //!
 //! The map side and a worker instance exchange many messages that refer to
-//! the same values: every tile's `setLayers` has the style's layers and
+//! the same values: every tile's layout job has its source's style, its layers and
 //! their expressions, and every layout the worker sends back has buckets
 //! whose binders hold those expressions again. A `Kind` names such a value
 //! type, and the fields that hold one opt in with `write`/`read`

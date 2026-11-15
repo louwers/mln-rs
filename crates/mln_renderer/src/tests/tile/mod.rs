@@ -74,6 +74,7 @@ impl RasterTileTest {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
+            source: crate::tests::test_source(),
             available_images: Arc::default(),
             font_faces: None,
             tile_worker_transport: std::rc::Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
@@ -90,15 +91,15 @@ impl Default for RasterTileTest {
     }
 }
 
-/// Port-only: a transport whose workers are in `count` worker instances on
-/// threads, reached only through the worker codec.
+/// Port-only: workers in `count` worker instances on threads, reached only
+/// through the worker codec.
 #[must_use]
-pub(crate) fn serializing_transport(
+pub(crate) fn remote_workers(
     run_loop: &mln_actor::RunLoop,
     count: usize,
-) -> std::rc::Rc<crate::tile::worker_codec::SerializingTransport> {
-    use crate::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
-    SerializingTransport::new(&run_loop.scheduler(), |replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
+) -> std::rc::Rc<crate::tile::worker_codec::RemoteWorkers> {
+    use crate::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
+    RemoteWorkers::new(&run_loop.scheduler(), |replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
 }
 
 /// Port-only: an opaque PNG whose pixels differ from their neighbours.

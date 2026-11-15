@@ -277,7 +277,7 @@ impl Gfx {
             run_loop,
         );
         renderer.set_tile_cache_enabled(tile_cache_enabled);
-        set_tile_worker_transport(&mut renderer, run_loop);
+        set_tile_workers(&mut renderer, run_loop);
         Ok(Gfx {
             renderer,
             target,
@@ -314,17 +314,17 @@ impl Gfx {
         );
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
-        set_tile_worker_transport(&mut renderer, &self.run_loop);
+        set_tile_workers(&mut renderer, &self.run_loop);
         self.renderer = renderer;
     }
 }
 
 /// In the browser, puts the renderer's tile workers in the instance's Web
 /// Workers. Elsewhere they stay on the background threads.
-fn set_tile_worker_transport(renderer: &mut Renderer, run_loop: &RunLoop) {
+fn set_tile_workers(renderer: &mut Renderer, run_loop: &RunLoop) {
     #[cfg(target_family = "wasm")]
-    if let Some(transport) = crate::web::tile_worker_transport(&run_loop.scheduler()) {
-        renderer.set_tile_worker_transport(transport);
+    if let Some(workers) = crate::web::tile_workers(&run_loop.scheduler()) {
+        renderer.set_tile_workers(&workers);
     }
     #[cfg(not(target_family = "wasm"))]
     let _ = (renderer, run_loop);

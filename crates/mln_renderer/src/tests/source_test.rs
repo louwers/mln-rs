@@ -52,6 +52,8 @@ struct SourceTest {
     run_loop: RunLoop,
     transform: Transform,
     thread_pool: TaggedScheduler,
+    /// Set by `end_handle`'s calls.
+    ended: Rc<std::cell::Cell<bool>>,
 }
 
 /// The tile parameters for `map_mode`, from a transform state the caller
@@ -80,6 +82,7 @@ fn tile_parameters<'a>(
         global_state: None,
         is_update_synchronous: false,
         capture_rendered_features: false,
+        source: crate::tests::test_source(),
         available_images: Arc::default(),
         font_faces: None,
         tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
@@ -98,6 +101,7 @@ impl SourceTest {
             run_loop: RunLoop::new(),
             transform,
             thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
+            ended: Rc::default(),
         }
     }
 
@@ -112,11 +116,28 @@ impl SourceTest {
     /// Ends the test; usable from `'static` callbacks.
     fn end_handle(&self) -> impl Fn() + Clone + 'static {
         let handle = self.run_loop.handle();
-        move || handle.stop()
+        let ended = Rc::clone(&self.ended);
+        move || {
+            ended.set(true);
+            handle.stop();
+        }
     }
 
     fn run(&self) {
         self.run_loop.run();
+    }
+
+    /// Runs the loop, and the jobs of `source`'s tiles as the renderer's
+    /// updates do, until the test ends.
+    fn run_with(&self, source: &dyn RenderSource) {
+        let mut driver = crate::tests::TileDriver::pool(&self.run_loop, &self.thread_pool);
+        let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+        while !self.ended.get() {
+            assert!(mln_util::time::Instant::now() < deadline, "the test didn't end");
+            self.run_loop.run_once();
+            driver.update_source(source);
+            std::thread::yield_now();
+        }
     }
 }
 
@@ -241,7 +262,7 @@ fn run_tile_case(
         &test.tile_parameters_with(MapMode::Continuous, Some(fs)),
     );
 
-    test.run();
+    test.run_with(&*render_source);
     render_source.base().base_impl.type_
 }
 
@@ -593,7 +614,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
         &test.tile_parameters_with(MapMode::Continuous, Some(fs)),
     );
 
-    test.run();
+    test.run_with(&*render_source);
     assert!(*changed.borrow());
 }
 
@@ -650,7 +671,7 @@ fn custom_geometry_source_set_tile_data() {
     }
     *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
 
-    let (source, _render_source) = custom_geometry_case(&test, observer);
+    let (source, render_source) = custom_geometry_case(&test, observer);
 
     let handle = source.handle();
     test.run_loop.invoke(move || {
@@ -658,7 +679,7 @@ fn custom_geometry_source_set_tile_data() {
         handle.set_tile_data(CanonicalTileID::new(0, 0, 0), GeoJson::from(Vec::<geojson::Feature>::new()));
     });
 
-    test.run();
+    test.run_with(&*render_source);
 }
 
 // gtest: Source.CustomGeometrySourceSetTileError
@@ -723,7 +744,7 @@ fn custom_vector_source_set_tile_data() {
     let handle = source.handle();
     test.run_loop.invoke(move || handle.set_tile_data(CanonicalTileID::new(0, 0, 0), None, TileDataFormat::Mvt));
 
-    test.run();
+    test.run_with(&*render_source);
 }
 
 // gtest: Source.EmptyTileset
@@ -889,8 +910,11 @@ fn geojson_source_synchronous_update_override_applies_to_existing_tiles() {
     let mut asynchronous = SynchronousUpdateSource::new(false);
     asynchronous.update(&test);
     assert!(!asynchronous.render_source.is_loaded());
+    let mut driver = crate::tests::TileDriver::pool(&test.run_loop, &test.thread_pool);
     while !asynchronous.render_source.is_loaded() {
-        run_until_work(&test.run_loop);
+        test.run_loop.run_once();
+        driver.update_source(&asynchronous.render_source);
+        std::thread::yield_now();
     }
     asynchronous.source.set_override_synchronous_update(true);
     asynchronous.update(&test);
@@ -1194,11 +1218,13 @@ impl TurningSource {
     /// loaded.
     fn load(&mut self, longitude: f64, zoom: f64) {
         self.update(longitude, zoom);
+        let mut driver = crate::tests::TileDriver::inline(&self.test.run_loop);
         for _ in 0..100 {
             self.file_source.respond_to_all();
             while self.test.run_loop.run_once() {}
             self.test.thread_pool.wait_for_empty();
             while self.test.run_loop.run_once() {}
+            driver.update_source(&self.render_source);
             self.update(longitude, zoom);
             if self.pyramid().is_loaded() {
                 return;

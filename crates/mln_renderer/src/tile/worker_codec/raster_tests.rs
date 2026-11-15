@@ -11,9 +11,9 @@ use mln_util::tileset::RasterEncoding;
 use mln_wire::Wire;
 use parking_lot::Mutex;
 
-use super::envelope::{self, ReplyHead};
-use super::map_side::{MapCodec, Reply};
-use super::worker_side::{WorkerAction, WorkerCodec};
+use super::envelope::{self, Action, RASTER, ReplyHead};
+use super::map_side::{RasterReply, decode_raster_reply, raster_request};
+use super::worker_side::encode_raster_reply;
 use super::*;
 use crate::bucket::BucketBase;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
@@ -76,23 +76,43 @@ fn raster_direct(data: Option<Data>) -> RasterTileMessage {
     sink.take()
 }
 
+/// The frame of `message` for the worker of `TILE`, as the map side sends
+/// it, decoded as the worker's side does: the action and the message.
+fn through_request<M: Wire>(message: &M) -> M {
+    let request = raster_request(&Action::Message { tile: TILE, correlation_id: CORRELATION_ID }, Some(message));
+    let Some((&RASTER, frame)) = request.split_first() else {
+        panic!("not a raster frame");
+    };
+    let (Action::Message { tile: TILE, correlation_id: CORRELATION_ID }, message) = envelope::take(frame).unwrap()
+    else {
+        panic!("not a message");
+    };
+    envelope::decode(message).unwrap()
+}
+
+/// Decodes a reply as the map side does, for `TILE`, a raster-dem tile if
+/// `dem`.
+fn decode(dem: bool, reply: Encoded) -> Result<Option<(u64, RasterReply)>, String> {
+    let Some((&RASTER, frame)) = reply.bytes.split_first() else {
+        return Err("not a raster frame".to_owned());
+    };
+    decode_raster_reply(frame, reply.payloads, |tile| (tile == TILE).then_some((dem, tile)))
+}
+
+fn encode_raster(message: &RasterTileMessage) -> Encoded {
+    encode_raster_reply(TILE, CORRELATION_ID, message, |error| RasterTileMessage::Error {
+        error: mln_util::error::Error::native(error),
+        correlation_id: CORRELATION_ID,
+    })
+}
+
 /// A raster worker's message for its tile through the codec: the request
 /// encoded on the map side and decoded on the worker's, and the reply back.
 fn raster_through_codec(data: Option<Data>) -> RasterTileMessage {
-    let mut map = MapCodec::new();
-    let mut worker_codec = WorkerCodec::new();
-    let WorkerAction::CreateRaster { tile: TILE } = worker_codec.decode(&map.create_raster(TILE)).unwrap() else {
-        panic!("not a raster worker");
-    };
     let sink = Sink::new();
     let mut worker = RasterTileWorker::new(Box::new(sink.clone()));
-    let request = map.raster_message(TILE, &RasterWorkerMessage::Parse { data, correlation_id: CORRELATION_ID });
-    let WorkerAction::Message { tile: TILE, message, .. } = worker_codec.decode(&request).unwrap() else {
-        panic!("not a message");
-    };
-    worker.handle(worker_codec.decode_message(&message).unwrap());
-    let reply = worker_codec.encode_raster(TILE, &sink.take());
-    let Some((TILE, Reply::Raster(message))) = map.decode(reply).unwrap() else {
+    worker.handle(through_request(&RasterWorkerMessage::Parse { data, correlation_id: CORRELATION_ID }));
+    let Some((TILE, RasterReply::Raster(message))) = decode(false, encode_raster(&sink.take())).unwrap() else {
         panic!("not a raster tile message");
     };
     message
@@ -109,27 +129,18 @@ fn raster_dem_direct(data: Option<Data>, encoding: RasterEncoding) -> RasterDEMT
 }
 
 fn raster_dem_through_codec(data: Option<Data>, encoding: RasterEncoding) -> RasterDEMTileMessage {
-    let mut map = MapCodec::new();
-    let mut worker_codec = WorkerCodec::new();
-    let WorkerAction::CreateRasterDEM { tile: TILE } = worker_codec.decode(&map.create_raster_dem(TILE)).unwrap()
-    else {
-        panic!("not a raster-dem worker");
-    };
     let sink = Sink::new();
     let mut worker = RasterDEMTileWorker::new(Box::new(sink.clone()));
-    let request =
-        map.raster_dem_message(TILE, &RasterDEMWorkerMessage::Parse { data, correlation_id: CORRELATION_ID, encoding });
-    let WorkerAction::Message { tile: TILE, message, .. } = worker_codec.decode(&request).unwrap() else {
-        panic!("not a message");
-    };
-    worker.handle(worker_codec.decode_message(&message).unwrap());
-    let reply = worker_codec.encode_raster_dem(TILE, &sink.take());
-    let Some((TILE, Reply::RasterDEM(message))) = map.decode(reply).unwrap() else {
+    worker.handle(through_request(&RasterDEMWorkerMessage::Parse { data, correlation_id: CORRELATION_ID, encoding }));
+    let reply = encode_raster_reply(TILE, CORRELATION_ID, &sink.take(), |error| RasterDEMTileMessage::Error {
+        error: mln_util::error::Error::native(error),
+        correlation_id: CORRELATION_ID,
+    });
+    let Some((TILE, RasterReply::RasterDEM(message))) = decode(true, reply).unwrap() else {
         panic!("not a raster-dem tile message");
     };
     message
 }
-
 fn parsed_image(message: RasterTileMessage) -> Option<PremultipliedImage> {
     match message {
         RasterTileMessage::Parsed { bucket, correlation_id: CORRELATION_ID } => {
@@ -226,7 +237,7 @@ fn raster_dem_tiles_cross() {
 fn reply<M: Wire>(message: &M) -> Encoded {
     let head = ReplyHead { tile: TILE, correlation_id: CORRELATION_ID };
     let (bytes, payloads) = mln_util::serialization::payload::encode(|| {
-        let mut bytes = Vec::new();
+        let mut bytes = vec![RASTER];
         envelope::append(&mut bytes, &head).unwrap();
         envelope::append(&mut bytes, message).unwrap();
         bytes
@@ -245,19 +256,19 @@ enum DEMParsed {
 /// tile; one for a tile that is gone is dropped.
 #[test]
 fn malformed_raster_replies() {
-    let mut map = MapCodec::new();
-    map.create_raster_dem(TILE);
     let image = PremultipliedImage::new(Size::new(2, 2));
     let raster =
         RasterTileMessage::Parsed { bucket: Some(Arc::new(RasterBucket::new(image))), correlation_id: CORRELATION_ID };
-    let Some((TILE, Reply::RasterDEM(RasterDEMTileMessage::Error { .. }))) = map.decode(reply(&raster)).unwrap() else {
+    let Some((TILE, RasterReply::RasterDEM(RasterDEMTileMessage::Error { .. }))) =
+        decode(true, reply(&raster)).unwrap()
+    else {
         panic!("not an error for the tile");
     };
-    assert!(map.decode(Encoded::from(vec![0xff; 4])).is_err());
+    assert!(decode_raster_reply(&[0xff; 4], Vec::new(), |tile| Some((false, tile))).is_err());
 
     // A tile that is gone.
-    map.remove(TILE);
-    assert!(map.decode(reply(&raster)).unwrap().is_none());
+    let reply = reply(&raster);
+    assert!(decode_raster_reply::<u64>(&reply.bytes[1..], reply.payloads, |_| None).unwrap().is_none());
 }
 
 /// A bucket the map side can't read becomes an error for its tile: sizes
@@ -265,17 +276,14 @@ fn malformed_raster_replies() {
 /// malformed buckets, not images without their pixels.
 #[test]
 fn malformed_raster_buckets() {
-    let mut map = MapCodec::new();
-    map.create_raster(TILE);
     let image = PremultipliedImage::from_vec(Size::new(0x4000_0000, 1), Vec::new());
     let parsed =
         RasterTileMessage::Parsed { bucket: Some(Arc::new(RasterBucket::new(image))), correlation_id: CORRELATION_ID };
-    let Some((TILE, Reply::Raster(RasterTileMessage::Error { .. }))) = map.decode(reply(&parsed)).unwrap() else {
+    let Some((TILE, RasterReply::Raster(RasterTileMessage::Error { .. }))) = decode(false, reply(&parsed)).unwrap()
+    else {
         panic!("not an error for the tile");
     };
 
-    let mut map = MapCodec::new();
-    map.create_raster_dem(TILE);
     let image = |size, bytes| PremultipliedImage::from_vec(Size::new(size, size), vec![0; bytes]);
     let dems = [
         (4, 5, image(6, 6 * 6 * 4)),
@@ -288,8 +296,8 @@ fn malformed_raster_buckets() {
             bucket: Some((BucketBase::default(), (dim, stride, RasterEncoding::Mapbox, image))),
             correlation_id: CORRELATION_ID,
         };
-        let Some((TILE, Reply::RasterDEM(RasterDEMTileMessage::Error { correlation_id: CORRELATION_ID, .. }))) =
-            map.decode(reply(&malformed)).unwrap()
+        let Some((TILE, RasterReply::RasterDEM(RasterDEMTileMessage::Error { correlation_id: CORRELATION_ID, .. }))) =
+            decode(true, reply(&malformed)).unwrap()
         else {
             panic!("dim {dim}, stride {stride}: not an error for the tile");
         };
@@ -304,23 +312,22 @@ fn large_arrays_travel_as_payloads() {
         bucket: Some(Arc::new(RasterBucket::new(PremultipliedImage::from_vec(Size::new(width, width), pixels)))),
         correlation_id: CORRELATION_ID,
     };
-    let decoded = |map: &mut MapCodec, encoded| match map.decode(encoded) {
-        Ok(Some((TILE, Reply::Raster(message)))) => parsed_image(message).unwrap().data,
+    let decoded = |encoded| match decode(false, encoded) {
+        Ok(Some((TILE, RasterReply::Raster(message)))) => parsed_image(message).unwrap().data,
         _ => panic!("not a raster tile message"),
     };
-    let mut map = MapCodec::new();
-    map.create_raster(TILE);
     let pixels = vec![7; 64 * 64 * 4];
-    let encoded = WorkerCodec::new().encode_raster(TILE, &parsed(pixels.clone(), 64));
+    let encoded = encode_raster(&parsed(pixels.clone(), 64));
     assert_eq!(encoded.payloads, [pixels.clone().into()]);
     assert!(encoded.bytes.len() < 64);
-    assert_eq!(decoded(&mut map, encoded.clone()), pixels);
+    assert_eq!(decoded(encoded.clone()), pixels);
     // Without its payload, the image doesn't decode.
-    let Ok(Some((TILE, Reply::Raster(RasterTileMessage::Error { .. })))) = map.decode(encoded.bytes.into()) else {
+    let Ok(Some((TILE, RasterReply::Raster(RasterTileMessage::Error { .. })))) = decode(false, encoded.bytes.into())
+    else {
         panic!("not an error for the tile");
     };
 
-    let encoded = WorkerCodec::new().encode_raster(TILE, &parsed(vec![1; 4], 1));
+    let encoded = encode_raster(&parsed(vec![1; 4], 1));
     assert_eq!(encoded.payloads.as_slice(), []);
-    assert_eq!(decoded(&mut map, encoded), vec![1; 4]);
+    assert_eq!(decoded(encoded), vec![1; 4]);
 }

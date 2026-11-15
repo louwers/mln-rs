@@ -27,7 +27,7 @@ pub use geometry_tile_data::{
 };
 pub use mlt::{MltFeature, MltLayer, MltTile};
 pub use mvt::{MvtFeature, MvtLayer, MvtTile};
-pub use tile_data::{Feature, FeatureGroups, GeoJsonFeature, TileBytes, TileData, TileFeatures, TileLayer};
+pub use tile_data::{Feature, FeatureGroups, GeoJsonFeature, TileData, TileLayer};
 
 #[cfg(test)]
 mod malformed_tile_test;

@@ -209,13 +209,15 @@ fn set_mlt_tile_data() {
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn LayerProperties> =
         Arc::new(FillLayerProperties::new(downcast_arc::<FillLayerImpl>(&layer.base_impl())));
-    tile.set_layers(&[layer_properties], None, &Arc::default());
+    tile.set_style(&crate::tests::style(&[layer_properties]));
 
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test/fixtures/map/issue12432/0-0-0.mlt");
     let data = Arc::new(std::fs::read(path).unwrap());
     tile.set_tile_data((Some(data), TileDataFormat::Mlt));
+    let mut driver = crate::tests::TileDriver::inline(&test.run_loop);
     while !tile.is_complete() {
         test.run_loop.run_once();
+        driver.update_tile(&tile);
     }
 
     let options = SourceQueryOptions { source_layers: Some(vec!["water".to_owned()]), filter: None };

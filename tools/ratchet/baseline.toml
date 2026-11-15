@@ -165,13 +165,12 @@
 "crates/mln_renderer/src/sources/render_tile_source.rs" = 8
 "crates/mln_renderer/src/text/placement.rs" = 6
 "crates/mln_renderer/src/tile/geojson_tile.rs" = 2
-"crates/mln_renderer/src/tile/geometry_tile.rs" = 16
+"crates/mln_renderer/src/tile/geometry_tile.rs" = 15
 "crates/mln_renderer/src/tile/raster_dem_tile.rs" = 5
 "crates/mln_renderer/src/tile/raster_tile.rs" = 4
 "crates/mln_renderer/src/tile/tile.rs" = 1
 "crates/mln_renderer/src/tile/tile_loader.rs" = 26
-"crates/mln_renderer/src/tile/tile_worker_transport.rs" = 2
-"crates/mln_renderer/src/tile/worker_codec/host.rs" = 10
+"crates/mln_renderer/src/tile/worker_codec/host.rs" = 7
 "crates/mln_renderer/src/tile/worker_codec/transport.rs" = 10
 "crates/mln_runtime/src/render/driver.rs" = 2
 "crates/mln_runtime/src/render/session.rs" = 9
@@ -197,6 +196,6 @@
 "crates/mln_web_host/src/pump.rs" = 3
 "crates/mln_web_host/src/shaper.rs" = 6
 "crates/mln_web_host/src/tile_worker.rs" = 2
-"crates/mln_web_host/src/tile_workers.rs" = 3
+"crates/mln_web_host/src/tile_workers.rs" = 1
 "crates/mln_webgpu/src/borrowed_target.rs" = 3
 "crates/mln_webgpu/src/renderer_backend.rs" = 2

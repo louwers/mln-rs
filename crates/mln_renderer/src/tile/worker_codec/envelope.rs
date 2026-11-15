@@ -1,18 +1,22 @@
-// Port-only: what goes around the messages between the map side and a worker
-// instance (mod.rs), and how both are encoded.
+// Port-only: the frames that cross between the map side and a worker
+// instance (mod.rs), and how they are encoded.
 //
-// A request is a `Request`, then the message it carries, if any; a reply is a
-// `ReplyHead`, then the worker's message. Each is encoded with mln_wire, one
-// after the other, so that the side that gets them reads the envelope even
-// when the message can't be read: the instance tells the tile which message
-// failed, and the map side which tile a reply it can't read was for.
+// Every frame starts with its kind. A job's frame then has the job's id as a
+// fixed header, read without the shared tables, and its body after it: a
+// worker that can't decode a body replies `Failed` with the header's id, and
+// the map side drops a stale reply after reading only its id. A raster or
+// raster-dem tile's frame has the tile's id and its message, as the tile and
+// its worker exchange them (tile_worker_transport.rs).
 
+use std::time::Duration;
+
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::serialization::payload::Payload;
 use mln_wire::{Reader, Wire, Writer};
 
-use crate::tile::tile_worker_transport::WorkerParameters;
+use crate::tile::job::{JobId, JobTimes, SourceKey, TileKey};
 
-/// A reply as it crosses between instances: its bytes, and the byte arrays
+/// A frame as it crosses between instances: its bytes, and the byte arrays
 /// that travel beside them (`mln_util::serialization::payload`), which a host
 /// can transfer rather than copy.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -22,58 +26,85 @@ pub struct Encoded {
 }
 
 impl From<Vec<u8>> for Encoded {
-    /// A reply without payloads.
+    /// A frame without payloads.
     fn from(bytes: Vec<u8>) -> Self {
         Encoded { bytes, payloads: Vec::new() }
     }
 }
 
-/// What the map side sends a worker instance, before the message it
-/// carries.
-#[derive(Wire)]
-pub(crate) struct Request {
-    /// The keys of the shared values that are gone on the map side
-    /// (`shared::Tables::forget_dead`).
-    pub(crate) forget: Vec<(String, Vec<u64>)>,
-    pub(crate) action: Action,
+/// A job's frame: a `Run` to a worker, a `Reply` back.
+pub(crate) const JOB: u8 = 0;
+/// A raster or raster-dem tile's frame.
+pub(crate) const RASTER: u8 = 1;
+
+/// The size of a `JobId` in a header.
+const JOB_ID_SIZE: usize = 8 + 1 + 2 + 1 + 4 + 4 + 8;
+
+/// Appends a job frame's header: its kind and `id`.
+pub(crate) fn write_job_header(bytes: &mut Vec<u8>, id: &JobId) {
+    let JobId { tile: TileKey { source: SourceKey(source), id: tile }, generation } = *id;
+    bytes.push(JOB);
+    bytes.extend_from_slice(&source.to_le_bytes());
+    bytes.push(tile.overscaled_z);
+    bytes.extend_from_slice(&tile.wrap.to_le_bytes());
+    bytes.push(tile.canonical.z);
+    bytes.extend_from_slice(&tile.canonical.x.to_le_bytes());
+    bytes.extend_from_slice(&tile.canonical.y.to_le_bytes());
+    bytes.extend_from_slice(&generation.to_le_bytes());
 }
 
+/// Reads a job frame's header, after its kind: its id, and the bytes after
+/// it.
+pub(crate) fn read_job_id(bytes: &[u8]) -> Option<(JobId, &[u8])> {
+    let (header, rest) = bytes.split_at_checked(JOB_ID_SIZE)?;
+    let (source, header) = header.split_first_chunk::<8>()?;
+    let (&[overscaled_z], header) = header.split_first_chunk::<1>()?;
+    let (wrap, header) = header.split_first_chunk::<2>()?;
+    let (&[z], header) = header.split_first_chunk::<1>()?;
+    let (x, header) = header.split_first_chunk::<4>()?;
+    let (y, header) = header.split_first_chunk::<4>()?;
+    let (generation, _) = header.split_first_chunk::<8>()?;
+    let canonical = CanonicalTileID { z, x: u32::from_le_bytes(*x), y: u32::from_le_bytes(*y) };
+    let tile = OverscaledTileID { overscaled_z, wrap: i16::from_le_bytes(*wrap), canonical };
+    let tile = TileKey { source: SourceKey(u64::from_le_bytes(*source)), id: tile };
+    Some((JobId { tile, generation: u64::from_le_bytes(*generation) }, rest))
+}
+
+/// Appends a reply's header: its kind, the job's id and how long its stages
+/// took.
+pub(crate) fn write_reply_header(bytes: &mut Vec<u8>, id: &JobId, times: &JobTimes) {
+    write_job_header(bytes, id);
+    let micros = |time: Duration| u32::try_from(time.as_micros()).unwrap_or(u32::MAX);
+    bytes.extend_from_slice(&micros(times.discover).to_le_bytes());
+    bytes.extend_from_slice(&micros(times.build).to_le_bytes());
+}
+
+/// Reads a reply's header, after its kind: the job's id, its times, and the
+/// body after them.
+pub(crate) fn read_reply_header(bytes: &[u8]) -> Option<(JobId, JobTimes, &[u8])> {
+    let (id, rest) = read_job_id(bytes)?;
+    let (discover, rest) = rest.split_first_chunk::<4>()?;
+    let (build, rest) = rest.split_first_chunk::<4>()?;
+    let time = |micros: &[u8; 4]| Duration::from_micros(u64::from(u32::from_le_bytes(*micros)));
+    Some((id, JobTimes { discover: time(discover), build: time(build) }, rest))
+}
+
+/// What the map side sends a worker instance for a raster or raster-dem
+/// tile, before the message it carries.
 #[derive(Wire)]
 pub(crate) enum Action {
-    /// Creates a worker for the geometry tile `tile`.
-    Create { tile: u64, parameters: WorkerParameters },
     /// Creates a worker for the raster tile `tile`.
     CreateRaster { tile: u64 },
     /// Creates a worker for the raster-dem tile `tile`.
     CreateRasterDEM { tile: u64 },
     /// A message for the worker of `tile`, of its type, which follows.
-    Message { tile: u64, about: About },
-    /// The worker's destructor: `~GeometryTileWorker()` after the tile set
-    /// its `obsolete` flag, or the raster or raster-dem tile's worker.
+    Message { tile: u64, correlation_id: u64 },
+    /// Drops the worker of `tile`.
     Remove { tile: u64 },
 }
 
-/// What a message is, for an error about it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Wire)]
-pub(crate) struct About {
-    /// The message's correlation id, or 0 for the answer to a dependency
-    /// request, which has none (the tile reports an error without one
-    /// without clearing its pending state).
-    pub(crate) correlation_id: u64,
-    pub(crate) kind: MessageKind,
-}
-
-/// The messages whose failure loses what the worker had (host.rs).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Wire)]
-pub(crate) enum MessageKind {
-    SetData,
-    SetLayers,
-    /// Any other message, which changes neither the data nor the layers.
-    Other,
-}
-
-/// What a worker instance sends back before the message of `tile`'s worker
-/// for its tile.
+/// What a worker instance sends back before the message of a raster or
+/// raster-dem tile's worker for its tile.
 #[derive(Wire)]
 pub(crate) struct ReplyHead {
     pub(crate) tile: u64,
@@ -83,13 +114,8 @@ pub(crate) struct ReplyHead {
 
 /// Appends `value`, encoded.
 pub(crate) fn append<T: Wire>(bytes: &mut Vec<u8>, value: &T) -> Result<(), String> {
-    append_with(bytes, |w| value.write(w))
-}
-
-/// Appends what `write` writes.
-fn append_with(bytes: &mut Vec<u8>, write: impl FnOnce(&mut Writer)) -> Result<(), String> {
     let mut w = Writer::from_vec(std::mem::take(bytes));
-    write(&mut w);
+    value.write(&mut w);
     *bytes = w.finish().map_err(|e| format!("can't encode: {e}"))?;
     Ok(())
 }
@@ -97,13 +123,8 @@ fn append_with(bytes: &mut Vec<u8>, write: impl FnOnce(&mut Writer)) -> Result<(
 /// Decodes a value at the start of `bytes`; returns it and the bytes after
 /// it.
 pub(crate) fn take<T: Wire>(bytes: &[u8]) -> Result<(T, &[u8]), String> {
-    take_with(bytes, T::read)
-}
-
-/// `take` with `read` for the value.
-fn take_with<T>(bytes: &[u8], read: impl FnOnce(&mut Reader<'_>) -> Option<T>) -> Result<(T, &[u8]), String> {
     let mut r = Reader::new(bytes);
-    match read(&mut r) {
+    match T::read(&mut r) {
         Some(value) => Ok((value, r.rest())),
         None => Err(format!("malformed: {}", r.error())),
     }

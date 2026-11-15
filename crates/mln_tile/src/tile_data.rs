@@ -4,7 +4,7 @@ use std::sync::Arc;
 use feature::{Identifier, PropertyMap, Value};
 use mln_tile_id::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::{FeatureType, to_feature_type};
-use mln_util::serialization::{payload, shared};
+use mln_util::serialization::payload;
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::TileError;
@@ -21,9 +21,7 @@ pub type GeoJsonFeature = feature::Feature<i16, Arc<PropertyMap>>;
 ///
 /// It is written (`mln_wire::Wire`) as what it is made from: the bytes of an
 /// MVT or MLT tile, as a payload (`mln_util::serialization::payload`), or the
-/// features. Bytes and features cross once per codec, then by key, where the
-/// codec has a table of [`TileBytes`] or [`TileFeatures`]
-/// (`mln_util::serialization::shared`).
+/// features.
 #[derive(Clone)]
 pub enum TileData {
     Mvt(MvtTile),
@@ -183,69 +181,33 @@ impl GeometryTileFeature for Feature<'_> {
     }
 }
 
-/// The `shared::Kind` of the bytes of MVT and MLT tiles.
-pub struct TileBytes;
-
-impl shared::Kind for TileBytes {
-    type Value = Vec<u8>;
-    const NAME: &'static str = "tile bytes";
-}
-
-impl shared::WireKind for TileBytes {
-    fn write(bytes: &Vec<u8>, w: &mut Writer) {
-        payload::bytes::write(bytes, w);
-    }
-
-    fn read(r: &mut Reader<'_>) -> Option<Arc<Vec<u8>>> {
-        payload::bytes::read(r).map(Arc::new)
-    }
-}
-
-/// The `shared::Kind` of the features of [`TileData::Features`].
-pub struct TileFeatures;
-
-impl shared::Kind for TileFeatures {
-    type Value = Vec<GeoJsonFeature>;
-    const NAME: &'static str = "tile features";
-}
-
-impl shared::WireKind for TileFeatures {
-    fn write(features: &Vec<GeoJsonFeature>, w: &mut Writer) {
-        features.write(w);
-    }
-
-    fn read(r: &mut Reader<'_>) -> Option<Arc<Vec<GeoJsonFeature>>> {
-        Vec::read(r).map(Arc::new)
-    }
-}
-
 impl Wire for TileData {
     fn write(&self, w: &mut Writer) {
         match self {
             TileData::Mvt(tile) => {
                 w.push(0);
-                shared::write::<TileBytes>(tile.bytes(), w);
+                payload::bytes::write(tile.bytes(), w);
             }
             TileData::Mlt(tile) => {
                 w.push(1);
                 tile.fast_pfor_enabled().write(w);
-                shared::write::<TileBytes>(tile.bytes(), w);
+                payload::bytes::write(tile.bytes(), w);
             }
             TileData::Features(features) => {
                 w.push(2);
-                shared::write::<TileFeatures>(features, w);
+                features.write(w);
             }
         }
     }
 
     fn read(r: &mut Reader<'_>) -> Option<Self> {
         Some(match r.byte()? {
-            0 => TileData::Mvt(MvtTile::new(shared::read::<TileBytes>(r)?)),
+            0 => TileData::Mvt(MvtTile::new(Arc::new(payload::bytes::read(r)?))),
             1 => {
                 let fast_pfor_enabled = bool::read(r)?;
-                TileData::Mlt(MltTile::new(shared::read::<TileBytes>(r)?, fast_pfor_enabled))
+                TileData::Mlt(MltTile::new(Arc::new(payload::bytes::read(r)?), fast_pfor_enabled))
             }
-            2 => TileData::Features(shared::read::<TileFeatures>(r)?),
+            2 => TileData::Features(Arc::new(Vec::read(r)?)),
             _ => return r.fail_tag(),
         })
     }

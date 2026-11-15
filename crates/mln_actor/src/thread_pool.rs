@@ -195,10 +195,14 @@ impl Default for ThreadPool {
     }
 }
 
+/// The number of threads of the process-wide thread pool
+/// (`scheduler::get_background`).
+pub const BACKGROUND_THREADS: usize = 1 + 3;
+
 impl ThreadPool {
     #[must_use]
     pub(crate) fn new() -> Self {
-        ThreadPool { scheduler: ThreadedScheduler::new(1 + 3) }
+        ThreadPool { scheduler: ThreadedScheduler::new(BACKGROUND_THREADS) }
     }
 }
 

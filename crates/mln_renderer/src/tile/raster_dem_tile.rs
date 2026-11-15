@@ -69,7 +69,7 @@ impl std::ops::BitAnd for DEMTileNeighbors {
 /// worker's public member functions. Port-only: the codec writes them for
 /// a worker in another wasm instance (`tile/worker_codec`).
 #[derive(mln_wire::Wire)]
-pub enum RasterDEMWorkerMessage {
+pub(crate) enum RasterDEMWorkerMessage {
     Parse {
         #[wire(with = "shared_bytes::option")]
         data: Option<Data>,
@@ -82,7 +82,7 @@ pub enum RasterDEMWorkerMessage {
 /// tile's member functions the worker calls. Port-only: the codec writes them
 /// for a worker in another wasm instance (`tile/worker_codec`).
 #[derive(mln_wire::Wire)]
-pub enum RasterDEMTileMessage {
+pub(crate) enum RasterDEMTileMessage {
     Parsed { bucket: Option<Arc<HillshadeBucket>>, correlation_id: u64 },
     Error { error: Error, correlation_id: u64 },
 }

@@ -5,7 +5,6 @@
 //! `discover` again later instead of keeping its result.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
@@ -14,6 +13,7 @@ use mln_style::layer::{LayerTypeInfo, layer_type_info};
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
+use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
@@ -35,7 +35,7 @@ use crate::render_layer::LayerRenderData;
 use crate::text::glyph_store::HBShapeResults;
 
 /// How a tile is laid out, apart from its style and data.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, mln_wire::Wire)]
 pub(crate) struct LayoutParams {
     pub(crate) mode: MapMode,
     pub(crate) pixel_ratio: f32,
@@ -77,7 +77,7 @@ impl LayoutInput<'_> {
 
 /// What a tile's layout needs from glyphs and images.
 #[derive(Clone, Debug, Default, mln_wire::Wire)]
-pub struct Dependencies {
+pub(crate) struct Dependencies {
     /// The glyph ids per font stack, and the text that font faces shape.
     pub(crate) glyphs: GlyphDependencies,
     /// The icons and patterns. The images that `image` expressions found
@@ -91,8 +91,31 @@ pub struct Dependencies {
 }
 
 impl Dependencies {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.glyphs.glyphs.is_empty() && self.glyphs.shapes.is_empty() && self.images.is_empty()
+    /// Whether `resolved` answers every one of these: each glyph has a
+    /// position or is known missing, each text its shaping, and each image a
+    /// position of its type or is known missing.
+    pub(crate) fn satisfied_by(&self, resolved: &Resolved) -> bool {
+        let glyphs = self.glyphs.glyphs.iter().all(|(font_stack, ids)| {
+            resolved
+                .glyphs
+                .get(&font_stack_hash(font_stack))
+                .is_some_and(|positions| ids.iter().all(|id| positions.contains_key(id)))
+        });
+        let shapes = self.glyphs.shapes.iter().all(|(font_stack, types)| {
+            let shaped = resolved.shaping.get(font_stack);
+            types.iter().all(|(type_, texts)| {
+                let shaped = shaped.and_then(|shaped| shaped.get(type_));
+                texts.iter().all(|text| shaped.is_some_and(|shaped| shaped.contains_key(text)))
+            })
+        });
+        let images = self.images.iter().all(|(id, type_)| {
+            let positions = match type_ {
+                ImageType::Icon => &resolved.icons,
+                ImageType::Pattern => &resolved.patterns,
+            };
+            positions.contains_key(id) || resolved.missing_images.contains(id)
+        });
+        glyphs && shapes && images
     }
 }
 
@@ -100,15 +123,17 @@ impl Dependencies {
 /// in the atlas pages the render thread packed them into, and the shaping of
 /// the text that font faces draw. No bitmaps or pixels.
 #[derive(Debug, Default, mln_wire::Wire)]
-pub struct Resolved {
+pub(crate) struct Resolved {
+    /// `None` for a glyph that no font has, or whose range failed.
     pub(crate) glyphs: GlyphPositions,
     pub(crate) shaping: HBShapeResults,
-    /// A requested icon absent here is missing.
     #[wire(with = "sorted::map")]
     pub(crate) icons: ImagePositions,
-    /// A requested pattern absent here is missing.
     #[wire(with = "sorted::map")]
     pub(crate) patterns: ImagePositions,
+    /// The requested images that are missing, which a layout lays out
+    /// without.
+    pub(crate) missing_images: VecSet<String>,
 }
 
 /// A tile's layer groups, as [`discover`] left them for [`build`].
@@ -128,14 +153,6 @@ struct DiscoveredGroup {
     layout: Option<Box<dyn Layout>>,
 }
 
-impl Discovered {
-    /// Whether a layout uses glyphs or images, so that `build` finishes it
-    /// after the other groups.
-    pub(crate) fn has_waiting_layouts(&self) -> bool {
-        self.groups.iter().any(|group| group.layout.as_ref().is_some_and(|layout| layout.has_dependencies()))
-    }
-}
-
 /// A tile's buckets and feature index.
 pub(crate) struct Built {
     /// Each layer's bucket, by layer id.
@@ -145,23 +162,19 @@ pub(crate) struct Built {
 
 /// Groups the layers, builds the layouts of the groups that can need glyphs
 /// or images (symbol layers, and fill, line and fill-extrusion layers with a
-/// pattern), and records what they need. It builds no bucket. `None` if
-/// `obsolete` was set.
-pub(crate) fn discover(input: &LayoutInput<'_>, obsolete: &AtomicBool) -> Result<Option<Discovered>, Error> {
+/// pattern), and records what they need. It builds no bucket.
+pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
     let mut discovered = Discovered {
         groups: Vec::new(),
         filter_groups: FilterGroups::default(),
         dependencies: Dependencies::default(),
     };
     let Some(data) = input.data else {
-        return Ok(Some(discovered));
+        return Ok(discovered);
     };
     let unavailable_images = UnavailableImages::new();
 
     for (_, layers) in group_layers(input.layers) {
-        if obsolete.load(Ordering::SeqCst) {
-            return Ok(None);
-        }
         let leader_impl = &layers[0].base_impl;
         if !data.has_layer(&leader_impl.source_layer)? {
             continue;
@@ -193,19 +206,14 @@ pub(crate) fn discover(input: &LayoutInput<'_>, obsolete: &AtomicBool) -> Result
         discovered.dependencies.images.entry(id.clone()).or_insert(ImageType::Icon);
         discovered.dependencies.unavailable_images.insert(id);
     }
-    Ok(Some(discovered))
+    Ok(discovered)
 }
 
 /// Builds every bucket and the feature index, from what [`discover`] made of
 /// the same `input` and what its dependencies resolved to. The feature index
 /// gets the groups that use no glyphs or images first, then the others,
-/// each in group order. `None` if `obsolete` was set.
-pub(crate) fn build(
-    discovered: Discovered,
-    input: &LayoutInput<'_>,
-    resolved: &Resolved,
-    obsolete: &AtomicBool,
-) -> Result<Option<Built>, Error> {
+/// each in group order.
+pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &Resolved) -> Result<Built, Error> {
     // Avoid small reallocations for populated cells. If we had a total
     // feature count, this could be based on that and the cell count.
     const ESTIMATED_ELEMENTS_PER_CELL: usize = 8;
@@ -214,16 +222,13 @@ pub(crate) fn build(
     let mut built = Built { render_data: HashMap::default(), feature_index: FeatureIndex::new(input.data.cloned()) };
     built.feature_index.reserve(ESTIMATED_ELEMENTS_PER_CELL);
     let Some(data) = input.data else {
-        return Ok(Some(built));
+        return Ok(built);
     };
     let canonical = &input.id.canonical;
     let LayoutParams { first_load, show_collision_boxes, .. } = input.params;
 
     let mut waiting = Vec::new();
     for DiscoveredGroup { layers, layout } in groups {
-        if obsolete.load(Ordering::SeqCst) {
-            return Ok(None);
-        }
         let leader_impl = &layers[0].base_impl;
         let layer_ids: Vec<String> = layers.iter().map(|layer| layer.base_impl.id.clone()).collect();
         built.feature_index.set_bucket_layer_ids(&leader_impl.id, &layer_ids);
@@ -238,18 +243,11 @@ pub(crate) fn build(
                 show_collision_boxes,
                 canonical,
             )?,
-            None => {
-                if !build_group(&layers, data, input, &mut filter_groups, &mut built, obsolete)? {
-                    return Ok(None);
-                }
-            }
+            None => build_group(&layers, data, input, &mut filter_groups, &mut built)?,
         }
     }
 
     for mut layout in waiting {
-        if obsolete.load(Ordering::SeqCst) {
-            return Ok(None);
-        }
         if layout.need_finalize_symbols() {
             layout.finalize_symbols(&resolved.shaping);
         }
@@ -266,19 +264,17 @@ pub(crate) fn build(
             canonical,
         )?;
     }
-    Ok(Some(built))
+    Ok(built)
 }
 
-/// Builds the bucket of a group that needs no glyphs or images. `false` if
-/// `obsolete` was set.
+/// Builds the bucket of a group that needs no glyphs or images.
 fn build_group(
     layers: &[Arc<dyn LayerProperties>],
     data: &TileData,
     input: &LayoutInput<'_>,
     filter_groups: &mut FilterGroups,
     built: &mut Built,
-    obsolete: &AtomicBool,
-) -> Result<bool, Error> {
+) -> Result<(), Error> {
     let leader_impl = &layers[0].base_impl;
     let layer_type = leader_impl.get_type_info();
     let parameters = input.bucket_parameters(layer_type);
@@ -310,16 +306,16 @@ fn build_group(
                 canonical,
             )?;
         }
-        return Ok(true);
+        return Ok(());
     }
 
     let filter = &leader_impl.filter;
     let source_layer_id = &leader_impl.source_layer;
     let Some(mut bucket) = layermanager::create_bucket(&parameters, layers) else {
-        return Ok(true);
+        return Ok(());
     };
     let Some(geometry_layer) = data.layer(source_layer_id)? else {
-        return Ok(true);
+        return Ok(());
     };
 
     bucket.set_retain_features_by_id(input.params.capture_rendered_features);
@@ -334,9 +330,6 @@ fn build_group(
     let selected = filter_groups.select(source_layer_id, &geometry_layer, filter, &context, passes);
 
     for i in 0..geometry_layer.len() {
-        if obsolete.load(Ordering::SeqCst) {
-            return Ok(false);
-        }
         if selected.as_ref().is_some_and(|selected| !selected[i]) {
             continue;
         }
@@ -367,5 +360,5 @@ fn build_group(
             });
         }
     }
-    Ok(true)
+    Ok(())
 }

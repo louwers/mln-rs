@@ -1,87 +1,40 @@
-// Port-only: how a tile reaches its worker.
+// Port-only: how a raster or raster-dem tile reaches its worker. Geometry
+// tiles submit jobs through `TileWorkers` (tile_workers.rs) instead.
 //
-// C++ `GeometryTile` owns an `OptionalActor<GeometryTileWorker>`,
-// `RasterTile` an `Actor<RasterTileWorker>` and `RasterDEMTile` an
-// `Actor<RasterDEMTileWorker>`, and each tile and its worker talk through
-// member function calls bound into actor messages. Here they talk only
-// through messages, one enum each way per worker type (`WorkerMessage` and
-// `TileMessage` in geometry_tile_worker.rs, `RasterWorkerMessage` and
-// `RasterTileMessage` in raster_tile.rs, `RasterDEMWorkerMessage` and
-// `RasterDEMTileMessage` in raster_dem_tile.rs), handed to a
-// `TileWorkerTransport` that the RenderOrchestrator owns. The transport
-// creates the worker for a tile and returns the `WorkerEndpoint` the tile
-// sends to; the worker's replies go to the `TileEndpoint` the tile hands
-// over.
+// A raster tile and its worker talk only through messages, one enum each way
+// per worker type (`RasterWorkerMessage` and `RasterTileMessage` in
+// raster_tile.rs, `RasterDEMWorkerMessage` and `RasterDEMTileMessage` in
+// raster_dem_tile.rs), handed to a `TileWorkerTransport` that the
+// RenderOrchestrator owns. The transport creates the worker for a tile and
+// returns the `WorkerEndpoint` the tile sends to; the worker's replies go to
+// the `TileEndpoint` the tile hands over.
 //
-// `InProcessTransport` is C++'s arrangement: the worker is an actor on the
-// map's tagged thread pool, or (synchronous updates of geometry tiles) an
-// object the tile calls directly, and messages pass by value.
-// `SerializingTransport` (worker_codec/transport.rs) puts the workers in
-// other worker instances (the browser's Web Workers) and sends the messages
-// as bytes.
-
-use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::rc::Weak;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+// `InProcessTransport` puts the worker on the map's thread pool, as C++
+// does. `RemoteWorkers` (worker_codec/transport.rs) puts it in another
+// worker instance (the browser's Web Workers) and sends the messages as
+// bytes.
 
 use mln_actor::actor::{Actor, PoolActorRef};
-use mln_actor::{ActorRef, LocalObject, TaggedScheduler};
-use mln_map_types::MapMode;
-use mln_text::glyph::FontFaces;
-use mln_tile_id::OverscaledTileID;
+use mln_actor::{ActorRef, TaggedScheduler};
 
-use crate::tile::geometry_tile::GeometryTileInner;
-use crate::tile::geometry_tile_worker::{GeometryTileWorker, TileMessage, WorkerMessage};
 use crate::tile::raster_dem_tile::{
     RasterDEMTileInner, RasterDEMTileMessage, RasterDEMTileWorker, RasterDEMWorkerMessage,
 };
 use crate::tile::raster_tile::{RasterTileInner, RasterTileMessage, RasterTileWorker, RasterWorkerMessage};
 
-/// The arguments of the C++ `GeometryTileWorker` constructor that a tile
-/// passes, plus whether the worker runs synchronously
-/// (`TileParameters::isUpdateSynchronous`).
-///
-/// The codec writes them for a worker in another worker instance
-/// (`worker_codec`), without what can't cross: there, the instance's host
-/// gives the worker an `obsolete` flag of its own, and the worker runs as an
-/// actor.
-#[derive(Clone, mln_wire::Wire)]
-pub struct WorkerParameters {
-    pub(crate) id: OverscaledTileID,
-    /// Set by the tile when it no longer needs the worker's results.
-    #[wire(skip)]
-    pub(crate) obsolete: Arc<AtomicBool>,
-    pub(crate) mode: MapMode,
-    pub(crate) pixel_ratio: f32,
-    pub(crate) show_collision_boxes: bool,
-    pub(crate) font_faces: Option<Arc<FontFaces>>,
-    pub(crate) capture_rendered_features: bool,
-    #[wire(skip)]
-    pub(crate) synchronous: bool,
-}
-
-/// Where a worker's messages for its tile go: `TileMessage`s from a
-/// `GeometryTileWorker`, or `M` from another worker type.
-pub trait TileEndpoint<M = TileMessage>: Send {
+/// Where a worker's messages of type `M` for its tile go.
+pub(crate) trait TileEndpoint<M>: Send {
     fn send(&self, message: M);
 }
 
-/// Where a tile's messages for its worker go: `WorkerMessage`s for a
-/// `GeometryTileWorker`, or `M` for another worker type. Dropping it drops the
-/// worker.
-pub trait WorkerEndpoint<M = WorkerMessage> {
+/// Where a tile's messages of type `M` for its worker go. Dropping it drops
+/// the worker.
+pub(crate) trait WorkerEndpoint<M> {
     fn send(&self, message: M);
 }
 
-/// Creates the worker of each `GeometryTile`, `RasterTile` and `RasterDEMTile`.
-pub trait TileWorkerTransport {
-    /// Creates the worker for a `GeometryTile`; its replies go to `tile`. With
-    /// `parameters.synchronous`, `tile` is called directly on the calling
-    /// thread.
-    fn create(&self, parameters: WorkerParameters, tile: Box<dyn TileEndpoint>) -> Box<dyn WorkerEndpoint>;
-
+/// Creates the worker of each `RasterTile` and `RasterDEMTile`.
+pub(crate) trait TileWorkerTransport {
     /// Creates the `RasterTileWorker` of a `RasterTile`; its replies go to
     /// `tile`.
     fn create_raster(
@@ -98,13 +51,6 @@ pub trait TileWorkerTransport {
 }
 
 /// Replies go to the tile's mailbox.
-impl TileEndpoint for ActorRef<GeometryTileInner> {
-    fn send(&self, message: TileMessage) {
-        self.invoke(move |tile: &GeometryTileInner| tile.handle_worker_message(message));
-    }
-}
-
-/// Replies go to the tile's mailbox.
 impl TileEndpoint<RasterTileMessage> for ActorRef<RasterTileInner> {
     fn send(&self, message: RasterTileMessage) {
         self.invoke(move |tile: &RasterTileInner| tile.handle_worker_message(message));
@@ -115,18 +61,6 @@ impl TileEndpoint<RasterTileMessage> for ActorRef<RasterTileInner> {
 impl TileEndpoint<RasterDEMTileMessage> for ActorRef<RasterDEMTileInner> {
     fn send(&self, message: RasterDEMTileMessage) {
         self.invoke(move |tile: &RasterDEMTileInner| tile.handle_worker_message(message));
-    }
-}
-
-/// The synchronous `OptionalActorRef<GeometryTile>`: the tile itself, on
-/// the render thread.
-pub(crate) struct SynchronousTile(pub(crate) LocalObject<Weak<GeometryTileInner>>);
-
-impl TileEndpoint for SynchronousTile {
-    fn send(&self, message: TileMessage) {
-        if let Some(tile) = self.0.get().and_then(|weak| weak.upgrade()) {
-            tile.handle_worker_message(message);
-        }
     }
 }
 
@@ -143,37 +77,6 @@ impl InProcessTransport {
 }
 
 impl TileWorkerTransport for InProcessTransport {
-    fn create(&self, parameters: WorkerParameters, tile: Box<dyn TileEndpoint>) -> Box<dyn WorkerEndpoint> {
-        let WorkerParameters {
-            id,
-            obsolete,
-            mode,
-            pixel_ratio,
-            show_collision_boxes,
-            font_faces,
-            capture_rendered_features,
-            synchronous,
-        } = parameters;
-        let make_worker = move |self_ref| {
-            GeometryTileWorker::new(
-                self_ref,
-                tile,
-                id,
-                obsolete,
-                mode,
-                pixel_ratio,
-                show_collision_boxes,
-                font_faces,
-                capture_rendered_features,
-            )
-        };
-        if synchronous {
-            Box::new(SynchronousWorker::new(make_worker(None)))
-        } else {
-            Box::new(PoolWorker::new(Actor::new_tagged(&self.thread_pool, move |self_ref| make_worker(Some(self_ref)))))
-        }
-    }
-
     fn create_raster(
         &self,
         tile: Box<dyn TileEndpoint<RasterTileMessage>>,
@@ -189,8 +92,7 @@ impl TileWorkerTransport for InProcessTransport {
     }
 }
 
-/// A worker on the thread pool: `OptionalActor<GeometryTileWorker>` with an
-/// actor, or the `Actor` of a raster or DEM tile.
+/// The `Actor` of a raster or DEM tile's worker on the thread pool.
 struct PoolWorker<W: Send + 'static> {
     actor_ref: PoolActorRef<W>,
     _actor: Actor<W>,
@@ -199,12 +101,6 @@ struct PoolWorker<W: Send + 'static> {
 impl<W: Send + 'static> PoolWorker<W> {
     fn new(actor: Actor<W>) -> Self {
         PoolWorker { actor_ref: actor.self_ref(), _actor: actor }
-    }
-}
-
-impl WorkerEndpoint for PoolWorker<GeometryTileWorker> {
-    fn send(&self, message: WorkerMessage) {
-        self.actor_ref.invoke(move |worker: &mut GeometryTileWorker| worker.handle(message));
     }
 }
 
@@ -217,40 +113,5 @@ impl WorkerEndpoint<RasterWorkerMessage> for PoolWorker<RasterTileWorker> {
 impl WorkerEndpoint<RasterDEMWorkerMessage> for PoolWorker<RasterDEMTileWorker> {
     fn send(&self, message: RasterDEMWorkerMessage) {
         self.actor_ref.invoke(move |worker: &mut RasterDEMTileWorker| worker.handle(message));
-    }
-}
-
-/// The worker on the render thread, for synchronous updates.
-///
-/// The worker can't be re-entered, so a message sent while another is being
-/// handled (a tile that answers its worker from inside the worker's call)
-/// waits in `nested`. It is handled as soon as the
-/// message being handled returns, before `send` returns to its caller. C++
-/// makes such a nested call into the worker directly.
-struct SynchronousWorker {
-    worker: RefCell<GeometryTileWorker>,
-    nested: RefCell<VecDeque<WorkerMessage>>,
-}
-
-impl SynchronousWorker {
-    fn new(worker: GeometryTileWorker) -> Self {
-        SynchronousWorker { worker: RefCell::new(worker), nested: RefCell::new(VecDeque::new()) }
-    }
-}
-
-impl WorkerEndpoint for SynchronousWorker {
-    /// Handles the message with a direct call.
-    fn send(&self, message: WorkerMessage) {
-        let Ok(mut worker) = self.worker.try_borrow_mut() else {
-            self.nested.borrow_mut().push_back(message);
-            return;
-        };
-        worker.handle(message);
-        loop {
-            let Some(message) = self.nested.borrow_mut().pop_front() else {
-                break;
-            };
-            worker.handle(message);
-        }
     }
 }

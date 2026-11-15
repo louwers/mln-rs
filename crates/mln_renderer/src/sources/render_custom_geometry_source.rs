@@ -109,7 +109,7 @@ impl RenderSource for RenderCustomGeometrySource {
         self.tile_source.has_fading_tiles()
     }
 
-    fn for_each_geometry_tile(&self, f: &mut dyn FnMut(&GeometryTile)) {
+    fn for_each_geometry_tile<'s>(&'s self, f: &mut dyn FnMut(&'s GeometryTile)) {
         self.tile_source.tile_pyramid.geometry_tiles().for_each(f);
     }
 

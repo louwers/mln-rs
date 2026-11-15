@@ -30,7 +30,7 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tree::RenderTree;
 use crate::renderer_event::{RenderMode, RendererEvent, RendererEvents};
-use crate::tile::tile_worker_transport::TileWorkerTransport;
+use crate::tile::worker_codec::RemoteWorkers;
 use crate::update_parameters::UpdateParameters;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,11 +163,11 @@ impl Renderer {
         self.pixel_ratio
     }
 
-    /// Port-only: the transport that creates the tile workers of tiles
-    /// created from now on (by default on the map's thread pool). Set it
-    /// before the first render so that every tile uses it.
-    pub fn set_tile_worker_transport(&mut self, transport: Rc<dyn TileWorkerTransport>) {
-        self.orchestrator.set_tile_worker_transport(transport);
+    /// Port-only: runs the tiles' jobs, and the raster tiles' workers, in
+    /// `workers` (by default on the map's thread pool). Set it before the
+    /// first render so that every tile uses it.
+    pub fn set_tile_workers(&mut self, workers: &Rc<RemoteWorkers>) {
+        self.orchestrator.set_tile_workers(workers);
     }
 
     /// Sets the queue the renderer pushes its events to: the map's, which

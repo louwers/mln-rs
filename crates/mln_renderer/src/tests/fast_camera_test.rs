@@ -34,7 +34,9 @@ use mln_util::tileset::PartialTileset;
 use crate::render_source::RenderSource;
 use crate::sources::render_raster_source::RenderRasterSource;
 use crate::sources::render_vector_source::RenderVectorSource;
+use crate::tests::TileDriver;
 use crate::tile::tile_worker_transport::InProcessTransport;
+use crate::tile::tile_workers::SourceCounters;
 use crate::tile_parameters::TileParameters;
 use crate::tile_pyramid::TilePyramid;
 
@@ -157,6 +159,8 @@ struct Scene {
     vector_render_source: RenderVectorSource,
     raster_render_source: RenderRasterSource,
     transport: Rc<InProcessTransport>,
+    source: Rc<SourceCounters>,
+    driver: TileDriver,
     laid_out: bool,
 }
 
@@ -192,6 +196,8 @@ impl Scene {
             vector_render_source: RenderVectorSource::new(source::downcast_arc(&vector.base_impl())),
             raster_render_source: RenderRasterSource::new(source::downcast_arc(&raster.base_impl())),
             transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
+            source: crate::tests::test_source(),
+            driver: TileDriver::pool(&run_loop, &thread_pool),
             run_loop,
             thread_pool,
             network,
@@ -236,6 +242,7 @@ impl Scene {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
+            source: Rc::clone(&self.source),
             available_images: Arc::default(),
             font_faces: None,
             tile_worker_transport: Rc::<InProcessTransport>::clone(&self.transport),
@@ -252,11 +259,12 @@ impl Scene {
         // anything left to do.
         loop {
             self.thread_pool.wait_for_empty();
-            if !self.run_loop.run_once() {
-                self.thread_pool.wait_for_empty();
-                if !self.run_loop.run_once() {
-                    break;
-                }
+            let ran = self.run_loop.run_once();
+            self.driver.update_source(&self.vector_render_source);
+            let mut work = false;
+            self.vector_render_source.for_each_geometry_tile(&mut |tile| work |= tile.inner().has_work());
+            if !ran && !work && self.driver.jobs.is_idle() {
+                break;
             }
         }
     }

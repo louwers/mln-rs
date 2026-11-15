@@ -195,7 +195,7 @@ fn invoke_tile_changed() {
         assert!(tile.layer_properties_updated(&properties));
     }));
 
-    tile.set_layers(&[layer_properties], None, &Arc::default());
+    tile.set_style(&crate::tests::style(&[layer_properties]));
     tile.set_observer(observer);
     let mut result = Vec::new();
     tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();
@@ -203,8 +203,10 @@ fn invoke_tile_changed() {
 
     tile.set_tile_data(Arc::new(vec![Feature { geometry: Some(Point::new(0i16, 0).into()), ..Feature::default() }]));
 
+    let mut driver = crate::tests::TileDriver::inline(&test.run_loop);
     while !tile.is_complete() {
         test.run_loop.run_once();
+        driver.update_tile(&*tile);
     }
 
     tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();

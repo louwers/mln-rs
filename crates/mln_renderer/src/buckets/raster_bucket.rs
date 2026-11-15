@@ -62,7 +62,7 @@ fn full_mask() -> TileMask {
 /// image, which is what a worker sets (`tile/worker_codec`); the geometry is
 /// the tile's (`set_mask`).
 #[derive(mln_wire::Wire)]
-pub struct RasterBucket {
+pub(crate) struct RasterBucket {
     pub(crate) base: BucketBase,
     pub(crate) image: Option<Arc<PremultipliedImage>>,
     #[wire(skip, default = "unmasked")]

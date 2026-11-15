@@ -26,6 +26,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::tile::geometry_tile::GeometryTile;
+use crate::tile::job::SourceStyle;
 use crate::tile::tile::{Tile, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_cache::TileCache;
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
@@ -61,6 +62,9 @@ pub(crate) struct TilePyramid {
     /// when the tile that held it unloads, or the tile could not come back
     /// while its symbols are in view.
     max_content_elevation: f32,
+    /// The style the source's tiles last got, which the next update reuses
+    /// while its values stay the same.
+    style: Option<Arc<SourceStyle>>,
 }
 
 /// The `TilePyramid::update` callbacks of `algorithm::updateRenderables`.
@@ -74,7 +78,7 @@ where
     previously_rendered_tiles: &'p mut BTreeMap<UnwrappedTileID, OverscaledTileID>,
     retain: &'p mut BTreeSet<OverscaledTileID>,
     observer: &'p Rc<dyn TileObserver>,
-    layers: &'p [Arc<dyn LayerProperties>],
+    style: &'p Arc<SourceStyle>,
     parameters: &'p TileParameters<'a>,
     tile_range: Option<TileRange>,
     needs_relayout: bool,
@@ -125,14 +129,14 @@ where
         let tile = if let Some(tile) = tile {
             // A tile cached before the pixel ratio changed.
             if tile.set_pixel_ratio(self.parameters.pixel_ratio) {
-                tile.set_layers(self.layers, self.parameters.global_state.clone(), &self.parameters.available_images);
+                tile.set_style(self.style);
             }
             tile
         } else {
             let tile = (self.create_tile)(id, Rc::clone(self.observer))?;
             tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
             tile.set_pixel_ratio(self.parameters.pixel_ratio);
-            tile.set_layers(self.layers, self.parameters.global_state.clone(), &self.parameters.available_images);
+            tile.set_style(self.style);
             tile
         };
 
@@ -154,6 +158,7 @@ where
                 if self.render { TileLoadOrder::ideal(self.pass_rank) } else { TileLoadOrder::coarse(self.pass_rank) };
             self.pass_rank += 1;
             tile.set_load_order(order);
+            tile.base().load_order.set(order);
             tile.set_necessity(necessity);
             tile.base().retained_necessity.set(necessity);
         }
@@ -163,7 +168,7 @@ where
         let pixel_ratio_changed = tile.set_pixel_ratio(self.parameters.pixel_ratio);
         if self.needs_relayout || pixel_ratio_changed {
             tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
-            tile.set_layers(self.layers, self.parameters.global_state.clone(), &self.parameters.available_images);
+            tile.set_style(self.style);
         }
     }
 
@@ -284,6 +289,7 @@ impl TilePyramid {
             cache_enabled: true,
             last_subdivision_granularity: SubdivisionGranularitySetting::none(),
             max_content_elevation: 0.0,
+            style: None,
         }
     }
 
@@ -478,6 +484,7 @@ impl TilePyramid {
 
         self.rendered_tiles.clear();
 
+        let style = self.source_style(layers, parameters);
         let mut ctx = UpdateContext {
             tiles: &mut self.tiles,
             cache: &mut self.cache,
@@ -485,7 +492,7 @@ impl TilePyramid {
             previously_rendered_tiles: &mut previously_rendered_tiles,
             retain: &mut retain,
             observer: &self.observer,
-            layers,
+            style: &style,
             parameters,
             tile_range,
             needs_relayout: relayout,
@@ -554,6 +561,8 @@ impl TilePyramid {
             // Remove the tile from the map. If it requires re-layout,
             // discard it asynchronously, otherwise keep it in the cache
             if let Some(tile) = self.tiles.remove(&key) {
+                // Its jobs come after those of the tiles in view.
+                tile.base().load_order.set(TileLoadOrder::UNWANTED);
                 if relayout {
                     self.cache.deferred_release(tile);
                 } else if tile.is_renderable() {
@@ -1023,6 +1032,30 @@ impl TilePyramid {
     pub(crate) fn dump_debug_logs(&self) {
         for tile in self.tiles.values() {
             tile.dump_debug_logs();
+        }
+    }
+
+    /// The source's style with `layers` and `parameters`' global state and
+    /// font faces: the last one, if it has those values.
+    fn source_style(
+        &mut self,
+        layers: &[Arc<dyn LayerProperties>],
+        parameters: &TileParameters<'_>,
+    ) -> Arc<SourceStyle> {
+        let global_state = parameters.global_state.as_ref();
+        let font_faces = parameters.font_faces.as_ref();
+        match &self.style {
+            Some(style) if style.is(layers, global_state, font_faces) => Arc::clone(style),
+            previous => {
+                let style = Arc::new(SourceStyle {
+                    version: previous.as_ref().map_or(0, |style| style.version + 1),
+                    layers: layers.to_vec(),
+                    global_state: global_state.cloned(),
+                    font_faces: font_faces.cloned(),
+                });
+                self.style = Some(Arc::clone(&style));
+                style
+            }
         }
     }
 

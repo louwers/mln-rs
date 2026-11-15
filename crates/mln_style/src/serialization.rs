@@ -9,7 +9,7 @@
 // render and query suites across.
 //
 // Layers, layer properties and expressions cross once per pair of sides,
-// then by key (mln_util::serialization::shared): every tile's `setLayers`
+// then by key (mln_util::serialization::shared): every tile's layout job
 // has the same layers, and the layouts a worker sends back refer to the
 // properties they were laid out with, and their binders to the layers'
 // expressions.

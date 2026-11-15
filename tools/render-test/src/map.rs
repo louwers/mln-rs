@@ -5,7 +5,7 @@ use std::sync::Arc;
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
-use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
+use mln_renderer::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_util::image::PremultipliedImage;
 
@@ -51,10 +51,10 @@ impl Impl {
             HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, run_loop).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let transport = SerializingTransport::new(&run_loop.scheduler(), |replies| {
+            let workers = RemoteWorkers::new(&run_loop.scheduler(), |replies| {
                 Box::new(ThreadWorkerInstances::new(count, &replies))
             });
-            frontend.renderer().set_tile_worker_transport(transport);
+            frontend.renderer().set_tile_workers(&workers);
         }
         let file_source = proxy_loader(&resource_options);
         let mut map = Map::with_file_source(

@@ -7,7 +7,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 
-use super::{ErrorObserver, RasterTileTest, png, serializing_transport};
+use super::{ErrorObserver, RasterTileTest, png, remote_workers};
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::tile::raster_dem_tile::{DEMTileNeighbors, RasterDEMTile};
 use crate::tile::tile::Tile;
@@ -121,7 +121,7 @@ fn missing_and_empty() {
 fn parse_and_backfill_through_the_codec() {
     let test = RasterTileTest::new();
     let mut parameters = test.tile_parameters();
-    parameters.tile_worker_transport = serializing_transport(&test.run_loop, 2);
+    parameters.tile_worker_transport = remote_workers(&test.run_loop, 2);
     let errors = Rc::new(ErrorObserver::default());
     // Neighbours, so both instances get one.
     let tiles: Vec<RasterDEMTile> = (0..2)
