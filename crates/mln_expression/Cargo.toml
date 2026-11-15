@@ -36,27 +36,17 @@ smallvec.workspace = true
 thiserror.workspace = true
 
 # The locale services of the locale-sensitive expressions (src/locale): the
-# platform's where it has them (Foundation on Apple platforms, android.icu
-# through JNI on Android, the browser's Intl on wasm), else ICU4X with the CLDR
-# data it compiles in.
+# platform's where it has them (Foundation and the system ICU on Apple
+# platforms, android.icu through JNI on Android, the browser's Intl on wasm),
+# else ICU4X with the CLDR data it compiles in.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2.workspace = true
-objc2-core-foundation = { workspace = true, features = [
-  "CFNumberFormatter",
-  "CFString",
-] }
 objc2-foundation = { workspace = true, features = [
   "NSArray",
-  "NSFormatter",
   "NSLocale",
-  "NSMeasurement",
-  "NSMeasurementFormatter",
-  "NSNumberFormatter",
   "NSObjCRuntime",
   "NSRange",
   "NSString",
-  "NSUnit",
-  "NSValue",
 ] }
 
 [target.'cfg(target_os = "android")'.dependencies]

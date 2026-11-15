@@ -2,8 +2,8 @@
 //! `resolved-locale` and `number-format`). Like the HTTP transport, they are
 //! the platform's where it has them, else a crate:
 //!
-//! - Apple platforms: Foundation's localized string comparison,
-//!   `NSNumberFormatter`, `NSMeasurementFormatter` and `NSLocale`.
+//! - Apple platforms: Foundation's localized string comparison and
+//!   `NSLocale`, and the system ICU's number formatter.
 //! - Android: the framework's ICU (`android.icu`), through JNI.
 //! - wasm (the browser build): the browser's `Intl.Collator` and
 //!   `Intl.NumberFormat`.

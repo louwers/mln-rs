@@ -237,8 +237,8 @@ mod tests {
         assert_eq!(format(123_456.789, "en-US", "JPY", None, None), "¥123,457");
         assert_eq!(format(123_456.789, "en-US", "EUR", None, None), "€123,456.79");
         assert_eq!(format(1234.5, "de-DE", "EUR", None, None), "1.234,50\u{a0}€");
-        // CLDR gives Japanese the full-width yen sign; macOS 27's Foundation
-        // gives the ordinary one.
+        // CLDR gives Japanese the full-width yen sign; macOS 27's ICU gives
+        // the ordinary one.
         let yen = format(1234.6, "ja-JP", "JPY", None, None);
         if cfg!(target_vendor = "apple") {
             assert!(["¥1,235", "￥1,235"].contains(&yen.as_str()), "{yen}");
@@ -256,14 +256,7 @@ mod tests {
         assert_eq!(format(f64::NAN, "en-US", "", None, None), "NaN");
         assert_eq!(format(f64::INFINITY, "en-US", "", None, None), "∞");
         assert_eq!(format(f64::NEG_INFINITY, "en-US", "", None, None), "-∞");
-        // Foundation's currency formats may leave the symbol out of an
-        // infinity.
-        let currency = format(f64::NEG_INFINITY, "en-US", "USD", None, None);
-        if cfg!(target_vendor = "apple") {
-            assert!(currency.starts_with('-') && currency.ends_with('∞'), "{currency}");
-        } else {
-            assert_eq!(currency, "-$∞");
-        }
+        assert_eq!(format(f64::NEG_INFINITY, "en-US", "USD", None, None), "-$∞");
     }
 
     fn format_unit(number: f64, locale: &str, unit: &str, min: Option<u8>, max: Option<u8>) -> String {
@@ -289,17 +282,13 @@ mod tests {
 
     #[test]
     #[cfg(target_vendor = "apple")]
-    fn foundation_formats_temperature_digital_and_speed_units() {
+    fn the_system_icu_formats_every_unit() {
         assert_eq!(format_unit(1234.567, "en-US", "celsius", None, None), "1,234.567°C");
         assert_eq!(format_unit(1234.567, "en-US", "kilobyte", None, None), "1,234.567 kB");
         assert_eq!(format_unit(1234.567, "de-DE", "kilometer-per-hour", None, None), "1.234,567 km/h");
-    }
-
-    #[test]
-    #[cfg(target_vendor = "apple")]
-    fn units_foundation_lacks_fail() {
-        assert!(format_number(1.0, "en-US", "", "day", None, None).is_err());
-        assert!(format_number(1.0, "en-US", "", "liter-per-kilometer", None, None).is_err());
+        assert_eq!(format_unit(1.0, "en-US", "day", None, None), "1 day");
+        assert_eq!(format_unit(2.5, "en-US", "year", None, None), "2.5 yrs");
+        assert_eq!(format_unit(12.5, "en-US", "liter-per-kilometer", None, None), "12.5 L/km");
     }
 
     #[test]

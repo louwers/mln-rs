@@ -1,5 +1,6 @@
-//! The locale services on Apple platforms: Foundation's, with the system's
-//! locale data. The default locale is the user's current locale.
+//! The locale services on Apple platforms: Foundation's and the system ICU's,
+//! with the system's locale data. The default locale is the user's current
+//! locale.
 //!
 //! Foundation's localized comparison (`compare:options:range:locale:`) has
 //! neither collation types nor a case-first setting, so a collator honors
@@ -7,35 +8,25 @@
 //! effect, and its resolved locale leaves them out. Its case- and
 //! diacritic-insensitive options select the strength.
 //!
-//! A unit formats with `NSMeasurementFormatter` in its medium style, which is
-//! CLDR's short one, and `percent` with `NSNumberFormatter`'s percent style.
-//! Foundation has no unit for `day`, `week`, `month` or `year`, and of the
-//! compound units only for `kilometer-per-hour`, `meter-per-second`,
-//! `mile-per-hour` and `mile-per-gallon`, so a `number-format` with any other
-//! fails. Neither do macOS before 10.15 and iOS before 13 have units of
-//! digital information or durations shorter than a second.
+//! A number formats with the system's ICU, `libicucore`, through its number
+//! skeletons, as Safari's `Intl.NumberFormat` does. That needs macOS 10.14
+//! or iOS 12, whose ICU has no `petabyte` and no `percent` denominator.
 //!
-//! Each entry point drains an autorelease pool of its own: expressions are
-//! evaluated on threads that have none, and Foundation hands its locales and
-//! strings back through one.
+//! Each use of Foundation drains an autorelease pool of its own: expressions
+//! are evaluated on threads that have none, and Foundation hands its locales
+//! and strings back through one.
 
-#![expect(unsafe_code, reason = "Foundation through objc2 is the FFI here")]
+#![expect(unsafe_code, reason = "Foundation through objc2 and ICU are the FFI here")]
 
 use std::cmp::Ordering;
+use std::ffi::CString;
+use std::ptr::NonNull;
 use std::sync::OnceLock;
 
 use mln_util::hash::HashSet;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
-use objc2::{AnyThread, ClassType, available};
-use objc2_core_foundation::{CFNumberFormatter, CFString};
-use objc2_foundation::{
-    NSDimension, NSFormattingUnitStyle, NSLocale, NSMeasurement, NSMeasurementFormatter,
-    NSMeasurementFormatterUnitOptions, NSNumber, NSNumberFormatter, NSNumberFormatterRoundingMode,
-    NSNumberFormatterStyle, NSRange, NSString, NSStringCompareOptions, NSUnit, NSUnitAngle, NSUnitArea, NSUnitDuration,
-    NSUnitFuelEfficiency, NSUnitInformationStorage, NSUnitLength, NSUnitMass, NSUnitSpeed, NSUnitTemperature,
-    NSUnitVolume,
-};
+use objc2_foundation::{NSLocale, NSRange, NSString, NSStringCompareOptions};
 
 use super::keywords::CollationKeywords;
 use super::{FractionDigits, Sensitivity, Style, Unit};
@@ -134,148 +125,180 @@ impl Collator {
     }
 }
 
-/// The ISO 4217 fraction digits of a currency, or 2 for one Foundation
-/// doesn't know.
-fn currency_digits(code: &str) -> u8 {
-    let mut digits = 2;
-    let mut rounding_increment = 0.0;
-    // SAFETY: the pointers are to live locals.
-    let known = unsafe {
-        CFNumberFormatter::decimal_info_for_currency_code(
-            Some(&CFString::from_str(code)),
-            &raw mut digits,
-            &raw mut rounding_increment,
-        )
-    };
-    if known { u8::try_from(digits).unwrap_or(2) } else { 2 }
-}
+/// The bindings to the system's ICU, `libicucore`, which ships with every
+/// Apple OS but whose headers the SDKs leave out. Apple builds it without
+/// ICU's versioned symbol names.
+mod icu {
+    use std::ffi::c_char;
 
-fn dimension<T: ClassType<Super = NSDimension> + 'static>(unit: Retained<T>) -> Retained<NSDimension> {
-    Retained::into_super(unit)
-}
+    /// An ICU status: positive for an error, negative for a warning.
+    pub(super) type UErrorCode = i32;
+    pub(super) const U_ZERO_ERROR: UErrorCode = 0;
+    pub(super) const U_BUFFER_OVERFLOW_ERROR: UErrorCode = 15;
 
-/// Foundation's unit for a unit, other than `percent`, if it has one.
-fn foundation_unit(unit: Unit) -> Option<Retained<NSDimension>> {
-    // Units of digital information and those durations are in macOS 10.15
-    // and iOS 13.
-    let recent = available!(macos = 10.15, ios = 13.0, tvos = 13.0, watchos = 6.0, visionos = 1.0, ..);
-    let simple = match unit.unit {
-        "acre" => dimension(NSUnitArea::acres()),
-        "celsius" => dimension(NSUnitTemperature::celsius()),
-        "centimeter" => dimension(NSUnitLength::centimeters()),
-        "degree" => dimension(NSUnitAngle::degrees()),
-        "fahrenheit" => dimension(NSUnitTemperature::fahrenheit()),
-        "fluid-ounce" => dimension(NSUnitVolume::fluidOunces()),
-        "foot" => dimension(NSUnitLength::feet()),
-        "gallon" => dimension(NSUnitVolume::gallons()),
-        "gram" => dimension(NSUnitMass::grams()),
-        "hectare" => dimension(NSUnitArea::hectares()),
-        "hour" => dimension(NSUnitDuration::hours()),
-        "inch" => dimension(NSUnitLength::inches()),
-        "kilogram" => dimension(NSUnitMass::kilograms()),
-        "kilometer" => dimension(NSUnitLength::kilometers()),
-        "liter" => dimension(NSUnitVolume::liters()),
-        "meter" => dimension(NSUnitLength::meters()),
-        "mile" => dimension(NSUnitLength::miles()),
-        "mile-scandinavian" => dimension(NSUnitLength::scandinavianMiles()),
-        "milliliter" => dimension(NSUnitVolume::milliliters()),
-        "millimeter" => dimension(NSUnitLength::millimeters()),
-        "minute" => dimension(NSUnitDuration::minutes()),
-        "ounce" => dimension(NSUnitMass::ounces()),
-        "pound" => dimension(NSUnitMass::poundsMass()),
-        "second" => dimension(NSUnitDuration::seconds()),
-        "stone" => dimension(NSUnitMass::stones()),
-        "yard" => dimension(NSUnitLength::yards()),
-        "microsecond" if recent => dimension(NSUnitDuration::microseconds()),
-        "millisecond" if recent => dimension(NSUnitDuration::milliseconds()),
-        "nanosecond" if recent => dimension(NSUnitDuration::nanoseconds()),
-        "bit" if recent => dimension(NSUnitInformationStorage::bits()),
-        "byte" if recent => dimension(NSUnitInformationStorage::bytes()),
-        "gigabit" if recent => dimension(NSUnitInformationStorage::gigabits()),
-        "gigabyte" if recent => dimension(NSUnitInformationStorage::gigabytes()),
-        "kilobit" if recent => dimension(NSUnitInformationStorage::kilobits()),
-        "kilobyte" if recent => dimension(NSUnitInformationStorage::kilobytes()),
-        "megabit" if recent => dimension(NSUnitInformationStorage::megabits()),
-        "megabyte" if recent => dimension(NSUnitInformationStorage::megabytes()),
-        "petabyte" if recent => dimension(NSUnitInformationStorage::petabytes()),
-        "terabit" if recent => dimension(NSUnitInformationStorage::terabits()),
-        "terabyte" if recent => dimension(NSUnitInformationStorage::terabytes()),
-        _ => return None,
-    };
-    match unit.per {
-        None => Some(simple),
-        Some(per) => Some(match (unit.unit, per) {
-            ("kilometer", "hour") => dimension(NSUnitSpeed::kilometersPerHour()),
-            ("meter", "second") => dimension(NSUnitSpeed::metersPerSecond()),
-            ("mile", "hour") => dimension(NSUnitSpeed::milesPerHour()),
-            ("mile", "gallon") => dimension(NSUnitFuelEfficiency::milesPerGallon()),
-            _ => return None,
-        }),
+    #[repr(C)]
+    pub(super) struct UNumberFormatter {
+        _private: [u8; 0],
+    }
+
+    #[repr(C)]
+    pub(super) struct UFormattedNumber {
+        _private: [u8; 0],
+    }
+
+    #[link(name = "icucore", kind = "dylib")]
+    unsafe extern "C" {
+        pub(super) fn unumf_openForSkeletonAndLocale(
+            skeleton: *const u16,
+            skeleton_len: i32,
+            locale: *const c_char,
+            status: *mut UErrorCode,
+        ) -> *mut UNumberFormatter;
+        pub(super) fn unumf_close(formatter: *mut UNumberFormatter);
+        pub(super) fn unumf_openResult(status: *mut UErrorCode) -> *mut UFormattedNumber;
+        pub(super) fn unumf_closeResult(result: *mut UFormattedNumber);
+        pub(super) fn unumf_formatDouble(
+            formatter: *const UNumberFormatter,
+            value: f64,
+            result: *mut UFormattedNumber,
+            status: *mut UErrorCode,
+        );
+        pub(super) fn unumf_resultToString(
+            result: *const UFormattedNumber,
+            buffer: *mut u16,
+            capacity: i32,
+            status: *mut UErrorCode,
+        ) -> i32;
+        pub(super) fn ucurr_getDefaultFractionDigits(currency: *const u16, status: *mut UErrorCode) -> i32;
     }
 }
 
-/// Formats with an `NSNumberFormatter` in the decimal, currency or percent
-/// style, or with an `NSMeasurementFormatter` over one in the decimal style.
+/// The ISO 4217 fraction digits of a currency: 2 for one ICU doesn't know.
+fn currency_digits(code: &str) -> u8 {
+    let code: Vec<u16> = code.encode_utf16().chain([0]).collect();
+    let mut status = icu::U_ZERO_ERROR;
+    // SAFETY: the code is a NUL-terminated UTF-16 string.
+    let digits = unsafe { icu::ucurr_getDefaultFractionDigits(code.as_ptr(), &raw mut status) };
+    if status > 0 { 2 } else { u8::try_from(digits).unwrap_or(2) }
+}
+
+/// The type ICU's skeletons qualify a simple unit with.
+fn unit_type(unit: &str) -> Result<&'static str, String> {
+    Ok(match unit {
+        "acre" | "hectare" => "area",
+        "bit" | "byte" | "gigabit" | "gigabyte" | "kilobit" | "kilobyte" | "megabit" | "megabyte" | "petabyte"
+        | "terabit" | "terabyte" => "digital",
+        "celsius" | "fahrenheit" => "temperature",
+        "centimeter" | "foot" | "inch" | "kilometer" | "meter" | "mile" | "mile-scandinavian" | "millimeter"
+        | "yard" => "length",
+        "day" | "hour" | "microsecond" | "millisecond" | "minute" | "month" | "nanosecond" | "second" | "week"
+        | "year" => "duration",
+        "degree" => "angle",
+        "fluid-ounce" | "gallon" | "liter" | "milliliter" => "volume",
+        "gram" | "kilogram" | "ounce" | "pound" | "stone" => "mass",
+        "percent" => "concentr",
+        _ => return Err(format!("{unit} has no ICU unit type")),
+    })
+}
+
+/// The ICU number skeleton of a style and fraction limits.
+fn skeleton(style: Style<'_>, digits: FractionDigits) -> Result<String, String> {
+    let (stem, currency_digits) = match style {
+        Style::Decimal => (String::new(), None),
+        Style::Currency(code) => (format!("currency/{code} "), Some(currency_digits(code))),
+        Style::Unit(Unit { unit, per }) => {
+            let per = match per {
+                Some(per) => format!("per-measure-unit/{}-{per} ", unit_type(per)?),
+                None => String::new(),
+            };
+            // ICU 62 has `percent` only as this stem, not as a measure unit.
+            let unit = if unit == "percent" {
+                "percent".to_owned()
+            } else {
+                format!("measure-unit/{}-{unit}", unit_type(unit)?)
+            };
+            (format!("{unit} {per}"), None)
+        }
+    };
+    let (min, max) = digits.resolve(currency_digits);
+    let precision = if max == 0 {
+        "precision-integer".to_owned()
+    } else {
+        format!(".{}{}", "0".repeat(min.into()), "#".repeat((max - min).into()))
+    };
+    Ok(stem + &precision)
+}
+
+/// An open ICU number formatter.
+struct NumberFormatter(NonNull<icu::UNumberFormatter>);
+
+impl Drop for NumberFormatter {
+    fn drop(&mut self) {
+        // SAFETY: the formatter is open, and closes only here.
+        unsafe { icu::unumf_close(self.0.as_ptr()) }
+    }
+}
+
+/// An open ICU formatted number.
+struct FormattedNumber(NonNull<icu::UFormattedNumber>);
+
+impl Drop for FormattedNumber {
+    fn drop(&mut self) {
+        // SAFETY: the result is open, and closes only here.
+        unsafe { icu::unumf_closeResult(self.0.as_ptr()) }
+    }
+}
+
+/// Fails on an ICU error, with what failed.
+fn check(status: icu::UErrorCode, what: &str) -> Result<(), String> {
+    if status > 0 { Err(format!("{what} failed with ICU error {status}")) } else { Ok(()) }
+}
+
+/// Formats with the system ICU's number formatter, as Safari's
+/// `Intl.NumberFormat` does.
 pub(crate) fn format_number(
     number: f64,
     tag: &str,
     style: Style<'_>,
     digits: FractionDigits,
 ) -> Result<String, String> {
-    autoreleasepool(|_| {
-        let locale = resolve_locale(tag);
-        let formatter = NSNumberFormatter::new();
-        formatter.setLocale(Some(&locale));
-        let mut measure = None;
-        let currency_digits = match style {
-            Style::Decimal => {
-                formatter.setNumberStyle(NSNumberFormatterStyle::DecimalStyle);
-                None
-            }
-            Style::Currency(code) => {
-                formatter.setNumberStyle(NSNumberFormatterStyle::CurrencyStyle);
-                formatter.setCurrencyCode(Some(&NSString::from_str(code)));
-                Some(currency_digits(code))
-            }
-            // As in Intl, a number in percent is already a percentage.
-            Style::Unit(Unit { unit: "percent", per: None }) => {
-                formatter.setNumberStyle(NSNumberFormatterStyle::PercentStyle);
-                formatter.setMultiplier(Some(&NSNumber::numberWithInt(1)));
-                None
-            }
-            Style::Unit(unit) => {
-                let foundation_unit =
-                    foundation_unit(unit).ok_or_else(|| format!("{unit} can't be formatted on this platform"))?;
-                measure = Some(foundation_unit);
-                formatter.setNumberStyle(NSNumberFormatterStyle::DecimalStyle);
-                None
-            }
-        };
-        let (min, max) = digits.resolve(currency_digits);
-        // The maximum first: setting a limit moves the other past it.
-        formatter.setMaximumFractionDigits(max.into());
-        formatter.setMinimumFractionDigits(min.into());
-        formatter.setRoundingMode(NSNumberFormatterRoundingMode::RoundHalfEven);
-        // Foundation's own is "+∞".
-        formatter.setPositiveInfinitySymbol(&NSString::from_str("∞"));
-        let Some(unit) = measure else {
-            return formatter
-                .stringFromNumber(&NSNumber::numberWithDouble(number))
-                .map(|formatted| formatted.to_string())
-                .ok_or_else(|| format!("NSNumberFormatter can't format {number}"));
-        };
-        let measurement_formatter = NSMeasurementFormatter::new();
-        measurement_formatter.setLocale(Some(&locale));
-        measurement_formatter.setUnitOptions(NSMeasurementFormatterUnitOptions::ProvidedUnit);
-        measurement_formatter.setUnitStyle(NSFormattingUnitStyle::Medium);
-        measurement_formatter.setNumberFormatter(Some(&formatter));
-        let measurement = NSMeasurement::<NSUnit>::initWithDoubleValue_unit(NSMeasurement::alloc(), number, &unit);
-        // SAFETY: NSMeasurement's type parameter only types its unit, and the
-        // formatter takes a measurement of a dimension.
-        let formatted = unsafe {
-            let measurement: Retained<NSMeasurement> = Retained::cast_unchecked(measurement);
-            measurement_formatter.stringFromMeasurement(&measurement)
-        };
-        Ok(formatted.to_string())
-    })
+    let locale = autoreleasepool(|_| resolve_locale(tag).localeIdentifier().to_string());
+    let locale = CString::new(locale).map_err(|error| error.to_string())?;
+    let skeleton: Vec<u16> = skeleton(style, digits)?.encode_utf16().collect();
+    let skeleton_len = i32::try_from(skeleton.len()).map_err(|error| error.to_string())?;
+
+    let mut status = icu::U_ZERO_ERROR;
+    // SAFETY: the skeleton is `skeleton_len` UTF-16 units, and the locale a
+    // NUL-terminated string.
+    let formatter = unsafe {
+        icu::unumf_openForSkeletonAndLocale(skeleton.as_ptr(), skeleton_len, locale.as_ptr(), &raw mut status)
+    };
+    let formatter = NonNull::new(formatter).map(NumberFormatter);
+    check(status, "Opening a number formatter")?;
+    let formatter = formatter.ok_or("ICU opened no number formatter")?;
+
+    // SAFETY: the status is a live local.
+    let result = NonNull::new(unsafe { icu::unumf_openResult(&raw mut status) }).map(FormattedNumber);
+    check(status, "Opening a formatted number")?;
+    let result = result.ok_or("ICU opened no formatted number")?;
+
+    // SAFETY: the formatter and the result are open.
+    unsafe { icu::unumf_formatDouble(formatter.0.as_ptr(), number, result.0.as_ptr(), &raw mut status) };
+    check(status, "Formatting a number")?;
+
+    let mut buffer = vec![0; 64];
+    loop {
+        let capacity = i32::try_from(buffer.len()).map_err(|error| error.to_string())?;
+        // SAFETY: the result is open, and the buffer holds `capacity` units.
+        let len =
+            unsafe { icu::unumf_resultToString(result.0.as_ptr(), buffer.as_mut_ptr(), capacity, &raw mut status) };
+        let len = usize::try_from(len).unwrap_or_default();
+        if status == icu::U_BUFFER_OVERFLOW_ERROR {
+            status = icu::U_ZERO_ERROR;
+            buffer.resize(len, 0);
+            continue;
+        }
+        check(status, "Reading a formatted number")?;
+        return Ok(String::from_utf16_lossy(&buffer[..len]));
+    }
 }
