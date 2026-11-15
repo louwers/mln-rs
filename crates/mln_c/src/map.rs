@@ -83,7 +83,7 @@ pub(crate) unsafe fn command(
     // SAFETY: the caller's contract.
     let pending = unsafe { PendingCompletion::optional(completion) }?;
     let Some(pending) = pending else {
-        let _discarded = send(&object.map.discarding_results(completion::log_discarded_runtime_failure))?;
+        let _discarded = send(&object.map.discarding_results(|error| completion::log_discarded(&error.into())))?;
         return Ok(());
     };
     let sent = send(&object.map)?;

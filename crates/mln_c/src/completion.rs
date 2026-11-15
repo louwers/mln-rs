@@ -224,12 +224,6 @@ pub(crate) fn forward<T: Send + 'static, V: CompletionValue>(
     });
 }
 
-/// Logs the failure of a runtime command whose caller passed no completion,
-/// as [`complete_or_log`] does without a sink.
-pub(crate) fn log_discarded_runtime_failure(error: mln_util::Error) {
-    complete_or_log::<()>(None, Err(Error::from(error)), Generations::default());
-}
-
 /// Delivers a command's result to `sink`. Without a sink, a failure that
 /// isn't a cancellation is logged as one warning, so it isn't lost.
 pub(crate) fn complete_or_log<V: CompletionValue>(
@@ -241,15 +235,18 @@ pub(crate) fn complete_or_log<V: CompletionValue>(
         Some(sink) => sink.complete(result, generations),
         None => {
             if let Err(error) = result {
-                let status = error.status();
-                if status != MLN_STATUS_CANCELLED {
-                    Log::warning(
-                        Event::General,
-                        format!("discarded command failed (status {status}): {}", error.message()),
-                    );
-                }
+                log_discarded(&error);
             }
         }
+    }
+}
+
+/// Logs the failure of a command whose caller passed no completion as one
+/// warning, so it isn't lost. A cancellation isn't logged.
+pub(crate) fn log_discarded(error: &Error) {
+    let status = error.status();
+    if status != MLN_STATUS_CANCELLED {
+        Log::warning(Event::General, format!("discarded command failed (status {status}): {}", error.message()));
     }
 }
 
@@ -410,19 +407,6 @@ pub(crate) mod tests {
         drop(mln_util::logging::Log::set_thread_observer(previous));
         assert_eq!(
             [format!("discarded command failed (status {MLN_STATUS_INVALID_STATE}): map has no open command group")],
-            warnings.lock().as_slice()
-        );
-    }
-
-    #[test]
-    fn a_discarded_runtime_failure_logs_as_a_command_without_a_completion_does() {
-        let warnings = Arc::new(Mutex::new(Vec::new()));
-        let previous = mln_util::logging::Log::set_thread_observer(Some(Box::new(Warnings(Arc::clone(&warnings)))));
-        log_discarded_runtime_failure(mln_util::Error::new(ErrorKind::InvalidState, "style is not loaded"));
-        log_discarded_runtime_failure(mln_util::Error::new(ErrorKind::Cancelled, "the map was released"));
-        drop(mln_util::logging::Log::set_thread_observer(previous));
-        assert_eq!(
-            [format!("discarded command failed (status {MLN_STATUS_INVALID_STATE}): style is not loaded")],
             warnings.lock().as_slice()
         );
     }

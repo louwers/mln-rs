@@ -442,6 +442,32 @@ mod tests {
     }
 
     #[test]
+    fn a_map_command_without_a_completion_logs_its_failure() {
+        let _state = LogState::take();
+        assert_eq!(set_async(0), MLN_STATUS_OK);
+        let probe = Probe::new("discarded command failed", false);
+        assert_eq!(set(&handler(&probe, 0)), MLN_STATUS_OK);
+        let runtime = crate::runtime::tests::create();
+        let map = crate::map::tests::create_map(runtime, &crate::map::tests::options(1.0));
+        // SAFETY: a null completion and diagnostic.
+        let status = unsafe { crate::map::mln_map_end_command_group(map, core::ptr::null(), NULL_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
+        let records = probe.wait_for(1);
+        crate::map::tests::release_map(map);
+        crate::runtime::tests::release(runtime);
+        assert_eq!(
+            records.iter().map(|seen| (seen.severity, seen.message.as_str())).collect::<Vec<_>>(),
+            [(
+                MLN_LOG_SEVERITY_WARNING,
+                format!(
+                    "discarded command failed (status {MLN_STATUS_INVALID_STATE}): the map has no open command group"
+                )
+                .as_str()
+            )]
+        );
+    }
+
+    #[test]
     fn a_log_callback_and_its_release_cannot_call_back_into_the_library() {
         let _state = LogState::take();
         assert_eq!(set_async(0), MLN_STATUS_OK);
