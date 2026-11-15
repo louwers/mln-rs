@@ -1,9 +1,9 @@
 # mln-rs-wire-derive
 
 > **Warning: this is an internal crate of
-> [mln-rs](https://crates.io/crates/mln-rs).** It is published only because
-> mln-rs depends on it, and its API can change in any release without notice.
-> Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead.
+> [mln-rs](https://crates.io/crates/mln-rs).** It is published only because the
+> other mln-rs crates depend on it, and its API can change in any release
+> without notice. mln-rs doesn't re-export it.
 
 `#[derive(Wire)]` for `mln-rs-wire`.
 
