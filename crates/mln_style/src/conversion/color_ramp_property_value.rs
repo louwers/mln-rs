@@ -4,13 +4,10 @@ use super::{Convertible, Error};
 use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::expression::{Dependency, ParsingContext, Type, is_expression};
 
-/// Converts a color ramp property value. The two flags are ignored, as in
-/// C++.
+/// Converts a color ramp property value.
 pub(crate) fn convert_color_ramp_property_value(
     value: &Convertible<'_>,
     error: &mut Error,
-    _allow_data_expressions: bool,
-    _convert_tokens: bool,
 ) -> Option<ColorRampPropertyValue> {
     if value.is_undefined() {
         Some(ColorRampPropertyValue::default())

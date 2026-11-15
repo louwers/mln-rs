@@ -199,3 +199,12 @@ fn text_field_array_not_an_expression() {
         assert_eq!(error.message, "value must be a string");
     }
 }
+
+// An image property's array that isn't an expression is a conversion error.
+#[test]
+fn image_array_not_an_expression() {
+    let src = r#"{"id": "symbol", "type": "symbol", "source": "s", "layout": {"icon-image": [["foo"]]}}"#;
+    let mut error = Error::default();
+    assert!(convert_layer(&Convertible::from(&parse_json(src)), &mut error).is_none());
+    assert_eq!(error.message, "value must be a string");
+}

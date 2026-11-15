@@ -179,3 +179,12 @@ fn upcase_and_downcase_use_full_case_mapping() {
     assert_eq!(evaluate("downcase", "ὈΔΥΣΣΕΎΣ"), string("ὀδυσσεύς"));
     assert_eq!(evaluate("downcase", "Σ"), string("σ"));
 }
+
+/// Forms the style spec doesn't define are parse errors.
+#[test]
+fn non_spec_forms_fail_to_parse() {
+    for json in [r#"["image", "a", "b"]"#, r#"["array", "image", ["literal", []]]"#] {
+        let document: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert!(ParsingContext::new().parse_expression(&Convertible::from(&document), None).is_none(), "{json}");
+    }
+}

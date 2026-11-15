@@ -5,7 +5,7 @@
 
 use std::f64::consts::PI;
 
-use feature::{Value as MbglValue, ValueObject};
+use feature::Value as MbglValue;
 use geo_types::{Coord, Geometry, Polygon};
 use geojson::GeoJson;
 use geometry::Point;
@@ -148,8 +148,6 @@ fn line_string_within_polygon(line: &[Point<i64>], polygon: &TilePolygon) -> boo
 fn line_string_within_polygons(line: &[Point<i64>], polygons: &[TilePolygon]) -> bool {
     polygons.iter().any(|polygon| line_string_within_polygon(line, polygon))
 }
-
-// --- within.cpp ---
 
 fn lat_lon_to_tile_coordinates(point: &Coord<f64>, canonical: &CanonicalTileID) -> Point<i64> {
     let size = f64::from(EXTENT) * 2f64.powi(i32::from(canonical.z));
@@ -392,21 +390,17 @@ impl From<Within> for MbglValue {
 
 impl Within {
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
-        if value.is_array() {
-            // object value, quoted with ["within", value]
-            if value.array_length() != 2 {
-                ctx.error(format!(
-                    "'within' expression requires exactly one argument, but found {} instead.",
-                    value.array_length().wrapping_sub(1)
-                ));
-                return None;
-            }
-
-            let parsed_value = parse_value(&value.array_member(1), ctx)?;
-            return Within::from_source(parsed_value, ctx).map(|within| Expr::new(Node::Within(Box::new(within))));
+        // object value, quoted with ["within", value]
+        if value.array_length() != 2 {
+            ctx.error(format!(
+                "'within' expression requires exactly one argument, but found {} instead.",
+                value.array_length() - 1
+            ));
+            return None;
         }
-        ctx.error("'within' expression needs to be an array with exactly one argument.".to_owned());
-        None
+
+        let parsed_value = parse_value(&value.array_member(1), ctx)?;
+        Within::from_source(parsed_value, ctx).map(|within| Expr::new(Node::Within(Box::new(within))))
     }
 
     /// The `within` of a GeoJSON value: of its first polygon. Every
@@ -414,34 +408,11 @@ impl Within {
     fn from_source(geojson_source: GeoJson, ctx: &mut ParsingContext) -> Option<Within> {
         let candidates = geojson_geometries(&geojson_source);
         let found = candidates.iter().find_map(|geometry| get_polygon_info(*geometry, ctx));
-        // C++ reports nothing for an empty collection, and its parser then
-        // asserts that a failed parse reported an error.
+        // An empty collection has no geometry to report an error about.
         if candidates.is_empty() {
             ctx.error(POLYGON_REQUIRED.to_owned());
         }
         Some(Within { geometries: found?, geojson_source })
-    }
-}
-
-fn value_converter(v: &serde_json::Value) -> MbglValue {
-    match v {
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                MbglValue::Int(i)
-            } else if let Some(u) = n.as_u64() {
-                MbglValue::Uint(u)
-            } else {
-                MbglValue::Double(n.as_f64().unwrap_or(0.0))
-            }
-        }
-        serde_json::Value::Bool(b) => MbglValue::Bool(*b),
-        serde_json::Value::String(s) => MbglValue::String(s.clone()),
-        serde_json::Value::Array(a) => MbglValue::Array(a.iter().map(value_converter).collect()),
-        serde_json::Value::Object(o) => {
-            MbglValue::Object(o.iter().map(|(k, v)| (k.clone(), value_converter(v))).collect())
-        }
-        // Ignore other types as valid geojson only contains above types.
-        serde_json::Value::Null => MbglValue::Null,
     }
 }
 
@@ -466,14 +437,7 @@ impl Within {
 
     /// The GeoJSON, as a style value.
     fn source_value(&self) -> MbglValue {
-        let value = serde_json::to_value(&self.geojson_source).unwrap_or_default();
-        let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
-            o.iter().map(|(k, v)| (k.clone(), value_converter(v))).collect()
-        } else {
-            Log::error(Event::General, "Failed to serialize 'within' expression, converted rapidJSON is not an object");
-            ValueObject::new()
-        };
-        MbglValue::Object(serialized)
+        mln_conversion::json_to_value(&serde_json::to_value(&self.geojson_source).unwrap_or_default())
     }
 }
 

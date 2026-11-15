@@ -60,6 +60,6 @@ pub fn default_heatmap_color() -> ColorRampPropertyValue {
         r#"["interpolate",["linear"],["heatmap-density"],0,"rgba(0, 0, 255, 0)",0.1,"royalblue",0.3,"cyan",0.5,"lime",0.7,"yellow",1,"red"]"#,
     )
     .unwrap();
-    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error, false, false)
+    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error)
         .expect("the heatmap-color default converts")
 }

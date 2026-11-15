@@ -2,8 +2,6 @@ use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::{Convertible, Error};
 
 /// An image ID plus whether it is available.
-// The C++ default constructor leaves `available` uninitialized; here it is
-// false.
 #[derive(Clone, Debug, Default, PartialEq, Eq, mln_wire::Wire)]
 pub struct Image {
     image_id: String,
@@ -43,25 +41,13 @@ impl Image {
     }
 }
 
+/// Converts an image ID. An array is an expression, which the property value
+/// conversion parses before this.
 pub fn convert_image(value: &Convertible<'_>, error: &mut Error) -> Option<Image> {
-    if value.is_array() {
-        let image_parameters = value.array_member(0);
-        let image_parameters_length = image_parameters.array_length();
-        if image_parameters_length < 1 {
-            error.message = "Image has to contain an ID.".to_owned();
-            return None;
-        }
-
-        let Some(image_id) = image_parameters.array_member(0).to_string() else {
-            error.message = "Image has to contain an ID.".to_owned();
-            return None;
-        };
-
-        Some(Image::with_available(image_id, false))
-    } else if let Some(result) = value.to_string() {
-        Some(Image::with_available(result, false))
+    if let Some(result) = value.to_string() {
+        Some(Image::new(result))
     } else {
-        error.message = "Image must be plain string or array type.".to_owned();
+        error.message = "value must be a string".to_owned();
         None
     }
 }

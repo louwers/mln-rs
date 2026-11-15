@@ -210,8 +210,6 @@ impl Dependency {
     pub const IMAGE: Dependency = Dependency(1 << 1);
     /// Zoom level
     pub const ZOOM: Dependency = Dependency(1 << 2);
-    /// Not used yet, "distance-from-center" not supported
-    pub(crate) const LOCATION: Dependency = Dependency(1 << 3);
     /// Create variable binding ("let")
     pub const BIND: Dependency = Dependency(1 << 4);
     /// Use variable binding
@@ -258,7 +256,6 @@ impl fmt::Display for Dependency {
             (Dependency::FEATURE, "Feature"),
             (Dependency::IMAGE, "Image"),
             (Dependency::ZOOM, "Zoom"),
-            (Dependency::LOCATION, "Location"),
             (Dependency::BIND, "Bind"),
             (Dependency::VAR, "Var"),
             (Dependency::OVERRIDE, "Override"),
@@ -444,14 +441,6 @@ impl Expr {
     #[must_use]
     pub fn literal(value: Value) -> Self {
         Expr::new(Node::Literal(Box::new(Literal::new(value))))
-    }
-
-    /// Parses `value` as a literal: a JSON scalar, or `["literal", value]`.
-    pub fn parse_literal(
-        value: &mln_conversion::Convertible<'_>,
-        ctx: &mut crate::parsing_context::ParsingContext,
-    ) -> crate::parsing_context::ParseResult {
-        Literal::parse(value, ctx)
     }
 
     /// `["all", ...]`.
@@ -978,38 +967,6 @@ pub(crate) fn evaluate_feature(
 ) -> EvaluationResult {
     let f = GeoJSONFeature::new(feature);
     e.evaluate(&EvaluationContext::with_color_ramp(zoom, Some(&f), color_ramp_parameter))
-}
-
-pub fn evaluate_feature_with_images(
-    e: &Expr,
-    zoom: Option<f32>,
-    feature: &Feature<f64>,
-    color_ramp_parameter: Option<f64>,
-    available_images: &VecSet<String>,
-) -> EvaluationResult {
-    evaluate_feature_with_context(
-        e,
-        feature,
-        EvaluationContext::with_color_ramp(zoom, None, color_ramp_parameter)
-            .with_available_images(Some(available_images)),
-    )
-}
-
-pub fn evaluate_feature_with_canonical(
-    e: &Expr,
-    zoom: Option<f32>,
-    feature: &Feature<f64>,
-    color_ramp_parameter: Option<f64>,
-    available_images: &VecSet<String>,
-    canonical: &CanonicalTileID,
-) -> EvaluationResult {
-    evaluate_feature_with_context(
-        e,
-        feature,
-        EvaluationContext::with_color_ramp(zoom, None, color_ramp_parameter)
-            .with_available_images(Some(available_images))
-            .with_canonical_tile_id(Some(canonical)),
-    )
 }
 
 pub fn evaluate_accumulated(e: &Expr, accumulated: Option<&MbglValue>, feature: &Feature<f64>) -> EvaluationResult {

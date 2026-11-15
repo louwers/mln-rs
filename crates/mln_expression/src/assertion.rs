@@ -23,8 +23,7 @@ pub(crate) struct Assertion {
 
 fn assertion_type(name: &str) -> Option<Type> {
     match name {
-        // TODO: give "image" its own type once we implement image expressions
-        "string" | "image" => Some(Type::String),
+        "string" => Some(Type::String),
         "number" => Some(Type::Number),
         "boolean" => Some(Type::Boolean),
         "object" => Some(Type::Object),

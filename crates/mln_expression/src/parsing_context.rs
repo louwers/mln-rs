@@ -53,7 +53,7 @@ impl std::fmt::Display for ParsingError {
 
 pub type ParseResult = Option<Expr>;
 
-/// The bindings of a `let` scope (`std::map<std::string, std::shared_ptr<Expression>>`).
+/// The bindings of a `let` scope, by name.
 pub(crate) type Bindings = VecMap<String, Arc<Expr>>;
 
 pub(crate) struct Scope {
@@ -159,7 +159,7 @@ fn is_constant(expression: &Expr) -> bool {
 
 type ParseFunction = fn(&Convertible<'_>, &mut ParsingContext) -> ParseResult;
 
-/// The `expressionRegistry` of `parsing_context.cpp`.
+/// The parser of each expression that isn't a compound expression, by name.
 fn expression_registry(name: &str) -> Option<ParseFunction> {
     Some(match name {
         "==" | "!=" | ">" | "<" | ">=" | "<=" => parse_comparison,

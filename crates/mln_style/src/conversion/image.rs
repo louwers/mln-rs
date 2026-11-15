@@ -1,7 +1,3 @@
-// `Converter<expression::Image>` is defined in
-// src/mln/style/expression/image.cpp; mln_expression ports it as
-// `image::convert_image`.
-
 use super::{Converter, Convertible, Error};
 use crate::expression::Image;
 

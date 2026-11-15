@@ -116,9 +116,9 @@ where
 }
 
 impl StyleValue for ColorRampPropertyValue {
-    fn convert(value: &Convertible<'_>, info: &PropertyInfo) -> Result<Self, Error> {
+    fn convert(value: &Convertible<'_>, _info: &PropertyInfo) -> Result<Self, Error> {
         let mut error = Error::default();
-        convert_color_ramp_property_value(value, &mut error, info.data_driven, info.tokens).ok_or(error)
+        convert_color_ramp_property_value(value, &mut error).ok_or(error)
     }
 
     fn style_property(&self) -> StyleProperty {

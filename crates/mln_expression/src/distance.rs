@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use cheap_ruler::{CheapRuler, DistanceUnit};
-use feature::{Value as MbglValue, ValueObject};
+use feature::Value as MbglValue;
 use geojson::GeoJson;
 use geometry::Point;
 use mln_conversion::{Convertible, Error};
@@ -173,8 +173,6 @@ fn point_within_polygon(point: &Point<f64>, polygon: &Polygon<f64>, true_on_boun
     }
     within
 }
-
-// --- distance.cpp ---
 
 const MIN_POINTS_SIZE: usize = 100;
 const MIN_LINE_POINTS_SIZE: usize = 50;
@@ -1066,34 +1064,11 @@ impl Distance {
     fn from_source(geojson_source: GeoJson, ctx: &mut ParsingContext) -> Option<Distance> {
         let candidates = crate::within::geojson_geometries(&geojson_source);
         let found = candidates.iter().find_map(|geometry| get_geometry(*geometry, ctx));
-        // C++ reports nothing for an empty collection, and its parser then
-        // asserts that a failed parse reported an error.
+        // An empty collection has no geometry to report an error about.
         if candidates.is_empty() {
             ctx.error(NO_SUPPORTED_GEOMETRY.to_owned());
         }
         Some(Distance { geometries: found?, geojson_source })
-    }
-}
-
-fn convert_value(v: &serde_json::Value) -> MbglValue {
-    match v {
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                MbglValue::Int(i)
-            } else if let Some(u) = n.as_u64() {
-                MbglValue::Uint(u)
-            } else {
-                MbglValue::Double(n.as_f64().unwrap_or(0.0))
-            }
-        }
-        serde_json::Value::Bool(b) => MbglValue::Bool(*b),
-        serde_json::Value::String(s) => MbglValue::String(s.clone()),
-        serde_json::Value::Array(a) => MbglValue::Array(a.iter().map(convert_value).collect()),
-        serde_json::Value::Object(o) => {
-            MbglValue::Object(o.iter().map(|(k, v)| (k.clone(), convert_value(v))).collect())
-        }
-        // Ignore other types as valid geojson only contains above types.
-        serde_json::Value::Null => MbglValue::Null,
     }
 }
 
@@ -1121,14 +1096,7 @@ impl Distance {
 
     /// The GeoJSON, as a style value.
     fn source_value(&self) -> MbglValue {
-        let value = serde_json::to_value(&self.geojson_source).unwrap_or_default();
-        let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
-            o.iter().map(|(k, v)| (k.clone(), convert_value(v))).collect()
-        } else {
-            Log::error(Event::Style, "Failed to serialize 'distance' expression, converted rapidJSON is not an object");
-            ValueObject::new()
-        };
-        MbglValue::Object(serialized)
+        mln_conversion::json_to_value(&serde_json::to_value(&self.geojson_source).unwrap_or_default())
     }
 }
 

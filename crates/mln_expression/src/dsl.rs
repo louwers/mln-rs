@@ -42,7 +42,6 @@ pub fn create_expression(expr: &Convertible<'_>) -> Option<Expr> {
     ctx.parse_expression(expr, None)
 }
 
-/// `["error", message]`.
 #[must_use]
 pub fn literal_str(value: &str) -> Expr {
     literal(Value::String(value.to_owned()))

@@ -14,10 +14,6 @@ pub(crate) struct Literal {
     value: Value,
 }
 
-fn check_number(n: f64) -> Value {
-    if n > f64::MAX { Value::Number(f64::INFINITY) } else { Value::Number(n) }
-}
-
 #[expect(
     clippy::only_used_in_recursion,
     reason = "`ctx` is only passed on to the recursive calls, as the parsers of other expressions take it"
@@ -55,14 +51,7 @@ pub(crate) fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> 
 
     // since value represents a JSON value, if it's not undefined, object, or
     // array, it must be convertible to mln::Value
-    let v = value.to_value().expect("to_value of a JSON scalar");
-
-    match v {
-        MbglValue::Uint(n) => Some(check_number(n as f64)),
-        MbglValue::Int(n) => Some(check_number(n as f64)),
-        MbglValue::Double(n) => Some(check_number(n)),
-        v => Some(from_mbgl_value(&v)),
-    }
+    Some(from_mbgl_value(&value.to_value().expect("to_value of a JSON scalar")))
 }
 
 impl Literal {

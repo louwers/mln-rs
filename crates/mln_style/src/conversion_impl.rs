@@ -9,20 +9,13 @@ use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 
-/// Makes a `Value` from a style value, and gives the style property kind of a
-/// constant (`Color`, `Padding` and `VariableAnchorOffsetCollection`
-/// constants are reported as expressions, as in C++).
+/// Makes a `Value` from a style value.
 pub(crate) trait ValueFactory {
     fn make_value(&self) -> Value;
 
     /// The value as an element of an array value.
     fn make_element_value(&self) -> Value {
         self.make_value()
-    }
-
-    #[must_use]
-    fn constant_kind() -> Kind {
-        Kind::Constant
     }
 }
 
@@ -42,19 +35,11 @@ impl ValueFactory for Color {
     fn make_element_value(&self) -> Value {
         Value::String(self.stringify())
     }
-
-    fn constant_kind() -> Kind {
-        Kind::Expression
-    }
 }
 
 impl ValueFactory for Padding {
     fn make_value(&self) -> Value {
         self.serialize()
-    }
-
-    fn constant_kind() -> Kind {
-        Kind::Expression
     }
 }
 
@@ -67,10 +52,6 @@ impl ValueFactory for ProjectionDefinition {
 impl ValueFactory for VariableAnchorOffsetCollection {
     fn make_value(&self) -> Value {
         self.serialize()
-    }
-
-    fn constant_kind() -> Kind {
-        Kind::Expression
     }
 }
 
@@ -186,7 +167,7 @@ pub(crate) fn make_value<T: ValueFactory>(arg: &T) -> Value {
 pub(crate) fn make_style_property<T: ValueFactory>(value: &PropertyValue<T>) -> StyleProperty {
     match value {
         PropertyValue::Undefined => StyleProperty::default(),
-        PropertyValue::Constant(t) => StyleProperty::new(make_value(t), T::constant_kind()),
+        PropertyValue::Constant(t) => StyleProperty::new(make_value(t), Kind::Constant),
         PropertyValue::Expression(fn_) => StyleProperty::new(fn_.get_expression().serialize(), Kind::Expression),
     }
 }

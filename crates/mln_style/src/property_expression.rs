@@ -19,12 +19,9 @@ fn collect_global_state_refs_shared(expression: &Expr) -> Option<Arc<VecSet<Stri
     Some(Arc::new(refs))
 }
 
-/// A shared expression plus its precomputed constness flags.
-///
-/// C++ also caches `zoomCurve` (raw pointers into the shared expression).
-/// A Rust struct cannot hold borrows of its own `Arc`, so
-/// `get_zoom_curve` recomputes it with
-/// `find_zoom_curve_checked` (a pure function of the expression).
+/// A shared expression plus its precomputed constness flags. The zoom curve
+/// isn't cached, since it would borrow from the expression:
+/// `get_zoom_curve` finds it each time.
 #[derive(Clone, Debug)]
 pub struct PropertyExpressionBase {
     expression: Arc<Expr>,

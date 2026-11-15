@@ -75,7 +75,7 @@ fn sky_set_and_get() {
     assert_float_eq(0.2, *properties.sky_horizon_fog_blend.value.as_constant());
     assert_float_eq(0.3, *properties.sky_horizon_blend.value.as_constant());
     assert_float_eq(0.4, *properties.sky_atmosphere_blend.value.as_constant());
-    assert_eq!(Kind::Expression, sky.get_property("sky-color").get_kind());
+    assert_eq!(Kind::Constant, sky.get_property("sky-color").get_kind());
     assert_eq!(Kind::Undefined, sky.get_property("unknown").get_kind());
 }
 

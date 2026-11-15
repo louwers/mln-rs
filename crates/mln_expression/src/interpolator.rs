@@ -27,12 +27,11 @@ impl ExponentialInterpolator {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CubicBezierInterpolator {
     pub(crate) ub: UnitBezier,
-    /// Port-only: the control points as given. C++ serializes
-    /// `ub.getP1()`/`getP2()`, which recompute them from the polynomial
-    /// coefficients with rounding errors (0.1 comes back as
+    /// The control points as given, for serialization. Recomputing them from
+    /// `ub`'s polynomial coefficients has rounding errors (0.1 comes back as
     /// 0.10000000000000002, 1 as 1.0000000000000002), so the serialized
-    /// expression may not parse back ("values between 0 and 1") or parses to
-    /// another curve.
+    /// expression might not parse back ("values between 0 and 1") or might
+    /// parse to another curve.
     control_points: [f64; 4],
 }
 

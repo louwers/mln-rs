@@ -2,7 +2,7 @@ use crate::compound_expression::Op;
 use crate::expression::{Dependency, Expr, Node};
 use crate::value::Value;
 
-/// Port-only: the property keys `expression` reads, sorted and without
+/// The property keys `expression` reads, sorted and without
 /// duplicates, if they and the geometry type are all it reads of a feature:
 /// not its id, its geometry, its feature state, all its properties or a key
 /// it computes. The expression then gives features with the same geometry

@@ -113,7 +113,7 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
         w.line(&format!("        r#\"{raw}\"#,"));
         w.line("    )");
         w.line("    .unwrap();");
-        w.line("    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error, false, false)");
+        w.line("    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error)");
         w.line("        .expect(\"the heatmap-color default converts\")");
         w.line("}");
     }

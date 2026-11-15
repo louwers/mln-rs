@@ -54,7 +54,7 @@ pub use feature_property_keys::feature_property_keys;
 pub use find_zoom_curve::{ZoomCurvePtr, find_zoom_curve_checked};
 pub use formatted::{Formatted, FormattedSection};
 pub use image::Image;
-pub use interpolate::{Interpolate, create_interpolate};
+pub use interpolate::Interpolate;
 pub use interpolator::Interpolator;
 pub use is_expression::is_expression;
 pub use parsing_context::{ParseResult, ParsingContext, TypeAnnotationOption};

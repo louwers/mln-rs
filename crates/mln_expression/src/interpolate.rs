@@ -274,18 +274,7 @@ impl Interpolate {
 
 /// The label of an interpolate/step stop (`toValue` of a JSON number).
 pub(crate) fn parse_stop_label(value: &Convertible<'_>) -> Option<f64> {
-    match value.to_value()? {
-        MbglValue::Uint(n) => {
-            let n = n as f64;
-            Some(if n > f64::MAX { f64::INFINITY } else { n })
-        }
-        MbglValue::Int(n) => {
-            let n = n as f64;
-            Some(if n > f64::MAX { f64::INFINITY } else { n })
-        }
-        MbglValue::Double(n) => Some(if n > f64::MAX { f64::INFINITY } else { n }),
-        _ => None,
-    }
+    value.to_double()
 }
 
 pub(crate) fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -413,7 +402,7 @@ pub(crate) fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContex
     create_interpolate(output_type, interpolator, color_space, input, stops, ctx)
 }
 
-pub fn create_interpolate(
+pub(crate) fn create_interpolate(
     type_: Type,
     interpolator: Interpolator,
     color_space: ColorSpace,

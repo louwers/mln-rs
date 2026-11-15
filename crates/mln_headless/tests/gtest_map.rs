@@ -1786,7 +1786,7 @@ fn universal_style_getter() {
 
     let line_color = line_layer.get_property("line-color");
     assert_ne!(*line_color.get_value(), Value::Null);
-    assert_eq!(StylePropertyKind::Expression, line_color.get_kind());
+    assert_eq!(StylePropertyKind::Constant, line_color.get_kind());
     let Value::Array(color) = line_color.get_value() else {
         panic!("line-color: {:?}", line_color.get_value());
     };

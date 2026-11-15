@@ -49,7 +49,7 @@ impl Let {
 
             let binding_value = ctx.parse(&value.array_member(i + 1), i + 1, None, None)?;
 
-            // std::map::emplace keeps the first binding of a name.
+            // The first binding of a name wins.
             bindings.entry(name).or_insert_with(|| Arc::new(binding_value));
             i += 2;
         }

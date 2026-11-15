@@ -20,7 +20,7 @@ use crate::expression::{
 };
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
-use crate::utf8_op_helpers::{get_unicode_character_offset_on_validated_utf8, unicode_length_on_validated_utf8};
+use crate::utf8_op_helpers::get_unicode_character_offset_on_validated_utf8;
 use crate::util::rgba;
 use crate::value::{ObjectType, Value, from_mbgl_value_owned, to_string, type_of};
 
@@ -359,22 +359,7 @@ impl CompoundExpression {
             }
             Op::Sub => num(0)? - num(1)?,
             Op::Neg => -num(0)?,
-            Op::Div => {
-                let (x, y) = (num(0)?, num(1)?);
-                if y == 0.0 {
-                    if x == 0.0 {
-                        f64::NAN
-                    } else if x > 0.0 {
-                        f64::INFINITY
-                    } else if x < 0.0 {
-                        f64::NEG_INFINITY
-                    } else {
-                        x / y
-                    }
-                } else {
-                    x / y
-                }
-            }
+            Op::Div => num(0)? / num(1)?,
             // Rust's float `%` is C fmod.
             Op::Rem => num(0)? % num(1)?,
             Op::Pow => num(0)?.powf(num(1)?),
@@ -531,7 +516,6 @@ fn split(input: &str, delimiter: &str) -> Vec<Value> {
             result.push(Value::String(remaining[..character_length].to_owned()));
             remaining = &remaining[character_length..];
         }
-        let _ = unicode_length_on_validated_utf8(input);
         return result;
     }
     let mut start = 0;

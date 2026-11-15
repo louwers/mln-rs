@@ -49,29 +49,9 @@ impl FormattedSection {
     }
 }
 
-#[derive(Clone, Debug, Default, mln_wire::Wire)]
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct Formatted {
     pub sections: Vec<FormattedSection>,
-}
-
-impl PartialEq for Formatted {
-    fn eq(&self, other: &Self) -> bool {
-        if other.sections.len() != self.sections.len() {
-            return false;
-        }
-        for (this_section, other_section) in self.sections.iter().zip(&other.sections) {
-            if this_section.text != other_section.text
-                || this_section.image != other_section.image
-                || this_section.font_scale != other_section.font_scale
-                || this_section.font_stack != other_section.font_stack
-                || this_section.text_color != other_section.text_color
-                || this_section.vertical_align != other_section.vertical_align
-            {
-                return false;
-            }
-        }
-        true
-    }
 }
 
 /// The sections' text, concatenated.
