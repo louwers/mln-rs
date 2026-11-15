@@ -11,9 +11,5 @@
   "render-tests/projection/globe/fill-planet-pole": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
   "render-tests/projection/globe/fill-planet-tiles": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
   "render-tests/projection/globe/fill-seams/checkerboard": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/within/filter-with-inlined-geojson": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/within/layout-text": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/within/paint-circle": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/within/paint-icon": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/within/paint-text": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines"
+  "render-tests/within/filter-with-inlined-geojson": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines"
 }
