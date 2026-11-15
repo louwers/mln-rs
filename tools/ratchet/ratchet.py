@@ -173,7 +173,7 @@ def write_baseline(baseline: dict[str, dict[str, int]]) -> None:
         lines.append(f"[{rule}]")
         for path, count in sorted(baseline.get(rule, {}).items()):
             lines.append(f'"{path}" = {count}')
-    BASELINE.write_text("\n".join(lines) + "\n")
+    BASELINE.write_text("\n".join(lines) + "\n", newline="\n")
 
 
 def main() -> int:

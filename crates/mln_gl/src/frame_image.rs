@@ -31,7 +31,7 @@ impl FrameImports {
     }
 
     /// The textures of the frame begun, if any.
-    #[cfg(all(unix, not(target_vendor = "apple")))]
+    #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
     pub(crate) fn get(&self) -> Option<FrameImage> {
         self.0.get().map(|(image, _)| image)
     }

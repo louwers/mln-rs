@@ -109,6 +109,9 @@ description = "Build the API docs as docs.rs does; `--open` opens them"
 usage = 'arg "[args]..." var=#true help="Arguments to `cargo doc`, such as `--open`"'
 env = { DOCS_RS = "1" }
 run = 'eval "set -- ${usage_args:-}"; cargo doc --no-deps --workspace "$@"'
+# Windows runs tasks with cmd, which has no eval: the arguments come from the
+# template instead, each unquoted.
+run_windows = "cargo doc --no-deps --workspace {{ usage.args | default(value=[]) | join(sep=' ') }}"
 
 # Needs libclang, which bindgen loads at run time (LIBCLANG_PATH names its
 # directory if it isn't found).
@@ -144,6 +147,8 @@ run = "cargo deny --locked check licenses"
 description = "Check that no file gains panics or RefCell borrows (tools/ratchet); `--update` lowers the counts"
 usage = 'arg "[args]..." var=#true help="Arguments to tools/ratchet/ratchet.py, such as `--update`"'
 run = 'eval "set -- ${usage_args:-}"; python3 -I tools/ratchet/ratchet.py "$@"'
+# As for docs: cmd has no eval.
+run_windows = "python3 -I tools/ratchet/ratchet.py {{ usage.args | default(value=[]) | join(sep=' ') }}"
 
 [tasks.release]
 description = "Run the release workflow on main again, to finish a release that failed part way (RELEASING.md)"

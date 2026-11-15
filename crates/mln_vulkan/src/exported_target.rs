@@ -724,6 +724,7 @@ impl ExportedMemory {
     /// device's D3D11 device makes, which the image keeps, and names the
     /// texture's NT handle in `export`. `requirements` are the image's.
     #[cfg(windows)]
+    #[expect(clippy::used_underscore_binding, reason = "the image keeps the texture only to release it")]
     fn import_dxgi(
         &mut self,
         device: &Device,

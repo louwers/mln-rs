@@ -8,6 +8,7 @@
 
 mod support;
 
+use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -182,7 +183,7 @@ fn device_of(backend: BackendType) -> Option<Device> {
 }
 
 fn surface(window: &Arc<TestWindow>) -> Surface {
-    Surface::window(window.clone())
+    Surface::window(Arc::clone(window))
 }
 
 // A minimized window takes no session and no replacement, and a session's
@@ -260,10 +261,13 @@ fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
 
     let Some(Device::Vulkan(device)) = device_of(BackendType::Vulkan) else { return };
     let window = TestWindow::new();
-    let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(&device, window.clone(), SIZE, true).unwrap();
+    let (backend, target) =
+        mln_vulkan::SurfaceTarget::with_backend(&device, Arc::<TestWindow>::clone(&window), SIZE, true).unwrap();
     assert_eq!(Some(Handoff::Presented), vulkan_frame(&backend, &target));
     window.set_minimized(true);
-    let refused = mln_vulkan::SurfaceTarget::new(backend.clone(), window.clone(), SIZE, true).err().unwrap();
+    let refused = mln_vulkan::SurfaceTarget::new(Rc::clone(&backend), Arc::<TestWindow>::clone(&window), SIZE, true)
+        .err()
+        .unwrap();
     assert_eq!(ErrorKind::InvalidState, refused.kind, "{refused:?}");
     let frames: Vec<_> = (0..12).map(|_| vulkan_frame(&backend, &target)).collect();
     let presented = frames.iter().take_while(|frame| **frame == Some(Handoff::Presented)).count();

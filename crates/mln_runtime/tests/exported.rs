@@ -737,9 +737,9 @@ mod win32 {
                 D3D11_CREATE_DEVICE_FLAG(0),
                 None,
                 D3D11_SDK_VERSION,
-                Some(&mut device),
+                Some(&raw mut device),
                 None,
-                Some(&mut context),
+                Some(&raw mut context),
             )
             .unwrap();
             (device.unwrap().cast().unwrap(), context.unwrap().cast().unwrap())
@@ -759,7 +759,7 @@ mod win32 {
         unsafe {
             let texture: ID3D11Texture2D = device.OpenSharedResource1(HANDLE(handle as usize as *mut _)).unwrap();
             let mut description = D3D11_TEXTURE2D_DESC::default();
-            texture.GetDesc(&mut description);
+            texture.GetDesc(&raw mut description);
             assert_eq!((size.width, size.height), (description.Width, description.Height));
             assert_eq!(DXGI_FORMAT_B8G8R8A8_UNORM, description.Format);
             let staging_description = D3D11_TEXTURE2D_DESC {
@@ -770,11 +770,11 @@ mod win32 {
                 ..description
             };
             let mut staging: Option<ID3D11Texture2D> = None;
-            device.CreateTexture2D(&staging_description, None, Some(&mut staging)).unwrap();
+            device.CreateTexture2D(&raw const staging_description, None, Some(&raw mut staging)).unwrap();
             let staging = staging.unwrap();
             context.CopyResource(&staging, &texture);
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).unwrap();
+            context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)).unwrap();
             let (x, y) = (size.width as usize / 2, size.height as usize / 2);
             let mut pixel = [0u8; 4];
             std::ptr::copy_nonoverlapping(
@@ -831,7 +831,7 @@ mod win32 {
         // the test closes once the session is gone.
         let (reads, reads_handle): (ID3D11Fence, HANDLE) = unsafe {
             let mut fence: Option<ID3D11Fence> = None;
-            device.CreateFence(0, D3D11_FENCE_FLAG_SHARED, &mut fence).unwrap();
+            device.CreateFence(0, D3D11_FENCE_FLAG_SHARED, &raw mut fence).unwrap();
             let fence = fence.unwrap();
             let handle = fence.CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null()).unwrap();
             (fence, handle)
@@ -848,7 +848,7 @@ mod win32 {
             // host's live device.
             unsafe {
                 let mut frames: Option<ID3D11Fence> = None;
-                device.OpenSharedFence(HANDLE(sync.handle as usize as *mut _), &mut frames).unwrap();
+                device.OpenSharedFence(HANDLE(sync.handle as usize as *mut _), &raw mut frames).unwrap();
                 context.Wait(&frames.unwrap(), sync.value).unwrap();
             }
             assert_eq!(BGRA_RED, texture_pixel(&device, &context, &frame));

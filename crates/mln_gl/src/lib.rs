@@ -47,6 +47,8 @@ mod device;
 mod egl;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod exported_target;
+#[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
+mod overlay;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod surface_target;
 #[cfg(windows)]
@@ -63,6 +65,8 @@ pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::{Api, Device, DeviceOptions};
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use exported_target::ExportedTarget;
+#[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
+pub use overlay::{Overlay, OverlayTarget};
 /// Frames drawn into textures of the library's and read back.
 #[cfg(not(target_arch = "wasm32"))]
 pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;

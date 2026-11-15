@@ -3,6 +3,9 @@
 // format the target sets. Windows lets no pixel format change, so the window
 // keeps the library's after the target is gone, and takes a target of the
 // library's again.
+//
+// As on the other window backends, an overlay can draw over each frame
+// before it is presented (an app's controls).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -19,6 +22,7 @@ use windows_sys::Win32::Graphics::OpenGL::HGLRC;
 use windows_sys::Win32::UI::WindowsAndMessaging::IsIconic;
 
 use crate::frame_image::{FrameImports, default_framebuffer};
+use crate::overlay::{self, Overlay};
 use crate::renderer_backend::{PlatformContext, RendererBackend};
 use crate::wgl;
 
@@ -94,6 +98,8 @@ pub struct SurfaceTarget {
     size: Cell<Size>,
     /// The frame's default framebuffer, imported into the backend's `GlGpu`.
     image: FrameImports,
+    /// What draws over each frame, which `end_frame` takes out while it draws.
+    overlay: Cell<Option<Overlay>>,
 }
 
 impl SurfaceTarget {
@@ -142,6 +148,7 @@ impl SurfaceTarget {
             window,
             size: Cell::new(framebuffer_size),
             image: FrameImports::default(),
+            overlay: Cell::default(),
         };
         Ok((backend, target))
     }
@@ -154,6 +161,12 @@ impl SurfaceTarget {
     /// The window has `size` pixels from now on.
     pub fn resize(&self, size: Size) {
         self.size.set(size);
+    }
+
+    /// Draws `overlay` over each frame from now on, or nothing.
+    pub fn set_overlay(&self, overlay: Option<Overlay>) {
+        let _current = self.backend.context().enter();
+        self.overlay.set(overlay);
     }
 }
 
@@ -168,11 +181,18 @@ impl FrameTarget for SurfaceTarget {
         self.image.get_or_import(|| default_framebuffer(&self.backend, size))
     }
 
+    /// Presents the frame, with the overlay over it.
     fn end_frame(&self) -> Handoff {
-        if !self.image.release(&self.backend) {
+        let Some(image) = self.image.get() else {
             return Handoff::Dropped;
+        };
+        let context = self.backend.context();
+        let _current = context.enter();
+        if let Some(mut overlay) = self.overlay.take() {
+            overlay::draw(&mut overlay, context, image.size);
+            self.overlay.set(Some(overlay));
         }
-        let _current = self.backend.context().enter();
+        self.image.release(&self.backend);
         if let Err(e) = wgl::swap_buffers(self.window.dc.dc()) {
             Log::error(Event::GraphicsBackend, e);
         }
@@ -182,6 +202,106 @@ impl FrameTarget for SurfaceTarget {
 
 impl Drop for SurfaceTarget {
     fn drop(&mut self) {
+        // The overlay's GL objects go with the context current.
+        if let Some(overlay) = self.overlay.get_mut().take() {
+            let _current = self.backend.context().enter();
+            drop(overlay);
+        }
         self.image.release(&self.backend);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::num::NonZeroIsize;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use glow::HasContext as _;
+    use mln_gfx::frame::{FrameTarget as _, Handoff};
+    use mln_gfx::gpu::{ColorAttachment, Gpu as _, LoadOp, PassDesc};
+    use mln_gfx::window::raw_window_handle::{
+        DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
+        Win32WindowHandle, WindowHandle, WindowsDisplayHandle,
+    };
+    use mln_util::Color;
+    use mln_util::size::Size;
+
+    use super::SurfaceTarget;
+    use crate::wgl::HiddenWindow;
+
+    /// The handle of a window that the test keeps open.
+    struct Handle(NonZeroIsize);
+
+    impl HasWindowHandle for Handle {
+        fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+            // SAFETY: the window stays open until the target is gone.
+            Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::Win32(Win32WindowHandle::new(self.0))) })
+        }
+    }
+
+    impl HasDisplayHandle for Handle {
+        fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+            // SAFETY: Windows' display handle names nothing.
+            Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Windows(WindowsDisplayHandle::new())) })
+        }
+    }
+
+    /// Clears a frame of `target` red, and presents it.
+    fn red_frame(backend: &crate::RendererBackend, target: &SurfaceTarget) -> Handoff {
+        let image = target.begin_frame().unwrap();
+        let clear = LoadOp::Clear(Color::new(1.0, 0.0, 0.0, 1.0));
+        let pass = PassDesc {
+            label: "frame",
+            color: Some(ColorAttachment { texture: image.color, load: clear }),
+            depth_stencil: None,
+        };
+        let mut gpu = backend.gpu();
+        gpu.begin_pass(&pass).unwrap();
+        gpu.end_pass().unwrap();
+        gpu.flush(false).unwrap();
+        drop(gpu);
+        target.end_frame()
+    }
+
+    // The overlay draws over each frame into the window's framebuffer, with
+    // the frame drawn into it, until it is taken away.
+    #[test]
+    fn an_overlay_draws_over_each_frame() {
+        let (window, _) = HiddenWindow::new(0).unwrap();
+        let handle = Arc::new(Handle(NonZeroIsize::new(window.window() as isize).unwrap()));
+        let size = Size::new(8, 8);
+        let (backend, target) = SurfaceTarget::with_backend(handle, size, false).unwrap();
+        let pixels = Rc::new(Cell::new(Vec::new()));
+        let seen = Rc::clone(&pixels);
+        target.set_overlay(Some(Box::new(move |target| {
+            assert_eq!(size, target.size);
+            let mut pixel = [0u8; 4];
+            // SAFETY: the context is current, with the window's framebuffer
+            // bound, and the pixel holds the one RGBA texel read.
+            unsafe {
+                target.gl.read_pixels(
+                    4,
+                    4,
+                    1,
+                    1,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelPackData::Slice(Some(&mut pixel)),
+                );
+            }
+            let mut pixels = seen.take();
+            pixels.push(pixel);
+            seen.set(pixels);
+        })));
+        assert_eq!(Handoff::Presented, red_frame(&backend, &target));
+        assert_eq!(Handoff::Presented, red_frame(&backend, &target));
+        assert_eq!(vec![[255, 0, 0, 255]; 2], pixels.take());
+        target.set_overlay(None);
+        assert_eq!(Handoff::Presented, red_frame(&backend, &target));
+        assert_eq!(Vec::<[u8; 4]>::new(), pixels.take());
+        drop(target);
+        drop(backend);
     }
 }

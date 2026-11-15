@@ -779,13 +779,14 @@ mod windows_tests {
         device_options.backend = MLN_RENDER_BACKEND_VULKAN;
         let mut device = 0;
         // SAFETY: local arguments.
-        if unsafe { mln_gpu_device_create(&device_options, &mut device, NO_DIAGNOSTIC) } != MLN_STATUS_OK {
+        if unsafe { mln_gpu_device_create(&raw const device_options, &raw mut device, NO_DIAGNOSTIC) } != MLN_STATUS_OK
+        {
             eprintln!("skipped: no Vulkan device");
             return;
         }
         let mut capabilities = sized::<mln_gpu_device_capabilities>();
         // SAFETY: local arguments.
-        unsafe { mln_gpu_device_get_capabilities(device, &mut capabilities, NO_DIAGNOSTIC) };
+        unsafe { mln_gpu_device_get_capabilities(device, &raw mut capabilities, NO_DIAGNOSTIC) };
         if capabilities.export_kinds & MLN_GPU_EXPORT_KIND_FLAG_DXGI_SHARED_HANDLE == 0 {
             mln_gpu_device_release(device);
             eprintln!("skipped: the Vulkan device shares no D3D11 textures");
@@ -797,7 +798,7 @@ mod windows_tests {
         let styled = Waiter::new();
         let style = r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#;
         // SAFETY: local arguments.
-        unsafe { mln_map_set_style_json(map, view(style), &styled.descriptor, NO_DIAGNOSTIC) };
+        unsafe { mln_map_set_style_json(map, view(style), &raw const styled.descriptor, NO_DIAGNOSTIC) };
         assert_eq!(styled.status(), MLN_STATUS_OK);
         let ring = mln_exported_ring_target {
             logical_size: mln_logical_size { width: 32, height: 16 },
@@ -814,13 +815,22 @@ mod windows_tests {
         };
         let (mut session, attached, attach) = (0, Waiter::new(), attach_options());
         // SAFETY: local arguments.
-        let status =
-            unsafe { mln_map_attach(map, &target, device, &attach, &mut session, &attached.descriptor, NO_DIAGNOSTIC) };
+        let status = unsafe {
+            mln_map_attach(
+                map,
+                &raw const target,
+                device,
+                &raw const attach,
+                &raw mut session,
+                &raw const attached.descriptor,
+                NO_DIAGNOSTIC,
+            )
+        };
         mln_gpu_device_release(device);
         assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
         let mut session_capabilities = sized::<mln_render_session_capabilities>();
         // SAFETY: local arguments.
-        unsafe { mln_render_session_get_capabilities(session, &mut session_capabilities, NO_DIAGNOSTIC) };
+        unsafe { mln_render_session_get_capabilities(session, &raw mut session_capabilities, NO_DIAGNOSTIC) };
         assert_eq!(MLN_GPU_EXPORT_KIND_DXGI_SHARED_HANDLE, session_capabilities.export_kind);
 
         for token in 1..=4 {
@@ -828,10 +838,13 @@ mod windows_tests {
             assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_RENDERED);
             let mut frame = 0;
             // SAFETY: local outputs.
-            assert_eq!(unsafe { mln_render_session_acquire_frame(session, &mut frame, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+            assert_eq!(
+                unsafe { mln_render_session_acquire_frame(session, &raw mut frame, NO_DIAGNOSTIC) },
+                MLN_STATUS_OK
+            );
             let mut texture = sized::<mln_dxgi_shared_texture_frame>();
             // SAFETY: local outputs.
-            let status = unsafe { mln_acquired_frame_get_dxgi_shared_texture(frame, &mut texture, NO_DIAGNOSTIC) };
+            let status = unsafe { mln_acquired_frame_get_dxgi_shared_texture(frame, &raw mut texture, NO_DIAGNOSTIC) };
             assert_eq!(status, MLN_STATUS_OK);
             // DXGI_FORMAT_B8G8R8A8_UNORM.
             assert_eq!((texture.width, texture.height, texture.format), (32, 16, 87));
@@ -839,11 +852,11 @@ mod windows_tests {
             assert!(texture.slot < 3);
             let mut opaque = sized::<mln_opaque_fd_frame>();
             // SAFETY: local outputs.
-            let status = unsafe { mln_acquired_frame_get_opaque_fd(frame, &mut opaque, NO_DIAGNOSTIC) };
+            let status = unsafe { mln_acquired_frame_get_opaque_fd(frame, &raw mut opaque, NO_DIAGNOSTIC) };
             assert_eq!(status, MLN_STATUS_UNSUPPORTED);
             let done = mln_gpu_sync { kind: MLN_GPU_SYNC_CPU_COMPLETE, ..sized() };
             // SAFETY: the live frame, and a local sync.
-            assert_eq!(unsafe { mln_acquired_frame_release(frame, &done, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+            assert_eq!(unsafe { mln_acquired_frame_release(frame, &raw const done, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         }
         release_session(session);
         release_map(map);

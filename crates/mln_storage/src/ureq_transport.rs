@@ -281,7 +281,7 @@ fn error(error: &ureq::Error) -> ResourceError {
     ResourceError::new(reason, error.to_string())
 }
 
-/// The system's trust store, through native-tls (SChannel).
+/// The system's trust store, through native-tls (`SChannel`).
 #[cfg(target_os = "windows")]
 fn tls_config() -> TlsConfig {
     TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build()

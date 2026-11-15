@@ -187,6 +187,11 @@ impl HiddenWindow {
     pub(crate) fn dc(&self) -> HDC {
         self.dc
     }
+
+    #[cfg(test)]
+    pub(crate) fn window(&self) -> HWND {
+        self.window
+    }
 }
 
 impl Drop for HiddenWindow {

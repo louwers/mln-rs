@@ -465,7 +465,7 @@ pub enum SurfaceOverlay {
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     Vulkan(Box<dyn mln_vulkan::Overlay>),
     #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
-    Gl(mln_gl::surface_target::Overlay),
+    Gl(mln_gl::Overlay),
 }
 
 pub(crate) enum SurfaceKind {

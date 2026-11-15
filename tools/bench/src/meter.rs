@@ -99,7 +99,9 @@ pub(crate) fn process_cpu() -> Duration {
     let (mut creation, mut exit, mut kernel, mut user) = (zero, zero, zero, zero);
     // SAFETY: the current process's pseudo handle needs no closing, and each
     // FILETIME is valid for the call to fill.
-    let status = unsafe { GetProcessTimes(GetCurrentProcess(), &mut creation, &mut exit, &mut kernel, &mut user) };
+    let status = unsafe {
+        GetProcessTimes(GetCurrentProcess(), &raw mut creation, &raw mut exit, &raw mut kernel, &raw mut user)
+    };
     assert_ne!(status, 0, "GetProcessTimes");
     // FILETIME counts 100 ns intervals.
     let hundred_ns = |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);

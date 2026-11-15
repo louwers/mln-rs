@@ -15,7 +15,6 @@ use khronos_egl as egl;
 use mln_gfx::Window;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{TextureRegion, read_texels};
-use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::window::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -25,8 +24,9 @@ use parking_lot::Mutex;
 
 use crate::egl::{Egl, library};
 use crate::frame_image::{FrameImports, default_framebuffer};
+use crate::overlay;
+pub use crate::overlay::{Overlay, OverlayTarget};
 use crate::renderer_backend::{PlatformContext, RendererBackend};
-use crate::types::Gl;
 
 /// The window to present to, as its windowing system names it.
 #[derive(Clone, Copy)]
@@ -471,18 +471,6 @@ impl PlatformContext for WindowContext {
     }
 }
 
-/// What an overlay draws into: the window's framebuffer, bound, through the
-/// GL functions of the backend's context.
-pub struct OverlayTarget<'a> {
-    pub gl: &'a Arc<Gl>,
-    /// The size of the framebuffer, in pixels.
-    pub size: Size,
-}
-
-/// Draws over a frame before it is presented. It may leave any GL state
-/// behind but the framebuffer binding: the context forgets what it had set.
-pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
-
 /// What the target shares with its draw target.
 #[derive(Default)]
 struct Presentation {
@@ -608,13 +596,7 @@ impl FrameTarget for SurfaceTarget {
         let _current = context.enter();
         let size = self.size.get();
         if let Some(overlay) = self.presentation.overlay.borrow_mut().as_mut() {
-            let (gl, state) = (context.gl(), context.state());
-            state.bind_framebuffer(gl, None);
-            state.set_scissor(gl, None);
-            state.set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
-            state.set_stencil_mode(gl, &StencilMode::disabled());
-            overlay(&OverlayTarget { gl: context.gl_shared(), size });
-            state.set_dirty();
+            overlay::draw(overlay, context, size);
         }
         if self.presentation.readback_requested.replace(false) {
             match read_texels(&mut *self.backend.gpu(), image.color, TextureRegion::whole(image.size)) {

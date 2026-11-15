@@ -141,7 +141,7 @@ impl TextureDevice {
         // success, whose objects the interfaces then own.
         unsafe {
             let mut factory = std::ptr::null_mut();
-            (functions.create_factory)(&IDXGIFactory4::IID, &mut factory)
+            (functions.create_factory)(&IDXGIFactory4::IID, &raw mut factory)
                 .ok()
                 .map_err(|e| Error::unsupported(format!("DXGI has no factory: {e}")))?;
             let factory = IDXGIFactory4::from_raw(factory);
@@ -157,9 +157,9 @@ impl TextureDevice {
                 std::ptr::null(),
                 0,
                 D3D11_SDK_VERSION,
-                &mut device,
+                &raw mut device,
                 std::ptr::null_mut(),
-                &mut context,
+                &raw mut context,
             )
             .ok()
             .map_err(|e| Error::native(format!("D3D11 can't make a device on the Vulkan GPU's adapter: {e}")))?;
@@ -199,7 +199,7 @@ impl TextureDevice {
         unsafe {
             let mut texture: Option<ID3D11Texture2D> = None;
             self.device
-                .CreateTexture2D(&description, None, Some(&mut texture))
+                .CreateTexture2D(&raw const description, None, Some(&raw mut texture))
                 .map_err(native("D3D11 can't make a shared texture"))?;
             let texture = texture.ok_or_else(|| Error::native("D3D11 made no texture"))?;
             let resource: IDXGIResource1 = texture.cast().map_err(native("The texture is no DXGI resource"))?;
@@ -212,7 +212,9 @@ impl TextureDevice {
             // into it.
             let mut query = None;
             let done = D3D11_QUERY_DESC { Query: D3D11_QUERY_EVENT, MiscFlags: 0 };
-            self.device.CreateQuery(&done, Some(&mut query)).map_err(native("D3D11 can't make a query"))?;
+            self.device
+                .CreateQuery(&raw const done, Some(&raw mut query))
+                .map_err(native("D3D11 can't make a query"))?;
             let query = query.ok_or_else(|| Error::native("D3D11 made no query"))?;
             let context = self.context.lock();
             context.End(&query);
