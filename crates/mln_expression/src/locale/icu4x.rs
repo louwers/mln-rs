@@ -2,7 +2,11 @@
 //! Android): ICU4X, with the CLDR data it compiles into the library. The
 //! default locale comes from the POSIX environment.
 //!
-//! It leaves out a `number-format`'s unit: the number formats as a decimal.
+//! A unit takes its short CLDR name from `icu_experimental`, which has names
+//! only for units of length, area, volume, mass and duration, and `percent`
+//! takes CLDR's percent pattern. A `number-format` with another unit fails:
+//! `celsius`, `fahrenheit`, `degree`, the units of digital information, and
+//! every compound unit.
 
 use std::cmp::Ordering;
 use std::sync::OnceLock;
@@ -17,13 +21,24 @@ use icu_experimental::dimension::currency::CurrencyType;
 use icu_experimental::dimension::provider::currency::essentials::CurrencyEssentialsV1;
 use icu_experimental::dimension::provider::currency::fractions::CurrencyFractionsV1;
 use icu_experimental::dimension::provider::currency::symbols::CurrencySymbolsV1;
+use icu_experimental::dimension::provider::percent::DecimalPercentV1;
+use icu_experimental::dimension::provider::units::categorized_display_names::{
+    UnitsNamesAreaCoreV1, UnitsNamesAreaExtendedV1, UnitsNamesAreaOutlierV1, UnitsNamesDurationCoreV1,
+    UnitsNamesDurationExtendedV1, UnitsNamesDurationOutlierV1, UnitsNamesLengthCoreV1, UnitsNamesLengthExtendedV1,
+    UnitsNamesLengthOutlierV1, UnitsNamesMassCoreV1, UnitsNamesMassExtendedV1, UnitsNamesMassOutlierV1,
+    UnitsNamesVolumeCoreV1, UnitsNamesVolumeExtendedV1, UnitsNamesVolumeOutlierV1,
+};
+use icu_experimental::dimension::provider::units::display_names::UnitsDisplayNames;
 use icu_locale::extensions::unicode::key;
+use icu_locale::preferences::LocalePreferences;
 use icu_locale::subtags::script;
 use icu_locale::{Locale, LocaleCanonicalizer, LocaleExpander, locale};
+use icu_plurals::{PluralRules, PluralRulesPreferences};
+use icu_provider::marker::ErasedMarker;
 use icu_provider::prelude::*;
 use writeable::Writeable;
 
-use super::{FractionDigits, Sensitivity, Style};
+use super::{FractionDigits, Sensitivity, Style, Unit};
 
 /// The POSIX locale category whose environment variable names the default
 /// locale of an expression.
@@ -182,22 +197,118 @@ fn non_finite(number: f64) -> &'static str {
     if number.is_nan() { "NaN" } else { "∞" }
 }
 
+/// The display names of a unit, in its short width, from the first of
+/// `markers` that has them.
+type UnitNames = DataPayload<ErasedMarker<UnitsDisplayNames<'static>>>;
+
+fn load_unit_names<M>(attributes: &DataMarkerAttributes, locale: LocalePreferences) -> Option<UnitNames>
+where
+    M: DataMarker<DataStruct = UnitsDisplayNames<'static>>,
+    icu_experimental::provider::Baked: DataProvider<M>,
+{
+    let locale = M::make_locale(locale);
+    icu_experimental::provider::Baked
+        .load(silent_request(DataIdentifierBorrowed::for_marker_attributes_and_locale(attributes, &locale)))
+        .ok()
+        .map(|response| response.payload.cast())
+}
+
+/// The short CLDR names of a simple unit, which `icu_experimental` keeps by
+/// the unit's category and how widely it's used.
+fn unit_names(unit: &str, locale: LocalePreferences) -> Option<UnitNames> {
+    let attributes = format!("short-{unit}");
+    let attributes = DataMarkerAttributes::try_from_str(&attributes).ok()?;
+    [
+        load_unit_names::<UnitsNamesLengthCoreV1>,
+        load_unit_names::<UnitsNamesLengthExtendedV1>,
+        load_unit_names::<UnitsNamesLengthOutlierV1>,
+        load_unit_names::<UnitsNamesAreaCoreV1>,
+        load_unit_names::<UnitsNamesAreaExtendedV1>,
+        load_unit_names::<UnitsNamesAreaOutlierV1>,
+        load_unit_names::<UnitsNamesVolumeCoreV1>,
+        load_unit_names::<UnitsNamesVolumeExtendedV1>,
+        load_unit_names::<UnitsNamesVolumeOutlierV1>,
+        load_unit_names::<UnitsNamesMassCoreV1>,
+        load_unit_names::<UnitsNamesMassExtendedV1>,
+        load_unit_names::<UnitsNamesMassOutlierV1>,
+        load_unit_names::<UnitsNamesDurationCoreV1>,
+        load_unit_names::<UnitsNamesDurationExtendedV1>,
+        load_unit_names::<UnitsNamesDurationOutlierV1>,
+    ]
+    .into_iter()
+    .find_map(|load| load(attributes, locale))
+}
+
+/// Formats a measure: `percent` with CLDR's percent pattern, which takes the
+/// number as a percentage, and another unit with its short CLDR name in the
+/// plural form of the rounded number.
+fn format_unit(
+    number: f64,
+    sign: Sign,
+    unit: Unit,
+    decimal: Option<&Decimal>,
+    locale: &Locale,
+    formatter: &DecimalFormatter,
+) -> Result<String, String> {
+    let prefs = DecimalFormatterPreferences::from(locale);
+    if unit == (Unit { unit: "percent", per: None }) {
+        let locale = DecimalPercentV1::make_locale(prefs.locale_preferences);
+        let essentials: DataResponse<DecimalPercentV1> = icu_experimental::provider::Baked
+            .load(DataRequest { id: DataIdentifierBorrowed::for_locale(&locale), ..DataRequest::default() })
+            .map_err(|error| error.to_string())?;
+        let essentials = essentials.payload.get();
+        let amount = match decimal {
+            Some(decimal) => {
+                AbstractFormatter::format_unsigned(formatter, decimal.absolute.clone()).write_to_string().into_owned()
+            }
+            None => non_finite(number).to_owned(),
+        };
+        let formatted = if sign == Sign::Negative {
+            essentials.signed_pattern.interpolate((amount, &essentials.minus_sign)).write_to_string().into_owned()
+        } else {
+            essentials.unsigned_pattern.interpolate([amount]).write_to_string().into_owned()
+        };
+        return Ok(formatted);
+    }
+
+    let names = unit.per.is_none().then(|| unit_names(unit.unit, prefs.locale_preferences)).flatten();
+    let names = names.ok_or_else(|| format!("{unit} can't be formatted on this platform"))?;
+    let names = names.get();
+    let (pattern, amount) = match decimal {
+        Some(decimal) => {
+            let rules = PluralRules::try_new_cardinal(PluralRulesPreferences::from(locale))
+                .map_err(|error| error.to_string())?;
+            (names.get(decimal.into(), &rules), formatter.format(decimal).write_to_string().into_owned())
+        }
+        // NaN and the infinities take the other plural form, as in ICU.
+        None => (
+            names.elements.get_default().1,
+            AbstractFormatter::format_sign(formatter, non_finite(number), sign).write_to_string().into_owned(),
+        ),
+    };
+    Ok(pattern.interpolate((amount,)).write_to_string().into_owned())
+}
+
 /// Formats with `icu_decimal`'s symbols and grouping for the locale. A currency
-/// takes its CLDR pattern and symbol from `icu_experimental`.
+/// takes its CLDR pattern and symbol from `icu_experimental`, as does a unit.
 pub(crate) fn format_number(
     number: f64,
     locale: &str,
     style: Style<'_>,
     digits: FractionDigits,
 ) -> Result<String, String> {
-    let prefs = DecimalFormatterPreferences::from(&resolve_locale(locale, Category::Numeric));
+    let locale = resolve_locale(locale, Category::Numeric);
+    let prefs = DecimalFormatterPreferences::from(&locale);
     let formatter =
         DecimalFormatter::try_new(prefs, DecimalFormatterOptions::default()).map_err(|error| error.to_string())?;
     // Negative zero keeps its sign, as in ICU and JavaScript's Intl.
     let sign = if number.is_sign_negative() && !number.is_nan() { Sign::Negative } else { Sign::None };
     let currency = match style {
         Style::Currency(currency) => currency,
-        Style::Decimal | Style::Unit(_) => {
+        Style::Unit(unit) => {
+            return format_unit(number, sign, unit, round(number, digits, None).as_ref(), &locale, &formatter);
+        }
+        Style::Decimal => {
             let formatted = match round(number, digits, None) {
                 Some(decimal) => formatter.format(&decimal).write_to_string().into_owned(),
                 None => {

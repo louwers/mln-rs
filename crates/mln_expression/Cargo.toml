@@ -68,6 +68,7 @@ icu_collator.workspace = true
 icu_decimal.workspace = true
 icu_experimental.workspace = true
 icu_locale.workspace = true
+icu_plurals.workspace = true
 icu_provider.workspace = true
 writeable.workspace = true
 

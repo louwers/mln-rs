@@ -266,26 +266,21 @@ mod tests {
         }
     }
 
-    #[cfg(target_vendor = "apple")]
     fn format_unit(number: f64, locale: &str, unit: &str, min: Option<u8>, max: Option<u8>) -> String {
         format_number(number, locale, "", unit, min, max).expect("formatted number")
     }
 
     #[test]
-    #[cfg(target_vendor = "apple")]
     fn units_take_the_locale_short_pattern() {
         assert_eq!(format_unit(1234.567, "en-US", "meter", None, None), "1,234.567 m");
-        assert_eq!(format_unit(1234.567, "en-US", "celsius", None, None), "1,234.567°C");
-        assert_eq!(format_unit(1234.567, "en-US", "kilobyte", None, None), "1,234.567 kB");
-        assert_eq!(format_unit(1234.567, "de-DE", "kilometer-per-hour", None, None), "1.234,567 km/h");
-        assert_eq!(format_unit(2.5, "en-US", "liter", Some(2), None), "2.50 L");
+        assert_eq!(format_unit(1234.567, "de-DE", "kilometer", None, None), "1.234,567 km");
+        assert_eq!(format_unit(1.0, "en-US", "hour", Some(2), None), "1.00 hr");
         assert_eq!(format_unit(-1234.5678, "en-US", "meter", None, None), "-1,234.568 m");
         assert_eq!(format_unit(f64::NAN, "en-US", "meter", None, None), "NaN m");
         assert_eq!(format_unit(f64::INFINITY, "en-US", "meter", None, None), "∞ m");
     }
 
     #[test]
-    #[cfg(target_vendor = "apple")]
     fn percent_is_already_a_percentage() {
         assert_eq!(format_unit(0.5, "en-US", "percent", None, None), "0.5%");
         assert_eq!(format_unit(1234.567, "en-US", "percent", None, None), "1,234.567%");
@@ -294,9 +289,33 @@ mod tests {
 
     #[test]
     #[cfg(target_vendor = "apple")]
+    fn foundation_formats_temperature_digital_and_speed_units() {
+        assert_eq!(format_unit(1234.567, "en-US", "celsius", None, None), "1,234.567°C");
+        assert_eq!(format_unit(1234.567, "en-US", "kilobyte", None, None), "1,234.567 kB");
+        assert_eq!(format_unit(1234.567, "de-DE", "kilometer-per-hour", None, None), "1.234,567 km/h");
+    }
+
+    #[test]
+    #[cfg(target_vendor = "apple")]
     fn units_foundation_lacks_fail() {
         assert!(format_number(1.0, "en-US", "", "day", None, None).is_err());
         assert!(format_number(1.0, "en-US", "", "liter-per-kilometer", None, None).is_err());
+    }
+
+    #[test]
+    #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+    fn icu4x_unit_names_take_the_plural_form() {
+        assert_eq!(format_unit(1.0, "en-US", "day", None, None), "1 day");
+        assert_eq!(format_unit(2.0, "en-US", "day", None, None), "2 days");
+        assert_eq!(format_unit(f64::NEG_INFINITY, "en-US", "percent", None, None), "-∞%");
+    }
+
+    #[test]
+    #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+    fn units_icu4x_lacks_fail() {
+        assert!(format_number(1.0, "en-US", "", "celsius", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "", "kilobyte", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "", "kilometer-per-hour", None, None).is_err());
     }
 
     #[test]
