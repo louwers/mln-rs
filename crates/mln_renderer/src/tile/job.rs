@@ -8,7 +8,9 @@
 //! discovery; the tile resolves them and runs the job again, which
 //! discovers again and builds.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use mln_style::expression::GlobalStateMap;
@@ -20,8 +22,9 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
+use parking_lot::Mutex;
 
-use crate::layout::tile_layout::{Dependencies, LayoutInput, LayoutParams, Resolved, build, discover};
+use crate::layout::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::geometry_tile::LayoutResult;
 use crate::tile::worker_codec::fields;
 
@@ -50,6 +53,10 @@ pub(crate) struct JobId {
 pub(crate) struct Run {
     pub(crate) id: JobId,
     pub(crate) job: Job,
+    /// Set once the tile no longer wants the job's result. Natively, a job
+    /// that hasn't started yet then answers `Failed` without running; it
+    /// doesn't cross to another instance.
+    pub(crate) superseded: Arc<AtomicBool>,
 }
 
 /// Worker → map: exactly one per `Run`.
@@ -164,11 +171,17 @@ pub(crate) struct JobTimes {
 /// Runs `run` and calls `done` with its reply exactly once, before
 /// returning. If the job panics, `done` gets `Failed` as the panic unwinds.
 /// `cache` is the worker's tile data cache: `None` natively, where the data
-/// always comes with the job.
-pub(crate) fn run_job(run: Run, cache: Option<&mut DataCache>, done: impl FnOnce(Reply, JobTimes)) {
-    let Run { id, job } = run;
+/// always comes with the job. `memo` keeps what a job that answered
+/// `NeedsDeps` discovered, for its resume.
+pub(crate) fn run_job(
+    run: Run,
+    cache: Option<&mut DataCache>,
+    memo: Option<&DiscoveryMemo>,
+    done: impl FnOnce(Reply, JobTimes),
+) {
+    let Run { id, job, .. } = run;
     run_guarded(id, done, move || match job {
-        Job::Layout(job) => layout(id, job, cache),
+        Job::Layout(job) => layout(id, job, cache, memo),
     });
 }
 
@@ -204,7 +217,12 @@ impl<F: FnOnce(Reply, JobTimes)> Drop for ReplyGuard<F> {
     }
 }
 
-fn layout(id: JobId, job: LayoutJob, cache: Option<&mut DataCache>) -> (JobResult, JobTimes) {
+fn layout(
+    id: JobId,
+    job: LayoutJob,
+    cache: Option<&mut DataCache>,
+    memo: Option<&DiscoveryMemo>,
+) -> (JobResult, JobTimes) {
     let LayoutJob { style, available_images, data, params, resolved } = job;
     let mut times = JobTimes::default();
     let data = match (data, cache) {
@@ -239,15 +257,26 @@ fn layout(id: JobId, job: LayoutJob, cache: Option<&mut DataCache>) -> (JobResul
         params,
     };
 
-    let start = Instant::now();
-    let discovered = discover(&input);
-    times.discover = start.elapsed();
-    let mut discovered = match discovered {
-        Ok(discovered) => discovered,
-        Err(error) => return (JobResult::Failed(error), times),
+    // A resume of the same generation discovers what its first try did.
+    let memoized = memo.and_then(|memo| memo.take(&id, &style, &available_images));
+    let (discovered, deps) = if let Some(memoized) = memoized {
+        memoized
+    } else {
+        let start = Instant::now();
+        let discovered = discover(&input);
+        times.discover = start.elapsed();
+        match discovered {
+            Ok(mut discovered) => {
+                let deps = std::mem::take(&mut discovered.dependencies);
+                (discovered, deps)
+            }
+            Err(error) => return (JobResult::Failed(error), times),
+        }
     };
-    let deps = std::mem::take(&mut discovered.dependencies);
     if !deps.satisfied_by(&resolved) {
+        if let Some(memo) = memo {
+            memo.keep(id, Memoized { style, available_images, discovered, deps: deps.clone() });
+        }
         return (JobResult::NeedsDeps(deps), times);
     }
 
@@ -262,6 +291,63 @@ fn layout(id: JobId, job: LayoutJob, cache: Option<&mut DataCache>) -> (JobResul
         Err(error) => JobResult::Failed(error),
     };
     (result, times)
+}
+
+/// What a job that answered `NeedsDeps` discovered, kept for its resume: a
+/// cache, whose miss discovers again. A resume is a job of the same
+/// generation, so of the same inputs but `resolved`. It keeps one entry per
+/// tile, which the tile's next job takes, resume or not.
+pub(crate) struct DiscoveryMemo {
+    capacity: usize,
+    /// Oldest first.
+    entries: Mutex<VecDeque<(JobId, Memoized)>>,
+}
+
+struct Memoized {
+    /// The inputs whose addresses `discovered` keys its filter groups by,
+    /// kept alive so that no other value takes their place.
+    style: Arc<SourceStyle>,
+    available_images: Arc<VecSet<String>>,
+    discovered: Discovered,
+    deps: Dependencies,
+}
+
+impl DiscoveryMemo {
+    /// A memo of the last `capacity` jobs that answered `NeedsDeps`.
+    pub(crate) fn new(capacity: usize) -> Self {
+        DiscoveryMemo { capacity, entries: Mutex::new(VecDeque::new()) }
+    }
+
+    /// Takes the entry of job `id`'s tile: what the job of the same
+    /// generation discovered, for a resume with the same style and images.
+    /// Another generation's entry goes, since no job will take it.
+    fn take(
+        &self,
+        id: &JobId,
+        style: &Arc<SourceStyle>,
+        available_images: &Arc<VecSet<String>>,
+    ) -> Option<(Discovered, Dependencies)> {
+        let (kept, memoized) = {
+            let mut entries = self.entries.lock();
+            let index = entries.iter().position(|(kept, _)| kept.tile == id.tile)?;
+            entries.remove(index)?
+        };
+        let same = kept == *id
+            && Arc::ptr_eq(&memoized.style, style)
+            && Arc::ptr_eq(&memoized.available_images, available_images);
+        same.then_some((memoized.discovered, memoized.deps))
+    }
+
+    fn keep(&self, id: JobId, memoized: Memoized) {
+        let evicted = {
+            let mut entries = self.entries.lock();
+            entries.push_back((id, memoized));
+            let excess = entries.len().saturating_sub(self.capacity);
+            entries.drain(..excess).collect::<Vec<_>>()
+        };
+        // Freed outside the lock.
+        drop(evicted);
+    }
 }
 
 /// What a worker's data cache keeps by default.

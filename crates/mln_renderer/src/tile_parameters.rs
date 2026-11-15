@@ -10,7 +10,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use crate::tile::tile_worker_transport::TileWorkerTransport;
-use crate::tile::tile_workers::SourceCounters;
+use crate::tile::tile_workers::{SourceCounters, TileJobs};
 
 pub(crate) struct TileParameters<'a> {
     pub(crate) pixel_ratio: f32,
@@ -32,6 +32,9 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) capture_rendered_features: bool,
     /// The counters of the source whose tiles these parameters make.
     pub(crate) source: Rc<SourceCounters>,
+    /// Where tiles submit their jobs as soon as their inputs change; without,
+    /// they wait for the renderer's update to submit them.
+    pub(crate) jobs: Option<Rc<std::cell::RefCell<TileJobs>>>,
     // symbols:
     /// The images that exist, which tiles lay out for.
     pub(crate) available_images: Arc<VecSet<String>>,

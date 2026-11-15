@@ -22,7 +22,7 @@ use mln_util::logging::{Event, Log};
 
 use super::envelope::{self, Action, Encoded, JOB, RASTER};
 use super::worker_side::{WorkerCodec, encode_raster_reply};
-use crate::tile::job::{DEFAULT_DATA_CACHE_BYTES, DataCache, JobResult, JobTimes, Reply, Run, run_job};
+use crate::tile::job::{DEFAULT_DATA_CACHE_BYTES, DataCache, DiscoveryMemo, JobResult, JobTimes, Reply, Run, run_job};
 use crate::tile::raster_dem_tile::{RasterDEMTileMessage, RasterDEMWorkerMessage};
 use crate::tile::raster_tile::{RasterTileMessage, RasterWorkerMessage};
 use crate::tile::tile_worker_transport::{InProcessTransport, TileEndpoint, TileWorkerTransport, WorkerEndpoint};
@@ -45,6 +45,7 @@ pub struct TileWorkerHost {
 struct Jobs {
     codec: WorkerCodec,
     cache: DataCache,
+    memo: DiscoveryMemo,
 }
 
 /// A raster or raster-dem tile's worker.
@@ -58,7 +59,12 @@ impl TileWorkerHost {
     /// replies to `replies`. Its data cache keeps 32 MiB.
     pub fn new(workers: TaggedScheduler, replies: impl Fn(Encoded) + Send + Sync + 'static) -> Self {
         TileWorkerHost {
-            jobs: RefCell::new(Jobs { codec: WorkerCodec::new(), cache: DataCache::new(DEFAULT_DATA_CACHE_BYTES) }),
+            jobs: RefCell::new(Jobs {
+                codec: WorkerCodec::new(),
+                cache: DataCache::new(DEFAULT_DATA_CACHE_BYTES),
+                // The labelled tiles of a view that resume here, about.
+                memo: DiscoveryMemo::new(16),
+            }),
             workers: InProcessTransport::new(workers),
             replies: Arc::new(replies),
             raster: RefCell::new(HashMap::default()),
@@ -91,12 +97,12 @@ impl TileWorkerHost {
             return self.lost("a tile worker request without a job id");
         };
         let mut jobs = self.jobs.borrow_mut();
-        let Jobs { codec, cache } = &mut *jobs;
+        let Jobs { codec, cache, memo } = &mut *jobs;
         let decoded = codec.decode_job(body);
         let replies = &self.replies;
         let mut send = |reply: Reply, times| (replies)(codec.encode_reply(&reply, &times));
         match decoded {
-            Ok(job) => run_job(Run { id, job }, Some(cache), send),
+            Ok(job) => run_job(Run { id, job, superseded: Arc::default() }, Some(cache), Some(memo), send),
             Err(error) => {
                 let result = JobResult::Failed(Error::native(format!("a tile worker request: {error}")));
                 send(Reply { id, result }, JobTimes::default());

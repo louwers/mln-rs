@@ -129,7 +129,8 @@ fn run(layers: &[Arc<dyn LayerProperties>], available: &[&str], resolved: Resolv
         resolved: Arc::new(resolved),
     };
     let mut result = None;
-    run_job(Run { id: JobId { tile, generation: 1 }, job: Job::Layout(job) }, None, |reply, _| {
+    let run = Run { id: JobId { tile, generation: 1 }, job: Job::Layout(job), superseded: Arc::default() };
+    run_job(run, None, None, |reply, _| {
         result = Some(reply.result);
     });
     result.unwrap()
@@ -178,4 +179,51 @@ fn a_job_lays_out_the_layers_of_its_zoom() {
     };
     assert!(output.result.layer_render_data.contains_key("outline"));
     assert!(!output.result.layer_render_data.contains_key("near"));
+}
+
+/// A resume of the generation of a first try that answered `NeedsDeps`
+/// builds from what the first try discovered, when the memo kept it; a job
+/// with other inputs discovers again.
+#[test]
+fn a_resume_builds_from_the_memo() {
+    use crate::tile::job::{DiscoveryMemo, JobTimes, SourceStyle};
+
+    let memo = DiscoveryMemo::new(4);
+    let style = crate::tests::style(&[layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": "a"}}))]);
+    let images = Arc::new(VecSet::new());
+    let job = |style: &Arc<SourceStyle>, images: &Arc<VecSet<String>>, resolved: Resolved, generation| {
+        let tile = TileKey { source: SourceKey(1), id: OverscaledTileID::from_zxy(0, 0, 0) };
+        let key = DataKey { source: SourceKey(1), tile: CanonicalTileID::new(0, 0, 0), load: 1 };
+        let job = LayoutJob {
+            style: Arc::clone(style),
+            available_images: Arc::clone(images),
+            data: DataInput::Full { key, data: Some(data()) },
+            params: params(),
+            resolved: Arc::new(resolved),
+        };
+        Run { id: JobId { tile, generation }, job: Job::Layout(job), superseded: Arc::default() }
+    };
+    let run = |run: Run| {
+        let mut out = None;
+        run_job(run, None, Some(&memo), |reply, times: JobTimes| out = Some((reply.result, times)));
+        out.unwrap()
+    };
+    let missing = || Resolved { missing_images: VecSet::from_iter(["a".to_owned()]), ..Resolved::default() };
+
+    let (JobResult::NeedsDeps(_), first) = run(job(&style, &images, Resolved::default(), 1)) else {
+        panic!("expected the dependencies");
+    };
+    assert!(!first.discover.is_zero());
+    let (JobResult::Laid(_), resume) = run(job(&style, &images, missing(), 1)) else {
+        panic!("expected the layout");
+    };
+    assert!(resume.discover.is_zero(), "the resume discovered nothing");
+
+    // Another set of images: the memo's discovery doesn't serve it.
+    assert!(matches!(run(job(&style, &images, Resolved::default(), 2)), (JobResult::NeedsDeps(_), _)));
+    let other = Arc::new(VecSet::new());
+    let (JobResult::Laid(_), times) = run(job(&style, &other, missing(), 2)) else {
+        panic!("expected the layout");
+    };
+    assert!(!times.discover.is_zero());
 }

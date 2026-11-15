@@ -91,7 +91,7 @@ fn job(style: &Arc<SourceStyle>, data: DataInput, resolved: Resolved) -> Run {
         },
         resolved: Arc::new(resolved),
     };
-    Run { id: id(1), job: Job::Layout(job) }
+    Run { id: id(1), job: Job::Layout(job), superseded: Arc::default() }
 }
 
 fn full(data: &TileData) -> DataInput {
@@ -147,7 +147,7 @@ fn answer(dependencies: &Dependencies) -> Resolved {
 /// Runs `run` on this thread, as `PoolWorkers` does.
 fn direct_result(run: Run) -> JobResult {
     let mut result = None;
-    run_job(run, None, |reply, _| result = Some(reply.result));
+    run_job(run, None, None, |reply, _| result = Some(reply.result));
     result.unwrap()
 }
 
@@ -191,7 +191,9 @@ impl ThroughCodec {
         let (id, body) = envelope::read_job_id(frame).unwrap();
         let job = self.worker.decode_job(body).unwrap();
         let mut reply = None;
-        run_job(Run { id, job }, Some(&mut self.cache), |r, times| reply = Some(self.worker.encode_reply(&r, &times)));
+        run_job(Run { id, job, superseded: Arc::default() }, Some(&mut self.cache), None, |r, times| {
+            reply = Some(self.worker.encode_reply(&r, &times));
+        });
         reply.unwrap()
     }
 

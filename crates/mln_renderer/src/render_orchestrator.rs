@@ -239,7 +239,10 @@ pub(crate) struct RenderOrchestrator {
     /// (`tile_worker_transport.rs`).
     tile_worker_transport: Rc<dyn TileWorkerTransport>,
     /// Where the geometry tiles' jobs run.
-    tile_jobs: TileJobs,
+    /// Shared with the tiles, which submit their jobs as their inputs
+    /// change; borrowed only through `try_borrow_mut`, so a tile whose input
+    /// changes while the update has it leaves its job to the update.
+    tile_jobs: Rc<RefCell<TileJobs>>,
     /// Asks for an update when a tile worker replies.
     waker: Waker,
     _update_requests: Arc<Mailbox>,
@@ -349,7 +352,7 @@ impl RenderOrchestrator {
             remake_render_layers: false,
             filtered_layers_for_source: Vec::new(),
             tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
-            tile_jobs: TileJobs::new(Box::new(pool_workers)),
+            tile_jobs: Rc::new(RefCell::new(TileJobs::new(Box::new(pool_workers)))),
             waker,
             _update_requests: update_requests,
             source_counters: HashMap::default(),
@@ -375,7 +378,9 @@ impl RenderOrchestrator {
     pub(crate) fn set_tile_workers(&mut self, workers: &Rc<RemoteWorkers>) {
         workers.set_waker(Arc::clone(&self.waker));
         self.tile_worker_transport = Rc::<RemoteWorkers>::clone(workers);
-        self.tile_jobs.set_workers(Box::new(RemoteJobs(Rc::clone(workers))));
+        if let Ok(mut jobs) = self.tile_jobs.try_borrow_mut() {
+            jobs.set_workers(Box::new(RemoteJobs(Rc::clone(workers))));
+        }
     }
 
     /// Sets the queue the orchestrator and its parts push their events to.
@@ -476,6 +481,7 @@ impl RenderOrchestrator {
             is_update_synchronous: false,
             capture_rendered_features: update_parameters.capture_rendered_features,
             source: Rc::new(SourceCounters::new(SourceKey(0))),
+            jobs: Some(Rc::clone(&self.tile_jobs)),
             available_images: Arc::default(),
             font_faces: update_parameters.font_faces.clone(),
             tile_worker_transport: Rc::clone(&self.tile_worker_transport),
@@ -1173,8 +1179,11 @@ impl RenderOrchestrator {
 
     /// Gives the tiles the replies to their jobs that arrived, and the lanes
     /// lost; frees the stale replies on the workers.
-    fn take_tile_replies(&mut self) {
-        let jobs = &mut self.tile_jobs;
+    fn take_tile_replies(&self) {
+        let Ok(mut jobs) = self.tile_jobs.try_borrow_mut() else {
+            return;
+        };
+        let jobs = &mut *jobs;
         jobs.receive();
         for source_impl in self.source_impls.iter() {
             if let Some(source) = self.render_sources.get(&source_impl.base().id) {
@@ -1210,9 +1219,12 @@ impl RenderOrchestrator {
             }
         }
         tiles.sort_by_key(|tile| tile.inner().base.load_order.get());
+        let Ok(mut jobs) = self.tile_jobs.try_borrow_mut() else {
+            return false;
+        };
         let mut laid_out = false;
         for tile in tiles {
-            laid_out |= tile.inner().drive(&mut self.tile_jobs, &mut stores);
+            laid_out |= tile.inner().drive(&mut jobs, &mut stores);
         }
         laid_out
     }
@@ -1497,6 +1509,8 @@ impl RenderOrchestrator {
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, Error> {
+        // A query answers from the layouts that arrived since the update.
+        self.take_tile_replies();
         let render_layers: Vec<&RenderLayerPtr> = match &options.layer_ids {
             Some(layer_ids) => layer_ids.iter().filter_map(|id| self.render_layers.get(id)).collect(),
             None => self.render_layers.values().collect(),
@@ -1643,6 +1657,7 @@ impl RenderOrchestrator {
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, Error> {
+        self.take_tile_replies();
         let Some(source) = self.get_render_source(source_id) else {
             return Ok(Vec::new());
         };
@@ -1671,7 +1686,9 @@ impl RenderOrchestrator {
             source.dump_debug_logs();
         }
         self.image_store.dump_debug_logs();
-        self.tile_jobs.log_stats();
+        if let Ok(jobs) = self.tile_jobs.try_borrow() {
+            jobs.log_stats();
+        }
     }
 
     // layers: feature state
@@ -1783,7 +1800,9 @@ impl Drop for WaitOnDrop {
 
 impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
-        self.tile_jobs.log_stats();
+        if let Ok(jobs) = self.tile_jobs.try_borrow() {
+            jobs.log_stats();
+        }
         // Destroy the render sources (and their tiles and workers) before
         // waiting for the thread pool, as the C++ members' destructors do.
         self.render_sources.clear();

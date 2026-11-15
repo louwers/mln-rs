@@ -243,6 +243,7 @@ impl Scene {
             is_update_synchronous: false,
             capture_rendered_features: false,
             source: Rc::clone(&self.source),
+            jobs: None,
             available_images: Arc::default(),
             font_faces: None,
             tile_worker_transport: Rc::<InProcessTransport>::clone(&self.transport),

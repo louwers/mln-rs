@@ -210,6 +210,7 @@ impl Test {
             is_update_synchronous: false,
             capture_rendered_features: false,
             source: test_source(),
+            jobs: None,
             available_images: Arc::clone(driver.images.available_images()),
             font_faces: None,
             tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
@@ -635,4 +636,74 @@ fn an_unreadable_reply_loses_its_worker() {
     }
     test.update_after();
     assert!(test.shows_layout());
+}
+
+/// An image added while a tile's first try runs, which the try names but
+/// didn't branch on, resolves as it is when the try replies: the tile
+/// resumes without discovering again.
+#[test]
+fn an_image_a_first_try_only_names_resolves_without_a_relayout() {
+    let manual = Manual::default();
+    let mut test = Test::new(Box::new(manual.clone()), &[]);
+    test.load(&[icons(&json!("late"), 1.0)]);
+    test.update();
+    let first = manual.take();
+
+    test.driver.images.add_image(image("late"));
+    let available = Arc::clone(test.driver.images.available_images());
+    test.tile().inner().images_changed(&HashSet::from_iter(["late".to_owned()]), &available);
+    manual.reply(InlineWorkers::run(first));
+    test.update();
+    assert_eq!(manual.submitted(), 2);
+    let resume = manual.take();
+    let Job::Layout(job) = &resume.job;
+    assert!(job.resolved.icons.contains_key("late"));
+}
+
+/// A tile with the renderer's jobs at hand submits as soon as its data
+/// arrives, without waiting for an update.
+#[test]
+fn a_tile_submits_as_its_data_arrives() {
+    let manual = Manual::default();
+    let jobs = Rc::new(RefCell::new(crate::tile::tile_workers::TileJobs::new(Box::new(manual.clone()))));
+    let run_loop = RunLoop::new();
+    let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+    let transform_state = TransformState::default();
+    let parameters = TileParameters {
+        pixel_ratio: 1.0,
+        debug_options: MapDebugOptions::NO_DEBUG,
+        transform_state: &transform_state,
+        file_source: None,
+        scheduler: run_loop.scheduler(),
+        mode: MapMode::Static,
+        prefetch_zoom_delta: 0,
+        tile_lod_min_radius: 3.0,
+        tile_lod_scale: 1.0,
+        tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
+        tile_lod_zoom_shift: 0.0,
+        tile_lod_mode: TileLodMode::Default,
+        subdivision_granularity: SubdivisionGranularitySetting::none(),
+        global_state: None,
+        is_update_synchronous: false,
+        capture_rendered_features: false,
+        source: test_source(),
+        jobs: Some(Rc::clone(&jobs)),
+        available_images: Arc::default(),
+        font_faces: None,
+        tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
+        thread_pool: thread_pool.clone(),
+    };
+    let tile = GeometryTile::new(OverscaledTileID::from_zxy(0, 0, 0), "s".to_owned(), &parameters, None);
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    assert_eq!(manual.submitted(), 0, "no data yet");
+    tile.set_data(Some(points()));
+    assert_eq!(manual.submitted(), 1);
+
+    // A newer generation supersedes the job in flight, which a worker that
+    // hasn't started it may skip.
+    let first = manual.take();
+    tile.set_data(Some(points()));
+    assert!(first.superseded.load(std::sync::atomic::Ordering::Relaxed));
+    drop(tile);
+    thread_pool.wait_for_empty();
 }

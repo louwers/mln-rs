@@ -8,6 +8,7 @@
 //! remembers which lane last got each tile's data.
 
 use std::cell::Cell;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
@@ -15,7 +16,9 @@ use mln_actor::TaggedScheduler;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log};
 
-use crate::tile::job::{DataKey, JobId, JobResult, JobTimes, Reply, Run, SourceKey, run_guarded, run_job};
+use crate::tile::job::{
+    DataKey, DiscoveryMemo, JobId, JobResult, JobTimes, Reply, Run, SourceKey, run_guarded, run_job,
+};
 use crate::tile::worker_codec::Encoded;
 
 /// One worker the jobs go to: one Web Worker, or the whole thread pool.
@@ -78,9 +81,13 @@ pub(crate) trait TileWorkers {
     }
 }
 
+/// The jobs whose discovery `PoolWorkers` keep for their resume.
+const MEMO_JOBS: usize = 64;
+
 /// The renderer's thread pool, as one lane with one queue.
 pub(crate) struct PoolWorkers {
     pool: TaggedScheduler,
+    memo: Arc<DiscoveryMemo>,
     capacity: usize,
     in_flight: usize,
     sender: mpsc::Sender<(Reply, JobTimes)>,
@@ -93,7 +100,9 @@ impl PoolWorkers {
     /// as each reply arrives.
     pub(crate) fn new(pool: TaggedScheduler, capacity: usize, wake: Waker) -> Self {
         let (sender, replies) = mpsc::channel();
-        PoolWorkers { pool, capacity, in_flight: 0, sender, replies, wake }
+        // Enough for the labelled tiles of a view that wait for glyphs.
+        let memo = Arc::new(DiscoveryMemo::new(MEMO_JOBS));
+        PoolWorkers { pool, memo, capacity, in_flight: 0, sender, replies, wake }
     }
 
     /// Runs `work` for job `id` on the pool, replying `Failed` if it panics.
@@ -130,9 +139,13 @@ impl TileWorkers for PoolWorkers {
 
     fn submit(&mut self, _lane: Lane, run: Run) {
         let id = run.id;
+        let memo = Arc::clone(&self.memo);
         self.spawn(id, move || {
+            if run.superseded.load(Ordering::Relaxed) {
+                return (JobResult::Failed(mln_util::error::Error::native("superseded")), JobTimes::default());
+            }
             let mut out = None;
-            run_job(run, None, |reply, times| out = Some((reply.result, times)));
+            run_job(run, None, Some(&memo), |reply, times| out = Some((reply.result, times)));
             out.unwrap_or_else(|| (JobResult::Failed(mln_util::error::Error::native("no reply")), JobTimes::default()))
         });
     }
@@ -156,7 +169,7 @@ impl InlineWorkers {
     pub(crate) fn run(run: Run) -> Reply {
         let id = run.id;
         let mut out = None;
-        run_job(run, None, |reply, _| out = Some(reply));
+        run_job(run, None, None, |reply, _| out = Some(reply));
         out.unwrap_or_else(|| Reply { id, result: JobResult::Failed(mln_util::error::Error::native("no reply")) })
     }
 }
@@ -176,7 +189,7 @@ impl TileWorkers for InlineWorkers {
 
     fn submit(&mut self, _lane: Lane, run: Run) {
         let replies = &mut self.replies;
-        run_job(run, None, |reply, times| replies.push((reply, times)));
+        run_job(run, None, None, |reply, times| replies.push((reply, times)));
     }
 
     fn receive(&mut self, events: &mut Vec<WorkerEvent>) {

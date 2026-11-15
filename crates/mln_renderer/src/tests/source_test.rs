@@ -83,6 +83,7 @@ fn tile_parameters<'a>(
         is_update_synchronous: false,
         capture_rendered_features: false,
         source: crate::tests::test_source(),
+        jobs: None,
         available_images: Arc::default(),
         font_faces: None,
         tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(

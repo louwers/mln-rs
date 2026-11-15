@@ -16,6 +16,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_actor::TaggedScheduler;
 use mln_map_types::{MapDebugOptions, MapMode};
@@ -218,7 +219,7 @@ enum Work {
     /// one.
     Running(Running),
     /// The job answered `NeedsDeps`: the tile waits for the stores.
-    Waiting { lane: Lane, needs: Dependencies, wait: DependencyWait },
+    Waiting { lane: Lane, needs: Dependencies, wait: DependencyWait, images: Arc<VecSet<String>> },
     /// The next job is ready but waits for a lane with room: a resume with
     /// its answer, or a job sent again with its data.
     Ready(Next),
@@ -230,6 +231,9 @@ struct Running {
     /// The job is a resume, whose `answer` resolves `known`.
     known: Option<Dependencies>,
     answer: Answer,
+    /// The images that exist, as the job got them.
+    images: Arc<VecSet<String>>,
+    superseded: Arc<AtomicBool>,
 }
 
 struct Next {
@@ -237,6 +241,9 @@ struct Next {
     lane: Option<Lane>,
     known: Option<Dependencies>,
     answer: Answer,
+    /// The images the job before got, which a resume discovers with again;
+    /// `None` for a first try, which gets the images as they are.
+    images: Option<Arc<VecSet<String>>>,
 }
 
 /// The tile's data, as it arrived: `None` for a tile without data.
@@ -269,8 +276,9 @@ impl Driver {
     /// else outdated.
     fn bump(&mut self, source: &SourceCounters) {
         self.generation = source.next_generation();
-        if !matches!(self.work, Work::Running(_)) {
-            self.work = Work::Outdated;
+        match &self.work {
+            Work::Running(running) => running.superseded.store(true, Ordering::Relaxed),
+            _ => self.work = Work::Outdated,
         }
     }
 
@@ -283,6 +291,20 @@ impl Driver {
             Work::Current | Work::Outdated => None,
         }
     }
+}
+
+/// Whether `result`, of a job that got the images `then`, branched on one
+/// that came or went since, as `now` has them: an image its discovery found
+/// unavailable that is there now, or one it found available that is gone.
+/// What else it names resolved, or resolves, as the stores have it.
+fn outdated_by(result: &JobResult, then: &VecSet<String>, now: &VecSet<String>) -> bool {
+    let deps = match result {
+        JobResult::Laid(output) => &output.deps,
+        JobResult::NeedsDeps(needs) => needs,
+        JobResult::NeedsData | JobResult::Failed(_) => return false,
+    };
+    deps.unavailable_images.iter().any(|id| now.contains(id))
+        || deps.images.keys().any(|id| then.contains(id) && !now.contains(id))
 }
 
 /// The render-thread state of a `GeometryTile`.
@@ -299,6 +321,9 @@ pub(crate) struct GeometryTileInner {
 
     driver: RefCell<Driver>,
     layout: RefCell<Option<Rc<TileLayout>>>,
+    /// Where the tile submits a job as soon as its inputs change, outside
+    /// the renderer's update.
+    jobs: Option<Rc<RefCell<TileJobs>>>,
     /// Where the layouts' data is freed (`release_layout`).
     thread_pool: TaggedScheduler,
 
@@ -421,18 +446,28 @@ impl GeometryTileInner {
 
     /// Takes in a change of images: the ones in `changed` were added,
     /// removed or resized, and `available` exist now. Lays the tile out
-    /// again if its layout, or the layout it runs or waits for, named one of
-    /// `changed`, or if its first try is running against another set of
-    /// images.
+    /// again if the images it shows, or that a job resolved for it, name one
+    /// of `changed`, or if a job waiting for its images branched on one that
+    /// came or went (an image the stores still have to resolve resolves as
+    /// it is now). A first try in flight is checked when it replies.
     pub(crate) fn images_changed(&self, changed: &HashSet<String>, available: &Arc<VecSet<String>>) {
         let relayout = {
             let mut driver = self.driver.borrow_mut();
-            let set_changed = !Arc::ptr_eq(&driver.available_images, available);
             driver.available_images = Arc::clone(available);
             let names = |deps: &Dependencies| deps.images.keys().any(|id| changed.contains(id));
             let shown = self.layout().is_some_and(|layout| names(&layout.deps));
-            let first_try_running = matches!(&driver.work, Work::Running(Running { known: None, .. }));
-            shown || driver.pending_dependencies().is_some_and(names) || (set_changed && first_try_running)
+            let work = match &driver.work {
+                Work::Running(Running { known: Some(known), .. }) | Work::Ready(Next { known: Some(known), .. }) => {
+                    names(known)
+                }
+                Work::Waiting { needs, .. } => {
+                    needs.unavailable_images.iter().any(|id| changed.contains(id) && available.contains(id))
+                        || needs.images.keys().any(|id| changed.contains(id) && !available.contains(id))
+                }
+                // A first try's reply tells whether the change touched it.
+                Work::Running(_) | Work::Current | Work::Outdated | Work::Ready(_) => false,
+            };
+            shown || work
         };
         if relayout {
             self.relayout();
@@ -510,10 +545,16 @@ impl GeometryTileInner {
     /// Applies the result of `running`, the tile's job. Returns whether the
     /// tile shows a new layout.
     fn apply(&self, running: Running, result: JobResult) -> bool {
-        let Running { id, lane, known, answer } = running;
+        let Running { id, lane, known, answer, images, .. } = running;
         let mut driver = self.driver.borrow_mut();
-        if id.generation != driver.generation {
+        let outdated_images =
+            !Arc::ptr_eq(&images, &driver.available_images) && outdated_by(&result, &images, &driver.available_images);
+        if id.generation != driver.generation || outdated_images {
             // Stale: the tile lays out its newest generation instead.
+            if outdated_images {
+                driver.answer_outdated = true;
+                driver.bump(&self.source);
+            }
             driver.work = Work::Outdated;
             drop(driver);
             drop_on_workers(&self.thread_pool, result);
@@ -529,7 +570,7 @@ impl GeometryTileInner {
                 true
             }
             JobResult::NeedsDeps(needs) if known.is_none() => {
-                driver.work = Work::Waiting { lane, needs, wait: DependencyWait::default() };
+                driver.work = Work::Waiting { lane, needs, wait: DependencyWait::default(), images };
                 drop(driver);
                 self.base.observer().on_update_needed(&self.base);
                 false
@@ -546,7 +587,7 @@ impl GeometryTileInner {
             }
             JobResult::NeedsData => {
                 driver.full = true;
-                driver.work = Work::Ready(Next { lane: None, known, answer });
+                driver.work = Work::Ready(Next { lane: None, known, answer, images: Some(images) });
                 drop(driver);
                 self.base.observer().on_update_needed(&self.base);
                 false
@@ -596,12 +637,17 @@ impl GeometryTileInner {
         if self.synchronous {
             return self.run_inline();
         }
-        let Some((run, running)) = self.next_job(|key, full| jobs.place(key, full)) else {
-            return false;
-        };
-        jobs.submit(running.lane, run);
-        self.driver.borrow_mut().work = Work::Running(running);
+        self.submit(jobs);
         false
+    }
+
+    /// Submits the tile's next job to `jobs`, if it has one and a lane has
+    /// room.
+    fn submit(&self, jobs: &mut TileJobs) {
+        if let Some((run, running)) = self.next_job(|key, full| jobs.place(key, full)) {
+            jobs.submit(running.lane, run);
+            self.driver.borrow_mut().work = Work::Running(running);
+        }
     }
 
     /// Whether the tile has a job it can submit, or dependencies to resolve.
@@ -614,14 +660,32 @@ impl GeometryTileInner {
         }
     }
 
-    /// Runs a synchronous tile's job now, and wakes the renderer's update
-    /// for another tile's.
+    /// Starts the tile's next job now: on this thread for a synchronous
+    /// tile, else on its workers if a lane has room, which the renderer's
+    /// update otherwise waits for. A job started outside an update replies
+    /// in time for the next.
     fn advance(&self) {
         if self.synchronous {
             self.run_inline();
-        } else {
+            return;
+        }
+        if let Some(jobs) = &self.jobs
+            && let Ok(mut jobs) = jobs.try_borrow_mut()
+        {
+            self.submit(&mut jobs);
+        }
+        // A job in flight wakes the update when it replies: an update now
+        // would only miss the reply.
+        if self.has_work() {
             self.base.observer().on_update_needed(&self.base);
         }
+    }
+
+    /// Lets go of the tile's job: it takes no more data, and a job not
+    /// started yet needn't run.
+    fn abandon(&self) {
+        self.obsolete.set(true);
+        self.change(|_| {});
     }
 
     /// Runs a synchronous tile's jobs until one waits for dependencies or
@@ -652,6 +716,7 @@ impl GeometryTileInner {
             Work::Outdated => Next {
                 lane: None,
                 known: None,
+                images: None,
                 answer: layout
                     .as_ref()
                     .filter(|_| !driver.answer_outdated)
@@ -680,14 +745,17 @@ impl GeometryTileInner {
         };
         let id = JobId { tile: self.key(), generation: driver.generation };
         let params = LayoutParams { first_load: layout.is_none(), ..driver.params };
+        let images = next.images.unwrap_or_else(|| Arc::clone(&driver.available_images));
         let job = LayoutJob {
             style: Arc::clone(style),
-            available_images: Arc::clone(&driver.available_images),
+            available_images: Arc::clone(&images),
             data,
             params,
             resolved: Arc::clone(&next.answer.resolved),
         };
-        Some((Run { id, job: Job::Layout(job) }, Running { id, lane, known: next.known, answer: next.answer }))
+        let superseded = Arc::new(AtomicBool::new(false));
+        let run = Run { id, job: Job::Layout(job), superseded: Arc::clone(&superseded) };
+        Some((run, Running { id, lane, known: next.known, answer: next.answer, images, superseded }))
     }
 
     /// Resolves the dependencies the tile's job waits for once the stores
@@ -696,7 +764,7 @@ impl GeometryTileInner {
     /// changed since it last tried.
     fn resolve(&self, stores: &mut DependencyStores<'_>) {
         let mut driver = self.driver.borrow_mut();
-        let Work::Waiting { lane, needs, wait } = &mut driver.work else {
+        let Work::Waiting { lane, needs, wait, images: seen } = &mut driver.work else {
             return;
         };
         let revisions = (stores.glyphs.revision(), stores.images.revision());
@@ -734,7 +802,8 @@ impl GeometryTileInner {
             Answer { resolved: Arc::new(resolved), atlases: Some(Rc::new(atlases)), glyphs_failed: glyphs.failed };
         let lane = Some(*lane);
         let known = Some(std::mem::take(needs));
-        driver.work = Work::Ready(Next { lane, known, answer });
+        let images = Some(Arc::clone(seen));
+        driver.work = Work::Ready(Next { lane, known, answer, images });
     }
 
     pub(crate) fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
@@ -781,6 +850,7 @@ impl GeometryTile {
             missing: Cell::new(false),
             driver: RefCell::new(driver),
             layout: RefCell::new(None),
+            jobs: parameters.jobs.clone(),
             thread_pool: parameters.thread_pool.clone(),
             mode: parameters.mode,
             synchronous: parameters.is_update_synchronous,
@@ -819,7 +889,7 @@ impl GeometryTile {
 
 impl Drop for GeometryTile {
     fn drop(&mut self) {
-        self.inner.obsolete.set(true);
+        self.inner.abandon();
 
         if self.inner.base.pending.get() {
             // This tile never finished loading or was abandoned, emit a
@@ -844,7 +914,7 @@ impl Tile for GeometryTile {
     }
 
     fn cancel(&self) {
-        self.inner.obsolete.set(true);
+        self.inner.abandon();
     }
 
     fn set_style(&self, style: &Arc<SourceStyle>) {
