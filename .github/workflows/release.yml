@@ -114,8 +114,11 @@ jobs:
       # dependencies on each other would resolve from crates.io.
       - name: Package
         run: |
-          read -ra packages <<< "$PACKAGES"
-          cargo package --locked "${packages[@]/#/--package=}"
+          args=()
+          for package in $PACKAGES; do
+            args+=("--package=$package")
+          done
+          cargo package --locked "${args[@]}"
 
       # In dependency order, waiting for each to reach the index. Package
       # verified these exact packages, so skip the second build. A 429 is
