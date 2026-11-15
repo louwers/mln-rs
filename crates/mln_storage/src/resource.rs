@@ -1,4 +1,3 @@
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -9,6 +8,8 @@ use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::string::to_string_double;
 use mln_util::tileset::Scheme;
 use mln_util::token::replace_tokens;
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+use url::{Position, Url};
 
 use crate::response::Data;
 
@@ -152,24 +153,6 @@ fn get_tile_bbox(x: i32, y: i32, z: i8) -> String {
 /// Everything but the RFC 3986 unreserved characters.
 const FONT_STACK_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
-/// `base` with `[@2x]` and `extension` appended to its path, keeping the
-/// query and dropping the fragment.
-fn sprite_url(base: &str, pixel_ratio: f32, extension: &str) -> String {
-    let suffix = if pixel_ratio > 1.0 { "@2x" } else { "" };
-    if let Ok(mut url) = url::Url::parse(base)
-        && !url.cannot_be_a_base()
-    {
-        let path = format!("{}{suffix}{extension}", url.path());
-        url.set_path(&path);
-        url.set_fragment(None);
-        return url.into();
-    }
-    // Relative references and opaque URLs: split off the query by hand.
-    let without_fragment = base.split('#').next().unwrap_or(base);
-    let (path, query) = without_fragment.split_at(without_fragment.find('?').unwrap_or(without_fragment.len()));
-    format!("{path}{suffix}{extension}{query}")
-}
-
 impl Resource {
     pub(crate) fn new(kind: Kind, url: impl Into<String>) -> Self {
         Self::with_tile_data(kind, url, None, LoadingMethod::All)
@@ -229,12 +212,32 @@ impl Resource {
 
     #[must_use]
     pub fn sprite_image(base: &str, pixel_ratio: f32) -> Resource {
-        Resource::new(Kind::SpriteImage, sprite_url(base, pixel_ratio, ".png"))
+        let suffix = if pixel_ratio > 1.0 { "@2x" } else { "" };
+        // The fragment is dropped; an unparseable base is taken as a bare path.
+        let url = match Url::parse(base) {
+            Ok(url) => format!(
+                "{}{suffix}.png{}",
+                &url[..Position::AfterPath],
+                &url[Position::BeforeQuery..Position::AfterQuery]
+            ),
+            Err(_) => format!("{base}{suffix}.png"),
+        };
+        Resource::new(Kind::SpriteImage, url)
     }
 
     #[must_use]
     pub fn sprite_json(base: &str, pixel_ratio: f32) -> Resource {
-        Resource::new(Kind::SpriteJSON, sprite_url(base, pixel_ratio, ".json"))
+        let suffix = if pixel_ratio > 1.0 { "@2x" } else { "" };
+        // The fragment is dropped; an unparseable base is taken as a bare path.
+        let url = match Url::parse(base) {
+            Ok(url) => format!(
+                "{}{suffix}.json{}",
+                &url[..Position::AfterPath],
+                &url[Position::BeforeQuery..Position::AfterQuery]
+            ),
+            Err(_) => format!("{base}{suffix}.json"),
+        };
+        Resource::new(Kind::SpriteJSON, url)
     }
 
     #[must_use]
