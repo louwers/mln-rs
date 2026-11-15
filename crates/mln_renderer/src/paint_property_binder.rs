@@ -169,7 +169,7 @@ pub(crate) enum PaintPropertyBinderKind<T> {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum InterleavedVertexData {
     Uninitialized,
     Interleaved { offset: usize },
@@ -289,7 +289,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
             | PaintPropertyBinderKind::CompositeFunction { vertex_data, .. } => vertex_data,
         };
         let new_vertex_offset = buffer.extend_vertex_format(Self::zoom_interpolated_size(), align_of::<f32>());
-        if matches!(vertex_data, InterleavedVertexData::Uninitialized) {
+        if vertex_data == InterleavedVertexData::Uninitialized {
             *vertex_data = InterleavedVertexData::Interleaved { offset: new_vertex_offset };
         }
     }
