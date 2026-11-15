@@ -4,6 +4,7 @@
 //
 
 use std::collections::HashMap;
+use std::range::RangeInclusive;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -74,11 +75,10 @@ fn has_icon_image(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
     layout.get::<IconImage>().constant().is_none_or(|t| !t.empty())
 }
 
-/// A run of UTF-16 code units, `first..=last`, that one font face draws.
+/// A run of UTF-16 code units that one font face draws.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct GlyphTypeSpan {
-    first: u16,
-    last: u16,
+    range: RangeInclusive<u16>,
     type_: GlyphIDType,
 }
 
@@ -123,8 +123,10 @@ impl GlyphTypeTable {
                 continue;
             };
             match spans.last_mut() {
-                Some(span) if span.type_ == face.type_ && u32::from(span.last) + 1 == unit => span.last = last,
-                _ => spans.push(GlyphTypeSpan { first, last, type_: face.type_ }),
+                Some(span) if span.type_ == face.type_ && u32::from(span.range.last) + 1 == unit => {
+                    span.range = (span.range.start..=last).into()
+                }
+                _ => spans.push(GlyphTypeSpan { range: (first..=last).into(), type_: face.type_ }),
             }
         }
         GlyphTypeTable { spans }
@@ -140,9 +142,9 @@ impl GlyphTypeTable {
         if i18n::is_variation_selector1(unit) {
             return previous;
         }
-        let index = self.spans.partition_point(|span| span.last < unit);
+        let index = self.spans.partition_point(|span| span.range.last < unit);
         match self.spans.get(index) {
-            Some(span) if span.first <= unit => span.type_,
+            Some(span) if span.range.start <= unit => span.type_,
             _ => GlyphIDType::FontPBF,
         }
     }
