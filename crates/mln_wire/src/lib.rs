@@ -15,9 +15,8 @@
 
 extern crate self as mln_wire;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::hash::{BuildHasher, Hash};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -535,42 +534,51 @@ impl<K: Wire + Ord, V: Wire> Wire for BTreeMap<K, V> {
     }
 }
 
-/// In iteration order, which differs between maps of the same entries:
-/// `mln_util::serialization::sorted` writes one in key order.
-impl<K: Wire + Eq + Hash, V: Wire, S: BuildHasher + Default> Wire for HashMap<K, V, S> {
-    fn write(&self, w: &mut Writer) {
-        write_len(w, self.len());
-        for (key, value) in self {
-            key.write(w);
-            value.write(w);
-        }
-    }
-    fn read(r: &mut Reader<'_>) -> Option<Self> {
-        let len = r.length()?;
-        let mut map = HashMap::with_capacity_and_hasher(len.min(r.rest().len()), S::default());
-        for _ in 0..len {
-            let key = K::read(r)?;
-            map.insert(key, V::read(r)?);
-        }
-        Some(map)
-    }
-}
+/// Hash maps and sets of any hasher, in iteration order, which differs
+/// between maps of the same entries: `mln_util::serialization::sorted` writes
+/// one in key order.
+mod hash {
+    #![expect(clippy::disallowed_types, reason = "impls for every hasher, mln_util's among them")]
 
-/// In iteration order, as `HashMap`.
-impl<T: Wire + Eq + Hash, S: BuildHasher + Default> Wire for HashSet<T, S> {
-    fn write(&self, w: &mut Writer) {
-        write_len(w, self.len());
-        for value in self {
-            value.write(w);
+    use std::collections::{HashMap, HashSet};
+    use std::hash::{BuildHasher, Hash};
+
+    use super::{Reader, Wire, Writer, write_len};
+
+    impl<K: Wire + Eq + Hash, V: Wire, S: BuildHasher + Default> Wire for HashMap<K, V, S> {
+        fn write(&self, w: &mut Writer) {
+            write_len(w, self.len());
+            for (key, value) in self {
+                key.write(w);
+                value.write(w);
+            }
+        }
+        fn read(r: &mut Reader<'_>) -> Option<Self> {
+            let len = r.length()?;
+            let mut map = HashMap::with_capacity_and_hasher(len.min(r.rest().len()), S::default());
+            for _ in 0..len {
+                let key = K::read(r)?;
+                map.insert(key, V::read(r)?);
+            }
+            Some(map)
         }
     }
-    fn read(r: &mut Reader<'_>) -> Option<Self> {
-        let len = r.length()?;
-        let mut set = HashSet::with_capacity_and_hasher(len.min(r.rest().len()), S::default());
-        for _ in 0..len {
-            set.insert(T::read(r)?);
+
+    impl<T: Wire + Eq + Hash, S: BuildHasher + Default> Wire for HashSet<T, S> {
+        fn write(&self, w: &mut Writer) {
+            write_len(w, self.len());
+            for value in self {
+                value.write(w);
+            }
         }
-        Some(set)
+        fn read(r: &mut Reader<'_>) -> Option<Self> {
+            let len = r.length()?;
+            let mut set = HashSet::with_capacity_and_hasher(len.min(r.rest().len()), S::default());
+            for _ in 0..len {
+                set.insert(T::read(r)?);
+            }
+            Some(set)
+        }
     }
 }
 
