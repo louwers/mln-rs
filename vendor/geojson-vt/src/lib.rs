@@ -111,7 +111,7 @@ pub fn geojson_to_tile(
     let tolerance = (options.tolerance / f64::from(options.extent)) / f64::from(z2);
     let mut features = detail::convert(feature_parts(features), tolerance, false);
     if wrap {
-        features = detail::wrap(&features, f64::from(options.buffer) / f64::from(options.extent), options.line_metrics);
+        features = detail::wrap(features, f64::from(options.buffer) / f64::from(options.extent), options.line_metrics);
     }
     if clip || options.line_metrics {
         let p = f64::from(options.buffer) / f64::from(options.extent);
@@ -167,7 +167,7 @@ impl GeoJSONVT {
             options.generate_id,
         );
         let features = detail::wrap(
-            &converted,
+            converted,
             f64::from(options.tile.buffer) / f64::from(options.tile.extent),
             options.tile.line_metrics,
         );
