@@ -286,8 +286,6 @@ static void feature_state_stays_with_the_update_held_by_a_command_group(void) {
   ));
   mln_test_render_until_idle(runtime, map, &fixture);
   expect_center_pixel(&fixture, red, "before the feature-state group");
-  mln_map_snapshot before = {.size = sizeof(mln_map_snapshot)};
-  MLN_TEST_OK(mln_map_get_snapshot(map, &before, NULL));
   MLN_TEST_AWAIT_OK(
     mln_map_begin_command_group(map, &completion.descriptor, NULL)
   );
@@ -308,14 +306,13 @@ static void feature_state_stays_with_the_update_held_by_a_command_group(void) {
   mln_test_render_fixture_destroy(&fixture);
   mln_test_destroy_map(map);
   mln_test_destroy_runtime(runtime);
+  TEST_ASSERT_EQUAL_UINT64(9001, held.token);
+  TEST_ASSERT_EQUAL_UINT32(MLN_RENDER_RESULT_RENDERED, held.disposition);
   TEST_ASSERT_EQUAL_HEX8_ARRAY_MESSAGE(
     red, inside, 4, "inside the feature-state group"
   );
   TEST_ASSERT_EQUAL_HEX8_ARRAY_MESSAGE(
     green, after, 4, "after the feature-state group"
-  );
-  TEST_ASSERT_EQUAL_UINT64(
-    before.latest_render_update_generation, held.map_update_generation
   );
 }
 
