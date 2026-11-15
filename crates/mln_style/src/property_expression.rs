@@ -200,7 +200,6 @@ pub struct PropertyExpression<T> {
     /// a value rather than a `T`, so that only one copy of the code that
     /// clones and sends it is compiled.
     default_value: Option<Value>,
-    #[serde(skip)]
     output: std::marker::PhantomData<fn() -> T>,
 }
 
