@@ -486,11 +486,16 @@ impl Drawable {
             // over the frame's.
             let buffer = self
                 .uniform_buffers
-                .binding(id)
-                .or_else(|| layer.and_then(|layer| layer.binding(id)))
-                .or_else(|| global.binding(id));
-            if let Some((buffer, offset, size)) = buffer {
-                entries.push(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size });
+                .get(id)
+                .or_else(|| layer.and_then(|layer| layer.get(id)))
+                .or_else(|| global.get(id));
+            if let Some(buffer) = buffer {
+                entries.push(BindGroupEntry::Buffer {
+                    id: id as u32,
+                    buffer: buffer.id(),
+                    offset: 0,
+                    size: buffer.size() as u64,
+                });
             }
         }
         drop(global);
@@ -689,7 +694,7 @@ fn vertex_slots(
 
 /// The paint parameters' scissor rect within a target of `size`, `None`
 /// where nothing of it is.
-fn clamped_scissor(parameters: &PaintParameters<'_>, size: mln_util::size::Size) -> Option<Scissor> {
+pub(crate) fn clamped_scissor(parameters: &PaintParameters<'_>, size: mln_util::size::Size) -> Option<Scissor> {
     let rect = parameters.scissor_rect;
     let (x, y) = (rect.x as u32, rect.y as u32);
     let width = if x < size.width { rect.width.min(size.width - x) } else { 0 };
