@@ -67,9 +67,14 @@ impl GlyphStoreObserver for NullObserver {}
 
 /// Where a glyph range is.
 enum RangeState {
-    /// Requested and not answered yet, by the request it holds open; `None`
-    /// for a font file that waits for the engine.
-    Loading(#[expect(dead_code, reason = "dropping the request cancels it")] Option<Request>),
+    /// Requested and not answered yet, by the store's `id`th request, which
+    /// `request` holds open; `None` for a font file that waits for the
+    /// engine. A response to another request is stale.
+    Loading {
+        id: u64,
+        #[expect(dead_code, reason = "dropping the request cancels it")]
+        request: Option<Request>,
+    },
     /// Parsed: the glyphs of a glyph PBF, or `None` for a font file or a
     /// response without content.
     Loaded(Option<Arc<GlyphCacheRange>>),
@@ -144,6 +149,8 @@ pub(crate) struct GlyphStore {
     wake: Rc<dyn Fn()>,
     /// How many requests failed.
     failures: u64,
+    /// How many ranges were requested.
+    requests: u64,
     /// Changes whenever a range is answered or dropped, so waiting tiles
     /// resolve again.
     revision: u64,
@@ -154,8 +161,9 @@ pub(crate) struct GlyphStore {
     /// Whether `engine.prepare` was called.
     engine_prepared: bool,
     engine_readiness: Arc<Mutex<EngineReadiness>>,
-    /// Font files that arrived before the engine was ready.
-    deferred_responses: Vec<(FontData, FontStack, GlyphRange)>,
+    /// Font files that arrived before the engine was ready, with the
+    /// request each answers.
+    deferred_responses: Vec<(FontData, FontStack, GlyphRange, u64)>,
     /// Wakes the renderer to parse `deferred_responses` once the engine
     /// reports back.
     deferred_task: Option<AsyncTask>,
@@ -184,6 +192,7 @@ impl GlyphStore {
             glyph_cache,
             wake,
             failures: 0,
+            requests: 0,
             revision: 0,
             font_faces: None,
             engine,
@@ -210,19 +219,30 @@ impl GlyphStore {
         self.revision
     }
 
-    /// Takes in a response to `font_stack`'s `range`.
-    pub(crate) fn take_response(&mut self, font_stack: &FontStack, range: GlyphRange, response: &Response) {
-        self.process_response(response, font_stack, range);
+    /// Takes in a response to request `id`, for `font_stack`'s `range`,
+    /// unless the range was dropped or requested again since.
+    pub(crate) fn take_response(&mut self, font_stack: &FontStack, range: GlyphRange, id: u64, response: &Response) {
+        if self.is_loading(font_stack, range, id) {
+            self.process_response(response, font_stack, range, id);
+        }
     }
 
     /// Takes in the font files that waited for the engine once it reported
     /// back.
     pub(crate) fn update(&mut self) {
         if !self.deferred_responses.is_empty() && self.engine_readiness.lock().result.is_some() {
-            for (data, font_stack, range) in std::mem::take(&mut self.deferred_responses) {
-                self.process_data(Ok(Some(data)), &font_stack, range);
+            for (data, font_stack, range, id) in std::mem::take(&mut self.deferred_responses) {
+                if self.is_loading(&font_stack, range, id) {
+                    self.process_data(Ok(Some(data)), &font_stack, range, id);
+                }
             }
         }
+    }
+
+    /// Whether `font_stack`'s `range` waits for request `id`.
+    fn is_loading(&self, font_stack: &FontStack, range: GlyphRange, id: u64) -> bool {
+        let state = self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range));
+        matches!(state, Some(RangeState::Loading { id: loading, .. }) if *loading == id)
     }
 
     /// The glyphs of `dependencies`, and the shaping of their font-face
@@ -258,7 +278,7 @@ impl GlyphStore {
                 match entry.ranges.get(&range) {
                     Some(RangeState::Loaded(_)) => {}
                     Some(RangeState::Failed { at }) if *at > since => failed = true,
-                    Some(RangeState::Loading(_)) => waits = true,
+                    Some(RangeState::Loading { .. }) => waits = true,
                     // Never requested, or failed before this wait began.
                     _ => to_request.push((font_stack.clone(), range)),
                 }
@@ -273,7 +293,7 @@ impl GlyphStore {
             };
             self.request_range(&font_stack, range, file_source, inbox);
             let entry = self.entries.get(&font_stack);
-            waits |= entry.is_some_and(|entry| matches!(entry.ranges.get(&range), Some(RangeState::Loading(_))));
+            waits |= entry.is_some_and(|entry| matches!(entry.ranges.get(&range), Some(RangeState::Loading { .. })));
         }
         if waits {
             return None;
@@ -342,11 +362,13 @@ impl GlyphStore {
         file_source: &Arc<dyn FileSource>,
         inbox: &InboxSender,
     ) {
+        self.requests += 1;
+        let id = self.requests;
         if let Some(data) = self.get_font_face_data(range.type_) {
             // A face that holds its font file needs no request.
-            self.set_range(font_stack, range, RangeState::Loading(None));
+            self.set_range(font_stack, range, RangeState::Loading { id, request: None });
             self.observer.on_glyphs_requested(font_stack, range);
-            self.process_data(Ok(Some(data)), font_stack, range);
+            self.process_data(Ok(Some(data)), font_stack, range, id);
             return;
         }
 
@@ -366,17 +388,17 @@ impl GlyphStore {
         let inbox = inbox.clone();
         let callback_font_stack = font_stack.clone();
         let (req, responder) = Request::direct(move |response: Response| {
-            inbox.send(TileEvent::Glyphs { font_stack: callback_font_stack.clone(), range, response });
+            inbox.send(TileEvent::Glyphs { font_stack: callback_font_stack.clone(), range, id, response });
         });
         file_source.load(&resource, responder);
-        self.set_range(font_stack, range, RangeState::Loading(Some(req)));
+        self.set_range(font_stack, range, RangeState::Loading { id, request: Some(req) });
     }
 
     fn set_range(&mut self, font_stack: &FontStack, range: GlyphRange, state: RangeState) {
         self.entries.entry(font_stack.clone()).or_default().ranges.insert(range, state);
     }
 
-    fn process_response(&mut self, res: &Response, font_stack: &FontStack, range: GlyphRange) {
+    fn process_response(&mut self, res: &Response, font_stack: &FontStack, range: GlyphRange, id: u64) {
         if res.not_modified {
             return;
         }
@@ -385,19 +407,26 @@ impl GlyphStore {
             Some(error) => Err(Error::native(error.message.clone())),
             None => Ok((!res.no_content).then(|| FontData::from(res.data.clone().unwrap_or_default()))),
         };
-        self.process_data(data, font_stack, range);
+        self.process_data(data, font_stack, range, id);
     }
 
-    /// The rest of `processResponse`, for a glyph PBF or font file: `None`
-    /// when the response had no content, an error when the request failed.
-    fn process_data(&mut self, data: Result<Option<FontData>, Error>, font_stack: &FontStack, range: GlyphRange) {
+    /// The rest of `processResponse`, for a glyph PBF or font file that
+    /// answers request `id`: `None` when the response had no content, an
+    /// error when the request failed.
+    fn process_data(
+        &mut self,
+        data: Result<Option<FontData>, Error>,
+        font_stack: &FontStack,
+        range: GlyphRange,
+        id: u64,
+    ) {
         let (data, mut error) = match data {
             Ok(data) => (data, None),
             Err(error) => (None, Some(error)),
         };
         if range.type_ != GlyphIDType::FontPBF
             && let Some(data) = &data
-            && self.defer_until_engine_ready(data, font_stack, range)
+            && self.defer_until_engine_ready(data, font_stack, range, id)
         {
             return;
         }
@@ -499,13 +528,19 @@ impl GlyphStore {
 
     /// Whether `data`, a font file, has to wait for the engine: if so, keeps
     /// it for `update`, which parses it once the engine reports back.
-    fn defer_until_engine_ready(&mut self, data: &FontData, font_stack: &FontStack, range: GlyphRange) -> bool {
+    fn defer_until_engine_ready(
+        &mut self,
+        data: &FontData,
+        font_stack: &FontStack,
+        range: GlyphRange,
+        id: u64,
+    ) -> bool {
         self.prepare_engine();
         let mut readiness = self.engine_readiness.lock();
         if readiness.result.is_some() {
             return false;
         }
-        self.deferred_responses.push((data.clone(), font_stack.clone(), range));
+        self.deferred_responses.push((data.clone(), font_stack.clone(), range, id));
         let wake = Rc::clone(&self.wake);
         let task = self.deferred_task.get_or_insert_with(|| AsyncTask::new(&self.run_loop, move || wake()));
         readiness.waker = Some(task.sender());

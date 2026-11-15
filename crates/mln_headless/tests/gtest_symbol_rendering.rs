@@ -111,6 +111,8 @@ impl SymbolRenderingTest {
         let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop).expect("a headless frontend");
         let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
+        // A style URL never answers: the map keeps the style it has.
+        file_source.set_response(Kind::Style, |_| None);
         let observer = Rc::new(StubMapObserver::default());
         let mut map = Map::with_file_source(
             file_source,
@@ -368,4 +370,45 @@ fn fully_hidden_layer_can_reappear() {
     let visible = test.render();
     assert_eq!(visible.stats.num_draw_calls, 1);
     assert_eq!(initial.image, visible.image);
+}
+
+/// Port-only: while a new style URL loads, the tiles of the style before
+/// keep drawing, and an image they draw that changes in place shows its new
+/// pixels.
+#[test]
+fn shown_icons_take_image_updates_while_a_style_url_loads() {
+    let test = SymbolRenderingTest::timed(1, 0.0, SymbolKind::Icon, MapMode::Continuous);
+    let fully_loaded = Rc::new(Cell::new(false));
+    {
+        let fully_loaded = Rc::clone(&fully_loaded);
+        test.observer
+            .did_finish_rendering_frame_callback
+            .set(move |status| fully_loaded.set(status.mode == RenderMode::Full));
+    }
+    let start = Instant::now();
+    let frame = |ms: u64| {
+        test.run_loop.run_once();
+        test.render_at(start + Duration::from_millis(ms))
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !fully_loaded.get() && Instant::now() < deadline {
+        frame(0);
+    }
+    assert!(fully_loaded.get());
+    let pixel_at_symbol = |image: &PremultipliedImage| {
+        let pixel = test.map.borrow().pixel_for_lat_lng(&lat_lng(5.0, 5.0));
+        let offset = (4 * (pixel.y as u32 * image.size.width + pixel.x as u32)) as usize;
+        <[u8; 4]>::try_from(&image.data[offset..offset + 4]).expect("a pixel")
+    };
+    assert_eq!(pixel_at_symbol(&frame(1000).image), [255; 4]);
+
+    test.map.borrow_mut().style_mut().load_url("https://example.com/next.json");
+    frame(1100);
+    let red = PremultipliedImage::from_vec(Size::new(16, 16), [255, 0, 0, 255].repeat(16 * 16));
+    let red =
+        mln_style::image::Impl::new("marker".to_owned(), red, 1.0, false, Vec::new(), Vec::new(), None, None, None)
+            .expect("style::Image");
+    test.map.borrow_mut().style_mut().add_image(Arc::new(red));
+    frame(1200);
+    assert_eq!(pixel_at_symbol(&frame(1300).image), [255, 0, 0, 255]);
 }

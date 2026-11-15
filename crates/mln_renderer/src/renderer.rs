@@ -76,7 +76,6 @@ pub struct Renderer {
     clip_masks: ClipMasks,
     render_state: RenderState,
     frame_count: u64,
-    style_loaded: bool,
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
     timings: RenderTimings,
@@ -136,7 +135,6 @@ impl Renderer {
             clip_masks: ClipMasks::default(),
             render_state: RenderState::Never,
             frame_count: 0,
-            style_loaded: false,
             frame_projection: None,
             timings: RenderTimings::default(),
         }
@@ -195,11 +193,6 @@ impl Renderer {
         // the context current.
         let backend = Rc::clone(&self.backend);
         let _hold = backend.hold();
-        let style_changed = self.style_loaded && !update_parameters.style_loaded;
-        self.style_loaded = update_parameters.style_loaded;
-        if style_changed {
-            self.orchestrator.reset_dynamic_texture_atlas();
-        }
         let start = Instant::now();
         let mut render_tree = self.orchestrator.create_render_tree(update_parameters)?;
         render_tree.prepare();

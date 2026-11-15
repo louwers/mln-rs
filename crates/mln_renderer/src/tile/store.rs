@@ -848,8 +848,8 @@ impl TileStore {
                         source.lane_lost(lane);
                     }
                 }
-                TileEvent::Glyphs { font_stack, range, response } => {
-                    self.ctx.glyphs.take_response(&font_stack, range, &response);
+                TileEvent::Glyphs { font_stack, range, id, response } => {
+                    self.ctx.glyphs.take_response(&font_stack, range, id, &response);
                 }
             }
         }

@@ -21,7 +21,7 @@ use mln_util::feature::Feature;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
-use mln_vec_map::VecMap;
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::{Bucket, BucketPtr, LayerFeatureStates};
 use crate::bucket_geometry::BucketGeometry;
@@ -86,9 +86,9 @@ pub(crate) struct Answer {
 }
 
 impl Answer {
-    /// This answer cut down to what `deps` use: the positions they name,
-    /// with leases on only those bins of the same pages. `None` if it holds
-    /// nothing else.
+    /// This answer cut down to what `deps` use: the positions and missing
+    /// images they name, with leases on only those bins of the same pages.
+    /// `None` if it holds nothing else.
     pub(crate) fn trimmed(&self, deps: &Dependencies, atlas: &mut DynamicTextureAtlas) -> Option<Answer> {
         let resolved = &*self.resolved;
         let atlases = self.atlases.as_ref()?;
@@ -142,6 +142,8 @@ impl Answer {
         };
         let icons = images_of(&resolved.icons, ImageType::Icon);
         let patterns = images_of(&resolved.patterns, ImageType::Pattern);
+        let missing_images: VecSet<_> =
+            resolved.missing_images.iter().filter(|id| deps.images.contains_key(*id)).cloned().collect();
 
         let glyph_count = |positions: &GlyphPositions| positions.values().map(BTreeMap::len).sum::<usize>();
         let shaping_count = |shaping: &HBShapeResults| {
@@ -151,6 +153,7 @@ impl Answer {
             && shaping_count(&shaping) == shaping_count(&resolved.shaping)
             && icons.len() == resolved.icons.len()
             && patterns.len() == resolved.patterns.len()
+            && missing_images.len() == resolved.missing_images.len()
         {
             return None;
         }
@@ -166,8 +169,6 @@ impl Answer {
             BinUse::Glyph(..) => false,
             BinUse::Dummy => true,
         });
-        let missing_images =
-            resolved.missing_images.iter().filter(|id| deps.images.contains_key(*id)).cloned().collect();
         let resolved = Resolved { glyphs, shaping, icons, patterns: patterns.clone(), missing_images };
         let atlases = TileAtlases { glyphs: glyph_lease, images: image_lease, pattern_positions: patterns };
         Some(Answer {

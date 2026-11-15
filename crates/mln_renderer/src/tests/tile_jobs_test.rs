@@ -415,6 +415,37 @@ fn removing_a_used_image_lays_out_again() {
     assert_eq!(manual.submitted(), 3);
 }
 
+/// A relayout that no longer uses a missing image drops it from the answer
+/// it carries: the image, added while unused, is there when a later layout
+/// uses it again.
+#[test]
+fn a_missing_image_a_relayout_drops_resolves_when_used_again() {
+    let manual = Manual::default();
+    let mut test = Test::new(Box::new(manual.clone()), &[]);
+    test.load(&[icons(&json!("a"), 1.0)]);
+    for _ in 0..2 {
+        test.update();
+        test.update();
+        manual.run();
+    }
+    test.update();
+    assert!(test.shows_layout());
+
+    test.load(&[layer(json!({"id": "dots", "type": "circle"}))]);
+    test.update();
+    manual.run();
+    test.update();
+    test.add_image("a");
+
+    test.load(&[icons(&json!("a"), 1.0)]);
+    test.update();
+    let again = manual.take();
+    let Job::Layout(job) = &again.job else {
+        panic!("not a layout job");
+    };
+    assert!(!job.resolved.missing_images.contains("a"), "the answer it carries forgets the missing image");
+}
+
 /// A scheduler whose tasks each run on a thread of their own, which catches
 /// their panics as the thread pool does.
 struct Catching;

@@ -189,8 +189,8 @@ impl Store {
     /// Gives the store the responses that arrived.
     fn take_responses(&self) {
         while let Some(event) = self.inbox.next() {
-            if let TileEvent::Glyphs { font_stack, range, response } = event {
-                self.store.borrow_mut().take_response(&font_stack, range, &response);
+            if let TileEvent::Glyphs { font_stack, range, id, response } = event {
+                self.store.borrow_mut().take_response(&font_stack, range, id, &response);
             }
         }
     }
@@ -657,6 +657,30 @@ fn a_wait_requests_the_font_stacks_evicted_while_it_waits_again() {
     for font_stack in [loaded_stack, test_stack()] {
         assert!(glyphs[&font_stack_hash(&font_stack)][&gid('a')].is_some(), "{font_stack:?}");
     }
+}
+
+// A response that arrived for a range evicted since is stale: the range
+// isn't loaded by it, and a later wait requests it again, from the glyph
+// URL the store has then.
+#[test]
+fn a_response_to_an_evicted_range_is_dropped() {
+    let test = GlyphStoreTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
+    let urls = Rc::new(RefCell::new(Vec::new()));
+    let u = Rc::clone(&urls);
+    test.file_source.set_response(Kind::Glyphs, move |resource: &Resource| {
+        u.borrow_mut().push(resource.url.clone());
+        glyphs_response("test/fixtures/resources/glyphs.pbf")(resource)
+    });
+
+    test.glyph_store().set_url("old/{fontstack}/{range}.pbf");
+    test.get_glyphs(dependencies(&['a']));
+    test.glyph_store().evict(&VecSet::new());
+    test.store.take_responses();
+
+    test.glyph_store().set_url("new/{fontstack}/{range}.pbf");
+    test.get_glyphs(dependencies(&['a']));
+    assert_eq!(urls.borrow().len(), 2, "requested again: {:?}", urls.borrow());
+    assert!(urls.borrow()[1].starts_with("new/"));
 }
 
 // gtest: GlyphManager.DoesNotKeepTheRangeGlyphsItDrawsLocally

@@ -30,7 +30,6 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::context::Context;
-use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_store::{ImageStore, ImageStoreObserver};
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweaker;
@@ -1073,13 +1072,6 @@ impl RenderOrchestrator {
         self.debug_layer_tweakers.clear(); // layers: debug
         self.sky_pass = crate::sky_pass::SkyPass::default();
         self.globe_depth_pass = crate::globe_depth_pass::GlobeDepthPass::default();
-    }
-
-    /// symbols: C++ `Renderer::render` recreates the dynamic texture atlas
-    /// when the style changed (`impl->dynamicTextureAtlas` is owned by the
-    /// renderer and handed to createRenderTree).
-    pub(crate) fn reset_dynamic_texture_atlas(&mut self) {
-        *self.tile_store.atlas() = DynamicTextureAtlas::new();
     }
 
     /// Makes the atlas's GPU textures and uploads what its pages queued.
