@@ -16,6 +16,7 @@
 # so warnings aren't errors here; CI's lint job checks them.
 set -euo pipefail
 source tools/dev-shell.sh
+rustup component add --toolchain "$MLN_NIGHTLY" rust-src
 host="$(rustc "+$MLN_NIGHTLY" -vV | sed -n 's/^host: //p')"
 export RUSTFLAGS=-Zsanitizer=address CARGO_BUILD_WARNINGS=warn CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/asan"
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
