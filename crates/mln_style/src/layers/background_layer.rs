@@ -1,24 +1,32 @@
-use std::sync::Arc;
-
-use crate::expression::Functions;
+use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::{NoProperties, StyleLayerType};
 pub use crate::layers::background_layer_impl::Impl;
+use crate::layers::background_layer_properties::{self, BackgroundPaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-crate::layer::layer_type!(
-    /// A `background` layer.
-    BackgroundLayer
-);
+/// The `background` layer type.
+pub struct Background;
 
-impl BackgroundLayer {
-    /// A layer whose property values parse against the built-in expression
-    /// functions.
-    #[must_use]
-    pub fn new(layer_id: &str) -> Self {
-        BackgroundLayer::with_functions(Functions::with_builtins(), layer_id)
+impl StyleLayerType for Background {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "background",
+        source: SourceKind::None,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &background_layer_properties::PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = BackgroundPaintProperties::Transitionable;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        background_layer_properties::visit(slot, visitor)
     }
 
-    /// A layer whose property values parse against `functions`.
-    #[must_use]
-    pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str) -> Self {
-        BackgroundLayer::from_impl(Arc::new(Impl::new(layer_id.to_owned(), String::new())), functions)
+    fn layout_difference(_a: &Impl, _b: &Impl) -> bool {
+        false
     }
 }

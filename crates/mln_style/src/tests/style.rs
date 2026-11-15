@@ -12,10 +12,9 @@ use mln_util::size::Size;
 use mln_util::tileset::PartialTileset;
 use mln_util::{Color, LatLng};
 
-use super::util::{FixtureLog, parse_json, read_file};
+use super::util::{FixtureLog, new_layer, parse_json, read_file};
 use crate::expression::Functions;
-use crate::layer::Layer;
-use crate::layers::line_layer::{Impl as LineLayerImpl, LineLayer};
+use crate::layers::line_layer::Impl as LineLayerImpl;
 use crate::observer::{Observer, SourceObserver};
 use crate::projection::Projection;
 use crate::property_value::PropertyValue;
@@ -189,7 +188,7 @@ fn add_remove_remove_image() {
 fn layer_transition_refreshes_immutable_collection() {
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    style.add_layer(Box::new(LineLayer::new("line", "source")), None).unwrap();
+    style.add_layer(new_layer("line", "line", "source"), None).unwrap();
     let before = style.get_layer_impls();
 
     {
@@ -225,7 +224,7 @@ fn source_collection_publishes_updates() {
     // the sources after each (see transition_options_publish_updates).
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    style.add_layer(Box::new(LineLayer::new("line", "late")), None).unwrap();
+    style.add_layer(new_layer("line", "line", "late"), None).unwrap();
     let observer = Rc::new(CountingObserver::default());
     style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
 
@@ -349,8 +348,8 @@ fn layer_changes_leave_earlier_snapshots_unchanged() {
     let loaded = style.get_layer_impls();
     assert_eq!(["a", "b"], *ids(&loaded));
 
-    style.add_layer(Box::new(LineLayer::new("c", "source")), Some("b")).unwrap();
-    let error = style.add_layer(Box::new(LineLayer::new("a", "source")), Some("b")).err().unwrap();
+    style.add_layer(new_layer("line", "c", "source"), Some("b")).unwrap();
+    let error = style.add_layer(new_layer("line", "a", "source"), Some("b")).err().unwrap();
     assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
     assert_eq!("Layer a already exists", error.message);
     assert_eq!(1, observer.updates.get());
@@ -535,12 +534,12 @@ fn layer_added_after_global_state_update_uses_current_state() {
     style.load_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
     style.set_global_state_property("showLayer", &Value::Bool(false));
 
-    let mut layer = LineLayer::new("line", "source");
+    let mut layer = new_layer("line", "line", "source");
     let json = parse_json(r#"["case", ["to-boolean", ["global-state", "showLayer"]], "visible", "none"]"#);
     assert!(layer.set_property("visibility", &Convertible::from(&json), None).is_none());
     assert_eq!(VisibilityType::Visible, layer.get_visibility());
 
-    let added_layer = style.add_layer(Box::new(layer), None).unwrap();
+    let added_layer = style.add_layer(layer, None).unwrap();
     assert_eq!(VisibilityType::None, added_layer.get_visibility());
 }
 
@@ -668,7 +667,7 @@ fn remove_source_in_use() {
 
     style.load_json(&read_file("test/fixtures/resources/style-unused-sources.json"));
     style.add_source(Box::new(vector_source("sourceId"))).unwrap();
-    style.add_layer(Box::new(LineLayer::new("layerId", "sourceId")), None).unwrap();
+    style.add_layer(new_layer("line", "layerId", "sourceId"), None).unwrap();
 
     // Should not remove the source
     let removed = style.remove_source("sourceId");

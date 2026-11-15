@@ -1,24 +1,36 @@
-use std::sync::Arc;
-
-use crate::expression::Functions;
+use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::StyleLayerType;
 pub use crate::layers::fill_layer_impl::Impl;
+use crate::layers::fill_layer_properties::{self, FillLayoutProperties, FillPaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-crate::layer::layer_type!(
-    /// A `fill` layer.
-    FillLayer
-);
+/// The `fill` layer type.
+pub struct Fill;
 
-impl FillLayer {
-    /// A layer whose property values parse against the built-in expression
-    /// functions.
-    #[must_use]
-    pub fn new(layer_id: &str, source_id: &str) -> Self {
-        FillLayer::with_functions(Functions::with_builtins(), layer_id, source_id)
+impl StyleLayerType for Fill {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "fill",
+        source: SourceKind::Geometry,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &fill_layer_properties::PROPERTIES;
+
+    type LayoutProperties = FillLayoutProperties::Unevaluated;
+    type PaintProperties = FillPaintProperties::Transitionable;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        fill_layer_properties::visit(slot, visitor)
     }
 
-    /// A layer whose property values parse against `functions`.
-    #[must_use]
-    pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str, source_id: &str) -> Self {
-        FillLayer::from_impl(Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())), functions)
+    fn layout_difference(a: &Impl, b: &Impl) -> bool {
+        a.filter != b.filter
+            || a.visibility != b.visibility
+            || a.layout != b.layout
+            || a.paint.fill_pattern.value != b.paint.fill_pattern.value
+            || a.paint.has_data_driven_property_difference(&b.paint)
     }
 }

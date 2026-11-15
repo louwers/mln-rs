@@ -1,24 +1,35 @@
-use std::sync::Arc;
-
-use crate::expression::Functions;
+use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::StyleLayerType;
 pub use crate::layers::line_layer_impl::Impl;
+use crate::layers::line_layer_properties::{self, LineLayoutProperties, LinePaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-crate::layer::layer_type!(
-    /// A `line` layer.
-    LineLayer
-);
+/// The `line` layer type.
+pub struct Line;
 
-impl LineLayer {
-    /// A layer whose property values parse against the built-in expression
-    /// functions.
-    #[must_use]
-    pub fn new(layer_id: &str, source_id: &str) -> Self {
-        LineLayer::with_functions(Functions::with_builtins(), layer_id, source_id)
+impl StyleLayerType for Line {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "line",
+        source: SourceKind::Geometry,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &line_layer_properties::PROPERTIES;
+
+    type LayoutProperties = LineLayoutProperties::Unevaluated;
+    type PaintProperties = LinePaintProperties::Transitionable;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        line_layer_properties::visit(slot, visitor)
     }
 
-    /// A layer whose property values parse against `functions`.
-    #[must_use]
-    pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str, source_id: &str) -> Self {
-        LineLayer::from_impl(Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())), functions)
+    fn layout_difference(a: &Impl, b: &Impl) -> bool {
+        a.filter != b.filter
+            || a.visibility != b.visibility
+            || a.layout != b.layout
+            || a.paint.has_data_driven_property_difference(&b.paint)
     }
 }

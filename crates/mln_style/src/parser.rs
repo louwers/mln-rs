@@ -37,7 +37,7 @@ pub struct Parser {
     pub glyph_url: String,
     pub font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
     pub sources: Vec<Box<dyn Source>>,
-    pub(crate) layers: Vec<Box<dyn Layer>>,
+    pub(crate) layers: Vec<Layer>,
 
     pub(crate) transition: TransitionOptions,
     pub(crate) light: Light,
@@ -382,13 +382,13 @@ impl Parser {
     /// Statically evaluate layer properties to determine what font stacks are used.
     #[must_use]
     pub fn font_stacks(&self) -> VecSet<FontStack> {
-        crate::layer::font_stacks(self.layers.iter().map(|layer| layer.base_impl()))
+        crate::layer::font_stacks(self.layers.iter().map(Layer::base_impl))
     }
 }
 
 struct LayerEntry<'a> {
     value: &'a Json<'a>,
-    layer: Option<Box<dyn Layer>>,
+    layer: Option<Layer>,
 }
 
 fn parse_layer(
@@ -434,7 +434,7 @@ fn parse_layer(
         };
 
         let mut layer = reference.clone_ref(id);
-        if let Some(error) = set_paint_properties(layer.as_mut(), &Convertible::from(value), InvalidProperty::Skip) {
+        if let Some(error) = set_paint_properties(&mut layer, &Convertible::from(value), InvalidProperty::Skip) {
             Log::warning(Event::ParseStyle, &error.message);
         }
         if let Some(entry) = layers_map.get_mut(id) {

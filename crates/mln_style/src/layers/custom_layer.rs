@@ -12,16 +12,13 @@
 use std::any::Any;
 use std::sync::{Arc, Weak};
 
-use feature::Value;
-use mln_conversion::{Convertible, Error};
 use mln_map_types::{FrameProjection, MapView};
 
-use crate::expression::{Dependency, Functions};
-use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, SourceKind, serialize_base};
+use crate::expression::Dependency;
+use crate::layer::{LayerTypeInfo, SourceKind};
 use crate::layer_properties::{LayerProperties, LayerPropertiesBase};
 use crate::layer_type::{LayerStyle, NoProperties, StyleLayerType};
 use crate::property_table::{PropertyTable, PropertyVisitor};
-use crate::style_property::StyleProperty;
 
 /// The frame that a custom layer draws into.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -150,82 +147,6 @@ impl LayerStyle<Custom> {
     }
 }
 
-/// A layer that the host draws.
-pub struct CustomLayer {
-    base_impl: Arc<Impl>,
-    host: Arc<dyn CustomLayerHost>,
-    functions: Arc<Functions>,
-}
-
-impl std::fmt::Debug for CustomLayer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomLayer").field("base_impl", &self.base_impl).finish_non_exhaustive()
-    }
-}
-
-impl CustomLayer {
-    /// A layer whose filter and visibility parse against the built-in
-    /// expression functions.
-    #[must_use]
-    pub fn new(layer_id: &str, host: Arc<dyn CustomLayerHost>) -> Self {
-        CustomLayer::with_functions(Functions::with_builtins(), layer_id, host)
-    }
-
-    /// A layer whose filter and visibility parse against `functions`.
-    #[must_use]
-    pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str, host: Arc<dyn CustomLayerHost>) -> Self {
-        CustomLayer { base_impl: Arc::new(Impl::with_host(layer_id.to_owned(), &host)), host, functions }
-    }
-
-    #[must_use]
-    pub fn impl_(&self) -> &Impl {
-        &self.base_impl
-    }
-}
-
-impl Layer for CustomLayer {
-    fn base_impl(&self) -> Arc<dyn layer::Impl> {
-        Arc::<Impl>::clone(&self.base_impl)
-    }
-
-    fn base_impl_ref(&self) -> &dyn layer::Impl {
-        &*self.base_impl
-    }
-
-    fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase)) {
-        let mut impl_ = (*self.base_impl).clone();
-        f(&mut impl_.base);
-        self.base_impl = Arc::new(impl_);
-    }
-
-    fn get_property(&self, _name: &str) -> StyleProperty {
-        StyleProperty::default()
-    }
-
-    fn functions(&self) -> &Arc<Functions> {
-        &self.functions
-    }
-
-    fn serialize(&self) -> Value {
-        serialize_base(self)
-    }
-
-    /// The host draws one layer, so a copy shares it: both draw through it.
-    fn clone_ref(&self, id: &str) -> Box<dyn Layer> {
-        let mut impl_ = (*self.base_impl).clone();
-        impl_.base.id = id.to_owned();
-        Box::new(CustomLayer {
-            base_impl: Arc::new(impl_),
-            host: Arc::clone(&self.host),
-            functions: Arc::clone(&self.functions),
-        })
-    }
-
-    fn set_property_internal(&mut self, name: &str, _value: &Convertible<'_>) -> Option<Error> {
-        Some(Error::new(format!("layer '{}' doesn't support property '{name}'", self.get_id())))
-    }
-}
-
 #[derive(Debug)]
 pub struct CustomLayerProperties {
     pub base: LayerPropertiesBase,
@@ -256,7 +177,8 @@ impl LayerProperties for CustomLayerProperties {
 mod tests {
     use std::sync::Arc;
 
-    use super::{CustomLayer, CustomLayerHost, Impl};
+    use super::{CustomLayerHost, Impl};
+    use crate::StyleRegistry;
     use crate::layer::Layer;
 
     struct Host;
@@ -269,7 +191,7 @@ mod tests {
     #[test]
     fn the_impls_of_a_removed_layer_dont_keep_its_host() {
         let host: Arc<dyn CustomLayerHost> = Arc::new(Host);
-        let layer = CustomLayer::new("custom", Arc::clone(&host));
+        let layer = Layer::custom(&StyleRegistry::with_builtins(), "custom", Arc::clone(&host));
         let impl_ = layer.base_impl();
         let impl_ = impl_.downcast_ref::<Impl>().unwrap();
         assert!(impl_.has_host(&host));

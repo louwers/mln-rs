@@ -17,11 +17,12 @@ use mln_actor::{LocalObject, RunLoop, TaggedScheduler, scheduler};
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
+use mln_style::StyleRegistry;
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::fill_layer::Impl as FillLayerImpl;
 use mln_style::layers::raster_layer::Impl as RasterLayerImpl;
-use mln_style::layers::{FillLayer, FillLayerProperties, RasterLayer, RasterLayerProperties};
+use mln_style::layers::{FillLayerProperties, RasterLayerProperties};
 use mln_style::source::Source;
 use mln_style::sources::tile_source::TileSource;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
@@ -175,11 +176,11 @@ impl Scene {
         vector.load_description(&*file_source, &run_loop);
         raster.load_description(&*file_source, &run_loop);
 
-        let mut fill = FillLayer::new("water", "vector");
+        let mut fill = Layer::new(&StyleRegistry::with_builtins(), "fill", "water", "vector").unwrap();
         fill.set_source_layer("water");
         let fill_layers: Vec<Arc<dyn LayerProperties>> =
             vec![Arc::new(FillLayerProperties::new(downcast_arc::<FillLayerImpl>(&fill.base_impl())))];
-        let raster_layer = RasterLayer::new("raster", "raster");
+        let raster_layer = Layer::new(&StyleRegistry::with_builtins(), "raster", "raster", "raster").unwrap();
         let raster_layers: Vec<Arc<dyn LayerProperties>> =
             vec![Arc::new(RasterLayerProperties::new(downcast_arc::<RasterLayerImpl>(&raster_layer.base_impl())))];
 

@@ -10,11 +10,12 @@ use feature::Feature;
 use geo_types::Point;
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler;
+use mln_style::StyleRegistry;
 use mln_style::custom_tile_loader::{CustomTileLoader, TileFunction};
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
+use mln_style::layers::CircleLayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
-use mln_style::layers::{CircleLayer, CircleLayerProperties};
 use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
 use mln_style::sources::geojson_source::TileFeatures;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -154,7 +155,7 @@ fn invoke_tile_changed() {
     let loader = loader(&test.run_loop, None, None);
     let mut tiles = tiles(&test, &[root()], loader.self_ref());
 
-    let layer = CircleLayer::new("circle", "source");
+    let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
     let layer_properties: Arc<dyn LayerProperties> =
         Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())));
 

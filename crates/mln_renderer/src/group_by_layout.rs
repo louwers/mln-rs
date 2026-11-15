@@ -149,14 +149,12 @@ pub(crate) fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
 
 #[cfg(test)]
 mod tests {
+    use mln_style::StyleRegistry;
     use mln_style::conversion::{Convertible, Error, convert_filter};
     use mln_style::expression::{Dependency, Functions};
     use mln_style::filter::Filter;
     use mln_style::layer::Layer;
     use mln_style::layer_properties::LayerPropertiesBase;
-    use mln_style::layers::circle_layer::CircleLayer;
-    use mln_style::layers::fill_layer::FillLayer;
-    use mln_style::layers::raster_layer::RasterLayer;
 
     use super::*;
 
@@ -182,7 +180,7 @@ mod tests {
         convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut Error::default()).expect("filter")
     }
 
-    fn layer(mut layer: impl Layer, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn LayerProperties> {
+    fn layer(mut layer: Layer, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn LayerProperties> {
         layer.set_source_layer(source_layer);
         if let Some(filter) = filter {
             layer.set_filter(filter);
@@ -191,7 +189,7 @@ mod tests {
     }
 
     fn circle(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn LayerProperties> {
-        layer(CircleLayer::new(id, "source"), source_layer, filter)
+        layer(Layer::new(&StyleRegistry::with_builtins(), "circle", id, "source").unwrap(), source_layer, filter)
     }
 
     fn ids(groups: &GroupMap) -> Vec<Vec<String>> {
@@ -223,7 +221,11 @@ mod tests {
             circle("c", "roads", Some(&motorway)),
             circle("d", "roads", None),
             circle("e", "water", Some(&motorway)),
-            layer(FillLayer::new("f", "source"), "roads", Some(&motorway)),
+            layer(
+                Layer::new(&StyleRegistry::with_builtins(), "fill", "f", "source").unwrap(),
+                "roads",
+                Some(&motorway),
+            ),
             circle("g", "roads", Some(&primary)),
             circle("h", "roads", None),
             // An equal filter that isn't shared: a filterable layer's
@@ -240,7 +242,9 @@ mod tests {
     /// them.
     #[test]
     fn groups_equal_filters_that_are_not_shared() {
-        let raster = |id: &str, json: &str| layer(RasterLayer::new(id, "source"), "", Some(&filter(json)));
+        let raster = |id: &str, json: &str| {
+            layer(Layer::new(&StyleRegistry::with_builtins(), "raster", id, "source").unwrap(), "", Some(&filter(json)))
+        };
         let layers = [
             raster("a", r#"["==", ["get", "rank"], 0]"#),
             raster("b", r#"["==", ["get", "rank"], 1]"#),

@@ -444,7 +444,7 @@ fn source_info(source: &dyn Source) -> SourceInfo {
     info
 }
 
-fn layer_info(layer: &dyn mln_style::Layer) -> LayerInfo {
+fn layer_info(layer: &mln_style::Layer) -> LayerInfo {
     LayerInfo {
         id: layer.get_id(),
         layer_type: layer.get_type_info().name,

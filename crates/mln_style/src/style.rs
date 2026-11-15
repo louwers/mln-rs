@@ -236,12 +236,12 @@ impl Style {
 
     // Layers
     #[must_use]
-    pub fn get_layers(&self) -> Vec<&dyn Layer> {
+    pub fn get_layers(&self) -> Vec<&Layer> {
         self.impl_.get_layers()
     }
 
     #[must_use]
-    pub fn get_layer(&self, layer_id: &str) -> Option<&dyn Layer> {
+    pub fn get_layer(&self, layer_id: &str) -> Option<&Layer> {
         self.impl_.get_layer(layer_id)
     }
 
@@ -256,12 +256,12 @@ impl Style {
     /// style has a layer with the same ID, and with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if the layer's
     /// type doesn't fit its source.
-    pub fn add_layer(&mut self, layer: Box<dyn Layer>, before_layer_id: Option<&str>) -> Result<(), Error> {
+    pub fn add_layer(&mut self, layer: Layer, before_layer_id: Option<&str>) -> Result<(), Error> {
         self.impl_.mutated = true;
         self.impl_.add_layer(layer, before_layer_id).map(|_| ())
     }
 
-    pub fn remove_layer(&mut self, id: &str) -> Option<Box<dyn Layer>> {
+    pub fn remove_layer(&mut self, id: &str) -> Option<Layer> {
         self.impl_.mutated = true;
         self.impl_.remove_layer(id)
     }

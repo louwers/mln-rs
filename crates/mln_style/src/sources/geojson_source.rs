@@ -375,8 +375,8 @@ impl Source for GeoJSONSource {
     }
 }
 
-// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
-// (layer.rs).
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Impl`
+// (layer_impl.rs).
 impl std::fmt::Debug for dyn GeoJSONData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GeoJSONData").finish_non_exhaustive()

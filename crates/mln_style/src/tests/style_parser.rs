@@ -381,7 +381,7 @@ fn invalid_properties_are_skipped() {
         )
         .unwrap();
 
-    let ids: Vec<_> = parser.layers.iter().map(|layer| layer.get_id()).collect();
+    let ids: Vec<_> = parser.layers.iter().map(super::super::layer::Layer::get_id).collect();
     assert_eq!(ids, ["a", "b"]);
     let property = |layer: usize, name: &str| {
         let property = parser.layers[layer].get_property(name);

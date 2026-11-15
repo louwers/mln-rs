@@ -160,3 +160,15 @@ impl mln_tile_id::geometry_tile_data::GeometryTileFeature for StubGeometryTileFe
 pub(crate) fn property_map(entries: &[(&str, feature::Value)]) -> feature::PropertyMap {
     entries.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect()
 }
+
+/// A layer of the built-in type `type_`.
+pub(crate) fn new_layer(type_: &str, id: &str, source: &str) -> crate::layer::Layer {
+    crate::layer::Layer::new(&crate::StyleRegistry::with_builtins(), type_, id, source).unwrap()
+}
+
+/// The style data of `layer`, a `T` layer.
+pub(crate) fn style_of<T: crate::layer_type::StyleLayerType>(
+    layer: &crate::layer::Layer,
+) -> &crate::layer_type::LayerStyle<T> {
+    crate::layer_type::LayerStyle::recover_ref(layer.base_impl_ref()).unwrap()
+}

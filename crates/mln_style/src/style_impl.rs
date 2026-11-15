@@ -239,7 +239,7 @@ pub struct Impl {
     source_observer: Rc<dyn SourceObserver>,
     /// The loop that the style's requests and background work answer on.
     run_loop: RunLoop,
-    layers: Collection<dyn Layer>,
+    layers: Collection<Layer>,
     transition_options: TransitionOptions,
     light: Light,
     sky: Option<Sky>,
@@ -485,12 +485,12 @@ impl Impl {
         let sources = &self.sources;
         let existing = self.layers.size();
         self.layers.extend(std::mem::take(&mut parser.layers).into_iter().filter_map(|mut layer| {
-            if let Err(error) = check_layer_source(sources, &*layer) {
+            if let Err(error) = check_layer_source(sources, &layer) {
                 Log::error(Event::ParseStyle, error.to_string());
                 return None;
             }
             layer.reevaluate_visibility(&global_state);
-            Some(layer)
+            Some(Box::new(layer))
         }));
         // An update for each layer, as `add_layer` publishes.
         let observer = self.observer();
@@ -688,11 +688,11 @@ impl Impl {
 
     // Layers
 
-    pub(crate) fn get_layers(&self) -> Vec<&dyn Layer> {
+    pub(crate) fn get_layers(&self) -> Vec<&Layer> {
         self.layers.get_wrappers()
     }
 
-    pub(crate) fn get_layer(&self, id: &str) -> Option<&dyn Layer> {
+    pub(crate) fn get_layer(&self, id: &str) -> Option<&Layer> {
         self.layers.get(id)
     }
 
@@ -705,18 +705,14 @@ impl Impl {
 
     /// Adds a layer before the layer `before`, or on top. See
     /// [`Style::add_layer`](crate::Style::add_layer).
-    pub(crate) fn add_layer(
-        &mut self,
-        mut layer: Box<dyn Layer>,
-        before: Option<&str>,
-    ) -> Result<&mut dyn Layer, Error> {
-        check_layer_source(&self.sources, &*layer)?;
+    pub(crate) fn add_layer(&mut self, mut layer: Layer, before: Option<&str>) -> Result<&mut Layer, Error> {
+        check_layer_source(&self.sources, &layer)?;
         // The global state is not available while the layer itself is parsed.
         layer.reevaluate_visibility(&self.global_state);
         let observer = self.observer();
         let result = self
             .layers
-            .add_unique(layer, before)
+            .add_unique(Box::new(layer), before)
             .map_err(|layer| Error::already_exists(format!("Layer {} already exists", layer.get_id())))?;
         observer.on_update();
         Ok(result)
@@ -731,8 +727,8 @@ impl Impl {
         true
     }
 
-    pub(crate) fn remove_layer(&mut self, id: &str) -> Option<Box<dyn Layer>> {
-        let layer = self.layers.remove(id);
+    pub(crate) fn remove_layer(&mut self, id: &str) -> Option<Layer> {
+        let layer = self.layers.remove(id).map(|layer| *layer);
 
         if layer.is_some() {
             self.observer().on_update();
@@ -962,7 +958,7 @@ impl Impl {
 
 /// Fails when `layer`'s source is in `sources` and doesn't support the
 /// layer's type.
-fn check_layer_source(sources: &CollectionWithPersistentOrder<dyn Source>, layer: &dyn Layer) -> Result<(), Error> {
+fn check_layer_source(sources: &CollectionWithPersistentOrder<dyn Source>, layer: &Layer) -> Result<(), Error> {
     // TODO: verify source
     let impl_ = layer.base_impl_ref();
     if let Some(source) = sources.get(&impl_.source)
@@ -1018,14 +1014,14 @@ pub struct LayerRefMut<'a> {
 }
 
 impl std::ops::Deref for LayerRefMut<'_> {
-    type Target = dyn Layer;
-    fn deref(&self) -> &(dyn Layer + 'static) {
+    type Target = Layer;
+    fn deref(&self) -> &Layer {
         self.style.layers.get(&self.id).expect("LayerRefMut: layer removed")
     }
 }
 
 impl std::ops::DerefMut for LayerRefMut<'_> {
-    fn deref_mut(&mut self) -> &mut (dyn Layer + 'static) {
+    fn deref_mut(&mut self) -> &mut Layer {
         self.style.layers.get_mut(&self.id).expect("LayerRefMut: layer removed")
     }
 }

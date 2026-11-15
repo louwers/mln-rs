@@ -40,7 +40,7 @@ fn every_style() -> Vec<PathBuf> {
 
 /// The layers of every style, with their style's path. Layers that don't
 /// parse in the first place (tests of invalid styles) are left out.
-fn every_layer(registry: &StyleRegistry) -> Vec<(PathBuf, Box<dyn Layer>)> {
+fn every_layer(registry: &StyleRegistry) -> Vec<(PathBuf, Layer)> {
     let mut layers = Vec::new();
     for path in every_style() {
         let style: serde_json::Value = match serde_json::from_str(&fs::read_to_string(&path).unwrap()) {

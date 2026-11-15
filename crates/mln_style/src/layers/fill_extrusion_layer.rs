@@ -1,24 +1,37 @@
-use std::sync::Arc;
-
-use crate::expression::Functions;
+use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::StyleLayerType;
 pub use crate::layers::fill_extrusion_layer_impl::Impl;
+use crate::layers::fill_extrusion_layer_properties::{
+    self, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
+};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-crate::layer::layer_type!(
-    /// A `fill-extrusion` layer.
-    FillExtrusionLayer
-);
+/// The `fill-extrusion` layer type.
+pub struct FillExtrusion;
 
-impl FillExtrusionLayer {
-    /// A layer whose property values parse against the built-in expression
-    /// functions.
-    #[must_use]
-    pub fn new(layer_id: &str, source_id: &str) -> Self {
-        FillExtrusionLayer::with_functions(Functions::with_builtins(), layer_id, source_id)
+impl StyleLayerType for FillExtrusion {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "fill-extrusion",
+        source: SourceKind::Geometry,
+        pass_3d: true,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &fill_extrusion_layer_properties::PROPERTIES;
+
+    type LayoutProperties = FillExtrusionLayoutProperties::Unevaluated;
+    type PaintProperties = FillExtrusionPaintProperties::Transitionable;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        fill_extrusion_layer_properties::visit(slot, visitor)
     }
 
-    /// A layer whose property values parse against `functions`.
-    #[must_use]
-    pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str, source_id: &str) -> Self {
-        FillExtrusionLayer::from_impl(Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())), functions)
+    fn layout_difference(a: &Impl, b: &Impl) -> bool {
+        a.filter != b.filter
+            || a.visibility != b.visibility
+            || a.layout != b.layout
+            || a.paint.has_data_driven_property_difference(&b.paint)
     }
 }

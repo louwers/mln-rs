@@ -151,9 +151,9 @@ pub(crate) trait Properties: Clone + 'static {
     fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output>;
 }
 
-/// Why [`set_property`] failed.
+/// Why setting a property failed.
 #[derive(Debug)]
-pub(crate) enum SetPropertyError {
+pub enum SetPropertyError {
     /// The table has no property of that name.
     Unknown,
     /// The value doesn't convert.
@@ -205,18 +205,39 @@ fn paint_style_property<V: StyleValue>(property: &Transitionable<V>, transition:
     if transition { make_transition_style_property(&property.options) } else { property.value.style_property() }
 }
 
+/// Where the owner of properties is kept, for [`set_property`] to read it
+/// and to change it in place.
+pub(crate) trait OwnerSlot<S> {
+    /// The owner; `None` when the slot holds something else.
+    fn get(&self) -> Option<&S>;
+
+    /// The owner, to change: copied first if it is shared.
+    fn make_mut(&mut self) -> Option<&mut S>;
+}
+
+impl<S: Clone> OwnerSlot<S> for Arc<S> {
+    fn get(&self) -> Option<&S> {
+        Some(self)
+    }
+
+    #[inline(never)]
+    fn make_mut(&mut self) -> Option<&mut S> {
+        Some(Arc::make_mut(self))
+    }
+}
+
 /// Sets the property `name` (or a paint property's `<name>-transition`) of
-/// `owner` from a style JSON value, whose expressions parse against
-/// `functions`. `owner` is copied only if the value changes it and it is
-/// shared.
-pub(crate) fn set_property<S: Properties>(
-    owner: &mut Arc<S>,
+/// the owner in `owner` from a style JSON value, whose expressions parse
+/// against `functions`. The owner is copied only if the value changes it and
+/// it is shared.
+pub(crate) fn set_property<S: Properties, O: OwnerSlot<S>>(
+    owner: &mut O,
     name: &str,
     value: &Convertible<'_>,
     functions: &Arc<Functions>,
 ) -> Result<(), SetPropertyError> {
-    struct Set<'a, 'v, S> {
-        owner: &'a mut Arc<S>,
+    struct Set<'a, 'v, O> {
+        owner: &'a mut O,
         value: &'a Convertible<'v>,
         functions: &'a Arc<Functions>,
         info: &'static PropertyInfo,
@@ -227,7 +248,7 @@ pub(crate) fn set_property<S: Properties>(
     // The change passes through a slot of the caller's, rather than by value,
     // so that this code, compiled for each pair of owner and value type, is
     // only calls.
-    impl<S: Clone> PropertyVisitor<S> for Set<'_, '_, S> {
+    impl<S, O: OwnerSlot<S>> PropertyVisitor<S> for Set<'_, '_, O> {
         type Output = ();
 
         #[inline(never)]
@@ -237,17 +258,29 @@ pub(crate) fn set_property<S: Properties>(
             get_mut: fn(&mut S) -> &mut Transitionable<V>,
         ) {
             let mut change = PaintChange::None;
-            let current = get(self.owner);
-            if paint_change(current, self.value, self.functions, self.info, self.transition, &mut change, self.error) {
-                apply_paint_change(get_mut(make_mut(self.owner)), &mut change);
+            let Some(current) = self.owner.get() else { return };
+            if paint_change(
+                get(current),
+                self.value,
+                self.functions,
+                self.info,
+                self.transition,
+                &mut change,
+                self.error,
+            ) && let Some(owner) = self.owner.make_mut()
+            {
+                apply_paint_change(get_mut(owner), &mut change);
             }
         }
 
         #[inline(never)]
         fn layout<V: StyleValue>(self, get: fn(&S) -> &V, get_mut: fn(&mut S) -> &mut V) {
             let mut change = None;
-            if changed_value(get(self.owner), self.value, self.functions, self.info, &mut change, self.error) {
-                store(get_mut(make_mut(self.owner)), &mut change);
+            let Some(current) = self.owner.get() else { return };
+            if changed_value(get(current), self.value, self.functions, self.info, &mut change, self.error)
+                && let Some(owner) = self.owner.make_mut()
+            {
+                store(get_mut(owner), &mut change);
             }
         }
     }
@@ -329,11 +362,6 @@ fn apply_paint_change<V>(property: &mut Transitionable<V>, change: &mut PaintCha
         PaintChange::Value(value) => property.value = value,
         PaintChange::Options(options) => property.options = options,
     }
-}
-
-#[inline(never)]
-fn make_mut<S: Clone>(owner: &mut Arc<S>) -> &mut S {
-    Arc::make_mut(owner)
 }
 
 #[inline(never)]

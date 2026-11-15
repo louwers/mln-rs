@@ -14,7 +14,7 @@ use mln_util::error::Error;
 use crate::conversion::{Converter, convert_layer, convert_light, convert_projection, convert_sky, convert_source};
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
-use crate::layer::SourceKind;
+use crate::layer::{Layer, SourceKind};
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::property_table::{Properties, defined_properties};
@@ -116,8 +116,8 @@ impl Style {
         if self.get_layer(id).is_some() {
             return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
         }
-        let functions = Arc::clone(self.registry().functions());
-        self.add_layer(Box::new(crate::layers::CustomLayer::with_functions(functions, id, host)), before_layer_id)
+        let layer = Layer::custom(self.registry(), id, host);
+        self.add_layer(layer, before_layer_id)
     }
 
     /// Moves the layer named `id` below the layer named `before_layer_id`,

@@ -16,15 +16,18 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use feature::ValueObject;
+use mln_conversion::Convertible;
 use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::expression::{Dependency, Functions};
-use crate::layer::{FontStack, ImplBase, Layer};
+use crate::layer::{FontStack, ImplBase};
 use crate::layers::{
     Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
 };
-use crate::property_table::{Properties, PropertyTable, PropertyVisitor};
+use crate::property_table::{self, OwnerSlot, Properties, PropertyTable, PropertyVisitor, SetPropertyError};
+use crate::style_property::StyleProperty;
 
 /// Where a layer type's layers get their data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -118,12 +121,6 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
 
     /// Adds the font stacks that `style` uses to `out`.
     fn populate_font_stack(_style: &LayerStyle<Self>, _out: &mut VecSet<FontStack>) {}
-
-    /// The layer of `style`, whose property values parse against
-    /// `functions`, or `None` for a type that style JSON can't create.
-    fn into_layer(_style: Arc<LayerStyle<Self>>, _functions: Arc<Functions>) -> Option<Box<dyn Layer>> {
-        None
-    }
 }
 
 /// The style data of a layer of the type `T`: the members every layer has,
@@ -235,6 +232,20 @@ pub trait ErasedLayerStyle: Any + Send + Sync {
     /// Adds the font stacks that the layer uses to `out`.
     fn populate_font_stack(&self, out: &mut VecSet<FontStack>);
 
+    /// The layer's type.
+    fn layer_type(&self) -> &'static dyn ErasedStyleLayerType;
+
+    /// The property `name` (or a paint property's `<name>-transition`),
+    /// undefined for a name the type lacks.
+    fn get_property(&self, name: &str) -> StyleProperty;
+
+    /// Writes the defined properties into a layer's style JSON `out`, under
+    /// "paint" and "layout". A key already there stays.
+    fn serialize_properties(&self, out: &mut ValueObject);
+
+    /// A copy named `id`, without the paint properties.
+    fn copy_without_paint(&self, id: &str) -> Arc<dyn ErasedLayerStyle>;
+
     /// Writes the value for its type's [`ErasedStyleLayerType::read_style`].
     fn write(&self, w: &mut Writer);
 }
@@ -265,6 +276,25 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
         T::populate_font_stack(self, out);
     }
 
+    fn layer_type(&self) -> &'static dyn ErasedStyleLayerType {
+        style_entry::<T>()
+    }
+
+    fn get_property(&self, name: &str) -> StyleProperty {
+        property_table::get_property(self, name)
+    }
+
+    fn serialize_properties(&self, out: &mut ValueObject) {
+        property_table::serialize_properties(self, out);
+    }
+
+    fn copy_without_paint(&self, id: &str) -> Arc<dyn ErasedLayerStyle> {
+        let mut copy = self.clone();
+        copy.base.id = id.to_owned();
+        copy.paint = T::PaintProperties::default();
+        Arc::new(copy)
+    }
+
     fn write(&self, w: &mut Writer) {
         Wire::write(self, w);
     }
@@ -274,10 +304,30 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
 pub trait ErasedStyleLayerType: Send + Sync + 'static {
     fn info(&self) -> LayerTypeInfo;
 
-    /// A layer of the type named `id` of the source `source`, whose property
-    /// values parse against `functions`; `None` for a type that style JSON
-    /// can't create.
-    fn create_layer(&self, id: &str, source: &str, functions: &Arc<Functions>) -> Option<Box<dyn Layer>>;
+    /// The style data of a layer of the type named `id` of the source
+    /// `source`, with every property undefined.
+    fn create(&self, id: &str, source: &str) -> Arc<dyn ErasedLayerStyle>;
+
+    /// Sets the property `name` (or a paint property's `<name>-transition`)
+    /// of `style`, which must be of the type, from a style JSON value whose
+    /// expressions parse against `functions`. `style` is copied only when
+    /// the value changes it and it is shared, so a second change to a copy
+    /// changes it in place.
+    ///
+    /// # Errors
+    ///
+    /// When the type has no such property, or the value doesn't convert.
+    fn set_property(
+        &self,
+        style: &mut Arc<dyn ErasedLayerStyle>,
+        name: &str,
+        value: &Convertible<'_>,
+        functions: &Arc<Functions>,
+    ) -> Result<(), SetPropertyError>;
+
+    /// Calls `f` with the members every layer has of `style`, which must be
+    /// of the type, copying it first if it is shared.
+    fn mutate_base(&self, style: &mut Arc<dyn ErasedLayerStyle>, f: &mut dyn FnMut(&mut ImplBase));
 
     /// Reads the value that [`ErasedLayerStyle::write`] wrote for a layer of
     /// the type.
@@ -292,13 +342,53 @@ impl<T: StyleLayerType> ErasedStyleLayerType for LayerTypeEntry<T> {
         T::INFO
     }
 
-    fn create_layer(&self, id: &str, source: &str, functions: &Arc<Functions>) -> Option<Box<dyn Layer>> {
-        let style = LayerStyle::<T>::new(id.to_owned(), source.to_owned());
-        T::into_layer(Arc::new(style), Arc::clone(functions))
+    fn create(&self, id: &str, source: &str) -> Arc<dyn ErasedLayerStyle> {
+        Arc::new(LayerStyle::<T>::new(id.to_owned(), source.to_owned()))
+    }
+
+    fn set_property(
+        &self,
+        style: &mut Arc<dyn ErasedLayerStyle>,
+        name: &str,
+        value: &Convertible<'_>,
+        functions: &Arc<Functions>,
+    ) -> Result<(), SetPropertyError> {
+        let mut slot = ErasedSlot::<T>(style, PhantomData);
+        if slot.get().is_none() {
+            return Err(SetPropertyError::Unknown);
+        }
+        property_table::set_property(&mut slot, name, value, functions)
+    }
+
+    fn mutate_base(&self, style: &mut Arc<dyn ErasedLayerStyle>, f: &mut dyn FnMut(&mut ImplBase)) {
+        if let Some(style) = ErasedSlot::<T>(style, PhantomData).make_mut() {
+            f(&mut style.base);
+        }
     }
 
     fn read_style(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedLayerStyle>> {
         Some(Arc::new(LayerStyle::<T>::read(r)?))
+    }
+}
+
+/// An erased style that is a `LayerStyle<T>`, as the slot that property
+/// changes copy and change it in.
+struct ErasedSlot<'a, T>(&'a mut Arc<dyn ErasedLayerStyle>, PhantomData<fn() -> T>);
+
+impl<T: StyleLayerType> OwnerSlot<LayerStyle<T>> for ErasedSlot<'_, T> {
+    fn get(&self) -> Option<&LayerStyle<T>> {
+        LayerStyle::recover_ref(&**self.0)
+    }
+
+    #[inline(never)]
+    fn make_mut(&mut self) -> Option<&mut LayerStyle<T>> {
+        if Arc::get_mut(self.0).is_none() {
+            let copy = self.get()?.clone();
+            *self.0 = Arc::new(copy);
+        }
+        let style: &mut dyn ErasedLayerStyle = Arc::get_mut(self.0)?;
+        let any: &mut dyn Any = style;
+        any.downcast_mut()
     }
 }
 

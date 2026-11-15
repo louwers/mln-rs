@@ -12,16 +12,14 @@ use mln_map_types::{
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, RequestOrder, Resource, Responder, Response};
+use mln_style::StyleRegistry;
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
 use mln_style::layers::hillshade_layer::Impl as HillshadeLayerImpl;
 use mln_style::layers::line_layer::Impl as LineLayerImpl;
 use mln_style::layers::raster_layer::Impl as RasterLayerImpl;
-use mln_style::layers::{
-    CircleLayer, CircleLayerProperties, HillshadeLayer, HillshadeLayerProperties, LineLayer, LineLayerProperties,
-    RasterLayer, RasterLayerProperties,
-};
+use mln_style::layers::{CircleLayerProperties, HillshadeLayerProperties, LineLayerProperties, RasterLayerProperties};
 use mln_style::observer::SourceObserver;
 use mln_style::source::{self, Source};
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
@@ -202,15 +200,15 @@ impl Tiled {
     fn layers(self) -> Vec<Arc<dyn LayerProperties>> {
         let properties: Arc<dyn LayerProperties> = match self {
             Tiled::Raster => {
-                let layer = RasterLayer::new("id", "source");
+                let layer = Layer::new(&StyleRegistry::with_builtins(), "raster", "id", "source").unwrap();
                 Arc::new(RasterLayerProperties::new(downcast_arc::<RasterLayerImpl>(&layer.base_impl())))
             }
             Tiled::RasterDEM => {
-                let layer = HillshadeLayer::new("id", "source");
+                let layer = Layer::new(&StyleRegistry::with_builtins(), "hillshade", "id", "source").unwrap();
                 Arc::new(HillshadeLayerProperties::new(downcast_arc::<HillshadeLayerImpl>(&layer.base_impl())))
             }
             Tiled::Vector => {
-                let mut layer = LineLayer::new("id", "source");
+                let mut layer = Layer::new(&StyleRegistry::with_builtins(), "line", "id", "source").unwrap();
                 layer.set_source_layer("water");
                 Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())))
             }
@@ -649,7 +647,7 @@ fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (CustomGeom
         CustomGeometrySource::new("source", CustomGeometrySourceOptions::default(), test.run_loop.pool()).unwrap();
     source.load_description(&file_source, &test.run_loop);
 
-    let mut layer = LineLayer::new("id", "source");
+    let mut layer = Layer::new(&StyleRegistry::with_builtins(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn LayerProperties> =
         Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())));
@@ -725,7 +723,7 @@ fn custom_vector_source_set_tile_data() {
     let source = CustomVectorSource::new("source", CustomVectorSourceOptions::default(), test.run_loop.pool());
     source.load_description(&file_source, &test.run_loop);
 
-    let mut layer = LineLayer::new("id", "source");
+    let mut layer = Layer::new(&StyleRegistry::with_builtins(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn LayerProperties> =
         Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())));
@@ -818,7 +816,7 @@ fn geojson_source_tiles_after_data_reset() {
     let mut store = test.store();
     let mut render_source = render_source::create(&source.base_impl(), &mut store);
 
-    let layer = CircleLayer::new("id", "source");
+    let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "id", "source").unwrap();
     let layer_properties: Arc<dyn LayerProperties> =
         Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())));
     let layers = vec![layer_properties];
@@ -843,7 +841,7 @@ fn geojson_source_tiles_after_data_reset() {
 
 /// A circle layer "id" on "source", as layer properties.
 fn circle_layers() -> Vec<Arc<dyn LayerProperties>> {
-    let layer = CircleLayer::new("id", "source");
+    let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "id", "source").unwrap();
     vec![Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())))]
 }
 

@@ -101,8 +101,10 @@ pub fn downcast_arc<T: Impl>(impl_: &Arc<dyn Impl>) -> Arc<T> {
     typed
 }
 
-// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
-// (layer.rs).
+// Debug is not a supertrait of this trait, nor of the other layer and source
+// traits that have a `dyn` Debug impl like this one: through the vtable it
+// would keep every implementation's derived Debug (and those of everything it
+// holds) in the binary. Each prints what tells its values apart instead.
 impl std::fmt::Debug for dyn Impl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Layer::Impl")

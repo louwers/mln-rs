@@ -4,10 +4,11 @@ use feature::Feature;
 use geo_types::Point;
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map_types::MapMode;
+use mln_style::StyleRegistry;
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
+use mln_style::layers::CircleLayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
-use mln_style::layers::{CircleLayer, CircleLayerProperties};
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style::sources::geojson_source::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -106,7 +107,7 @@ fn point_data() -> Arc<dyn GeoJSONData> {
 }
 
 fn circle_layer_properties() -> Arc<dyn LayerProperties> {
-    let layer = CircleLayer::new("circle", "source");
+    let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
     Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())))
 }
 
@@ -179,7 +180,7 @@ fn issue_9927() {
 /// A circle layer as its render layer evaluates it, which records what the
 /// worker codec sends to evaluate it again.
 fn evaluated_circle_layer_properties() -> Arc<dyn LayerProperties> {
-    let layer = CircleLayer::new("circle", "source");
+    let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
     let render_layer = crate::layermanager::create_render_layer(&layer.base_impl()).unwrap();
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)

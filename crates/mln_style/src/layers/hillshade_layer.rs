@@ -1,24 +1,32 @@
-use std::sync::Arc;
-
-use crate::expression::Functions;
+use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::{NoProperties, StyleLayerType};
 pub use crate::layers::hillshade_layer_impl::Impl;
+use crate::layers::hillshade_layer_properties::{self, HillshadePaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-crate::layer::layer_type!(
-    /// A `hillshade` layer.
-    HillshadeLayer
-);
+/// The `hillshade` layer type.
+pub struct Hillshade;
 
-impl HillshadeLayer {
-    /// A layer whose property values parse against the built-in expression
-    /// functions.
-    #[must_use]
-    pub fn new(layer_id: &str, source_id: &str) -> Self {
-        HillshadeLayer::with_functions(Functions::with_builtins(), layer_id, source_id)
+impl StyleLayerType for Hillshade {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "hillshade",
+        source: SourceKind::RasterDem,
+        pass_3d: true,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &hillshade_layer_properties::PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = HillshadePaintProperties::Transitionable;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        hillshade_layer_properties::visit(slot, visitor)
     }
 
-    /// A layer whose property values parse against `functions`.
-    #[must_use]
-    pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str, source_id: &str) -> Self {
-        HillshadeLayer::from_impl(Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())), functions)
+    fn layout_difference(_a: &Impl, _b: &Impl) -> bool {
+        false
     }
 }

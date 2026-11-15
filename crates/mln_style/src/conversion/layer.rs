@@ -4,7 +4,7 @@ use super::{Convertible, Error};
 use crate::layer::{Layer, PropertyScope, SourceKind};
 use crate::registry::StyleRegistry;
 
-fn set_object_member(layer: &mut Box<dyn Layer>, value: &Convertible<'_>, member: &str, error: &mut Error) -> bool {
+fn set_object_member(layer: &mut Layer, value: &Convertible<'_>, member: &str, error: &mut Error) -> bool {
     if let Some(member_value) = value.object_member(member)
         && let Some(error_) = layer.set_property(member, &member_value, None)
     {
@@ -28,7 +28,7 @@ pub(crate) enum InvalidProperty {
 /// Sets each member of the object `properties` (the layer's `layout` or
 /// `paint`) as a property of `layer`.
 fn set_properties(
-    layer: &mut dyn Layer,
+    layer: &mut Layer,
     properties: &Convertible<'_>,
     scope: PropertyScope,
     invalid: InvalidProperty,
@@ -46,7 +46,7 @@ fn set_properties(
 }
 
 pub(crate) fn set_paint_properties(
-    layer: &mut dyn Layer,
+    layer: &mut Layer,
     value: &Convertible<'_>,
     invalid: InvalidProperty,
 ) -> Option<Error> {
@@ -61,7 +61,7 @@ pub(crate) fn set_paint_properties(
 /// one of `registry`'s types, whose expressions parse against its functions.
 /// Fails on the first error, including a layout or paint property that the
 /// layer can't set.
-pub fn convert_layer(registry: &StyleRegistry, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Layer>> {
+pub fn convert_layer(registry: &StyleRegistry, value: &Convertible<'_>, error: &mut Error) -> Option<Layer> {
     convert_layer_with(registry, value, error, InvalidProperty::Fail)
 }
 
@@ -70,7 +70,7 @@ pub(crate) fn convert_layer_with(
     value: &Convertible<'_>,
     error: &mut Error,
     invalid: InvalidProperty,
-) -> Option<Box<dyn Layer>> {
+) -> Option<Layer> {
     if !value.is_object() {
         error.message = "layer must be an object".to_owned();
         return None;
@@ -117,13 +117,13 @@ pub(crate) fn convert_layer_with(
             error.message = format!("layer '{id}': layout must be an object");
             return None;
         }
-        if let Some(error_) = set_properties(layer.as_mut(), &layout_value, PropertyScope::Layout, invalid) {
+        if let Some(error_) = set_properties(&mut layer, &layout_value, PropertyScope::Layout, invalid) {
             *error = error_;
             return None;
         }
     }
 
-    if let Some(error_) = set_paint_properties(layer.as_mut(), value, invalid) {
+    if let Some(error_) = set_paint_properties(&mut layer, value, invalid) {
         *error = error_;
         return None;
     }

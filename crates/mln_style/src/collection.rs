@@ -20,7 +20,7 @@ pub(crate) trait CollectionElement {
     fn impl_id(impl_: &Self::Impl) -> &str;
 }
 
-impl CollectionElement for dyn crate::layer::Layer {
+impl CollectionElement for crate::layer::Layer {
     type Impl = dyn crate::layer::Impl;
     fn base_impl(&self) -> Arc<Self::Impl> {
         crate::layer::Layer::base_impl(self)

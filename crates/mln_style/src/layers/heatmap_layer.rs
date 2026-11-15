@@ -1,24 +1,32 @@
-use std::sync::Arc;
-
-use crate::expression::Functions;
+use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::{NoProperties, StyleLayerType};
 pub use crate::layers::heatmap_layer_impl::Impl;
+use crate::layers::heatmap_layer_properties::{self, HeatmapPaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-crate::layer::layer_type!(
-    /// A `heatmap` layer.
-    HeatmapLayer
-);
+/// The `heatmap` layer type.
+pub struct Heatmap;
 
-impl HeatmapLayer {
-    /// A layer whose property values parse against the built-in expression
-    /// functions.
-    #[must_use]
-    pub fn new(layer_id: &str, source_id: &str) -> Self {
-        HeatmapLayer::with_functions(Functions::with_builtins(), layer_id, source_id)
+impl StyleLayerType for Heatmap {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "heatmap",
+        source: SourceKind::Geometry,
+        pass_3d: true,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &heatmap_layer_properties::PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = HeatmapPaintProperties::Transitionable;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        heatmap_layer_properties::visit(slot, visitor)
     }
 
-    /// A layer whose property values parse against `functions`.
-    #[must_use]
-    pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str, source_id: &str) -> Self {
-        HeatmapLayer::from_impl(Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())), functions)
+    fn layout_difference(a: &Impl, b: &Impl) -> bool {
+        a.filter != b.filter || a.visibility != b.visibility || a.paint.has_data_driven_property_difference(&b.paint)
     }
 }

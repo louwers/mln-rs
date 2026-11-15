@@ -43,7 +43,7 @@ fn tile_data() -> TileData {
     TileData::Mvt(MvtTile::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mvt"))))
 }
 
-fn convert(json: &str) -> Box<dyn Layer> {
+fn convert(json: &str) -> Layer {
     let json: serde_json::Value = serde_json::from_str(json).unwrap();
     let mut error = ConversionError::default();
     convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)

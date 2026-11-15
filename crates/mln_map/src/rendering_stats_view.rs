@@ -6,7 +6,6 @@ use feature::Value;
 use geojson::{Feature, GeoJson, Geometry};
 use mln_renderer::RenderingStats;
 use mln_style::conversion::Convertible;
-use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::sources::custom_geometry_source::{
     CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
 };
@@ -81,8 +80,11 @@ impl RenderingStatsView {
             }
         }
 
-        if style.get_layer(RENDERING_STATS_LAYER_ID).is_none() {
-            let mut layer = SymbolLayer::new(RENDERING_STATS_LAYER_ID, RENDERING_STATS_SOURCE_ID);
+        if style.get_layer(RENDERING_STATS_LAYER_ID).is_none()
+            // A registry without the symbol layer type has no layer to show.
+            && let Ok(mut layer) =
+                Layer::new(style.registry(), "symbol", RENDERING_STATS_LAYER_ID, RENDERING_STATS_SOURCE_ID)
+        {
             let translation = f64::from(EXTENT as f32 / 2.0 - 100.0);
             let properties = [
                 // required
@@ -104,7 +106,7 @@ impl RenderingStatsView {
                 debug_assert!(error.is_none(), "{name}: {error:?}");
             }
 
-            let _ = style.add_layer(Box::new(layer), None);
+            let _ = style.add_layer(layer, None);
         }
     }
 

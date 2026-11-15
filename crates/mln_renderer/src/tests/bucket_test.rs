@@ -13,11 +13,12 @@ use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer
 use mln_style::evaluated::Evaluated;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
 use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPaintProperties};
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style::layers::{FillLayer, LineLayer};
+use mln_style::layers::{Fill, Line};
 use mln_style::property_value::PropertyValue;
 use mln_style::{CrossfadeParameters, PropertyEvaluationParameters, StyleRegistry};
 use mln_style_types::image::ImagePositions;
@@ -183,10 +184,8 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         .unwrap_or_else(|| panic!("{}", error.message));
     let evaluated = FillPaintProperties::PossiblyEvaluated {
         fill_color: Evaluated::PerFeature {
-            expression: layer
-                .downcast_ref::<FillLayer>()
+            expression: LayerStyle::<Fill>::recover_ref(layer.base_impl_ref())
                 .expect("fill layer")
-                .impl_()
                 .paint
                 .fill_color
                 .value
@@ -707,10 +706,8 @@ fn line_bucket_vertices(
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    let layout = layer
-        .downcast_ref::<LineLayer>()
+    let layout = LayerStyle::<Line>::recover_ref(layer.base_impl_ref())
         .expect("line layer")
-        .impl_()
         .layout
         .evaluate(&PropertyEvaluationParameters::new(10.0));
     let mut bucket = LineBucket::new(layout, &VecMap::new(), 10.0, 1);

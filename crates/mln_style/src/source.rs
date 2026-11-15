@@ -201,8 +201,8 @@ pub fn set_max_overscale_factor_for_parent_tiles(source: &dyn Source, overscale_
     mutate_impl(source, |impl_| impl_.base_mut().set_max_overscale_factor_for_parent_tiles(overscale_factor));
 }
 
-// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
-// (layer.rs).
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Impl`
+// (layer_impl.rs).
 impl std::fmt::Debug for dyn Source {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let base = self.base_impl();

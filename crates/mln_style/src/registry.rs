@@ -69,7 +69,7 @@ impl StyleRegistry {
         id: &str,
         value: &Convertible<'_>,
         error: &mut Error,
-    ) -> Option<Box<dyn Layer>> {
+    ) -> Option<Layer> {
         let Some(layer_type) = self.layer_type(type_) else {
             error.message = format!("Unsupported layer type! Null factory for type: {type_}");
             return None;
@@ -88,11 +88,7 @@ impl StyleRegistry {
             };
             source
         };
-        let layer = layer_type.create_layer(id, &source, &self.functions);
-        if layer.is_none() {
-            error.message = format!("Error parsing layer {id} of type: {type_}");
-        }
-        layer
+        Some(Layer::from_style(layer_type.create(id, &source), Arc::clone(&self.functions)))
     }
 }
 

@@ -3,15 +3,15 @@ use std::time::Duration;
 use feature::Value;
 use mln_conversion::{Convertible, Error};
 
-use super::util::{parse_json, value_to_json};
+use super::util::{parse_json, style_of, value_to_json};
 use crate::StyleRegistry;
 use crate::conversion::{convert_filter, convert_layer};
 use crate::expression::Functions;
 use crate::filter::Filter;
 use crate::layer::Layer;
-use crate::layers::background_layer::BackgroundLayer;
+use crate::layers::Background;
 
-fn parse_layer(src: &str) -> Option<Box<dyn Layer>> {
+fn parse_layer(src: &str) -> Option<Layer> {
     let mut error = Error::default();
     let json = parse_json(src);
     convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
@@ -41,9 +41,9 @@ fn layer_transition() {
     )
     .unwrap();
     assert_eq!("background", layer.get_type_info().name);
-    let background = (layer.as_ref()).downcast_ref::<BackgroundLayer>().unwrap();
-    assert_eq!(Some(Duration::from_millis(400)), background.impl_().paint.background_color.options.duration);
-    assert_eq!(Some(Duration::from_millis(500)), background.impl_().paint.background_color.options.delay);
+    let background = style_of::<Background>(&layer);
+    assert_eq!(Some(Duration::from_millis(400)), background.paint.background_color.options.duration);
+    assert_eq!(Some(Duration::from_millis(500)), background.paint.background_color.options.delay);
 }
 
 // gtest: StyleConversion.SerializeDefaults

@@ -1,24 +1,83 @@
-use std::sync::Arc;
+use std::sync::OnceLock;
 
-use crate::expression::Functions;
+use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
+use mln_util::logging::{Event, Log};
+use mln_vec_map::VecSet;
+
+use crate::layer::{FontStack, LayerTypeInfo, SourceKind};
+use crate::layer_type::StyleLayerType;
 pub use crate::layers::symbol_layer_impl::Impl;
+use crate::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
+use crate::layers::symbol_layer_properties::{self, SymbolLayoutProperties, SymbolPaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
+use crate::property_value::PropertyValue;
 
-crate::layer::layer_type!(
-    /// A `symbol` layer.
-    SymbolLayer
-);
+/// The `symbol` layer type.
+pub struct Symbol;
 
-impl SymbolLayer {
-    /// A layer whose property values parse against the built-in expression
-    /// functions.
-    #[must_use]
-    pub fn new(layer_id: &str, source_id: &str) -> Self {
-        SymbolLayer::with_functions(Functions::with_builtins(), layer_id, source_id)
+impl StyleLayerType for Symbol {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "symbol",
+        source: SourceKind::Geometry,
+        pass_3d: false,
+        fading_tiles: true,
+        cross_tile_index: true,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &symbol_layer_properties::PROPERTIES;
+
+    type LayoutProperties = SymbolLayoutProperties::Unevaluated;
+    type PaintProperties = SymbolPaintProperties::Transitionable;
+    type Extra = OnceLock<bool>;
+
+    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+        symbol_layer_properties::visit(slot, visitor)
     }
 
-    /// A layer whose property values parse against `functions`.
-    #[must_use]
-    pub(crate) fn with_functions(functions: Arc<Functions>, layer_id: &str, source_id: &str) -> Self {
-        SymbolLayer::from_impl(Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())), functions)
+    fn layout_difference(a: &Impl, b: &Impl) -> bool {
+        a.filter != b.filter
+            || a.visibility != b.visibility
+            || a.layout != b.layout
+            || a.paint.has_data_driven_property_difference(&b.paint)
+            || (has_format_section_overrides(a)
+                && SymbolLayerPaintPropertyOverrides::has_paint_property_difference(&a.paint, &b.paint))
     }
+
+    fn populate_font_stack(style: &Impl, font_stack: &mut VecSet<FontStack>) {
+        if style.layout.text_field.is_undefined() {
+            return;
+        }
+
+        match &style.layout.text_font {
+            PropertyValue::Undefined => {
+                font_stack
+                    .insert(vec![LAST_RESORT_ALPHABETIC_FONT.to_owned(), LAST_RESORT_PAN_UNICODE_FONT.to_owned()]);
+            }
+            PropertyValue::Constant(constant) => {
+                font_stack.insert(constant.clone());
+            }
+            PropertyValue::Expression(function) => {
+                for value in function.possible_outputs() {
+                    if let Some(value) = value {
+                        font_stack.insert(value);
+                    } else {
+                        Log::warning(
+                            Event::ParseStyle,
+                            format!(
+                                "Layer '{}' has an invalid value for text-font and will not render text. Output \
+                                 values must be contained as literals within the expression.",
+                                style.id
+                            ),
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Whether a section of `style`'s `text-field` overrides a paint property.
+fn has_format_section_overrides(style: &Impl) -> bool {
+    *style.extra.get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(&style.layout.text_field))
 }

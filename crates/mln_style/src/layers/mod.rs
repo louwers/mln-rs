@@ -4,8 +4,9 @@
 //! the style spec (tools/style-codegen/v8.json); its `generated_code_test`
 //! checks them, and the formatter skips them (dprint.jsonc). The
 //! `<type>_layer.rs` and `<type>_layer_impl.rs` files are written by hand:
-//! `<type>_layer_impl.rs` declares the type's marker (such as [`Circle`]),
-//! which implements [`StyleLayerType`](crate::layer_type::StyleLayerType).
+//! `<type>_layer.rs` declares the type's marker (such as [`Circle`]), which
+//! implements [`StyleLayerType`](crate::layer_type::StyleLayerType), and
+//! `<type>_layer_impl.rs` names its style data `Impl`.
 
 pub mod background_layer;
 pub mod background_layer_impl;
@@ -49,39 +50,29 @@ pub mod symbol_layer_impl;
 #[rustfmt::skip]
 pub mod symbol_layer_properties;
 
-pub use background_layer::BackgroundLayer;
-pub use background_layer_impl::Background;
+pub use background_layer::Background;
 pub use background_layer_properties::{BackgroundLayerProperties, BackgroundPaintProperties};
-pub use circle_layer::CircleLayer;
-pub use circle_layer_impl::Circle;
+pub use circle_layer::Circle;
 pub use circle_layer_properties::{CircleLayerProperties, CircleLayoutProperties, CirclePaintProperties};
-pub use color_relief_layer::ColorReliefLayer;
-pub use color_relief_layer_impl::ColorRelief;
+pub use color_relief_layer::ColorRelief;
 pub use color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefPaintProperties};
 pub use custom_layer::{
-    Custom, CustomLayer, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerProperties,
+    Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerProperties,
     CustomLayerRenderParameters,
 };
-pub use fill_extrusion_layer::FillExtrusionLayer;
-pub use fill_extrusion_layer_impl::FillExtrusion;
+pub use fill_extrusion_layer::FillExtrusion;
 pub use fill_extrusion_layer_properties::{
     FillExtrusionLayerProperties, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
 };
-pub use fill_layer::FillLayer;
-pub use fill_layer_impl::Fill;
+pub use fill_layer::Fill;
 pub use fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPaintProperties};
-pub use heatmap_layer::HeatmapLayer;
-pub use heatmap_layer_impl::Heatmap;
+pub use heatmap_layer::Heatmap;
 pub use heatmap_layer_properties::{HeatmapLayerProperties, HeatmapPaintProperties};
-pub use hillshade_layer::HillshadeLayer;
-pub use hillshade_layer_impl::Hillshade;
+pub use hillshade_layer::Hillshade;
 pub use hillshade_layer_properties::{HillshadeLayerProperties, HillshadePaintProperties};
-pub use line_layer::LineLayer;
-pub use line_layer_impl::Line;
+pub use line_layer::Line;
 pub use line_layer_properties::{LineLayerProperties, LineLayoutProperties, LinePaintProperties};
-pub use raster_layer::RasterLayer;
-pub use raster_layer_impl::Raster;
+pub use raster_layer::Raster;
 pub use raster_layer_properties::{RasterLayerProperties, RasterPaintProperties};
-pub use symbol_layer::SymbolLayer;
-pub use symbol_layer_impl::Symbol;
+pub use symbol_layer::Symbol;
 pub use symbol_layer_properties::{SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties};

@@ -97,8 +97,8 @@ pub trait HasCrossfade: LayerProperties {
     fn crossfade(&self) -> &crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 }
 
-// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
-// (layer.rs).
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Impl`
+// (layer_impl.rs).
 impl std::fmt::Debug for dyn LayerProperties {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let base_impl = &self.base().base_impl;

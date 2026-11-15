@@ -2,23 +2,16 @@
 // `set_overrides`, which builds `FormatSectionOverride` expressions, is in
 // format_section_override.rs.
 
-use std::sync::{Arc, OnceLock};
-
 use mln_expression::format_expression::FormatExpressionSection;
 use mln_expression::value::from_expression_value;
-use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
-use mln_util::logging::{Event, Log};
-use mln_vec_map::VecSet;
 
 use crate::evaluated::Evaluated;
-use crate::expression::{Expr, Formatted, FormattedSection, Functions, Type};
-use crate::layer::{FontStack, Layer, LayerTypeInfo, SourceKind};
-use crate::layer_type::{LayerStyle, StyleLayerType};
-use crate::layers::symbol_layer::SymbolLayer;
-use crate::layers::symbol_layer_properties::{self, SymbolLayoutProperties, SymbolPaintProperties};
+use crate::expression::{Expr, Formatted, FormattedSection, Type};
+use crate::layer_type::LayerStyle;
+use crate::layers::Symbol;
+use crate::layers::symbol_layer_properties::SymbolPaintProperties;
 use crate::properties::OverridableSection;
 use crate::property_expression::PropertyExpression;
-use crate::property_table::{PropertyTable, PropertyVisitor};
 use crate::property_value::PropertyValue;
 
 /// The alternatives of a `PropertyValue<Formatted>` or an
@@ -164,79 +157,5 @@ impl SymbolLayerPaintPropertyOverrides {
     }
 }
 
-/// The `symbol` layer type.
-pub struct Symbol;
-
 /// The style data of a `symbol` layer.
 pub type Impl = LayerStyle<Symbol>;
-
-impl StyleLayerType for Symbol {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "symbol",
-        source: SourceKind::Geometry,
-        pass_3d: false,
-        fading_tiles: true,
-        cross_tile_index: true,
-        from_json: true,
-    };
-    const PROPERTIES: &'static PropertyTable = &symbol_layer_properties::PROPERTIES;
-
-    type LayoutProperties = SymbolLayoutProperties::Unevaluated;
-    type PaintProperties = SymbolPaintProperties::Transitionable;
-    type Extra = OnceLock<bool>;
-
-    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
-        symbol_layer_properties::visit(slot, visitor)
-    }
-
-    fn layout_difference(a: &Impl, b: &Impl) -> bool {
-        a.filter != b.filter
-            || a.visibility != b.visibility
-            || a.layout != b.layout
-            || a.paint.has_data_driven_property_difference(&b.paint)
-            || (has_format_section_overrides(a)
-                && SymbolLayerPaintPropertyOverrides::has_paint_property_difference(&a.paint, &b.paint))
-    }
-
-    fn populate_font_stack(style: &Impl, font_stack: &mut VecSet<FontStack>) {
-        if style.layout.text_field.is_undefined() {
-            return;
-        }
-
-        match &style.layout.text_font {
-            PropertyValue::Undefined => {
-                font_stack
-                    .insert(vec![LAST_RESORT_ALPHABETIC_FONT.to_owned(), LAST_RESORT_PAN_UNICODE_FONT.to_owned()]);
-            }
-            PropertyValue::Constant(constant) => {
-                font_stack.insert(constant.clone());
-            }
-            PropertyValue::Expression(function) => {
-                for value in function.possible_outputs() {
-                    if let Some(value) = value {
-                        font_stack.insert(value);
-                    } else {
-                        Log::warning(
-                            Event::ParseStyle,
-                            format!(
-                                "Layer '{}' has an invalid value for text-font and will not render text. Output \
-                                 values must be contained as literals within the expression.",
-                                style.id
-                            ),
-                        );
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    fn into_layer(style: Arc<Impl>, functions: Arc<Functions>) -> Option<Box<dyn Layer>> {
-        Some(Box::new(SymbolLayer::from_impl(style, functions)))
-    }
-}
-
-/// Whether a section of `style`'s `text-field` overrides a paint property.
-fn has_format_section_overrides(style: &Impl) -> bool {
-    *style.extra.get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(&style.layout.text_field))
-}

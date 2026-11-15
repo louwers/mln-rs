@@ -122,8 +122,8 @@ pub fn downcast_arc<T: Impl>(impl_: &Arc<dyn Impl>) -> Arc<T> {
     any.downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))
 }
 
-// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
-// (layer.rs).
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Impl`
+// (layer_impl.rs).
 impl std::fmt::Debug for dyn Impl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let base = self.base();
