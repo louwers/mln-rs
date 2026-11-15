@@ -52,8 +52,7 @@ use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver};
 use crate::text::placement::Placement;
 use crate::tile::geometry_tile::{DependencyStores, GeometryTile};
 use crate::tile::job::SourceKey;
-use crate::tile::tile::TileOperation;
-use crate::tile::tile_worker_transport::{InProcessTransport, TileWorkerTransport};
+use crate::tile::tile::{Tile, TileOperation};
 use crate::tile::tile_workers::{PoolWorkers, SourceCounters, TileJobs, Waker};
 use crate::tile::worker_codec::{RemoteJobs, RemoteWorkers};
 use crate::tile_parameters::TileParameters;
@@ -235,10 +234,7 @@ pub(crate) struct RenderOrchestrator {
     filtered_layers_for_source: Vec<Arc<dyn LayerProperties>>,
 
     thread_pool: TaggedScheduler,
-    /// Port-only: creates the workers of raster and raster-dem tiles
-    /// (`tile_worker_transport.rs`).
-    tile_worker_transport: Rc<dyn TileWorkerTransport>,
-    /// Where the geometry tiles' jobs run.
+    /// Where the tiles' jobs run.
     /// Shared with the tiles, which submit their jobs as their inputs
     /// change; borrowed only through `try_borrow_mut`, so a tile whose input
     /// changes while the update has it leaves its job to the update.
@@ -351,7 +347,6 @@ impl RenderOrchestrator {
             ordered_layers: Vec::new(),
             remake_render_layers: false,
             filtered_layers_for_source: Vec::new(),
-            tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
             tile_jobs: Rc::new(RefCell::new(TileJobs::new(Box::new(pool_workers)))),
             waker,
             _update_requests: update_requests,
@@ -372,12 +367,10 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Port-only: runs the tiles' jobs, and the workers of the raster tiles
-    /// created from now on, in `workers` (by default on the thread pool).
-    /// The jobs in flight elsewhere run again there.
+    /// Port-only: runs the tiles' jobs in `workers` (by default on the
+    /// thread pool). The jobs in flight elsewhere run again there.
     pub(crate) fn set_tile_workers(&mut self, workers: &Rc<RemoteWorkers>) {
         workers.set_waker(Arc::clone(&self.waker));
-        self.tile_worker_transport = Rc::<RemoteWorkers>::clone(workers);
         if let Ok(mut jobs) = self.tile_jobs.try_borrow_mut() {
             jobs.set_workers(Box::new(RemoteJobs(Rc::clone(workers))));
         }
@@ -484,7 +477,6 @@ impl RenderOrchestrator {
             jobs: Some(Rc::clone(&self.tile_jobs)),
             available_images: Arc::default(),
             font_faces: update_parameters.font_faces.clone(),
-            tile_worker_transport: Rc::clone(&self.tile_worker_transport),
             thread_pool: self.thread_pool.clone(),
         };
 
@@ -1167,14 +1159,24 @@ impl RenderOrchestrator {
         self.dynamic_texture_atlas.upload(context);
     }
 
+    /// Calls `f` with each tile of each source, in the style's source
+    /// order.
+    fn for_each_tile(&self, mut f: impl FnMut(&dyn Tile)) {
+        for source_impl in self.source_impls.iter() {
+            if let Some(source) = self.render_sources.get(&source_impl.base().id) {
+                source.for_each_tile(&mut f);
+            }
+        }
+    }
+
     /// Calls `f` with each geometry tile of each source, in the style's
     /// source order.
     fn for_each_geometry_tile(&self, mut f: impl FnMut(&GeometryTile)) {
-        for source_impl in self.source_impls.iter() {
-            if let Some(source) = self.render_sources.get(&source_impl.base().id) {
-                source.for_each_geometry_tile(&mut f);
+        self.for_each_tile(|tile| {
+            if let Some(tile) = tile.as_geometry_tile() {
+                f(tile);
             }
-        }
+        });
     }
 
     /// Gives the tiles the replies to their jobs that arrived, and the lanes
@@ -1185,13 +1187,9 @@ impl RenderOrchestrator {
         };
         let jobs = &mut *jobs;
         jobs.receive();
-        for source_impl in self.source_impls.iter() {
-            if let Some(source) = self.render_sources.get(&source_impl.base().id) {
-                source.for_each_geometry_tile(&mut |tile| {
-                    tile.inner().take_reply(jobs);
-                });
-            }
-        }
+        self.for_each_tile(|tile| {
+            tile.take_reply(jobs);
+        });
         let stale = jobs.end_receive();
         if !stale.is_empty() {
             drop_on_workers(&self.thread_pool, stale);
@@ -1203,28 +1201,28 @@ impl RenderOrchestrator {
     /// view's first, while the workers have room. Returns whether a tile of
     /// a source with synchronous updates laid out.
     fn drive_tiles(&mut self) -> bool {
-        let mut stores = DependencyStores {
-            glyphs: &mut self.glyph_store,
-            images: &mut self.image_store,
-            atlas: &mut self.dynamic_texture_atlas,
-        };
-        let mut tiles: Vec<&GeometryTile> = Vec::new();
+        let mut tiles: Vec<&dyn Tile> = Vec::new();
         for source_impl in self.source_impls.iter() {
             if let Some(source) = self.render_sources.get(&source_impl.base().id) {
-                source.for_each_geometry_tile(&mut |tile| {
-                    if tile.inner().has_work() {
+                source.for_each_tile(&mut |tile| {
+                    if tile.has_work() {
                         tiles.push(tile);
                     }
                 });
             }
         }
-        tiles.sort_by_key(|tile| tile.inner().base.load_order.get());
+        tiles.sort_by_key(|tile| tile.base().load_order.get());
         let Ok(mut jobs) = self.tile_jobs.try_borrow_mut() else {
             return false;
         };
+        let mut stores = DependencyStores {
+            glyphs: &mut self.glyph_store,
+            images: &mut self.image_store,
+            atlas: &mut self.dynamic_texture_atlas,
+        };
         let mut laid_out = false;
         for tile in tiles {
-            laid_out |= tile.inner().drive(&mut jobs, &mut stores);
+            laid_out |= tile.drive(&mut jobs, &mut stores);
         }
         laid_out
     }

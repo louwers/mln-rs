@@ -6,13 +6,15 @@
 //! with [`JobResult::NeedsData`]. A layout whose dependencies its job's
 //! [`Resolved`] doesn't cover answers [`JobResult::NeedsDeps`] after
 //! discovery; the tile resolves them and runs the job again, which
-//! discovers again and builds.
+//! discovers again and builds. A raster or raster-dem tile's job decodes
+//! its image.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use mln_image::decoder;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
 use mln_text::glyph::FontFaces;
@@ -20,10 +22,14 @@ use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
+use mln_util::image::PremultipliedImage;
+use mln_util::serialization::payload::shared_bytes;
+use mln_util::tileset::RasterEncoding;
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
+use crate::geometry::dem_data::DEMData;
 use crate::layout::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::geometry_tile::LayoutResult;
 use crate::tile::worker_codec::fields;
@@ -68,6 +74,17 @@ pub(crate) struct Reply {
 #[derive(mln_wire::Wire)]
 pub(crate) enum Job {
     Layout(LayoutJob),
+    /// Decodes a raster tile's image.
+    Raster {
+        #[wire(with = "shared_bytes")]
+        data: Arc<Vec<u8>>,
+    },
+    /// Decodes a raster-dem tile's image into its DEM.
+    Dem {
+        #[wire(with = "shared_bytes")]
+        data: Arc<Vec<u8>>,
+        encoding: RasterEncoding,
+    },
 }
 
 /// Everything a layout reads.
@@ -148,6 +165,10 @@ pub(crate) enum JobResult {
     NeedsDeps(Dependencies),
     /// `Cached(key)` missed: the worker evicted the data or never had it.
     NeedsData,
+    /// A raster tile's image.
+    Raster(PremultipliedImage),
+    /// A raster-dem tile's DEM, with its border filled from its own edges.
+    Dem(DEMData),
     Failed(Error),
 }
 
@@ -168,29 +189,35 @@ pub(crate) struct JobTimes {
     pub(crate) build: Duration,
 }
 
-/// Runs `run` and calls `done` with its reply exactly once, before
-/// returning. If the job panics, `done` gets `Failed` as the panic unwinds.
-/// `cache` is the worker's tile data cache: `None` natively, where the data
-/// always comes with the job. `memo` keeps what a job that answered
-/// `NeedsDeps` discovered, for its resume.
+/// Runs `run` and calls `done` with its reply exactly once: before
+/// returning, or later on this thread for an image the platform's decoder
+/// answers later (the browser's). If the job panics, `done` gets `Failed`
+/// as the panic unwinds. `cache` is the worker's tile data cache: `None`
+/// natively, where the data always comes with the job. `memo` keeps what a
+/// job that answered `NeedsDeps` discovered, for its resume.
 pub(crate) fn run_job(
     run: Run,
     cache: Option<&mut DataCache>,
     memo: Option<&DiscoveryMemo>,
-    done: impl FnOnce(Reply, JobTimes),
+    done: impl FnOnce(Reply, JobTimes) + 'static,
 ) {
     let Run { id, job, .. } = run;
-    run_guarded(id, done, move || match job {
-        Job::Layout(job) => layout(id, job, cache, memo),
-    });
-}
-
-/// Calls `done` with `work`'s result for job `id`, or with `Failed` if
-/// `work` panics.
-pub(crate) fn run_guarded(id: JobId, done: impl FnOnce(Reply, JobTimes), work: impl FnOnce() -> (JobResult, JobTimes)) {
     let guard = ReplyGuard { id, done: Some(done) };
-    let (result, times) = work();
-    guard.finish(result, times);
+    match job {
+        Job::Layout(job) => {
+            let (result, times) = layout(id, job, cache, memo);
+            guard.finish(result, times);
+        }
+        // The guard goes with the decode, which replies when it answers.
+        Job::Raster { data } => decoder::decode(&data, move |image| {
+            let result = image.map_or_else(JobResult::Failed, JobResult::Raster);
+            guard.finish(result, JobTimes::default());
+        }),
+        Job::Dem { data, encoding } => decoder::decode(&data, move |image| {
+            let dem = image.and_then(|image| DEMData::new(&image, encoding).map_err(Error::native));
+            guard.finish(dem.map_or_else(JobResult::Failed, JobResult::Dem), JobTimes::default());
+        }),
+    }
 }
 
 /// Replies `Failed` if it drops before `finish`: a job that panics still
@@ -211,7 +238,7 @@ impl<F: FnOnce(Reply, JobTimes)> ReplyGuard<F> {
 impl<F: FnOnce(Reply, JobTimes)> Drop for ReplyGuard<F> {
     fn drop(&mut self) {
         if let Some(done) = self.done.take() {
-            let result = JobResult::Failed(Error::native("the tile's layout panicked"));
+            let result = JobResult::Failed(Error::native("the tile's job panicked"));
             done(Reply { id: self.id, result }, JobTimes::default());
         }
     }

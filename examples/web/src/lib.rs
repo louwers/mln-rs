@@ -9,9 +9,9 @@
 //!   `webgl` build. The runtime's and the session's work runs in the slices
 //!   of `mln_web_host::pump`, and the page's animation frames demand frames.
 //! - In each tile worker's Web Worker, `mln_web_host`'s tile worker side: a
-//!   `TileWorkerHost`, which runs the tiles' layout jobs and the raster
-//!   tiles' workers. The session's renderer sends them only bytes, over a
-//!   `MessageChannel` between the two Web Workers.
+//!   `TileWorkerHost`, which runs the tiles' jobs: layouts, and raster and
+//!   raster-dem tiles' image decodes. The session's renderer sends them only
+//!   bytes, over a `MessageChannel` between the two Web Workers.
 //! - In the map's Web Worker again, once a style declares font faces: the
 //!   shaper module (`crates/mln_web_shaper`), which shapes and rasterizes them
 //!   (`mln_web_host::shaper`). Only the map's Web Worker loads it, and maps

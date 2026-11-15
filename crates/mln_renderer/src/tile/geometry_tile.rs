@@ -301,7 +301,7 @@ fn outdated_by(result: &JobResult, then: &VecSet<String>, now: &VecSet<String>) 
     let deps = match result {
         JobResult::Laid(output) => &output.deps,
         JobResult::NeedsDeps(needs) => needs,
-        JobResult::NeedsData | JobResult::Failed(_) => return false,
+        JobResult::NeedsData | JobResult::Raster(_) | JobResult::Dem(_) | JobResult::Failed(_) => return false,
     };
     deps.unavailable_images.iter().any(|id| now.contains(id))
         || deps.images.keys().any(|id| then.contains(id) && !now.contains(id))
@@ -596,6 +596,12 @@ impl GeometryTileInner {
                 driver.work = Work::Current;
                 drop(driver);
                 self.on_error(error);
+                false
+            }
+            JobResult::Raster(_) | JobResult::Dem(_) => {
+                driver.work = Work::Current;
+                drop(driver);
+                self.on_error(Error::native("a geometry tile's layout answered as a decode"));
                 false
             }
         }
@@ -915,6 +921,18 @@ impl Tile for GeometryTile {
 
     fn cancel(&self) {
         self.inner.abandon();
+    }
+
+    fn take_reply(&self, jobs: &mut TileJobs) -> bool {
+        self.inner.take_reply(jobs)
+    }
+
+    fn has_work(&self) -> bool {
+        self.inner.has_work()
+    }
+
+    fn drive(&self, jobs: &mut TileJobs, stores: &mut DependencyStores<'_>) -> bool {
+        self.inner.drive(jobs, stores)
     }
 
     fn set_style(&self, style: &Arc<SourceStyle>) {

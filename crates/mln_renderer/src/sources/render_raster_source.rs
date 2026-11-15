@@ -15,7 +15,7 @@ use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePr
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderItem;
 use crate::sources::render_tile_source::RenderTileSource;
-use crate::tile::raster_tile::RasterTile;
+use crate::tile::raster_tile::{RasterKind, RasterTile};
 use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
@@ -56,7 +56,14 @@ impl RenderRasterSource {
             tileset.zoom_range,
             tileset.bounds,
             |tile_id, observer| -> Option<Box<dyn Tile>> {
-                Some(Box::new(RasterTile::new(*tile_id, source_id.clone(), parameters, tileset, Some(observer))))
+                Some(Box::new(RasterTile::new(
+                    *tile_id,
+                    source_id.clone(),
+                    RasterKind::Image,
+                    parameters,
+                    tileset,
+                    Some(observer),
+                )))
             },
         );
         let renderables: Vec<(UnwrappedTileID, &dyn Tile)> =
@@ -142,6 +149,10 @@ impl RenderSource for RenderRasterSource {
 
     fn get_raw_render_tiles(&self) -> Rc<Vec<RenderTile>> {
         self.tile_source.get_raw_render_tiles()
+    }
+
+    fn for_each_tile<'s>(&'s self, f: &mut dyn FnMut(&'s dyn Tile)) {
+        self.tile_source.tile_pyramid.all_tiles().for_each(f);
     }
 
     fn set_cache_enabled(&mut self, enable: bool) {

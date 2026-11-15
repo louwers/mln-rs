@@ -20,6 +20,7 @@ use serde_json::json;
 use crate::layermanager;
 use crate::layout::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, Run, SourceKey, TileKey, run_job};
+use crate::tile::tile_workers::InlineWorkers;
 
 /// A layer from its style JSON on source `s`, evaluated at zoom 0 as the
 /// `RenderOrchestrator` evaluates it.
@@ -128,12 +129,8 @@ fn run(layers: &[Arc<dyn LayerProperties>], available: &[&str], resolved: Resolv
         params: params(),
         resolved: Arc::new(resolved),
     };
-    let mut result = None;
     let run = Run { id: JobId { tile, generation: 1 }, job: Job::Layout(job), superseded: Arc::default() };
-    run_job(run, None, None, |reply, _| {
-        result = Some(reply.result);
-    });
-    result.unwrap()
+    InlineWorkers::run(run).result
 }
 
 /// A symbol layer whose only feature has no icon, but whose `icon-image`
@@ -204,9 +201,11 @@ fn a_resume_builds_from_the_memo() {
         Run { id: JobId { tile, generation }, job: Job::Layout(job), superseded: Arc::default() }
     };
     let run = |run: Run| {
-        let mut out = None;
-        run_job(run, None, Some(&memo), |reply, times: JobTimes| out = Some((reply.result, times)));
-        out.unwrap()
+        let (sender, out) = std::sync::mpsc::channel();
+        run_job(run, None, Some(&memo), move |reply, times: JobTimes| {
+            let _ = sender.send((reply.result, times));
+        });
+        out.try_recv().expect("a reply before returning")
     };
     let missing = || Resolved { missing_images: VecSet::from_iter(["a".to_owned()]), ..Resolved::default() };
 

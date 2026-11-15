@@ -24,8 +24,7 @@ use crate::render_tree::RenderItem;
 use crate::sources::render_geojson_source::RenderGeoJSONSource;
 use crate::sources::render_raster_source::RenderRasterSource;
 use crate::sources::render_vector_source::RenderVectorSource;
-use crate::tile::geometry_tile::GeometryTile;
-use crate::tile::tile::{TileBase, TileOperation};
+use crate::tile::tile::{Tile, TileBase, TileOperation};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile_parameters::TileParameters;
 
@@ -164,9 +163,8 @@ pub(crate) trait RenderSource {
     fn update_fading_tiles(&mut self);
     fn has_fading_tiles(&self) -> bool;
 
-    /// Calls `f` with each of the source's geometry tiles, the cached ones
-    /// included.
-    fn for_each_geometry_tile<'s>(&'s self, _f: &mut dyn FnMut(&'s GeometryTile)) {}
+    /// Calls `f` with each of the source's tiles, the cached ones included.
+    fn for_each_tile<'s>(&'s self, _f: &mut dyn FnMut(&'s dyn Tile)) {}
 
     /// If supported, returns a shared list of `RenderTiles`, sorted by tile id
     /// and excluding tiles hold for fade; returns `None` otherwise.

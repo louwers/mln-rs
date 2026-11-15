@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
@@ -14,7 +13,6 @@ use mln_util::tileset::Tileset;
 use crate::query::SourceQueryOptions;
 use crate::tile::tile::Tile;
 use crate::tile::tile_loader::{LoaderTile, VectorTileEncoding};
-use crate::tile::tile_worker_transport::{InProcessTransport, TileWorkerTransport};
 use crate::tile::vector_tile::VectorTile;
 use crate::tile_parameters::TileParameters;
 
@@ -24,7 +22,6 @@ struct VectorTileTest {
     thread_pool: TaggedScheduler,
     file_source: Arc<StubFileSource>,
     tileset: Tileset,
-    transport: Rc<dyn TileWorkerTransport>,
 }
 
 impl VectorTileTest {
@@ -37,7 +34,6 @@ impl VectorTileTest {
             file_source: Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
             run_loop,
             transform: Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default),
-            transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
             thread_pool,
             tileset: Tileset { tiles: vec!["https://example.com".to_owned()], ..Default::default() },
         }
@@ -66,7 +62,6 @@ impl VectorTileTest {
             jobs: None,
             available_images: Arc::default(),
             font_faces: None,
-            tile_worker_transport: Rc::clone(&self.transport),
             thread_pool: self.thread_pool.clone(),
         }
     }

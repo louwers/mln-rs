@@ -19,10 +19,9 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
-use super::envelope::{self, JOB};
 use super::map_side::MapCodec;
 use super::worker_side::WorkerCodec;
-use super::{Encoded, TileWorkerHost, fields};
+use super::{Encoded, TileWorkerHost, envelope, fields};
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layermanager;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
@@ -32,6 +31,7 @@ use crate::tile::job::{
     DataCache, DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceKey, SourceStyle,
     TileKey, run_job,
 };
+use crate::tile::tile_workers::InlineWorkers;
 
 fn fixture(path: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(path);
@@ -146,9 +146,7 @@ fn answer(dependencies: &Dependencies) -> Resolved {
 
 /// Runs `run` on this thread, as `PoolWorkers` does.
 fn direct_result(run: Run) -> JobResult {
-    let mut result = None;
-    run_job(run, None, None, |reply, _| result = Some(reply.result));
-    result.unwrap()
+    InlineWorkers::run(run).result
 }
 
 /// Runs the job of `layers` and `data` until it lays out, answering its
@@ -165,6 +163,7 @@ fn lay_out(
             JobResult::Laid(output) => return output,
             JobResult::NeedsDeps(needs) => resolved = answer(&needs),
             JobResult::NeedsData => panic!("the job carried its data"),
+            JobResult::Raster(_) | JobResult::Dem(_) => panic!("a decode's result"),
             JobResult::Failed(error) => panic!("{error}"),
         }
     }
@@ -185,24 +184,19 @@ impl ThroughCodec {
 
     /// The reply to `run`, encoded on the worker's side.
     fn reply(&mut self, request: &[u8]) -> Encoded {
-        let Some((&JOB, frame)) = request.split_first() else {
-            panic!("not a job");
-        };
-        let (id, body) = envelope::read_job_id(frame).unwrap();
+        let (id, body) = envelope::read_job_id(request).unwrap();
         let job = self.worker.decode_job(body).unwrap();
-        let mut reply = None;
-        run_job(Run { id, job, superseded: Arc::default() }, Some(&mut self.cache), None, |r, times| {
-            reply = Some(self.worker.encode_reply(&r, &times));
+        let (sender, reply) = std::sync::mpsc::channel();
+        run_job(Run { id, job, superseded: Arc::default() }, Some(&mut self.cache), None, move |r, times| {
+            let _ = sender.send((r, times));
         });
-        reply.unwrap()
+        let (reply, times) = reply.try_recv().expect("a reply before returning");
+        self.worker.encode_reply(&reply, &times)
     }
 
     /// Decodes a reply on the map side.
     fn decode(&mut self, reply: Encoded) -> (JobId, JobResult) {
-        let Some((&JOB, frame)) = reply.bytes.split_first() else {
-            panic!("not a job's reply");
-        };
-        let (id, _, body) = envelope::read_reply_header(frame).unwrap();
+        let (id, _, body) = envelope::read_reply_header(&reply.bytes).unwrap();
         let body = Encoded { bytes: body.to_vec(), payloads: reply.payloads };
         (id, self.map.decode_result(body))
     }
@@ -530,7 +524,7 @@ fn layouts_have_the_layers_they_answer() {
 
 /// The keys of each table that a job's frame tells the worker to forget.
 fn forgotten(request: &[u8]) -> Vec<(String, Vec<u64>)> {
-    let (_, body) = envelope::read_job_id(&request[1..]).unwrap();
+    let (_, body) = envelope::read_job_id(request).unwrap();
     envelope::take(body).unwrap().0
 }
 
@@ -625,8 +619,10 @@ fn failed_jobs_define_nothing() {
 
     // Decoded without the failed job, the next one defines the layer.
     let request = map.encode_run(&job(&style(&[fill]), DataInput::Cached(key(1)), Resolved::default())).unwrap();
-    let (_, body) = envelope::read_job_id(&request[1..]).unwrap();
-    let Job::Layout(job) = WorkerCodec::new().decode_job(body).unwrap();
+    let (_, body) = envelope::read_job_id(&request).unwrap();
+    let Job::Layout(job) = WorkerCodec::new().decode_job(body).unwrap() else {
+        panic!("not a layout job");
+    };
     assert_eq!(job.style.layers[0].base_impl.id, "water");
 }
 
@@ -636,13 +632,7 @@ fn failed_jobs_define_nothing() {
 fn an_undecodable_body_fails_its_job() {
     let replies = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink = Arc::clone(&replies);
-    let host = TileWorkerHost::new(
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
-        move |reply| sink.lock().push(reply),
-    );
+    let host = TileWorkerHost::new(move |reply| sink.lock().push(reply));
     let mut request = Vec::new();
     envelope::write_job_header(&mut request, &id(4));
     request.extend_from_slice(&[0xff; 16]);
@@ -657,7 +647,7 @@ fn an_undecodable_body_fails_its_job() {
 
     // A frame without a job id can't be answered: the host replies with
     // nothing, which the map side takes as the instance lost.
-    host.handle(&[JOB, 1, 2]);
+    host.handle(&[1, 2]);
     assert_eq!(replies.lock().pop(), Some(Encoded::default()));
 }
 
@@ -683,4 +673,106 @@ fn evicted_data_needs_sending_again() {
     assert!(matches!(codec.run(&job(&style, full_load(2), Resolved::default())), JobResult::Laid(_)));
     assert!(matches!(codec.run(&job(&style, DataInput::Cached(key(1)), Resolved::default())), JobResult::NeedsData));
     assert!(matches!(codec.run(&job(&style, DataInput::Cached(key(2)), Resolved::default())), JobResult::Laid(_)));
+}
+
+/// A PNG of opaque pixels that differ from their neighbours.
+fn png(width: u32, height: u32) -> Arc<Vec<u8>> {
+    let mut image = mln_util::image::PremultipliedImage::new(mln_util::size::Size::new(width, height));
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        *pixel = [(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255];
+    }
+    Arc::new(mln_image::encode_png(&image))
+}
+
+/// A decode job of tile 0/0/0.
+fn decode_job(job: Job) -> Run {
+    Run { id: id(1), job, superseded: Arc::default() }
+}
+
+/// A raster tile's image crosses as it decodes directly, its pixels as a
+/// payload, and a decoding error crosses as the tile's.
+#[test]
+fn raster_decodes_cross() {
+    for data in [Arc::new(fixture("test/fixtures/annotations/emerald.png")), png(64, 64)] {
+        let raster = || decode_job(Job::Raster { data: Arc::clone(&data) });
+        let (JobResult::Raster(direct), JobResult::Raster(through)) =
+            (direct_result(raster()), ThroughCodec::new().run(&raster()))
+        else {
+            panic!("not images");
+        };
+        assert!(direct.valid());
+        assert_eq!((through.size, &through.data), (direct.size, &direct.data));
+    }
+
+    let mut codec = ThroughCodec::new();
+    let request = codec.map.encode_run(&decode_job(Job::Raster { data: png(64, 64) })).unwrap();
+    let reply = codec.reply(&request);
+    assert_eq!(reply.payloads.len(), 1, "the pixels travel as a payload");
+    assert!(reply.bytes.len() < 64);
+
+    let garbage = || decode_job(Job::Raster { data: Arc::new(b"not an image".to_vec()) });
+    let (JobResult::Failed(direct), JobResult::Failed(through)) =
+        (direct_result(garbage()), ThroughCodec::new().run(&garbage()))
+    else {
+        panic!("not errors");
+    };
+    assert_eq!(through.to_string(), direct.to_string());
+}
+
+/// A raster-dem tile's DEM crosses with its border, as it decodes directly,
+/// and the `DEMData` constructor's error crosses as the tile's.
+#[test]
+fn dem_decodes_cross() {
+    use mln_util::tileset::RasterEncoding;
+    let custom = RasterEncoding::Custom { red_factor: 0.0, green_factor: 25.6, blue_factor: 0.1, base_shift: 3446.4 };
+    for encoding in [RasterEncoding::Mapbox, RasterEncoding::Terrarium, custom] {
+        let dem = || decode_job(Job::Dem { data: png(16, 16), encoding });
+        let (JobResult::Dem(direct), JobResult::Dem(through)) = (direct_result(dem()), ThroughCodec::new().run(&dem()))
+        else {
+            panic!("not DEMs");
+        };
+        assert_eq!((through.dim, through.stride, through.encoding), (16, 18, encoding));
+        assert_eq!(through.get_image().data, direct.get_image().data);
+        assert_eq!(through.get(-1, 3), through.get(0, 3), "the border repeats the edge");
+    }
+
+    let not_square = || decode_job(Job::Dem { data: png(16, 8), encoding: RasterEncoding::Mapbox });
+    let JobResult::Failed(error) = ThroughCodec::new().run(&not_square()) else {
+        panic!("not an error");
+    };
+    assert_eq!(error.to_string(), "raster-dem tiles must be square.");
+}
+
+/// A DEM the map side can't read back fails its job: sizes whose byte
+/// counts overflow 32 bits, or members `DEMData::new` can't make.
+#[test]
+fn malformed_dems_fail() {
+    use mln_util::image::PremultipliedImage;
+    use mln_util::size::Size;
+    use mln_util::tileset::RasterEncoding;
+
+    /// What a `JobResult::Dem` crosses as, with a `DEMData` of any members.
+    #[derive(mln_wire::Wire)]
+    enum Malformed {
+        _Laid,
+        _NeedsDeps,
+        _NeedsData,
+        _Raster,
+        Dem(i32, i32, RasterEncoding, PremultipliedImage),
+    }
+
+    let image = |size, bytes| PremultipliedImage::from_vec(Size::new(size, size), vec![0; bytes]);
+    let dems = [
+        (4, 5, image(6, 6 * 6 * 4)),
+        (-1, 1, image(1, 4)),
+        (i32::MAX, 1, image(1, 4)),
+        (32766, 32768, image(32768, 0)),
+    ];
+    for (dim, stride, image) in dems {
+        let mut bytes = Vec::new();
+        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image)).unwrap();
+        let JobResult::Failed(_) = MapCodec::default().decode_result(Encoded::from(bytes)) else {
+            panic!("dim {dim}, stride {stride}: not a failure");
+        };
+    }
 }

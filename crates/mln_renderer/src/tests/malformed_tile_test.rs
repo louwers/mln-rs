@@ -163,9 +163,6 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             jobs: None,
             available_images,
             font_faces: None,
-            tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
-                thread_pool.clone(),
-            )),
             thread_pool: thread_pool.clone(),
         },
     );

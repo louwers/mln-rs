@@ -1,13 +1,11 @@
 // Port-only: a worker instance's side of the worker codec (mod.rs): decodes
-// the jobs the map side sends and encodes their replies, and does the same
-// for the messages of raster and raster-dem tiles.
+// the jobs the map side sends and encodes their replies.
 
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
-use mln_wire::Wire;
 
-use super::envelope::{self, Encoded, RASTER, ReplyHead};
+use super::envelope::{self, Encoded};
 use super::fields::{SharedAvailableImages, SharedSourceStyle};
 use crate::tile::job::{Job, JobResult, JobTimes, Reply};
 
@@ -59,22 +57,4 @@ impl WorkerCodec {
         });
         Encoded { bytes: bytes.unwrap_or_default(), payloads }
     }
-}
-
-/// Encodes what the worker of the raster or raster-dem tile `tile` sends
-/// its tile, or the `error` of what failed to encode.
-pub(crate) fn encode_raster_reply<M: Wire>(
-    tile: u64,
-    correlation_id: u64,
-    message: &M,
-    error: impl FnOnce(String) -> M,
-) -> Encoded {
-    let encode = |message: &M| {
-        let mut bytes = vec![RASTER];
-        envelope::append(&mut bytes, &ReplyHead { tile, correlation_id })?;
-        envelope::append(&mut bytes, message)?;
-        Ok::<_, String>(bytes)
-    };
-    let (bytes, payloads) = payload::encode(|| encode(message).or_else(|failure| encode(&error(failure))));
-    Encoded { bytes: bytes.unwrap_or_default(), payloads }
 }

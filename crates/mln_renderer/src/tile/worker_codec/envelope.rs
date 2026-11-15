@@ -1,12 +1,11 @@
 // Port-only: the frames that cross between the map side and a worker
 // instance (mod.rs), and how they are encoded.
 //
-// Every frame starts with its kind. A job's frame then has the job's id as a
-// fixed header, read without the shared tables, and its body after it: a
-// worker that can't decode a body replies `Failed` with the header's id, and
-// the map side drops a stale reply after reading only its id. A raster or
-// raster-dem tile's frame has the tile's id and its message, as the tile and
-// its worker exchange them (tile_worker_transport.rs).
+// Every frame is one job's: a `Run` to a worker, a `Reply` back. It starts
+// with the job's id as a fixed header, read without the shared tables, and
+// has its body after it: a worker that can't decode a body replies `Failed`
+// with the header's id, and the map side drops a stale reply after reading
+// only its id.
 
 use std::time::Duration;
 
@@ -32,18 +31,12 @@ impl From<Vec<u8>> for Encoded {
     }
 }
 
-/// A job's frame: a `Run` to a worker, a `Reply` back.
-pub(crate) const JOB: u8 = 0;
-/// A raster or raster-dem tile's frame.
-pub(crate) const RASTER: u8 = 1;
-
 /// The size of a `JobId` in a header.
 const JOB_ID_SIZE: usize = 8 + 1 + 2 + 1 + 4 + 4 + 8;
 
-/// Appends a job frame's header: its kind and `id`.
+/// Appends a job frame's header: `id`.
 pub(crate) fn write_job_header(bytes: &mut Vec<u8>, id: &JobId) {
     let JobId { tile: TileKey { source: SourceKey(source), id: tile }, generation } = *id;
-    bytes.push(JOB);
     bytes.extend_from_slice(&source.to_le_bytes());
     bytes.push(tile.overscaled_z);
     bytes.extend_from_slice(&tile.wrap.to_le_bytes());
@@ -53,8 +46,7 @@ pub(crate) fn write_job_header(bytes: &mut Vec<u8>, id: &JobId) {
     bytes.extend_from_slice(&generation.to_le_bytes());
 }
 
-/// Reads a job frame's header, after its kind: its id, and the bytes after
-/// it.
+/// Reads a job frame's header: its id, and the bytes after it.
 pub(crate) fn read_job_id(bytes: &[u8]) -> Option<(JobId, &[u8])> {
     let (header, rest) = bytes.split_at_checked(JOB_ID_SIZE)?;
     let (source, header) = header.split_first_chunk::<8>()?;
@@ -70,8 +62,7 @@ pub(crate) fn read_job_id(bytes: &[u8]) -> Option<(JobId, &[u8])> {
     Some((JobId { tile, generation: u64::from_le_bytes(*generation) }, rest))
 }
 
-/// Appends a reply's header: its kind, the job's id and how long its stages
-/// took.
+/// Appends a reply's header: the job's id and how long its stages took.
 pub(crate) fn write_reply_header(bytes: &mut Vec<u8>, id: &JobId, times: &JobTimes) {
     write_job_header(bytes, id);
     let micros = |time: Duration| u32::try_from(time.as_micros()).unwrap_or(u32::MAX);
@@ -79,37 +70,14 @@ pub(crate) fn write_reply_header(bytes: &mut Vec<u8>, id: &JobId, times: &JobTim
     bytes.extend_from_slice(&micros(times.build).to_le_bytes());
 }
 
-/// Reads a reply's header, after its kind: the job's id, its times, and the
-/// body after them.
+/// Reads a reply's header: the job's id, its times, and the body after
+/// them.
 pub(crate) fn read_reply_header(bytes: &[u8]) -> Option<(JobId, JobTimes, &[u8])> {
     let (id, rest) = read_job_id(bytes)?;
     let (discover, rest) = rest.split_first_chunk::<4>()?;
     let (build, rest) = rest.split_first_chunk::<4>()?;
     let time = |micros: &[u8; 4]| Duration::from_micros(u64::from(u32::from_le_bytes(*micros)));
     Some((id, JobTimes { discover: time(discover), build: time(build) }, rest))
-}
-
-/// What the map side sends a worker instance for a raster or raster-dem
-/// tile, before the message it carries.
-#[derive(Wire)]
-pub(crate) enum Action {
-    /// Creates a worker for the raster tile `tile`.
-    CreateRaster { tile: u64 },
-    /// Creates a worker for the raster-dem tile `tile`.
-    CreateRasterDEM { tile: u64 },
-    /// A message for the worker of `tile`, of its type, which follows.
-    Message { tile: u64, correlation_id: u64 },
-    /// Drops the worker of `tile`.
-    Remove { tile: u64 },
-}
-
-/// What a worker instance sends back before the message of a raster or
-/// raster-dem tile's worker for its tile.
-#[derive(Wire)]
-pub(crate) struct ReplyHead {
-    pub(crate) tile: u64,
-    /// The message's correlation id, for an error about it.
-    pub(crate) correlation_id: u64,
 }
 
 /// Appends `value`, encoded.

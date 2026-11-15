@@ -15,14 +15,14 @@ use mln_style::source_impl::Impl as _;
 use mln_style::sources::tile_source;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
-use mln_util::tileset::Tileset;
+use mln_util::tileset::{RasterEncoding, Tileset};
 
 use crate::algorithm::update_tile_masks::update_tile_masks;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderItem;
 use crate::sources::render_tile_source::RenderTileSource;
-use crate::tile::raster_dem_tile::{DEMTileNeighbors, RasterDEMTile};
+use crate::tile::raster_tile::{DEMTileNeighbors, RasterKind, RasterTile};
 use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
@@ -69,6 +69,7 @@ impl RenderRasterDEMSource {
     ) {
         let impl_ = self.impl_();
         let source_id = impl_.base().id.clone();
+        let kind = RasterKind::Dem(tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox));
         self.tile_source.tile_pyramid.update(
             layers,
             needs_rendering,
@@ -79,7 +80,7 @@ impl RenderRasterDEMSource {
             tileset.zoom_range,
             tileset.bounds,
             |tile_id, observer| -> Option<Box<dyn Tile>> {
-                Some(Box::new(RasterDEMTile::new(*tile_id, source_id.clone(), parameters, tileset, Some(observer))))
+                Some(Box::new(RasterTile::new(*tile_id, source_id.clone(), kind, parameters, tileset, Some(observer))))
             },
         );
         let renderables: Vec<(UnwrappedTileID, &dyn Tile)> =
@@ -94,7 +95,7 @@ impl RenderRasterDEMSource {
     fn backfill_tiles(&self) {
         let pyramid = &self.tile_source.tile_pyramid;
         for tile in pyramid.get_tiles().values() {
-            let Some(demtile) = tile.downcast_ref::<RasterDEMTile>() else {
+            let Some(demtile) = tile.downcast_ref::<RasterTile>() else {
                 continue;
             };
             self.on_tile_changed(demtile);
@@ -103,7 +104,7 @@ impl RenderRasterDEMSource {
 
     /// Backfills the borders of `demtile` and its neighbours from each other.
     /// The tile's observer forwards the change to the `RenderTileSource`.
-    fn on_tile_changed(&self, demtile: &RasterDEMTile) {
+    fn on_tile_changed(&self, demtile: &RasterTile) {
         if !(demtile.is_renderable() && demtile.neighboring_tiles() != DEMTileNeighbors::COMPLETE) {
             return;
         }
@@ -142,7 +143,7 @@ impl RenderRasterDEMSource {
                 if !renderable_neighbor.is_renderable() {
                     continue;
                 }
-                let Some(border_tile) = renderable_neighbor.downcast_ref::<RasterDEMTile>() else {
+                let Some(border_tile) = renderable_neighbor.downcast_ref::<RasterTile>() else {
                     continue;
                 };
                 demtile.backfill_border(border_tile, mask);
@@ -231,6 +232,10 @@ impl RenderSource for RenderRasterDEMSource {
 
     fn get_raw_render_tiles(&self) -> Rc<Vec<RenderTile>> {
         self.tile_source.get_raw_render_tiles()
+    }
+
+    fn for_each_tile<'s>(&'s self, f: &mut dyn FnMut(&'s dyn Tile)) {
+        self.tile_source.tile_pyramid.all_tiles().for_each(f);
     }
 
     fn set_cache_enabled(&mut self, enable: bool) {

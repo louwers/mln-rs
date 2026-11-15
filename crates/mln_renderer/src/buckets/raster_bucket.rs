@@ -58,14 +58,11 @@ fn full_mask() -> TileMask {
     mask
 }
 
-/// A raster tile's image and the geometry that draws it. Serde writes the
-/// image, which is what a worker sets (`tile/worker_codec`); the geometry is
-/// the tile's (`set_mask`).
-#[derive(mln_wire::Wire)]
+/// A raster tile's image and the geometry that draws it, which the tile
+/// masks (`set_mask`).
 pub(crate) struct RasterBucket {
     pub(crate) base: BucketBase,
     pub(crate) image: Option<Arc<PremultipliedImage>>,
-    #[wire(skip, default = "unmasked")]
     geometry: Mutex<RasterBucketGeometry>,
 }
 

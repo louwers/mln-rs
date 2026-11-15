@@ -19,7 +19,9 @@ use mln_util::chrono::Timestamp;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::tile::geometry_tile::DependencyStores;
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
+use crate::tile::tile_workers::TileJobs;
 use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileRenderData;
 
@@ -294,6 +296,25 @@ pub(crate) trait Tile: Any {
     /// The geometry tile this tile lays out with, if it is one.
     fn as_geometry_tile(&self) -> Option<&crate::tile::geometry_tile::GeometryTile> {
         None
+    }
+
+    /// Takes the reply to the tile's job, if it arrived, and gives up the
+    /// job if its lane was lost. Returns whether the tile shows something
+    /// new. By default, those of the geometry tile it lays out with.
+    fn take_reply(&self, jobs: &mut TileJobs) -> bool {
+        self.as_geometry_tile().is_some_and(|tile| tile.take_reply(jobs))
+    }
+
+    /// Whether the tile has a job to submit, or dependencies to resolve.
+    fn has_work(&self) -> bool {
+        self.as_geometry_tile().is_some_and(Tile::has_work)
+    }
+
+    /// Moves the tile's job on: resolves the dependencies it waits for from
+    /// `stores`, and submits its next job to `jobs` if a lane has room.
+    /// Returns whether the tile shows something new.
+    fn drive(&self, jobs: &mut TileJobs, stores: &mut DependencyStores<'_>) -> bool {
+        self.as_geometry_tile().is_some_and(|tile| tile.drive(jobs, stores))
     }
 
     fn set_mask(&self, _mask: TileMask) {}

@@ -9,7 +9,6 @@ use mln_text::glyph::FontFaces;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
-use crate::tile::tile_worker_transport::TileWorkerTransport;
 use crate::tile::tile_workers::{SourceCounters, TileJobs};
 
 pub(crate) struct TileParameters<'a> {
@@ -40,9 +39,6 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) available_images: Arc<VecSet<String>>,
     /// The style's font faces, which the tiles' workers shape text with.
     pub(crate) font_faces: Option<Arc<FontFaces>>,
-    /// Port-only: creates the workers of raster and raster-dem tiles
-    /// (`tile_worker_transport.rs`).
-    pub(crate) tile_worker_transport: Rc<dyn TileWorkerTransport>,
     /// Port-only: the orchestrator's workers, which free the data of the
     /// tiles' layouts (see `render_orchestrator::drop_on_workers`).
     pub(crate) thread_pool: TaggedScheduler,

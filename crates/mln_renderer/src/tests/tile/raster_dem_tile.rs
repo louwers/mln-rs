@@ -1,5 +1,4 @@
 use std::rc::Rc;
-use std::sync::Arc;
 
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
@@ -7,20 +6,17 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 
-use super::{ErrorObserver, RasterTileTest, png, remote_workers};
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::tile::raster_dem_tile::{DEMTileNeighbors, RasterDEMTile};
+use super::{ErrorObserver, RasterTileTest, png};
+use crate::geometry::dem_data::DEMData;
+use crate::tile::job::JobResult;
+use crate::tile::raster_tile::{DEMTileNeighbors, RasterKind, RasterTile};
 use crate::tile::tile::Tile;
 use crate::tile::tile_loader::{LoaderTile, VectorTileEncoding};
 
-fn tile(test: &RasterTileTest) -> RasterDEMTile {
-    RasterDEMTile::new(
-        OverscaledTileID::from_zxy(0, 0, 0),
-        "testSource".to_owned(),
-        &test.tile_parameters(),
-        &test.tileset,
-        None,
-    )
+const DEM: RasterKind = RasterKind::Dem(RasterEncoding::Mapbox);
+
+fn tile(test: &RasterTileTest) -> RasterTile {
+    test.tile(OverscaledTileID::from_zxy(0, 0, 0), DEM, None)
 }
 
 // gtest: RasterDEMTile.setError
@@ -39,7 +35,7 @@ fn set_error() {
 fn on_error() {
     let test = RasterTileTest::new();
     let tile = tile(&test);
-    tile.inner().on_error(Error::native("test"), 0);
+    tile.inner().on_error(Error::native("test"));
     assert!(!tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());
@@ -50,9 +46,8 @@ fn on_error() {
 fn on_parsed() {
     let test = RasterTileTest::new();
     let tile = tile(&test);
-    let bucket = HillshadeBucket::new(&PremultipliedImage::new(Size::new(16, 16)), RasterEncoding::Mapbox)
-        .expect("HillshadeBucket");
-    tile.inner().on_parsed(Some(Arc::new(bucket)), 0);
+    let dem = DEMData::new(&PremultipliedImage::new(Size::new(16, 16)), RasterEncoding::Mapbox).expect("DEMData");
+    tile.inner().apply(JobResult::Dem(dem));
     assert!(tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());
@@ -67,7 +62,7 @@ fn on_parsed() {
 
     // Then simulate a parsing failure and make sure that we keep it renderable
     // in this situation as well.
-    tile.inner().on_error(Error::native("Parse error"), 0);
+    tile.inner().on_error(Error::native("Parse error"));
     assert!(tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());
@@ -79,7 +74,7 @@ fn on_parsed() {
 fn on_parsed_empty() {
     let test = RasterTileTest::new();
     let tile = tile(&test);
-    tile.inner().on_parsed(None, 0);
+    LoaderTile::set_data(&**tile.inner(), None, VectorTileEncoding::Mvt);
     assert!(tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());
@@ -92,56 +87,40 @@ fn on_parsed_empty() {
 fn missing_and_empty() {
     let test = RasterTileTest::new();
     let tile = tile(&test);
-    let wait = || {
-        while !tile.is_complete() {
-            test.run_loop.run_once();
-        }
-    };
+    let mut driver = test.pool_driver();
 
-    tile.inner().set_data(Some(png(16, 16)), VectorTileEncoding::Mvt);
-    wait();
+    LoaderTile::set_data(&**tile.inner(), Some(png(16, 16)), VectorTileEncoding::Mvt);
+    test.settle(&mut driver, &[&tile]);
     assert!(tile.is_renderable());
     assert!(tile.get_bucket().is_some());
 
     LoaderTile::set_missing(&**tile.inner(), VectorTileEncoding::Mvt);
-    wait();
+    test.settle(&mut driver, &[&tile]);
     assert!(!tile.is_renderable());
     assert!(tile.get_bucket().is_none());
 
-    tile.inner().set_data(None, VectorTileEncoding::Mvt);
-    wait();
+    LoaderTile::set_data(&**tile.inner(), None, VectorTileEncoding::Mvt);
+    test.settle(&mut driver, &[&tile]);
     assert!(tile.is_renderable());
     assert!(tile.get_bucket().is_none());
 }
 
-// Port-only: raster-dem tiles whose workers are in worker instances on other
-// threads get their DEMs back through the codec, borders included, and
-// backfill them from each other.
+// Port-only: raster-dem tiles whose jobs run in worker instances on other threads get their DEMs
+// back through the codec, borders included, and backfill them from each other.
 #[test]
-fn parse_and_backfill_through_the_codec() {
+fn decode_and_backfill_through_the_codec() {
     let test = RasterTileTest::new();
-    let mut parameters = test.tile_parameters();
-    parameters.tile_worker_transport = remote_workers(&test.run_loop, 2);
+    let mut driver = test.remote_driver(2);
     let errors = Rc::new(ErrorObserver::default());
     // Neighbours, so both instances get one.
-    let tiles: Vec<RasterDEMTile> = (0..2)
-        .map(|x| {
-            let id = OverscaledTileID::from_zxy(1, x, 0);
-            RasterDEMTile::new(
-                id,
-                "s".to_owned(),
-                &parameters,
-                &test.tileset,
-                Some(Rc::<ErrorObserver>::clone(&errors)),
-            )
-        })
+    let tiles: Vec<RasterTile> = (0..2)
+        .map(|x| test.tile(OverscaledTileID::from_zxy(1, x, 0), DEM, Some(Rc::<ErrorObserver>::clone(&errors))))
         .collect();
+    let all: Vec<&dyn Tile> = tiles.iter().map(|tile| -> &dyn Tile { tile }).collect();
     for tile in &tiles {
-        tile.inner().set_data(Some(png(16, 16)), VectorTileEncoding::Mvt);
+        LoaderTile::set_data(&**tile.inner(), Some(png(16, 16)), VectorTileEncoding::Mvt);
     }
-    while !tiles.iter().all(Tile::is_complete) {
-        test.run_loop.run_once();
-    }
+    test.settle(&mut driver, &all);
     for tile in &tiles {
         assert!(tile.is_renderable());
         let bucket = tile.get_bucket().expect("a bucket");
@@ -157,10 +136,8 @@ fn parse_and_backfill_through_the_codec() {
     }
 
     // The DEMData constructor's error crosses as the tile's.
-    tiles[1].inner().set_data(Some(png(16, 8)), VectorTileEncoding::Mvt);
-    while !tiles[1].is_complete() {
-        test.run_loop.run_once();
-    }
+    LoaderTile::set_data(&**tiles[1].inner(), Some(png(16, 8)), VectorTileEncoding::Mvt);
+    test.settle(&mut driver, &all[1..]);
     assert_eq!(*errors.0.borrow(), ["raster-dem tiles must be square."]);
     assert!(tiles[1].is_renderable());
 }

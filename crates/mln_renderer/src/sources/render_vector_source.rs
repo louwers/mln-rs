@@ -12,7 +12,6 @@ use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePr
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderItem;
 use crate::sources::render_tile_source::RenderTileSource;
-use crate::tile::geometry_tile::GeometryTile;
 use crate::tile::tile::Tile;
 use crate::tile::tile_loader::VectorTileEncoding;
 use crate::tile::vector_tile::VectorTile;
@@ -151,8 +150,8 @@ impl RenderSource for RenderVectorSource {
         self.tile_source.has_fading_tiles()
     }
 
-    fn for_each_geometry_tile<'s>(&'s self, f: &mut dyn FnMut(&'s GeometryTile)) {
-        self.tile_source.tile_pyramid.geometry_tiles().for_each(f);
+    fn for_each_tile<'s>(&'s self, f: &mut dyn FnMut(&'s dyn Tile)) {
+        self.tile_source.tile_pyramid.all_tiles().for_each(f);
     }
 
     fn get_render_tiles(&self) -> Option<RenderTiles> {

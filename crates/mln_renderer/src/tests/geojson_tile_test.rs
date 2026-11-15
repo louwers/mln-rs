@@ -61,9 +61,6 @@ impl GeoJSONTileTest {
             jobs: None,
             available_images: Arc::default(),
             font_faces: None,
-            tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
-                self.thread_pool.clone(),
-            )),
             thread_pool: self.thread_pool.clone(),
         }
     }
@@ -249,7 +246,7 @@ fn update_through_the_codec() {
             tile
         })
         .collect();
-    let geometry_tiles: Vec<_> = tiles.iter().map(GeoJSONTile::geometry_tile).collect();
+    let geometry_tiles: Vec<&dyn Tile> = tiles.iter().map(|tile| -> &dyn Tile { tile.geometry_tile() }).collect();
     while !tiles.iter().all(Tile::is_complete) {
         test.run_loop.run_once();
         driver.update(&geometry_tiles);

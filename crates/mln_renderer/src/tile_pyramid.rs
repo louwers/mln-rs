@@ -25,7 +25,6 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::tile::geometry_tile::GeometryTile;
 use crate::tile::job::SourceStyle;
 use crate::tile::tile::{Tile, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_cache::TileCache;
@@ -1059,9 +1058,9 @@ impl TilePyramid {
         }
     }
 
-    /// The geometry tiles of the pyramid and of its cache.
-    pub(crate) fn geometry_tiles(&self) -> impl Iterator<Item = &GeometryTile> + '_ {
-        self.tiles.values().map(AsRef::as_ref).chain(self.cache.tiles()).filter_map(Tile::as_geometry_tile)
+    /// The tiles of the pyramid and of its cache.
+    pub(crate) fn all_tiles(&self) -> impl Iterator<Item = &dyn Tile> + '_ {
+        self.tiles.values().map(AsRef::as_ref).chain(self.cache.tiles())
     }
 
     #[must_use]

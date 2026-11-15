@@ -4,9 +4,7 @@
 // `RemoteWorkers` is the map side. Each instance is a lane of `TileWorkers`:
 // a job crosses as its frame through the lane's `MapCodec`, whose shared
 // tables mirror the instance's, and each lane takes two jobs at a time.
-// Raster and raster-dem tiles' workers go to the instances in turn, and
-// their messages cross the same way. Each instance runs a `TileWorkerHost`
-// (host.rs).
+// Each instance runs a `TileWorkerHost` (host.rs).
 //
 // An instance is lost when it reports its own death (a Web Worker's `error`
 // event) or sends a frame whose header can't be read. Its lane's tables then
@@ -15,8 +13,8 @@
 //
 // In the browser each instance is a Web Worker with its own wasm instance
 // and memory. `ThreadWorkerInstances` runs the instances on threads of this
-// process instead, each host on its thread's RunLoop and nothing shared
-// with the map but the bytes; the render-test runner uses it
+// process instead, each host on its thread and nothing shared with the map
+// but the bytes; the render-test runner uses it
 // (`--tileWorkerCodec`) to run the suites through the codec.
 
 use std::cell::{Cell, OnceCell, RefCell};
@@ -24,19 +22,15 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{LocalObject, SchedulerPtr, TaggedScheduler, Thread};
-use mln_util::hash::{HashMap, HashSet};
-use mln_util::identity::SimpleIdentity;
+use mln_actor::{LocalObject, SchedulerPtr, Thread};
+use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use super::TileWorkerHost;
-use super::envelope::{self, Action, Encoded, JOB, RASTER};
-use super::map_side::{MapCodec, RasterReply, decode_raster_reply, raster_request};
+use super::envelope::{self, Encoded};
+use super::map_side::MapCodec;
 use crate::tile::job::{JobId, JobResult, JobTimes, Run};
-use crate::tile::raster_dem_tile::{RasterDEMTileMessage, RasterDEMWorkerMessage};
-use crate::tile::raster_tile::{RasterTileMessage, RasterWorkerMessage};
-use crate::tile::tile_worker_transport::{TileEndpoint, TileWorkerTransport, WorkerEndpoint};
 use crate::tile::tile_workers::{Lane, ReplyBody, TileWorkers, Waker, WorkerEvent};
 
 /// The jobs a lane takes at once.
@@ -90,7 +84,6 @@ impl ReplySink {
 
 /// The map side of tile workers in other worker instances.
 pub struct RemoteWorkers {
-    self_weak: Weak<RemoteWorkers>,
     state: RefCell<State>,
     /// Whether each lane's instance takes jobs: not once lost without a
     /// replacement.
@@ -108,9 +101,6 @@ struct State {
     lanes: Vec<RemoteLane>,
     /// The replies and lost lanes `TileWorkers::receive` hasn't taken.
     events: Vec<WorkerEvent>,
-    raster: HashMap<u64, Route>,
-    next_tile: u64,
-    next_instance: usize,
 }
 
 /// One instance's jobs.
@@ -118,20 +108,6 @@ struct State {
 struct RemoteLane {
     codec: MapCodec,
     in_flight: HashSet<JobId>,
-}
-
-/// Where a raster or raster-dem tile's worker is, and the tile's endpoint
-/// for its replies. Shared so that a reply is delivered without the routes
-/// borrowed.
-struct Route {
-    instance: usize,
-    tile: RouteTile,
-}
-
-#[derive(Clone)]
-enum RouteTile {
-    Raster(Rc<dyn TileEndpoint<RasterTileMessage>>),
-    RasterDEM(Rc<dyn TileEndpoint<RasterDEMTileMessage>>),
 }
 
 impl RemoteWorkers {
@@ -146,14 +122,10 @@ impl RemoteWorkers {
             let count = instances.count();
             assert!(count > 0, "RemoteWorkers need a worker instance");
             RemoteWorkers {
-                self_weak: Weak::clone(self_weak),
                 state: RefCell::new(State {
                     instances,
                     lanes: (0..count).map(|_| RemoteLane::default()).collect(),
                     events: Vec::new(),
-                    raster: HashMap::default(),
-                    next_tile: 0,
-                    next_instance: 0,
                 }),
                 live: (0..count).map(|_| Cell::new(true)).collect(),
                 wake: OnceCell::new(),
@@ -183,13 +155,9 @@ impl RemoteWorkers {
 
     fn receive(&self, instance: usize, reply: Encoded) {
         let start = Instant::now();
-        match reply.bytes.split_first() {
-            Some((&JOB, frame)) => match envelope::read_reply_header(frame) {
-                Some((id, times, body)) => self.job_reply(Lane(instance), id, times, body, reply.payloads),
-                None => self.lose(Lane(instance)),
-            },
-            Some((&RASTER, frame)) => self.raster_reply(frame, reply.payloads),
-            _ => self.lose(Lane(instance)),
+        match envelope::read_reply_header(&reply.bytes) {
+            Some((id, times, body)) => self.job_reply(Lane(instance), id, times, body, reply.payloads),
+            None => self.lose(Lane(instance)),
         }
         self.receive_time.set(self.receive_time.get() + start.elapsed());
     }
@@ -234,55 +202,6 @@ impl RemoteWorkers {
             state.events.push(WorkerEvent::LaneLost(lane));
         }
         self.wake();
-    }
-
-    fn raster_reply(&self, frame: &[u8], payloads: Vec<mln_util::serialization::payload::Payload>) {
-        let decoded = decode_raster_reply(frame, payloads, |tile| {
-            let route = self.state.borrow().raster.get(&tile).map(|route| route.tile.clone())?;
-            Some((matches!(route, RouteTile::RasterDEM(_)), route))
-        });
-        let (endpoint, message) = match decoded {
-            Ok(Some(decoded)) => decoded,
-            // The tile dropped its worker after the worker sent this.
-            Ok(None) => return,
-            Err(error) => return Log::error(Event::General, format!("Not a tile worker reply: {error}")),
-        };
-        match (endpoint, message) {
-            (RouteTile::Raster(endpoint), RasterReply::Raster(message)) => endpoint.send(message),
-            (RouteTile::RasterDEM(endpoint), RasterReply::RasterDEM(message)) => endpoint.send(message),
-            // The codec decodes a tile's reply as its worker type's.
-            _ => {}
-        }
-    }
-
-    /// Gives a new raster or raster-dem tile's worker to the next instance,
-    /// with the frame `create` makes for it there; returns the tile's
-    /// worker.
-    fn add(&self, tile: RouteTile, create: impl FnOnce(u64) -> Action) -> RemoteRasterWorker {
-        let mut state = self.state.borrow_mut();
-        let key = state.next_tile;
-        state.next_tile += 1;
-        let instance = state.next_instance;
-        state.next_instance = (instance + 1) % state.lanes.len();
-        state.raster.insert(key, Route { instance, tile });
-        state.instances.post(instance, raster_request::<()>(&create(key), None));
-        let workers = self.self_weak.upgrade().expect("the workers create raster workers while they live");
-        RemoteRasterWorker { workers, tile: key }
-    }
-
-    fn send_raster<M: mln_wire::Wire>(&self, tile: u64, correlation_id: u64, message: &M) {
-        let mut state = self.state.borrow_mut();
-        if let Some(instance) = state.raster.get(&tile).map(|route| route.instance) {
-            let request = raster_request(&Action::Message { tile, correlation_id }, Some(message));
-            state.instances.post(instance, request);
-        }
-    }
-
-    fn remove_raster(&self, tile: u64) {
-        let mut state = self.state.borrow_mut();
-        if let Some(route) = state.raster.remove(&tile) {
-            state.instances.post(route.instance, raster_request::<()>(&Action::Remove { tile }, None));
-        }
     }
 }
 
@@ -353,51 +272,8 @@ impl TileWorkers for RemoteJobs {
     }
 }
 
-impl TileWorkerTransport for RemoteWorkers {
-    fn create_raster(
-        &self,
-        tile: Box<dyn TileEndpoint<RasterTileMessage>>,
-    ) -> Box<dyn WorkerEndpoint<RasterWorkerMessage>> {
-        Box::new(self.add(RouteTile::Raster(Rc::from(tile)), |tile| Action::CreateRaster { tile }))
-    }
-
-    fn create_raster_dem(
-        &self,
-        tile: Box<dyn TileEndpoint<RasterDEMTileMessage>>,
-    ) -> Box<dyn WorkerEndpoint<RasterDEMWorkerMessage>> {
-        Box::new(self.add(RouteTile::RasterDEM(Rc::from(tile)), |tile| Action::CreateRasterDEM { tile }))
-    }
-}
-
-/// A raster or raster-dem tile's worker in a worker instance. Dropping it
-/// drops the worker.
-struct RemoteRasterWorker {
-    workers: Rc<RemoteWorkers>,
-    tile: u64,
-}
-
-impl WorkerEndpoint<RasterWorkerMessage> for RemoteRasterWorker {
-    fn send(&self, message: RasterWorkerMessage) {
-        let &RasterWorkerMessage::Parse { correlation_id, .. } = &message;
-        self.workers.send_raster(self.tile, correlation_id, &message);
-    }
-}
-
-impl WorkerEndpoint<RasterDEMWorkerMessage> for RemoteRasterWorker {
-    fn send(&self, message: RasterDEMWorkerMessage) {
-        let &RasterDEMWorkerMessage::Parse { correlation_id, .. } = &message;
-        self.workers.send_raster(self.tile, correlation_id, &message);
-    }
-}
-
-impl Drop for RemoteRasterWorker {
-    fn drop(&mut self) {
-        self.workers.remove_raster(self.tile);
-    }
-}
-
 /// Worker instances on threads of this process: a `TileWorkerHost` on each
-/// thread, with its raster workers on the thread's `RunLoop`.
+/// thread.
 pub struct ThreadWorkerInstances {
     threads: Vec<Thread<TileWorkerHost>>,
     replies: ReplySink,
@@ -413,9 +289,8 @@ impl ThreadWorkerInstances {
 
     fn start(instance: usize, replies: &ReplySink) -> Thread<TileWorkerHost> {
         let replies = replies.clone();
-        Thread::new(&format!("TileWorker {instance}"), move |_, run_loop| {
-            let workers = TaggedScheduler::new(run_loop.scheduler(), SimpleIdentity::new());
-            TileWorkerHost::new(workers, move |reply| replies.send(instance, reply))
+        Thread::new(&format!("TileWorker {instance}"), move |_, _| {
+            TileWorkerHost::new(move |reply| replies.send(instance, reply))
         })
     }
 }

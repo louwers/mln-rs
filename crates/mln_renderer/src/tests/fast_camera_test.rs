@@ -35,7 +35,6 @@ use crate::render_source::RenderSource;
 use crate::sources::render_raster_source::RenderRasterSource;
 use crate::sources::render_vector_source::RenderVectorSource;
 use crate::tests::TileDriver;
-use crate::tile::tile_worker_transport::InProcessTransport;
 use crate::tile::tile_workers::SourceCounters;
 use crate::tile_parameters::TileParameters;
 use crate::tile_pyramid::TilePyramid;
@@ -158,7 +157,6 @@ struct Scene {
     raster_layers: Vec<Arc<dyn LayerProperties>>,
     vector_render_source: RenderVectorSource,
     raster_render_source: RenderRasterSource,
-    transport: Rc<InProcessTransport>,
     source: Rc<SourceCounters>,
     driver: TileDriver,
     laid_out: bool,
@@ -195,7 +193,6 @@ impl Scene {
         Scene {
             vector_render_source: RenderVectorSource::new(source::downcast_arc(&vector.base_impl())),
             raster_render_source: RenderRasterSource::new(source::downcast_arc(&raster.base_impl())),
-            transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
             source: crate::tests::test_source(),
             driver: TileDriver::pool(&run_loop, &thread_pool),
             run_loop,
@@ -246,7 +243,6 @@ impl Scene {
             jobs: None,
             available_images: Arc::default(),
             font_faces: None,
-            tile_worker_transport: Rc::<InProcessTransport>::clone(&self.transport),
             thread_pool: self.thread_pool.clone(),
         };
         // The first frame lays the tiles out.
@@ -261,9 +257,11 @@ impl Scene {
         loop {
             self.thread_pool.wait_for_empty();
             let ran = self.run_loop.run_once();
-            self.driver.update_source(&self.vector_render_source);
-            let mut work = false;
-            self.vector_render_source.for_each_geometry_tile(&mut |tile| work |= tile.inner().has_work());
+            let mut tiles = Vec::new();
+            self.vector_render_source.for_each_tile(&mut |tile| tiles.push(tile));
+            self.raster_render_source.for_each_tile(&mut |tile| tiles.push(tile));
+            self.driver.update(&tiles);
+            let work = tiles.iter().any(|tile| tile.has_work());
             if !ran && !work && self.driver.jobs.is_idle() {
                 break;
             }

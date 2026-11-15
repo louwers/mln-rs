@@ -78,9 +78,6 @@ impl RasterTileTest {
             jobs: None,
             available_images: Arc::default(),
             font_faces: None,
-            tile_worker_transport: std::rc::Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
-                self.thread_pool.clone(),
-            )),
             thread_pool: self.thread_pool.clone(),
         }
     }
@@ -89,6 +86,52 @@ impl RasterTileTest {
 impl Default for RasterTileTest {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl RasterTileTest {
+    /// A raster tile of `kind` at `id` whose errors go to `observer`.
+    pub(crate) fn tile(
+        &self,
+        id: mln_tile_id::OverscaledTileID,
+        kind: crate::tile::raster_tile::RasterKind,
+        observer: Option<std::rc::Rc<dyn crate::tile::tile_observer::TileObserver>>,
+    ) -> crate::tile::raster_tile::RasterTile {
+        crate::tile::raster_tile::RasterTile::new(
+            id,
+            "testSource".to_owned(),
+            kind,
+            &self.tile_parameters(),
+            &self.tileset,
+            observer,
+        )
+    }
+
+    /// A driver of tiles whose jobs run on the thread pool.
+    pub(crate) fn pool_driver(&self) -> crate::tests::TileDriver {
+        crate::tests::TileDriver::pool(&self.run_loop, &self.thread_pool)
+    }
+
+    /// A driver of tiles whose jobs run in `count` worker instances on
+    /// threads, reached only through the worker codec.
+    pub(crate) fn remote_driver(&self, count: usize) -> crate::tests::TileDriver {
+        let workers = remote_workers(&self.run_loop, count);
+        crate::tests::TileDriver::new(&self.run_loop, Box::new(crate::tile::worker_codec::RemoteJobs(workers)))
+    }
+
+    /// Runs the loop and updates `tiles` with `driver` until they are all
+    /// complete.
+    pub(crate) fn settle(&self, driver: &mut crate::tests::TileDriver, tiles: &[&dyn crate::tile::tile::Tile]) {
+        let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            self.run_loop.run_once();
+            driver.update(tiles);
+            if tiles.iter().all(|tile| tile.is_complete()) {
+                return;
+            }
+            assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't complete");
+            std::thread::yield_now();
+        }
     }
 }
 

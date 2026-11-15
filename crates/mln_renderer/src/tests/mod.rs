@@ -48,8 +48,7 @@ mod tile_layout_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 
-/// Port-only: drives the geometry tiles under test as the renderer's update
-/// does: their jobs run on `jobs`' workers, and the renderer's glyph and
+/// Port-only: drives the tiles under test as the renderer's update does: their jobs run on `jobs`' workers, and the renderer's glyph and
 /// image stores and atlas resolve what the jobs need.
 pub(crate) struct TileDriver {
     pub(crate) glyphs: crate::text::glyph_store::GlyphStore,
@@ -91,13 +90,13 @@ impl TileDriver {
     /// responses, gives the images asked for their update, applies the
     /// replies that arrived, resolves what the jobs wait for and submits the
     /// next jobs. Returns whether a tile shows a new layout.
-    pub(crate) fn update(&mut self, tiles: &[&crate::tile::geometry_tile::GeometryTile]) -> bool {
+    pub(crate) fn update(&mut self, tiles: &[&dyn crate::tile::tile::Tile]) -> bool {
         self.glyphs.update();
         self.images.begin_update();
         self.jobs.receive();
         let mut laid_out = false;
         for tile in tiles {
-            laid_out |= tile.inner().take_reply(&mut self.jobs);
+            laid_out |= tile.take_reply(&mut self.jobs);
         }
         drop(self.jobs.end_receive());
         let mut stores = crate::tile::geometry_tile::DependencyStores {
@@ -106,20 +105,20 @@ impl TileDriver {
             atlas: &mut self.atlas,
         };
         for tile in tiles {
-            laid_out |= tile.inner().drive(&mut self.jobs, &mut stores);
+            laid_out |= tile.drive(&mut self.jobs, &mut stores);
         }
         laid_out
     }
 
-    /// One update of `tile`, a geometry tile.
+    /// One update of `tile`.
     pub(crate) fn update_tile(&mut self, tile: &dyn crate::tile::tile::Tile) -> bool {
-        self.update(&[tile.as_geometry_tile().expect("a geometry tile")])
+        self.update(&[tile])
     }
 
     /// One update of `source`'s tiles.
     pub(crate) fn update_source(&mut self, source: &dyn crate::render_source::RenderSource) -> bool {
         let mut tiles = Vec::new();
-        source.for_each_geometry_tile(&mut |tile| tiles.push(tile));
+        source.for_each_tile(&mut |tile| tiles.push(tile));
         self.update(&tiles)
     }
 }

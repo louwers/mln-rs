@@ -16,9 +16,7 @@ use mln_actor::TaggedScheduler;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log};
 
-use crate::tile::job::{
-    DataKey, DiscoveryMemo, JobId, JobResult, JobTimes, Reply, Run, SourceKey, run_guarded, run_job,
-};
+use crate::tile::job::{DataKey, DiscoveryMemo, JobId, JobResult, JobTimes, Reply, Run, SourceKey, run_job};
 use crate::tile::worker_codec::Encoded;
 
 /// One worker the jobs go to: one Web Worker, or the whole thread pool.
@@ -104,24 +102,6 @@ impl PoolWorkers {
         let memo = Arc::new(DiscoveryMemo::new(MEMO_JOBS));
         PoolWorkers { pool, memo, capacity, in_flight: 0, sender, replies, wake }
     }
-
-    /// Runs `work` for job `id` on the pool, replying `Failed` if it panics.
-    pub(crate) fn spawn(&mut self, id: JobId, work: impl FnOnce() -> (JobResult, JobTimes) + Send + 'static) {
-        self.in_flight += 1;
-        let sender = self.sender.clone();
-        let wake = Arc::clone(&self.wake);
-        self.pool.schedule(Box::new(move || {
-            run_guarded(
-                id,
-                move |reply, times| {
-                    // The renderer may be gone, and its replies with it.
-                    let _ = sender.send((reply, times));
-                    wake();
-                },
-                work,
-            );
-        }));
-    }
 }
 
 impl TileWorkers for PoolWorkers {
@@ -138,16 +118,22 @@ impl TileWorkers for PoolWorkers {
     }
 
     fn submit(&mut self, _lane: Lane, run: Run) {
-        let id = run.id;
+        self.in_flight += 1;
         let memo = Arc::clone(&self.memo);
-        self.spawn(id, move || {
+        let sender = self.sender.clone();
+        let wake = Arc::clone(&self.wake);
+        self.pool.schedule(Box::new(move || {
+            let done = move |reply, times| {
+                // The renderer may be gone, and its replies with it.
+                let _ = sender.send((reply, times));
+                wake();
+            };
             if run.superseded.load(Ordering::Relaxed) {
-                return (JobResult::Failed(mln_util::error::Error::native("superseded")), JobTimes::default());
+                let result = JobResult::Failed(mln_util::error::Error::native("superseded"));
+                return done(Reply { id: run.id, result }, JobTimes::default());
             }
-            let mut out = None;
-            run_job(run, None, Some(&memo), |reply, times| out = Some((reply.result, times)));
-            out.unwrap_or_else(|| (JobResult::Failed(mln_util::error::Error::native("no reply")), JobTimes::default()))
-        });
+            run_job(run, None, Some(&memo), done);
+        }));
     }
 
     fn receive(&mut self, events: &mut Vec<WorkerEvent>) {
@@ -158,19 +144,34 @@ impl TileWorkers for PoolWorkers {
     }
 }
 
-/// Runs each job inside `submit`, on the calling thread.
-#[derive(Default)]
+/// Runs each job inside `submit`, on the calling thread. Natively every job
+/// replies before `submit` returns; on the web, an image decode replies
+/// later.
 pub(crate) struct InlineWorkers {
-    replies: Vec<(Reply, JobTimes)>,
+    sender: mpsc::Sender<(Reply, JobTimes)>,
+    replies: mpsc::Receiver<(Reply, JobTimes)>,
+    in_flight: usize,
+}
+
+impl Default for InlineWorkers {
+    fn default() -> Self {
+        let (sender, replies) = mpsc::channel();
+        InlineWorkers { sender, replies, in_flight: 0 }
+    }
 }
 
 impl InlineWorkers {
-    /// Runs `run` now and returns its reply.
+    /// Runs `run` now and returns its reply. On the web, an image decode
+    /// answers later: its reply here is `Failed`.
     pub(crate) fn run(run: Run) -> Reply {
         let id = run.id;
-        let mut out = None;
-        run_job(run, None, None, |reply, _| out = Some(reply));
-        out.unwrap_or_else(|| Reply { id, result: JobResult::Failed(mln_util::error::Error::native("no reply")) })
+        let (sender, reply) = mpsc::channel();
+        run_job(run, None, None, move |reply, _| {
+            let _ = sender.send(reply);
+        });
+        reply
+            .try_recv()
+            .unwrap_or_else(|_| Reply { id, result: JobResult::Failed(mln_util::error::Error::native("no reply")) })
     }
 }
 
@@ -180,7 +181,7 @@ impl TileWorkers for InlineWorkers {
     }
 
     fn in_flight(&self, _lane: Lane) -> usize {
-        self.replies.len()
+        self.in_flight
     }
 
     fn capacity(&self, _lane: Lane) -> usize {
@@ -188,12 +189,16 @@ impl TileWorkers for InlineWorkers {
     }
 
     fn submit(&mut self, _lane: Lane, run: Run) {
-        let replies = &mut self.replies;
-        run_job(run, None, None, |reply, times| replies.push((reply, times)));
+        self.in_flight += 1;
+        let sender = self.sender.clone();
+        run_job(run, None, None, move |reply, times| {
+            let _ = sender.send((reply, times));
+        });
     }
 
     fn receive(&mut self, events: &mut Vec<WorkerEvent>) {
-        for (Reply { id, result }, times) in self.replies.drain(..) {
+        while let Ok((Reply { id, result }, times)) = self.replies.try_recv() {
+            self.in_flight -= 1;
             events.push(WorkerEvent::Reply { lane: Lane(0), id, body: ReplyBody::Result(result), times });
         }
     }
@@ -226,6 +231,11 @@ impl SourceCounters {
         self.load.set(self.load.get() + 1);
         self.load.get()
     }
+}
+
+/// Whether `lane` takes another job.
+fn has_room(workers: &dyn TileWorkers, lane: Lane) -> bool {
+    workers.in_flight(lane) < workers.capacity(lane)
 }
 
 /// The most data keys whose lane `TileJobs` remembers; past it, it forgets
@@ -311,7 +321,7 @@ impl TileJobs {
         match result {
             JobResult::NeedsDeps(_) => self.stats.needs_deps += 1,
             JobResult::NeedsData => self.stats.needs_data += 1,
-            JobResult::Laid(_) | JobResult::Failed(_) => {}
+            JobResult::Laid(_) | JobResult::Raster(_) | JobResult::Dem(_) | JobResult::Failed(_) => {}
         }
         Some(result)
     }
@@ -335,17 +345,15 @@ impl TileJobs {
     /// that gets the data.
     pub(crate) fn place(&mut self, key: DataKey, full: bool) -> Option<(Lane, bool)> {
         let workers = &*self.workers;
-        let room = |lane: Lane| workers.in_flight(lane) < workers.capacity(lane);
         if workers.caches_data()
             && !full
             && let Some(&lane) = self.hints.get(&key)
-            && room(lane)
+            && has_room(workers, lane)
         {
             return Some((lane, true));
         }
-        let lane =
-            (0..workers.lanes()).map(Lane).filter(|lane| room(*lane)).min_by_key(|lane| workers.in_flight(*lane))?;
-        if !workers.caches_data() {
+        let lane = self.lane()?;
+        if !self.workers.caches_data() {
             return Some((lane, false));
         }
         if self.hints.len() >= MAX_HINTS {
@@ -353,6 +361,16 @@ impl TileJobs {
         }
         self.hints.insert(key, lane);
         Some((lane, false))
+    }
+
+    /// The least loaded lane with room, for a job that carries all it
+    /// reads; `None` if no lane has room.
+    pub(crate) fn lane(&self) -> Option<Lane> {
+        let workers = &*self.workers;
+        (0..workers.lanes())
+            .map(Lane)
+            .filter(|lane| has_room(workers, *lane))
+            .min_by_key(|lane| workers.in_flight(*lane))
     }
 
     pub(crate) fn submit(&mut self, lane: Lane, run: Run) {

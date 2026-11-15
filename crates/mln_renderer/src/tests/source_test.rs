@@ -86,9 +86,6 @@ fn tile_parameters<'a>(
         jobs: None,
         available_images: Arc::default(),
         font_faces: None,
-        tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
-            thread_pool.clone(),
-        )),
         thread_pool: thread_pool.clone(),
     }
 }
@@ -1391,4 +1388,83 @@ fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
     source::set_max_overscale_factor_for_parent_tiles(&*out_of_reach.source, Some(2));
     out_of_reach.load(60.0, 3.0);
     assert_eq!(4, out_of_reach.tiles_at(1).len());
+}
+
+/// Port-only: a 16 by 16 DEM image whose pixels differ from their
+/// neighbours and from those of other `seed`s.
+fn dem_png(seed: u32) -> mln_storage::Data {
+    let mut image = mln_util::image::PremultipliedImage::new(Size::new(16, 16));
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let i = i as u32;
+        *pixel = [((seed * 37 + i) % 256) as u8, (i * 7 % 256) as u8, ((i * 3 + seed) % 256) as u8, 255];
+    }
+    Arc::new(mln_image::encode_png(&image))
+}
+
+/// Port-only: raster-dem tiles that meet at the antimeridian, in two copies
+/// of the world, backfill each other's borders as neighbours in one copy
+/// do.
+#[test]
+fn raster_dem_borders_across_a_world_wrap() {
+    use crate::tile::raster_tile::{DEMTileNeighbors, RasterTile};
+    use crate::tile::tile::Tile;
+
+    let mut test = SourceTest::new();
+    test.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(0.0, 180.0).unwrap()),
+        zoom: Some(2.0),
+        ..Default::default()
+    });
+    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+    file_source.set_response(Kind::Tile, |resource| {
+        let tile = resource.tile_data.as_ref()?;
+        let mut response = Response::new();
+        response.data = Some(dem_png(tile.x as u32));
+        Some(response)
+    });
+    let layers = Tiled::RasterDEM.layers();
+    let source = Tiled::RasterDEM.source(None, tiles_tileset());
+    source.load_description(&*file_source, &test.run_loop);
+    let mut render_source = render_source::create(&source.base_impl());
+    let fs: Arc<dyn FileSource> = file_source;
+    let mut driver = crate::tests::TileDriver::pool(&test.run_loop, &test.thread_pool);
+    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    let mut relayout = true;
+    loop {
+        // The source backfills its tiles as it updates.
+        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+        render_source.update(source.base_impl(), &layers, true, relayout, &parameters);
+        relayout = false;
+        let mut tiles = 0;
+        render_source.for_each_tile(&mut |_| tiles += 1);
+        if tiles > 0 && render_source.is_loaded() {
+            break;
+        }
+        assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't load");
+        test.run_loop.run_once();
+        driver.update_source(&*render_source);
+        std::thread::yield_now();
+    }
+
+    let mut tiles = Vec::new();
+    render_source.for_each_tile(&mut |tile| tiles.push(tile));
+    let tile = |x| -> &RasterTile {
+        tiles
+            .iter()
+            .find(|tile| tile.id().canonical == CanonicalTileID::new(2, x, 1))
+            .and_then(|tile| tile.downcast_ref::<RasterTile>())
+            .unwrap_or_else(|| panic!("no tile 2/{x}/1"))
+    };
+    // The east edge of a copy of the world, and the west edge of the copy
+    // east of it.
+    let (east, west) = (tile(3), tile(0));
+    assert_eq!(west.id().wrap, east.id().wrap + 1);
+    assert_eq!(east.neighboring_tiles() & DEMTileNeighbors::RIGHT, DEMTileNeighbors::RIGHT);
+    assert_eq!(west.neighboring_tiles() & DEMTileNeighbors::LEFT, DEMTileNeighbors::LEFT);
+    let (east, west) = (east.get_bucket().expect("a DEM"), west.get_bucket().expect("a DEM"));
+    let (east, west) = (east.get_dem_data(), west.get_dem_data());
+    for y in 0..16 {
+        assert_eq!(east.get(16, y), west.get(0, y), "row {y} of the east tile's border");
+        assert_eq!(west.get(-1, y), east.get(15, y), "row {y} of the west tile's border");
+    }
 }

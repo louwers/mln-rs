@@ -2,9 +2,9 @@
 //! with its own memory, and a `TileWorkerHost` for each map side that
 //! connected a port to it ([`tile_workers`](crate::tile_workers) describes
 //! the messages). A host runs a tile's job as its message arrives, one job
-//! per message, so the browser's event loop runs between jobs; raster
-//! tiles' images and raster-dem tiles' DEMs decode on the instance's
-//! cooperative scheduler, which the [`pump`](crate::pump) runs.
+//! per message, so the browser's event loop runs between jobs; raster and
+//! raster-dem tiles' images decode in the browser's decoder, whose answer
+//! the job replies with later.
 //!
 //! The JavaScript that runs the Web Worker sends `{fatal: message}` over
 //! each port instead when the instance panics, which it sees as an `error`
@@ -14,9 +14,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::TaggedScheduler;
 use mln_renderer::tile::worker_codec::{Encoded, TileWorkerHost};
-use mln_util::identity::SimpleIdentity;
 use mln_util::serialization::payload::Payload;
 use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
@@ -48,11 +46,10 @@ pub fn serve(port: &web_sys::MessagePort) {
     let scheduler = crate::install_cooperative_scheduler();
     scheduler.set_waker(Some(pump::waker()));
     let replies = Arc::new(Mutex::new(Vec::new()));
-    let workers = TaggedScheduler::new(scheduler, SimpleIdentity::new());
     let sink = Arc::clone(&replies);
     // A raster tile's reply comes once the browser decoded its image,
     // outside a slice.
-    let host = TileWorkerHost::new(workers, move |reply| {
+    let host = TileWorkerHost::new(move |reply| {
         sink.lock().push(reply);
         pump::wake();
     });

@@ -2,11 +2,10 @@
 //!
 //! The browser build runs one wasm instance per page or Web Worker, each
 //! with its own memory, so a tile on the map's instance reaches a worker on
-//! another instance only through bytes. A geometry tile's job (`Run`,
-//! `tile/job.rs`) and its reply cross as frames (envelope.rs): a fixed
-//! header with the job's id, then the body, encoded with `mln_wire`. Raster
-//! and raster-dem tiles' messages (`raster_tile.rs`, `raster_dem_tile.rs`)
-//! cross in frames of their own. Three things make that work:
+//! another instance only through bytes. A tile's job (`Run`, `tile/job.rs`)
+//! and its reply cross as frames (envelope.rs): a fixed header with the
+//! job's id, then the body, encoded with `mln_wire`. Three things make that
+//! work:
 //!
 //! - Large byte arrays (encoded tiles, decoded images and DEMs, vertex and
 //!   index arrays) travel beside a frame's bytes as payloads (`Encoded`,
@@ -28,9 +27,9 @@
 //!
 //! `MapCodec` (`map_side.rs`) is the map side of one worker instance and
 //! `WorkerCodec` (`worker_side.rs`) that instance's side. `TileWorkerHost`
-//! (host.rs) runs an instance's jobs and raster workers behind its
-//! `WorkerCodec`, and `RemoteWorkers` (transport.rs) is the map side of the
-//! instances, as `TileWorkers` and as the raster tiles' transport.
+//! (host.rs) runs an instance's jobs behind its `WorkerCodec`, and
+//! `RemoteWorkers` (transport.rs) is the map side of the instances, as
+//! `TileWorkers`.
 
 mod envelope;
 pub(crate) mod fields;
@@ -44,7 +43,5 @@ pub use host::TileWorkerHost;
 pub(crate) use transport::RemoteJobs;
 pub use transport::{RemoteWorkers, ReplySink, ThreadWorkerInstances, WorkerInstances};
 
-#[cfg(test)]
-mod raster_tests;
 #[cfg(test)]
 mod tests;
