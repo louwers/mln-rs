@@ -274,6 +274,45 @@ fn a_cache_file_that_cant_be_created_fails_the_runtime() {
     wait(runtime.unwrap().release());
 }
 
+/// A runtime's maps share its registry, so their styles parse the
+/// functions it registers.
+#[test]
+fn maps_parse_against_the_runtime_registry() {
+    use mln_runtime::registry::{RegistryBuilder, register_builtins};
+    use mln_style::expression::Type;
+    use mln_style::expression::functions::{Eval, OverloadSpec, Params, Role};
+
+    let mut builder = RegistryBuilder::new();
+    register_builtins(&mut builder).unwrap();
+    let seven = OverloadSpec {
+        result: Type::Number,
+        params: Params::Fixed(Vec::new()),
+        dependencies: mln_style::expression::Dependency::NONE,
+        role: Role::Plain,
+        eval: Eval::Number(|_, _| Ok(7.0)),
+    };
+    builder.functions_mut().add("seven", vec![seven]).unwrap();
+    let registry = builder.build();
+    let custom =
+        support::TestRuntime(Runtime::with_registry(&RuntimeOptions::default(), Arc::clone(&registry)).unwrap());
+    assert!(Arc::ptr_eq(custom.registry(), &registry));
+    let map = map(&custom);
+    assert!(Arc::ptr_eq(map.registry(), &registry));
+
+    let style = r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
+        "layers":[{"id":"sevens","type":"circle","source":"points","filter":["==",["seven"],7]}]}"#;
+    wait(map.set_style_json(style));
+    let layers = wait(map.style_layers());
+    assert_eq!(layers.iter().map(|layer| layer.id.as_str()).collect::<Vec<_>>(), ["sevens"]);
+
+    // A map of a runtime with the built-ins drops the layer it can't parse.
+    let builtins = runtime();
+    let map = support::map(&builtins);
+    wait(map.set_style_json(style));
+    let layers = wait(map.style_layers());
+    assert!(layers.is_empty(), "{layers:?}");
+}
+
 #[test]
 fn a_command_group_holds_updates_back_until_it_ends() {
     let runtime = runtime();

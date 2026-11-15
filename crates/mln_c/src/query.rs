@@ -95,13 +95,13 @@ unsafe fn texts(views: *const mln_buffer_view, count: usize, name: &str) -> Resu
 /// # Safety
 ///
 /// As for [`buffer::text`].
-unsafe fn filter(view: mln_buffer_view, functions: Arc<Functions>) -> Result<Option<Filter>, Error> {
+unsafe fn filter(view: mln_buffer_view, functions: &Arc<Functions>) -> Result<Option<Filter>, Error> {
     // SAFETY: the caller's contract.
     let json = unsafe { buffer::text(view, "query filter") }?;
     if json.is_empty() {
         return Ok(None);
     }
-    let json = json.to_owned();
+    let (json, functions) = (json.to_owned(), Arc::clone(functions));
     parse_thread::run(move || {
         let document: serde_json::Value = serde_json::from_str(&json)
             .map_err(|error| Error::invalid_argument(format!("query filter is not valid JSON: {error}")))?;
@@ -112,11 +112,16 @@ unsafe fn filter(view: mln_buffer_view, functions: Arc<Functions>) -> Result<Opt
     })?
 }
 
+/// The options that `options` names, its filter parsed against `functions`.
+///
 /// # Safety
 ///
 /// `options` is null or points to a readable struct of the size it
 /// declares, whose views are valid.
-unsafe fn rendered_options(options: *const mln_rendered_feature_query_options) -> Result<RenderedQueryOptions, Error> {
+unsafe fn rendered_options(
+    options: *const mln_rendered_feature_query_options,
+    functions: &Arc<Functions>,
+) -> Result<RenderedQueryOptions, Error> {
     if options.is_null() {
         return Ok(RenderedQueryOptions::default());
     }
@@ -133,15 +138,20 @@ unsafe fn rendered_options(options: *const mln_rendered_feature_query_options) -
         .map(|()| unsafe { texts(options.layer_ids, options.layer_id_count, "query layer IDs") })
         .transpose()?;
     // SAFETY: the caller's contract.
-    let filter = unsafe { filter(options.filter, Functions::with_builtins()) }?;
+    let filter = unsafe { filter(options.filter, functions) }?;
     Ok(RenderedQueryOptions::new(layer_ids, filter))
 }
 
+/// The options that `options` names, its filter parsed against `functions`.
+///
 /// # Safety
 ///
 /// `options` is null or points to a readable struct of the size it
 /// declares, whose views are valid.
-unsafe fn source_options(options: *const mln_source_feature_query_options) -> Result<SourceQueryOptions, Error> {
+unsafe fn source_options(
+    options: *const mln_source_feature_query_options,
+    functions: &Arc<Functions>,
+) -> Result<SourceQueryOptions, Error> {
     if options.is_null() {
         return Ok(SourceQueryOptions::default());
     }
@@ -158,7 +168,7 @@ unsafe fn source_options(options: *const mln_source_feature_query_options) -> Re
         .map(|()| unsafe { texts(options.source_layer_ids, options.source_layer_id_count, "query source layer IDs") })
         .transpose()?;
     // SAFETY: the caller's contract.
-    let filter = unsafe { filter(options.filter, Functions::with_builtins()) }?;
+    let filter = unsafe { filter(options.filter, functions) }?;
     Ok(SourceQueryOptions::new(source_layers, filter))
 }
 
@@ -270,8 +280,10 @@ pub(crate) unsafe extern "C" fn mln_render_session_query_rendered_features(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
+        // The filter parses against the functions of the session's map.
+        let functions = Arc::clone(render_session::resolve(session)?.map.registry().functions());
         // SAFETY: the caller's contract.
-        let (geometry, options) = unsafe { (self::geometry(geometry)?, rendered_options(options)?) };
+        let (geometry, options) = unsafe { (self::geometry(geometry)?, rendered_options(options, &functions)?) };
         // SAFETY: the caller's contract.
         unsafe {
             render_session::operation(
@@ -298,8 +310,10 @@ pub(crate) unsafe extern "C" fn mln_render_session_query_source_features(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
+        // The filter parses against the functions of the session's map.
+        let functions = Arc::clone(render_session::resolve(session)?.map.registry().functions());
         // SAFETY: the caller's contract.
-        let (source_id, options) = unsafe { (self::source_id(source_id)?, source_options(options)?) };
+        let (source_id, options) = unsafe { (self::source_id(source_id)?, source_options(options, &functions)?) };
         // SAFETY: the caller's contract.
         unsafe {
             render_session::operation(
@@ -491,22 +505,23 @@ mod tests {
             layer_id_count: 1,
             filter: view(r#"["==",["get","kind"],"a"]"#),
         };
+        let functions = Functions::with_builtins();
         // SAFETY: local options, whose views outlive the calls.
         unsafe {
-            let parsed = rendered_options(&raw const options).unwrap();
+            let parsed = rendered_options(&raw const options, &functions).unwrap();
             assert_eq!(parsed.layer_ids, Some(vec!["circles".to_owned()]));
             assert!(parsed.filter.is_some());
             options.filter = view("");
-            assert!(rendered_options(&raw const options).unwrap().filter.is_none());
+            assert!(rendered_options(&raw const options, &functions).unwrap().filter.is_none());
             options.filter = view(r#"["=="#);
-            assert!(message(rendered_options(&raw const options)).contains("query filter"));
+            assert!(message(rendered_options(&raw const options, &functions)).contains("query filter"));
             options.filter = view("");
             options.layer_ids = core::ptr::null();
-            message(rendered_options(&raw const options));
+            message(rendered_options(&raw const options, &functions));
             let no_bytes = [mln_buffer_view { data: core::ptr::null(), size: 1 }];
             options.layer_ids = no_bytes.as_ptr();
-            message(rendered_options(&raw const options));
-            assert!(rendered_options(core::ptr::null()).unwrap().layer_ids.is_none());
+            message(rendered_options(&raw const options, &functions));
+            assert!(rendered_options(core::ptr::null(), &functions).unwrap().layer_ids.is_none());
             assert_eq!(message(source_id(view(""))), "source_id must not be empty");
         }
     }

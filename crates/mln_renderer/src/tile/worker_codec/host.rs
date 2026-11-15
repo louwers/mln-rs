@@ -18,6 +18,7 @@ use mln_util::logging::{Event, Log};
 
 use super::envelope::{self, Encoded};
 use super::worker_side::WorkerCodec;
+use crate::Registry;
 use crate::tile::job::{DEFAULT_DATA_CACHE_BYTES, DataCache, DiscoveryMemo, JobResult, JobTimes, Reply, Run, run_job};
 
 /// Where a host's replies go, encoded: back to the map side of its
@@ -41,16 +42,18 @@ struct Jobs {
 }
 
 impl TileWorkerHost {
-    /// A host that sends its replies to `replies`. Its data cache keeps
-    /// 32 MiB.
-    pub fn new(replies: impl Fn(Encoded) + Send + Sync + 'static) -> Self {
+    /// A host that resolves the registrations its jobs name against
+    /// `registry` and sends its replies to `replies`. `registry` must be
+    /// filled by the same calls as the map side's, or the host fails every
+    /// job. Its data cache keeps 32 MiB.
+    pub fn new(registry: Arc<Registry>, replies: impl Fn(Encoded) + Send + Sync + 'static) -> Self {
         TileWorkerHost {
             jobs: RefCell::new(Jobs {
                 cache: DataCache::new(DEFAULT_DATA_CACHE_BYTES),
                 // The labelled tiles of a view that resume here, about.
                 memo: DiscoveryMemo::new(16),
             }),
-            codec: Rc::new(RefCell::new(WorkerCodec::new())),
+            codec: Rc::new(RefCell::new(WorkerCodec::new(registry))),
             replies: Arc::new(replies),
         }
     }

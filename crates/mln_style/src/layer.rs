@@ -74,9 +74,7 @@ pub mod layer_type_info {
     }
 }
 
-/// Holds static data for a certain layer type. Compared by address, as in
-/// C++ (`impl->getTypeInfo() == BackgroundLayer::Impl::staticTypeInfo()`):
-/// use `std::ptr::eq`.
+/// Holds static data for a certain layer type, which `type_` identifies.
 #[derive(Debug)]
 pub struct LayerTypeInfo {
     /// The layer type as defined in the style specification.

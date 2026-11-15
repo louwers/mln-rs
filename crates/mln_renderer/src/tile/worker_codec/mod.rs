@@ -21,6 +21,11 @@
 //!   data of its jobs in a cache of its own, so a later job can name it.
 //! - Trait objects cross as the types they can be (fields.rs): layers and
 //!   their properties as their layer type's, buckets as their bucket type's.
+//!   Compound expressions cross as their function's name, which the reading
+//!   side resolves against its own [`Registry`]. The first frame of a map
+//!   side carries its registry's digest, and an instance whose registry
+//!   differs fails every job instead of decoding them against other
+//!   registrations.
 //!
 //! Glyphs and images stay on the map side: a job gets where they are in the
 //! map's atlas (`Resolved`), never their pixels.
@@ -30,6 +35,12 @@
 //! (host.rs) runs an instance's jobs behind its `WorkerCodec`, and
 //! `RemoteWorkers` (transport.rs) is the map side of the instances, as
 //! `TileWorkers`.
+
+use std::sync::Arc;
+
+use mln_style::expression::functions;
+
+use crate::Registry;
 
 mod envelope;
 pub(crate) mod fields;
@@ -42,6 +53,12 @@ pub use envelope::Encoded;
 pub use host::TileWorkerHost;
 pub(crate) use transport::RemoteJobs;
 pub use transport::{RemoteWorkers, ReplySink, ThreadWorkerInstances, WorkerInstances};
+
+/// Runs `f`, in which the values that the codec reads resolve the
+/// registrations they name against `registry`.
+fn session<R>(registry: &Arc<Registry>, f: impl FnOnce() -> R) -> R {
+    functions::decode_with(registry.functions(), f)
+}
 
 #[cfg(test)]
 mod tests;

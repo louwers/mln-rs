@@ -30,7 +30,6 @@ use serde_json::json;
 
 use crate::gfx::dynamic_texture::DynamicTextureBinId;
 use crate::image_store::ImageStoreObserver;
-use crate::layermanager;
 use crate::layout::tile_layout::LayoutParams;
 use crate::tests::tile::png;
 use crate::tests::{OneTile, style, tile_store};
@@ -40,6 +39,7 @@ use crate::tile::job::{DataInput, Job, JobId, JobResult, JobTimes, LayoutJob, Re
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::{InlineWorkers, Lane, PoolWorkers, ReplyBody, TileWorkers};
 use crate::tile::worker_codec::{Encoded, RemoteJobs, RemoteWorkers, ReplySink, TileWorkerHost, WorkerInstances};
+use crate::{Registry, layermanager};
 
 /// Workers whose jobs run when the test says so, or get the replies the
 /// test makes up.
@@ -554,12 +554,12 @@ impl Instances {
 
     fn host(instance: usize, replies: &Arc<Mutex<Vec<(usize, Encoded)>>>) -> TileWorkerHost {
         let replies = Arc::clone(replies);
-        TileWorkerHost::new(move |reply| replies.lock().push((instance, reply)))
+        TileWorkerHost::new(Registry::with_builtins(), move |reply| replies.lock().push((instance, reply)))
     }
 
     /// `RemoteWorkers` over these instances.
     fn workers(&self, run_loop: &RunLoop) -> Box<dyn TileWorkers> {
-        let workers = RemoteWorkers::new(&run_loop.scheduler(), |sink| {
+        let workers = RemoteWorkers::new(&run_loop.scheduler(), Registry::with_builtins(), |sink| {
             self.0.borrow_mut().sink = Some(sink);
             Box::new(self.clone())
         });

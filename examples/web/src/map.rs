@@ -156,7 +156,7 @@ impl WebMap {
         on_frame: js_sys::Function,
     ) -> Result<WebMap, JsValue> {
         shaper::set_loader(load_shaper);
-        let runtime = Runtime::new(&RuntimeOptions::default()).map_err(js_error)?;
+        let runtime = Runtime::with_registry(&RuntimeOptions::default(), crate::registry()).map_err(js_error)?;
         sent(runtime.set_fetch_preloads(PRELOADS.with(|preloads| preloads.borrow().clone())));
         let reports = Arc::new(Mutex::new(Reports::default()));
         let handler_reports = Arc::clone(&reports);

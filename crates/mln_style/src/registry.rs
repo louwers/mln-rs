@@ -1,6 +1,7 @@
 //! The registrations that a style parses against: its expression functions
 //! and its layer types.
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};
@@ -57,6 +58,17 @@ impl StyleRegistry {
     #[must_use]
     pub fn functions(&self) -> &Arc<Functions> {
         &self.functions
+    }
+
+    /// Feeds `hasher` what parsing and decoding resolve against: the
+    /// functions' [`digest`](Functions::digest), then the layer types'
+    /// names, in the order they were added.
+    pub fn digest(&self, hasher: &mut impl Hasher) {
+        self.functions.digest(hasher);
+        self.factories.len().hash(hasher);
+        for name in self.factories.keys() {
+            name.hash(hasher);
+        }
     }
 
     /// A layer of the type `type_` from its style JSON `value`, without its

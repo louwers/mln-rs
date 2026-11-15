@@ -40,6 +40,7 @@ mod offline;
 #[path = "offline_web.rs"]
 mod offline;
 mod queue;
+pub mod registry;
 mod render;
 mod resources;
 mod runtime;

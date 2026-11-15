@@ -21,7 +21,7 @@ pub(crate) fn runtime() -> TestRuntime {
 /// every render session that holds one, has let go, which a dropped handle
 /// only starts. A session still freeing its GPU objects when the test binary
 /// exits can call into a Vulkan layer or driver that the exit unloaded.
-pub(crate) struct TestRuntime(Runtime);
+pub(crate) struct TestRuntime(pub(crate) Runtime);
 
 impl std::ops::Deref for TestRuntime {
     type Target = Runtime;

@@ -3,13 +3,14 @@
 
 use std::sync::Arc;
 
-use mln_style::expression::{Functions, functions};
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
 
 use super::envelope::{self, Encoded};
 use super::fields::{SharedAvailableImages, SharedSourceStyle};
+use super::session;
+use crate::Registry;
 use crate::tile::job::{JobResult, Run};
 
 /// The map side of one worker instance's jobs.
@@ -17,27 +18,31 @@ pub(crate) struct MapCodec {
     /// The keys of what the instance has of this side's: source styles,
     /// layers, their properties and expressions, and sets of images.
     tables: shared::Tables,
-    /// What the expressions in replies resolve against.
-    functions: Arc<Functions>,
+    /// What the jobs name and the replies resolve against.
+    registry: Arc<Registry>,
+    /// Whether a frame carried the registry's digest to the instance.
+    digest_sent: bool,
 }
 
-impl Default for MapCodec {
-    fn default() -> Self {
+impl MapCodec {
+    /// The map side of a new instance, whose jobs name `registry`'s
+    /// registrations.
+    pub(crate) fn new(registry: Arc<Registry>) -> Self {
         MapCodec {
-            functions: Functions::with_builtins(),
             tables: shared::Tables::new()
                 .origin::<SharedSourceStyle>()
                 .origin::<SharedAvailableImages>()
                 .origin::<SharedLayer>()
                 .origin::<SharedLayerProperties>()
                 .origin::<SharedExpression>(),
+            registry,
+            digest_sent: false,
         }
     }
-}
 
-impl MapCodec {
-    /// The frame of `run`: its header, then the keys of the shared values
-    /// that are gone on this side, then the job. Fails for what can't cross,
+    /// The frame of `run`: its header, then the registry's digest in the
+    /// first frame (`None` after), then the keys of the shared values that
+    /// are gone on this side, then the job. Fails for what can't cross,
     /// which then defines nothing.
     pub(crate) fn encode_run(&mut self, run: &Run) -> Result<Vec<u8>, String> {
         let job = self.tables.open(|| {
@@ -49,8 +54,10 @@ impl MapCodec {
         let forget = self.tables.forget_dead();
         let mut bytes = Vec::new();
         envelope::write_job_header(&mut bytes, &run.id);
+        envelope::append(&mut bytes, &(!self.digest_sent).then(|| self.registry.digest()))?;
         envelope::append(&mut bytes, &forget)?;
         bytes.extend_from_slice(&job);
+        self.digest_sent = true;
         Ok(bytes)
     }
 
@@ -58,9 +65,9 @@ impl MapCodec {
     /// `Failed`.
     pub(crate) fn decode_result(&mut self, body: Encoded) -> JobResult {
         let Encoded { bytes, payloads } = body;
-        let Self { tables, functions } = self;
+        let Self { tables, registry, .. } = self;
         let decode = || tables.open(|| envelope::decode::<JobResult>(&bytes));
-        payload::decode(payloads, || functions::decode_with(functions, decode))
+        payload::decode(payloads, || session(registry, decode))
             .unwrap_or_else(|error| JobResult::Failed(Error::native(format!("a tile worker's reply: {error}"))))
     }
 }

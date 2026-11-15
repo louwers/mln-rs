@@ -12,8 +12,10 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_actor::RunLoop;
+use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::RemoteWorkers;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
@@ -96,10 +98,11 @@ pub(crate) fn run_session_now(id: SessionId) {
 }
 
 /// Tile workers for a renderer on `scheduler`'s loop, in the instance's tile
-/// worker Web Workers, or `None` where none start, which leaves the tiles'
-/// jobs on the cooperative scheduler, in the pump's slices. A Web Worker
-/// that panics is replaced by a new one.
-pub(crate) fn tile_workers(scheduler: &mln_actor::SchedulerPtr) -> Option<Rc<RemoteWorkers>> {
+/// worker Web Workers, whose jobs name `registry`'s registrations, or `None`
+/// where none start, which leaves the tiles' jobs on the cooperative
+/// scheduler, in the pump's slices. A Web Worker that panics is replaced by
+/// a new one.
+pub(crate) fn tile_workers(scheduler: &mln_actor::SchedulerPtr, registry: &Arc<Registry>) -> Option<Rc<RemoteWorkers>> {
     let ports = match tile_workers::connect() {
         Ok(ports) => ports,
         Err(error) => {
@@ -119,5 +122,5 @@ pub(crate) fn tile_workers(scheduler: &mln_actor::SchedulerPtr) -> Option<Rc<Rem
             .inspect_err(|error| Log::error(Event::General, format!("No tile worker took {instance}'s place: {error}")))
             .ok()
     };
-    Some(tile_workers::workers(scheduler, ports, |_| {}, fatal, respawn))
+    Some(tile_workers::workers(scheduler, ports, Arc::clone(registry), |_| {}, fatal, respawn))
 }

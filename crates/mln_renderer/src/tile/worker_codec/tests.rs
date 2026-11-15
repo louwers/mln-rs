@@ -24,7 +24,6 @@ use super::map_side::MapCodec;
 use super::worker_side::WorkerCodec;
 use super::{Encoded, TileWorkerHost, envelope, fields};
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::layermanager;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::text::glyph_store::HBShapeResults;
 use crate::tile::contents::LayoutResult;
@@ -33,6 +32,7 @@ use crate::tile::job::{
     TileKey, run_job,
 };
 use crate::tile::tile_workers::InlineWorkers;
+use crate::{Registry, layermanager};
 
 fn fixture(path: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(path);
@@ -181,7 +181,11 @@ struct ThroughCodec {
 
 impl ThroughCodec {
     fn new() -> Self {
-        ThroughCodec { map: MapCodec::default(), worker: WorkerCodec::new(), cache: DataCache::new(1 << 20) }
+        ThroughCodec {
+            map: MapCodec::new(Registry::with_builtins()),
+            worker: WorkerCodec::new(Registry::with_builtins()),
+            cache: DataCache::new(1 << 20),
+        }
     }
 
     /// The reply to `run`, encoded on the worker's side.
@@ -527,6 +531,7 @@ fn layouts_have_the_layers_they_answer() {
 /// The keys of each table that a job's frame tells the worker to forget.
 fn forgotten(request: &[u8]) -> Vec<(String, Vec<u64>)> {
     let (_, body) = envelope::read_job_id(request).unwrap();
+    let (_digest, body): (Option<u64>, _) = envelope::take(body).unwrap();
     envelope::take(body).unwrap().0
 }
 
@@ -535,7 +540,7 @@ fn forgotten(request: &[u8]) -> Vec<(String, Vec<u64>)> {
 /// forgets each value when it is gone on the map side.
 #[test]
 fn styles_and_layers_are_defined_once() {
-    let mut map = MapCodec::default();
+    let mut map = MapCodec::new(Registry::with_builtins());
     let data = DataInput::Cached(key(1));
     let layers = layers(&[FILL, LINE]);
     let first_style = style(&layers);
@@ -573,7 +578,7 @@ fn data_input(data: &DataInput) -> DataInput {
 /// a CJK tile's resume stays small.
 #[test]
 fn answers_cross_without_pixels() {
-    let mut map = MapCodec::default();
+    let mut map = MapCodec::new(Registry::with_builtins());
     let ids = (0..256).map(mln_text::glyph::GlyphID::new).collect();
     let dependencies = Dependencies {
         glyphs: mln_text::glyph::GlyphDependencies {
@@ -611,7 +616,7 @@ impl LayerProperties for Unknown {
 /// is still defined with the next job.
 #[test]
 fn failed_jobs_define_nothing() {
-    let mut map = MapCodec::default();
+    let mut map = MapCodec::new(Registry::with_builtins());
     let fill = layer(FILL, 0.0);
     let unknown: Arc<dyn LayerProperties> = Arc::new(Unknown(mln_style::layer_properties::LayerPropertiesBase::new(
         Arc::clone(&layer(LINE, 0.0).base_impl),
@@ -622,10 +627,32 @@ fn failed_jobs_define_nothing() {
     // Decoded without the failed job, the next one defines the layer.
     let request = map.encode_run(&job(&style(&[fill]), DataInput::Cached(key(1)), Resolved::default())).unwrap();
     let (_, body) = envelope::read_job_id(&request).unwrap();
-    let Job::Layout(job) = WorkerCodec::new().decode_job(body).unwrap() else {
+    let Job::Layout(job) = WorkerCodec::new(Registry::with_builtins()).decode_job(body).unwrap() else {
         panic!("not a layout job");
     };
     assert_eq!(job.style.layers[0].base_impl.id, "water");
+}
+
+/// A map side's first frame carries its registry's digest, and an instance
+/// whose registry has another fails that job and every one after.
+#[test]
+fn other_registrations_fail_every_job() {
+    let registry = Registry::with_builtins();
+    let mut map = MapCodec::new(Arc::clone(&registry));
+    let style = style(&layers(&[FILL]));
+    let requests: Vec<Vec<u8>> =
+        (0..2).map(|_| map.encode_run(&job(&style, DataInput::Cached(key(1)), Resolved::default())).unwrap()).collect();
+    let bodies: Vec<&[u8]> = requests.iter().map(|request| envelope::read_job_id(request).unwrap().1).collect();
+    let digests: Vec<Option<u64>> = bodies.iter().map(|body| envelope::take(body).unwrap().0).collect();
+    assert_eq!(digests, [Some(registry.digest()), None]);
+
+    let mut other = WorkerCodec::new(crate::RegistryBuilder::new().build());
+    for body in &bodies {
+        let Err(error) = other.decode_job(body) else { panic!("decoded with other registrations") };
+        assert!(error.contains("registrations differ"), "{error}");
+    }
+    let mut same = WorkerCodec::new(Registry::with_builtins());
+    assert!(bodies.iter().all(|body| same.decode_job(body).is_ok()));
 }
 
 /// A host that can't decode a job's body replies `Failed` with the job's
@@ -634,7 +661,7 @@ fn failed_jobs_define_nothing() {
 fn an_undecodable_body_fails_its_job() {
     let replies = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink = Arc::clone(&replies);
-    let host = TileWorkerHost::new(move |reply| sink.lock().push(reply));
+    let host = TileWorkerHost::new(Registry::with_builtins(), move |reply| sink.lock().push(reply));
     let mut request = Vec::new();
     envelope::write_job_header(&mut request, &id(4));
     request.extend_from_slice(&[0xff; 16]);
@@ -773,7 +800,7 @@ fn malformed_dems_fail() {
     for (dim, stride, image) in dems {
         let mut bytes = Vec::new();
         envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image)).unwrap();
-        let JobResult::Failed(_) = MapCodec::default().decode_result(Encoded::from(bytes)) else {
+        let JobResult::Failed(_) = MapCodec::new(Registry::with_builtins()).decode_result(Encoded::from(bytes)) else {
             panic!("dim {dim}, stride {stride}: not a failure");
         };
     }

@@ -190,7 +190,8 @@ impl Map {
         resource_options: &ResourceOptions,
         run_loop: &RunLoop,
     ) -> Result<Map, Error> {
-        Self::create(Some(Arc::new(Loader::new(resource_options))), &map_options, run_loop)
+        let loader: Arc<dyn FileSource> = Arc::new(Loader::new(resource_options));
+        Self::with_registry(loader, map_options, StyleRegistry::with_builtins(), run_loop)
     }
 
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
@@ -201,20 +202,27 @@ impl Map {
         map_options: MapOptions,
         run_loop: &RunLoop,
     ) -> Result<Map, Error> {
-        Self::create(Some(file_source), &map_options, run_loop)
+        Self::with_registry(file_source, map_options, StyleRegistry::with_builtins(), run_loop)
     }
 
-    fn create(
-        file_source: Option<Arc<dyn FileSource>>,
-        map_options: &MapOptions,
+    /// A map whose resources come from `file_source` and whose style parses
+    /// against `registry`, on `run_loop`. The other constructors use the
+    /// built-in registrations.
+    ///
+    /// The renderer that draws the map must be given a registry filled by
+    /// the same calls as `registry` ([`mln_renderer::Registry::style`]): it
+    /// finds a layer's type by name, and draws no layer whose type it lacks.
+    pub fn with_registry(
+        file_source: Arc<dyn FileSource>,
+        map_options: MapOptions,
+        registry: Arc<StyleRegistry>,
         run_loop: &RunLoop,
     ) -> Result<Map, Error> {
         let events = EventQueue::new();
         let style_events = EventQueue::new();
         let renderer_events = RendererEvents::new();
         let pixel_ratio = map_options.pixel_ratio;
-        let registry = StyleRegistry::with_builtins();
-        let mut style = Style::with_file_source(registry, file_source.clone(), pixel_ratio, run_loop);
+        let mut style = Style::with_file_source(registry, Some(Arc::clone(&file_source)), pixel_ratio, run_loop);
         style.impl_.set_observer(Some(Rc::new(StyleEvents(style_events.clone()))));
         let mut transform = Transform::new(map_options.constrain_mode, map_options.viewport_mode);
         transform.set_north_orientation(map_options.north_orientation);
@@ -251,7 +259,7 @@ impl Map {
             renderer_events,
             events,
             command_ends: Vec::new(),
-            file_source,
+            file_source: Some(file_source),
             run_loop: run_loop.clone(),
         };
         map.share_projection_with_transform();

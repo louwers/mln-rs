@@ -4,9 +4,9 @@
 //!
 //! The browser build's other JavaScript-facing exports, which wasm-bindgen
 //! makes rather than the headers, live here too: the table's `insert` and
-//! `get`, the callback trampolines (`trampoline.rs`), and the defaults of the
-//! instance's tile workers and shaper module, which the package ships beside
-//! the module's bindings.
+//! `get`, the callback trampolines (`trampoline.rs`), the tile workers'
+//! entry point, and the defaults of the instance's tile workers and shaper
+//! module, which the package ships beside the module's bindings.
 
 #[cfg(target_family = "wasm")]
 mod table {
@@ -129,6 +129,20 @@ mod upcalls {
             Log::error(Event::General, format!("the upcall dispatcher threw for {name}: {error:?}"));
             JsValue::UNDEFINED
         })
+    }
+}
+
+/// The entry point of the tile workers' Web Workers (`js/tile_worker.js`).
+#[cfg(target_family = "wasm")]
+mod tile_worker {
+    use wasm_bindgen::prelude::*;
+
+    /// Runs tile workers for the map side at the other end of `port`, with
+    /// the built-in registrations, which the library's runtimes have.
+    #[expect(unreachable_pub, reason = "wasm-bindgen exports only `pub` functions")]
+    #[wasm_bindgen(js_name = mlnWebServeTileWorker)]
+    pub fn serve(port: &web_sys::MessagePort) {
+        mln_web_host::tile_worker::serve(port, ::mln_runtime::registry::Registry::with_builtins());
     }
 }
 

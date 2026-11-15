@@ -38,8 +38,8 @@ pub(crate) struct LayoutGroupKey {
 
 impl PartialEq for LayoutGroupKey {
     fn eq(&self, other: &Self) -> bool {
-        // Fast path: compare pointers and scalars first
-        if !std::ptr::eq(self.type_info, other.type_info) {
+        // Fast path: compare types and scalars first
+        if self.type_info.type_ != other.type_info.type_ {
             return false;
         }
         if self.min_zoom != other.min_zoom {
@@ -86,7 +86,7 @@ fn create_group_key(impl_: &Arc<dyn layer::Impl>) -> LayoutGroupKey {
     // 0.0 == -0.0.
     let zoom_bits = |zoom: f32| if zoom == 0.0 { 0 } else { zoom.to_bits() };
     let mut state = std::hash::DefaultHasher::new();
-    std::ptr::from_ref(impl_.get_type_info()).hash(&mut state);
+    impl_.get_type_info().type_.hash(&mut state);
     impl_.source.hash(&mut state);
     impl_.source_layer.hash(&mut state);
     zoom_bits(impl_.min_zoom).hash(&mut state);

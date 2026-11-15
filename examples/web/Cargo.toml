@@ -47,7 +47,7 @@ mln_webgpu = { workspace = true, optional = true }
 parking_lot.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys.workspace = true
+web-sys = { workspace = true, features = ["MessagePort"] }
 
 [lints]
 workspace = true

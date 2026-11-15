@@ -8,8 +8,8 @@ use mln_map::{
     BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent,
     MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
-use mln_renderer::UpdateReader;
 use mln_renderer::text::font_face_engine::FontFaceEngine;
+use mln_renderer::{Registry, UpdateReader};
 use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
@@ -698,6 +698,15 @@ impl Map {
     /// What the renderers of the runtime's maps load font faces with.
     pub(crate) fn font_face_engine(&self) -> Arc<dyn FontFaceEngine> {
         Arc::clone(&self.shared.runtime.font_face_engine)
+    }
+
+    /// What the map parses its style against, its renderer draws and its
+    /// tile workers lay out: its runtime's
+    /// [`registry`](crate::Runtime::registry). A filter for a query parses
+    /// against its functions.
+    #[must_use]
+    pub fn registry(&self) -> &Arc<Registry> {
+        &self.shared.runtime.registry
     }
 
     /// Reserves the map for the session `id`.
@@ -1461,7 +1470,8 @@ pub(crate) fn create(
     resolver: Resolver<Applied>,
     outbox: &mut Outbox,
 ) {
-    let mut map = match mln_map::Map::with_file_source(Arc::clone(core.loader()), options.map, &core.run_loop) {
+    let registry = Arc::clone(core.registry.style());
+    let mut map = match mln_map::Map::with_registry(Arc::clone(core.loader()), options.map, registry, &core.run_loop) {
         Ok(map) => map,
         Err(error) => return outbox.resolve(resolver, Err(error)),
     };
