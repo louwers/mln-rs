@@ -49,7 +49,6 @@ pub mod tileset;
 pub mod time;
 pub mod tiny_sdf;
 pub mod token;
-pub mod url;
 pub mod vectors;
 
 #[cfg(test)]

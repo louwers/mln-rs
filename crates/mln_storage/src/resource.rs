@@ -1,3 +1,4 @@
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -8,7 +9,6 @@ use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::string::to_string_double;
 use mln_util::tileset::Scheme;
 use mln_util::token::replace_tokens;
-use mln_util::url::{URL, percent_encode, substr};
 
 use crate::response::Data;
 
@@ -149,6 +149,27 @@ fn get_tile_bbox(x: i32, y: i32, z: i8) -> String {
         + &to_string_double(max.1)
 }
 
+/// Everything but the RFC 3986 unreserved characters.
+const FONT_STACK_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
+
+/// `base` with `[@2x]` and `extension` appended to its path, keeping the
+/// query and dropping the fragment.
+fn sprite_url(base: &str, pixel_ratio: f32, extension: &str) -> String {
+    let suffix = if pixel_ratio > 1.0 { "@2x" } else { "" };
+    if let Ok(mut url) = url::Url::parse(base)
+        && !url.cannot_be_a_base()
+    {
+        let path = format!("{}{suffix}{extension}", url.path());
+        url.set_path(&path);
+        url.set_fragment(None);
+        return url.into();
+    }
+    // Relative references and opaque URLs: split off the query by hand.
+    let without_fragment = base.split('#').next().unwrap_or(base);
+    let (path, query) = without_fragment.split_at(without_fragment.find('?').unwrap_or(without_fragment.len()));
+    format!("{path}{suffix}{extension}{query}")
+}
+
 impl Resource {
     pub(crate) fn new(kind: Kind, url: impl Into<String>) -> Self {
         Self::with_tile_data(kind, url, None, LoadingMethod::All)
@@ -208,26 +229,12 @@ impl Resource {
 
     #[must_use]
     pub fn sprite_image(base: &str, pixel_ratio: f32) -> Resource {
-        let url = URL::new(base);
-        Resource::new(
-            Kind::SpriteImage,
-            substr(base, 0, url.path.0.wrapping_add(url.path.1)).to_owned()
-                + if pixel_ratio > 1.0 { "@2x" } else { "" }
-                + ".png"
-                + substr(base, url.query.0, url.query.1),
-        )
+        Resource::new(Kind::SpriteImage, sprite_url(base, pixel_ratio, ".png"))
     }
 
     #[must_use]
     pub fn sprite_json(base: &str, pixel_ratio: f32) -> Resource {
-        let url = URL::new(base);
-        Resource::new(
-            Kind::SpriteJSON,
-            substr(base, 0, url.path.0.wrapping_add(url.path.1)).to_owned()
-                + if pixel_ratio > 1.0 { "@2x" } else { "" }
-                + ".json"
-                + substr(base, url.query.0, url.query.1),
-        )
+        Resource::new(Kind::SpriteJSON, sprite_url(base, pixel_ratio, ".json"))
     }
 
     #[must_use]
@@ -236,7 +243,7 @@ impl Resource {
             Kind::Glyphs,
             replace_tokens(url_template, |token: &str| -> Option<String> {
                 if token == "fontstack" {
-                    Some(percent_encode(&font_stack_to_string(font_stack)))
+                    Some(utf8_percent_encode(&font_stack_to_string(font_stack), FONT_STACK_ENCODE_SET).to_string())
                 } else if token == "range" {
                     Some(glyph_range.0.to_string() + "-" + &glyph_range.1.to_string())
                 } else {

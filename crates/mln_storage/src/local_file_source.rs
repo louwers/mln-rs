@@ -5,7 +5,6 @@
 
 use mln_actor::{ActorRef, Thread};
 use mln_util::constants::FILE_PROTOCOL;
-use mln_util::url::percent_decode;
 use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
@@ -27,7 +26,7 @@ fn path_from_file_url(url: &str) -> Vec<u8> {
     #[cfg(target_os = "android")]
     let url = crate::android::url_path(url);
     #[cfg_attr(not(windows), expect(unused_mut, reason = "only Windows edits the path"))]
-    let mut path = percent_decode(url);
+    let mut path: Vec<u8> = percent_encoding::percent_decode_str(url).collect();
     #[cfg(windows)]
     {
         // file:///C:/path minus the scheme is /C:/path, which Windows rejects.

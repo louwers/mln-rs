@@ -14,7 +14,6 @@ use mln_actor::{ActorRef, Thread};
 use mln_util::chrono::Timestamp;
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::MBTILES_PROTOCOL;
-use mln_util::url::percent_decode;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 use rusqlite::types::ValueRef;
@@ -35,7 +34,7 @@ fn accepts_url(url: &str) -> bool {
 }
 
 fn url_to_path(url: &str) -> Vec<u8> {
-    percent_decode(&url[MBTILES_PROTOCOL.len().min(url.len())..])
+    percent_encoding::percent_decode_str(&url[MBTILES_PROTOCOL.len().min(url.len())..]).collect()
 }
 
 /// The `N` comma-separated numbers of a metadata value such as `bounds`.

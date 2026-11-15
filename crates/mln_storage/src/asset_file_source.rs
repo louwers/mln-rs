@@ -5,7 +5,6 @@
 
 use mln_actor::{ActorRef, Thread};
 use mln_util::constants::ASSET_PROTOCOL;
-use mln_util::url::percent_decode;
 use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
@@ -41,7 +40,7 @@ impl AssetFileSourceThread {
         if !path.ends_with(b"/") {
             path.push(b'/');
         }
-        path.extend_from_slice(&percent_decode(url));
+        path.extend(percent_encoding::percent_decode_str(url));
         #[cfg(target_os = "android")]
         if let Some(name) = crate::android::app_asset_name(&path) {
             crate::android::request_asset(name, req, resource.data_range);
