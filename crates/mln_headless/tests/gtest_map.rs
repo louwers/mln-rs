@@ -373,8 +373,8 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
 
     let position = [0.25, 0.25, 0.01];
     test.map().set_free_camera_options(&mln_map::FreeCameraOptions { position: Some(position), orientation: None });
-    let ends = test.map().take_command_ends();
-    let ended: Vec<_> = ends.iter().filter(|end| end.command == command).map(|end| end.end.outcome).collect();
+    let ended: Vec<_> =
+        test.map().drain_command_ends().filter(|end| end.command == command).map(|end| end.end.outcome).collect();
     assert_eq!(ended, [mln_map::TransitionOutcome::Cancelled]);
     assert!(!test.map().snapshot().transition_in_progress);
     let placed = test.map().snapshot().free_camera.position;

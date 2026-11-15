@@ -51,7 +51,7 @@ pub use camera::{CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, 
 pub use completion::Completion;
 pub use event::{EventHandler, EventMask, EventSource, EventType, RuntimeEvent, RuntimeEventKind};
 pub use feature_state::{FeatureState, FeatureStateSelector};
-pub use map::{Applied, CameraCommand, CameraQuery, CommandGroup, Map, MapId, MapOptions};
+pub use map::{Applied, CameraQuery, CommandGroup, Map, MapId, MapOptions};
 pub use mln_map::{LogicalExtent, MapSnapshot};
 pub use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 pub use mln_renderer::{ClipDepthRange, FrameProjection};

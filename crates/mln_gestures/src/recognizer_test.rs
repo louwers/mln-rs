@@ -32,7 +32,7 @@ struct TestCamera {
 impl TestCamera {
     /// Takes what the transform reported.
     fn take_events(&mut self) {
-        for event in self.transform.take_events() {
+        for event in self.transform.drain_events() {
             match event {
                 TransformEvent::CommandEnded(end) => {
                     self.ends.borrow_mut().insert(end.command, end.end);
@@ -149,7 +149,7 @@ impl Rig {
         let time = Instant::now() + Duration::from_secs(3600);
         let mut camera = transform();
         camera.set_frame_time(Some(time));
-        camera.take_events();
+        camera.drain_events().for_each(drop);
         let camera = TestCamera { transform: camera, ends: Rc::default(), sources: Vec::new() };
         Rig { camera, input: GestureRecognizer::new(*options), now: 1000.0, time }
     }

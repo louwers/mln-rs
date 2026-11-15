@@ -387,7 +387,7 @@ impl Map {
     /// Moves what the transform reported to the map's events, after the
     /// events before it, and to its command ends.
     fn forward_camera_events(&mut self) {
-        for event in self.transform.take_events() {
+        for event in self.transform.drain_events() {
             match event {
                 TransformEvent::CameraWillChange(change) => self.events.push(MapEvent::CameraWillChange(change)),
                 TransformEvent::CameraIsChanging => self.events.push(MapEvent::CameraIsChanging),
@@ -397,14 +397,15 @@ impl Map {
         }
     }
 
-    /// Takes the ends of the camera commands that ended since the last call,
-    /// oldest first: each command's end comes once, unless the map drops
-    /// while the command runs (see [`close_camera`](Self::close_camera)).
+    /// Drains the ends of the camera commands that ended since the last
+    /// call, oldest first: each command's end comes once, unless the map
+    /// drops while the command runs (see [`close_camera`](Self::close_camera)).
     /// They come with the camera events of the same calls, which
-    /// [`drain_events`](Self::drain_events) takes.
-    pub fn take_command_ends(&mut self) -> Vec<CommandEnd> {
+    /// [`drain_events`](Self::drain_events) takes. The map keeps its buffer
+    /// for the ends that come next.
+    pub fn drain_command_ends(&mut self) -> std::vec::Drain<'_, CommandEnd> {
         self.forward_camera_events();
-        std::mem::take(&mut self.command_ends)
+        self.command_ends.drain(..)
     }
 
     fn handle_style_event(&mut self, event: StyleEvent) {
@@ -808,7 +809,7 @@ impl Map {
     /// (maplibre-native-ffi's `mln_map_apply_camera_delta`): a pan, a zoom,
     /// turn and tilt around an anchor, a gesture phase, and the momentum a
     /// gesture's end continues with. See [`CameraDelta`]. Returns the
-    /// command, whose end [`take_command_ends`](Self::take_command_ends)
+    /// command, whose end [`drain_command_ends`](Self::drain_command_ends)
     /// reports.
     pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<CameraCommandId, CameraError> {
         let command = self.transform.apply_camera_delta(delta)?;
@@ -820,7 +821,7 @@ impl Map {
     /// Moves the camera to absolute values, by a jump, an ease or a flight,
     /// as a command or as part of a gesture (maplibre-native-ffi's
     /// `mln_map_update_camera`). See [`CameraUpdate`]. Returns the command,
-    /// whose end [`take_command_ends`](Self::take_command_ends) reports.
+    /// whose end [`drain_command_ends`](Self::drain_command_ends) reports.
     pub fn update_camera(&mut self, update: &CameraUpdate) -> CameraCommandId {
         self.camera_mutated = true;
         let command = self.transform.update_camera(update);
@@ -829,7 +830,7 @@ impl Map {
     }
 
     /// Ends the running camera commands as closed, as when the map closes,
-    /// which [`take_command_ends`](Self::take_command_ends) reports. An
+    /// which [`drain_command_ends`](Self::drain_command_ends) reports. An
     /// owner that waits for the commands' ends calls it before it drops the
     /// map.
     pub fn close_camera(&mut self) {

@@ -185,7 +185,7 @@ pub(crate) fn run(launch: Launch) {
         fov: Some(settings.fov),
         ..Default::default()
     };
-    log_failure(map.update_camera(CameraUpdate { camera, ..Default::default() }).map(|command| command.applied));
+    log_failure(map.update_camera(CameraUpdate { camera, ..Default::default() }));
     log_failure(map.set_debug_flags(MapDebugOptions(settings.debug)));
     log_failure(map.set_globe_free_bearing_enabled(settings.free_bearing));
 
@@ -510,7 +510,7 @@ impl View {
         if let Some(dx) = std::env::var("MLN_PAN_PX").ok().and_then(|v| v.parse::<f64>().ok()) {
             let dx = if (ms / 2000.0) as i64 % 2 == 0 { dx } else { -dx };
             let pan = CameraDelta { offset: Some(ScreenCoordinate::new(dx, 0.0)), ..Default::default() };
-            log_failure(self.map.apply_camera_delta(pan).map(|command| command.applied));
+            log_failure(self.map.apply_camera_delta(pan));
         }
 
         self.redraw |= self.inbox.take_redraw();

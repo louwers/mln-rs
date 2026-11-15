@@ -89,21 +89,6 @@ fn fit(map: &mut mln_map::Map, area: &CameraFitArea, update: CameraFitUpdate) ->
     Ok(map.update_camera(&CameraUpdate { mode, camera, animation, ..CameraUpdate::default() }))
 }
 
-/// A camera command on its way.
-#[must_use = "a camera command does nothing unless its completions are received"]
-#[derive(Debug)]
-pub struct CameraCommand {
-    /// Completes once the command ran, as every map command does.
-    pub applied: Completion<Applied>,
-    /// Completes once the command's camera change ended, with how it ended,
-    /// on the runtime's thread: once the map has published the snapshot that
-    /// shows where the change left the camera, whose generation the end
-    /// reports, and before `applied` when the change ends within the
-    /// command. A command that fails ends as cancelled, and one that the
-    /// map's release ends as closed, with generation 0.
-    pub ended: Completion<TransitionEnd>,
-}
-
 /// The camera, and the generation of the map that it belongs to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraQuery {
@@ -1117,22 +1102,19 @@ impl Map {
 
     // MARK: - Camera
 
-    /// A command that moves the camera: `apply` starts the camera command
-    /// whose end the returned [`CameraCommand::ended`] reports. A failure
-    /// ends it as cancelled.
+    /// A command that moves the camera: `apply` starts a camera command,
+    /// whose end nobody waits for.
     fn camera_command(
         &self,
         apply: impl FnOnce(&mut mln_map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
-    ) -> Result<CameraCommand, Error> {
-        let (ended, end) = self.shared.runtime.completion();
-        let applied = self.send_camera(apply, end)?;
-        Ok(CameraCommand { applied, ended })
+    ) -> Result<Completion<Applied>, Error> {
+        self.send_camera(apply, None)
     }
 
-    /// A command that moves the camera, as [`camera_command`](Self::camera_command)
-    /// sends it, whose end `on_end` receives. `on_end` is in place before the
-    /// command is sent, so it runs on the runtime's thread, or on this one
-    /// with [`ErrorKind::Cancelled`](mln_util::ErrorKind) when the send fails.
+    /// A command that moves the camera, whose end `on_end` receives. `on_end`
+    /// is in place before the command is sent, so it runs on the runtime's
+    /// thread, or on this one with
+    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind) when the send fails.
     fn camera_command_then(
         &self,
         apply: impl FnOnce(&mut mln_map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
@@ -1140,25 +1122,30 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let (ended, end) = self.shared.runtime.completion();
         ended.on_complete(on_end);
-        self.send_camera(apply, end)
+        self.send_camera(apply, Some(end))
     }
 
+    /// Sends a camera command, and `end`, if any, the command's end: a
+    /// failure ends it as cancelled.
     fn send_camera(
         &self,
         apply: impl FnOnce(&mut mln_map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
-        end: Resolver<TransitionEnd>,
+        end: Option<Resolver<TransitionEnd>>,
     ) -> Result<Completion<Applied>, Error> {
         self.send(
-            move |entry, outbox| match apply(&mut entry.core) {
-                Ok(command) => {
+            move |entry, outbox| match (apply(&mut entry.core), end) {
+                (Ok(command), Some(end)) => {
                     entry.camera_commands.insert(command, end);
                     Ok(())
                 }
-                Err(error) => {
-                    let generation = entry.core.generation();
-                    let cancelled =
-                        TransitionEnd { outcome: TransitionOutcome::Cancelled, generation, ..Default::default() };
-                    outbox.resolve(end, Ok(cancelled));
+                (Ok(_), None) => Ok(()),
+                (Err(error), end) => {
+                    if let Some(end) = end {
+                        let generation = entry.core.generation();
+                        let cancelled =
+                            TransitionEnd { outcome: TransitionOutcome::Cancelled, generation, ..Default::default() };
+                        outbox.resolve(end, Ok(cancelled));
+                    }
                     Err(error)
                 }
             },
@@ -1167,16 +1154,19 @@ impl Map {
     }
 
     /// Moves the camera to absolute values, by a jump, an ease or a flight.
-    pub fn update_camera(&self, update: CameraUpdate) -> Result<CameraCommand, Error> {
+    pub fn update_camera(&self, update: CameraUpdate) -> Result<Completion<Applied>, Error> {
         self.camera_command(move |map| Ok(map.update_camera(&update)))
     }
 
     /// Moves the camera as [`update_camera`](Self::update_camera) does, and
-    /// calls `on_end` with how the change ended, as
-    /// [`CameraCommand::ended`] reports it, on the runtime's thread. Unlike
-    /// a callback that a caller attaches to `ended`, it can't run on this
-    /// thread when the change ends quickly; it runs here only with
-    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind) when the send fails.
+    /// calls `on_end` with how the change ended, on the runtime's thread:
+    /// once the map has published the snapshot that shows where the change
+    /// left the camera, whose generation the end reports, and before the
+    /// returned completion when the change ends within the command. A
+    /// command that fails ends as cancelled, and one that the map's release
+    /// ends as closed, with generation 0. `on_end` runs on this thread only
+    /// with [`ErrorKind::Cancelled`](mln_util::ErrorKind), when the send
+    /// fails.
     pub fn update_camera_then(
         &self,
         update: CameraUpdate,
@@ -1188,7 +1178,7 @@ impl Map {
     /// Moves the camera relative to where it is, as a gesture does.
     /// Completes with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
     /// a delta that the camera can't apply.
-    pub fn apply_camera_delta(&self, delta: CameraDelta) -> Result<CameraCommand, Error> {
+    pub fn apply_camera_delta(&self, delta: CameraDelta) -> Result<Completion<Applied>, Error> {
         self.camera_command(move |map| {
             map.apply_camera_delta(&delta).map_err(|error| Error::invalid_argument(error.to_string()))
         })
@@ -1228,7 +1218,7 @@ impl Map {
     ///
     /// Completes as `camera_for` fails, and then leaves the camera where it
     /// is and ends the animation as cancelled.
-    pub fn fit_camera(&self, area: CameraFitArea, update: CameraFitUpdate) -> Result<CameraCommand, Error> {
+    pub fn fit_camera(&self, area: CameraFitArea, update: CameraFitUpdate) -> Result<Completion<Applied>, Error> {
         self.camera_command(move |map| fit(map, &area, update))
     }
 
@@ -1613,8 +1603,7 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     // The camera commands that ended report the snapshot that shows them.
     let ends: Vec<_> = entry
         .core
-        .take_command_ends()
-        .into_iter()
+        .drain_command_ends()
         .filter_map(|end| Some((entry.camera_commands.remove(&end.command)?, TransitionEnd { generation, ..end.end })))
         .collect();
     // Each change to the state grows the generation, so a snapshot of the
@@ -1690,7 +1679,7 @@ fn remove(core: &mut RuntimeCore, id: MapId, done: Option<Resolver<()>>, outbox:
         // The map's camera changes end as closed as it drops, with no
         // snapshot to show them.
         entry.core.close_camera();
-        for end in entry.core.take_command_ends() {
+        for end in entry.core.drain_command_ends() {
             if let Some(resolver) = entry.camera_commands.remove(&end.command) {
                 outbox.resolve(resolver, Ok(end.end));
             }

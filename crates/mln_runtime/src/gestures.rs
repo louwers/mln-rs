@@ -2,13 +2,15 @@
 //! map's published snapshot and sends camera commands, without waiting for
 //! them.
 
+use std::sync::Arc;
+
 use mln_gestures::{GestureCamera, PendingEnd};
 use mln_map::{CameraDelta, CameraOptions, CameraUpdate, MapProjection, MapSnapshot, TransitionEnd};
 use mln_util::LatLng;
 use mln_util::geo::{LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::logging::{Event, Log};
+use parking_lot::Mutex;
 
-use crate::completion::Completion;
 use crate::map::Map;
 
 impl Map {
@@ -57,8 +59,10 @@ impl GestureCamera for Map {
     }
 
     fn release(&mut self, delta: &CameraDelta) -> Box<dyn PendingEnd> {
-        let ended = sent(Map::apply_camera_delta(self, delta.clone())).map(|command| command.ended);
-        Box::new(EndCompletion(ended))
+        let end = Arc::new(Mutex::new(None));
+        let ended = Arc::clone(&end);
+        sent(self.apply_camera_delta_then(delta.clone(), move |result| *ended.lock() = result.ok()));
+        Box::new(EndSlot(end))
     }
 
     fn update_camera(&mut self, update: &CameraUpdate) {
@@ -70,15 +74,12 @@ impl GestureCamera for Map {
     }
 }
 
-/// A camera command's end, which arrives on the runtime's thread.
+/// A camera command's end, which the runtime's thread leaves here.
 #[derive(Debug)]
-struct EndCompletion(Option<Completion<TransitionEnd>>);
+struct EndSlot(Arc<Mutex<Option<TransitionEnd>>>);
 
-impl PendingEnd for EndCompletion {
+impl PendingEnd for EndSlot {
     fn take(&mut self) -> Option<TransitionEnd> {
-        if !self.0.as_ref().is_some_and(Completion::is_complete) {
-            return None;
-        }
-        self.0.take()?.wait().ok()
+        self.0.lock().take()
     }
 }

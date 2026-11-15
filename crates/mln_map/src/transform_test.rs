@@ -4297,8 +4297,7 @@ fn compose_padding_pitch_and_field_of_view() {
 /// each command's end that `tags` names by transition id.
 fn take_tagged(transform: &mut Transform, tags: &[(&EndLog, i32)]) -> Vec<i32> {
     transform
-        .take_events()
-        .into_iter()
+        .drain_events()
         .filter_map(|event| match event {
             TransformEvent::CameraDidChange(_) => Some(0),
             TransformEvent::CommandEnded(end) => {
@@ -4322,7 +4321,7 @@ fn partial_camera_commands_finish_together_for_still_image() {
     transform
         .ease_to(&CameraOptions { center: Some(ll(20.0, 30.0)), zoom: Some(12.0), ..Default::default() }, &position);
     transform.ease_to(&CameraOptions { bearing: Some(60.0), ..Default::default() }, &bearing);
-    transform.take_events();
+    transform.drain_events().for_each(drop);
     transform.jump_to(&CameraOptions { zoom: Some(10.0), ..Default::default() });
     assert_eq!(take_tagged(&mut transform, &tags), [0]);
 

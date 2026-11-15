@@ -21,7 +21,7 @@ fn the_recognizer_reads_and_moves_a_runtime_map() {
         camera: CameraOptions { center: Some(center), zoom: Some(4.0), ..Default::default() },
         ..Default::default()
     };
-    wait(map.update_camera(update).map(|command| command.applied));
+    wait(map.update_camera(update));
 
     // The reads are the snapshot's: the map is 256 pixels square.
     assert_eq!(GestureCamera::viewport(&map), at(256.0, 256.0));

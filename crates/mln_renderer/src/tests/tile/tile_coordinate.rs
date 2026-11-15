@@ -82,8 +82,7 @@ fn from_lat_lng() {
     // The resize made the one immediate camera change.
     let immediate = |change: &CameraChange| change.mode == CameraChangeMode::Immediate;
     let changes: Vec<_> = transform
-        .take_events()
-        .into_iter()
+        .drain_events()
         .filter_map(|event| match event {
             TransformEvent::CameraWillChange(change) if immediate(&change) => Some('w'),
             TransformEvent::CameraDidChange(change) if immediate(&change) => Some('d'),

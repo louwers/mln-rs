@@ -100,7 +100,7 @@ pub struct CommandEnd {
 }
 
 /// What the transform reports, in order, for its owner to drain with
-/// [`Transform::take_events`].
+/// [`Transform::drain_events`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TransformEvent {
     CameraWillChange(CameraChange),
@@ -483,7 +483,7 @@ pub struct Transform {
     state: TransformState,
 
     transitions: Vec<Transition>,
-    /// What the transform reports, for [`Self::take_events`].
+    /// What the transform reports, for [`Self::drain_events`].
     events: Vec<TransformEvent>,
     /// The command being started, which the transitions it starts report
     /// their end to (see [`Self::command`]), unless `silent`.
@@ -588,13 +588,14 @@ impl Transform {
         }
     }
 
-    /// Takes what the transform reported since the last call, oldest first.
-    pub fn take_events(&mut self) -> Vec<TransformEvent> {
-        std::mem::take(&mut self.events)
+    /// Drains what the transform reported since the last call, oldest
+    /// first. The transform keeps its buffer for what it reports next.
+    pub fn drain_events(&mut self) -> std::vec::Drain<'_, TransformEvent> {
+        self.events.drain(..)
     }
 
     /// Whether the transform reported something that
-    /// [`take_events`](Self::take_events) hasn't taken.
+    /// [`drain_events`](Self::drain_events) hasn't drained.
     pub fn has_events(&self) -> bool {
         !self.events.is_empty()
     }

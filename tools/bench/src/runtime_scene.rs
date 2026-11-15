@@ -171,7 +171,7 @@ impl RuntimeMap {
     pub(crate) fn new(runtime: &RuntimeHandle, view: View, device: Option<Device>) -> RuntimeMap {
         let View { size, center, zoom, style } = view;
         let map = runtime.create_map(size);
-        map.update_camera(jump(center, zoom)).expect("a camera").applied.wait().expect("the camera");
+        map.update_camera(jump(center, zoom)).expect("a camera").wait().expect("the camera");
         map.set_style_json(style).expect("a style").wait().expect("the style");
         let wakes = Arc::new(Wakes::default());
         let wake = Arc::clone(&wakes);
