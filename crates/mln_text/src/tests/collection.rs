@@ -4,6 +4,8 @@
 // --layout-features='*' --name-IDs='*'`, `fonttools varLib.instancer
 // wght=400`), collected by `fonttools ttLib -o collection.ttc`.
 
+use std::num::NonZeroU16;
+
 use crate::glyph::{FontData, GlyphIDType};
 use crate::{FreeTypeLibrary, HBShaper};
 
@@ -13,7 +15,7 @@ const COLLECTION: &[u8] = include_bytes!("../../tests/fixtures/collection.ttc");
 /// with ink, or `None` when it has no such face.
 fn inked_glyphs(index: u32, text: &str) -> Option<usize> {
     let data = FontData::from(COLLECTION.to_vec()).with_face_index(index);
-    let shaper = HBShaper::new(GlyphIDType(1), data, &FreeTypeLibrary::new());
+    let shaper = HBShaper::new(GlyphIDType::face(NonZeroU16::MIN), data, &FreeTypeLibrary::new());
     if !shaper.valid() {
         return None;
     }
@@ -36,7 +38,11 @@ fn each_face_of_a_collection_draws_its_own_glyphs() {
 fn a_single_font_has_only_face_zero() {
     let khmer = include_bytes!("../../tests/fixtures/khmer.ttf").to_vec();
     let face = |index| {
-        HBShaper::new(GlyphIDType(1), FontData::from(khmer.clone()).with_face_index(index), &FreeTypeLibrary::new())
+        HBShaper::new(
+            GlyphIDType::face(NonZeroU16::MIN),
+            FontData::from(khmer.clone()).with_face_index(index),
+            &FreeTypeLibrary::new(),
+        )
     };
     assert!(face(0).valid());
     assert!(!face(1).valid());

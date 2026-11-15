@@ -166,16 +166,27 @@ impl MapShared {
         }
     }
 
+    /// A completion that the runtime's thread resolves, or with
+    /// `discard`, one whose result is discarded, as
+    /// [`Completion::discarded`] makes it.
+    fn completion<R: Send + 'static>(&self, discard: Option<fn(Error)>) -> (Completion<R>, Resolver<R>) {
+        match discard {
+            Some(on_failure) => Completion::discarded(on_failure),
+            None => self.runtime.completion(),
+        }
+    }
+
     /// Numbers a command and posts it to the runtime's thread.
     pub(crate) fn send<R: Send + 'static>(
         &self,
+        discard: Option<fn(Error)>,
         command: impl FnOnce(&mut RuntimeCore, &mut Outbox, MapId, u64, Resolver<R>) + Send + 'static,
     ) -> Result<Completion<R>, Error> {
         let mut sent = self.sent.lock();
         if self.released.load(Ordering::SeqCst) {
             return Err(released());
         }
-        let (completion, resolver) = self.runtime.completion();
+        let (completion, resolver) = self.completion(discard);
         let id = self.id;
         *sent += 1;
         let sequence = *sent;
@@ -236,11 +247,14 @@ impl Drop for MapShared {
 #[derive(Clone)]
 pub struct Map {
     pub(crate) shared: Arc<MapShared>,
+    /// Where the failures of the handle's commands go when it discards
+    /// their results.
+    discard: Option<fn(Error)>,
 }
 
 impl std::fmt::Debug for Map {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Map").field("id", &self.shared.id).finish()
+        f.debug_struct("Map").field("id", &self.shared.id).field("discards_results", &self.discard.is_some()).finish()
     }
 }
 
@@ -268,7 +282,25 @@ pub(crate) fn missing_map() -> Error {
 
 impl Map {
     pub(crate) fn new(shared: MapShared) -> Self {
-        Map { shared: Arc::new(shared) }
+        Map { shared: Arc::new(shared), discard: None }
+    }
+
+    /// A handle to the same map whose commands discard their results, for a
+    /// caller that doesn't need them: each command's completion acts as one
+    /// whose result was taken, and costs no allocation, and a failure,
+    /// cancellations included, goes to `on_failure` on the runtime's thread.
+    #[must_use]
+    pub fn discarding_results(&self, on_failure: fn(Error)) -> Map {
+        Map { shared: Arc::clone(&self.shared), discard: Some(on_failure) }
+    }
+
+    /// Numbers a command and posts it to the runtime's thread, with a
+    /// completion as the handle makes them.
+    pub(crate) fn post<R: Send + 'static>(
+        &self,
+        command: impl FnOnce(&mut RuntimeCore, &mut Outbox, MapId, u64, Resolver<R>) + Send + 'static,
+    ) -> Result<Completion<R>, Error> {
+        self.shared.send(self.discard, command)
     }
 
     #[must_use]
@@ -337,7 +369,7 @@ impl Map {
         apply: impl FnOnce(&mut MapEntry, &mut Outbox) -> Result<T, Error> + Send + 'static,
         finish: impl FnOnce(T, &MapEntry) -> R + Send + 'static,
     ) -> Result<Completion<R>, Error> {
-        self.shared.send(move |core, outbox, id, sequence, resolver| {
+        self.post(move |core, outbox, id, sequence, resolver| {
             run_command(core, id, sequence, apply, finish, resolver, outbox);
         })
     }
@@ -399,7 +431,7 @@ impl Map {
     }
 
     fn release_with(&self, in_any_state: bool) -> Result<Completion<()>, Error> {
-        let (completion, resolver) = self.shared.runtime.completion();
+        let (completion, resolver) = self.shared.completion(self.discard);
         let claimed = {
             let mut claim = self.shared.session.lock();
             match claim.as_mut() {
@@ -595,7 +627,7 @@ impl Map {
         if self.shared.mode == MapMode::Continuous {
             return Err(Error::invalid_state("the map is not in static or tile mode"));
         }
-        self.shared.send(move |core, outbox, id, sequence, resolver| {
+        self.post(move |core, outbox, id, sequence, resolver| {
             if !core.maps.contains_key(&id) {
                 return outbox.resolve(resolver, Err(missing_map()));
             }
@@ -696,7 +728,7 @@ impl Map {
         awaited: Arc<AtomicU64>,
         size: Size,
     ) -> Result<(), Error> {
-        let sent = self.shared.send(move |core, outbox, map_id, sequence, resolver: Resolver<()>| {
+        let sent = self.shared.send(Some(drop), move |core, outbox, map_id, sequence, resolver: Resolver<()>| {
             drop(resolver);
             if !core.maps.contains_key(&map_id) {
                 return worker_post(&run_loop, |worker, outbox| worker.bind_failed(missing_map(), outbox));
@@ -767,7 +799,7 @@ impl Map {
     ) -> Result<(), Error> {
         // The scale factor that a session attached later renders at.
         self.shared.scale_factor.store(scale_factor.to_bits(), Ordering::SeqCst);
-        let sent = self.shared.send(move |core, outbox, id, sequence, resolver: Resolver<()>| {
+        let sent = self.shared.send(Some(drop), move |core, outbox, id, sequence, resolver: Resolver<()>| {
             drop(resolver);
             if !core.maps.contains_key(&id) {
                 return worker_post(&run_loop, move |worker, outbox| resize(worker, Err(missing_map()), outbox));
@@ -894,7 +926,7 @@ impl Map {
     }
 
     fn load_style(&self, load: StyleLoad) -> Result<Completion<Applied>, Error> {
-        self.shared.send(move |core, outbox, id, sequence, resolver| {
+        self.post(move |core, outbox, id, sequence, resolver| {
             load_style(core, id, sequence, load, resolver, outbox);
         })
     }

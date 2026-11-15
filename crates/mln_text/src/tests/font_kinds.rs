@@ -4,6 +4,8 @@
 // one Mac Roman (1, 0) subtable instead, and Source Code Pro's `CFF ` table
 // on its own, a bare CFF font, which has no `cmap`.
 
+use std::num::NonZeroU16;
+
 use crate::glyph::GlyphIDType;
 use crate::{FreeTypeLibrary, HBShaper};
 
@@ -13,7 +15,7 @@ const BARE_CFF: &[u8] = include_bytes!("../../tests/fixtures/bare.cff");
 /// The number of glyphs of `text` that `font` maps and draws with ink, or
 /// `None` when it isn't a font the shaper reads.
 fn inked_glyphs(font: &[u8], text: &str) -> Option<usize> {
-    let shaper = HBShaper::new(GlyphIDType(1), font.to_vec(), &FreeTypeLibrary::new());
+    let shaper = HBShaper::new(GlyphIDType::face(NonZeroU16::MIN), font.to_vec(), &FreeTypeLibrary::new());
     if !shaper.valid() {
         return None;
     }

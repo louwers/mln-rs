@@ -7,6 +7,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use std::num::NonZeroU16;
+
 use mln_text::glyph::{FontData, GlyphID, GlyphIDType};
 use mln_text::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
 use wasm_bindgen::prelude::*;
@@ -30,8 +32,9 @@ fn start() {
 #[must_use]
 pub fn open_face(type_: u16, data: Vec<u8>, face_index: u32) -> Option<Face> {
     let data = FontData::from(data).with_face_index(face_index);
-    let shaper = HBShaper::new(GlyphIDType(type_), data, &FreeTypeLibrary::new());
-    shaper.valid().then_some(Face { shaper, type_: GlyphIDType(type_) })
+    let type_ = GlyphIDType::face(NonZeroU16::new(type_)?);
+    let shaper = HBShaper::new(type_, data, &FreeTypeLibrary::new());
+    shaper.valid().then_some(Face { shaper, type_ })
 }
 
 /// A font file `openFace` opened.

@@ -1,7 +1,7 @@
 //! A runtime: the thread that its maps live on, and the file sources, cache
 //! and offline regions that they share.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -198,6 +198,9 @@ fn released() -> Error {
 thread_local! {
     /// The state of the runtime whose thread this is.
     static CORE: RefCell<Option<RuntimeCore>> = const { RefCell::new(None) };
+    /// The buffer of the outbox that the next task takes, so that each task
+    /// reuses the last one's.
+    static DELIVERIES: Cell<Vec<Box<dyn FnOnce()>>> = const { Cell::new(Vec::new()) };
 }
 
 /// Posts `task` to the runtime thread whose loop is `run_loop`.
@@ -217,7 +220,7 @@ pub(crate) fn async_task(task: impl Fn(&mut RuntimeCore, &mut Outbox) + 'static)
 /// down drops, which cancels its completions. A task that
 /// [`RuntimeShared::post`] sent runs in its burst.
 fn run(task: impl FnOnce(&mut RuntimeCore, &mut Outbox), in_burst: bool) {
-    let mut outbox = Outbox::default();
+    let mut outbox = Outbox { deliveries: DELIVERIES.take() };
     let unrun = CORE.with(|core| match core.borrow_mut().as_mut() {
         Some(core) => {
             if in_burst {
@@ -232,7 +235,7 @@ fn run(task: impl FnOnce(&mut RuntimeCore, &mut Outbox), in_burst: bool) {
         None => Some(task),
     });
     drop(unrun);
-    outbox.deliver();
+    DELIVERIES.set(outbox.deliver());
 }
 
 /// What a task sends to the host: event batches and results, in order. They
@@ -249,13 +252,19 @@ impl Outbox {
     }
 
     pub(crate) fn resolve<T: 'static>(&mut self, resolver: Resolver<T>, result: Result<T, Error>) {
+        // A success whose result is discarded runs nothing.
+        if resolver.discards() && result.is_ok() {
+            return resolver.resolve(result);
+        }
         self.push(move || resolver.resolve(result));
     }
 
-    pub(crate) fn deliver(self) {
-        for delivery in self.deliveries {
+    /// Delivers what the outbox holds, and returns its emptied buffer.
+    pub(crate) fn deliver(mut self) -> Vec<Box<dyn FnOnce()>> {
+        for delivery in self.deliveries.drain(..) {
             delivery();
         }
+        self.deliveries
     }
 }
 

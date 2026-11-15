@@ -163,7 +163,7 @@ impl FontFaceEngine for ShaperModuleEngine {
 
     fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
         let opened = MODULE.with(|module| match &*module.borrow() {
-            Some(Module::Loaded(module)) => module.open_face(type_.0, data.as_bytes(), data.face_index()),
+            Some(Module::Loaded(module)) => module.open_face(type_.id(), data.as_bytes(), data.face_index()),
             _ => Err(JsValue::from_str("the shaper module isn't loaded")),
         });
         match opened {

@@ -107,7 +107,7 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
         let range = if glyph_range.type_ == mln_text::glyph::GlyphIDType::FontPBF {
             format!("{}-{}", glyph_range.first, glyph_range.second)
         } else {
-            format!("{}(font file)", glyph_range.type_.0)
+            format!("{}(font file)", glyph_range.type_.id())
         };
         Log::error(
             Event::Style,

@@ -1959,6 +1959,8 @@ impl Layout for SymbolLayout {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU16;
+
     use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
 
     use super::GlyphTypeTable;
@@ -1977,7 +1979,7 @@ mod tests {
 
     fn face(name: &str, type_: u16, ranges: &[(u32, u32)]) -> FontFace {
         let mut face = FontFace::new(name, "font.ttf", ranges.to_vec());
-        face.type_ = GlyphIDType(type_);
+        face.type_ = GlyphIDType::face(NonZeroU16::new(type_).unwrap());
         face
     }
 
@@ -1998,7 +2000,7 @@ mod tests {
             let stack: Vec<String> = stack.iter().map(|name| (*name).to_owned()).collect();
             let table = GlyphTypeTable::new(&stack, &faces);
             for unit in 0..=u16::MAX {
-                for previous in [GlyphIDType::FontPBF, GlyphIDType(7)] {
+                for previous in [GlyphIDType::FontPBF, GlyphIDType::face(NonZeroU16::new(7).unwrap())] {
                     assert_eq!(
                         table.get(unit, previous),
                         scan(unit, &stack, &faces, previous),

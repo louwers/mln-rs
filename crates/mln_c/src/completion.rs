@@ -235,15 +235,18 @@ pub(crate) fn complete_or_log<V: CompletionValue>(
         Some(sink) => sink.complete(result, generations),
         None => {
             if let Err(error) = result {
-                let status = error.status();
-                if status != MLN_STATUS_CANCELLED {
-                    Log::warning(
-                        Event::General,
-                        format!("discarded command failed (status {status}): {}", error.message()),
-                    );
-                }
+                log_discarded(&error);
             }
         }
+    }
+}
+
+/// Logs the failure of a command whose caller passed no completion as one
+/// warning, so it isn't lost. A cancellation isn't logged.
+pub(crate) fn log_discarded(error: &Error) {
+    let status = error.status();
+    if status != MLN_STATUS_CANCELLED {
+        Log::warning(Event::General, format!("discarded command failed (status {status}): {}", error.message()));
     }
 }
 

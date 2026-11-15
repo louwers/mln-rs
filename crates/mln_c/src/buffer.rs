@@ -58,8 +58,14 @@ impl LentText {
     pub(crate) fn view(&self) -> mln_buffer_view {
         match self.0.split_last() {
             Some((_, text)) => mln_buffer_view { data: self.0.as_ptr().cast(), size: text.len() },
-            None => mln_buffer_view { data: c"".as_ptr().cast(), size: 0 },
+            None => Self::empty_view(),
         }
+    }
+
+    /// The view of empty text, which points at a static terminator and so
+    /// needs no `LentText` to keep it valid.
+    pub(crate) const fn empty_view() -> mln_buffer_view {
+        mln_buffer_view { data: c"".as_ptr().cast(), size: 0 }
     }
 }
 

@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::num::NonZeroU16;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -868,7 +869,7 @@ impl FontFaceShaper for FakeShaper {
     }
 }
 
-const FONT_FACE: GlyphIDType = GlyphIDType(7);
+const FONT_FACE: GlyphIDType = GlyphIDType::face(NonZeroU16::new(7).unwrap());
 
 /// A manager on `engine` with one font face, and a synchronous file source
 /// that answers its file with "font".
