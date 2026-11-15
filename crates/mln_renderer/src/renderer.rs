@@ -170,6 +170,15 @@ impl Renderer {
         self.orchestrator.set_tile_workers(workers);
     }
 
+    /// Takes in what arrived for the tiles since the last frame (their data,
+    /// their jobs' replies, glyphs) and starts the jobs it makes ready. Each
+    /// frame does this first; a host that draws frames on a clock calls it
+    /// as soon as the renderer asks for an update, so that the tiles' work
+    /// doesn't wait for the next frame to start.
+    pub fn receive_tiles(&mut self) {
+        self.orchestrator.receive_tiles();
+    }
+
     /// Sets the queue the renderer pushes its events to: the map's, which
     /// the map's frontend passes on.
     pub fn set_event_queue(&mut self, events: Option<RendererEvents>) {
@@ -228,7 +237,7 @@ impl Renderer {
     // query: `Err` is the exception C++ throws out of the query (a
     // malformed tile).
     pub fn query_rendered_features(
-        &self,
+        &mut self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
@@ -236,7 +245,7 @@ impl Renderer {
     }
 
     pub fn query_rendered_features_at_point(
-        &self,
+        &mut self,
         point: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
@@ -244,7 +253,7 @@ impl Renderer {
     }
 
     pub fn query_rendered_features_in_box(
-        &self,
+        &mut self,
         min: &mln_util::geo::ScreenCoordinate,
         max: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
@@ -257,7 +266,7 @@ impl Renderer {
     }
 
     pub fn query_source_features(
-        &self,
+        &mut self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {

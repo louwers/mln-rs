@@ -45,81 +45,269 @@ mod malformed_tile_test;
 mod tile_jobs_test;
 // Port-only: a tile's layout in two stages, and the worker over them.
 mod tile_layout_test;
+// Port-only: the tile store keeps a tile's data, work and contents apart.
+mod tile_store_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 
-/// Port-only: drives the tiles under test as the renderer's update does: their jobs run on `jobs`' workers, and the renderer's glyph and
-/// image stores and atlas resolve what the jobs need.
-pub(crate) struct TileDriver {
-    pub(crate) glyphs: crate::text::glyph_store::GlyphStore,
-    pub(crate) images: crate::image_store::ImageStore,
-    pub(crate) atlas: crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas,
-    pub(crate) jobs: crate::tile::tile_workers::TileJobs,
+/// Port-only: a tile store whose jobs run on `workers` and which frees on
+/// `pool`, whose glyph store hears from its engine on `run_loop`, with no
+/// images and no sprite loaded.
+pub(crate) fn tile_store(
+    run_loop: &mln_actor::RunLoop,
+    pool: &mln_actor::TaggedScheduler,
+    workers: Box<dyn crate::tile::tile_workers::TileWorkers>,
+) -> crate::tile::store::TileStore {
+    let glyphs = crate::text::glyph_store::GlyphStore::new(
+        None,
+        std::sync::Arc::default(),
+        crate::text::font_face_engine::default_engine(),
+        run_loop.clone(),
+        std::rc::Rc::new(|| {}),
+    );
+    crate::tile::store::TileStore::new(
+        workers,
+        glyphs,
+        crate::image_store::ImageStore::default(),
+        pool.clone(),
+        std::sync::Arc::new(|| {}),
+    )
 }
 
-impl TileDriver {
-    /// A driver whose jobs run on `workers`, whose glyph responses arrive on
-    /// `run_loop`, with no images and no sprite loaded.
-    pub(crate) fn new(run_loop: &mln_actor::RunLoop, workers: Box<dyn crate::tile::tile_workers::TileWorkers>) -> Self {
-        TileDriver {
-            glyphs: crate::text::glyph_store::GlyphStore::new(
-                None,
-                std::sync::Arc::default(),
-                crate::text::font_face_engine::default_engine(),
-                run_loop.clone(),
-                std::rc::Rc::new(|| {}),
-            ),
-            images: crate::image_store::ImageStore::default(),
-            atlas: crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new(),
-            jobs: crate::tile::tile_workers::TileJobs::new(workers),
+/// Port-only: a tile store whose jobs run on `pool`.
+pub(crate) fn pool_store(
+    run_loop: &mln_actor::RunLoop,
+    pool: &mln_actor::TaggedScheduler,
+) -> crate::tile::store::TileStore {
+    tile_store(run_loop, pool, Box::new(crate::tile::tile_workers::PoolWorkers::new(pool.clone(), 8)))
+}
+
+/// Port-only: one update of `store`'s tiles, as the renderer's: gives the
+/// images asked for their update, takes in what arrived and starts the next
+/// jobs. Returns whether a tile of a source with synchronous updates laid
+/// out.
+pub(crate) fn update(store: &mut crate::tile::store::TileStore) -> bool {
+    store.images_mut().begin_update();
+    store.receive();
+    store.drive()
+}
+
+/// Port-only: one tile of a source of its own in a store, driven as the
+/// renderer drives it, whose data the test gives it.
+pub(crate) struct OneTile {
+    pub(crate) store: crate::tile::store::TileStore,
+    pub(crate) key: crate::tile::job::SourceKey,
+    pub(crate) id: mln_tile_id::OverscaledTileID,
+    mode: mln_map_types::MapMode,
+}
+
+impl OneTile {
+    /// Tile `id` of kind `kind` in `store`, laid out for `mode`.
+    pub(crate) fn new(
+        mut store: crate::tile::store::TileStore,
+        kind: crate::tile::tile::TileKind,
+        id: mln_tile_id::OverscaledTileID,
+        mode: mln_map_types::MapMode,
+    ) -> Self {
+        let key = store.add_source("s".to_owned(), kind, false);
+        let mut tiles = OneTile { store, key, id, mode };
+        tiles.add(id);
+        tiles
+    }
+
+    fn params(&self) -> crate::layout::tile_layout::LayoutParams {
+        crate::layout::tile_layout::LayoutParams {
+            mode: self.mode,
+            pixel_ratio: 1.0,
+            show_collision_boxes: false,
+            subdivision_granularity: mln_util::subdivision_granularity::SubdivisionGranularitySetting::none(),
+            first_load: true,
+            capture_rendered_features: false,
         }
     }
 
-    /// A driver whose jobs run inside their submission.
-    pub(crate) fn inline(run_loop: &mln_actor::RunLoop) -> Self {
-        Self::new(run_loop, Box::new(crate::tile::tile_workers::InlineWorkers::default()))
-    }
-
-    /// A driver whose jobs run on `thread_pool`.
-    pub(crate) fn pool(run_loop: &mln_actor::RunLoop, thread_pool: &mln_actor::TaggedScheduler) -> Self {
-        let workers = crate::tile::tile_workers::PoolWorkers::new(thread_pool.clone(), 8, std::sync::Arc::new(|| {}));
-        Self::new(run_loop, Box::new(workers))
-    }
-
-    /// One update of `tiles`, as the renderer's: takes in the glyph
-    /// responses, gives the images asked for their update, applies the
-    /// replies that arrived, resolves what the jobs wait for and submits the
-    /// next jobs. Returns whether a tile shows a new layout.
-    pub(crate) fn update(&mut self, tiles: &[&dyn crate::tile::tile::Tile]) -> bool {
-        self.glyphs.update();
-        self.images.begin_update();
-        self.jobs.receive();
-        let mut laid_out = false;
-        for tile in tiles {
-            laid_out |= tile.take_reply(&mut self.jobs);
+    /// Tiles `ids` of a source of `kind` whose data comes from `origin`, in
+    /// `store`, laid out for `mode`; `single_layer` for a source whose data
+    /// has one layer. Their loads start as a cover starts them.
+    pub(crate) fn with_origin(
+        mut store: crate::tile::store::TileStore,
+        kind: crate::tile::tile::TileKind,
+        single_layer: bool,
+        origin: crate::tile::loading::DataOrigin,
+        ids: &[mln_tile_id::OverscaledTileID],
+        mode: mln_map_types::MapMode,
+    ) -> Self {
+        let key = store.add_source("source".to_owned(), kind, single_layer);
+        let mut tiles = OneTile { store, key, id: ids[0], mode };
+        let params = tiles.params();
+        let (source, ctx) = tiles.store.source_mut(key).expect("the source");
+        source.info.origin = Some(origin);
+        for id in ids {
+            let mut tile = source.info.new_tile(*id, params).expect("a tile");
+            source.info.start_load(&mut tile, ctx);
+            source.tiles.insert(*id, tile);
         }
-        drop(self.jobs.end_receive());
-        let mut stores = crate::tile::geometry_tile::DependencyStores {
-            glyphs: &mut self.glyphs,
-            images: &mut self.images,
-            atlas: &mut self.atlas,
-        };
-        for tile in tiles {
-            laid_out |= tile.drive(&mut self.jobs, &mut stores);
+        tiles
+    }
+
+    /// Sets how much tile `id` is needed.
+    pub(crate) fn set_necessity(
+        &mut self,
+        id: &mln_tile_id::OverscaledTileID,
+        necessity: crate::tile::tile::TileNecessity,
+    ) {
+        self.with_at(id, |info, tile, ctx| info.set_necessity(tile, ctx, necessity));
+    }
+
+    /// Moves tile `from` to id `to`, as a wrap jump does.
+    pub(crate) fn rekey(&mut self, from: &mln_tile_id::OverscaledTileID, to: mln_tile_id::OverscaledTileID) {
+        let (source, _) = self.store.source_mut(self.key).expect("the source");
+        let mut tile = source.tiles.remove(from).expect("the tile");
+        tile.id = to;
+        source.tiles.insert(to, tile);
+        if self.id == *from {
+            self.id = to;
         }
-        laid_out
     }
 
-    /// One update of `tile`.
-    pub(crate) fn update_tile(&mut self, tile: &dyn crate::tile::tile::Tile) -> bool {
-        self.update(&[tile])
+    /// How many changes the store reported since the last call, after it
+    /// took in what arrived.
+    pub(crate) fn changes(&mut self) -> usize {
+        self.store.receive();
+        self.store
+            .take_events()
+            .into_iter()
+            .filter(|event| matches!(event, crate::tile::store::StoreEvent::Changed))
+            .count()
     }
 
-    /// One update of `source`'s tiles.
-    pub(crate) fn update_source(&mut self, source: &dyn crate::render_source::RenderSource) -> bool {
-        let mut tiles = Vec::new();
-        source.for_each_tile(&mut |tile| tiles.push(tile));
-        self.update(&tiles)
+    /// Adds another tile, `id`, to the source, which loads nothing itself.
+    pub(crate) fn add(&mut self, id: mln_tile_id::OverscaledTileID) {
+        let params = self.params();
+        let (source, _) = self.store.source_mut(self.key).expect("the source");
+        let generation = source.info.next();
+        let tile = crate::tile::tile::Tile::new(
+            id,
+            source.info.kind,
+            generation,
+            crate::tile::loading::TileLoad::GeoJson,
+            params,
+        );
+        source.tiles.insert(id, tile);
+    }
+
+    pub(crate) fn tile(&self) -> &crate::tile::tile::Tile {
+        self.tile_at(&self.id)
+    }
+
+    /// The layout parameters of the tile.
+    pub(crate) fn tile_params(&self) -> crate::layout::tile_layout::LayoutParams {
+        self.tile().params
+    }
+
+    pub(crate) fn tile_at(&self, id: &mln_tile_id::OverscaledTileID) -> &crate::tile::tile::Tile {
+        self.store.source(self.key).and_then(|source| source.tiles.get(id)).expect("the tile")
+    }
+
+    /// Calls `f` with the tile, its source and the store.
+    pub(crate) fn with<R>(
+        &mut self,
+        f: impl FnOnce(
+            &mut crate::tile::store::SourceInfo,
+            &mut crate::tile::tile::Tile,
+            &mut crate::tile::store::StoreContext,
+        ) -> R,
+    ) -> R {
+        let id = self.id;
+        self.with_at(&id, f)
+    }
+
+    /// Calls `f` with tile `id`, its source and the store.
+    pub(crate) fn with_at<R>(
+        &mut self,
+        id: &mln_tile_id::OverscaledTileID,
+        f: impl FnOnce(
+            &mut crate::tile::store::SourceInfo,
+            &mut crate::tile::tile::Tile,
+            &mut crate::tile::store::StoreContext,
+        ) -> R,
+    ) -> R {
+        let (source, ctx) = self.store.source_mut(self.key).expect("the source");
+        let tile = source.tiles.get_mut(id).expect("the tile");
+        f(&mut source.info, tile, ctx)
+    }
+
+    pub(crate) fn set_style(&mut self, style: &std::sync::Arc<crate::tile::job::SourceStyle>) {
+        self.with(|info, tile, ctx| info.set_style(tile, ctx, style));
+    }
+
+    /// Gives a geometry tile `data`, as a load of its own.
+    pub(crate) fn set_data(&mut self, data: Option<mln_tile::TileData>) {
+        self.with(|info, tile, ctx| {
+            let load = info.next();
+            info.set_data(tile, ctx, load, crate::tile::tile::TileInput::Geometry { data, missing: false }, false);
+        });
+    }
+
+    /// Gives raster tile `id` the image `data`, as a load of its own.
+    pub(crate) fn set_image(&mut self, id: &mln_tile_id::OverscaledTileID, data: Option<mln_storage::Data>) {
+        self.with_at(id, |info, tile, ctx| {
+            let load = info.next();
+            info.set_data(tile, ctx, load, crate::tile::tile::TileInput::Image(data), false);
+        });
+    }
+
+    /// Gives tile `id` no data, as a load that finds the tileset has no
+    /// tile there.
+    pub(crate) fn set_missing(&mut self, id: &mln_tile_id::OverscaledTileID) {
+        self.with_at(id, |info, tile, ctx| {
+            let load = info.next();
+            let input = match tile.kind {
+                crate::tile::tile::TileKind::Geometry => {
+                    crate::tile::tile::TileInput::Geometry { data: None, missing: true }
+                }
+                crate::tile::tile::TileKind::Raster | crate::tile::tile::TileKind::Dem(_) => {
+                    crate::tile::tile::TileInput::Image(None)
+                }
+            };
+            info.set_data(tile, ctx, load, input, true);
+        });
+    }
+
+    /// The errors the store reported since the last call.
+    pub(crate) fn errors(&mut self) -> Vec<String> {
+        self.store
+            .take_events()
+            .into_iter()
+            .filter_map(|event| match event {
+                crate::tile::store::StoreEvent::Error { error, .. } => Some(error.to_string()),
+                crate::tile::store::StoreEvent::Changed | crate::tile::store::StoreEvent::Action { .. } => None,
+            })
+            .collect()
+    }
+
+    /// One update of the store.
+    pub(crate) fn update(&mut self) -> bool {
+        update(&mut self.store)
+    }
+
+    /// Whether the tile shows a layout.
+    pub(crate) fn shows_layout(&self) -> bool {
+        self.tile().contents.as_deref().and_then(crate::tile::contents::Contents::geometry).is_some()
+    }
+
+    /// Lets go of the tile, as its source does when it leaves the cache.
+    pub(crate) fn drop_tile(&mut self) {
+        let id = self.id;
+        self.drop_tile_at(&id);
+    }
+
+    /// Lets go of tile `id`.
+    pub(crate) fn drop_tile_at(&mut self, id: &mln_tile_id::OverscaledTileID) {
+        let (source, ctx) = self.store.source_mut(self.key).expect("the source");
+        if let Some(tile) = source.tiles.remove(id) {
+            source.info.drop_tile(tile, ctx);
+        }
     }
 }
 
@@ -134,9 +322,4 @@ pub(crate) fn style(
         global_state: None,
         font_faces: None,
     })
-}
-
-/// Port-only: the counters of a source under test.
-pub(crate) fn test_source() -> std::rc::Rc<crate::tile::tile_workers::SourceCounters> {
-    std::rc::Rc::new(crate::tile::tile_workers::SourceCounters::new(crate::tile::job::SourceKey(1)))
 }

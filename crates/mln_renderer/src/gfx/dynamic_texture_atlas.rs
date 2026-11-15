@@ -11,7 +11,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use geometry::Point;
 use mln_gfx::types::TexturePixelType;
 use mln_style_types::image::{ImageMap, ImagePosition, ImagePositions, ImageType, Impl as ImageImpl, RectU16};
-use mln_text::glyph::{Glyph, GlyphMap, GlyphPosition, GlyphPositions};
+use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphPosition, GlyphPositions};
 use mln_util::hash::{HashMap, RandomState};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
@@ -64,12 +64,26 @@ type PageId = u64;
 /// Bins a lease gives back: the page's id and the handles.
 type Release = (PageId, Vec<TextureHandle>);
 
+/// What a lease's bin is for, so that a lease can be cut down to some of
+/// its bins.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum BinUse {
+    /// A glyph of a font stack.
+    Glyph(u64, GlyphID),
+    /// An image, as an icon or a pattern.
+    Image(String, ImageType),
+    /// The bin of a 1×1 page, for a layout with nothing on its page.
+    Dummy,
+}
+
 /// A hold on bins of one atlas page, for a layout that draws from them.
 /// Dropping it gives the bins back; the atlas frees them the next time it
 /// packs or uploads.
 pub(crate) struct AtlasLease {
     page: PageId,
     texture_handles: Vec<TextureHandle>,
+    /// What each of `texture_handles` is for.
+    uses: Vec<BinUse>,
     texture: PageTexture,
     releases: Sender<Release>,
 }
@@ -201,11 +215,41 @@ impl DynamicTextureAtlas {
         DynamicTextureAtlas::default()
     }
 
-    fn lease(&self, page: &Page, texture_handles: Vec<TextureHandle>) -> AtlasLease {
+    fn lease(&self, page: &Page, texture_handles: Vec<TextureHandle>, uses: Vec<BinUse>) -> AtlasLease {
+        debug_assert_eq!(texture_handles.len(), uses.len());
         AtlasLease {
             page: page.id,
             texture_handles,
+            uses,
             texture: Rc::clone(page.texture.texture()),
+            releases: self.releases.clone(),
+        }
+    }
+
+    /// A lease on the bins of `lease` that `keep` keeps, on the same page.
+    /// `lease` keeps its own.
+    pub(crate) fn retain(&mut self, lease: &AtlasLease, mut keep: impl FnMut(&BinUse) -> bool) -> AtlasLease {
+        let mut texture_handles = Vec::new();
+        let mut uses = Vec::new();
+        if let Some(page) = self.pages.iter_mut().chain(&mut self.dummies).find(|page| page.id == lease.page) {
+            for (handle, bin_use) in lease.texture_handles.iter().zip(&lease.uses) {
+                if !keep(bin_use) {
+                    continue;
+                }
+                // `lease` holds the bin, so its id still names it.
+                let rect = handle.get_rectangle();
+                let size = Size::new(u32::from(rect.w), u32::from(rect.h));
+                if let Some(handle) = page.texture.reserve_size(size, Some(handle.get_id())) {
+                    texture_handles.push(handle);
+                    uses.push(bin_use.clone());
+                }
+            }
+        }
+        AtlasLease {
+            page: lease.page,
+            texture_handles,
+            uses,
+            texture: Rc::clone(&lease.texture),
             releases: self.releases.clone(),
         }
     }
@@ -227,7 +271,9 @@ impl DynamicTextureAtlas {
         } else {
             texture.reserve_size(DUMMY_SIZE, Some(DUMMY_BIN))
         };
-        self.lease(&self.dummies[index], handle.into_iter().collect())
+        let texture_handles: Vec<TextureHandle> = handle.into_iter().collect();
+        let uses = vec![BinUse::Dummy; texture_handles.len()];
+        self.lease(&self.dummies[index], texture_handles, uses)
     }
 
     fn new_page_id(&mut self) -> PageId {
@@ -239,13 +285,22 @@ impl DynamicTextureAtlas {
     /// positions too, and one without a bitmap has an empty rectangle.
     pub(crate) fn pack_glyphs(&mut self, glyphs: &GlyphMap) -> GlyphPage {
         self.free_released();
-        let drawn: Vec<&Arc<Glyph>> =
-            glyphs.values().flat_map(|glyphs| glyphs.values().flatten()).filter(|glyph| glyph.bitmap.valid()).collect();
+        let drawn: Vec<(BinUse, &Arc<Glyph>)> = glyphs
+            .iter()
+            .flat_map(|(font_stack, glyphs)| {
+                glyphs.iter().filter_map(|(id, glyph)| {
+                    glyph
+                        .as_ref()
+                        .filter(|glyph| glyph.bitmap.valid())
+                        .map(|glyph| (BinUse::Glyph(*font_stack, *id), glyph))
+                })
+            })
+            .collect();
         let (lease, texture_handles) = if drawn.is_empty() {
             (self.dummy_lease(TexturePixelType::Alpha), Vec::new())
         } else {
             let (index, mut texture_handles) = self.place(TexturePixelType::Alpha, |atlas, page, handles| {
-                for glyph in &drawn {
+                for (_, glyph) in &drawn {
                     let Some(handle) = atlas.reserve_glyph(page, glyph) else {
                         return false;
                     };
@@ -254,7 +309,7 @@ impl DynamicTextureAtlas {
                 true
             });
             let texture = &mut self.pages[index].texture;
-            for (tex_handle, glyph) in texture_handles.iter_mut().zip(&drawn) {
+            for (tex_handle, (_, glyph)) in texture_handles.iter_mut().zip(&drawn) {
                 if tex_handle.is_upload_needed() {
                     let rect = *tex_handle.get_rectangle();
                     let mut padded_image = AlphaImage::new(Size::new(u32::from(rect.w), u32::from(rect.h)));
@@ -270,7 +325,8 @@ impl DynamicTextureAtlas {
                 }
             }
             let rects: Vec<RectU16> = texture_handles.iter().map(|handle| *handle.get_rectangle()).collect();
-            (self.lease(&self.pages[index], texture_handles), rects)
+            let uses = drawn.into_iter().map(|(bin_use, _)| bin_use).collect();
+            (self.lease(&self.pages[index], texture_handles, uses), rects)
         };
 
         let mut rects = texture_handles.into_iter();
@@ -332,7 +388,8 @@ impl DynamicTextureAtlas {
                 .entry(image.id.clone())
                 .or_insert_with(|| ImagePosition::new(rect_without_extra_padding(rect), image));
         }
-        let lease = self.lease(&self.pages[index], texture_handles);
+        let uses = images.iter().map(|(image, type_)| BinUse::Image(image.id.clone(), *type_)).collect();
+        let lease = self.lease(&self.pages[index], texture_handles, uses);
         ImagePage { icons: positions.0, patterns: positions.1, lease }
     }
 

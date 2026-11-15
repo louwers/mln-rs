@@ -18,8 +18,11 @@ use parking_lot::Mutex;
 
 use super::RasterTileTest;
 use crate::query::SourceQueryOptions;
-use crate::tile::custom_tile::CustomVectorTile;
-use crate::tile::tile::{Tile, TileNecessity};
+use crate::tests::OneTile;
+use crate::tile::contents::Contents;
+use crate::tile::loading::{CustomLoaderOf, DataOrigin};
+use crate::tile::tile::{TileKind, TileNecessity};
+use crate::tile::tile_workers::InlineWorkers;
 
 /// The loader actor, on the test's run loop.
 fn loader(
@@ -49,8 +52,19 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
     (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().push(*id)))
 }
 
-fn tile(test: &RasterTileTest, id: OverscaledTileID, loader: PoolActorRef<CustomVectorTileLoader>) -> CustomVectorTile {
-    CustomVectorTile::new(id, "source".to_owned(), &test.tile_parameters(), loader, None, false)
+/// Tiles `ids` of a custom vector source whose loader is `loader`.
+fn tiles(test: &RasterTileTest, ids: &[OverscaledTileID], loader: PoolActorRef<CustomVectorTileLoader>) -> OneTile {
+    let store = crate::tests::tile_store(&test.run_loop, &test.thread_pool, Box::new(InlineWorkers));
+    let origin = DataOrigin::Custom(Arc::new(CustomLoaderOf {
+        loader,
+        convert: Arc::new(|(data, format): CustomVectorTileData| {
+            data.map(|data| match format {
+                TileDataFormat::Mvt => mln_tile::TileData::Mvt(mln_tile::MvtTile::new(data)),
+                TileDataFormat::Mlt => mln_tile::TileData::Mlt(mln_tile::MltTile::new(data, false)),
+            })
+        }),
+    }));
+    OneTile::with_origin(store, TileKind::Geometry, false, origin, ids, mln_map_types::MapMode::Static)
 }
 
 /// A subscriber that ignores what the loader sends it.
@@ -69,20 +83,23 @@ fn invalidate_failed_tile() {
     let (fetches, fetch) = counter();
     let loader = loader(&test.run_loop, Some(fetch), None);
 
-    let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref());
-    tile.set_necessity(TileNecessity::Required);
+    let root = OverscaledTileID::from_zxy(0, 0, 0);
+    let mut tiles = tiles(&test, &[root], loader.self_ref());
+    tiles.set_necessity(&root, TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     let id = CanonicalTileID::new(0, 0, 0);
     loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, &Error::native("failed")));
     test.run_loop.wait_for_empty();
+    tiles.store.receive();
 
     loader.self_ref().invoke(move |loader| loader.invalidate_tile(&id));
     test.run_loop.wait_for_empty();
+    tiles.store.receive();
 
     // The render source updates the necessity of a changed tile.
-    tile.set_necessity(TileNecessity::Required);
+    tiles.set_necessity(&root, TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
@@ -116,18 +133,20 @@ fn cancel_one_copy() {
     let loader = loader(&test.run_loop, Some(fetch), Some(cancel));
 
     // Two copies of one tile in neighboring worlds share its data.
-    let first = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref());
-    let second = tile(&test, OverscaledTileID::new(0, 1, CanonicalTileID::new(0, 0, 0)), loader.self_ref());
-    first.set_necessity(TileNecessity::Required);
-    second.set_necessity(TileNecessity::Required);
+    let root = OverscaledTileID::from_zxy(0, 0, 0);
+    let second = OverscaledTileID::new(0, 1, CanonicalTileID::new(0, 0, 0));
+    let mut tiles = tiles(&test, &[root, second], loader.self_ref());
+    tiles.set_necessity(&root, TileNecessity::Required);
+    tiles.set_necessity(&second, TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
-    // The map moves by a world, and TilePyramid changes both copies' wraps.
-    first.base().set_id(first.id().unwrap_to(-1));
-    second.base().set_id(second.id().unwrap_to(0));
+    // The map moves by a world, and the source changes both copies' wraps.
+    let first = root.unwrap_to(-1);
+    tiles.rekey(&root, first);
+    tiles.rekey(&second, root);
 
-    second.set_necessity(TileNecessity::Optional);
+    tiles.set_necessity(&root, TileNecessity::Optional);
     test.run_loop.wait_for_empty();
     assert_eq!(cancels.load(Ordering::SeqCst), 0);
 
@@ -135,7 +154,8 @@ fn cancel_one_copy() {
     let id = CanonicalTileID::new(0, 0, 0);
     loader.self_ref().invoke(move |loader| loader.invalidate_tile(&id));
     test.run_loop.wait_for_empty();
-    first.set_necessity(TileNecessity::Required);
+    tiles.store.receive();
+    tiles.set_necessity(&first, TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
@@ -159,33 +179,31 @@ fn invalidate_region() {
             tile_ids.push(OverscaledTileID::from_zxy(1, x, y));
         }
     }
-    let tiles: Vec<CustomVectorTile> = tile_ids
-        .iter()
-        .map(|tile_id| {
-            let tile = tile(&test, *tile_id, loader.self_ref());
-            tile.set_necessity(TileNecessity::Required);
-            tile
-        })
-        .collect();
+    let mut tiles = tiles(&test, &tile_ids, loader.self_ref());
+    for tile_id in &tile_ids {
+        tiles.set_necessity(tile_id, TileNecessity::Required);
+    }
     test.run_loop.wait_for_empty();
     assert_eq!(fetched.lock().len(), tile_ids.len());
 
     // Cached data would otherwise answer the refetch.
-    for tile in &tiles {
-        let id = tile.id().canonical;
+    for tile_id in &tile_ids {
+        let id = tile_id.canonical;
         loader.self_ref().invoke(move |loader| loader.set_tile_data(&id, (None, TileDataFormat::Mvt)));
     }
     test.run_loop.wait_for_empty();
+    tiles.store.receive();
     fetched.lock().clear();
 
     // Northeast of the origin, so it intersects the root tile, 1/1/0, and 2/2/1.
     let bounds = LatLngBounds::hull(LatLng::new(10.0, 10.0).unwrap(), LatLng::new(20.0, 20.0).unwrap());
     loader.self_ref().invoke(move |loader| loader.invalidate_region(&bounds));
     test.run_loop.wait_for_empty();
+    tiles.store.receive();
 
     // The render source updates the necessity of a changed tile.
-    for tile in &tiles {
-        tile.set_necessity(TileNecessity::Required);
+    for tile_id in &tile_ids {
+        tiles.set_necessity(tile_id, TileNecessity::Required);
     }
     test.run_loop.wait_for_empty();
     let intersecting =
@@ -203,25 +221,30 @@ fn invalidate_region() {
 fn set_mlt_tile_data() {
     let test = RasterTileTest::new();
     let loader = loader(&test.run_loop, None, None);
-    let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref());
+    let root = OverscaledTileID::from_zxy(0, 0, 0);
+    let mut tiles = tiles(&test, &[root], loader.self_ref());
 
     let mut layer = FillLayer::new("water", "source");
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn LayerProperties> =
         Arc::new(FillLayerProperties::new(downcast_arc::<FillLayerImpl>(&layer.base_impl())));
-    tile.set_style(&crate::tests::style(&[layer_properties]));
+    tiles.set_style(&crate::tests::style(&[layer_properties]));
+    tiles.set_necessity(&root, TileNecessity::Required);
+    test.run_loop.wait_for_empty();
 
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test/fixtures/map/issue12432/0-0-0.mlt");
     let data = Arc::new(std::fs::read(path).unwrap());
-    tile.set_tile_data((Some(data), TileDataFormat::Mlt));
-    let mut driver = crate::tests::TileDriver::inline(&test.run_loop);
-    while !tile.is_complete() {
+    loader.self_ref().invoke(move |loader| loader.set_tile_data(&root.canonical, (Some(data), TileDataFormat::Mlt)));
+    while !tiles.tile().is_complete() {
         test.run_loop.run_once();
-        driver.update_tile(&tile);
+        tiles.update();
     }
 
     let options = SourceQueryOptions { source_layers: Some(vec!["water".to_owned()]), filter: None };
+    let Some(Contents::Geometry(contents)) = tiles.tile().contents.as_deref() else {
+        panic!("a layout");
+    };
     let mut result = Vec::new();
-    tile.query_source_features(&mut result, &options, None).unwrap();
+    contents.query_source_features(&root, false, &mut result, &options, None).unwrap();
     assert_ne!(result, Vec::<mln_util::feature::Feature>::new());
 }

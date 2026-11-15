@@ -26,7 +26,7 @@ use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layermanager;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::text::glyph_store::HBShapeResults;
-use crate::tile::geometry_tile::LayoutResult;
+use crate::tile::contents::LayoutResult;
 use crate::tile::job::{
     DataCache, DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceKey, SourceStyle,
     TileKey, run_job,

@@ -120,6 +120,23 @@ impl Request {
         let deliver = Deliver::Direct(Arc::new(Mutex::new(Box::new(callback))));
         (Request { shared: Arc::clone(&shared), slot: None }, Responder { shared, deliver })
     }
+
+    /// A request for one response, which `callback` receives on the thread
+    /// that sends it. The request ends with it: the file source sees it
+    /// cancelled and sends nothing more, though its cancel hook runs only
+    /// when the request drops.
+    pub fn direct_once(callback: impl FnOnce(Response) + Send + 'static) -> (Request, Responder) {
+        let shared = Arc::new(Shared::default());
+        let answered = Arc::clone(&shared);
+        let mut callback = Some(callback);
+        let deliver = Deliver::Direct(Arc::new(Mutex::new(Box::new(move |response| {
+            if let Some(callback) = callback.take() {
+                answered.cancelled.store(true, Ordering::SeqCst);
+                callback(response);
+            }
+        }))));
+        (Request { shared: Arc::clone(&shared), slot: None }, Responder { shared, deliver })
+    }
 }
 
 impl Drop for Request {
@@ -203,5 +220,22 @@ mod tests {
         std::thread::spawn(move || drop(request)).join().unwrap();
         while run_loop.run_once() {}
         assert!(!ran.get());
+    }
+
+    /// A request for one response ends at it: the responder sees it
+    /// cancelled, and a second response goes nowhere.
+    #[test]
+    fn a_direct_once_request_ends_at_its_response() {
+        let responses = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&responses);
+        let (request, responder) = Request::direct_once(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        });
+        assert!(!responder.is_cancelled());
+        responder.send(Response::new());
+        assert!(responder.is_cancelled());
+        responder.send(Response::new());
+        assert_eq!(responses.load(Ordering::SeqCst), 1);
+        drop(request);
     }
 }

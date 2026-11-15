@@ -31,7 +31,7 @@ use parking_lot::Mutex;
 
 use crate::geometry::dem_data::DEMData;
 use crate::layout::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
-use crate::tile::geometry_tile::LayoutResult;
+use crate::tile::contents::LayoutResult;
 use crate::tile::worker_codec::fields;
 
 /// A source, as the renderer numbers it. Never reused within a renderer, so

@@ -48,7 +48,6 @@ pub mod text;
 pub mod tile;
 mod tile_mask;
 mod tile_parameters;
-mod tile_pyramid;
 mod tile_render_data;
 mod update_parameters;
 pub mod update_slot;

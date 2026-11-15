@@ -724,8 +724,13 @@ impl Worker {
         self.reader.as_ref().map_or(0, UpdateReader::generation)
     }
 
-    /// Passes the renderer's events on to the map.
+    /// Passes the renderer's events on to the map. The renderer asks for an
+    /// update when something arrives for its tiles: it takes it in now, so
+    /// that the work it starts runs before the next frame.
     fn forward_events(&mut self) {
+        if let Some(gfx) = self.gfx.as_mut() {
+            gfx.renderer.receive_tiles();
+        }
         let events = self.renderer_events.take();
         self.forward(events);
     }

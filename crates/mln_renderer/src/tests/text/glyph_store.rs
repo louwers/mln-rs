@@ -1,7 +1,8 @@
 // The C++ GlyphManager notifies requestors; the port's GlyphStore answers
 // waits that ask it again (`resolve`). The fixture here keeps the waits of
-// its requestors and asks the store again whenever it wakes the renderer,
-// as the renderer's update does for waiting tiles.
+// its requestors, takes the responses from its inbox and asks the store
+// again whenever it wakes, as the tile store's update does for waiting
+// tiles.
 
 use std::cell::{Cell, RefCell};
 use std::num::NonZeroU16;
@@ -35,6 +36,7 @@ use super::glyph_store_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::{SquelchLog, read_file};
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver, GlyphWait, HBShapeResults};
+use crate::tile::inbox::{Inbox, TileEvent};
 
 fn stub_glyph(glyph_id: GlyphID) -> Glyph {
     Glyph {
@@ -135,6 +137,8 @@ struct Wait {
 /// A store and the waits of its requestors, which it answers when it wakes.
 struct Store {
     store: RefCell<GlyphStore>,
+    /// Where the responses arrive.
+    inbox: Inbox,
     file_source: Arc<dyn FileSource>,
     waits: RefCell<Vec<Wait>>,
     _wake: AsyncTask,
@@ -152,6 +156,7 @@ impl Store {
             let this = Weak::clone(this);
             let wake = AsyncTask::new(run_loop, move || {
                 if let Some(this) = this.upgrade() {
+                    this.take_responses();
                     this.store.borrow_mut().update();
                     this.answer();
                 }
@@ -164,7 +169,9 @@ impl Store {
                 run_loop.clone(),
                 Rc::new(move || sender.send()),
             );
-            Store { store: RefCell::new(store), file_source, waits: RefCell::default(), _wake: wake }
+            let sender = wake.sender();
+            let inbox = Inbox::new(Arc::new(move || sender.send()));
+            Store { store: RefCell::new(store), inbox, file_source, waits: RefCell::default(), _wake: wake }
         })
     }
 
@@ -179,12 +186,26 @@ impl Store {
         self.answer();
     }
 
+    /// Gives the store the responses that arrived.
+    fn take_responses(&self) {
+        while let Some(event) = self.inbox.next() {
+            if let TileEvent::Glyphs { font_stack, range, response } = event {
+                self.store.borrow_mut().take_response(&font_stack, range, &response);
+            }
+        }
+    }
+
     /// Answers the waits the store can answer now.
     fn answer(&self) {
         let waits = std::mem::take(&mut *self.waits.borrow_mut());
         let mut answered = Vec::new();
         for mut wait in waits {
-            let resolved = self.store.borrow_mut().resolve(&wait.dependencies, &mut wait.wait, Some(&self.file_source));
+            let resolved = self.store.borrow_mut().resolve(
+                &wait.dependencies,
+                &mut wait.wait,
+                Some(&self.file_source),
+                self.inbox.sender(),
+            );
             match resolved {
                 Some(resolved) => answered.push((wait.requestor, resolved)),
                 None => self.waits.borrow_mut().push(wait),
@@ -492,12 +513,14 @@ fn a_wait_resolves_a_range_that_failed_during_it_as_missing() {
 
     let file_source = Arc::clone(&test.store.file_source);
     let mut wait = GlyphWait::default();
-    assert!(test.glyph_store().resolve(&dependencies(&['a']), &mut wait, Some(&file_source)).is_none());
+    let inbox = test.store.inbox.sender().clone();
+    assert!(test.glyph_store().resolve(&dependencies(&['a']), &mut wait, Some(&file_source), &inbox).is_none());
     test.run_loop.run_once();
+    test.store.take_responses();
     test.glyph_store().update();
     for _ in 0..2 {
         let resolved =
-            test.glyph_store().resolve(&dependencies(&['a']), &mut wait, Some(&file_source)).expect("answered");
+            test.glyph_store().resolve(&dependencies(&['a']), &mut wait, Some(&file_source), &inbox).expect("answered");
         assert!(resolved.failed);
         assert!(resolved.glyphs[&font_stack_hash(&test_stack())][&gid('a')].is_none());
     }

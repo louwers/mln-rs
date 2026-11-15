@@ -30,8 +30,9 @@ use mln_util::time::Instant;
 use super::TileWorkerHost;
 use super::envelope::{self, Encoded};
 use super::map_side::MapCodec;
+use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::{JobId, JobResult, JobTimes, Run};
-use crate::tile::tile_workers::{Lane, ReplyBody, TileWorkers, Waker, WorkerEvent};
+use crate::tile::tile_workers::{Lane, ReplyBody, TileWorkers};
 
 /// The jobs a lane takes at once.
 const JOBS_PER_LANE: usize = 2;
@@ -88,8 +89,8 @@ pub struct RemoteWorkers {
     /// Whether each lane's instance takes jobs: not once lost without a
     /// replacement.
     live: Vec<Cell<bool>>,
-    /// What asks the renderer for an update when a reply arrives.
-    wake: OnceCell<Waker>,
+    /// Where the replies go: the inbox of the first renderer that submits.
+    inbox: OnceCell<InboxSender>,
     /// The bytes sent and received for jobs.
     bytes: Cell<(u64, u64)>,
     /// The time this thread spent on replies since `take_receive_time`.
@@ -99,8 +100,6 @@ pub struct RemoteWorkers {
 struct State {
     instances: Box<dyn WorkerInstances>,
     lanes: Vec<RemoteLane>,
-    /// The replies and lost lanes `TileWorkers::receive` hasn't taken.
-    events: Vec<WorkerEvent>,
 }
 
 /// One instance's jobs.
@@ -108,6 +107,9 @@ struct State {
 struct RemoteLane {
     codec: MapCodec,
     in_flight: HashSet<JobId>,
+    /// Counts the instances the lane had: a reply of an earlier one can't be
+    /// read with this one's tables.
+    instance: u64,
 }
 
 impl RemoteWorkers {
@@ -122,13 +124,9 @@ impl RemoteWorkers {
             let count = instances.count();
             assert!(count > 0, "RemoteWorkers need a worker instance");
             RemoteWorkers {
-                state: RefCell::new(State {
-                    instances,
-                    lanes: (0..count).map(|_| RemoteLane::default()).collect(),
-                    events: Vec::new(),
-                }),
+                state: RefCell::new(State { instances, lanes: (0..count).map(|_| RemoteLane::default()).collect() }),
                 live: (0..count).map(|_| Cell::new(true)).collect(),
-                wake: OnceCell::new(),
+                inbox: OnceCell::new(),
                 bytes: Cell::new((0, 0)),
                 receive_time: Cell::new(Duration::ZERO),
             }
@@ -141,15 +139,9 @@ impl RemoteWorkers {
         self.receive_time.take()
     }
 
-    /// Sets what asks the renderer for an update when a reply arrives: the
-    /// first renderer's.
-    pub(crate) fn set_waker(&self, wake: Waker) {
-        let _ = self.wake.set(wake);
-    }
-
-    fn wake(&self) {
-        if let Some(wake) = self.wake.get() {
-            wake();
+    fn send(&self, event: TileEvent) {
+        if let Some(inbox) = self.inbox.get() {
+            inbox.send(event);
         }
     }
 
@@ -170,24 +162,25 @@ impl RemoteWorkers {
         body: &[u8],
         payloads: Vec<mln_util::serialization::payload::Payload>,
     ) {
-        {
+        let body = {
             let mut state = self.state.borrow_mut();
-            let state = &mut *state;
             // A reply of an instance lost since isn't in flight any more.
-            if !state.lanes.get_mut(lane.0).is_some_and(|remote| remote.in_flight.remove(&id)) {
+            let Some(remote) = state.lanes.get_mut(lane.0) else {
+                return;
+            };
+            if !remote.in_flight.remove(&id) {
                 return;
             }
             let size = body.len() + payloads.iter().map(mln_util::serialization::payload::Payload::len).sum::<usize>();
             let (sent, received) = self.bytes.get();
             self.bytes.set((sent, received + size as u64));
-            let body = ReplyBody::Encoded(Encoded { bytes: body.to_vec(), payloads });
-            state.events.push(WorkerEvent::Reply { lane, id, body, times });
-        }
-        self.wake();
+            ReplyBody::Encoded { body: Encoded { bytes: body.to_vec(), payloads }, instance: remote.instance }
+        };
+        self.send(TileEvent::Reply { lane, id, body, times });
     }
 
-    /// Gives up on the instance of `lane`: its jobs and the replies not yet
-    /// taken, and its shared tables, on both sides.
+    /// Gives up on the instance of `lane`: its jobs, the replies not yet
+    /// read, and its shared tables, on both sides.
     fn lose(&self, lane: Lane) {
         {
             let mut state = self.state.borrow_mut();
@@ -197,11 +190,9 @@ impl RemoteWorkers {
             };
             Log::error(Event::General, format!("Tile worker {} was lost", lane.0));
             live.set(state.instances.replace(lane.0));
-            *remote = RemoteLane::default();
-            state.events.retain(|event| !matches!(event, WorkerEvent::Reply { lane: other, .. } if *other == lane));
-            state.events.push(WorkerEvent::LaneLost(lane));
+            *remote = RemoteLane { instance: remote.instance + 1, ..RemoteLane::default() };
         }
-        self.wake();
+        self.send(TileEvent::LaneLost(lane));
     }
 }
 
@@ -213,10 +204,6 @@ impl TileWorkers for RemoteJobs {
         self.0.live.len()
     }
 
-    fn in_flight(&self, lane: Lane) -> usize {
-        self.0.state.borrow().lanes.get(lane.0).map_or(0, |remote| remote.in_flight.len())
-    }
-
     fn capacity(&self, lane: Lane) -> usize {
         if self.0.live.get(lane.0).is_some_and(Cell::get) { JOBS_PER_LANE } else { 0 }
     }
@@ -225,44 +212,42 @@ impl TileWorkers for RemoteJobs {
         true
     }
 
-    fn submit(&mut self, lane: Lane, run: Run) {
-        let mut state = self.0.state.borrow_mut();
-        let state = &mut *state;
-        let Some(remote) = state.lanes.get_mut(lane.0) else {
-            return;
+    fn submit(&mut self, lane: Lane, run: Run, inbox: &InboxSender) {
+        let _ = self.0.inbox.set(inbox.clone());
+        let failed = {
+            let mut state = self.0.state.borrow_mut();
+            let state = &mut *state;
+            let Some(remote) = state.lanes.get_mut(lane.0) else {
+                return;
+            };
+            match remote.codec.encode_run(&run) {
+                Ok(request) => {
+                    remote.in_flight.insert(run.id);
+                    let (sent, received) = self.0.bytes.get();
+                    self.0.bytes.set((sent + request.len() as u64, received));
+                    state.instances.post(lane.0, request);
+                    None
+                }
+                Err(error) => Some(error),
+            }
         };
-        match remote.codec.encode_run(&run) {
-            Ok(request) => {
-                remote.in_flight.insert(run.id);
-                let (sent, received) = self.0.bytes.get();
-                self.0.bytes.set((sent + request.len() as u64, received));
-                state.instances.post(lane.0, request);
-            }
-            // As a worker reports a job it can't decode.
-            Err(error) => {
-                let result = JobResult::Failed(mln_util::error::Error::native(error));
-                let body = ReplyBody::Result(result);
-                state.events.push(WorkerEvent::Reply { lane, id: run.id, body, times: JobTimes::default() });
-            }
+        // As a worker reports a job it can't decode.
+        if let Some(error) = failed {
+            let body = ReplyBody::Result(JobResult::Failed(mln_util::error::Error::native(error)));
+            self.0.send(TileEvent::Reply { lane, id: run.id, body, times: JobTimes::default() });
         }
     }
 
-    fn receive(&mut self, events: &mut Vec<WorkerEvent>) {
-        events.append(&mut self.0.state.borrow_mut().events);
-    }
-
-    fn decode(&mut self, lane: Lane, body: ReplyBody) -> JobResult {
+    fn decode(&mut self, lane: Lane, body: ReplyBody) -> Option<JobResult> {
         match body {
-            ReplyBody::Result(result) => result,
-            ReplyBody::Encoded(body) => {
+            ReplyBody::Result(result) => Some(result),
+            ReplyBody::Encoded { body, instance } => {
                 let start = Instant::now();
                 let mut state = self.0.state.borrow_mut();
-                let result = match state.lanes.get_mut(lane.0) {
-                    Some(remote) => remote.codec.decode_result(body),
-                    None => JobResult::Failed(mln_util::error::Error::native("a reply of no tile worker")),
-                };
+                let remote = state.lanes.get_mut(lane.0).filter(|remote| remote.instance == instance)?;
+                let result = remote.codec.decode_result(body);
                 self.0.receive_time.set(self.0.receive_time.get() + start.elapsed());
-                result
+                Some(result)
             }
         }
     }

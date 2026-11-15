@@ -1,9 +1,8 @@
 // C++ calls a CustomTileLoader directly and reaches it from the tiles
 // through a mailbox on the test's run loop. Here the loader is an actor on
-// the run loop, so the test reaches it through messages too.
+// the run loop, so the test reaches it through messages too, and what the
+// loader sends the tiles waits in their store's inbox.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -17,15 +16,18 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
 use mln_style::layers::{CircleLayer, CircleLayerProperties};
 use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
+use mln_style::sources::geojson_source::TileFeatures;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use parking_lot::Mutex;
 
 use super::RasterTileTest;
 use crate::query::SourceQueryOptions;
-use crate::tile::custom_tile::CustomGeometryTile;
-use crate::tile::tile::{Tile, TileBase, TileNecessity};
-use crate::tile::tile_observer::TileObserver;
+use crate::tests::OneTile;
+use crate::tile::contents::Contents;
+use crate::tile::loading::{CustomLoaderOf, DataOrigin};
+use crate::tile::tile::{TileKind, TileNecessity};
+use crate::tile::tile_workers::InlineWorkers;
 
 /// The loader actor, on the test's run loop.
 fn loader(
@@ -55,45 +57,19 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
     (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().push(*id)))
 }
 
-fn tile(
-    test: &RasterTileTest,
-    id: OverscaledTileID,
-    loader: PoolActorRef<CustomGeometryTileLoader>,
-    observer: Option<Rc<dyn TileObserver>>,
-) -> CustomGeometryTile {
-    CustomGeometryTile::new(id, "source".to_owned(), &test.tile_parameters(), loader, observer)
+/// Tiles `ids` of a custom geometry source whose loader is `loader`.
+fn tiles(test: &RasterTileTest, ids: &[OverscaledTileID], loader: PoolActorRef<CustomGeometryTileLoader>) -> OneTile {
+    let store = crate::tests::tile_store(&test.run_loop, &test.thread_pool, Box::new(InlineWorkers));
+    let origin = DataOrigin::Custom(Arc::new(CustomLoaderOf {
+        loader,
+        convert: Arc::new(|features: Arc<TileFeatures>| Some(mln_tile::TileData::Features(features))),
+    }));
+    OneTile::with_origin(store, TileKind::Geometry, true, origin, ids, mln_map_types::MapMode::Static)
 }
 
-type OnTileChanged = Box<dyn Fn(&TileBase)>;
-type OnTileError = Box<dyn Fn(&TileBase, Error)>;
-
-#[derive(Default)]
-struct StubTileObserver {
-    tile_changed: RefCell<Option<OnTileChanged>>,
-    tile_error: RefCell<Option<OnTileError>>,
-}
-
-impl TileObserver for StubTileObserver {
-    fn on_tile_changed(&self, tile: &TileBase) {
-        if let Some(f) = &*self.tile_changed.borrow() {
-            f(tile);
-        }
-    }
-
-    fn on_tile_error(&self, tile: &TileBase, error: Error) {
-        if let Some(f) = &*self.tile_error.borrow() {
-            f(tile, error);
-        }
-    }
-}
-
-/// An observer that counts the tile's changes.
-fn change_counter() -> (Rc<Cell<u32>>, Rc<StubTileObserver>) {
-    let changes = Rc::new(Cell::new(0));
-    let observer = Rc::new(StubTileObserver::default());
-    let counted = Rc::clone(&changes);
-    *observer.tile_changed.borrow_mut() = Some(Box::new(move |_| counted.set(counted.get() + 1)));
-    (changes, observer)
+/// The root tile's id.
+fn root() -> OverscaledTileID {
+    OverscaledTileID::from_zxy(0, 0, 0)
 }
 
 // gtest: CustomGeometryTile.InvokeFetchTile
@@ -103,8 +79,8 @@ fn invoke_fetch_tile() {
     let (fetched, fetch) = recorder();
     let loader = loader(&test.run_loop, Some(fetch), Some(Arc::new(|_: &CanonicalTileID| {})));
 
-    let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None);
-    tile.set_necessity(TileNecessity::Required);
+    let mut tiles = tiles(&test, &[root()], loader.self_ref());
+    tiles.set_necessity(&root(), TileNecessity::Required);
     test.run_loop.wait_for_empty();
 
     assert_eq!(*fetched.lock(), vec![CanonicalTileID::new(0, 0, 0)]);
@@ -117,9 +93,9 @@ fn invoke_cancel_tile() {
     let (cancelled, cancel) = recorder();
     let loader = loader(&test.run_loop, Some(Arc::new(|_: &CanonicalTileID| {})), Some(cancel));
 
-    let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None);
-    tile.set_necessity(TileNecessity::Required);
-    tile.set_necessity(TileNecessity::Optional);
+    let mut tiles = tiles(&test, &[root()], loader.self_ref());
+    tiles.set_necessity(&root(), TileNecessity::Required);
+    tiles.set_necessity(&root(), TileNecessity::Optional);
     test.run_loop.wait_for_empty();
 
     assert_eq!(*cancelled.lock(), vec![CanonicalTileID::new(0, 0, 0)]);
@@ -132,13 +108,13 @@ fn fetch_cancelled_tile_again() {
     let (fetches, fetch) = counter();
     let loader = loader(&test.run_loop, Some(fetch), None);
 
-    let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None);
-    tile.set_necessity(TileNecessity::Required);
-    tile.set_necessity(TileNecessity::Optional);
+    let mut tiles = tiles(&test, &[root()], loader.self_ref());
+    tiles.set_necessity(&root(), TileNecessity::Required);
+    tiles.set_necessity(&root(), TileNecessity::Optional);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
-    tile.set_necessity(TileNecessity::Required);
+    tiles.set_necessity(&root(), TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
@@ -150,26 +126,23 @@ fn invalidate_failed_tile() {
     let (fetches, fetch) = counter();
     let loader = loader(&test.run_loop, Some(fetch), None);
 
-    let observer = Rc::new(StubTileObserver::default());
-    let failed = Rc::new(Cell::new(false));
-    let failed_set = Rc::clone(&failed);
-    *observer.tile_error.borrow_mut() = Some(Box::new(move |_, _| failed_set.set(true)));
-
-    let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), Some(observer));
-    tile.set_necessity(TileNecessity::Required);
+    let mut tiles = tiles(&test, &[root()], loader.self_ref());
+    tiles.set_necessity(&root(), TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     let id = CanonicalTileID::new(0, 0, 0);
     loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, &Error::native("failed")));
     test.run_loop.wait_for_empty();
-    assert!(failed.get());
+    tiles.store.receive();
+    assert_eq!(tiles.errors(), ["failed"]);
 
     loader.self_ref().invoke(move |loader| loader.invalidate_tile(&id));
     test.run_loop.wait_for_empty();
+    tiles.store.receive();
 
     // The render source updates the necessity of a changed tile.
-    tile.set_necessity(TileNecessity::Required);
+    tiles.set_necessity(&root(), TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
@@ -179,37 +152,32 @@ fn invalidate_failed_tile() {
 fn invoke_tile_changed() {
     let test = RasterTileTest::new();
     let loader = loader(&test.run_loop, None, None);
-    let tile = Rc::new(tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None));
+    let mut tiles = tiles(&test, &[root()], loader.self_ref());
 
     let layer = CircleLayer::new("circle", "source");
     let layer_properties: Arc<dyn LayerProperties> =
         Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())));
 
-    let observer = Rc::new(StubTileObserver::default());
-    let weak_tile = Rc::downgrade(&tile);
-    let properties = Arc::clone(&layer_properties);
-    *observer.tile_changed.borrow_mut() = Some(Box::new(move |_| {
-        // Once present, the bucket should never "disappear", which would
-        // cause flickering.
-        let tile = weak_tile.upgrade().unwrap();
-        assert!(tile.layer_properties_updated(&properties));
-    }));
+    tiles.set_style(&crate::tests::style(std::slice::from_ref(&layer_properties)));
+    assert!(tiles.tile().contents.is_none());
 
-    tile.set_style(&crate::tests::style(&[layer_properties]));
-    tile.set_observer(observer);
-    let mut result = Vec::new();
-    tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();
-    assert_eq!(result, Vec::<mln_util::feature::Feature>::new());
-
-    tile.set_tile_data(Arc::new(vec![Feature { geometry: Some(Point::new(0i16, 0).into()), ..Feature::default() }]));
-
-    let mut driver = crate::tests::TileDriver::inline(&test.run_loop);
-    while !tile.is_complete() {
+    tiles.set_data(Some(mln_tile::TileData::Features(Arc::new(vec![Feature {
+        geometry: Some(Point::new(0i16, 0).into()),
+        ..Feature::default()
+    }]))));
+    while !tiles.tile().is_complete() {
         test.run_loop.run_once();
-        driver.update_tile(&*tile);
+        tiles.update();
     }
+    // Once present, the bucket should never "disappear", which would cause
+    // flickering.
+    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
 
-    tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();
+    let Some(Contents::Geometry(contents)) = tiles.tile().contents.as_deref() else {
+        panic!("a layout");
+    };
+    let mut result = Vec::new();
+    contents.query_source_features(&root(), true, &mut result, &SourceQueryOptions::default(), None).unwrap();
     assert_eq!(result.len(), 1);
 }
 
@@ -217,43 +185,39 @@ fn invoke_tile_changed() {
 #[test]
 fn cancellation_discards_queued_invalidation() {
     let test = RasterTileTest::new();
-    let (changes, observer) = change_counter();
     let (fetches, fetch) = counter();
     // On the background scheduler, so the loader's message to the tile waits
-    // in the run loop until the test runs it.
+    // in the store's inbox until the test takes it in.
     let loader: Actor<CustomGeometryTileLoader> =
         Actor::new(scheduler::get_background(), |_| CustomTileLoader::new(Some(fetch), None));
-    let id = OverscaledTileID::from_zxy(0, 0, 0);
-    let tile = tile(&test, id, loader.self_ref(), Some(observer));
-    tile.set_necessity(TileNecessity::Required);
+    let mut tiles = tiles(&test, &[root()], loader.self_ref());
+    tiles.set_necessity(&root(), TileNecessity::Required);
     loader.self_ref().ask(|_| ()).recv().unwrap();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
-    loader.self_ref().ask(move |loader| loader.invalidate_tile(&id.canonical)).recv().unwrap();
-    tile.cancel();
+    loader.self_ref().ask(move |loader| loader.invalidate_tile(&root().canonical)).recv().unwrap();
+    tiles.drop_tile();
     test.run_loop.wait_for_empty();
 
-    assert_eq!(changes.get(), 0);
+    assert_eq!(tiles.changes(), 0);
 }
 
 // gtest: CustomGeometryTile.CancellationDiscardsLateInvalidation
 #[test]
 fn cancellation_discards_late_invalidation() {
     let test = RasterTileTest::new();
-    let (changes, observer) = change_counter();
     let (fetches, fetch) = counter();
     let loader = loader(&test.run_loop, Some(fetch), None);
-    let id = OverscaledTileID::from_zxy(0, 0, 0);
-    let tile = tile(&test, id, loader.self_ref(), Some(observer));
-    tile.set_necessity(TileNecessity::Required);
+    let mut tiles = tiles(&test, &[root()], loader.self_ref());
+    tiles.set_necessity(&root(), TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
-    tile.cancel();
-    loader.self_ref().invoke(move |loader| loader.invalidate_tile(&id.canonical));
+    tiles.drop_tile();
+    loader.self_ref().invoke(move |loader| loader.invalidate_tile(&root().canonical));
     test.run_loop.wait_for_empty();
 
-    assert_eq!(changes.get(), 0);
+    assert_eq!(tiles.changes(), 0);
 }
 
 // gtest: CustomGeometryTile.CancelOneCopy
@@ -265,18 +229,19 @@ fn cancel_one_copy() {
     let loader = loader(&test.run_loop, Some(fetch), Some(cancel));
 
     // Two copies of one tile in neighboring worlds share its data.
-    let first = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None);
-    let second = tile(&test, OverscaledTileID::new(0, 1, CanonicalTileID::new(0, 0, 0)), loader.self_ref(), None);
-    first.set_necessity(TileNecessity::Required);
-    second.set_necessity(TileNecessity::Required);
+    let second = OverscaledTileID::new(0, 1, CanonicalTileID::new(0, 0, 0));
+    let mut tiles = tiles(&test, &[root(), second], loader.self_ref());
+    tiles.set_necessity(&root(), TileNecessity::Required);
+    tiles.set_necessity(&second, TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
-    // The map moves by a world, and TilePyramid changes both copies' wraps.
-    first.base().set_id(first.id().unwrap_to(-1));
-    second.base().set_id(second.id().unwrap_to(0));
+    // The map moves by a world, and the source changes both copies' wraps.
+    let first = root().unwrap_to(-1);
+    tiles.rekey(&root(), first);
+    tiles.rekey(&second, root());
 
-    second.set_necessity(TileNecessity::Optional);
+    tiles.set_necessity(&root(), TileNecessity::Optional);
     test.run_loop.wait_for_empty();
     assert_eq!(cancels.load(Ordering::SeqCst), 0);
 
@@ -284,7 +249,8 @@ fn cancel_one_copy() {
     let id = CanonicalTileID::new(0, 0, 0);
     loader.self_ref().invoke(move |loader| loader.invalidate_tile(&id));
     test.run_loop.wait_for_empty();
-    first.set_necessity(TileNecessity::Required);
+    tiles.store.receive();
+    tiles.set_necessity(&first, TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
@@ -296,23 +262,21 @@ fn cancelled_tile_drops_cached_data() {
     let (fetches, fetch) = counter();
     let loader = loader(&test.run_loop, Some(fetch), None);
 
-    let id = OverscaledTileID::from_zxy(0, 0, 0);
-    {
-        let tile = tile(&test, id, loader.self_ref(), None);
-        tile.set_necessity(TileNecessity::Required);
-        test.run_loop.wait_for_empty();
-        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    let mut first = tiles(&test, &[root()], loader.self_ref());
+    first.set_necessity(&root(), TileNecessity::Required);
+    test.run_loop.wait_for_empty();
+    assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
-        // The data arrives, but the tile leaves the view before it is parsed.
-        loader.self_ref().invoke(move |loader| loader.set_tile_data(&id.canonical, Arc::new(Vec::new())));
-        tile.set_necessity(TileNecessity::Optional);
-        test.run_loop.wait_for_empty();
-    }
+    // The data arrives, but the tile leaves the view before it is parsed.
+    loader.self_ref().invoke(move |loader| loader.set_tile_data(&root().canonical, Arc::new(Vec::new())));
+    first.set_necessity(&root(), TileNecessity::Optional);
+    test.run_loop.wait_for_empty();
+    first.drop_tile();
     test.run_loop.wait_for_empty();
 
     // The data went with the last tile that wanted it.
-    let next = tile(&test, id, loader.self_ref(), None);
-    next.set_necessity(TileNecessity::Required);
+    let mut next = tiles(&test, &[root()], loader.self_ref());
+    next.set_necessity(&root(), TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }

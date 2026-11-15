@@ -1,32 +1,42 @@
-use std::rc::Rc;
-
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 
-use super::{ErrorObserver, RasterTileTest, png};
+use super::{RasterTileTest, png};
+use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::geometry::dem_data::DEMData;
+use crate::tests::OneTile;
+use crate::tile::contents::Contents;
+use crate::tile::dem::DEMTileNeighbors;
 use crate::tile::job::JobResult;
-use crate::tile::raster_tile::{DEMTileNeighbors, RasterKind, RasterTile};
-use crate::tile::tile::Tile;
-use crate::tile::tile_loader::{LoaderTile, VectorTileEncoding};
+use crate::tile::tile::TileKind;
+use crate::tile::tile_workers::InlineWorkers;
 
-const DEM: RasterKind = RasterKind::Dem(RasterEncoding::Mapbox);
+const DEM: TileKind = TileKind::Dem(RasterEncoding::Mapbox);
 
-fn tile(test: &RasterTileTest) -> RasterTile {
-    test.tile(OverscaledTileID::from_zxy(0, 0, 0), DEM, None)
+fn tiles(test: &RasterTileTest) -> OneTile {
+    test.tiles(DEM, OverscaledTileID::from_zxy(0, 0, 0), Box::new(InlineWorkers))
+}
+
+/// The bucket of the DEM tile `id` shows.
+fn dem(tiles: &OneTile, id: &OverscaledTileID) -> Option<std::sync::Arc<HillshadeBucket>> {
+    match tiles.tile_at(id).contents.as_deref() {
+        Some(Contents::Dem(bucket)) => Some(std::sync::Arc::clone(bucket)),
+        _ => None,
+    }
 }
 
 // gtest: RasterDEMTile.setError
 #[test]
 fn set_error() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
-    LoaderTile::set_error(&**tile.inner(), Error::native("test"));
+    let mut tiles = tiles(&test);
+    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("test")));
+    let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.is_loaded());
+    assert!(tile.loaded);
     assert!(tile.is_complete());
 }
 
@@ -34,10 +44,11 @@ fn set_error() {
 #[test]
 fn on_error() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
-    tile.inner().on_error(Error::native("test"));
+    let mut tiles = tiles(&test);
+    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("test")));
+    let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.is_loaded());
+    assert!(tile.loaded);
     assert!(tile.is_complete());
 }
 
@@ -45,27 +56,27 @@ fn on_error() {
 #[test]
 fn on_parsed() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
+    let mut tiles = tiles(&test);
     let dem = DEMData::new(&PremultipliedImage::new(Size::new(16, 16)), RasterEncoding::Mapbox).expect("DEMData");
-    tile.inner().apply(JobResult::Dem(dem));
-    assert!(tile.is_renderable());
-    assert!(tile.is_loaded());
-    assert!(tile.is_complete());
+    tiles.with(|info, tile, ctx| info.apply_now(tile, ctx, JobResult::Dem(dem)));
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_complete());
 
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the tile
     // renderable.
-    LoaderTile::set_error(&**tile.inner(), Error::native("Connection offline"));
-    assert!(tile.is_renderable());
-    assert!(tile.is_loaded());
-    assert!(tile.is_complete());
+    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("Connection offline")));
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_complete());
 
     // Then simulate a parsing failure and make sure that we keep it renderable
     // in this situation as well.
-    tile.inner().on_error(Error::native("Parse error"));
-    assert!(tile.is_renderable());
-    assert!(tile.is_loaded());
-    assert!(tile.is_complete());
+    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("Parse error")));
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_complete());
 }
 
 // gtest: RasterDEMTile.onParsedEmpty. Unlike in C++, a parse without data is a tile with nothing in
@@ -73,11 +84,12 @@ fn on_parsed() {
 #[test]
 fn on_parsed_empty() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
-    LoaderTile::set_data(&**tile.inner(), None, VectorTileEncoding::Mvt);
-    assert!(tile.is_renderable());
-    assert!(tile.is_loaded());
-    assert!(tile.is_complete());
+    let mut tiles = tiles(&test);
+    let id = tiles.id;
+    tiles.set_image(&id, None);
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_complete());
 }
 
 // Port-only: a tile the tileset doesn't have (HTTP 404) isn't renderable, so the pyramid draws a
@@ -86,58 +98,57 @@ fn on_parsed_empty() {
 #[test]
 fn missing_and_empty() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
-    let mut driver = test.pool_driver();
+    let mut tiles = test.pool_tiles(DEM);
+    let id = tiles.id;
 
-    LoaderTile::set_data(&**tile.inner(), Some(png(16, 16)), VectorTileEncoding::Mvt);
-    test.settle(&mut driver, &[&tile]);
-    assert!(tile.is_renderable());
-    assert!(tile.get_bucket().is_some());
+    tiles.set_image(&id, Some(png(16, 16)));
+    test.settle(&mut tiles, &[id]);
+    assert!(tiles.tile().is_renderable());
+    assert!(dem(&tiles, &id).is_some());
 
-    LoaderTile::set_missing(&**tile.inner(), VectorTileEncoding::Mvt);
-    test.settle(&mut driver, &[&tile]);
-    assert!(!tile.is_renderable());
-    assert!(tile.get_bucket().is_none());
+    tiles.set_missing(&id);
+    test.settle(&mut tiles, &[id]);
+    assert!(!tiles.tile().is_renderable());
+    assert!(dem(&tiles, &id).is_none());
 
-    LoaderTile::set_data(&**tile.inner(), None, VectorTileEncoding::Mvt);
-    test.settle(&mut driver, &[&tile]);
-    assert!(tile.is_renderable());
-    assert!(tile.get_bucket().is_none());
+    tiles.set_image(&id, None);
+    test.settle(&mut tiles, &[id]);
+    assert!(tiles.tile().is_renderable());
+    assert!(dem(&tiles, &id).is_none());
 }
 
 // Port-only: raster-dem tiles whose jobs run in worker instances on other threads get their DEMs
-// back through the codec, borders included, and backfill them from each other.
+// back through the codec, borders included, and the store backfills neighbours from each other as
+// their DEMs arrive.
 #[test]
 fn decode_and_backfill_through_the_codec() {
     let test = RasterTileTest::new();
-    let mut driver = test.remote_driver(2);
-    let errors = Rc::new(ErrorObserver::default());
     // Neighbours, so both instances get one.
-    let tiles: Vec<RasterTile> = (0..2)
-        .map(|x| test.tile(OverscaledTileID::from_zxy(1, x, 0), DEM, Some(Rc::<ErrorObserver>::clone(&errors))))
-        .collect();
-    let all: Vec<&dyn Tile> = tiles.iter().map(|tile| -> &dyn Tile { tile }).collect();
-    for tile in &tiles {
-        LoaderTile::set_data(&**tile.inner(), Some(png(16, 16)), VectorTileEncoding::Mvt);
+    let mut tiles = test.remote_tiles(DEM, 2);
+    let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
+    for id in &ids {
+        tiles.set_image(id, Some(png(16, 16)));
     }
-    test.settle(&mut driver, &all);
-    for tile in &tiles {
-        assert!(tile.is_renderable());
-        let bucket = tile.get_bucket().expect("a bucket");
+    test.settle(&mut tiles, &ids);
+    for id in &ids {
+        assert!(tiles.tile_at(id).is_renderable());
+        let bucket = dem(&tiles, id).expect("a bucket");
         let dem = bucket.get_dem_data();
         assert_eq!((dem.dim, dem.stride, dem.encoding), (16, 18, RasterEncoding::Mapbox));
     }
 
-    tiles[0].backfill_border(&tiles[1], DEMTileNeighbors::RIGHT);
-    assert_eq!(tiles[0].neighboring_tiles() & DEMTileNeighbors::RIGHT, DEMTileNeighbors::RIGHT);
-    let (left, right) = (tiles[0].get_bucket().unwrap(), tiles[1].get_bucket().unwrap());
+    let neighbors = tiles.tile_at(&ids[0]).dem_neighbors;
+    assert_eq!(neighbors & DEMTileNeighbors::RIGHT, DEMTileNeighbors::RIGHT);
+    assert_eq!(tiles.tile_at(&ids[1]).dem_neighbors & DEMTileNeighbors::LEFT, DEMTileNeighbors::LEFT);
+    let (left, right) = (dem(&tiles, &ids[0]).unwrap(), dem(&tiles, &ids[1]).unwrap());
     for y in 0..16 {
         assert_eq!(left.get_dem_data().get(16, y), right.get_dem_data().get(0, y));
+        assert_eq!(right.get_dem_data().get(-1, y), left.get_dem_data().get(15, y));
     }
 
     // The DEMData constructor's error crosses as the tile's.
-    LoaderTile::set_data(&**tiles[1].inner(), Some(png(16, 8)), VectorTileEncoding::Mvt);
-    test.settle(&mut driver, &all[1..]);
-    assert_eq!(*errors.0.borrow(), ["raster-dem tiles must be square."]);
-    assert!(tiles[1].is_renderable());
+    tiles.set_image(&ids[1], Some(png(16, 8)));
+    test.settle(&mut tiles, &ids[1..]);
+    assert_eq!(tiles.errors(), ["raster-dem tiles must be square."]);
+    assert!(tiles.tile_at(&ids[1]).is_renderable());
 }

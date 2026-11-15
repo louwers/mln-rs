@@ -1,12 +1,10 @@
 // Port-only tests: a malformed vector tile reaches the tile as its error
 // (`onTileError`), and never panics the tile worker.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
+use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -21,7 +19,6 @@ use mln_style::layers::{
 use mln_style::sources::tile_source::TileSource;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
@@ -31,8 +28,8 @@ use mln_util::tileset::PartialTileset;
 use proptest::prelude::*;
 use serde_json::json;
 
-use crate::render_source::{self as render_source, RenderSourceObserver};
-use crate::tests::TileDriver;
+use crate::render_source;
+use crate::tile::store::StoreEvent;
 use crate::tile_parameters::TileParameters;
 
 /// What the render source reported for the tile.
@@ -40,33 +37,6 @@ use crate::tile_parameters::TileParameters;
 enum Outcome {
     Loaded,
     Error(String),
-}
-
-#[derive(Default)]
-struct Observer {
-    outcome: RefCell<Option<Outcome>>,
-    end: RefCell<Option<Box<dyn Fn()>>>,
-}
-
-impl Observer {
-    fn report(&self, outcome: Outcome) {
-        if self.outcome.borrow().is_none() {
-            *self.outcome.borrow_mut() = Some(outcome);
-            if let Some(end) = &*self.end.borrow() {
-                end();
-            }
-        }
-    }
-}
-
-impl RenderSourceObserver for Observer {
-    fn on_tile_changed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {
-        self.report(Outcome::Loaded);
-    }
-
-    fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, error: Error) {
-        self.report(Outcome::Error(error.to_string()));
-    }
 }
 
 /// A layer of the given style JSON, as the worker gets it.
@@ -102,42 +72,22 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
         Some(response)
     });
 
-    let observer = Rc::new(Observer::default());
-    let handle = run_loop.handle();
-    *observer.end.borrow_mut() = Some(Box::new(move || handle.stop()));
-    let timeout = Timer::new(&run_loop);
-    {
-        let observer = Rc::clone(&observer);
-        timeout.start(Duration::from_secs(30), Duration::ZERO, move || {
-            observer.report(Outcome::Error("timeout".to_owned()));
-        });
-    }
-
     let source = TileSource::vector("source", None, tileset);
     mln_style::source::Source::load_description(&source, &*file_source, &run_loop);
     let base_impl = mln_style::source::Source::base_impl(&source);
-    let render_source = Rc::new(RefCell::new(render_source::create(&base_impl)));
-    render_source.borrow().set_observer(Rc::<Observer>::clone(&observer));
-    let file_source: Arc<dyn FileSource> = file_source;
     // A loaded sprite with the icon "v" answers the symbol layer's request,
-    // and missing icons stay missing. The timer stands in for the
-    // RenderOrchestrator updates that run the tile's jobs.
-    let mut stores = TileDriver::pool(&run_loop, &thread_pool);
+    // and missing icons stay missing.
+    let mut store = crate::tests::pool_store(&run_loop, &thread_pool);
     let mut icon = PremultipliedImage::new(Size::new(1, 1));
     icon.data.fill(255);
-    stores.images.add_image(Arc::new(
+    store.images_mut().add_image(Arc::new(
         ImageImpl::new("v".to_owned(), icon, 1.0, false, Vec::new(), Vec::new(), None, None, None).unwrap(),
     ));
-    stores.images.set_loaded(true);
-    let available_images = Arc::clone(stores.images.available_images());
-    let frame = Timer::new(&run_loop);
-    {
-        let render_source = Rc::clone(&render_source);
-        frame.start(Duration::from_millis(10), Duration::from_millis(10), move || {
-            stores.update_source(&**render_source.borrow());
-        });
-    }
-    render_source.borrow_mut().update(
+    store.images_mut().set_loaded(true);
+    let mut render_source = render_source::create(&base_impl, &mut store);
+    let file_source: Arc<dyn FileSource> = file_source;
+    render_source.update(
+        &mut store,
         base_impl,
         layers,
         true,
@@ -147,7 +97,6 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: transform.get_state(),
             file_source: Some(file_source),
-            scheduler: run_loop.scheduler(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -159,19 +108,33 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            source: crate::tests::test_source(),
-            jobs: None,
-            available_images,
             font_faces: None,
-            thread_pool: thread_pool.clone(),
         },
     );
 
-    run_loop.run();
-    drop(frame);
+    // What the renderer's updates do, until the tile shows its layout or
+    // fails.
+    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    let outcome = loop {
+        run_loop.run_once();
+        crate::tests::update(&mut store);
+        let outcome = store.take_events().into_iter().find_map(|event| match event {
+            StoreEvent::Changed => Some(Outcome::Loaded),
+            StoreEvent::Error { error, .. } => Some(Outcome::Error(error.to_string())),
+            StoreEvent::Action { .. } => None,
+        });
+        if let Some(outcome) = outcome {
+            break outcome;
+        }
+        if mln_util::time::Instant::now() > deadline {
+            break Outcome::Error("timeout".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    };
     drop(render_source);
+    drop(store);
     thread_pool.wait_for_empty();
-    observer.outcome.take().unwrap()
+    outcome
 }
 
 // protobuf encoding for hand-made tiles.
@@ -369,7 +332,7 @@ fn query_of_a_bad_value_is_an_error() {
     let data = mln_tile::TileData::Mvt(mln_tile::MvtTile::new(Arc::new(tile_with_bad_value())));
     let layer = data.layer("l").unwrap().unwrap();
     let mut result = Vec::new();
-    let error = crate::tile::geometry_tile::query_layer_source_features(
+    let error = crate::tile::contents::query_layer_source_features(
         &layer,
         &mut result,
         &crate::query::SourceQueryOptions::default(),

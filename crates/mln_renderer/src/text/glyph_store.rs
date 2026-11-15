@@ -1,11 +1,11 @@
 // In mln_renderer rather than mln_text: it requests through mln_storage
 // (mln_text stays free of it).
 //
-// The store lives on the render thread, owned by the orchestrator. Tiles
+// The store lives on the render thread, owned by the tile store. Tiles
 // don't register with it: a tile waiting for glyphs asks it to `resolve`
-// them again after it changes (`revision`). Responses arrive on the
-// renderer's loop, which puts them in the store's inbox and wakes the
-// renderer; the next update takes them in (`update`).
+// them again after it changes (`revision`). Responses arrive in the tile
+// store's inbox, from whatever thread answers, and the tile store hands
+// them over (`take_response`).
 //
 // Glyphs parsed from PBF ranges go through the `GlyphCache` the store is
 // given (thread-safe, so renderers on other threads can share it), and each
@@ -25,10 +25,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender, channel};
 
 use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop};
-use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
+use mln_storage::{FileSource, Request, Resource, Response};
 use mln_text::glyph::{
     FontData, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, HBShapeRequests,
     get_glyph_range,
@@ -47,6 +46,7 @@ use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
+use crate::tile::inbox::{InboxSender, TileEvent};
 
 #[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub(crate) struct HBShapeResult {
@@ -102,9 +102,6 @@ impl Entry {
 /// The loaded HarfBuzz shapers of each font stack, by font face type.
 type HBShapers = VecMap<FontStack, VecMap<GlyphIDType, Rc<dyn FontFaceShaper>>>;
 
-/// A response waiting in the store's inbox.
-type Arrival = (FontStack, GlyphRange, Response);
-
 /// What the font-face engine's `prepare` reported, and how to wake the
 /// renderer when it does if a font file waits for it; shared with its
 /// `ready` callback, which may run on another thread.
@@ -136,17 +133,15 @@ pub(crate) struct ResolvedGlyphs {
 }
 
 pub(crate) struct GlyphStore {
-    /// The renderer's loop, where responses and the engine's report arrive.
+    /// The renderer's loop, where the engine's report arrives.
     run_loop: RunLoop,
     glyph_url: String,
     entries: HashMap<FontStack, Entry>,
     observer: Rc<dyn GlyphStoreObserver>,
     local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
     glyph_cache: Arc<GlyphCache>,
-    /// Asks the renderer for an update, for a response or the engine's report.
+    /// Asks the renderer for an update, for the engine's report.
     wake: Rc<dyn Fn()>,
-    inbox: Sender<Arrival>,
-    arrivals: Receiver<Arrival>,
     /// How many requests failed.
     failures: u64,
     /// Changes whenever a range is answered or dropped, so waiting tiles
@@ -169,8 +164,8 @@ pub(crate) struct GlyphStore {
 
 impl GlyphStore {
     /// A store that shares `glyph_cache`, loads font faces with `engine`,
-    /// takes its responses on `run_loop`, the renderer's, and calls `wake`
-    /// there when it has something for `update`.
+    /// hears from the engine on `run_loop`, the renderer's, and calls `wake`
+    /// there when that report is in for `update`.
     pub(crate) fn new(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         glyph_cache: Arc<GlyphCache>,
@@ -180,7 +175,6 @@ impl GlyphStore {
     ) -> GlyphStore {
         let local_glyph_rasterizer =
             local_glyph_rasterizer.unwrap_or_else(|| Box::new(DefaultLocalGlyphRasterizer::new(None)));
-        let (inbox, arrivals) = channel();
         GlyphStore {
             run_loop,
             glyph_url: String::new(),
@@ -189,8 +183,6 @@ impl GlyphStore {
             local_glyph_rasterizer,
             glyph_cache,
             wake,
-            inbox,
-            arrivals,
             failures: 0,
             revision: 0,
             font_faces: None,
@@ -218,12 +210,14 @@ impl GlyphStore {
         self.revision
     }
 
-    /// Takes in the responses that arrived, and the font files that waited
-    /// for the engine once it reported back.
+    /// Takes in a response to `font_stack`'s `range`.
+    pub(crate) fn take_response(&mut self, font_stack: &FontStack, range: GlyphRange, response: &Response) {
+        self.process_response(response, font_stack, range);
+    }
+
+    /// Takes in the font files that waited for the engine once it reported
+    /// back.
     pub(crate) fn update(&mut self) {
-        while let Ok((font_stack, range, response)) = self.arrivals.try_recv() {
-            self.process_response(&response, &font_stack, range);
-        }
         if !self.deferred_responses.is_empty() && self.engine_readiness.lock().result.is_some() {
             for (data, font_stack, range) in std::mem::take(&mut self.deferred_responses) {
                 self.process_data(Ok(Some(data)), &font_stack, range);
@@ -234,12 +228,14 @@ impl GlyphStore {
     /// The glyphs of `dependencies`, and the shaping of their font-face
     /// text, once every range they need is loaded or failed during `wait`.
     /// Until then `None`, having requested the ranges that need it from
-    /// `file_source`; without one, those ranges never load.
+    /// `file_source`, whose responses go to `inbox`; without one, those
+    /// ranges never load.
     pub(crate) fn resolve(
         &mut self,
         dependencies: &GlyphDependencies,
         wait: &mut GlyphWait,
         file_source: Option<&Arc<dyn FileSource>>,
+        inbox: &InboxSender,
     ) -> Option<ResolvedGlyphs> {
         let since = *wait.since.get_or_insert(self.failures);
         let mut to_request: Vec<(FontStack, GlyphRange)> = Vec::new();
@@ -275,7 +271,7 @@ impl GlyphStore {
                 waits = true;
                 continue;
             };
-            self.request_range(&font_stack, range, file_source);
+            self.request_range(&font_stack, range, file_source, inbox);
             let entry = self.entries.get(&font_stack);
             waits |= entry.is_some_and(|entry| matches!(entry.ranges.get(&range), Some(RangeState::Loading(_))));
         }
@@ -339,7 +335,13 @@ impl GlyphStore {
         results
     }
 
-    fn request_range(&mut self, font_stack: &FontStack, range: GlyphRange, file_source: &Arc<dyn FileSource>) {
+    fn request_range(
+        &mut self,
+        font_stack: &FontStack,
+        range: GlyphRange,
+        file_source: &Arc<dyn FileSource>,
+        inbox: &InboxSender,
+    ) {
         if let Some(data) = self.get_font_face_data(range.type_) {
             // A face that holds its font file needs no request.
             self.set_range(font_stack, range, RangeState::Loading(None));
@@ -361,15 +363,12 @@ impl GlyphStore {
 
         self.observer.on_glyphs_requested(font_stack, range);
 
-        let inbox = self.inbox.clone();
-        let wake = Rc::clone(&self.wake);
+        let inbox = inbox.clone();
         let callback_font_stack = font_stack.clone();
-        let req = file_source.request(&self.run_loop.scheduler(), &resource, move |response: Response| {
-            // The store may be gone, its inbox with it.
-            if inbox.send((callback_font_stack.clone(), range, response)).is_ok() {
-                wake();
-            }
+        let (req, responder) = Request::direct(move |response: Response| {
+            inbox.send(TileEvent::Glyphs { font_stack: callback_font_stack.clone(), range, response });
         });
+        file_source.load(&resource, responder);
         self.set_range(font_stack, range, RangeState::Loading(Some(req)));
     }
 

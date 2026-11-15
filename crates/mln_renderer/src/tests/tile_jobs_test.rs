@@ -1,8 +1,8 @@
-// Port-only: a tile drives its jobs (tile/job.rs): one job in flight and a
-// generation, results applied only when the generation matches, a geometry
-// tile's dependencies resolved from the renderer's stores between jobs, and
-// jobs lost with their lane run again. Raster and raster-dem tiles' decodes
-// go the same way.
+// Port-only: the tile store drives each tile's jobs (tile/job.rs): one job
+// in flight and a generation, results applied only when the generation
+// matches, a geometry tile's dependencies resolved from the store's glyphs
+// and images between jobs, and jobs lost with their lane run again. Raster
+// and raster-dem tiles' decodes go the same way.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
+use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_properties::{LayerProperties, LayerPropertiesBase};
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -27,55 +27,52 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use parking_lot::Mutex;
 use serde_json::json;
 
-use crate::buckets::raster_bucket::RasterBucket;
 use crate::gfx::dynamic_texture::DynamicTextureBinId;
 use crate::image_store::ImageStoreObserver;
 use crate::layermanager;
 use crate::layout::tile_layout::LayoutParams;
-use crate::tests::tile::{RasterTileTest, png};
-use crate::tests::{TileDriver, style, test_source};
-use crate::tile::geometry_tile::GeometryTile;
+use crate::tests::tile::png;
+use crate::tests::{OneTile, style, tile_store};
+use crate::tile::contents::Contents;
+use crate::tile::inbox::{Inbox, InboxSender, TileEvent};
 use crate::tile::job::{DataInput, Job, JobId, JobResult, JobTimes, LayoutJob, Reply, Run};
-use crate::tile::raster_tile::{RasterKind, RasterTile};
-use crate::tile::tile::Tile;
-use crate::tile::tile_loader::{LoaderTile, VectorTileEncoding};
-use crate::tile::tile_workers::{InlineWorkers, Lane, PoolWorkers, ReplyBody, TileWorkers, WorkerEvent};
+use crate::tile::tile::TileKind;
+use crate::tile::tile_workers::{InlineWorkers, Lane, PoolWorkers, ReplyBody, TileWorkers};
 use crate::tile::worker_codec::{Encoded, RemoteJobs, RemoteWorkers, ReplySink, TileWorkerHost, WorkerInstances};
-use crate::tile_parameters::TileParameters;
 
 /// Workers whose jobs run when the test says so, or get the replies the
 /// test makes up.
 #[derive(Clone, Default)]
-struct Manual(Rc<RefCell<ManualState>>);
+pub(super) struct Manual(Rc<RefCell<ManualState>>);
 
 #[derive(Default)]
 struct ManualState {
     runs: VecDeque<Run>,
-    replies: Vec<Reply>,
-    in_flight: usize,
+    inbox: Option<InboxSender>,
     caches_data: bool,
     submitted: usize,
 }
 
 impl Manual {
     /// The oldest job submitted and not yet answered.
-    fn take(&self) -> Run {
+    pub(super) fn take(&self) -> Run {
         self.0.borrow_mut().runs.pop_front().expect("a job in flight")
     }
 
-    fn reply(&self, reply: Reply) {
-        self.0.borrow_mut().replies.push(reply);
+    pub(super) fn reply(&self, Reply { id, result }: Reply) {
+        let inbox = self.0.borrow().inbox.clone().expect("a job submitted");
+        inbox.send(TileEvent::Reply { lane: Lane(0), id, body: ReplyBody::Result(result), times: JobTimes::default() });
     }
 
     /// Runs the oldest job in flight; returns its id.
-    fn run(&self) -> JobId {
+    pub(super) fn run(&self) -> JobId {
         let reply = InlineWorkers::run(self.take());
         let id = reply.id;
         self.reply(reply);
         id
     }
 
-    fn submitted(&self) -> usize {
+    pub(super) fn submitted(&self) -> usize {
         self.0.borrow().submitted
     }
 }
@@ -83,10 +80,6 @@ impl Manual {
 impl TileWorkers for Manual {
     fn lanes(&self) -> usize {
         1
-    }
-
-    fn in_flight(&self, _lane: Lane) -> usize {
-        self.0.borrow().in_flight
     }
 
     fn capacity(&self, _lane: Lane) -> usize {
@@ -97,24 +90,11 @@ impl TileWorkers for Manual {
         self.0.borrow().caches_data
     }
 
-    fn submit(&mut self, _lane: Lane, run: Run) {
+    fn submit(&mut self, _lane: Lane, run: Run, inbox: &InboxSender) {
         let mut state = self.0.borrow_mut();
-        state.in_flight += 1;
+        state.inbox = Some(inbox.clone());
         state.submitted += 1;
         state.runs.push_back(run);
-    }
-
-    fn receive(&mut self, events: &mut Vec<WorkerEvent>) {
-        let mut state = self.0.borrow_mut();
-        for Reply { id, result } in std::mem::take(&mut state.replies) {
-            state.in_flight -= 1;
-            events.push(WorkerEvent::Reply {
-                lane: Lane(0),
-                id,
-                body: ReplyBody::Result(result),
-                times: JobTimes::default(),
-            });
-        }
     }
 }
 
@@ -128,7 +108,7 @@ impl ImageStoreObserver for Asked {
     }
 }
 
-fn image(id: &str) -> Arc<ImageImpl> {
+pub(super) fn image(id: &str) -> Arc<ImageImpl> {
     Arc::new(
         ImageImpl::new(
             id.to_owned(),
@@ -147,7 +127,7 @@ fn image(id: &str) -> Arc<ImageImpl> {
 
 /// A layer from its style JSON on source `s`, evaluated at zoom 0 as the
 /// `RenderOrchestrator` evaluates it.
-fn layer(mut json: serde_json::Value) -> Arc<dyn LayerProperties> {
+pub(super) fn layer(mut json: serde_json::Value) -> Arc<dyn LayerProperties> {
     json["source"] = json!("s");
     let mut error = ConversionError::default();
     let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
@@ -157,11 +137,11 @@ fn layer(mut json: serde_json::Value) -> Arc<dyn LayerProperties> {
 }
 
 /// Icons of `icon-image`, at size `size`.
-fn icons(icon_image: &serde_json::Value, size: f32) -> Arc<dyn LayerProperties> {
+pub(super) fn icons(icon_image: &serde_json::Value, size: f32) -> Arc<dyn LayerProperties> {
     layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": icon_image, "icon-size": size}}))
 }
 
-fn points() -> TileData {
+pub(super) fn points() -> TileData {
     let point = Feature {
         geometry: Some(Geometry::Point(Point::new(2048i16, 2048))),
         properties: Arc::new(PropertyMap::new()),
@@ -173,9 +153,8 @@ fn points() -> TileData {
 struct Test {
     run_loop: RunLoop,
     thread_pool: TaggedScheduler,
-    driver: TileDriver,
+    tile: OneTile,
     asked: Rc<Asked>,
-    tile: Option<GeometryTile>,
 }
 
 impl Test {
@@ -189,66 +168,48 @@ impl Test {
     fn on(workers: impl FnOnce(&RunLoop) -> Box<dyn TileWorkers>, images: &[&str]) -> Self {
         let run_loop = RunLoop::new();
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
-        let mut driver = TileDriver::new(&run_loop, workers(&run_loop));
+        let mut store = tile_store(&run_loop, &thread_pool, workers(&run_loop));
         let asked = Rc::new(Asked::default());
-        driver.images.set_observer(Some(Rc::<Asked>::clone(&asked)));
+        store.images_mut().set_observer(Some(Rc::<Asked>::clone(&asked)));
         for id in images {
-            driver.images.add_image(image(id));
+            store.images_mut().add_image(image(id));
         }
-        driver.images.set_loaded(true);
-        let transform_state = TransformState::default();
-        let parameters = TileParameters {
-            pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
-            transform_state: &transform_state,
-            file_source: None,
-            scheduler: run_loop.scheduler(),
-            mode: MapMode::Static,
-            prefetch_zoom_delta: 0,
-            tile_lod_min_radius: 3.0,
-            tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
-            tile_lod_zoom_shift: 0.0,
-            tile_lod_mode: TileLodMode::Default,
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
-            global_state: None,
-            is_update_synchronous: false,
-            capture_rendered_features: false,
-            source: test_source(),
-            jobs: None,
-            available_images: Arc::clone(driver.images.available_images()),
-            font_faces: None,
-            thread_pool: thread_pool.clone(),
-        };
+        store.images_mut().set_loaded(true);
         let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));
-        let tile = GeometryTile::new(id, "s".to_owned(), &parameters, None);
-        Test { run_loop, thread_pool, driver, asked, tile: Some(tile) }
-    }
-
-    fn tile(&self) -> &GeometryTile {
-        self.tile.as_ref().expect("the tile")
+        let tile = OneTile::new(store, TileKind::Geometry, id, MapMode::Static);
+        Test { run_loop, thread_pool, tile, asked }
     }
 
     /// The renderer's update.
     fn update(&mut self) -> bool {
-        let tile = self.tile.as_ref().expect("the tile");
-        self.driver.update(&[tile])
+        self.tile.update()
     }
 
     /// A tile with `layers`, whose data arrived.
-    fn load(&self, layers: &[Arc<dyn LayerProperties>]) {
-        self.tile().set_style(&style(layers));
-        self.tile().set_data(Some(points()));
+    fn load(&mut self, layers: &[Arc<dyn LayerProperties>]) {
+        self.tile.set_style(&style(layers));
+        self.tile.set_data(Some(points()));
+    }
+
+    fn is_complete(&self) -> bool {
+        self.tile.tile().is_complete()
     }
 
     fn shows_layout(&self) -> bool {
-        self.tile().create_render_data().get_feature_index().is_some()
+        self.tile.shows_layout()
+    }
+
+    /// Adds image `id` to the store, and tells the tiles.
+    fn add_image(&mut self, id: &str) {
+        self.tile.store.images_mut().add_image(image(id));
+        self.tile.store.images_changed(&HashSet::from_iter([id.to_owned()]));
     }
 
     /// The id of the bin the atlas packs `id` into now.
     fn bin_of(&mut self, id: &str) -> DynamicTextureBinId {
-        let icons = [(id.to_owned(), self.driver.images.get_image(id).cloned().expect("image"))].into_iter().collect();
-        let page = self.driver.atlas.pack_images(&icons, &mln_style_types::image::ImageMap::default());
+        let image = self.tile.store.images().get_image(id).cloned().expect("image");
+        let icons = [(id.to_owned(), image)].into_iter().collect();
+        let page = self.tile.store.atlas().pack_images(&icons, &mln_style_types::image::ImageMap::default());
         page.lease.texture_handles()[0].get_id()
     }
 }
@@ -267,8 +228,8 @@ impl Drop for Test {
 fn a_cold_labelled_tile_takes_two_jobs_and_a_relayout_one() {
     let manual = Manual::default();
     let mut test = Test::new(Box::new(manual.clone()), &["marker"]);
-    test.tile().set_style(&style(&[icons(&json!("marker"), 1.0)]));
-    test.tile().set_data(Some(points()));
+    test.tile.set_style(&style(&[icons(&json!("marker"), 1.0)]));
+    test.tile.set_data(Some(points()));
     test.update();
     let first = manual.run();
     test.update();
@@ -276,10 +237,10 @@ fn a_cold_labelled_tile_takes_two_jobs_and_a_relayout_one() {
     let second = manual.run();
     assert_eq!(first, second, "the resume keeps the generation");
     test.update();
-    assert!(test.shows_layout() && test.tile().is_complete());
+    assert!(test.shows_layout() && test.is_complete());
     assert_eq!(manual.submitted(), 2);
 
-    test.tile().set_style(&style(&[icons(&json!("marker"), 2.0)]));
+    test.tile.set_style(&style(&[icons(&json!("marker"), 2.0)]));
     test.update();
     {
         let state = manual.0.borrow();
@@ -290,7 +251,7 @@ fn a_cold_labelled_tile_takes_two_jobs_and_a_relayout_one() {
     }
     manual.run();
     test.update();
-    assert!(test.tile().is_complete());
+    assert!(test.is_complete());
     assert_eq!(manual.submitted(), 3);
 }
 
@@ -301,12 +262,12 @@ fn a_stale_reply_after_a_relayout_is_dropped() {
     let manual = Manual::default();
     let mut test = Test::new(Box::new(manual.clone()), &[]);
     let line = layer(json!({"id": "line", "type": "circle"}));
-    test.tile().set_style(&style(std::slice::from_ref(&line)));
-    test.tile().set_data(Some(points()));
+    test.tile.set_style(&style(std::slice::from_ref(&line)));
+    test.tile.set_data(Some(points()));
     test.update();
     let stale = manual.take();
 
-    test.tile().set_style(&style(&[line]));
+    test.tile.set_style(&style(&[line]));
     let reply = InlineWorkers::run(stale);
     assert!(matches!(reply.result, JobResult::Laid(_)));
     manual.reply(reply);
@@ -315,7 +276,7 @@ fn a_stale_reply_after_a_relayout_is_dropped() {
     assert_eq!(manual.submitted(), 2, "the newest generation went once the stale job came back");
     manual.run();
     test.update();
-    assert!(test.shows_layout() && test.tile().is_complete());
+    assert!(test.shows_layout() && test.is_complete());
 }
 
 /// A job whose data the worker evicted answers `NeedsData`: the tile sends
@@ -325,8 +286,8 @@ fn a_tile_sends_its_data_again_after_an_eviction() {
     let manual = Manual::default();
     manual.0.borrow_mut().caches_data = true;
     let mut test = Test::new(Box::new(manual.clone()), &["marker"]);
-    test.tile().set_style(&style(&[icons(&json!("marker"), 1.0)]));
-    test.tile().set_data(Some(points()));
+    test.tile.set_style(&style(&[icons(&json!("marker"), 1.0)]));
+    test.tile.set_data(Some(points()));
     test.update();
     let first = manual.take();
     assert!(matches!(&first.job, Job::Layout(job) if matches!(job.data, DataInput::Full { .. })));
@@ -358,15 +319,12 @@ fn a_tile_sends_its_data_again_after_an_eviction() {
 fn an_image_added_while_a_first_job_runs_lays_out_again() {
     let manual = Manual::default();
     let mut test = Test::new(Box::new(manual.clone()), &[]);
-    test.tile().set_style(&style(&[icons(&json!(["coalesce", ["image", "late"], ["image", "other"]]), 1.0)]));
-    test.tile().set_data(Some(points()));
+    test.tile.set_style(&style(&[icons(&json!(["coalesce", ["image", "late"], ["image", "other"]]), 1.0)]));
+    test.tile.set_data(Some(points()));
     test.update();
     let first = manual.take();
 
-    test.driver.images.add_image(image("late"));
-    let added = HashSet::from_iter(["late".to_owned()]);
-    let available = Arc::clone(test.driver.images.available_images());
-    test.tile().inner().images_changed(&added, &available);
+    test.add_image("late");
     manual.reply(InlineWorkers::run(first));
     test.update();
     let again = manual.take();
@@ -389,24 +347,24 @@ fn an_image_added_while_a_first_job_runs_lays_out_again() {
 fn an_answer_holds_its_bins_while_its_layout_runs_and_shows() {
     let manual = Manual::default();
     let mut test = Test::new(Box::new(manual.clone()), &["a"]);
-    test.tile().set_style(&style(&[icons(&json!("a"), 1.0)]));
-    test.tile().set_data(Some(points()));
+    test.tile.set_style(&style(&[icons(&json!("a"), 1.0)]));
+    test.tile.set_data(Some(points()));
     test.update();
     manual.run();
     test.update();
     let bin = test.bin_of("a");
-    test.driver.atlas.free_released();
+    test.tile.store.atlas().free_released();
     assert_eq!(test.bin_of("a"), bin, "the running job holds the bin");
 
     manual.run();
     test.update();
-    assert!(test.tile().create_render_data().get_atlas_textures().is_some());
-    test.driver.atlas.free_released();
+    assert!(test.shows_layout());
+    test.tile.store.atlas().free_released();
     assert_eq!(test.bin_of("a"), bin, "the layout holds the bin");
 
-    test.tile = None;
-    test.driver.atlas.free_released();
-    assert_eq!(test.driver.atlas.page_count(), 0, "nothing holds the bin");
+    test.tile.drop_tile();
+    test.tile.store.atlas().free_released();
+    assert_eq!(test.tile.store.atlas().page_count(), 0, "nothing holds the bin");
 }
 
 /// The stores resolve only when they have something new: a tile that waits
@@ -446,14 +404,13 @@ fn removing_a_used_image_lays_out_again() {
         manual.run();
     }
     test.update();
-    assert!(test.tile().is_complete());
+    assert!(test.is_complete());
 
-    test.driver.images.remove_image("a");
-    let available = Arc::clone(test.driver.images.available_images());
-    test.tile().inner().images_changed(&HashSet::from_iter(["b".to_owned()]), &available);
-    assert!(test.tile().is_complete(), "an image it didn't name changes nothing");
-    test.tile().inner().images_changed(&HashSet::from_iter(["a".to_owned()]), &available);
-    assert!(!test.tile().is_complete());
+    test.tile.store.images_mut().remove_image("a");
+    test.tile.store.images_changed(&HashSet::from_iter(["b".to_owned()]));
+    assert!(test.is_complete(), "an image it didn't name changes nothing");
+    test.tile.store.images_changed(&HashSet::from_iter(["a".to_owned()]));
+    assert!(!test.is_complete());
     test.update();
     assert_eq!(manual.submitted(), 3);
 }
@@ -493,7 +450,8 @@ impl LayerProperties for Mistyped {
 #[test]
 fn a_panicking_native_job_fails() {
     let pool = TaggedScheduler::new(Arc::new(Catching), SimpleIdentity::new());
-    let mut workers = PoolWorkers::new(pool, 1, Arc::new(|| {}));
+    let mut workers = PoolWorkers::new(pool, 1);
+    let inbox = Inbox::new(Arc::new(|| {}));
     let circles = layer(json!({"id": "dots", "type": "circle"}));
     let mistyped: Arc<dyn LayerProperties> =
         Arc::new(Mistyped(LayerPropertiesBase::new(Arc::clone(&circles.base_impl))));
@@ -519,22 +477,20 @@ fn a_panicking_native_job_fails() {
         },
         resolved: Arc::default(),
     };
-    workers.submit(Lane(0), Run { id, job: Job::Layout(job), superseded: Arc::default() });
-    assert_eq!(workers.in_flight(Lane(0)), 1);
-    let mut events = Vec::new();
+    workers.submit(Lane(0), Run { id, job: Job::Layout(job), superseded: Arc::default() }, inbox.sender());
     let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(10);
-    while events.is_empty() {
+    let event = loop {
+        if let Some(event) = inbox.next() {
+            break event;
+        }
         assert!(mln_util::time::Instant::now() < deadline, "no reply");
-        workers.receive(&mut events);
         std::thread::yield_now();
-    }
-    let [WorkerEvent::Reply { id: replied, body: ReplyBody::Result(JobResult::Failed(error)), .. }] = events.as_slice()
-    else {
+    };
+    let TileEvent::Reply { id: replied, body: ReplyBody::Result(JobResult::Failed(error)), .. } = event else {
         panic!("expected a failure");
     };
-    assert_eq!(*replied, id);
+    assert_eq!(replied, id);
     assert_eq!(error.to_string(), "the tile's job panicked");
-    assert_eq!(workers.in_flight(Lane(0)), 0);
 }
 
 /// Worker instances on the test's thread, whose frames wait until the test
@@ -663,7 +619,7 @@ fn a_worker_lost_during_discovery_and_during_a_resume() {
         instances.step(0);
         test.update_after();
     }
-    assert!(test.shows_layout() && test.tile().is_complete());
+    assert!(test.shows_layout() && test.is_complete());
 }
 
 /// A reply whose header the map side can't read loses its worker too.
@@ -697,9 +653,7 @@ fn an_image_a_first_try_only_names_resolves_without_a_relayout() {
     test.update();
     let first = manual.take();
 
-    test.driver.images.add_image(image("late"));
-    let available = Arc::clone(test.driver.images.available_images());
-    test.tile().inner().images_changed(&HashSet::from_iter(["late".to_owned()]), &available);
+    test.add_image("late");
     manual.reply(InlineWorkers::run(first));
     test.update();
     assert_eq!(manual.submitted(), 2);
@@ -710,64 +664,40 @@ fn an_image_a_first_try_only_names_resolves_without_a_relayout() {
     assert!(job.resolved.icons.contains_key("late"));
 }
 
-/// A tile with the renderer's jobs at hand submits as soon as its data
-/// arrives, without waiting for an update.
+/// A tile's job starts in the update that has its data, and a newer
+/// generation supersedes the job in flight, which a worker that hasn't
+/// started it may skip.
 #[test]
-fn a_tile_submits_as_its_data_arrives() {
+fn a_newer_generation_supersedes_the_job_in_flight() {
     let manual = Manual::default();
-    let jobs = Rc::new(RefCell::new(crate::tile::tile_workers::TileJobs::new(Box::new(manual.clone()))));
-    let run_loop = RunLoop::new();
-    let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
-    let transform_state = TransformState::default();
-    let parameters = TileParameters {
-        pixel_ratio: 1.0,
-        debug_options: MapDebugOptions::NO_DEBUG,
-        transform_state: &transform_state,
-        file_source: None,
-        scheduler: run_loop.scheduler(),
-        mode: MapMode::Static,
-        prefetch_zoom_delta: 0,
-        tile_lod_min_radius: 3.0,
-        tile_lod_scale: 1.0,
-        tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
-        tile_lod_zoom_shift: 0.0,
-        tile_lod_mode: TileLodMode::Default,
-        subdivision_granularity: SubdivisionGranularitySetting::none(),
-        global_state: None,
-        is_update_synchronous: false,
-        capture_rendered_features: false,
-        source: test_source(),
-        jobs: Some(Rc::clone(&jobs)),
-        available_images: Arc::default(),
-        font_faces: None,
-        thread_pool: thread_pool.clone(),
-    };
-    let tile = GeometryTile::new(OverscaledTileID::from_zxy(0, 0, 0), "s".to_owned(), &parameters, None);
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    let mut test = Test::new(Box::new(manual.clone()), &[]);
+    test.tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    test.update();
     assert_eq!(manual.submitted(), 0, "no data yet");
-    tile.set_data(Some(points()));
+    test.tile.set_data(Some(points()));
+    test.update();
     assert_eq!(manual.submitted(), 1);
 
-    // A newer generation supersedes the job in flight, which a worker that
-    // hasn't started it may skip.
     let first = manual.take();
-    tile.set_data(Some(points()));
+    test.tile.set_data(Some(points()));
     assert!(first.superseded.load(std::sync::atomic::Ordering::Relaxed));
-    drop(tile);
-    thread_pool.wait_for_empty();
 }
 
-/// A raster tile of `kind` at `x`/0 of zoom 1, whose jobs `driver` runs.
-fn raster_tile(test: &RasterTileTest, x: u32, kind: RasterKind) -> RasterTile {
-    test.tile(OverscaledTileID::from_zxy(1, x, 0), kind, None)
+/// A raster tile of `kind`, `x`/0 of zoom 1, and a second one at `x + 1`,
+/// whose jobs run on `workers`.
+fn raster_tiles(run_loop: &RunLoop, pool: &TaggedScheduler, workers: Box<dyn TileWorkers>, kind: TileKind) -> OneTile {
+    let store = tile_store(run_loop, pool, workers);
+    let mut tiles = OneTile::new(store, kind, OverscaledTileID::from_zxy(1, 0, 0), MapMode::Static);
+    tiles.add(OverscaledTileID::from_zxy(1, 1, 0));
+    tiles
 }
 
 /// The size of the image a raster tile shows.
-fn raster_size(tile: &RasterTile) -> Option<Size> {
-    let layer = mln_style::layer::Layer::base_impl(&mln_style::layers::RasterLayer::new("r", "s"));
-    let render_data = tile.create_render_data();
-    let bucket = render_data.get_bucket(&*layer)?;
-    bucket.downcast_ref::<RasterBucket>()?.image.as_ref().map(|image| image.size)
+fn raster_size(tiles: &OneTile, x: u32) -> Option<Size> {
+    let Some(Contents::Raster(bucket)) = tiles.tile_at(&OverscaledTileID::from_zxy(1, x, 0)).contents.as_deref() else {
+        return None;
+    };
+    bucket.image.as_ref().map(|image| image.size)
 }
 
 /// Decodes come back in any order: each tile takes only the reply of its
@@ -775,63 +705,72 @@ fn raster_size(tile: &RasterTile) -> Option<Size> {
 /// its newest data next and never shows the stale image.
 #[test]
 fn raster_decodes_apply_in_any_order() {
-    let test = RasterTileTest::new();
+    let run_loop = RunLoop::new();
+    let pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
     let manual = Manual::default();
-    let mut driver = TileDriver::new(&test.run_loop, Box::new(manual.clone()));
-    let tiles = [raster_tile(&test, 0, RasterKind::Image), raster_tile(&test, 1, RasterKind::Image)];
-    let all: Vec<&dyn Tile> = tiles.iter().map(|tile| -> &dyn Tile { tile }).collect();
-    for (tile, size) in tiles.iter().zip([16, 32]) {
-        LoaderTile::set_data(&**tile.inner(), Some(png(size, size)), VectorTileEncoding::Mvt);
+    let mut tiles = raster_tiles(&run_loop, &pool, Box::new(manual.clone()), TileKind::Raster);
+    let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
+    for (id, size) in ids.iter().zip([16, 32]) {
+        tiles.set_image(id, Some(png(size, size)));
     }
-    driver.update(&all);
+    tiles.update();
     let (first, second) = (manual.take(), manual.take());
     manual.reply(InlineWorkers::run(second));
     manual.reply(InlineWorkers::run(first));
-    driver.update(&all);
-    assert_eq!(raster_size(&tiles[0]), Some(Size::new(16, 16)));
-    assert_eq!(raster_size(&tiles[1]), Some(Size::new(32, 32)));
+    tiles.update();
+    assert_eq!(raster_size(&tiles, 0), Some(Size::new(16, 16)));
+    assert_eq!(raster_size(&tiles, 1), Some(Size::new(32, 32)));
 
     // New data while the decode of the last runs: the last's reply is stale.
-    LoaderTile::set_data(&**tiles[0].inner(), Some(png(8, 8)), VectorTileEncoding::Mvt);
-    driver.update(&all);
+    tiles.set_image(&ids[0], Some(png(8, 8)));
+    tiles.update();
     let stale = manual.take();
-    LoaderTile::set_data(&**tiles[0].inner(), Some(png(4, 4)), VectorTileEncoding::Mvt);
+    tiles.set_image(&ids[0], Some(png(4, 4)));
     assert!(stale.superseded.load(std::sync::atomic::Ordering::Relaxed));
-    driver.update(&all);
+    tiles.update();
     assert_eq!(manual.submitted(), 3, "one decode in flight per tile");
     manual.reply(InlineWorkers::run(stale));
-    driver.update(&all);
-    assert_eq!(raster_size(&tiles[0]), Some(Size::new(16, 16)), "the stale image isn't shown");
-    assert!(!tiles[0].is_complete());
+    tiles.update();
+    assert_eq!(raster_size(&tiles, 0), Some(Size::new(16, 16)), "the stale image isn't shown");
+    assert!(!tiles.tile().is_complete());
     manual.run();
-    driver.update(&all);
-    assert_eq!(raster_size(&tiles[0]), Some(Size::new(4, 4)));
-    assert!(tiles[0].is_complete());
+    tiles.update();
+    assert_eq!(raster_size(&tiles, 0), Some(Size::new(4, 4)));
+    assert!(tiles.tile().is_complete());
+    drop(tiles);
+    pool.wait_for_empty();
 }
 
 /// A Web Worker that dies while it decodes a raster-dem tile: the tile kept
 /// its data, which it sends again to the worker in its place.
 #[test]
 fn a_worker_lost_during_a_decode() {
-    let test = RasterTileTest::new();
+    let run_loop = RunLoop::new();
+    let pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
     let instances = Instances::new(1);
-    let mut driver = TileDriver::new(&test.run_loop, instances.workers(&test.run_loop));
-    let tile = raster_tile(&test, 0, RasterKind::Dem(mln_util::tileset::RasterEncoding::Mapbox));
-    let update = |driver: &mut TileDriver| {
-        while test.run_loop.run_once() {}
-        driver.update(&[&tile]);
+    let kind = TileKind::Dem(mln_util::tileset::RasterEncoding::Mapbox);
+    let mut tiles = raster_tiles(&run_loop, &pool, instances.workers(&run_loop), kind);
+    let update = |tiles: &mut OneTile| {
+        while run_loop.run_once() {}
+        tiles.update();
     };
-    LoaderTile::set_data(&**tile.inner(), Some(png(16, 16)), VectorTileEncoding::Mvt);
-    update(&mut driver);
+    let id = tiles.id;
+    tiles.set_image(&id, Some(png(16, 16)));
+    update(&mut tiles);
     assert_eq!(instances.queued(0), 1);
 
     instances.kill(0);
-    update(&mut driver);
+    update(&mut tiles);
     assert_eq!(instances.0.borrow().started, 2);
     assert_eq!(instances.queued(0), 1, "the decode runs again, on the new worker");
-    assert!(!tile.is_complete());
+    assert!(!tiles.tile().is_complete());
     instances.step(0);
-    update(&mut driver);
-    assert!(tile.is_complete() && tile.is_renderable());
-    assert_eq!(tile.get_bucket().expect("a DEM").get_dem_data().dim, 16);
+    update(&mut tiles);
+    assert!(tiles.tile().is_complete() && tiles.tile().is_renderable());
+    let Some(Contents::Dem(bucket)) = tiles.tile().contents.as_deref() else {
+        panic!("a DEM");
+    };
+    assert_eq!(bucket.get_dem_data().dim, 16);
+    drop(tiles);
+    pool.wait_for_empty();
 }

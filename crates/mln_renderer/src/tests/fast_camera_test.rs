@@ -22,7 +22,7 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::fill_layer::Impl as FillLayerImpl;
 use mln_style::layers::raster_layer::Impl as RasterLayerImpl;
 use mln_style::layers::{FillLayer, FillLayerProperties, RasterLayer, RasterLayerProperties};
-use mln_style::source::{self, Source};
+use mln_style::source::Source;
 use mln_style::sources::tile_source::TileSource;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::geo::LatLng;
@@ -31,13 +31,10 @@ use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
 
-use crate::render_source::RenderSource;
-use crate::sources::render_raster_source::RenderRasterSource;
-use crate::sources::render_vector_source::RenderVectorSource;
-use crate::tests::TileDriver;
-use crate::tile::tile_workers::SourceCounters;
+use crate::render_source::{self as render_source, RenderSource};
+use crate::tile::source_tiles::SourceTiles;
+use crate::tile::store::{SourceInfo, TileStore};
 use crate::tile_parameters::TileParameters;
-use crate::tile_pyramid::TilePyramid;
 
 /// The requests in flight at once.
 const SLOTS: usize = DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize;
@@ -155,10 +152,9 @@ struct Scene {
     raster: TileSource,
     fill_layers: Vec<Arc<dyn LayerProperties>>,
     raster_layers: Vec<Arc<dyn LayerProperties>>,
-    vector_render_source: RenderVectorSource,
-    raster_render_source: RenderRasterSource,
-    source: Rc<SourceCounters>,
-    driver: TileDriver,
+    vector_render_source: Box<dyn RenderSource>,
+    raster_render_source: Box<dyn RenderSource>,
+    store: TileStore,
     laid_out: bool,
 }
 
@@ -190,11 +186,11 @@ impl Scene {
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(size).unwrap();
 
+        let mut store = crate::tests::pool_store(&run_loop, &thread_pool);
         Scene {
-            vector_render_source: RenderVectorSource::new(source::downcast_arc(&vector.base_impl())),
-            raster_render_source: RenderRasterSource::new(source::downcast_arc(&raster.base_impl())),
-            source: crate::tests::test_source(),
-            driver: TileDriver::pool(&run_loop, &thread_pool),
+            vector_render_source: render_source::create(&vector.base_impl(), &mut store),
+            raster_render_source: render_source::create(&raster.base_impl(), &mut store),
+            store,
             run_loop,
             thread_pool,
             network,
@@ -207,8 +203,9 @@ impl Scene {
         }
     }
 
-    fn pyramids(&self) -> [&TilePyramid; 2] {
-        [&self.vector_render_source.tile_source().tile_pyramid, &self.raster_render_source.tile_source().tile_pyramid]
+    fn pyramids(&self) -> [&SourceTiles; 2] {
+        [&self.vector_render_source, &self.raster_render_source]
+            .map(|source| source.tiles().and_then(|key| self.store.source(key)).expect("the source's tiles"))
     }
 
     /// A frame at `zoom` over `center`: the sources update for the camera,
@@ -226,7 +223,6 @@ impl Scene {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: self.transform.get_state(),
             file_source: Some(file_source),
-            scheduler: self.run_loop.scheduler(),
             mode: MapMode::Continuous,
             // The map's default.
             prefetch_zoom_delta: 4,
@@ -239,17 +235,28 @@ impl Scene {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            source: Rc::clone(&self.source),
-            jobs: None,
-            available_images: Arc::default(),
             font_faces: None,
-            thread_pool: self.thread_pool.clone(),
         };
         // The first frame lays the tiles out.
         let relayout = !self.laid_out;
         self.laid_out = true;
-        self.vector_render_source.update(self.vector.base_impl(), &self.fill_layers, true, relayout, &parameters);
-        self.raster_render_source.update(self.raster.base_impl(), &self.raster_layers, true, relayout, &parameters);
+        let store = &mut self.store;
+        self.vector_render_source.update(
+            store,
+            self.vector.base_impl(),
+            &self.fill_layers,
+            true,
+            relayout,
+            &parameters,
+        );
+        self.raster_render_source.update(
+            store,
+            self.raster.base_impl(),
+            &self.raster_layers,
+            true,
+            relayout,
+            &parameters,
+        );
 
         self.network.end_frame();
         // Until neither the tile workers nor the replies they sent have
@@ -257,12 +264,9 @@ impl Scene {
         loop {
             self.thread_pool.wait_for_empty();
             let ran = self.run_loop.run_once();
-            let mut tiles = Vec::new();
-            self.vector_render_source.for_each_tile(&mut |tile| tiles.push(tile));
-            self.raster_render_source.for_each_tile(&mut |tile| tiles.push(tile));
-            self.driver.update(&tiles);
-            let work = tiles.iter().any(|tile| tile.has_work());
-            if !ran && !work && self.driver.jobs.is_idle() {
+            crate::tests::update(&mut self.store);
+            let work = self.pyramids().iter().any(|source| source.tiles.values().any(SourceInfo::has_work));
+            if !ran && !work && self.store.is_idle() {
                 break;
             }
         }
@@ -289,13 +293,13 @@ impl Scene {
     /// batches of `SLOTS`, with a batch to spare for the requests in flight
     /// when the camera stopped.
     fn frames_needed(&self) -> usize {
-        let tiles: usize = self.pyramids().iter().map(|pyramid| pyramid.get_tiles().len()).sum();
+        let tiles: usize = self.pyramids().iter().map(|source| source.cover().count()).sum();
         (1 + tiles.div_ceil(SLOTS)) * LATENCY
     }
 
     /// The world copies that the vector source draws.
     fn vector_wraps(&self) -> BTreeSet<i16> {
-        self.pyramids()[0].get_rendered_tiles().map(|(id, _)| id.wrap).collect()
+        self.pyramids()[0].rendered().map(|(id, _)| id.wrap).collect()
     }
 }
 

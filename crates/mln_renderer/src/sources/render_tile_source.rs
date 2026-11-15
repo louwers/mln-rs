@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use geometry::Point;
 use glam::Vec2;
@@ -23,19 +23,27 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::{ColorMode, CullFaceMode};
-use mln_map_types::MapDebugOptions;
+use mln_map_types::{MapDebugOptions, MapMode};
+use mln_storage::FileSource;
 use mln_style::expression::Dependency;
 use mln_style::layer::{LayerTypeInfo, layer_type_info};
 use mln_style::layer_properties::{LayerProperties, LayerPropertiesBase};
+use mln_style::source::downcast_arc;
+use mln_style::sources::custom_vector_source::{CustomVectorTileData, TileDataFormat};
+use mln_style::sources::geojson_source::{GeoJSONData, TileFeatures};
+use mln_style::sources::{custom_geometry_source, custom_vector_source, geojson_source_impl, tile_source};
 use mln_style::{layer, source};
-use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
+use mln_style_types::{LineCapType, LineJoinType, SourceType, TranslateAnchorType};
+use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
-use mln_util::Color;
 use mln_util::constants::EXTENT;
+use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
 use mln_util::hash::HashSet;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
+use mln_util::{Color, constants};
 
 use crate::drawable::Drawable;
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
@@ -46,11 +54,17 @@ use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
+use crate::query::FeatureExtensionValue;
 use crate::render_pass::RenderPass;
-use crate::render_source::{RenderSourceBase, RenderTiles, SourcePrepareParameters};
+use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayerGroupMap, DebugType, RenderItem};
-use crate::tile_pyramid::TilePyramid;
+use crate::tile::job::SourceKey;
+use crate::tile::loading::{CustomLoader, CustomLoaderOf, DataOrigin, VectorTileEncoding};
+use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
+use crate::tile::store::TileStore;
+use crate::tile::tile::TileKind;
+use crate::tile_parameters::TileParameters;
 use crate::util::subdivision::subdivide_vertex_line;
 
 pub(crate) struct TileSourceRenderItem {
@@ -457,119 +471,346 @@ impl LayerTweaker for PolylineLayerTweaker {
     }
 }
 
-/// The base of the render sources that provide render tiles.
+/// Where a tile source's data comes from, as its style source has it.
+enum Origin {
+    /// A tileset's tiles: vector, raster or raster-dem.
+    Tileset { tileset: Option<Tileset> },
+    /// A GeoJSON source's data, and whether the source's tiles were made
+    /// with synchronous updates.
+    GeoJson { data: Option<Weak<dyn GeoJSONData>>, synchronous: bool },
+    /// A custom geometry or custom vector source's loader.
+    Custom,
+}
+
+/// The render source of a source with tiles: a view into the tile store,
+/// which keeps the tiles, with the render tiles of the last `prepare`.
 pub(crate) struct RenderTileSource {
     pub(crate) base: RenderSourceBase,
-    pub(crate) tile_pyramid: TilePyramid,
+    key: SourceKey,
+    origin: Origin,
+    fast_pfor_enabled: bool,
     pub(crate) render_tiles: Rc<Vec<RenderTile>>,
     filtered_render_tiles: RefCell<Option<RenderTiles>>,
     render_tiles_sorted_by_y: RefCell<Option<RenderTiles>>,
-
     bearing: f32,
-    // layers: feature state
-    pub(crate) feature_state: crate::source_state::SourceFeatureState,
+}
+
+/// Whether `a` and `b` are both empty or both the same object.
+fn same_data(a: Option<&Arc<dyn GeoJSONData>>, b: Option<&Arc<dyn GeoJSONData>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
+        _ => false,
+    }
+}
+
+/// The property `name`, if it is an unsigned integer.
+fn get_uint_property(properties: &feature::PropertyMap, name: &str) -> Option<u64> {
+    match properties.get(name) {
+        Some(feature::Value::Uint(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+/// The supercluster `extensionGetters`: the `extension_field` of cluster
+/// `cluster_id`, or `None` for a field it doesn't have.
+fn supercluster_extension(
+    cluster_data: &dyn GeoJSONData,
+    extension_field: &str,
+    cluster_id: u32,
+    args: Option<&feature::PropertyMap>,
+) -> Option<Result<FeatureExtensionValue, Error>> {
+    Some(match extension_field {
+        "children" => cluster_data.get_children(cluster_id).map(FeatureExtensionValue::FeatureCollection),
+        "leaves" => {
+            // Offset cannot be set without limit.
+            let (limit, offset) = match args.and_then(|args| Some((get_uint_property(args, "limit")?, args))) {
+                Some((limit, args)) => {
+                    (limit as u32, get_uint_property(args, "offset").map_or(0, |offset| offset as u32))
+                }
+                None => (10, 0),
+            };
+            cluster_data.get_leaves(cluster_id, limit, offset).map(FeatureExtensionValue::FeatureCollection)
+        }
+        "expansion-zoom" => cluster_data
+            .get_cluster_expansion_zoom(cluster_id)
+            .map(|zoom| FeatureExtensionValue::Value(feature::Value::Uint(u64::from(zoom)))),
+        _ => return None,
+    })
 }
 
 impl RenderTileSource {
-    /// A render tile source for `impl_`. Takes no thread pool (see
-    /// `TileCache::new`).
-    pub(crate) fn new(impl_: Arc<dyn source::Impl>) -> Self {
-        let base = RenderSourceBase::new(impl_);
-        let mut tile_pyramid = TilePyramid::new();
-        tile_pyramid.set_observer(base.tile_observer());
+    /// The render source of `impl_`, whose tiles go in `store`.
+    pub(crate) fn new(impl_: Arc<dyn source::Impl>, store: &mut TileStore) -> Self {
+        let (kind, single_layer, origin) = match impl_.type_ {
+            SourceType::Raster => (TileKind::Raster, false, Origin::Tileset { tileset: None }),
+            SourceType::RasterDEM => (TileKind::Dem(RasterEncoding::Mapbox), false, Origin::Tileset { tileset: None }),
+            SourceType::GeoJSON => (TileKind::Geometry, true, Origin::GeoJson { data: None, synchronous: false }),
+            SourceType::CustomVector => (TileKind::Geometry, true, Origin::Custom),
+            SourceType::CustomMVTVector => (TileKind::Geometry, false, Origin::Custom),
+            SourceType::Vector | SourceType::Image => (TileKind::Geometry, false, Origin::Tileset { tileset: None }),
+        };
+        let key = store.add_source(impl_.id.clone(), kind, single_layer);
         RenderTileSource {
-            base,
-            tile_pyramid,
+            base: RenderSourceBase::new(impl_),
+            key,
+            origin,
+            fast_pfor_enabled: false,
             render_tiles: Rc::new(Vec::new()),
             filtered_render_tiles: RefCell::new(None),
             render_tiles_sorted_by_y: RefCell::new(None),
             bearing: 0.0,
-            feature_state: crate::source_state::SourceFeatureState::new(),
         }
     }
 
-    // layers: feature state
-    pub(crate) fn set_feature_state(
+    /// Takes in a tileset source's `impl_`. Returns its tileset, if it has
+    /// tiles; a new tileset clears the source's tiles.
+    fn update_tileset(&mut self, store: &mut TileStore, parameters: &TileParameters<'_>) -> Option<Tileset> {
+        let impl_ = downcast_arc::<tile_source::Impl>(&self.base.base_impl);
+        let Origin::Tileset { tileset: cached } = &mut self.origin else {
+            return None;
+        };
+        let impl_tileset = impl_.tileset.clone();
+        // In Continuous mode, keep the existing tiles if the new tileset is
+        // not yet available, thus providing smart style transitions without
+        // flickering. In other modes, allow clearing the tiles first, before
+        // the early return in order to avoid render tests being flaky.
+        let can_update_tileset = impl_tileset.is_some() || parameters.mode != MapMode::Continuous;
+        let (source, ctx) = store.source_mut(self.key)?;
+        if can_update_tileset && *cached != impl_tileset {
+            *cached = impl_tileset;
+            // TODO: this removes existing buckets, and will cause flickering.
+            // Should instead refresh tile data in place.
+            source.clear_all(ctx);
+            source.info.origin = None;
+        }
+        // A tileset without tiles makes no tiles, and the source counts as
+        // loaded until its tiles are set.
+        let tileset = cached.clone().filter(|tileset| !tileset.tiles.is_empty())?;
+        let encoding = match self.base.base_impl.type_ {
+            // The encoding is decided once, from the first tileset (`isMLT`).
+            SourceType::Vector if tileset.vector_encoding == Some(VectorEncoding::MLT) => {
+                VectorTileEncoding::Mlt { fast_pfor_enabled: self.fast_pfor_enabled }
+            }
+            _ => VectorTileEncoding::Mvt,
+        };
+        if let TileKind::Dem(_) = source.info.kind {
+            source.info.kind = TileKind::Dem(tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox));
+        }
+        let file_source = parameters.file_source.clone();
+        let current = matches!(
+            &source.info.origin,
+            Some(DataOrigin::Tileset { tileset: origin, encoding: current, file_source: current_file_source })
+                if *origin == tileset
+                    && *current == encoding
+                    && same_file_source(current_file_source.as_ref(), file_source.as_ref())
+        );
+        if !current {
+            source.info.origin = Some(DataOrigin::Tileset { tileset: tileset.clone(), encoding, file_source });
+        }
+        Some(tileset)
+    }
+
+    /// Takes in a GeoJSON source's `impl_`: new data loads into its tiles.
+    /// Returns its data, if it has any.
+    fn update_geojson(
         &mut self,
-        source_layer_id: Option<&str>,
-        feature_id: &str,
-        state: &mln_style::expression::expression::FeatureState,
-    ) {
-        self.feature_state.update_state(source_layer_id, feature_id, state);
+        store: &mut TileStore,
+        needs_relayout: bool,
+        parameters: &TileParameters<'_>,
+    ) -> Option<Arc<dyn GeoJSONData>> {
+        let impl_ = downcast_arc::<geojson_source_impl::Impl>(&self.base.base_impl);
+        let Origin::GeoJson { data: current, synchronous } = &mut self.origin else {
+            return None;
+        };
+        let (source, ctx) = store.source_mut(self.key)?;
+        // A tile lays out in the mode it was created with, so a mode change
+        // recreates the tiles.
+        if parameters.is_update_synchronous != *synchronous {
+            *synchronous = parameters.is_update_synchronous;
+            source.clear_all(ctx);
+        }
+        let data = impl_.get_data().and_then(|weak| weak.upgrade());
+        let previous = current.as_ref().and_then(Weak::upgrade);
+        if !same_data(previous.as_ref(), data.as_ref()) {
+            *current = data.as_ref().map(Arc::downgrade);
+            source.info.origin = data.as_ref().map(|data| DataOrigin::GeoJson(Arc::clone(data)));
+            source.info.synchronous = parameters.is_update_synchronous;
+            if parameters.mode != MapMode::Continuous {
+                // Clearing the tiles in order to avoid render tests being
+                // flaky.
+                source.clear_all(ctx);
+            } else if let Some(data) = &data {
+                source.reduce_memory_use(ctx);
+                let max_z = impl_.get_zoom_range().max;
+                let SourceTiles { info, tiles, .. } = source;
+                for tile in tiles.values_mut().filter(|tile| !tile.cached && tile.id.canonical.z <= max_z) {
+                    info.load_geojson(tile, ctx, data, needs_relayout);
+                }
+            }
+        }
+        data
     }
 
-    pub(crate) fn get_feature_state(
-        &self,
-        source_layer_id: Option<&str>,
-        feature_id: &str,
-    ) -> mln_style::expression::expression::FeatureState {
-        self.feature_state.get_state(source_layer_id, feature_id)
-    }
-
-    pub(crate) fn remove_feature_state(
-        &mut self,
-        source_layer_id: Option<&str>,
-        feature_id: Option<&str>,
-        state_key: Option<&str>,
-    ) {
-        self.feature_state.remove_state(source_layer_id, feature_id, state_key);
-    }
-
-    // query
-    pub(crate) fn query_rendered_features(
-        &self,
-        geometry: &[mln_util::geo::ScreenCoordinate],
-        transform_state: &mln_map_types::TransformState,
-        layers: &crate::geometry::feature_index::QueryLayers<'_>,
-        options: &crate::query::RenderedQueryOptions,
-        global_state: Option<&mln_style::expression::GlobalStateMap>,
-        proj_matrix: &mln_util::mat4::Mat4,
-    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
-        self.tile_pyramid.query_rendered_features(
-            geometry,
-            transform_state,
-            layers,
-            options,
-            global_state,
-            proj_matrix,
-            &self.feature_state,
-        )
-    }
-
-    pub(crate) fn query_source_features(
-        &self,
-        options: &crate::query::SourceQueryOptions,
-        global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
-        self.tile_pyramid.query_source_features(options, global_state)
-    }
-
-    pub(crate) fn is_loaded(&self) -> bool {
-        self.tile_pyramid.is_loaded()
+    /// Takes in a custom source's `impl_`, whose new options or loader clear
+    /// the source's tiles. Returns whether it has a loader.
+    fn update_custom(&mut self, store: &mut TileStore, base_impl: &Arc<dyn source::Impl>) -> bool {
+        let previous = std::mem::replace(&mut self.base.base_impl, Arc::clone(base_impl));
+        let Some((source, ctx)) = store.source_mut(self.key) else {
+            return false;
+        };
+        let (differs, loader): (bool, Option<Arc<dyn CustomLoader>>) = if base_impl.type_ == SourceType::CustomVector {
+            let impl_ = downcast_arc::<custom_geometry_source::Impl>(base_impl);
+            let previous = downcast_arc::<custom_geometry_source::Impl>(&previous);
+            let loader = impl_.get_tile_loader().map(|loader| -> Arc<dyn CustomLoader> {
+                Arc::new(CustomLoaderOf {
+                    loader: loader.clone(),
+                    convert: Arc::new(|features: Arc<TileFeatures>| Some(TileData::Features(features))),
+                })
+            });
+            (impl_.differs(&previous), loader)
+        } else {
+            let impl_ = downcast_arc::<custom_vector_source::Impl>(base_impl);
+            let previous = downcast_arc::<custom_vector_source::Impl>(&previous);
+            let fast_pfor_enabled = self.fast_pfor_enabled;
+            let loader = impl_.get_tile_loader().map(|loader| -> Arc<dyn CustomLoader> {
+                Arc::new(CustomLoaderOf {
+                    loader: loader.clone(),
+                    convert: Arc::new(move |(data, format): CustomVectorTileData| {
+                        data.map(|data| match format {
+                            TileDataFormat::Mvt => TileData::Mvt(mln_tile::MvtTile::new(data)),
+                            TileDataFormat::Mlt => TileData::Mlt(mln_tile::MltTile::new(data, fast_pfor_enabled)),
+                        })
+                    }),
+                })
+            });
+            (impl_.differs(&previous), loader)
+        };
+        // Clear the tiles only if the updated source has different tile
+        // options, zoom range or initialization state for a custom tile
+        // loader.
+        if !Arc::ptr_eq(&previous, base_impl) && differs {
+            source.clear_all(ctx);
+        }
+        let has_loader = loader.is_some();
+        if source.info.origin.is_none() || !Arc::ptr_eq(&previous, base_impl) {
+            source.info.origin = loader.map(DataOrigin::Custom);
+        }
+        has_loader
     }
 
     pub(crate) fn create_render_item(&mut self) -> Box<dyn RenderItem> {
         Box::new(TileSourceRenderItem::new(Rc::clone(&self.render_tiles), self.base.base_impl.id.clone()))
     }
+}
 
-    pub(crate) fn prepare(&mut self, parameters: &SourcePrepareParameters<'_>) {
+/// Whether `a` and `b` are both absent or the same file source.
+fn same_file_source(a: Option<&Arc<dyn FileSource>>, b: Option<&Arc<dyn FileSource>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
+        _ => false,
+    }
+}
+
+impl RenderSource for RenderTileSource {
+    fn base(&self) -> &RenderSourceBase {
+        &self.base
+    }
+
+    fn is_loaded(&self, store: &TileStore) -> bool {
+        store.source(self.key).is_none_or(SourceTiles::is_loaded)
+    }
+
+    fn update(
+        &mut self,
+        store: &mut TileStore,
+        base_impl: Arc<dyn source::Impl>,
+        layers: &[Arc<dyn LayerProperties>],
+        needs_rendering: bool,
+        needs_relayout: bool,
+        parameters: &TileParameters<'_>,
+    ) {
+        let (tile_size, zoom_range, bounds) = match &self.origin {
+            Origin::Tileset { .. } => {
+                self.base.base_impl = base_impl;
+                self.base.enabled = needs_rendering;
+                let Some(tileset) = self.update_tileset(store, parameters) else {
+                    return;
+                };
+                let impl_ = downcast_arc::<tile_source::Impl>(&self.base.base_impl);
+                let tile_size = if self.base.base_impl.type_ == SourceType::Vector {
+                    constants::TILE_SIZE_I
+                } else {
+                    impl_.get_tile_size()
+                };
+                (tile_size, tileset.zoom_range, tileset.bounds)
+            }
+            Origin::GeoJson { .. } => {
+                self.base.base_impl = base_impl;
+                self.base.enabled = needs_rendering;
+                if self.update_geojson(store, needs_relayout, parameters).is_none() {
+                    return;
+                }
+                let impl_ = downcast_arc::<geojson_source_impl::Impl>(&self.base.base_impl);
+                (constants::TILE_SIZE_I, impl_.get_zoom_range(), None)
+            }
+            Origin::Custom => {
+                let has_loader = self.update_custom(store, &base_impl);
+                self.base.enabled = needs_rendering;
+                if !has_loader {
+                    return;
+                }
+                if base_impl.type_ == SourceType::CustomVector {
+                    let impl_ = downcast_arc::<custom_geometry_source::Impl>(&base_impl);
+                    (impl_.get_tile_options().tile_size, impl_.get_zoom_range(), None)
+                } else {
+                    let impl_ = downcast_arc::<custom_vector_source::Impl>(&base_impl);
+                    (constants::TILE_SIZE_I, impl_.get_zoom_range(), None)
+                }
+            }
+        };
+        let Some((source, ctx)) = store.source_mut(self.key) else {
+            return;
+        };
+        let update = CoverUpdate {
+            layers,
+            needs_rendering,
+            needs_relayout,
+            parameters,
+            source_impl: &*self.base.base_impl,
+            tile_size,
+            zoom_range,
+            bounds,
+        };
+        source.update_cover(&update, ctx);
+    }
+
+    fn create_render_item(&mut self) -> Box<dyn RenderItem> {
+        RenderTileSource::create_render_item(self)
+    }
+
+    fn prepare(&mut self, store: &mut TileStore, parameters: &SourcePrepareParameters<'_>) {
         self.bearing = parameters.transform.state.get_bearing() as f32;
         *self.filtered_render_tiles.borrow_mut() = None;
         *self.render_tiles_sorted_by_y.borrow_mut() = None;
-        let mut tiles: Vec<RenderTile> = Vec::with_capacity(self.tile_pyramid.rendered_tile_count());
-        for (id, tile) in self.tile_pyramid.get_rendered_tiles() {
+        let pool = store.pool().clone();
+        let Some((source, _)) = store.source_mut(self.key) else {
+            self.render_tiles = Rc::new(Vec::new());
+            return;
+        };
+        // layers: feature state
+        source.coalesce_feature_state();
+        let mut tiles: Vec<RenderTile> = Vec::with_capacity(source.rendered_count());
+        for (id, tile) in source.rendered() {
             let mut render_tile = RenderTile::new(*id, tile);
-            render_tile.prepare(tile, parameters);
+            render_tile.prepare(tile, &pool, parameters);
             tiles.push(render_tile);
         }
-        // layers: feature state
-        // featureState.coalesceChanges(*tiles): RenderTile::setFeatureState
-        // is tile.setFeatureState, applied to the pyramid's tiles directly.
-        self.feature_state.coalesce_changes(self.tile_pyramid.get_rendered_tiles().map(|(_, tile)| tile));
         self.render_tiles = Rc::new(tiles);
     }
 
-    pub(crate) fn release_render_data(&mut self) {
+    fn release_render_data(&mut self) {
         if !self.render_tiles.is_empty() {
             *self.filtered_render_tiles.borrow_mut() = None;
             *self.render_tiles_sorted_by_y.borrow_mut() = None;
@@ -577,15 +818,11 @@ impl RenderTileSource {
         }
     }
 
-    pub(crate) fn update_fading_tiles(&mut self) {
-        self.tile_pyramid.update_fading_tiles();
+    fn tiles(&self) -> Option<SourceKey> {
+        Some(self.key)
     }
 
-    pub(crate) fn has_fading_tiles(&self) -> bool {
-        self.tile_pyramid.has_fading_tiles()
-    }
-
-    pub(crate) fn get_render_tiles(&self) -> Option<RenderTiles> {
+    fn get_render_tiles(&self) -> Option<RenderTiles> {
         let mut filtered = self.filtered_render_tiles.borrow_mut();
         if filtered.is_none() {
             let indices: Vec<usize> = self
@@ -600,7 +837,7 @@ impl RenderTileSource {
         filtered.clone()
     }
 
-    pub(crate) fn get_render_tiles_sorted_by_y_position(&self) -> Option<RenderTiles> {
+    fn get_render_tiles_sorted_by_y_position(&self) -> Option<RenderTiles> {
         let mut sorted = self.render_tiles_sorted_by_y.borrow_mut();
         if sorted.is_none() {
             let source_bearing = self.bearing;
@@ -624,23 +861,46 @@ impl RenderTileSource {
         sorted.clone()
     }
 
-    pub(crate) fn get_raw_render_tiles(&self) -> Rc<Vec<RenderTile>> {
+    fn get_raw_render_tiles(&self) -> Rc<Vec<RenderTile>> {
         Rc::clone(&self.render_tiles)
     }
 
-    pub(crate) fn set_cache_enabled(&mut self, enable: bool) {
-        self.tile_pyramid.set_cache_enabled(enable);
+    /// The "supercluster" extension of a GeoJSON source: a cluster feature's
+    /// "children", "leaves" (`args` "limit", default 10, and "offset",
+    /// default 0) or "expansion-zoom". Anything else is a null value.
+    fn query_feature_extensions(
+        &self,
+        feature: &mln_util::feature::Feature,
+        extension: &str,
+        extension_field: &str,
+        args: Option<&feature::PropertyMap>,
+    ) -> Result<FeatureExtensionValue, Error> {
+        let Origin::GeoJson { data, .. } = &self.origin else {
+            return Ok(FeatureExtensionValue::default());
+        };
+        if extension != "supercluster" {
+            return Ok(FeatureExtensionValue::default());
+        }
+        let Some(cluster_id) = get_uint_property(&feature.properties, "cluster_id") else {
+            return Ok(FeatureExtensionValue::default());
+        };
+        let Some(json_data) = data.as_ref().and_then(Weak::upgrade) else {
+            return Ok(FeatureExtensionValue::default());
+        };
+        supercluster_extension(&*json_data, extension_field, cluster_id as u32, args)
+            .unwrap_or_else(|| Ok(FeatureExtensionValue::default()))
     }
 
-    pub(crate) fn reduce_memory_use(&mut self) {
-        self.tile_pyramid.reduce_memory_use();
+    fn set_fast_pfor_enabled(&mut self, enable: bool) {
+        self.fast_pfor_enabled = enable;
     }
 
-    pub(crate) fn retry_failed_tiles(&self) {
-        self.tile_pyramid.retry_failed_tiles();
-    }
+    fn dump_debug_logs(&self) {}
 
-    pub(crate) fn dump_debug_logs(&self) {
-        self.tile_pyramid.dump_debug_logs();
+    fn get_max_zoom(&self) -> u8 {
+        match &self.origin {
+            Origin::Tileset { tileset: Some(tileset) } => tileset.zoom_range.max,
+            _ => constants::TERRAIN_RGB_MAXZOOM,
+        }
     }
 }

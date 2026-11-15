@@ -20,7 +20,7 @@ use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::render_layer::LayerRenderData;
-use crate::tile::geometry_tile::LayoutResult;
+use crate::tile::contents::LayoutResult;
 use crate::tile::job::SourceStyle;
 
 /// `#[wire(with)]` for a source style's layers, each by key.
