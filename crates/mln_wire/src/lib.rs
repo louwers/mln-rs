@@ -166,6 +166,10 @@ impl<'a> Reader<'a> {
         let mut value = 0u64;
         for shift in (0..64).step_by(7) {
             let byte = self.byte()?;
+            // The tenth byte holds the one bit left of a `u64`.
+            if shift == 63 && byte > 1 {
+                return self.fail("varint too long");
+            }
             value |= u64::from(byte & 0x7f) << shift;
             if byte & 0x80 == 0 {
                 return Some(value);
@@ -800,5 +804,15 @@ mod tests {
             assert!(from_slice::<Shape>(&bytes[..end]).is_err());
         }
         assert_eq!(from_slice::<Shape>(&[9]), Err(Error("unknown variant")));
+    }
+
+    #[test]
+    fn varints_past_64_bits_are_errors() {
+        let mut max = vec![0xff; 9];
+        max.push(0x01);
+        assert_eq!(from_slice::<u64>(&max), Ok(u64::MAX));
+        let mut over = vec![0x80; 9];
+        over.push(0x02);
+        assert!(from_slice::<u64>(&over).is_err());
     }
 }

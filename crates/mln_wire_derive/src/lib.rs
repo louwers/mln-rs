@@ -8,7 +8,8 @@
 //! - `#[wire(default)]` on a struct that implements `Default` reads it into
 //!   its default, one field after another. A struct literal of the fields
 //!   read drops those read so far at each place reading can fail, which
-//!   for a struct of many fields compiles to much more code.
+//!   for a struct of many fields compiles to much more code. Its skipped
+//!   fields keep the struct's default.
 //! - `#[wire(with = "path")]` on a field writes it with `path::write(&field,
 //!   writer)` and reads it with `path::read(reader)`.
 //! - `#[wire(skip)]` on a field leaves it out; it reads as its `Default`, or
