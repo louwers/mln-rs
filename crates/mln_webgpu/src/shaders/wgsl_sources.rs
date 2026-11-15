@@ -1932,7 +1932,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let invW = 1.0 / clip.w;
     let ndcXY = clip.xy * invW;
     out.position = clip;
-    out.pos = (ndcXY + vec2<f32>(1.0)) * 0.5 * paintParams.world_size;
+    out.pos = (ndcXY * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0)) * 0.5 * paintParams.world_size;
 
     var color: vec4<f32>;
 #ifdef HAS_UNIFORM_u_outline_color
@@ -1969,6 +1969,7 @@ struct FillOutlineEvaluatedPropsUBO {
 @group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
 
 struct FragmentInput {
+    @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) opacity: f32,
     @location(2) pos: vec2<f32>,
@@ -1990,7 +1991,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     opacity = in.opacity;
 #endif
 
-    return color * opacity;
+    // The outline fades over a pixel from the line, as in the GL and Vulkan
+    // shaders; the C++ WebGPU source leaves `alpha` out here.
+    let dist = length(in.pos - in.position.xy);
+    let alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    return color * alpha * opacity;
 }
 ",
     ),

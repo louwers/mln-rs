@@ -6,7 +6,6 @@
 // The `layers` argument (C++ `std::unordered_map<std::string, const
 // RenderLayer*>`) is `QueryLayers`.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use geometry::Point;
@@ -21,6 +20,7 @@ use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::grid_index::{BBox, GridIndex};
+use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
@@ -111,8 +111,8 @@ impl FeatureIndex {
             // 16x16 grid -> 32px cell
             grid: GridIndex::new(constants::EXTENT as f32, constants::EXTENT as f32, (constants::EXTENT / 16) as u32),
             sort_index: 0,
-            bucket_layer_ids: HashMap::new(),
-            unique_layer_ids: HashSet::new(),
+            bucket_layer_ids: HashMap::default(),
+            unique_layer_ids: HashSet::default(),
             tile_data,
         }
     }
@@ -275,7 +275,7 @@ impl FeatureIndex {
         tile_id: &OverscaledTileID,
         feature_sort_order: &FeatureSortOrder,
     ) -> Result<QueryResults, Error> {
-        let mut result = QueryResults::new();
+        let mut result = QueryResults::default();
         if self.tile_data.is_none() {
             return Ok(result);
         }
@@ -505,7 +505,7 @@ impl FeatureIndex {
             return Err("a feature index with circles");
         }
         let mut strings: Vec<String> = Vec::new();
-        let mut string_ids: HashMap<*const u8, u32> = HashMap::new();
+        let mut string_ids: HashMap<*const u8, u32> = HashMap::default();
         let mut intern = |s: &Arc<str>| -> u32 {
             *string_ids.entry(s.as_ptr()).or_insert_with(|| {
                 strings.push(s.to_string());

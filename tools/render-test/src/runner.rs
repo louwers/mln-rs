@@ -5,7 +5,6 @@
 // `mln_headless::HeadlessFrontend`, the tests over a mock map, and
 // `--self-check` replaces rendering with the test's expected image.
 
-use std::collections::HashMap;
 use std::fmt::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
@@ -16,6 +15,7 @@ use geometry::Point;
 use mln_image::{decode_image, encode_png};
 use mln_util::feature::Feature;
 use mln_util::geo::LatLng;
+use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -361,7 +361,7 @@ impl TestRunner {
         output_path: PathBuf,
     ) -> Self {
         TestRunner {
-            maps: HashMap::new(),
+            maps: HashMap::default(),
             manifest,
             update_results,
             factory,
@@ -1116,7 +1116,7 @@ fn render_tiles(
     let pixel_ratio = ctx.metadata.pixel_ratio;
     let tile_screen_size = get_tile_screen_pixel_size(pixel_ratio);
 
-    let mut symbol_index: HashMap<Vec<u16>, Vec<SymbolLocationAndStatus>> = HashMap::new();
+    let mut symbol_index: HashMap<Vec<u16>, Vec<SymbolLocationAndStatus>> = HashMap::default();
 
     let mut result = PremultipliedImage::new(Size::new(
         x_dims.len() as u32 * tile_screen_size,

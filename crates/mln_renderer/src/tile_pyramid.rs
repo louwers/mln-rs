@@ -2,7 +2,7 @@
 // maps to the key of the tile in `tiles`: every rendered tile is one of the
 // pyramid's tiles.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -15,6 +15,7 @@ use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{LatLngBounds, WrapMode};
+use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::range::Range;
@@ -626,7 +627,7 @@ impl TilePyramid {
         use mln_map_types::tile_coordinate::TileCoordinate;
         use mln_util::constants;
 
-        let mut result = crate::geometry::feature_index::QueryResults::new();
+        let mut result = crate::geometry::feature_index::QueryResults::default();
         if self.rendered_tiles.is_empty() || geometry.is_empty() {
             return Ok(result);
         }
@@ -761,7 +762,7 @@ impl TilePyramid {
         // tile is tested at three copies and can be rendered at two wraps:
         // these are where this tile's features start in each layer's results.
         let mut canonical_tile: Option<mln_tile_id::CanonicalTileID> = None;
-        let mut canonical_tile_start: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut canonical_tile_start: mln_util::hash::HashMap<String, usize> = mln_util::hash::HashMap::default();
 
         for (id, key) in sorted_tiles {
             let tile = self.tiles[key].as_ref();
@@ -825,7 +826,7 @@ impl TilePyramid {
                     continue;
                 }
 
-                let mut found = crate::geometry::feature_index::QueryResults::new();
+                let mut found = crate::geometry::feature_index::QueryResults::default();
                 tile.query_rendered_features(
                     &mut found,
                     &tile_space_query_geometry,

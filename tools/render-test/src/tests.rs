@@ -97,10 +97,11 @@ fn parses_our_manifest() {
         default.expectations,
         vec![
             format!("{INTEGRATION}/render-tests/background-color/default/"),
-            // platform-macos first: the runner checks the paths from the last
-            // one, so a platform-linux baseline wins where both exist.
-            "testdata/metrics/expectations/platform-macos/render-tests/background-color/default/".to_string(),
+            // platform-linux first, as in C++'s OpenGL manifest: the runner
+            // checks the paths from the last one, so a platform-linux-opengl
+            // baseline wins where both exist.
             "testdata/metrics/expectations/platform-linux/render-tests/background-color/default/".to_string(),
+            "testdata/metrics/expectations/platform-linux-opengl/render-tests/background-color/default/".to_string(),
         ]
     );
     assert_eq!(

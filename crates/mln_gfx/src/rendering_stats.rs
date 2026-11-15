@@ -1,6 +1,5 @@
-use std::collections::{HashMap, HashSet};
-
 use mln_tile_id::OverscaledTileID;
+use mln_util::hash::{HashMap, HashSet};
 
 /// A bounding box in normalized device coordinates, positive up and right. The
 /// default is empty (inverted), so that `include` of any bound

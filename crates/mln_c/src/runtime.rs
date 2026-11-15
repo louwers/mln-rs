@@ -1,12 +1,12 @@
 //! `runtime.h`: runtimes, their event handlers, and what applies to every
 //! runtime in the process, such as the network status.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use ::mln_runtime::{CacheDatabaseOperation, MapId, Runtime, RuntimeEvent, RuntimeOptions};
 use mln_storage::network_status::{NetworkStatus, Status};
+use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
 use crate::callback::Registration;
@@ -85,7 +85,7 @@ pub(crate) unsafe extern "C" fn mln_runtime_create(
         crate::process_exit::watch();
         let runtime = Runtime::new(&options)?;
         *out_runtime =
-            RUNTIMES.insert(Arc::new(RuntimeObject { runtime, maps: Arc::new(Mutex::new(HashMap::new())) }))?;
+            RUNTIMES.insert(Arc::new(RuntimeObject { runtime, maps: Arc::new(Mutex::new(HashMap::default())) }))?;
         Ok(())
     })
 }

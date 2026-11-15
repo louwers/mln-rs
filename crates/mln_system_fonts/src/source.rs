@@ -3,7 +3,6 @@
 
 #![expect(unsafe_code, reason = "memory-mapping a font file is unsafe")]
 
-use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -11,6 +10,7 @@ use std::sync::{Arc, OnceLock};
 use memmap2::Mmap;
 use mln_text::glyph::FontData;
 use mln_text::weight::REGULAR_WEIGHT;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use skrifa::raw::tables::cmap::Cmap;
 use skrifa::raw::tables::fvar::Fvar;

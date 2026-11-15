@@ -11,13 +11,13 @@
 //! once a style declares them.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::SerializingTransport;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_web_host::{pump, shaper, tile_workers};
 
@@ -60,7 +60,7 @@ struct SessionLoop {
 thread_local! {
     /// The loops of the sessions on core workers, which
     /// [`run_session_now`] finds by their session's id.
-    static SESSIONS: RefCell<HashMap<SessionId, Rc<SessionLoop>>> = RefCell::new(HashMap::new());
+    static SESSIONS: RefCell<HashMap<SessionId, Rc<SessionLoop>>> = RefCell::new(HashMap::default());
 }
 
 /// Runs a core worker session's loop in the pump's slices until it stops,

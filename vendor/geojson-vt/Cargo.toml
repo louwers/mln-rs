@@ -19,6 +19,7 @@ doctest = false
 
 [dependencies]
 feature.workspace = true
+foldhash.workspace = true
 geo-traits.workspace = true
 geo-types.workspace = true
 geometry.workspace = true

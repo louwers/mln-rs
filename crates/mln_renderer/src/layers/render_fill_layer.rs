@@ -5,8 +5,6 @@ use std::sync::Arc;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_POS_VERTEX_ATTRIBUTE,
-    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
@@ -32,7 +30,6 @@ use super::{
 };
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
-use crate::buckets::line_bucket::LineLayoutVertex;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
@@ -49,7 +46,6 @@ const FILL_SHADER_NAME: &str = "FillShader";
 const FILL_OUTLINE_SHADER_NAME: &str = "FillOutlineShader";
 const FILL_PATTERN_SHADER_NAME: &str = "FillPatternShader";
 const FILL_OUTLINE_PATTERN_SHADER_NAME: &str = "FillOutlinePatternShader";
-const FILL_OUTLINE_TRIANGULATED_SHADER_NAME: &str = "FillOutlineTriangulatedShader";
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), FillLayerImpl::static_type_info()));
@@ -63,7 +59,6 @@ pub(crate) enum FillVariant {
     FillPattern,
     FillOutline,
     FillOutlinePattern,
-    FillOutlineTriangulated,
 }
 
 impl FillVariant {
@@ -76,7 +71,6 @@ impl FillVariant {
             1 => Some(FillVariant::FillPattern),
             2 => Some(FillVariant::FillOutline),
             3 => Some(FillVariant::FillOutlinePattern),
-            4 => Some(FillVariant::FillOutlineTriangulated),
             _ => None,
         }
     }
@@ -200,7 +194,6 @@ pub(crate) struct RenderFillLayer {
     outline_shader_group: Option<ShaderGroupPtr>,
     pattern_shader_group: Option<ShaderGroupPtr>,
     outline_pattern_shader_group: Option<ShaderGroupPtr>,
-    outline_triangulated_shader_group: Option<ShaderGroupPtr>,
 }
 
 impl RenderFillLayer {
@@ -216,7 +209,6 @@ impl RenderFillLayer {
             outline_shader_group: None,
             pattern_shader_group: None,
             outline_pattern_shader_group: None,
-            outline_triangulated_shader_group: None,
         }
     }
 }
@@ -310,6 +302,12 @@ impl RenderLayer for RenderFillLayer {
         render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
+        // The outlines' line width, which the style spec doesn't give. GL JS
+        // sets none, so it draws 1 px; C++ draws 2 px on OpenGL. The outline
+        // shader fades the pixels on both sides of a fill's edge by their
+        // distance from it, and the render tests' expected images have both.
+        // Metal, WebGPU and devices without wide lines draw 1 px, which
+        // reaches one of the two.
         const LINE_WIDTH: f32 = 2.0;
 
         self.base.stats.rendered_features.clear();
@@ -331,10 +329,6 @@ impl RenderLayer for RenderFillLayer {
             }
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
-
-        if self.outline_triangulated_shader_group.is_none() {
-            self.outline_triangulated_shader_group = shaders.get_shader_group(FILL_OUTLINE_TRIANGULATED_SHADER_NAME);
-        }
 
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(FillLayerTweaker::new(
@@ -442,8 +436,7 @@ impl RenderLayer for RenderFillLayer {
             // when those change.
             let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
                 let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
-                if current && FillVariant::from_type(drawable.get_type()) != Some(FillVariant::FillOutlineTriangulated)
-                {
+                if current {
                     refresh_if_bucket_updated(drawable, |attrs| {
                         read_fill_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
                     });
@@ -472,8 +465,6 @@ impl RenderLayer for RenderFillLayer {
             let do_outline = *evaluated.get::<FillAntialias>()
                 && (self.unevaluated.get::<FillPattern>().is_undefined()
                     || self.unevaluated.get::<FillOutlineColor>().is_undefined());
-            let data_driven_outline =
-                !evaluated.get::<FillOutlineColor>().is_constant() || !evaluated.get::<FillOpacity>().is_constant();
 
             let fill_vertex_count = bucket.vertices.len();
 
@@ -488,35 +479,6 @@ impl RenderLayer for RenderFillLayer {
                     AttributeDataType::Short2,
                 );
             }
-
-            let line_vertex_count = bucket.line_vertices.len();
-            let get_triangulated_attributes = || {
-                let attrs = context.create_vertex_attribute_array();
-                let shared = bucket_vertices(geometry, bucket, &bucket.line_vertices);
-                if let Some(attr) =
-                    attrs.borrow_mut().set(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
-                {
-                    attr.set_shared_raw_data(
-                        Some(Rc::clone(&shared)),
-                        0, // offsetof(LineLayoutVertex, a1)
-                        /*vertexOffset=*/ 0,
-                        size_of::<LineLayoutVertex>() as u32,
-                        AttributeDataType::Short2,
-                    );
-                }
-                if let Some(attr) =
-                    attrs.borrow_mut().set(ID_LINE_DATA_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
-                {
-                    attr.set_shared_raw_data(
-                        Some(shared),
-                        4, // offsetof(LineLayoutVertex, a2)
-                        /*vertexOffset=*/ 0,
-                        size_of::<LineLayoutVertex>() as u32,
-                        AttributeDataType::UByte4,
-                    );
-                }
-                attrs
-            };
 
             let layer_id = self.base.base_impl.id.clone();
             let finish = |builder: &mut dyn DrawableBuilder, type_: FillVariant| {
@@ -542,29 +504,6 @@ impl RenderLayer for RenderFillLayer {
                     self.base.projection_variant,
                     "a_pos",
                 );
-
-                let outline_triangulated_shader = if do_outline && !data_driven_outline {
-                    let outline_properties_as_uniforms: StringIDSetsPair = (
-                        ["a_color", "a_opacity", "a_width"].iter().map(|s| (*s).to_owned()).collect(),
-                        [
-                            ID_LINE_COLOR_VERTEX_ATTRIBUTE,
-                            ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-                            ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-                        ]
-                        .into_iter()
-                        .collect(),
-                    );
-                    self.outline_triangulated_shader_group.as_ref().and_then(|group| {
-                        group.get_or_create_shader(
-                            context,
-                            &outline_properties_as_uniforms,
-                            self.base.projection_variant,
-                            "a_pos",
-                        )
-                    })
-                } else {
-                    None
-                };
 
                 let outline_shader = if do_outline {
                     outline_shader_group.get_or_create_shader(
@@ -610,10 +549,7 @@ impl RenderLayer for RenderFillLayer {
                     && !bucket.triangles.is_empty()
                 {
                     builder.set_shader(fill_shader.clone());
-                    if do_outline
-                        && data_driven_outline
-                        && let Some(outline) = outline_builder.as_mut()
-                    {
+                    if do_outline && let Some(outline) = outline_builder.as_mut() {
                         outline.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
                     }
                     builder.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
@@ -627,35 +563,18 @@ impl RenderLayer for RenderFillLayer {
                     finish(builder.as_mut(), FillVariant::Fill);
                 }
 
-                if do_outline && let Some(builder) = outline_builder.as_mut() {
-                    if !data_driven_outline {
-                        builder.set_sub_layer_index(if self.unevaluated.get::<FillOutlineColor>().is_undefined() {
-                            2
-                        } else {
-                            0
-                        });
-                        // createOutlineTriangulated(outlineBuilder)
-                        if line_vertex_count != 0 {
-                            builder.set_shader(outline_triangulated_shader.clone());
-                            builder.set_raw_vertices(Vec::new(), line_vertex_count, AttributeDataType::Short2);
-                            builder.set_vertex_attributes(Some(get_triangulated_attributes()));
-                            builder.set_segments_shared(
-                                DrawMode::Triangles(),
-                                Some(bucket_indexes(geometry, bucket, &bucket.line_indexes)),
-                                &bucket.line_segments,
-                            );
-                            finish(builder.as_mut(), FillVariant::FillOutlineTriangulated);
-                        }
-                    } else if !bucket.basic_lines.is_empty() {
-                        builder.set_shader(outline_shader.clone());
-                        builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
-                        builder.set_segments_shared(
-                            DrawMode::Lines(LINE_WIDTH),
-                            Some(bucket_indexes(geometry, bucket, &bucket.basic_lines)),
-                            &bucket.basic_line_segments,
-                        );
-                        finish(builder.as_mut(), FillVariant::FillOutline);
-                    }
+                if do_outline
+                    && let Some(builder) = outline_builder.as_mut()
+                    && !bucket.basic_lines.is_empty()
+                {
+                    builder.set_shader(outline_shader.clone());
+                    builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
+                    builder.set_segments_shared(
+                        DrawMode::Lines(LINE_WIDTH),
+                        Some(bucket_indexes(geometry, bucket, &bucket.basic_lines)),
+                        &bucket.basic_line_segments,
+                    );
+                    finish(builder.as_mut(), FillVariant::FillOutline);
                 }
             } else {
                 // Fill with pattern (conformance)

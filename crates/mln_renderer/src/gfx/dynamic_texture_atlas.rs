@@ -4,13 +4,13 @@
 // needs no context here: the GPU texture is created in the upload pass (see
 // dynamic_texture.rs).
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::types::TexturePixelType;
 use mln_style_types::image::{ImageMap, ImagePosition, ImagePositions, ImageType, Impl as ImageImpl, RectU16};
 use mln_text::glyph::{Glyph, GlyphMap, GlyphPosition, GlyphPositions};
+use mln_util::hash::HashMap;
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::serialization::sorted;
 use mln_util::size::Size;

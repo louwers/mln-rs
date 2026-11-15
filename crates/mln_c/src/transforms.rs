@@ -4,7 +4,6 @@
 //! library applies itself.
 
 use core::ffi::c_void;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -14,6 +13,7 @@ use mln_storage::resource::Kind;
 use mln_storage::resource_transform::{FinishedCallback, TransformResult};
 use mln_storage::response::Reason;
 use mln_util::chrono::Timestamp;
+use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
 use crate::buffer::LentText;
@@ -272,7 +272,7 @@ struct Collection(usize);
 impl Collection {
     fn start() -> Self {
         let id = NEXT_COLLECTION.fetch_add(1, Ordering::Relaxed);
-        COLLECTING.lock().get_or_insert_with(HashMap::new).insert(id, HttpHeaders::new());
+        COLLECTING.lock().get_or_insert_with(HashMap::default).insert(id, HttpHeaders::new());
         Self(id)
     }
 

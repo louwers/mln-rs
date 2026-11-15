@@ -5,7 +5,7 @@ mod gtest_prefetch;
 mod support;
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -57,6 +57,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::chrono::Timestamp;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_util::hash::HashSet;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::size::Size;
@@ -1209,7 +1210,7 @@ fn dont_load_unneeded_tiles() {
 }"#,
     );
 
-    let tiles: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    let tiles: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::default()));
 
     {
         let tiles = Rc::clone(&tiles);

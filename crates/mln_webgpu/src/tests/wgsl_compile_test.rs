@@ -7,12 +7,11 @@
 //
 // The shaders on the M1 path must compile; the rest are reported only.
 
-use std::collections::HashMap;
-
 use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shader_group::GLOBE_DEFINE;
+use mln_util::hash::HashMap;
 
 use crate::Device;
 use crate::shaders::shader_program::ShaderProgram;

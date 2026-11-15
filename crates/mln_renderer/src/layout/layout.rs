@@ -5,7 +5,6 @@
 // tile data and the layer name, from which they re-borrow the layer (and
 // re-get features by index) when they need it. Same results.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions};
@@ -13,6 +12,7 @@ use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileLayer};
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_vec_map::VecSet;
 
 use crate::bucket_parameters::BucketParameters;

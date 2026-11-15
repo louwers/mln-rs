@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -15,6 +14,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::error::Error;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
-use crate::buckets::line_bucket::LineLayoutVertex;
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
@@ -48,11 +47,6 @@ pub(crate) struct FillLayoutVertex {
 #[derive(Serialize, Deserialize)]
 pub(crate) struct FillBucket {
     pub(crate) base: BucketBase,
-
-    // MLN_TRIANGULATE_FILL_OUTLINES
-    pub(crate) line_vertices: GeometryVec<LineLayoutVertex>,
-    pub(crate) line_indexes: GeometryVec<u16>,
-    pub(crate) line_segments: Vec<SegmentBase>,
 
     pub(crate) basic_lines: GeometryVec<u16>,
     pub(crate) basic_line_segments: Vec<SegmentBase>,
@@ -90,9 +84,6 @@ impl FillBucket {
         }
         FillBucket {
             base: BucketBase::default(),
-            line_vertices: GeometryVec::default(),
-            line_indexes: GeometryVec::default(),
-            line_segments: Vec::new(),
             basic_lines: GeometryVec::default(),
             basic_line_segments: Vec::new(),
             vertices: GeometryVec::default(),
@@ -100,8 +91,8 @@ impl FillBucket {
             triangle_segments: Vec::new(),
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             paint_property_binders,
-            sdf_patterns: HashMap::new(),
-            mixed_sdf_pattern_layers: HashSet::new(),
+            sdf_patterns: HashMap::default(),
+            mixed_sdf_pattern_layers: HashSet::default(),
         }
     }
 
@@ -120,9 +111,6 @@ impl FillBucket {
             self.vertices.get_mut(),
             self.triangles.get_mut(),
             &mut self.triangle_segments,
-            self.line_vertices.get_mut(),
-            self.line_indexes.get_mut(),
-            &mut self.line_segments,
             self.basic_lines.get_mut(),
             &mut self.basic_line_segments,
             canonical,

@@ -10,7 +10,6 @@
 //   since (the drawable's data holds the geometry time it was built from).
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -38,6 +37,7 @@ use mln_style::layers::hillshade_layer_properties::{
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::ResamplingType;
 use mln_util::constants;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 use mln_util::time::Instant;
@@ -106,7 +106,7 @@ impl RenderHillshadeLayer {
             static_data_shared_vertices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             prepare_layer_tweaker: None,
-            bucket_render_targets: HashMap::new(),
+            bucket_render_targets: HashMap::default(),
         }
     }
 

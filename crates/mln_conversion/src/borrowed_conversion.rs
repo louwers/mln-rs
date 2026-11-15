@@ -7,9 +7,8 @@
 // map read it: each key once, at its first member's position, with its last
 // member's value.
 
-use std::collections::HashSet;
-
 use feature::Value;
+use foldhash::HashSet;
 use geojson::GeoJson;
 pub use serde_json_borrow::{Map as JsonObject, Value as Json};
 
@@ -30,7 +29,7 @@ pub fn member<'a, 'ctx>(object: &'a JsonObject<'ctx>, key: &str) -> Option<&'a J
 pub fn members<'a, 'ctx>(object: &'a JsonObject<'ctx>) -> impl Iterator<Item = (&'a str, &'a Json<'ctx>)> {
     let entries = object.as_vec();
     let (unique, deduplicated) = if has_duplicate_keys(object) {
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let deduplicated: Vec<_> = entries
             .iter()
             .filter(|(name, _)| seen.insert(&**name))
@@ -50,7 +49,7 @@ fn has_duplicate_keys(object: &JsonObject<'_>) -> bool {
     if entries.len() <= 16 {
         entries.iter().enumerate().any(|(i, (name, _))| entries[..i].iter().any(|(earlier, _)| earlier == name))
     } else {
-        let mut seen = HashSet::with_capacity(entries.len());
+        let mut seen = HashSet::with_capacity_and_hasher(entries.len(), foldhash::fast::RandomState::default());
         !entries.iter().all(|(name, _)| seen.insert(&**name))
     }
 }

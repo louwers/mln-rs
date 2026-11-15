@@ -6,7 +6,6 @@
 // are equal without being shared seldom meet in a bucket; the port hashes
 // the filter's structure and groups them.
 
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -15,6 +14,7 @@ use mln_style::layer;
 use mln_style::layer::LayerTypeInfo;
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::VisibilityType;
+use mln_util::hash::{HashMap, RandomState};
 
 pub(crate) struct LayoutGroupKey {
     // Direct comparable fields (fast path)
@@ -116,7 +116,7 @@ pub(crate) fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
     let mut group_map: GroupMap = Vec::with_capacity(layers.len());
     // The first group with each key hash, and for each group the next
     // group with its key's hash.
-    let mut first: HashMap<u64, usize> = HashMap::with_capacity(layers.len());
+    let mut first: HashMap<u64, usize> = HashMap::with_capacity_and_hasher(layers.len(), RandomState::default());
     let mut next: Vec<Option<usize>> = Vec::with_capacity(layers.len());
 
     for layer in layers {
@@ -268,8 +268,7 @@ mod tests {
         assert_eq!(groups.len(), 50);
         assert_eq!(groups, grouped_by_comparison(&layers));
         // Each group's key hashes apart from the others.
-        let hashes: std::collections::HashSet<u64> =
-            layers.iter().map(|l| create_group_key(&l.base_impl).hash).collect();
+        let hashes: mln_util::hash::HashSet<u64> = layers.iter().map(|l| create_group_key(&l.base_impl).hash).collect();
         assert_eq!(hashes.len(), 50);
     }
 }

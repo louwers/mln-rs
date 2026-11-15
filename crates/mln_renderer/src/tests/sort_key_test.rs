@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
@@ -12,6 +11,7 @@ use mln_style_types::image::{ImageDependencies, ImageMap, ImagePosition, ImagePo
 use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileData;
+use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -120,7 +120,7 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
         subdivision_granularity: SubdivisionGranularitySetting::none(),
     };
     let mut glyph_dependencies = GlyphDependencies::default();
-    let mut image_dependencies = ImageDependencies::new();
+    let mut image_dependencies = ImageDependencies::default();
     let available_images = VecSet::from_iter(["marker".to_owned()]);
     let layer_id = properties.base_impl.id.clone();
     let mut layout = layermanager::create_layout(
@@ -159,7 +159,7 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
     let images = ImageMap::from_iter([("marker".to_owned(), marker)]);
     layout.prepare_symbols(&GlyphMap::new(), &GlyphPositions::new(), &images, &image_positions);
     let mut feature_index = FeatureIndex::new(Some(data));
-    let mut render_data: HashMap<String, LayerRenderData> = HashMap::new();
+    let mut render_data: HashMap<String, LayerRenderData> = HashMap::default();
     layout
         .create_bucket(
             &image_positions,

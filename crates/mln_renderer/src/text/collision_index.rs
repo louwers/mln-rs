@@ -2,8 +2,6 @@
 // RefIndexedSubfeature&)>>`) is an `Option<&dyn Fn(&IndexedSubfeature) ->
 // bool>`.
 
-use std::collections::{HashMap, HashSet};
-
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, TransformState};
@@ -15,6 +13,7 @@ use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
 use mln_util::geo::ScreenLineString;
 use mln_util::grid_index::{BBox, GridIndex};
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::intersection_tests::polygon_intersects_polygon;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::vectors::Vec4;
@@ -611,7 +610,7 @@ impl CollisionIndex {
         &self,
         query_geometry: &ScreenLineString,
     ) -> HashMap<u32, Vec<IndexedSubfeature>> {
-        let mut result: HashMap<u32, Vec<IndexedSubfeature>> = HashMap::new();
+        let mut result: HashMap<u32, Vec<IndexedSubfeature>> = HashMap::default();
         if query_geometry.is_empty() || (self.collision_grid.empty() && self.ignored_grid.empty()) {
             return result;
         }
@@ -634,7 +633,7 @@ impl CollisionIndex {
         let ignored_features = self.ignored_grid.query_with_boxes(&envelope);
         features.extend(ignored_features);
 
-        let mut seen_buckets: HashMap<u32, HashSet<usize>> = HashMap::new();
+        let mut seen_buckets: HashMap<u32, HashSet<usize>> = HashMap::default();
         for (feature, bbox) in features {
             // Skip already seen features.
             let seen_features = seen_buckets.entry(feature.bucket_instance_id).or_default();

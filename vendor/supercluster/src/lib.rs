@@ -7,11 +7,11 @@
 // Exceptions (`std::runtime_error`, `bad_variant_access`) are `Err`s with
 // the C++ `what()`.
 
-use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
+use foldhash::HashMap;
 use geo_types::Geometry;
 use geometry::Point;
 use kdbush::{KDBush, Nth};
@@ -305,7 +305,7 @@ impl Supercluster {
             .into_iter()
             .map(|f| Feature { geometry: f.geometry, properties: Arc::new(f.properties), id: f.id })
             .collect();
-        let mut index = Supercluster { features, options, zooms: HashMap::new() };
+        let mut index = Supercluster { features, options, zooms: HashMap::default() };
         let options = &index.options;
 
         // convert and index initial points

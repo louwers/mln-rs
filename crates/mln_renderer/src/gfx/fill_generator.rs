@@ -1,20 +1,16 @@
-// The C++ includes renderer/buckets/{fill,line}_bucket.hpp for the vertex
-// types and layout functions, so the port lives in mln_renderer.
+// The C++ includes renderer/buckets/fill_bucket.hpp for the vertex type and
+// layout function, so the port lives in mln_renderer.
 
-use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_tile::geometry_tile_data::{classify_rings, limit_holes, signed_area};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
-use mln_util::constants::EXTENT;
 use mln_util::error::Error;
-use mln_util::geometry::FeatureType;
 
 use crate::bucket::geometry_too_long;
 use crate::buckets::fill_bucket::{FillBucket, FillLayoutVertex};
-use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::gfx::fill_large_mesh_arrays::{MeshLines, fill_large_mesh_arrays};
-use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_vertex_line};
+use crate::util::subdivision::{SubdivisionResult, subdivide_polygon};
 use crate::util::triangulate::triangulate;
 
 fn add_ring_vertices(vertices: &mut Vec<FillLayoutVertex>, ring: &GeometryCoordinates) -> usize {
@@ -107,42 +103,6 @@ fn add_outline_indices(
     line_segment.index_length += n_vertices * 2;
 }
 
-fn inside_tile_x(point: GeometryCoordinate) -> bool {
-    point.x >= 0 && i32::from(point.x) <= EXTENT
-}
-
-/// On zoom 0 the tile's buffer wraps around the planet onto the tile itself,
-/// so the outline keeps only the runs of vertices inside the tile's X extent,
-/// the way the subdivided fill drops its triangles. `generate` is the
-/// generator's `generate`.
-fn generate_outline(
-    generate: &mut impl FnMut(&GeometryCoordinates, &PolylineGeneratorOptions),
-    ring: &GeometryCoordinates,
-    canonical: &CanonicalTileID,
-    ring_options: &PolylineGeneratorOptions,
-) {
-    if canonical.z != 0 || ring.iter().copied().all(inside_tile_x) {
-        generate(ring, ring_options);
-        return;
-    }
-    let mut run_options = *ring_options;
-    run_options.type_ = FeatureType::LineString;
-    let mut run = GeometryCoordinates::new();
-    for point in ring {
-        if inside_tile_x(*point) {
-            run.push(*point);
-            continue;
-        }
-        if run.len() > 1 {
-            generate(&run, &run_options);
-        }
-        run.clear();
-    }
-    if run.len() > 1 {
-        generate(&run, &run_options);
-    }
-}
-
 fn add_subdivided_polygon(
     subdivided: &SubdivisionResult,
     fill_vertices: &mut Vec<FillLayoutVertex>,
@@ -173,7 +133,9 @@ fn add_subdivided_polygon(
 ///
 /// Every ring keeps its outline: the tile's triangles cut every hole, so
 /// the earcut path's limit on holes doesn't apply. The C++ draws no outline
-/// of such a polygon and draws its triangles unchecked.
+/// of such a polygon and draws its triangles unchecked, and only on Metal
+/// and WebGPU: its OpenGL and Vulkan builds triangulate the polygon again,
+/// which the tile's triangles are there to spare.
 fn add_tessellated_polygon(
     geometry: &GeometryCollection,
     fill_vertices: &mut Vec<FillLayoutVertex>,
@@ -181,7 +143,6 @@ fn add_tessellated_polygon(
     fill_segments: &mut Vec<SegmentBase>,
     basic_line_indexes: &mut Vec<u16>,
     basic_line_segments: &mut Vec<SegmentBase>,
-    line_generator: &mut impl FnMut(&GeometryCoordinates),
 ) -> bool {
     let indices = geometry.get_triangles();
     let total_vertices: usize = geometry.iter().map(Vec::len).sum();
@@ -201,48 +162,33 @@ fn add_tessellated_polygon(
         let n_vertices = add_ring_vertices(fill_vertices, ring);
         if single || signed_area(ring) != 0.0 {
             add_outline_indices(base, n_vertices, basic_line_segments, basic_line_indexes);
-            line_generator(ring);
         }
     }
     add_fill_indices(fill_segments, fill_indexes, indices, start_vertices, total_vertices);
     true
 }
 
-/// Generates the fill triangles and outlines of `geometry`, the outlines both
-/// as triangles and as simple lines (the `MLN_TRIANGULATE_FILL_OUTLINES`
-/// variant the WebGPU fill bucket uses). C++ defaults
-/// `subdivision_granularity` to 1.
+/// Generates the fill triangles of `geometry` and its outlines, as line
+/// primitives: the variant C++ builds without
+/// `MLN_TRIANGULATE_FILL_OUTLINES`. C++ defaults `subdivision_granularity`
+/// to 1.
 ///
 /// Without subdivision, a geometry that carries triangles is filled with
 /// them, and triangulated only when they can't be drawn.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the fill, outline and basic-outline buffers that one pass over the geometry fills, each with its indexes and segments"
+    reason = "the fill and outline buffers that one pass over the geometry fills, each with its indexes and segments"
 )]
 pub(crate) fn generate_fill_and_outline_buffers(
     geometry: &GeometryCollection,
     fill_vertices: &mut Vec<FillLayoutVertex>,
     fill_indexes: &mut Vec<u16>,
     fill_segments: &mut Vec<SegmentBase>,
-    line_vertices: &mut Vec<LineLayoutVertex>,
-    line_indexes: &mut Vec<u16>,
-    line_segments: &mut Vec<SegmentBase>,
     basic_line_indexes: &mut Vec<u16>,
     basic_line_segments: &mut Vec<SegmentBase>,
     canonical: &CanonicalTileID,
     subdivision_granularity: u32,
 ) -> Result<(), Error> {
-    let mut line_generator = PolylineGenerator::new(
-        line_vertices,
-        LineBucket::layout_vertex,
-        line_segments,
-        &SegmentBase::new,
-        get_segment,
-        line_indexes,
-    );
-
-    let line_options = PolylineGeneratorOptions { type_: FeatureType::Polygon, ..Default::default() };
-
     if subdivision_granularity < 2
         && !geometry.get_triangles().is_empty()
         && add_tessellated_polygon(
@@ -252,7 +198,6 @@ pub(crate) fn generate_fill_and_outline_buffers(
             fill_segments,
             basic_line_indexes,
             basic_line_segments,
-            &mut |ring| line_generator.generate(ring, &line_options),
         )
     {
         return Ok(());
@@ -263,14 +208,6 @@ pub(crate) fn generate_fill_and_outline_buffers(
         limit_holes(&mut polygon, 500);
 
         if subdivision_granularity >= 2 {
-            for ring in polygon.iter() {
-                generate_outline(
-                    &mut |ring, options| line_generator.generate(ring, options),
-                    &subdivide_vertex_line(ring, subdivision_granularity, true),
-                    canonical,
-                    &line_options,
-                );
-            }
             add_subdivided_polygon(
                 &subdivide_polygon(&polygon, canonical, subdivision_granularity, true),
                 fill_vertices,
@@ -289,7 +226,6 @@ pub(crate) fn generate_fill_and_outline_buffers(
             let base = fill_vertices.len();
             let n_vertices = add_ring_vertices(fill_vertices, ring);
             add_outline_indices(base, n_vertices, basic_line_segments, basic_line_indexes);
-            line_generator.generate(ring, &line_options);
         }
 
         let indices: Vec<u32> = triangulate(&polygon[..]);
@@ -297,8 +233,4 @@ pub(crate) fn generate_fill_and_outline_buffers(
         add_fill_indices(fill_segments, fill_indexes, &indices, start_vertices, total_vertices);
     }
     Ok(())
-}
-
-fn get_segment(segment: &mut SegmentBase) -> &mut SegmentBase {
-    segment
 }

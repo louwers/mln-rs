@@ -3,10 +3,11 @@
 // `coalesce_changes` takes the tiles of the render source's pyramid (the same
 // tiles).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock};
 
 use mln_style::expression::expression::FeatureState;
+use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{FeatureStates, LayerFeatureStates};
@@ -42,7 +43,7 @@ enum StatesNode {
 /// The empty whole state, which a dropping chain of changes leaves in each
 /// node it takes apart.
 static EMPTY: LazyLock<SourceFeatureStates> =
-    LazyLock::new(|| SourceFeatureStates(Arc::new(StatesNode::Whole(LayerFeatureStates::new()))));
+    LazyLock::new(|| SourceFeatureStates(Arc::new(StatesNode::Whole(LayerFeatureStates::default()))));
 
 /// One feature's new state in a chain of changes.
 struct Change<'a> {
@@ -261,7 +262,7 @@ impl SourceFeatureState {
         self.changed_since_given = false;
         self.state_changes.clear();
         self.deleted_states.clear();
-        let empty = LayerFeatureStates::new();
+        let empty = LayerFeatureStates::default();
         let (base, changes) = states.map_or((&empty, Vec::new()), SourceFeatureStates::base);
         // The features the changes leave alone take their base state, and
         // each changed feature its newest.
@@ -387,7 +388,7 @@ impl SourceFeatureState {
     /// was not rendered in a frame with changes, gets the whole state; a tile
     /// that is up to date gets nothing.
     pub(crate) fn coalesce_changes<'a>(&mut self, tiles: impl IntoIterator<Item = &'a dyn Tile>) {
-        let mut changes: LayerFeatureStates = LayerFeatureStates::new();
+        let mut changes: LayerFeatureStates = LayerFeatureStates::default();
         let state_changes = std::mem::take(&mut self.state_changes);
         for (source_layer, layer_state_changes) in &state_changes {
             let layer_states = changes.entry(source_layer.clone()).or_default();
@@ -477,7 +478,7 @@ impl SourceFeatureState {
                     .insert(feature_id.to_owned(), FeatureState::new());
             }
             (None, _) => {
-                self.deleted_states.insert(source_layer.to_owned(), FeatureStates::new());
+                self.deleted_states.insert(source_layer.to_owned(), FeatureStates::default());
             }
         }
         // A later change turns this removal into removals of the current
@@ -543,7 +544,7 @@ mod tests {
 
         /// The states that the tile was given, each feature's last.
         fn drawn(&self) -> FeatureStates {
-            let mut drawn = FeatureStates::new();
+            let mut drawn = FeatureStates::default();
             for applied in self.applied.borrow().iter() {
                 drawn.extend(applied.get("layer").cloned().unwrap_or_default());
             }
@@ -574,7 +575,7 @@ mod tests {
             .map(|(feature, state)| ((*feature).to_owned(), (*state).clone()))
             .collect();
         let layers = if features.is_empty() {
-            LayerFeatureStates::new()
+            LayerFeatureStates::default()
         } else {
             [("layer".to_owned(), features.clone())].into_iter().collect()
         };
@@ -736,7 +737,7 @@ mod tests {
                 for &third in &ops {
                     let sequence = [first, second, third];
                     let mut state = SourceFeatureState::new();
-                    let mut expected = FeatureStates::new();
+                    let mut expected = FeatureStates::default();
                     let tile = StubTile::new(0);
                     apply(&mut state, &mut expected, Op::Set("1", "a"));
                     apply(&mut state, &mut expected, Op::Set("1", "b"));
@@ -813,7 +814,7 @@ mod tests {
                     let tile = StubTile::new(0);
                     state.set_states(Some(first));
                     render_frame(&mut state, &[&tile]);
-                    apply(&mut state, &mut FeatureStates::new(), op);
+                    apply(&mut state, &mut FeatureStates::default(), op);
                     // A copy, as the same state again changes nothing.
                     let (copy, _) = states_of(&[&second.get("layer", "1"), &second.get("layer", "2")]);
                     state.set_states(Some(&copy));
@@ -920,7 +921,7 @@ mod tests {
     // Dropping a long chain of changes doesn't overflow the stack.
     #[test]
     fn a_long_chain_of_changes_drops() {
-        let mut states = SourceFeatureStates::new(LayerFeatureStates::new());
+        let mut states = SourceFeatureStates::new(LayerFeatureStates::default());
         for index in 0..1_000_000 {
             states = states.with_change("layer", "1", if index % 2 == 0 { hover() } else { FeatureState::new() });
         }

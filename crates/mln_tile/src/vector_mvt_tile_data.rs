@@ -13,7 +13,6 @@
 use std::cell::OnceCell;
 #[cfg(test)]
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
@@ -26,6 +25,7 @@ use mln_tile_id::{
 use mln_util::constants::EXTENT;
 use mln_util::error::Error as MlnError;
 use mln_util::geometry::FeatureType;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 
 use crate::Error;
@@ -293,7 +293,7 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
         let value_count = self.layer.values().len();
         let slots: Vec<Option<usize>> =
             (self.layer.keys().iter()).map(|key| keys.iter().position(|k| k == key)).collect();
-        let mut index: HashMap<Box<[u32]>, u32> = HashMap::new();
+        let mut index: HashMap<Box<[u32]>, u32> = HashMap::default();
         let mut codes = vec![ABSENT; keys.len() + 1];
         let mut groups = FeatureGroups { of_feature: Vec::with_capacity(count), first: Vec::new() };
         for (i, feature) in self.layer.features().enumerate() {

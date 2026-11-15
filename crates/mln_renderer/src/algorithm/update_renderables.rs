@@ -3,9 +3,8 @@
 // and tiles are named by their key in the caller's tile storage (the
 // `OverscaledTileID` the tile was stored under).
 
-use std::collections::HashSet;
-
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
+use mln_util::hash::HashSet;
 use mln_util::range::Range;
 
 use crate::tile::tile::TileNecessity;
@@ -37,7 +36,7 @@ pub(crate) fn update_renderables<C: RenderablesContext>(
     zoom_range: Range<u8>,
     max_parent_overscale_factor: Option<u8>,
 ) {
-    let mut checked: HashSet<OverscaledTileID> = HashSet::new();
+    let mut checked: HashSet<OverscaledTileID> = HashSet::default();
     let mut covered;
     let mut parent_or_child_tile_found;
     let mut overscaled_z: i32;

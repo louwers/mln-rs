@@ -25,6 +25,7 @@ pub mod feature;
 pub mod font_stack;
 pub mod geometry;
 pub mod grid_index;
+pub mod hash;
 #[cfg(target_family = "wasm")]
 pub mod host_bytes;
 pub mod http_header;

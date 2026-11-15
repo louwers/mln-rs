@@ -24,8 +24,8 @@ use crate::render_layer::RenderLayer;
 
 pub(crate) type BucketPtr = Arc<dyn Bucket>;
 
-pub(crate) type FeatureStates = std::collections::HashMap<String, mln_style::expression::expression::FeatureState>;
-pub type LayerFeatureStates = std::collections::HashMap<String, FeatureStates>;
+pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
+pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RetainedFeature {

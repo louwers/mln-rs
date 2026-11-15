@@ -20,13 +20,13 @@
 // longer takes replies (its mailbox is closed).
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
 use mln_actor::{LocalObject, SchedulerPtr, TaggedScheduler, Thread, scheduler};
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
@@ -120,7 +120,7 @@ impl SerializingTransport {
                 instances,
                 codecs: (0..count).map(|_| RefCell::new(MapCodec::new())).collect(),
                 synchronous: InProcessTransport::new(synchronous),
-                tiles: RefCell::new(HashMap::new()),
+                tiles: RefCell::new(HashMap::default()),
                 next_tile: Cell::new(0),
                 next_instance: Cell::new(0),
                 receive_time: Cell::new(Duration::ZERO),

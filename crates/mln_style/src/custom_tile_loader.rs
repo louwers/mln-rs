@@ -7,13 +7,13 @@
 // and tiles hear about data through their own mailboxes on the render
 // thread.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
+use mln_util::hash::HashMap;
 
 /// Called with the canonical ID of a tile that the map needs, or no longer
 /// needs. It runs on a background thread.
@@ -82,8 +82,8 @@ impl<D: Clone> CustomTileLoader<D> {
         CustomTileLoader {
             fetch_tile_function,
             cancel_tile_function,
-            tile_states: HashMap::new(),
-            data_cache: HashMap::new(),
+            tile_states: HashMap::default(),
+            data_cache: HashMap::default(),
         }
     }
 
@@ -196,7 +196,7 @@ impl<D: Clone> CustomTileLoader<D> {
 
     /// Invalidates each tile that `bounds` intersect, at the tile's own zoom.
     pub fn invalidate_region(&mut self, bounds: &LatLngBounds) {
-        let mut tile_ranges: HashMap<u8, TileRange> = HashMap::new();
+        let mut tile_ranges: HashMap<u8, TileRange> = HashMap::default();
         let intersecting: Vec<CanonicalTileID> = self
             .tile_states
             .keys()

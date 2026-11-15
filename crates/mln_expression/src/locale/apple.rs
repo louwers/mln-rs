@@ -10,9 +10,9 @@
 #![expect(unsafe_code, reason = "Foundation through objc2 is the FFI here")]
 
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::sync::OnceLock;
 
+use mln_util::hash::HashSet;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_core_foundation::{CFNumberFormatter, CFString};

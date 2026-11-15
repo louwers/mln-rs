@@ -268,8 +268,8 @@ fn mt19937_matches_the_standard() {
 }
 
 thread_local! {
-    static LOCAL_CALLBACKS: RefCell<std::collections::HashMap<u64, Box<dyn FnOnce()>>> =
-        RefCell::new(std::collections::HashMap::new());
+    static LOCAL_CALLBACKS: RefCell<mln_util::hash::HashMap<u64, Box<dyn FnOnce()>>> =
+        RefCell::new(mln_util::hash::HashMap::default());
 }
 
 /// A `Send` handle for a closure that runs on the calling thread only. The

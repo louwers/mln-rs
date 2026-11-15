@@ -8,7 +8,6 @@
 // `GeometryTileFeature::error`, as VectorMVTTileFeature does.
 
 use std::cell::OnceCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
@@ -19,6 +18,7 @@ use mln_tile_id::{
 use mln_util::constants::EXTENT;
 use mln_util::error::Error as MlnError;
 use mln_util::geometry::FeatureType;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use parking_lot::Mutex;
 
@@ -236,7 +236,7 @@ impl GeometryTileLayer for VectorMLTTileLayer {
             .filter_map(|key| layer.get_property_column(key))
             .map(mlt::PresentProperties::codes)
             .collect::<Option<_>>()?;
-        let mut index: HashMap<Box<[Option<u64>]>, u32> = HashMap::new();
+        let mut index: HashMap<Box<[Option<u64>]>, u32> = HashMap::default();
         let mut codes = vec![None; columns.len() + 1];
         let mut groups = FeatureGroups { of_feature: Vec::with_capacity(count), first: Vec::new() };
         for (i, feature) in features.iter().enumerate() {

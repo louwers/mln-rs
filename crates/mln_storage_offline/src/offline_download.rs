@@ -11,7 +11,7 @@
 // iterator). `RunLoop::invokeCancellable` is `invoke_cancellable` below.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::rc::Rc;
 #[cfg(test)]
 use std::rc::Weak;
@@ -38,6 +38,7 @@ use mln_text::glyph::{
 };
 use mln_tile_id::tile_id::CanonicalTileID;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
+use mln_util::hash::HashSet;
 use mln_util::i18n::glyph_range_is_entirely_locally_generated;
 use mln_util::range::Range;
 use mln_util::tileset::Tileset;
@@ -217,7 +218,7 @@ impl OfflineDownload {
             observer: RefCell::new(Rc::new(NullObserver)),
             requests: RefCell::new(VecMap::new()),
             next_request_id: Cell::new(0),
-            required_source_urls: RefCell::new(HashSet::new()),
+            required_source_urls: RefCell::new(HashSet::default()),
             resources_remaining: RefCell::new(VecDeque::new()),
             resources_to_be_marked_as_used: RefCell::new(Vec::new()),
             buffer: RefCell::new(Vec::new()),

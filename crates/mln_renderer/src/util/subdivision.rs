@@ -4,11 +4,10 @@
 // 16-bit range and an empty ring, which 16-bit tile geometry can't produce;
 // the port panics with the same messages, as broken invariants.
 
-use std::collections::HashMap;
-
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
+use mln_util::hash::HashMap;
 
 use crate::util::triangulate::triangulate;
 
@@ -39,7 +38,7 @@ impl Subdivider {
     fn new(granularity: u32, canonical: &CanonicalTileID) -> Self {
         Subdivider {
             vertices: Vec::new(),
-            dictionary: HashMap::new(),
+            dictionary: HashMap::default(),
             canonical: *canonical,
             granularity,
             cell_size: f64::from(EXTENT) / f64::from(granularity),

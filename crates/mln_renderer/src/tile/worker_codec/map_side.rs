@@ -2,13 +2,13 @@
 // instance: encodes what the tiles send their workers in that instance and
 // decodes what the workers send back.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_style_types::image::SharedImage;
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::{payload, shared};
 use parking_lot::Mutex;
@@ -82,7 +82,7 @@ impl Default for MapCodec {
                 .origin::<SharedTileDataKind>()
                 .copies::<SharedTexture>(),
             atlas: Arc::default(),
-            tiles: HashMap::new(),
+            tiles: HashMap::default(),
         }
     }
 }

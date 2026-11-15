@@ -18,7 +18,6 @@
 // (tile_worker_transport.rs), so that a worker can also run in another
 // wasm instance.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -34,6 +33,7 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileFeature};
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
@@ -228,7 +228,7 @@ impl GeometryTileWorker {
             pixel_ratio,
             capture_rendered_features,
             feature_index: None,
-            render_data: HashMap::new(),
+            render_data: HashMap::default(),
             state: State::Idle,
             correlation_id: 0,
             image_correlation_id: 0,
@@ -240,10 +240,10 @@ impl GeometryTileWorker {
             glyph_map: GlyphMap::new(),
             dynamic_texture_atlas,
             font_faces,
-            pending_image_dependencies: ImageDependencies::new(),
+            pending_image_dependencies: ImageDependencies::default(),
             icon_map: ImageMap::new(),
             pattern_map: ImageMap::new(),
-            version_map: ImageVersionMap::new(),
+            version_map: ImageVersionMap::default(),
             available_images: Arc::new(VecSet::new()),
             show_collision_boxes,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
@@ -650,7 +650,7 @@ impl GeometryTileWorker {
         self.feature_index = Some(feature_index);
 
         let mut glyph_dependencies = GlyphDependencies::default();
-        let mut image_dependencies = ImageDependencies::new();
+        let mut image_dependencies = ImageDependencies::default();
         let mut filter_groups = FilterGroups::default();
         let unavailable_images = UnavailableImages::start();
 
@@ -713,7 +713,7 @@ impl GeometryTileWorker {
                     self.layouts.push(layout);
                 } else {
                     layout.create_bucket(
-                        &ImagePositions::new(),
+                        &ImagePositions::default(),
                         feature_index,
                         &mut self.render_data,
                         self.first_load,
@@ -764,8 +764,8 @@ impl GeometryTileWorker {
                     bucket.add_feature(
                         &*feature,
                         geometries,
-                        &ImagePositions::new(),
-                        &PatternLayerMap::new(),
+                        &ImagePositions::default(),
+                        &PatternLayerMap::default(),
                         i,
                         &self.id.canonical,
                     )?;

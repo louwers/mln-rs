@@ -5,12 +5,12 @@
 #![expect(unsafe_code, reason = "Metal through objc2 is the FFI here")]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
 use mln_mtl::surface_target::{Overlay, OverlayTarget};
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -155,7 +155,7 @@ impl Painter {
         let pipeline = device
             .newRenderPipelineStateWithDescriptor_error(&descriptor)
             .map_err(|e| e.localizedDescription().to_string())?;
-        Ok(Painter { pipeline, textures: HashMap::new() })
+        Ok(Painter { pipeline, textures: HashMap::default() })
     }
 
     /// Applies one of egui's texture updates: a whole new texture, or a

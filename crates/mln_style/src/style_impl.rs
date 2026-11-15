@@ -29,7 +29,7 @@
 //   C++ lambda.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -38,6 +38,7 @@ use mln_actor::{TaggedScheduler, scheduler};
 use mln_sprite::{SpriteLoader, SpriteLoaderObserver};
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 
@@ -289,7 +290,7 @@ impl Impl {
     ) -> Self {
         let shared = Rc::new(RefCell::new(SpriteShared {
             images: Arc::new(Vec::new()),
-            sprites_loading_status: HashMap::new(),
+            sprites_loading_status: HashMap::default(),
             last_error: None,
             observer: None,
         }));

@@ -5,7 +5,7 @@
 
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -40,6 +40,7 @@ use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
+use mln_util::hash::HashSet;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 // layers: debug

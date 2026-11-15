@@ -2,7 +2,6 @@
 // the features its filter accepted and gets the features again from the
 // source layer in `create_bucket`.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
@@ -16,6 +15,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketPtr};

@@ -20,7 +20,6 @@
 // timestamp query extensions.
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Once;
 
@@ -47,6 +46,7 @@ use mln_gfx::types::{StencilOpType, TextureChannelDataType};
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::Color;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 

@@ -17,6 +17,7 @@ doctest = false
 
 [dependencies]
 feature.workspace = true
+foldhash.workspace = true
 geojson.workspace = true
 serde.workspace = true
 serde_json.workspace = true

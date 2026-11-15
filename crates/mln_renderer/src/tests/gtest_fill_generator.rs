@@ -7,7 +7,6 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, Ge
 use mln_util::constants::EXTENT;
 
 use crate::buckets::fill_bucket::FillLayoutVertex;
-use crate::buckets::line_bucket::LineLayoutVertex;
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
 use crate::util::subdivision::{SubdivisionResult, subdivide_polygon};
 
@@ -31,9 +30,6 @@ struct Buffers {
     fill_vertices: Vec<FillLayoutVertex>,
     fill_indexes: Vec<u16>,
     fill_segments: Vec<SegmentBase>,
-    line_vertices: Vec<LineLayoutVertex>,
-    line_indexes: Vec<u16>,
-    line_segments: Vec<SegmentBase>,
     basic_line_indexes: Vec<u16>,
     basic_line_segments: Vec<SegmentBase>,
 }
@@ -46,9 +42,6 @@ fn generate(geometry: &GeometryCollection, canonical: &CanonicalTileID, granular
         &mut buffers.fill_vertices,
         &mut buffers.fill_indexes,
         &mut buffers.fill_segments,
-        &mut buffers.line_vertices,
-        &mut buffers.line_indexes,
-        &mut buffers.line_segments,
         &mut buffers.basic_line_indexes,
         &mut buffers.basic_line_segments,
         canonical,
@@ -121,25 +114,23 @@ fn mesh_lines(mesh: &SubdivisionResult) -> Vec<Line> {
     lines
 }
 
-// The line vertex packs the tile X doubled, with the round-join bit in the
-// low bit.
-fn any_outline_vertex_outside_tile_x(vertices: &[LineLayoutVertex]) -> bool {
-    vertices.iter().any(|vertex| {
-        let x = vertex.a1[0] / 2;
-        x < 0 || i32::from(x) > EXTENT
-    })
+fn any_line_outside_tile_x(lines: &[Line]) -> bool {
+    lines.iter().any(|line| [line[0], line[2]].iter().any(|&x| x < 0 || i32::from(x) > EXTENT))
 }
 
+// The C++ test checks the outline triangles, which the port doesn't build:
+// here the outline is its lines.
 // gtest: FillGenerator.GlobeZoomZeroOutlineStaysInsideTheTile
 #[test]
 fn globe_zoom_zero_outline_stays_inside_the_tile() {
     let wide = square(-2000, 1000, EXTENT_I16 + 2000, 2000);
     for zoom in [0u8, 1] {
         let buffers = generate(&wide, &CanonicalTileID::new(zoom, 0, 0), 8);
-        assert_ne!(buffers.line_vertices, Vec::<LineLayoutVertex>::new());
+        let lines = drawn_lines(&buffers.fill_vertices, &buffers.basic_line_indexes, &buffers.basic_line_segments);
+        assert_ne!(lines, Vec::<Line>::new());
         // Only the zoom 0 tile wraps onto itself; every other zoom keeps the
         // outline of its buffer.
-        assert_eq!(zoom != 0, any_outline_vertex_outside_tile_x(&buffers.line_vertices), "zoom {zoom}");
+        assert_eq!(zoom != 0, any_line_outside_tile_x(&lines), "zoom {zoom}");
     }
 }
 
@@ -153,7 +144,7 @@ fn globe_subdivides_pretessellated_polygons() {
     // The C++ lambda `generate`: what each buffer gets.
     let counts = |geometry: &GeometryCollection, granularity: u32| {
         let buffers = generate(geometry, &CanonicalTileID::new(1, 0, 0), granularity);
-        (buffers.fill_vertices.len(), buffers.fill_indexes.len(), buffers.line_vertices.len())
+        (buffers.fill_vertices.len(), buffers.fill_indexes.len(), buffers.basic_line_indexes.len())
     };
     let mut pretessellated = square(1000, 1000, 7000, 7000);
     pretessellated.set_triangles(Arc::from(&TRIANGLES[..]), 0..TRIANGLES.len());
@@ -216,11 +207,10 @@ fn covered_area(triangles: &[Triangle]) -> i64 {
 }
 
 /// The outlines and triangles a geometry draws.
-fn drawn(buffers: &Buffers) -> (Vec<Triangle>, Vec<Line>, &[LineLayoutVertex]) {
+fn drawn(buffers: &Buffers) -> (Vec<Triangle>, Vec<Line>) {
     (
         drawn_triangles(&buffers.fill_vertices, &buffers.fill_indexes, &buffers.fill_segments),
         drawn_lines(&buffers.fill_vertices, &buffers.basic_line_indexes, &buffers.basic_line_segments),
-        &buffers.line_vertices,
     )
 }
 
@@ -309,12 +299,11 @@ fn mlt_polygons_fill_with_the_triangles_the_tile_carries() {
 
         let tessellated = generate(geometry, &canonical, 1);
         let earcut = generate(&GeometryCollection::from(geometry.to_vec()), &canonical, 1);
-        let (triangles, lines, line_vertices) = drawn(&tessellated);
-        let (earcut_triangles, earcut_lines, earcut_line_vertices) = drawn(&earcut);
+        let (triangles, lines) = drawn(&tessellated);
+        let (earcut_triangles, earcut_lines) = drawn(&earcut);
         assert_eq!(carried, &triangles, "feature {i}");
         assert_eq!(covered_area(&earcut_triangles), covered_area(&triangles), "feature {i}");
         assert_eq!(earcut_lines, lines, "feature {i}");
-        assert_eq!(earcut_line_vertices, line_vertices, "feature {i}");
     }
 }
 
@@ -371,9 +360,8 @@ fn pretessellated_outlines_skip_rings_without_an_area() {
     pretessellated.set_triangles(Arc::from(&[0u32, 1, 2][..]), 0..3);
     let canonical = CanonicalTileID::new(14, 0, 0);
     let earcut = generate(&geometry, &canonical, 1);
-    let (_, earcut_lines, earcut_line_vertices) = drawn(&earcut);
+    let (_, earcut_lines) = drawn(&earcut);
     let buffers = generate(&pretessellated, &canonical, 1);
-    let (_, lines, line_vertices) = drawn(&buffers);
+    let (_, lines) = drawn(&buffers);
     assert_eq!(earcut_lines, lines);
-    assert_eq!(earcut_line_vertices, line_vertices);
 }

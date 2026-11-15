@@ -2,10 +2,11 @@
 // `std::unordered_multimap` is a map from hash to a bucket of weak
 // references.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Weak};
 
+use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
 use crate::glyph::{Glyph, GlyphID};
@@ -40,7 +41,7 @@ struct Table<T> {
 
 impl<T> Default for Table<T> {
     fn default() -> Self {
-        Table { buckets: HashMap::new(), len: 0, next_sweep: MIN_SWEEP }
+        Table { buckets: HashMap::default(), len: 0, next_sweep: MIN_SWEEP }
     }
 }
 

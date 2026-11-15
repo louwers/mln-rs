@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::fill_layer_ubo::{
-    FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO,
-    FillOutlineTriangulatedDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO, FillTilePropsUnionUBO,
+    FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
+    FillPatternTilePropsUBO, FillTilePropsUnionUBO,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
@@ -210,15 +210,6 @@ impl LayerTweaker for FillLayerTweaker {
                         sdf: sdf_pattern,
                         pad2: 0.0,
                     };
-                }
-                Some(FillVariant::FillOutlineTriangulated) => {
-                    ubo.set_fill_outline_triangulated(&FillOutlineTriangulatedDrawableUBO {
-                        matrix: cast_matrix(&matrix),
-                        ratio: 1.0f32 / tile_id.pixels_to_tile_units(1.0, parameters.state.get_zoom() as f32),
-                        pad1: 0.0,
-                        pad2: 0.0,
-                        pad3: 0.0,
-                    });
                 }
                 None => {
                     if cfg!(debug_assertions) {

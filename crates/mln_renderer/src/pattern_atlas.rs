@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
 use mln_gfx::UploadPass;
 use mln_gfx::texture2d::{Texture2DPtr, upload_image};
 use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
+use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -38,7 +37,7 @@ impl PatternAtlas {
     pub(crate) fn new() -> Self {
         PatternAtlas {
             allocator: BucketedAtlasAllocator::new(size2(64, 64)),
-            patterns: HashMap::new(),
+            patterns: HashMap::default(),
             atlas_image: PremultipliedImage::new(Size::new(0, 0)),
             atlas_texture_2d: None,
             dirty: true,

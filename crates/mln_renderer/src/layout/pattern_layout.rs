@@ -10,7 +10,6 @@
 // again in `create_bucket` (C++ keeps the `unique_ptr<GeometryTileFeature>`).
 // Getting a feature twice yields the same feature.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_style::PropertyEvaluationParameters;
@@ -25,6 +24,7 @@ use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::{VecMap, VecSet};
 
@@ -179,7 +179,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                 }
             }
 
-            let mut pattern_dependency_map = PatternLayerMap::new();
+            let mut pattern_dependency_map = PatternLayerMap::default();
             if has_pattern {
                 for layer_properties in group {
                     let layer_id = &layer_properties.base_impl.id;

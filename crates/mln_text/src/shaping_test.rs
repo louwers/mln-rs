@@ -94,7 +94,7 @@ fn shape_line_label_with(text: &str, writing_mode: WritingModeType, allow_vertic
         &TaggedString::new(u(text), SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, 0, None)),
         writing_mode,
         allow_vertical_placement,
-        &ImagePositions::new(),
+        &ImagePositions::default(),
     )
 }
 
@@ -137,7 +137,7 @@ fn zwsp() {
     glyphs.entry(font_stack_hash(&font_stack)).or_default().insert(GlyphID::from('中' as u16), Some(immutable_glyph));
     let mut glyph_positions = GlyphPositions::new();
     glyph_positions.entry(font_stack_hash(&font_stack)).or_default().insert(GlyphID::from('中' as u16), glyph_position);
-    let image_positions = ImagePositions::new();
+    let image_positions = ImagePositions::default();
 
     let mut test_get_shaping = |string: &TaggedString, max_width_in_chars: u32| {
         get_shaping(
@@ -470,7 +470,7 @@ fn vertical_missing_glyph_preserves_indices() {
         &mut bidi,
         &glyphs,
         &glyph_positions,
-        &ImagePositions::new(),
+        &ImagePositions::default(),
         ONE_EM,
         ONE_EM,
         false,
@@ -593,7 +593,7 @@ fn vertical_glyph_orientation_respects_formatted_sections() {
     text.add_text_section(&u("CD"), 0.5, &font_stack, GlyphIDType::FontPBF, true, None);
 
     let orientations =
-        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::new()));
+        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::default()));
     let expected = expect(&[('A', "along-line"), ('B', "along-line"), ('C', "along-line"), ('D', "along-line")]);
     assert_eq!(orientations, expected);
 }
@@ -619,7 +619,7 @@ fn vertical_glyph_orientation_delimits_inline_images() {
         None,
     )
     .unwrap();
-    let mut image_positions = ImagePositions::new();
+    let mut image_positions = ImagePositions::default();
     image_positions.insert("image".to_string(), ImagePosition::new(RectU16 { x: 0, y: 0, w: 14, h: 26 }, &image, 0));
 
     let shaped_line_label = shape_tagged_text(&text, WritingModeType::Vertical, false, &image_positions);
@@ -649,7 +649,7 @@ fn vertical_glyph_orientation_delimits_native_glyph_sections() {
     text.add_text_section(&u("D"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
 
     let orientations =
-        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::new()));
+        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::default()));
     let expected = expect(&[('A', "upright"), ('B', "upright"), ('C', "along-line"), ('D', "upright")]);
     assert_eq!(orientations, expected);
 }
@@ -684,7 +684,7 @@ fn shaped_codes(shaping: &Shaping) -> Vec<u16> {
 }
 
 fn shape_horizontal(text: &TaggedString) -> Shaping {
-    shape_tagged_text(text, WritingModeType::Horizontal, false, &ImagePositions::new())
+    shape_tagged_text(text, WritingModeType::Horizontal, false, &ImagePositions::default())
 }
 
 // gtest: Shaping.RightToLeftShapedSectionBeforeLatin
@@ -801,7 +801,7 @@ fn break_before_left_parenthesis() {
         glyphs.entry(font_stack_hash(&font_stack)).or_default().entry(id).or_insert(Some(Arc::new(glyph)));
         glyph_positions.entry(font_stack_hash(&font_stack)).or_default().entry(id).or_insert(glyph_position);
     }
-    let image_positions = ImagePositions::new();
+    let image_positions = ImagePositions::default();
 
     let mut glyphs_per_line = |text: &str| {
         let shaping = get_shaping(

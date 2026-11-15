@@ -19,7 +19,6 @@
 // pending.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -27,6 +26,7 @@ use mln_actor::TaggedScheduler;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
@@ -200,7 +200,7 @@ impl TileWorkerHost {
             codec: Arc::new(Mutex::new(WorkerCodec::new())),
             workers: InProcessTransport::new(workers),
             replies: Arc::new(replies),
-            hosted: RefCell::new(HashMap::new()),
+            hosted: RefCell::new(HashMap::default()),
         }
     }
 

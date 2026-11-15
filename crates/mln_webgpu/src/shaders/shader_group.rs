@@ -1,7 +1,6 @@
 // The C++ `ShaderGroup<BuiltIn ShaderID>` template is one type here holding
 // the `BuiltIn` value.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
@@ -11,6 +10,7 @@ use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::util_hash::hash_combine;
+use mln_util::hash::HashMap;
 
 use crate::context::Context;
 use crate::shaders::shader_program::ShaderProgram;
@@ -70,7 +70,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
             return Some(shader);
         }
 
-        let mut additional_defines = HashMap::new();
+        let mut additional_defines = HashMap::default();
         Self::add_additional_defines(properties_as_uniforms, &mut additional_defines);
         if variant == ProjectionVariant::Globe {
             additional_defines.insert(GLOBE_DEFINE.to_owned(), String::new());
@@ -86,7 +86,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
             None => (format!("{common_prelude}{vert}"), format!("{common_prelude}{frag}")),
         };
 
-        let mut define_set: HashMap<String, bool> = HashMap::new();
+        let mut define_set: HashMap<String, bool> = HashMap::default();
         for key in self.program_parameters.get_defines().keys() {
             define_set.entry(key.clone()).or_insert(true);
         }

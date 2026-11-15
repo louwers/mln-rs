@@ -2961,7 +2961,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float4 position = projectTile(float2(vertx.position), float2(vertx.position), projectionVector[uboIndex]);
     return {
         .position       = position,
-        .pos            = (position.xy / position.w + 1.0) / 2.0 * paintParams.world_size,
+        .pos            = (position.xy / position.w * float2(1.0, -1.0) + 1.0) / 2.0 * paintParams.world_size,
 #if !defined(HAS_UNIFORM_u_outline_color)
         .outline_color  = half4(unpack_mix_color(vertx.outline_color, drawable.outline_color_t)),
 #endif
@@ -2977,11 +2977,10 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-//   TODO: Cause metal line primitive only support draw 1 pixel width line
-//   use alpha to provide edge antialiased is no point
-//   Should triangate the lines into triangles to support thick line and edge antialiased.
-//    float dist = length(in.pos - in.position.xy);
-//    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    // The outline fades over a pixel from the line, as in the GL and Vulkan
+    // shaders; the C++ Metal source leaves `alpha` out here.
+    const float dist = length(in.pos - in.position.xy);
+    const float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
 
 #if defined(HAS_UNIFORM_u_outline_color)
     const half4 color = half4(props.outline_color);
@@ -2995,7 +2994,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const half opacity = in.opacity;
 #endif
 
-    return half4(color * opacity);
+    return half4(color * opacity * half(alpha));
 }
 ",
 };
