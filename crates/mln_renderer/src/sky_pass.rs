@@ -82,6 +82,8 @@ fn sun_position(light: &EvaluatedLight, state: &TransformState, blend: f32) -> [
         matrix::rotate_x(&mut m, &a, state.get_pitch());
         let a = m;
         matrix::rotate_z(&mut m, &a, -state.get_roll());
+        let a = m;
+        matrix::rotate_z(&mut m, &a, state.get_north_orientation_angle());
         let a = sun;
         matrix::transform_mat4(&mut sun, &a, &m);
     }
@@ -222,6 +224,7 @@ impl SkyPass {
 
 #[cfg(test)]
 mod tests {
+    use mln_map_types::NorthOrientation;
     use mln_style::evaluated::Evaluated;
     use mln_style_types::Position;
     use mln_util::geo::LatLng;
@@ -272,5 +275,15 @@ mod tests {
         let light = light(LightAnchorType::Viewport, [1.5, 90.0, 90.0]);
         assert_sun([1.5, 0.0, 0.0], sun_position(&light, &camera(0.0, 0.0, 0.0), 1.0));
         assert_sun([0.0, 0.0, -1.5], sun_position(&light, &camera(0.0, 90.0, 0.0), 1.0));
+    }
+
+    // With north down, the right of the view is west of the center: the same
+    // viewport light is over 0°N 90°W seen from 0°N 0°E.
+    #[test]
+    fn viewport_light_turns_with_the_north_orientation() {
+        let light = light(LightAnchorType::Viewport, [1.5, 90.0, 90.0]);
+        let mut state = camera(0.0, 0.0, 0.0);
+        state.set_north_orientation(NorthOrientation::Downwards);
+        assert_sun([-1.5, 0.0, 0.0], sun_position(&light, &state, 1.0));
     }
 }
