@@ -1,6 +1,5 @@
 //! A handle to a map that lives on its runtime's thread.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
@@ -15,6 +14,7 @@ use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
 use mln_util::geo::LatLngBounds;
+use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
@@ -1488,7 +1488,7 @@ pub(crate) fn create(
             pending_still: None,
             session: None,
             flush_task,
-            camera_commands: HashMap::new(),
+            camera_commands: HashMap::default(),
             callback_sources: CallbackSources::default(),
             geojson_updates: GeoJsonUpdates::default(),
         },

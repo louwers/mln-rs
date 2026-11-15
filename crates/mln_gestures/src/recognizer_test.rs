@@ -5,7 +5,6 @@
 // rig's camera is a bare transform (`TestCamera`), which needs no renderer.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::time::Duration;
@@ -15,6 +14,7 @@ use mln_map::{CameraChangeSource, ConstrainMode, MomentumSnap, TransitionEnd, Vi
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
 use mln_util::geo::LatLngBounds;
+use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
