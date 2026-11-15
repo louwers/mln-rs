@@ -4899,3 +4899,52 @@ fn releases_tiles_outside_zoom_range_color_relief() {
         keeper: INACTIVE_DEM_KEEPER,
     });
 }
+
+/// Renders a `layer_type` layer over flat DEM tiles and returns the rendering
+/// stats of: the first frame, a still frame after it, and a frame panned one
+/// tile east, which keeps one column of tiles and loads a new one.
+fn dem_layer_frames(layer_type: &str) -> [mln_gfx::rendering_stats::RenderingStats; 3] {
+    let test = MapTest::new();
+    test.map().set_prefetch_zoom_delta(0);
+    test.file_source.set_response(Kind::Tile, |_: &Resource| {
+        // Opaque black: every pixel has the same elevation.
+        let mut dem = PremultipliedImage::new(Size::new(256, 256));
+        for i in (3..dem.bytes()).step_by(4) {
+            dem.data[i] = 255;
+        }
+        let mut response = Response::new();
+        response.data = Some(Arc::new(mln_image::encode_png(&dem)));
+        Some(response)
+    });
+    test.load_json(&format!(
+        r#"{{"version":8,"sources":{{"dem":{{"type":"raster-dem","tiles":["https://example.com/{{z}}/{{x}}/{{y}}.png"]}}}},
+        "layers":[{{"id":"dem","type":"{layer_type}","source":"dem"}}]}}"#
+    ));
+    let render = |longitude: f64| {
+        test.map().jump_to(&CameraOptions { center: Some(ll(0.0, longitude)), zoom: Some(3.0), ..Default::default() });
+        test.render().stats
+    };
+    // At zoom 3 a 512 px tile spans 45 degrees of longitude.
+    [render(0.0), render(0.0), render(45.0)]
+}
+
+/// Checks that tiles without a mask share one quad index buffer, whichever
+/// frame they were created in, and that a still frame creates no buffers.
+fn dem_layer_shares_one_quad_index_buffer(layer_type: &str) {
+    let [first, still, panned] = dem_layer_frames(layer_type);
+    assert!(first.num_draw_calls > 0);
+    assert_eq!(first.total_buffers, still.total_buffers, "buffers created by a still frame");
+    assert_eq!(first.num_index_buffers, panned.num_index_buffers, "live index buffers after new tiles load");
+}
+
+// gtest: HillshadeLayer.AStillFrameCreatesNoBuffers
+#[test]
+fn hillshade_tiles_share_one_quad_index_buffer() {
+    dem_layer_shares_one_quad_index_buffer("hillshade");
+}
+
+// gtest: ColorReliefLayer.AStillFrameCreatesNoBuffers
+#[test]
+fn color_relief_tiles_share_one_quad_index_buffer() {
+    dem_layer_shares_one_quad_index_buffer("color-relief");
+}

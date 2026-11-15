@@ -78,6 +78,7 @@ pub(crate) struct RenderHillshadeLayer {
     activated_render_targets: Vec<RenderTargetPtr>,
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
+    static_data_indices: Option<IndexVectorBasePtr>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     prepare_layer_tweaker: Option<LayerTweakerPtr>,
@@ -101,6 +102,7 @@ impl RenderHillshadeLayer {
             hillshade_shader: None,
             activated_render_targets: Vec::new(),
             static_data_shared_vertices: None,
+            static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             prepare_layer_tweaker: None,
             bucket_render_targets: HashMap::default(),
@@ -311,8 +313,11 @@ impl RenderLayer for RenderHillshadeLayer {
             self.static_data_shared_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
         }
         let static_data_shared_vertices = self.static_data_shared_vertices.clone().expect("static vertices");
-        let static_data_indices: IndexVectorBasePtr =
-            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
+        // One quad index buffer for every tile without a mask, whichever
+        // frame made its drawables.
+        let static_data_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
+            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())))
+        }));
         let static_data_segments = RenderStaticData::raster_segments();
 
         let mut hillshade_prepare_vertex_attrs: Option<VertexAttributeArrayPtr> = None;

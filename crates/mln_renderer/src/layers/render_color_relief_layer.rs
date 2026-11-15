@@ -93,6 +93,7 @@ pub(crate) struct RenderColorReliefLayer {
     color_relief_shader: Option<ShaderProgramPtr>,
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
+    static_data_indices: Option<IndexVectorBasePtr>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// The DEM texture of each bucket, with the bucket's prepare generation
@@ -122,6 +123,7 @@ impl RenderColorReliefLayer {
             color_stops_texture: None,
             color_relief_shader: None,
             static_data_shared_vertices: None,
+            static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             dem_textures: HashMap::default(),
         };
@@ -401,8 +403,11 @@ impl RenderLayer for RenderColorReliefLayer {
             self.static_data_shared_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
         }
         let static_data_shared_vertices = self.static_data_shared_vertices.clone().expect("static vertices");
-        let static_data_indices: IndexVectorBasePtr =
-            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
+        // One quad index buffer for every tile without a mask, whichever
+        // frame made its drawables.
+        let static_data_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
+            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())))
+        }));
         let static_data_segments = RenderStaticData::raster_segments();
 
         // Update color ramp textures if changed
