@@ -1,17 +1,18 @@
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
+use mln_style_types::types::VerticalAlign;
 use mln_util::Color;
 
 use crate::expression::{EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
 use crate::formatted::{
     FontStack, Formatted, FormattedSection, K_FORMATTED_SECTION_FONT_SCALE, K_FORMATTED_SECTION_TEXT_COLOR,
-    K_FORMATTED_SECTION_TEXT_FONT,
+    K_FORMATTED_SECTION_TEXT_FONT, K_FORMATTED_SECTION_VERTICAL_ALIGN,
 };
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::{Value, from_expression_value, to_string, type_of};
 
-/// A section of a `format` expression: its content and text options.
+/// A section of a `format` expression: its content and options.
 #[derive(Clone, PartialEq, mln_wire::Wire)]
 pub struct FormatExpressionSection {
     /// Content can be expression that evaluates to String or Image.
@@ -21,12 +22,15 @@ pub struct FormatExpressionSection {
     pub(crate) font_scale: Option<Expr>,
     pub(crate) text_font: Option<Expr>,
     pub text_color: Option<Expr>,
+
+    /// A string expression, for text and image sections.
+    pub(crate) vertical_align: Option<Expr>,
 }
 
 impl FormatExpressionSection {
     #[must_use]
     pub fn new(content: Expr) -> Self {
-        FormatExpressionSection { content, font_scale: None, text_font: None, text_color: None }
+        FormatExpressionSection { content, font_scale: None, text_font: None, text_color: None, vertical_align: None }
     }
 
     pub fn set_text_section_options(
@@ -45,6 +49,21 @@ impl FormatExpressionSection {
             self.text_color = Some(text_color);
         }
     }
+}
+
+/// Evaluates a section's `vertical-align` option. A name that isn't one of
+/// the options aligns to the bottom, as when the option is missing.
+fn evaluate_vertical_align(
+    vertical_align: Option<&Expr>,
+    params: &EvaluationContext<'_>,
+) -> Result<Option<VerticalAlign>, EvaluationError> {
+    let Some(vertical_align) = vertical_align else {
+        return Ok(None);
+    };
+    Ok(match vertical_align.evaluate(params)? {
+        Value::String(name) => name.parse().ok(),
+        _ => None,
+    })
 }
 
 /// `["format", content, options, ...]`.
@@ -99,10 +118,22 @@ impl FormatExpression {
                     text_color = Some(ctx.parse(&option, 1, Some(Type::Color), None)?);
                 }
 
-                sections
-                    .last_mut()
-                    .expect("a section before its options")
-                    .set_text_section_options(font_scale, text_font, text_color);
+                let mut vertical_align = None;
+                if let Some(option) = arg.object_member(K_FORMATTED_SECTION_VERTICAL_ALIGN) {
+                    if let Some(name) = option.to_string()
+                        && name.parse::<VerticalAlign>().is_err()
+                    {
+                        ctx.error(format!(
+                            "'vertical-align' must be one of: 'bottom', 'center', 'top' but found '{name}' instead."
+                        ));
+                        return None;
+                    }
+                    vertical_align = Some(ctx.parse(&option, 1, Some(Type::String), None)?);
+                }
+
+                let section = sections.last_mut().expect("a section before its options");
+                section.set_text_section_options(font_scale, text_font, text_color);
+                section.vertical_align = vertical_align;
             } else {
                 let Some(parsed_arg) = ctx.parse(&arg, 1, Some(Type::Value), None) else {
                     ctx.error("Cannot parse formatted section.".to_owned());
@@ -126,10 +157,12 @@ impl FormatExpression {
                 let Value::Image(image) = &content_result else { unreachable!() };
                 // Omit sections with empty image ids.
                 if !image.id().is_empty() {
-                    evaluated_sections.push(FormattedSection::from_image(image.clone()));
+                    evaluated_sections.push(FormattedSection {
+                        vertical_align: evaluate_vertical_align(section.vertical_align.as_ref(), params)?,
+                        ..FormattedSection::from_image(image.clone())
+                    });
                 }
-                // Continue evaluation of a next section, as the image section
-                // does not have section options.
+                // Image sections take no text options.
                 continue;
             }
             // `toString(Value)` always produces a string.
@@ -159,12 +192,10 @@ impl FormatExpression {
                     return Err(EvaluationError::new("Format text-color option must evaluate to Color"));
                 }
             }
-            evaluated_sections.push(FormattedSection::new(
-                evaluated_text,
-                evaluated_font_scale,
-                evaluated_text_font,
-                evaluated_text_color,
-            ));
+            evaluated_sections.push(FormattedSection {
+                vertical_align: evaluate_vertical_align(section.vertical_align.as_ref(), params)?,
+                ..FormattedSection::new(evaluated_text, evaluated_font_scale, evaluated_text_font, evaluated_text_color)
+            });
         }
         Ok(Value::Formatted(Formatted::new(evaluated_sections)))
     }
@@ -180,6 +211,9 @@ impl FormatExpression {
             }
             if let Some(text_color) = &section.text_color {
                 visit(text_color);
+            }
+            if let Some(vertical_align) = &section.vertical_align {
+                visit(vertical_align);
             }
         }
     }
@@ -197,6 +231,9 @@ impl FormatExpression {
             }
             if let Some(text_color) = &section.text_color {
                 options.insert(K_FORMATTED_SECTION_TEXT_COLOR.to_owned(), text_color.serialize());
+            }
+            if let Some(vertical_align) = &section.vertical_align {
+                options.insert(K_FORMATTED_SECTION_VERTICAL_ALIGN.to_owned(), vertical_align.serialize());
             }
             serialized.push(MbglValue::Object(options));
         }

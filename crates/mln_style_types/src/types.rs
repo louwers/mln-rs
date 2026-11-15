@@ -199,6 +199,18 @@ pub enum IconOverlapType {
 
 pub type TextOverlapType = IconOverlapType;
 
+/// The `vertical-align` option of a `format` section: where a text or image
+/// section sits in a line that's taller than it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
+#[repr(u8)]
+pub enum VerticalAlign {
+    /// On the line's baseline.
+    #[default]
+    Bottom,
+    Center,
+    Top,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 #[repr(u8)]
 pub enum TextWritingModeType {
@@ -351,6 +363,12 @@ style_spec_names!(IconOverlapType {
     Never => "never",
     Always => "always",
     Cooperative => "cooperative",
+});
+
+style_spec_names!(VerticalAlign {
+    Bottom => "bottom",
+    Center => "center",
+    Top => "top",
 });
 
 style_spec_names!(LightAnchorType {

@@ -1,6 +1,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
+use mln_style_types::types::VerticalAlign;
 use mln_util::font_stack::FontStack;
 use mln_util::logging::{Event, Log};
 use mln_util::{Color, i18n};
@@ -37,6 +38,8 @@ pub struct SectionOptions {
     pub(crate) rtl: bool,
     pub image_id: Option<String>,
     pub text_color: Option<Color>,
+    /// Where the section sits in a horizontal line that's taller than it.
+    pub vertical_align: VerticalAlign,
 }
 
 impl SectionOptions {
@@ -60,13 +63,14 @@ impl SectionOptions {
             rtl: false,
             image_id: None,
             text_color,
+            vertical_align: VerticalAlign::Bottom,
         }
     }
 
     /// The options of an image section. The font stack hash and start index
     /// are 0 (C++ leaves them uninitialized).
     #[must_use]
-    pub(crate) fn image(image_id: String) -> Self {
+    pub(crate) fn image(image_id: String, vertical_align: VerticalAlign) -> Self {
         SectionOptions {
             scale: 1.0,
             font_stack: FontStack::new(),
@@ -78,6 +82,7 @@ impl SectionOptions {
             rtl: false,
             image_id: Some(image_id),
             text_color: None,
+            vertical_align,
         }
     }
 }
@@ -155,6 +160,7 @@ impl TaggedString {
 
     /// Appends a text section. Quirk kept from C++: the section's start index
     /// is the length *after* appending the text.
+    #[expect(clippy::too_many_arguments, reason = "each argument is a property of the section")]
     pub fn add_text_section(
         &mut self,
         section_text: &[u16],
@@ -163,10 +169,14 @@ impl TaggedString {
         type_: GlyphIDType,
         key_section: bool,
         text_color: Option<Color>,
+        vertical_align: VerticalAlign,
     ) {
         self.styled_text.0.extend_from_slice(section_text);
         let start_index = self.styled_text.0.len() as u32;
-        self.sections.push(SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color));
+        self.sections.push(SectionOptions {
+            vertical_align,
+            ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
+        });
         let index = (self.sections.len() - 1) as u8;
         self.styled_text.1.resize(self.styled_text.0.len(), index);
         self.supports_vertical_writing_mode = None;
@@ -189,9 +199,13 @@ impl TaggedString {
         rtl: bool,
         key_section: bool,
         text_color: Option<Color>,
+        vertical_align: VerticalAlign,
     ) {
         let start_index = self.styled_text.0.len() as u32;
-        self.sections.push(SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color));
+        self.sections.push(SectionOptions {
+            vertical_align,
+            ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
+        });
         self.styled_text.0.extend_from_slice(section_text);
         let index = (self.sections.len() - 1) as u8;
         self.styled_text.1.resize(self.styled_text.0.len(), index);
@@ -206,13 +220,13 @@ impl TaggedString {
         section.key_section = key_section;
     }
 
-    pub fn add_image_section(&mut self, image_id: &str) {
+    pub fn add_image_section(&mut self, image_id: &str, vertical_align: VerticalAlign) {
         let Some(next) = self.get_next_image_section_char_code() else {
             Log::warning(Event::Style, "Exceeded maximum number of images in a label.");
             return;
         };
         self.styled_text.0.push(next);
-        self.sections.push(SectionOptions::image(image_id.to_string()));
+        self.sections.push(SectionOptions::image(image_id.to_string(), vertical_align));
         let index = (self.sections.len() - 1) as u8;
         self.styled_text.1.resize(self.styled_text.0.len(), index);
     }
@@ -370,8 +384,24 @@ mod tests {
         assert_eq!(basic.raw_text(), u("trim that and not this"));
 
         let mut two_sections = TaggedString::default();
-        two_sections.add_text_section(&u(" \t\ntrim that"), 1.5, &vec![], GlyphIDType::FontPBF, false, None);
-        two_sections.add_text_section(&u(" and not this  \n\t"), 0.5, &vec![], GlyphIDType::FontPBF, false, None);
+        two_sections.add_text_section(
+            &u(" \t\ntrim that"),
+            1.5,
+            &vec![],
+            GlyphIDType::FontPBF,
+            false,
+            None,
+            VerticalAlign::Bottom,
+        );
+        two_sections.add_text_section(
+            &u(" and not this  \n\t"),
+            0.5,
+            &vec![],
+            GlyphIDType::FontPBF,
+            false,
+            None,
+            VerticalAlign::Bottom,
+        );
 
         two_sections.trim();
         assert_eq!(two_sections.raw_text(), u("trim that and not this"));
@@ -391,14 +421,14 @@ mod tests {
     #[test]
     fn image_sections() {
         let mut string = TaggedString::default();
-        string.add_image_section("image_name");
+        string.add_image_section("image_name", VerticalAlign::Bottom);
         assert_eq!(string.raw_text(), u("\u{E000}"));
         assert!(string.get_section(0).image_id.is_some());
         assert_eq!(string.get_section(0).image_id.as_deref(), Some("image_name"));
 
         let mut max_sections = TaggedString::default();
         for i in 0..6401 {
-            max_sections.add_image_section(&i.to_string());
+            max_sections.add_image_section(&i.to_string(), VerticalAlign::Bottom);
         }
 
         assert_eq!(max_sections.get_sections().len(), 6400);

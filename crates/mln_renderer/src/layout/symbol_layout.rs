@@ -489,7 +489,7 @@ impl SymbolLayout {
                                 .entry(image.id().to_owned())
                                 .or_insert(ImageType::Icon);
                         }
-                        formatted_text.add_image_section(image.id());
+                        formatted_text.add_image_section(image.id(), section.vertical_align.unwrap_or_default());
                         continue;
                     }
                     let mut u8string = section.text.clone();
@@ -533,6 +533,7 @@ impl SymbolLayout {
                                 sub_string_type,
                                 key_section,
                                 section.text_color,
+                                section.vertical_align.unwrap_or_default(),
                             );
                             section_table.insert(formatted_text.get_sections().len() - 1, section_index);
                             if sub_string_type != GlyphIDType::FontPBF {
@@ -1467,6 +1468,7 @@ impl Layout for SymbolLayout {
                         section.type_,
                         section.key_section,
                         section.text_color,
+                        section.vertical_align,
                     );
                 } else {
                     let result = results
@@ -1484,6 +1486,7 @@ impl Layout for SymbolLayout {
                         starts_right_to_left(sub_string),
                         section.key_section,
                         section.text_color,
+                        section.vertical_align,
                     );
                 }
             };

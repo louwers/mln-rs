@@ -347,16 +347,23 @@ pub fn to_mbgl_value(value: &Value) -> MbglValue {
             // constant expression that would generate them.
             let mut serialized = vec![MbglValue::String("format".to_owned())];
             for section in &formatted.sections {
+                let mut options = ValueObject::new();
+                if let Some(vertical_align) = section.vertical_align {
+                    options.insert("vertical-align".to_owned(), MbglValue::String(vertical_align.as_str().to_owned()));
+                }
+
                 if let Some(image) = &section.image {
                     serialized.push(MbglValue::Array(vec![
                         MbglValue::String("image".to_owned()),
                         MbglValue::String(image.id().to_owned()),
                     ]));
+                    if !options.is_empty() {
+                        serialized.push(MbglValue::Object(options));
+                    }
                     continue;
                 }
 
                 serialized.push(MbglValue::String(section.text.clone()));
-                let mut options = ValueObject::new();
 
                 if let Some(font_scale) = section.font_scale {
                     options.insert("font-scale".to_owned(), MbglValue::Double(font_scale));

@@ -2,6 +2,7 @@ use std::fmt;
 
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::{Convertible, Error};
+use mln_style_types::types::VerticalAlign;
 use mln_util::Color;
 
 use crate::image::Image;
@@ -9,6 +10,7 @@ use crate::image::Image;
 pub(crate) const K_FORMATTED_SECTION_FONT_SCALE: &str = "font-scale";
 pub(crate) const K_FORMATTED_SECTION_TEXT_FONT: &str = "text-font";
 pub const K_FORMATTED_SECTION_TEXT_COLOR: &str = "text-color";
+pub(crate) const K_FORMATTED_SECTION_VERTICAL_ALIGN: &str = "vertical-align";
 
 /// A list of font names.
 pub(crate) type FontStack = Vec<String>;
@@ -25,6 +27,9 @@ pub struct FormattedSection {
     pub font_scale: Option<f64>,
     pub font_stack: Option<FontStack>,
     pub text_color: Option<Color>,
+    /// Where the text or image sits in its line. `None` is
+    /// [`VerticalAlign::Bottom`].
+    pub vertical_align: Option<VerticalAlign>,
 }
 
 impl FormattedSection {
@@ -35,7 +40,7 @@ impl FormattedSection {
         font_stack: Option<FontStack>,
         text_color: Option<Color>,
     ) -> Self {
-        FormattedSection { text, image: None, font_scale, font_stack, text_color }
+        FormattedSection { text, image: None, font_scale, font_stack, text_color, vertical_align: None }
     }
 
     #[must_use]
@@ -60,6 +65,7 @@ impl PartialEq for Formatted {
                 || this_section.font_scale != other_section.font_scale
                 || this_section.font_stack != other_section.font_stack
                 || this_section.text_color != other_section.text_color
+                || this_section.vertical_align != other_section.vertical_align
             {
                 return false;
             }
@@ -105,6 +111,10 @@ impl Formatted {
                 .insert("textColor".to_owned(), section.text_color.as_ref().map_or(MbglValue::Null, Color::to_object));
             serialized_section
                 .insert("image".to_owned(), section.image.as_ref().map_or(MbglValue::Null, Image::to_value));
+            if let Some(vertical_align) = section.vertical_align {
+                serialized_section
+                    .insert("verticalAlign".to_owned(), MbglValue::String(vertical_align.as_str().to_owned()));
+            }
             section_values.push(MbglValue::Object(serialized_section));
         }
         result.insert("sections".to_owned(), MbglValue::Array(section_values));
@@ -139,6 +149,18 @@ fn convert_color(value: &Convertible<'_>, error: &mut Error) -> Option<Color> {
     color
 }
 
+/// Converts a section's `vertical-align` parameter, if it has one, for the
+/// `Formatted` converter.
+fn convert_vertical_align(section_params: &Convertible<'_>) -> Result<Option<VerticalAlign>, String> {
+    let Some(member) = section_params.object_member(K_FORMATTED_SECTION_VERTICAL_ALIGN) else {
+        return Ok(None);
+    };
+    match member.to_string().map(|name| name.parse()) {
+        Some(Ok(vertical_align)) => Ok(Some(vertical_align)),
+        _ => Err("vertical-align must be one of 'bottom', 'center' or 'top'.".to_owned()),
+    }
+}
+
 pub fn convert_formatted(value: &Convertible<'_>, error: &mut Error) -> Option<Formatted> {
     if value.is_array() {
         let mut sections = Vec::new();
@@ -168,7 +190,22 @@ pub fn convert_formatted(value: &Convertible<'_>, error: &mut Error) -> Option<F
                     return None;
                 };
 
-                sections.push(FormattedSection::from_image(Image::new(image_arg)));
+                let mut image_section = FormattedSection::from_image(Image::new(image_arg));
+                if section_length > 1 {
+                    let section_params = section.array_member(1);
+                    if !section_params.is_object() {
+                        error.message = "Parameters have to be enclosed in an object.".to_owned();
+                        return None;
+                    }
+                    image_section.vertical_align = match convert_vertical_align(&section_params) {
+                        Ok(vertical_align) => vertical_align,
+                        Err(message) => {
+                            error.message = message;
+                            return None;
+                        }
+                    };
+                }
+                sections.push(image_section);
                 continue;
             }
 
@@ -180,6 +217,7 @@ pub fn convert_formatted(value: &Convertible<'_>, error: &mut Error) -> Option<F
             let mut font_scale = None;
             let mut text_font = None;
             let mut text_color = None;
+            let mut vertical_align = None;
             if section_length > 1 {
                 let section_params = section.array_member(1);
                 if !section_params.is_object() {
@@ -213,9 +251,20 @@ pub fn convert_formatted(value: &Convertible<'_>, error: &mut Error) -> Option<F
                     text_color = convert_color(&text_color_member, error);
                     text_color?;
                 }
+
+                vertical_align = match convert_vertical_align(&section_params) {
+                    Ok(vertical_align) => vertical_align,
+                    Err(message) => {
+                        error.message = message;
+                        return None;
+                    }
+                };
             }
 
-            sections.push(FormattedSection::new(section_text, font_scale, text_font, text_color));
+            sections.push(FormattedSection {
+                vertical_align,
+                ..FormattedSection::new(section_text, font_scale, text_font, text_color)
+            });
         }
         Some(Formatted::new(sections))
     } else if let Some(result) = value.to_string() {

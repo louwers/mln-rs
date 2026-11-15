@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use mln_style_types::image::{ImageContent, ImagePosition, ImagePositions, Impl, RectU16, TextFit};
-use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType};
+use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, VerticalAlign};
 use mln_util::constants::ONE_EM;
 use mln_util::font_stack::FontStack;
 use mln_util::i18n;
@@ -576,8 +576,8 @@ fn vertical_digit_with_combining_mark() {
 fn vertical_glyph_orientation_respects_formatted_sections() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let mut text = TaggedString::default();
-    text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
-    text.add_text_section(&u("CD"), 0.5, &font_stack, GlyphIDType::FontPBF, true, None);
+    text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+    text.add_text_section(&u("CD"), 0.5, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
 
     let orientations =
         get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::default()));
@@ -590,9 +590,9 @@ fn vertical_glyph_orientation_respects_formatted_sections() {
 fn vertical_glyph_orientation_delimits_inline_images() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let mut text = TaggedString::default();
-    text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
-    text.add_image_section("image");
-    text.add_text_section(&u("CD"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
+    text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+    text.add_image_section("image", VerticalAlign::Bottom);
+    text.add_text_section(&u("CD"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
 
     let image = Impl::new(
         "image".to_string(),
@@ -631,9 +631,9 @@ fn vertical_glyph_orientation_delimits_native_glyph_sections() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let native_type = gen_new_glyph_id_type("shaping-test-native", &font_stack, &[(0, 0xffff)]);
     let mut text = TaggedString::default();
-    text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
-    text.add_text_section(&u("C"), 1.0, &font_stack, native_type, true, None);
-    text.add_text_section(&u("D"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
+    text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+    text.add_text_section(&u("C"), 1.0, &font_stack, native_type, true, None, VerticalAlign::Bottom);
+    text.add_text_section(&u("D"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
 
     let orientations =
         get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::default()));
@@ -653,11 +653,21 @@ fn label_with_shaped_section(
     let shaped_type = gen_new_glyph_id_type("shaping-test-shaped", &font_stack, &[(0, 0xffff)]);
     let mut text = TaggedString::default();
     if !before.is_empty() {
-        text.add_text_section(&u(before), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
+        text.add_text_section(&u(before), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
     }
-    text.add_text_section_with_adjusts(&u("XY"), 1.0, &font_stack, shaped_type, &adjusts.cloned(), rtl, true, None);
+    text.add_text_section_with_adjusts(
+        &u("XY"),
+        1.0,
+        &font_stack,
+        shaped_type,
+        &adjusts.cloned(),
+        rtl,
+        true,
+        None,
+        VerticalAlign::Bottom,
+    );
     if !after.is_empty() {
-        text.add_text_section(&u(after), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
+        text.add_text_section(&u(after), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
     }
     text
 }

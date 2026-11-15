@@ -5,7 +5,7 @@
 // produces).
 
 use mln_style_types::image::{ImagePosition, ImagePositions, RectU16, TextFit};
-use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType};
+use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, VerticalAlign};
 use mln_util::constants::ONE_EM;
 use mln_util::{Padding, i18n};
 use mln_vec_map::VecSet;
@@ -258,9 +258,9 @@ fn align(
 }
 
 /// Shifts the glyphs by `justify` of the line's width (left = 0, right = 1,
-/// center = 0.5), and vertically by `line_offset`.
-fn justify_line(positioned_glyphs: &mut [PositionedGlyph], justify: f32, line_offset: f32) {
-    if justify == 0.0 && line_offset == 0.0 {
+/// center = 0.5).
+fn justify_line(positioned_glyphs: &mut [PositionedGlyph], justify: f32) {
+    if justify == 0.0 {
         return;
     }
 
@@ -269,7 +269,48 @@ fn justify_line(positioned_glyphs: &mut [PositionedGlyph], justify: f32, line_of
     let line_indent = (last_glyph.x + last_advance) * justify;
     for positioned_glyph in positioned_glyphs.iter_mut() {
         positioned_glyph.x -= line_indent;
-        positioned_glyph.y += line_offset;
+    }
+}
+
+/// The room a line's content takes across the line, in ems at 24 points:
+/// its largest glyph or image.
+struct LineContentSize {
+    /// The height of a horizontal line.
+    horizontal_height: f64,
+    /// The width of a vertical line.
+    vertical_width: f64,
+}
+
+impl LineContentSize {
+    fn new(line: &TaggedString, image_positions: &ImagePositions, layout_text_size: f32) -> Self {
+        let max_glyph_size = line.get_max_scale() * f64::from(ONE_EM);
+        let (mut max_image_width, mut max_image_height) = (0.0_f32, 0.0_f32);
+        for i in 0..line.length() {
+            if let Some(image) = line.get_section(i).image_id.as_ref().and_then(|id| image_positions.get(id)) {
+                let [width, height] = image.display_size();
+                max_image_width = max_image_width.max(width);
+                max_image_height = max_image_height.max(height);
+            }
+        }
+        let image_scale = f64::from(ONE_EM) / f64::from(layout_text_size);
+        LineContentSize {
+            horizontal_height: max_glyph_size.max(f64::from(max_image_height) * image_scale),
+            vertical_width: max_glyph_size.max(f64::from(max_image_width) * image_scale),
+        }
+    }
+
+    /// How far below the line's top a section `size` tall starts. A vertical
+    /// glyph ignores `vertical_align`, as in GL JS.
+    fn baseline_offset(&self, size: f64, vertical: bool, vertical_align: VerticalAlign) -> f64 {
+        if vertical {
+            return self.vertical_width - size;
+        }
+        let factor = match vertical_align {
+            VerticalAlign::Top => 0.0,
+            VerticalAlign::Center => 0.5,
+            VerticalAlign::Bottom => 1.0,
+        };
+        (self.horizontal_height - size) * factor
     }
 }
 
@@ -612,6 +653,7 @@ fn shape_lines(
             continue;
         }
 
+        let line_content_size = LineContentSize::new(line, image_positions, layout_text_size);
         let line_verticals = if writing_mode == WritingModeType::Vertical && !allow_vertical_placement {
             determine_line_verticals(line)
         } else {
@@ -687,10 +729,11 @@ fn shape_lines(
                         x_hb_offset -= spacing;
                     }
 
-                    // We don't know the baseline, but since we're laying
-                    // out at 24 points, we can calculate how much it will
-                    // move when we scale up or down.
-                    baseline_offset = (line_max_scale - section_scale) * f64::from(ONE_EM);
+                    baseline_offset = line_content_size.baseline_offset(
+                        section_scale * f64::from(ONE_EM),
+                        vertical,
+                        section.vertical_align,
+                    );
                 }
                 Some(image_id) => {
                     let Some(image) = image_positions.get(image_id) else {
@@ -713,10 +756,11 @@ fn shape_lines(
                     // section.
                     section_scale = section_scale * f64::from(ONE_EM) / f64::from(layout_text_size);
 
-                    // Difference between one EM and an image size. Aligns
-                    // bottom of an image to a baseline level.
-                    let image_offset: f32 = ONE_EM - display_size[1] * section_scale as f32;
-                    baseline_offset = max_line_offset + f64::from(image_offset);
+                    baseline_offset = line_content_size.baseline_offset(
+                        f64::from(display_size[1]) * section_scale,
+                        vertical,
+                        section.vertical_align,
+                    );
                     vertical_advance = metrics.advance as f32;
                     advance = vertical_advance;
 
@@ -773,7 +817,7 @@ fn shape_lines(
         if !positioned_glyphs.is_empty() {
             let line_length = x - spacing; // Don't count trailing spacing
             max_line_length = mln_math::fmaxf(line_length, max_line_length); // util::max
-            justify_line(positioned_glyphs, justify, line_offset as f32);
+            justify_line(positioned_glyphs, justify);
         }
 
         let current_line_height = (f64::from(line_height) * line_max_scale + line_offset) as f32;
