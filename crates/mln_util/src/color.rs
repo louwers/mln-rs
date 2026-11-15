@@ -7,7 +7,7 @@
 
 use std::f32::consts::{PI, TAU};
 
-use feature::{Value, ValueObject};
+use feature::Value;
 
 use crate::interpolate::interpolate as util_interpolate;
 use crate::string::to_string_double;
@@ -602,17 +602,6 @@ impl Color {
             Value::Double(array[2]),
             Value::Double(array[3]),
         ])
-    }
-
-    /// Object format for evaluation output: the raw premultiplied channels.
-    #[must_use]
-    pub fn to_object(&self) -> Value {
-        let mut object = ValueObject::new();
-        object.insert("r".to_owned(), Value::Double(f64::from(self.r)));
-        object.insert("g".to_owned(), Value::Double(f64::from(self.g)));
-        object.insert("b".to_owned(), Value::Double(f64::from(self.b)));
-        object.insert("a".to_owned(), Value::Double(f64::from(self.a)));
-        Value::Object(object)
     }
 }
 

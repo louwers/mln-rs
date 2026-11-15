@@ -429,6 +429,32 @@ pub(crate) fn compiled_to_value(compiled: &Compiled) -> Value {
     Value::Object(compiled_object)
 }
 
+/// A formatted value as the tests expect it: GL JS's `Formatted` object, with
+/// colors as their premultiplied channels.
+fn formatted_to_value(formatted: &mln_expression::Formatted) -> Value {
+    let optional = |value: Option<Value>| value.unwrap_or(Value::Null);
+    let sections = formatted.sections.iter().map(|section| {
+        let mut object = ValueObject::new();
+        object.insert("text".to_owned(), Value::String(section.text.clone()));
+        object.insert("scale".to_owned(), optional(section.font_scale.map(Value::Double)));
+        object
+            .insert("fontStack".to_owned(), optional(section.font_stack.as_ref().map(|f| Value::String(f.join(",")))));
+        let color = section.text_color.map(|c| {
+            let channels = [("r", c.r), ("g", c.g), ("b", c.b), ("a", c.a)];
+            Value::Object(channels.into_iter().map(|(k, v)| (k.to_owned(), Value::Double(f64::from(v)))).collect())
+        });
+        object.insert("textColor".to_owned(), optional(color));
+        object.insert("image".to_owned(), optional(section.image.as_ref().map(mln_expression::Image::to_value)));
+        if let Some(vertical_align) = section.vertical_align {
+            object.insert("verticalAlign".to_owned(), Value::String(vertical_align.as_str().to_owned()));
+        }
+        Value::Object(object)
+    });
+    let mut result = ValueObject::new();
+    result.insert("sections".to_owned(), Value::Array(sections.collect()));
+    Value::Object(result)
+}
+
 /// Serializes an expression value to the JS format the tests expect; colors
 /// and formatted values have their own forms.
 pub(crate) fn expression_value_to_value(expr_value: &mln_expression::Value) -> Value {
@@ -440,7 +466,7 @@ pub(crate) fn expression_value_to_value(expr_value: &mln_expression::Value) -> V
             Value::Double(f64::from(c.b)),
             Value::Double(f64::from(c.a)),
         ]),
-        mln_expression::Value::Formatted(formatted) => formatted.to_object(),
+        mln_expression::Value::Formatted(formatted) => formatted_to_value(formatted),
         mln_expression::Value::Array(values) => Value::Array(values.iter().map(to_mbgl_value).collect()),
         mln_expression::Value::Object(value_map) => {
             Value::Object(value_map.iter().map(|(k, v)| (k.clone(), to_mbgl_value(v))).collect())
