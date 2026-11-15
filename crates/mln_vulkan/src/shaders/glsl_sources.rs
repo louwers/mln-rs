@@ -3039,6 +3039,20 @@ void main() {
 ",
 };
 
+/// Port-only: the instanced walls' GLSL, which the wall shaders run with every
+/// attribute per vertex.
+pub(crate) const FILL_EXTRUSION_WALL_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "FillExtrusionWallShader",
+    name: "FillExtrusionWallShader",
+    ..FILL_EXTRUSION_INSTANCED_SHADER
+};
+
+pub(crate) const FILL_EXTRUSION_PATTERN_WALL_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "FillExtrusionPatternWallShader",
+    name: "FillExtrusionPatternWallShader",
+    ..FILL_EXTRUSION_PATTERN_INSTANCED_SHADER
+};
+
 pub(crate) const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "GlobeDepthShader",
     name: "GlobeDepthShader",
@@ -6468,8 +6482,10 @@ pub(crate) const ALL: &[&GlslShaderSource] = &[
     &FILL_OUTLINE_TRIANGULATED_SHADER,
     &FILL_EXTRUSION_SHADER,
     &FILL_EXTRUSION_INSTANCED_SHADER,
+    &FILL_EXTRUSION_WALL_SHADER,
     &FILL_EXTRUSION_PATTERN_SHADER,
     &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
+    &FILL_EXTRUSION_PATTERN_WALL_SHADER,
     &GLOBE_DEPTH_SHADER,
     &HEATMAP_SHADER,
     &HEATMAP_TEXTURE_SHADER,

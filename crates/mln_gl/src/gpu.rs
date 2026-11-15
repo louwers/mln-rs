@@ -449,6 +449,9 @@ impl GlGpu {
             let forward_compatible = desktop
                 && gl.get_parameter_i32(glow::CONTEXT_FLAGS) as u32 & glow::CONTEXT_FLAG_FORWARD_COMPATIBLE_BIT != 0;
             let max_line_width = if forward_compatible { 1.0 } else { line_widths[1].max(1.0) };
+            // Mesa's software rasterizers, also under zink, whose renderer
+            // names the Vulkan device it runs on.
+            let renderer = gl.get_parameter_string(glow::RENDERER);
             let caps = Caps {
                 buffer_offset_alignment: alignment.max(1) as u32,
                 max_texture_size: max_texture_size.max(0) as u32,
@@ -457,6 +460,7 @@ impl GlGpu {
                 render_target_depth: None,
                 clear_stencil_with_pass: false,
                 line_expressions: false,
+                cpu_rasterizer: renderer.contains("llvmpipe") || renderer.contains("softpipe"),
             };
             (caps, anisotropic, line_widths[0].min(1.0)..=max_line_width)
         };

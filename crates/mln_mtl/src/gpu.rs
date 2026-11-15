@@ -349,6 +349,7 @@ impl MetalGpu {
             render_target_depth: None,
             clear_stencil_with_pass: false,
             line_expressions: true,
+            cpu_rasterizer: false,
         };
         MetalGpu {
             device: device.clone(),

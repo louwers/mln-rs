@@ -23,8 +23,13 @@ pub enum BuiltIn {
     FillOutlineTriangulatedShader,
     FillExtrusionShader,
     FillExtrusionInstancedShader,
+    /// Port-only: the walls of `FillExtrusionInstancedShader` with every
+    /// attribute per vertex, for walls whose quads are in the vertex buffer.
+    FillExtrusionWallShader,
     FillExtrusionPatternShader,
     FillExtrusionPatternInstancedShader,
+    /// Port-only: `FillExtrusionWallShader` of the pattern walls.
+    FillExtrusionPatternWallShader,
     HeatmapShader,
     HeatmapTextureShader,
     HillshadePrepareShader,

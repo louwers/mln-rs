@@ -6,7 +6,9 @@
 //! the same buffer bound twice, one vertex apart. Where the lowest bit of the
 //! vertex's `decimals_ed.x` is set, it ends a ring and the instance draws
 //! nothing. The static quad's x picks the vertex (0) or the next one (1), its y
-//! the base (0) or the top (1).
+//! the base (0) or the top (1). The wall shaders run the same vertex stages
+//! with every input per vertex, for walls whose quads are in the vertex
+//! buffer.
 
 use super::shader_source::WgslShaderSource;
 use super::wgsl_sources;

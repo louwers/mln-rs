@@ -68,8 +68,10 @@ pub(super) const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::FillOutlineTriangulatedShader,
     BuiltIn::FillExtrusionShader,
     BuiltIn::FillExtrusionInstancedShader,
+    BuiltIn::FillExtrusionWallShader,
     BuiltIn::FillExtrusionPatternShader,
     BuiltIn::FillExtrusionPatternInstancedShader,
+    BuiltIn::FillExtrusionPatternWallShader,
     BuiltIn::HeatmapShader,
     BuiltIn::HeatmapTextureShader,
     BuiltIn::HillshadePrepareShader,
@@ -276,17 +278,19 @@ fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_FILL_TILE_PROPS_UBO), size_of::<FillTilePropsUnionUBO>()),
             (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
         ],
-        "FillExtrusionShader" | "FillExtrusionInstancedShader" => vec![
+        "FillExtrusionShader" | "FillExtrusionInstancedShader" | "FillExtrusionWallShader" => vec![
             (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
             projection,
             (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
         ],
-        "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" => vec![
-            (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
-            projection,
-            (LayerStorage(ID_FILL_EXTRUSION_TILE_PROPS_UBO), size_of::<FillExtrusionTilePropsUBO>()),
-            (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
-        ],
+        "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" | "FillExtrusionPatternWallShader" => {
+            vec![
+                (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
+                projection,
+                (LayerStorage(ID_FILL_EXTRUSION_TILE_PROPS_UBO), size_of::<FillExtrusionTilePropsUBO>()),
+                (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
+            ]
+        }
         "GlobeDepthShader" => vec![projection],
         "HeatmapShader" => vec![
             (LayerStorage(ID_HEATMAP_DRAWABLE_UBO), size_of::<HeatmapDrawableUBO>()),

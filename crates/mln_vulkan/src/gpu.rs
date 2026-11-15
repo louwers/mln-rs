@@ -658,7 +658,8 @@ impl VulkanGpu {
                 vk::Format::D32_SFLOAT_S8_UINT
             };
 
-        let limits = &backend.get_device_properties().limits;
+        let properties = backend.get_device_properties();
+        let limits = &properties.limits;
         let caps = Caps {
             buffer_offset_alignment: limits
                 .min_uniform_buffer_offset_alignment
@@ -669,6 +670,7 @@ impl VulkanGpu {
             render_target_depth: None,
             clear_stencil_with_pass: true,
             line_expressions: false,
+            cpu_rasterizer: properties.device_type == vk::PhysicalDeviceType::CPU,
         };
         let line_widths = (backend.get_device_features().wide_lines == vk::TRUE)
             .then(|| (limits.line_width_range[0], limits.line_width_range[1]));

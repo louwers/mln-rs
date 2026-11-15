@@ -134,7 +134,7 @@
 "crates/mln_mtl/src/exported_target.rs" = 8
 "crates/mln_mtl/src/renderer_backend.rs" = 2
 "crates/mln_mtl/src/surface_target.rs" = 13
-"crates/mln_renderer/src/bucket_geometry.rs" = 2
+"crates/mln_renderer/src/bucket_geometry.rs" = 1
 "crates/mln_renderer/src/drawable.rs" = 10
 "crates/mln_renderer/src/drawable_builder.rs" = 4
 "crates/mln_renderer/src/gfx/context.rs" = 7

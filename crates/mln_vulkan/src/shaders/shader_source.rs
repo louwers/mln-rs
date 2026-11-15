@@ -253,6 +253,33 @@ const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &
     attr(7, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
     attr(8, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
 ];
+// The wall shaders run the instanced ones' GLSL with every attribute per
+// vertex, for walls whose quads are in the vertex buffer.
+const FILL_EXTRUSION_WALL_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
+    attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
+    attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
+    // Data driven
+    attr(3, Float4, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+    attr(4, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+    attr(5, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+    // The next outline vertex
+    attr(6, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+    attr(7, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
+];
+const FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
+    attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
+    attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
+    // Data driven
+    attr(3, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+    attr(4, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+    attr(5, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    attr(6, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+    // The next outline vertex
+    attr(7, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+    attr(8, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
+];
 const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
 shader_source!(FILL_EXTRUSION_SHADER, "FillExtrusionShader", FILL_EXTRUSION_ATTRIBUTES, &[]);
 shader_source!(
@@ -273,6 +300,13 @@ shader_source!(
     "FillExtrusionPatternInstancedShader",
     FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
     FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
+    FILL_EXTRUSION_PATTERN_TEXTURES
+);
+shader_source!(FILL_EXTRUSION_WALL_SHADER, "FillExtrusionWallShader", FILL_EXTRUSION_WALL_ATTRIBUTES, &[]);
+shader_source!(
+    FILL_EXTRUSION_PATTERN_WALL_SHADER,
+    "FillExtrusionPatternWallShader",
+    FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES,
     FILL_EXTRUSION_PATTERN_TEXTURES
 );
 
@@ -467,8 +501,10 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::FillOutlineTriangulatedShader => Some(&FILL_OUTLINE_TRIANGULATED_SHADER),
         BuiltIn::FillExtrusionShader => Some(&FILL_EXTRUSION_SHADER),
         BuiltIn::FillExtrusionInstancedShader => Some(&FILL_EXTRUSION_INSTANCED_SHADER),
+        BuiltIn::FillExtrusionWallShader => Some(&FILL_EXTRUSION_WALL_SHADER),
         BuiltIn::FillExtrusionPatternShader => Some(&FILL_EXTRUSION_PATTERN_SHADER),
         BuiltIn::FillExtrusionPatternInstancedShader => Some(&FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
+        BuiltIn::FillExtrusionPatternWallShader => Some(&FILL_EXTRUSION_PATTERN_WALL_SHADER),
         BuiltIn::HeatmapShader => Some(&HEATMAP_SHADER),
         BuiltIn::HeatmapTextureShader => Some(&HEATMAP_TEXTURE_SHADER),
         BuiltIn::HillshadeShader => Some(&HILLSHADE_SHADER),

@@ -88,6 +88,10 @@ pub struct Caps {
     /// expression mask marks the properties they evaluate, where other
     /// backends' marks the constant ones.
     pub line_expressions: bool,
+    /// Whether the device rasterizes on the CPU, as Mesa's llvmpipe and
+    /// lavapipe do. Their vertex pipeline runs once per instance, so an
+    /// instanced draw costs about as much as a draw of each instance.
+    pub cpu_rasterizer: bool,
 }
 
 /// How a buffer is bound.

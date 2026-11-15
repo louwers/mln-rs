@@ -551,34 +551,33 @@ pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     Ok(())
 }
 
-/// Checks that the instanced fill extrusion shader reads an instance's
-/// outline vertex and the next one only through the attributes of its
-/// layouts, in slots of the caller's choosing, and that a draw is checked
-/// against the instances it reads. The outline runs along the bottom of the
-/// tile, through its middle, to its right edge; the middle vertex ends a
-/// ring, so the wall from it draws nothing. The walls stand the height of
-/// the target, and the first covers the left half. The next vertex comes
-/// first, in a slot of its own, and the instance buffer holds the outline's
-/// three vertices and no more. Returns the error of a call that should
-/// succeed.
-///
-/// # Panics
-///
-/// Where a check doesn't hold.
-pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+/// The corners of the wall quad: x picks the wall's outline vertex (0) or
+/// the next one (1), y the base (0) or the top (1).
+const WALL_CORNERS: [[i16; 2]; 4] = [[0, 0], [1, 0], [0, 1], [1, 1]];
+
+/// The outline of the walls of `instanced_walls` and `wall_quads`. Each
+/// vertex is its position, then `decimals_ed`, whose x is odd where the
+/// vertex ends a ring.
+fn wall_outline() -> [[i16; 4]; 3] {
+    let (e, half) = (EXTENT as i16, (EXTENT / 2.0) as i16);
+    [[0, 0, 0, 0], [half, 0, 1, 0], [e, 0, 0, 0]]
+}
+
+/// A frame for the walls, and the shader of `program` with its bindings,
+/// which map tile x `0..EXTENT` to clip x `-1..1` and elevation `0..1` to
+/// clip y `-1..1`, and color the walls opaque red, lit evenly.
+fn wall_frame(gpu: &mut impl Gpu, program: BuiltIn) -> Result<(Solid, ShaderId, BindingsId), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
     let shader = gpu.create_shader(&ShaderKey::new(
-        BuiltIn::FillExtrusionInstancedShader,
+        program,
         ["HAS_UNIFORM_u_color", "HAS_UNIFORM_u_base", "HAS_UNIFORM_u_height"].map(String::from),
     ))?;
-    // Tile x `0..EXTENT` to clip x `-1..1`, elevation `0..1` to clip y
-    // `-1..1`, at clip depth 0.5.
+    // At clip depth 0.5.
     let s = 2.0 / EXTENT;
     let matrix = [s, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, -1.0, -1.0, 0.5, 1.0];
     let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
     let drawable = [FillExtrusionDrawableUBO { matrix, ..FillExtrusionDrawableUBO::default() }];
     let tile_props = [FillExtrusionTilePropsUBO::default()];
-    // Opaque red, lit evenly.
     let props = FillExtrusionPropsUBO {
         color: [1.0, 0.0, 0.0, 1.0],
         light_color: [1.0; 3],
@@ -604,16 +603,47 @@ pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
             whole(ID_FILL_EXTRUSION_PROPS_UBO, props_buffer, props),
         ],
     })?;
+    Ok((frame, shader, bindings))
+}
 
-    // The wall quad: x picks the instance's vertex (0) or the next one (1),
-    // y the base (0) or the top (1).
-    let corners: [[i16; 2]; 4] = [[0, 0], [1, 0], [0, 1], [1, 1]];
-    let corners = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&corners))?;
-    // Each outline vertex is its position, then `decimals_ed`, whose x is
-    // odd where the vertex ends a ring.
-    let (e, half) = (EXTENT as i16, (EXTENT / 2.0) as i16);
-    let outline: [[i16; 4]; 3] = [[0, 0, 0, 0], [half, 0, 1, 0], [e, 0, 0, 0]];
-    let outline = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&outline))?;
+/// Checks the texels of the walls of `instanced_walls`.
+fn check_walls(pixels: &[u8]) {
+    let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
+    for y in [0, bottom / 2, bottom] {
+        for x in [0, right / 2] {
+            let [r, _, _, a] = texel(pixels, x, y);
+            assert_eq!([r, a], [255, 255], "the first wall covers ({x}, {y})");
+        }
+        for x in [right / 2 + 1, right] {
+            assert_eq!(texel(pixels, x, y), [0, 0, 0, 255], "the wall that ends a ring leaves ({x}, {y})");
+        }
+    }
+}
+
+/// Checks that the instanced fill extrusion shader reads an instance's
+/// outline vertex and the next one only through the attributes of its
+/// layouts, in slots of the caller's choosing, and that a draw is checked
+/// against the instances it reads. The outline runs along the bottom of the
+/// tile, through its middle, to its right edge; the middle vertex ends a
+/// ring, so the wall from it draws nothing. The walls stand the height of
+/// the target, and the first covers the left half. The next vertex comes
+/// first, in a slot of its own, and the instance buffer holds the outline's
+/// three vertices and no more. Returns the error of a call that should
+/// succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    check_walls(&instanced_wall_texels(gpu)?);
+    Ok(())
+}
+
+/// The texels of the frame of `instanced_walls`.
+fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
+    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionInstancedShader)?;
+    let corners = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&WALL_CORNERS))?;
+    let outline = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&wall_outline()))?;
 
     let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
     let instances = |stride, attributes| VertexBufferLayout { stride, step: VertexStep::Instance, attributes };
@@ -646,18 +676,58 @@ pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let past = frame.frame(gpu, &[walls(3)]);
     assert!(invalid(&past), "a wall whose next vertex is past the instance buffer");
     frame.frame(gpu, &[walls(2)])?;
+    read(gpu, frame.target)
+}
 
-    let pixels = read(gpu, frame.target)?;
-    let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
-    for y in [0, bottom / 2, bottom] {
-        for x in [0, right / 2] {
-            let [r, _, _, a] = texel(&pixels, x, y);
-            assert_eq!([r, a], [255, 255], "the first wall covers ({x}, {y})");
-        }
-        for x in [right / 2 + 1, right] {
-            assert_eq!(texel(&pixels, x, y), [0, 0, 0, 255], "the wall that ends a ring leaves ({x}, {y})");
+/// Checks that the fill extrusion wall shader, which reads every attribute
+/// per vertex, draws the walls of [`instanced_walls`] from quads of their
+/// own into the texels that the instanced shader draws. The buffer holds each
+/// outline vertex four times, once with each corner, and a wall reads the
+/// next outline vertex from it four vertices further on, in a slot of its
+/// own. Returns the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionWallShader)?;
+    let mut quads: Vec<i16> = Vec::new();
+    for vertex in wall_outline() {
+        for corner in WALL_CORNERS {
+            quads.extend(corner.iter().chain(&vertex));
         }
     }
+    let quads = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&quads))?;
+    let indices: [u16; 12] = [0, 1, 2, 1, 2, 3, 4, 5, 6, 5, 6, 7];
+    let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?;
+
+    let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
+    let vertices = |attributes| VertexBufferLayout { stride: 12, step: VertexStep::Vertex, attributes };
+    let (short2, ushort2) = (AttributeDataType::Short2, AttributeDataType::UShort2);
+    let layouts = [
+        vertices(vec![
+            attribute(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, short2, 0),
+            attribute(ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, short2, 4),
+            attribute(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ushort2, 8),
+        ]),
+        vertices(vec![
+            attribute(ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, short2, 4),
+            attribute(ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ushort2, 8),
+        ]),
+    ];
+    let pipeline =
+        gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &layouts, ..background(shader, RGBA8) })?;
+    let geometry = gpu.create_geometry(&GeometryDesc {
+        shader,
+        layouts: &layouts,
+        vertex_buffers: &[(quads, 0), (quads, 4 * 12)],
+        index_buffer: indices,
+    })?;
+    frame.frame(gpu, &[draw(pipeline, bindings, geometry, 12)])?;
+
+    let pixels = read(gpu, frame.target)?;
+    check_walls(&pixels);
+    assert!(pixels == instanced_wall_texels(gpu)?, "the wall quads draw other texels than the instanced walls");
     Ok(())
 }
 

@@ -471,6 +471,26 @@ shader_source!(
     &[]
 );
 
+// Fill Extrusion Wall: the instanced walls' GLSL with every attribute per
+// vertex, for walls whose quads are in the vertex buffer
+static FILL_EXTRUSION_WALL_SHADER: ShaderSource = ShaderSource {
+    glsl: &glsl_sources::FILL_EXTRUSION_INSTANCED_SHADER,
+    name: "FillExtrusionWallShader",
+    uniform_blocks: FILL_EXTRUSION_BLOCKS,
+    attributes: &[
+        attr("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
+        attr("a_outline_pos", ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
+        attr("a_decimals_ed", ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
+        attr("a_next_outline_pos", ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+        attr("a_next_decimals_ed", ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
+        attr("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        attr("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        attr("a_color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+    ],
+    instance_attributes: &[],
+    textures: &[],
+};
+
 // Fill Extrusion Pattern: the roofs
 const FILL_EXTRUSION_PATTERN_BLOCKS: &[UniformBlockInfo] = &[
     element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
@@ -519,6 +539,26 @@ shader_source!(
     ],
     FILL_EXTRUSION_PATTERN_TEXTURES
 );
+
+// Fill Extrusion Pattern Wall: as Fill Extrusion Wall
+static FILL_EXTRUSION_PATTERN_WALL_SHADER: ShaderSource = ShaderSource {
+    glsl: &glsl_sources::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
+    name: "FillExtrusionPatternWallShader",
+    uniform_blocks: FILL_EXTRUSION_PATTERN_BLOCKS,
+    attributes: &[
+        attr("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
+        attr("a_outline_pos", ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
+        attr("a_decimals_ed", ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
+        attr("a_next_outline_pos", ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+        attr("a_next_decimals_ed", ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
+        attr("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        attr("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        attr("a_pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        attr("a_pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+    ],
+    instance_attributes: &[],
+    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
+};
 
 // Heatmap
 shader_source!(
@@ -843,8 +883,10 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::FillOutlineTriangulatedShader => Some(&FILL_OUTLINE_TRIANGULATED_SHADER),
         BuiltIn::FillExtrusionShader => Some(&FILL_EXTRUSION_SHADER),
         BuiltIn::FillExtrusionInstancedShader => Some(&FILL_EXTRUSION_INSTANCED_SHADER),
+        BuiltIn::FillExtrusionWallShader => Some(&FILL_EXTRUSION_WALL_SHADER),
         BuiltIn::FillExtrusionPatternShader => Some(&FILL_EXTRUSION_PATTERN_SHADER),
         BuiltIn::FillExtrusionPatternInstancedShader => Some(&FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
+        BuiltIn::FillExtrusionPatternWallShader => Some(&FILL_EXTRUSION_PATTERN_WALL_SHADER),
         BuiltIn::HeatmapShader => Some(&HEATMAP_SHADER),
         BuiltIn::HeatmapTextureShader => Some(&HEATMAP_TEXTURE_SHADER),
         BuiltIn::HillshadePrepareShader => Some(&HILLSHADE_PREPARE_SHADER),
@@ -883,8 +925,10 @@ pub(crate) const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::FillOutlineTriangulatedShader,
     BuiltIn::FillExtrusionShader,
     BuiltIn::FillExtrusionInstancedShader,
+    BuiltIn::FillExtrusionWallShader,
     BuiltIn::FillExtrusionPatternShader,
     BuiltIn::FillExtrusionPatternInstancedShader,
+    BuiltIn::FillExtrusionPatternWallShader,
     BuiltIn::HeatmapShader,
     BuiltIn::HeatmapTextureShader,
     BuiltIn::HillshadePrepareShader,

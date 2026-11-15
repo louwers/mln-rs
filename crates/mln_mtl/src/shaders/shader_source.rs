@@ -479,7 +479,8 @@ shader_source!(
 );
 
 /// The Metal source of `shader_id`, or `None` for the shaders the renderer
-/// doesn't draw with: the wide vector.
+/// doesn't draw with on Metal: the wide vector, and the fill extrusion walls
+/// of devices that rasterize on the CPU.
 #[must_use]
 pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {
