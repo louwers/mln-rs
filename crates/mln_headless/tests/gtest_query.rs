@@ -32,7 +32,7 @@ struct QueryTest(MapTest);
 impl QueryTest {
     fn new() -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         let test = QueryTest(MapTest::create(run_loop, file_source, 1.0, MapMode::Static));
         test.map().style_mut().load_json(&read_file("test/fixtures/api/query_style.json"));
         test.map().style_mut().add_image(style_image(
@@ -564,7 +564,7 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     let options = GeoJSONOptions { cluster: true, ..GeoJSONOptions::default() };
     let source = GeoJSONSource::new("cluster_source", Arc::new(options));
     source.set_url("http://url");
-    source.load_description(&*test.0.file_source);
+    source.load_description(&*test.0.file_source, &test.0.run_loop);
 
     let mut cluster_layer = SymbolLayer::new("cluster_layer", "cluster_source");
     set(&mut cluster_layer, "icon-image", &json!("test-icon"));

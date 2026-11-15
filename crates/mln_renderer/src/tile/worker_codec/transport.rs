@@ -24,7 +24,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{LocalObject, SchedulerPtr, TaggedScheduler, Thread, scheduler};
+use mln_actor::{LocalObject, SchedulerPtr, TaggedScheduler, Thread};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
@@ -294,8 +294,8 @@ impl ThreadWorkerInstances {
         let threads = (0..count)
             .map(|instance| {
                 let replies = replies.clone();
-                Thread::new(&format!("TileWorker {instance}"), move |_| {
-                    let workers = TaggedScheduler::new(scheduler::get_current(), SimpleIdentity::new());
+                Thread::new(&format!("TileWorker {instance}"), move |_, run_loop| {
+                    let workers = TaggedScheduler::new(run_loop.scheduler(), SimpleIdentity::new());
                     TileWorkerHost::new(workers, move |reply| replies.send(instance, reply))
                 })
             })

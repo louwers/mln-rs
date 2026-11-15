@@ -8,8 +8,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use mln_actor::TaggedScheduler;
 use mln_actor::scheduler::Respond;
+use mln_actor::{SchedulerPtr, TaggedScheduler};
 use mln_image::decoder;
 use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style_types::image::Impl;
@@ -35,6 +35,8 @@ struct Inner {
     data_map: RefCell<VecMap<String, SpriteData>>,
     observer: RefCell<Rc<dyn SpriteLoaderObserver>>,
     thread_pool: TaggedScheduler,
+    /// The loader's thread's queue, where the responses and parses answer.
+    queue: SchedulerPtr,
     /// Counts the calls to `load`.
     loads: Cell<u64>,
 }
@@ -104,6 +106,7 @@ impl Inner {
         // `parseSprite`, whose image decodes through the `decoder`, which
         // may answer after the closure returns (the browser's).
         self.thread_pool.schedule_and_reply_later(
+            &self.queue,
             /* parseClosure */
             move |respond: Respond<ParseResult>| {
                 decoder::decode(&image, move |raster| {
@@ -133,14 +136,17 @@ impl Inner {
 }
 
 impl SpriteLoader {
+    /// A loader whose responses and parses answer on `queue`, which runs on
+    /// this thread, and which parses on `thread_pool`.
     #[must_use]
-    pub fn new(pixel_ratio: f32, thread_pool: TaggedScheduler) -> Self {
+    pub fn new(pixel_ratio: f32, queue: SchedulerPtr, thread_pool: TaggedScheduler) -> Self {
         SpriteLoader {
             pixel_ratio,
             inner: Rc::new(Inner {
                 data_map: RefCell::new(VecMap::new()),
                 observer: RefCell::new(Rc::new(NullSpriteLoaderObserver)),
                 thread_pool,
+                queue,
                 loads: Cell::new(0),
             }),
         }
@@ -176,14 +182,20 @@ impl SpriteLoader {
             })
         };
 
-        let json_request =
-            file_source.request(&Resource::sprite_json(&url, self.pixel_ratio), make_callback(Part::Json));
+        let json_request = file_source.request(
+            &self.inner.queue,
+            &Resource::sprite_json(&url, self.pixel_ratio),
+            make_callback(Part::Json),
+        );
         if let Some(data) = self.inner.data_map.borrow_mut().get_mut(&id) {
             data.json_request = Some(json_request);
         }
 
-        let sprite_request =
-            file_source.request(&Resource::sprite_image(&url, self.pixel_ratio), make_callback(Part::Image));
+        let sprite_request = file_source.request(
+            &self.inner.queue,
+            &Resource::sprite_image(&url, self.pixel_ratio),
+            make_callback(Part::Image),
+        );
         if let Some(data) = self.inner.data_map.borrow_mut().get_mut(&id) {
             data.sprite_request = Some(sprite_request);
         }

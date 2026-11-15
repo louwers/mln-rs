@@ -9,6 +9,8 @@ use std::sync::Arc;
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
+use mln_style::layers::symbol_layer_impl::Impl as SymbolLayerImpl;
+use mln_style::property_value::PropertyValue;
 use mln_style::source;
 use mln_style_types::SourceType;
 use mln_tile_id::tile_range::TileRange;
@@ -22,6 +24,7 @@ use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
+use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::tile::tile::{Tile, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_cache::TileCache;
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
@@ -52,6 +55,11 @@ pub(crate) struct TilePyramid {
     fading_tiles: bool,
     cache_enabled: bool,
     last_subdivision_granularity: SubdivisionGranularitySetting,
+    /// The highest `symbol-height-offset` seen in the layers and loaded
+    /// tiles since the tiles were last cleared, in meters. It doesn't fall
+    /// when the tile that held it unloads, or the tile could not come back
+    /// while its symbols are in view.
+    max_content_elevation: f32,
 }
 
 /// The `TilePyramid::update` callbacks of `algorithm::updateRenderables`.
@@ -274,6 +282,7 @@ impl TilePyramid {
             fading_tiles: false,
             cache_enabled: true,
             last_subdivision_granularity: SubdivisionGranularitySetting::none(),
+            max_content_elevation: 0.0,
         }
     }
 
@@ -305,6 +314,7 @@ impl TilePyramid {
         // If we need a relayout, abandon any cached tiles; they're now stale.
         if relayout {
             self.cache.clear();
+            self.max_content_elevation = 0.0;
         }
 
         // If we're not going to render anything, move our existing tiles
@@ -367,6 +377,7 @@ impl TilePyramid {
             tile_lod_mode: parameters.tile_lod_mode,
             requested_zoom: Some(zoom + (constants::TILE_SIZE_D / f64::from(tile_size)).log2()),
             round_zoom: type_ == SourceType::Raster || type_ == SourceType::RasterDEM,
+            max_content_elevation: f64::from(self.update_max_content_elevation(layers)),
         };
 
         if overscaled_zoom >= i32::from(zoom_range.min) {
@@ -588,6 +599,39 @@ impl TilePyramid {
         }
 
         self.cache.defer_pending_releases();
+    }
+
+    /// Raises the high-water mark of the source's `symbol-height-offset` to
+    /// the constants of `layers` and the highest symbols of the loaded tiles,
+    /// and returns it.
+    fn update_max_content_elevation(&mut self, layers: &[Arc<dyn LayerProperties>]) -> f32 {
+        let mut max = self.max_content_elevation;
+        // Only the buckets know the heights of an expression.
+        let mut expression_layers = Vec::new();
+        for layer in layers {
+            let Some(symbol_layer) = layer.base_impl.downcast_ref::<SymbolLayerImpl>() else {
+                continue;
+            };
+            match &symbol_layer.layout.symbol_height_offset {
+                PropertyValue::Constant(height_offset) => max = max.max(*height_offset),
+                PropertyValue::Expression(_) => expression_layers.push(&*layer.base_impl),
+                PropertyValue::Undefined => {}
+            }
+        }
+        if !expression_layers.is_empty() {
+            for tile in self.tiles.values() {
+                let render_data = tile.create_render_data();
+                for layer in &expression_layers {
+                    if let Some(bucket) = render_data.get_bucket(*layer)
+                        && let Some(bucket) = (**bucket).downcast_ref::<SymbolBucket>()
+                    {
+                        max = max.max(bucket.max_height_offset);
+                    }
+                }
+            }
+        }
+        self.max_content_elevation = max;
+        max
     }
 
     /// The rendered tiles, sorted by tile id.
@@ -988,6 +1032,7 @@ impl TilePyramid {
 
     pub(crate) fn clear_all(&mut self) {
         self.fading_tiles = false;
+        self.max_content_elevation = 0.0;
         self.tiles.clear();
         self.rendered_tiles.clear();
         self.cache.clear();

@@ -28,8 +28,12 @@ use crate::tile::tile::{Tile, TileBase, TileNecessity};
 use crate::tile::tile_observer::TileObserver;
 
 /// The loader actor, on the test's run loop.
-fn loader(fetch: Option<TileFunction>, cancel: Option<TileFunction>) -> Actor<CustomGeometryTileLoader> {
-    Actor::new(scheduler::get_current(), |_| CustomTileLoader::new(fetch, cancel))
+fn loader(
+    run_loop: &mln_actor::RunLoop,
+    fetch: Option<TileFunction>,
+    cancel: Option<TileFunction>,
+) -> Actor<CustomGeometryTileLoader> {
+    Actor::new(run_loop.scheduler(), |_| CustomTileLoader::new(fetch, cancel))
 }
 
 /// A tile function that counts its calls.
@@ -97,7 +101,7 @@ fn change_counter() -> (Rc<Cell<u32>>, Rc<StubTileObserver>) {
 fn invoke_fetch_tile() {
     let test = RasterTileTest::new();
     let (fetched, fetch) = recorder();
-    let loader = loader(Some(fetch), Some(Arc::new(|_: &CanonicalTileID| {})));
+    let loader = loader(&test.run_loop, Some(fetch), Some(Arc::new(|_: &CanonicalTileID| {})));
 
     let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None);
     tile.set_necessity(TileNecessity::Required);
@@ -111,7 +115,7 @@ fn invoke_fetch_tile() {
 fn invoke_cancel_tile() {
     let test = RasterTileTest::new();
     let (cancelled, cancel) = recorder();
-    let loader = loader(Some(Arc::new(|_: &CanonicalTileID| {})), Some(cancel));
+    let loader = loader(&test.run_loop, Some(Arc::new(|_: &CanonicalTileID| {})), Some(cancel));
 
     let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None);
     tile.set_necessity(TileNecessity::Required);
@@ -126,7 +130,7 @@ fn invoke_cancel_tile() {
 fn fetch_cancelled_tile_again() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(Some(fetch), None);
+    let loader = loader(&test.run_loop, Some(fetch), None);
 
     let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None);
     tile.set_necessity(TileNecessity::Required);
@@ -144,7 +148,7 @@ fn fetch_cancelled_tile_again() {
 fn invalidate_failed_tile() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(Some(fetch), None);
+    let loader = loader(&test.run_loop, Some(fetch), None);
 
     let observer = Rc::new(StubTileObserver::default());
     let failed = Rc::new(Cell::new(false));
@@ -174,7 +178,7 @@ fn invalidate_failed_tile() {
 #[test]
 fn invoke_tile_changed() {
     let test = RasterTileTest::new();
-    let loader = loader(None, None);
+    let loader = loader(&test.run_loop, None, None);
     let tile = Rc::new(tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None));
 
     let layer = CircleLayer::new("circle", "source");
@@ -236,7 +240,7 @@ fn cancellation_discards_late_invalidation() {
     let test = RasterTileTest::new();
     let (changes, observer) = change_counter();
     let (fetches, fetch) = counter();
-    let loader = loader(Some(fetch), None);
+    let loader = loader(&test.run_loop, Some(fetch), None);
     let id = OverscaledTileID::from_zxy(0, 0, 0);
     let tile = tile(&test, id, loader.self_ref(), Some(observer));
     tile.set_necessity(TileNecessity::Required);
@@ -256,7 +260,7 @@ fn cancel_one_copy() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
     let (cancels, cancel) = counter();
-    let loader = loader(Some(fetch), Some(cancel));
+    let loader = loader(&test.run_loop, Some(fetch), Some(cancel));
 
     // Two copies of one tile in neighboring worlds share its data.
     let first = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None);
@@ -288,7 +292,7 @@ fn cancel_one_copy() {
 fn cancelled_tile_drops_cached_data() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(Some(fetch), None);
+    let loader = loader(&test.run_loop, Some(fetch), None);
 
     let id = OverscaledTileID::from_zxy(0, 0, 0);
     {

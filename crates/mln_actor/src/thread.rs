@@ -1,6 +1,7 @@
 // The C++ constructor forwards the object's constructor arguments to the
 // thread; here `make` is a `Send` closure that builds the object on the new
-// thread (it gets the actor's own `ActorRef`, like `O(ActorRef<O>, args...)`).
+// thread (it gets the actor's own `ActorRef`, like `O(ActorRef<O>, args...)`,
+// and the thread's loop, which C++ finds as the thread's current one).
 // Waiting for the thread to be running (`running.wait()`) happens in `drop`,
 // as in C++, not at the end of the constructor, which would deadlock when the
 // object's constructor waits for the caller (test/util/thread.test.cpp
@@ -8,8 +9,8 @@
 //
 // Port-only: with a cooperative scheduler installed (a host without threads,
 // see cooperative_scheduler.rs) no thread starts: the object is established
-// on the creating thread's RunLoop, which the host drives, and its messages
-// run there.
+// on a RunLoop of the creating thread, which the cooperative scheduler runs
+// when the host runs its tasks, and its messages run there.
 
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -17,6 +18,7 @@ use std::thread::JoinHandle;
 use parking_lot::Mutex;
 
 use crate::actor_ref::ActorRef;
+use crate::cooperative_scheduler::CooperativeScheduler;
 use crate::established_actor::{AspiringActor, EstablishedActor};
 use crate::local_object::LocalObject;
 use crate::run_loop::{RunLoop, RunLoopHandle};
@@ -36,25 +38,35 @@ enum Backing<O: 'static> {
         /// `Mutex` so that a `Thread` is `Sync`).
         running: Mutex<mpsc::Receiver<RunLoopHandle>>,
     },
-    /// Port-only: on the creating thread, with a cooperative scheduler.
-    /// Dropping it drops the object.
-    Local { _established: LocalObject<EstablishedActor<O>> },
+    /// Port-only: on the creating thread, on a loop that the cooperative
+    /// scheduler runs. Dropping it drops the object.
+    Local {
+        established: Option<LocalObject<EstablishedActor<O>>>,
+        scheduler: &'static std::sync::Arc<CooperativeScheduler>,
+        key: u64,
+    },
 }
 
 impl<O: 'static> Thread<O> {
-    /// `Thread(name, args...)`.
-    pub fn new(name: &str, make: impl FnOnce(ActorRef<O>) -> O + Send + 'static) -> Self {
+    /// `Thread(name, args...)`: `make` builds the object on the thread,
+    /// from the actor's own reference and the thread's loop.
+    pub fn new(name: &str, make: impl FnOnce(ActorRef<O>, &RunLoop) -> O + Send + 'static) -> Self {
         let object = AspiringActor::<O>::new();
-        if scheduler::cooperative().is_some() {
-            let established = EstablishedActor::new(&scheduler::get_current(), &object, make);
-            return Thread { object, backing: Backing::Local { _established: LocalObject::new(established) } };
+        if let Some(scheduler) = scheduler::cooperative() {
+            let run_loop = RunLoop::new();
+            let established =
+                EstablishedActor::new(&run_loop.scheduler(), &object, |self_ref| make(self_ref, &run_loop));
+            let key = scheduler.host(&run_loop);
+            let established = Some(LocalObject::new(established));
+            return Thread { object, backing: Backing::Local { established, scheduler, key } };
         }
         let mailbox = std::sync::Arc::clone(&object.mailbox);
         let (running_tx, running_rx) = mpsc::channel::<RunLoopHandle>();
         let thread = mln_util::thread::spawn(name, move || {
             let run_loop = RunLoop::new();
             let parent = AspiringActor::<O>::with_mailbox(mailbox);
-            let established_actor = EstablishedActor::new(&scheduler::get_current(), &parent, make);
+            let established_actor =
+                EstablishedActor::new(&run_loop.scheduler(), &parent, |self_ref| make(self_ref, &run_loop));
             let _ = running_tx.send(run_loop.handle());
             run_loop.run();
             drop(established_actor);
@@ -75,8 +87,13 @@ impl<O: 'static> Drop for Thread<O> {
     /// Dropped on its own thread, by the last of its owners there, it only
     /// stops the loop, which ends once the task that drops it returns.
     fn drop(&mut self) {
-        let Backing::Spawned { thread, running } = &mut self.backing else {
-            return;
+        let (thread, running) = match &mut self.backing {
+            Backing::Spawned { thread, running } => (thread, running),
+            Backing::Local { established, scheduler, key } => {
+                scheduler.unhost(*key);
+                drop(established.take());
+                return;
+            }
         };
         let (stoppable_tx, stoppable_rx) = mpsc::channel::<()>();
         // `running.wait()`.
@@ -119,7 +136,7 @@ mod tests {
     fn messages_run_on_the_thread_in_order() {
         let total = Arc::new(AtomicUsize::new(0));
         let t = Arc::clone(&total);
-        let thread = Thread::new("Test", move |_| Counter { count: Cell::new(0), total: t });
+        let thread = Thread::new("Test", move |_, _| Counter { count: Cell::new(0), total: t });
         let main = std::thread::current().id();
         for i in 0..100 {
             thread.actor().invoke(move |counter: &Counter| {
@@ -137,7 +154,7 @@ mod tests {
         let total = Arc::new(AtomicUsize::new(0));
         let thread = Arc::new(Mutex::new(Some(Thread::new("Test", {
             let total = Arc::clone(&total);
-            move |_| Counter { count: Cell::new(7), total }
+            move |_, _| Counter { count: Cell::new(7), total }
         }))));
         let (done, finished) = mpsc::channel();
         let owner = Arc::clone(&thread);

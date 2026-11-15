@@ -194,7 +194,7 @@ impl Source for TileSource {
         &self.inner.base
     }
 
-    fn load_description(&self, file_source: &dyn FileSource) {
+    fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop) {
         let Some(url) = &self.inner.url else {
             self.set_tileset(self.inner.style_tileset.clone().into());
             self.inner.base.observer().on_source_loaded(self);
@@ -204,8 +204,11 @@ impl Source for TileSource {
             return;
         }
         let weak = Rc::downgrade(&self.inner);
-        let req = file_source
-            .request(&Resource::source(url), Box::new(move |res: Response| on_description_response(&weak, &res)));
+        let req = file_source.request(
+            &run_loop.scheduler(),
+            &Resource::source(url),
+            Box::new(move |res: Response| on_description_response(&weak, &res)),
+        );
         *self.inner.req.borrow_mut() = Some(req);
     }
 

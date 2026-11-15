@@ -1419,7 +1419,7 @@ pub(crate) fn create(
     resolver: Resolver<Applied>,
     outbox: &mut Outbox,
 ) {
-    let mut map = match mln_map::Map::with_file_source(Arc::clone(core.loader()), options.map) {
+    let mut map = match mln_map::Map::with_file_source(Arc::clone(core.loader()), options.map, &core.run_loop) {
         Ok(map) => map,
         Err(error) => return outbox.resolve(resolver, Err(error)),
     };
@@ -1431,7 +1431,7 @@ pub(crate) fn create(
         map.style_mut().set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
     }
     let _ = published.updates.set(map.update_reader());
-    let flush_task = async_task(&core.queue, move |core, outbox| flush(core, id, outbox));
+    let flush_task = async_task(&core.run_loop, &core.queue, move |core, outbox| flush(core, id, outbox));
     let flush_sender = flush_task.sender();
     map.set_reports_waker(Some(Arc::new(move || flush_sender.send())));
     published.applied.store(1, Ordering::SeqCst);

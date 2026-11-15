@@ -549,7 +549,7 @@ impl WebMap {
         let scheduler = install_cooperative_scheduler();
         shaper::set_loader(load_shaper);
 
-        let run_loop = RunLoop::get();
+        let run_loop = RunLoop::new();
         run_loop.set_waker(Some(pump::waker()));
         scheduler.set_waker(Some(pump::waker()));
         let mut renderer = Renderer::with_fonts(
@@ -591,6 +591,7 @@ impl WebMap {
         let mut map = Map::with_file_source(
             Arc::new(loader),
             MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
+            &run_loop,
         )
         .map_err(js_error)?;
         map.set_waker(Some(pump::waker()));

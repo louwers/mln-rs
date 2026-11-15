@@ -60,7 +60,7 @@ crate::paint_property_binders!(
 
 /// The layout attributes of a symbol quad's vertex, and the quad's atlas
 /// origin.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub(crate) struct SymbolLayoutVertex {
     pub(crate) a1: [i16; 4],
@@ -73,6 +73,8 @@ pub(crate) struct SymbolLayoutVertex {
     /// and which tile reserves an image first, and so its position, varies
     /// from run to run.
     pub(crate) a4: [u16; 2],
+    /// The symbol's `symbol-height-offset`, in meters.
+    pub(crate) a5: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -87,12 +89,14 @@ pub(crate) struct SymbolOpacityVertex {
     pub(crate) a1: [f32; 1],
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub(crate) struct CollisionBoxLayoutVertex {
     pub(crate) a1: [i16; 2],
     pub(crate) a2: [i16; 2],
     pub(crate) a3: [i16; 2],
+    /// The symbol's `symbol-height-offset`, in meters.
+    pub(crate) a4: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -280,6 +284,8 @@ pub(crate) struct PlacedSymbol {
     /// Reference to placed icon, only applicable for text symbols.
     pub(crate) placed_icon_index: Option<usize>,
     pub(crate) feature_id: Option<String>,
+    /// The symbol's `symbol-height-offset`, in meters above the ground.
+    pub(crate) height_offset: f32,
 }
 
 impl PlacedSymbol {
@@ -314,6 +320,7 @@ impl PlacedSymbol {
             angle: 0.0,
             placed_icon_index,
             feature_id,
+            height_offset: 0.0,
         }
     }
 }
@@ -472,6 +479,8 @@ pub(crate) struct SymbolBucket {
     pub(crate) icon_size_binder: SymbolSizeBinder,
 
     pub(crate) tile_pixel_ratio: f32,
+    /// The highest `symbol-height-offset` of the bucket's symbols, in meters.
+    pub(crate) max_height_offset: f32,
     /// Port-only: a bucket another side made gets an id of this side's.
     #[wire(skip, default = "next_bucket_instance_id")]
     pub(crate) bucket_instance_id: u32,
@@ -541,6 +550,7 @@ impl SymbolBucket {
                 })
             });
         }
+        let max_height_offset = symbol_instances.iter().map(SymbolInstance::height_offset).fold(0.0, f32::max);
         SymbolBucket {
             base: BucketBase::default(),
             layout,
@@ -553,6 +563,7 @@ impl SymbolBucket {
             text_size_binder: SymbolSizeBinder::create(zoom, text_size, SymbolLayoutProperties::Defaults::text_size()),
             icon_size_binder: SymbolSizeBinder::create(zoom, icon_size, SymbolLayoutProperties::Defaults::icon_size()),
             tile_pixel_ratio,
+            max_height_offset,
             bucket_instance_id: next_bucket_instance_id(),
             allow_vertical_placement,
             placement_modes,
@@ -729,6 +740,7 @@ impl SymbolBucket {
         is_sdf: bool,
         pixel_offset: Vec2,
         min_font_scale: Vec2,
+        height_offset: f32,
     ) -> SymbolLayoutVertex {
         let a_size_min = (MAX_PACKED_SIZE.min((size_data.min * f32::from(SIZE_PACK_FACTOR)) as u16) << 1)
             .wrapping_add(u16::from(is_sdf));
@@ -750,6 +762,7 @@ impl SymbolBucket {
                 (min_font_scale.y * 256.0) as i16,
             ],
             a4: tex_origin,
+            a5: height_offset,
         }
     }
 
@@ -764,11 +777,17 @@ impl SymbolBucket {
     }
 
     #[must_use]
-    pub(crate) fn collision_layout_vertex(a: Vec2, anchor: Vec2, o: Vec2) -> CollisionBoxLayoutVertex {
+    pub(crate) fn collision_layout_vertex(
+        a: Vec2,
+        anchor: Vec2,
+        o: Vec2,
+        height_offset: f32,
+    ) -> CollisionBoxLayoutVertex {
         CollisionBoxLayoutVertex {
             a1: [a.x as i16, a.y as i16],
             a2: [anchor.x as i16, anchor.y as i16],
             a3: [o.x.round() as i16, o.y.round() as i16],
+            a4: height_offset,
         }
     }
 

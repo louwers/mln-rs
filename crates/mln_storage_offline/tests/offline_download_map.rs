@@ -52,7 +52,7 @@ impl<F: Fn(OfflineRegionStatus)> OfflineRegionObserver for StatusObserver<F> {
 fn resource_offline_usage_unset() {
     // `OfflineTest test{filename_test_fs}`.
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
     // A database of this run's own, which goes when the test ends.
     let dir = tempfile::tempdir().unwrap();
     let filename = dir.path().join("offline_download.db").to_string_lossy().into_owned();
@@ -147,7 +147,7 @@ fn resource_offline_usage_unset() {
     // Resource requests must not have Offline usage tag.
     with(&mut |db, _| assert!(db.invalidate_region(region_id).is_none()));
 
-    let stubfile_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let stubfile_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
     let s = Rc::clone(&size);
     stubfile_source.set_response(Kind::Style, move |resource: &Resource| {
         assert_ne!(resource.usage, Usage::Offline);
@@ -160,10 +160,11 @@ fn resource_offline_usage_unset() {
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 
-    let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
     let mut map = Map::with_file_source(
         stubfile_source,
         MapOptions { map_mode: MapMode::Continuous, size: frontend.get_size(), ..Default::default() },
+        &run_loop,
     )
     .unwrap();
     frontend.attach(&map);

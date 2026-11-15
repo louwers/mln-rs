@@ -175,3 +175,31 @@ fn aabb_intersects_frustum_edge_case() {
     assert_eq!(frustum.intersects(&aabb), IntersectionResult::Intersects);
     assert_eq!(frustum.intersects_precise(&aabb, false), IntersectionResult::Separate);
 }
+
+#[test]
+fn pushing_the_far_plane_moves_the_far_corners_along_their_rays() {
+    // A camera at the origin looking down -Z, its far plane at Z = -100.
+    let mut proj: Mat4 = [0.0; 16];
+    let mut inv_proj: Mat4 = [0.0; 16];
+    matrix::perspective(&mut proj, PI / 2.0, 1.0, 0.1, 100.0);
+    let a = proj;
+    matrix::scale(&mut proj, &a, 1.0, -1.0, 1.0);
+    assert!(!matrix::invert(&mut inv_proj, &proj));
+    let frustum = Frustum::from_inv_proj_matrix(&inv_proj, 1.0, 0.0, false, None);
+    let far_side = |frustum: &Frustum| {
+        let far = frustum.get_planes()[5];
+        far[0] * 0.0 + far[1] * 0.0 + far[2] * -105.0 + far[3]
+    };
+    assert!(far_side(&frustum) < 0.0);
+
+    let pushed = frustum.with_far_plane_pushed(10.0, &[0.0, 0.0, 0.0]);
+
+    for (before, after) in frustum.get_points()[4..].iter().zip(&pushed.get_points()[4..]) {
+        for axis in 0..3 {
+            assert!((after[axis] - before[axis] * 1.1).abs() < 1e-6, "{before:?} -> {after:?}");
+        }
+    }
+    assert_eq!(&frustum.get_points()[..4], &pushed.get_points()[..4]);
+    // A point 5 past the old far plane is inside the new one.
+    assert!(far_side(&pushed) > 0.0);
+}

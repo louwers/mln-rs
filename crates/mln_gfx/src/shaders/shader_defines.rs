@@ -99,7 +99,7 @@ pub const ID_LINE_WIDTH_VERTEX_ATTRIBUTE: usize = 7;
 pub const ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE: usize = 8;
 pub const ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 9;
 pub const ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 10;
-pub const MAX_ATTRIBUTE_COUNT_PER_SHADER: usize = 11;
+pub const MAX_ATTRIBUTE_COUNT_PER_SHADER: usize = 12;
 
 // --- conformance: raster, fill-extrusion, hillshade, heatmap, color-relief
 // (WebGPU values; the packed SSBO/UBO counts above already include them) ---
@@ -195,6 +195,8 @@ pub const ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE: usize = 1;
 pub const ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE: usize = 2;
 pub const ID_COLLISION_PLACED_VERTEX_ATTRIBUTE: usize = 3;
 pub const ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE: usize = 4;
+// Port-only: the symbol's `symbol-height-offset` (`CollisionBoxLayoutVertex::a4`).
+pub const ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE: usize = 5;
 pub const ID_SYMBOL_POS_OFFSET_ATTRIBUTE: usize = 0;
 pub const ID_SYMBOL_DATA_ATTRIBUTE: usize = 1;
 pub const ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE: usize = 2;
@@ -208,3 +210,5 @@ pub const ID_SYMBOL_HALO_WIDTH_ATTRIBUTE: usize = 8;
 pub const ID_SYMBOL_HALO_BLUR_ATTRIBUTE: usize = 9;
 // Port-only: the quad's atlas origin (`SymbolLayoutVertex::a4`).
 pub const ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE: usize = 10;
+// Port-only: the symbol's `symbol-height-offset` (`SymbolLayoutVertex::a5`).
+pub const ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE: usize = 11;

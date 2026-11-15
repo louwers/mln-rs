@@ -525,9 +525,11 @@ impl Suite {
 }
 
 fn mock_factory() -> ImplFactory {
-    Box::new(|_metadata: &TestMetadata, _options: &ResourceOptions, _impl_options: &ImplOptions| {
-        Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])))
-    })
+    Box::new(
+        |_metadata: &TestMetadata, _options: &ResourceOptions, _impl_options: &ImplOptions, _: &mln_actor::RunLoop| {
+            Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])))
+        },
+    )
 }
 
 fn status<'a>(result: &'a RunResult, id: &str) -> &'a str {
@@ -700,7 +702,7 @@ fn pending_requests_leave_when_answered_or_cancelled() {
             true
         }
     }
-    let _run_loop = mln_actor::RunLoop::new();
+    let run_loop = mln_actor::RunLoop::new();
     let is_pending = |url: &str| ProxyFileSource::pending_requests().iter().any(|(pending, _)| pending == url);
 
     let number = track("http://tiles/answered.mvt");
@@ -709,7 +711,7 @@ fn pending_requests_leave_when_answered_or_cancelled() {
     assert!(!is_pending("http://tiles/answered.mvt"));
 
     let proxy = ProxyFileSource { default_resource_loader: std::sync::Arc::new(Unanswered) };
-    let request = proxy.request(&Resource::style("http://tiles/cancelled.mvt"), |_| {});
+    let request = proxy.request(&run_loop.scheduler(), &Resource::style("http://tiles/cancelled.mvt"), |_| {});
     assert!(is_pending("http://tiles/cancelled.mvt"));
     drop(request);
     assert!(!is_pending("http://tiles/cancelled.mvt"));

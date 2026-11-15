@@ -166,8 +166,11 @@ impl GlyphManager {
     /// A manager with a glyph cache of its own.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn new(local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>) -> Rc<GlyphManager> {
-        Self::with_glyph_cache(local_glyph_rasterizer, Arc::default())
+    pub(crate) fn new(
+        local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
+        run_loop: &RunLoop,
+    ) -> Rc<GlyphManager> {
+        Self::with_glyph_cache(local_glyph_rasterizer, Arc::default(), run_loop)
     }
 
     /// A manager that uses `glyph_cache`: managers given the same cache share
@@ -176,12 +179,13 @@ impl GlyphManager {
     pub(crate) fn with_glyph_cache(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         glyph_cache: Arc<GlyphCache>,
+        run_loop: &RunLoop,
     ) -> Rc<GlyphManager> {
         Self::with_cache_and_engine(
             local_glyph_rasterizer,
             glyph_cache,
             crate::text::font_face_engine::default_engine(),
-            RunLoop::get(),
+            run_loop.clone(),
         )
     }
 
@@ -191,8 +195,9 @@ impl GlyphManager {
     pub(crate) fn with_font_face_engine(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         engine: Arc<dyn FontFaceEngine>,
+        run_loop: &RunLoop,
     ) -> Rc<GlyphManager> {
-        Self::with_cache_and_engine(local_glyph_rasterizer, Arc::default(), engine, RunLoop::get())
+        Self::with_cache_and_engine(local_glyph_rasterizer, Arc::default(), engine, run_loop.clone())
     }
 
     /// A manager that shares `glyph_cache`, loads font faces with `engine`,
@@ -346,7 +351,7 @@ impl GlyphManager {
         let weak_self = Weak::clone(&self.self_weak);
         let callback_font_stack = font_stack.clone();
         let callback_range = range;
-        let req = file_source.request_on(
+        let req = file_source.request(
             &self.run_loop.scheduler(),
             &resource,
             Box::new(move |response: Response| {
@@ -595,7 +600,7 @@ impl GlyphManager {
         let mut task = self.deferred_task.borrow_mut();
         let task = task.get_or_insert_with(|| {
             let weak_self = Weak::clone(&self.self_weak);
-            AsyncTask::on(&self.run_loop, move || {
+            AsyncTask::new(&self.run_loop, move || {
                 if let Some(this) = weak_self.upgrade() {
                     this.process_deferred_responses();
                 }

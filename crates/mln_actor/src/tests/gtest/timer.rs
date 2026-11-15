@@ -33,7 +33,7 @@ fn basic() {
         l.stop();
     };
 
-    let timer = Timer::new();
+    let timer = Timer::new(&run_loop);
     timer.start(Duration::from_millis(300), Duration::ZERO, callback);
 
     run_loop.run();
@@ -50,7 +50,7 @@ fn basic() {
 #[ignore = "TEST_REQUIRES_ACCURATE_TIMING (DISABLED_ on the C++ CI)"]
 fn repeat() {
     let run_loop = RunLoop::new();
-    let timer = Timer::new();
+    let timer = Timer::new(&run_loop);
 
     let count = Rc::new(Cell::new(10u32));
     let (l, c) = (run_loop.clone(), Rc::clone(&count));
@@ -81,8 +81,8 @@ fn repeat() {
 fn stop() {
     let run_loop = RunLoop::new();
 
-    let timer1 = Rc::new(Timer::new());
-    let timer2 = Timer::new();
+    let timer1 = Rc::new(Timer::new(&run_loop));
+    let timer2 = Timer::new(&run_loop);
 
     let interval1 = Duration::from_millis(50);
     let interval2 = Duration::from_millis(250);
@@ -124,8 +124,8 @@ fn stop() {
 fn destroy_should_stop() {
     let run_loop = RunLoop::new();
 
-    let timer1: Rc<RefCell<Option<Timer>>> = Rc::new(RefCell::new(Some(Timer::new())));
-    let timer2 = Timer::new();
+    let timer1: Rc<RefCell<Option<Timer>>> = Rc::new(RefCell::new(Some(Timer::new(&run_loop))));
+    let timer2 = Timer::new(&run_loop);
 
     let interval1 = Duration::from_millis(50);
     let interval2 = Duration::from_millis(250);
@@ -171,8 +171,8 @@ fn stopped_during_expiration() {
 
     let run_loop = RunLoop::new();
 
-    let timer = Rc::new(Timer::new());
-    let loop_stop_timer = Timer::new();
+    let timer = Rc::new(Timer::new(&run_loop));
+    let loop_stop_timer = Timer::new(&run_loop);
     let expire_timeout = 50.0;
 
     let timer_callback = || {
@@ -204,8 +204,8 @@ fn stopped_during_expiration() {
 fn stopped_after_expiration() {
     let run_loop = RunLoop::new();
 
-    let timer = Timer::new();
-    let _loop_stop_timer = Timer::new();
+    let timer = Timer::new(&run_loop);
+    let _loop_stop_timer = Timer::new(&run_loop);
     let expire_timeout = 50.0;
 
     let callback_fired = Rc::new(Cell::new(false));
@@ -239,7 +239,7 @@ fn stopped_after_expiration() {
 fn start_overrides() {
     let run_loop = RunLoop::new();
 
-    let timer = Rc::new(Timer::new());
+    let timer = Rc::new(Timer::new(&run_loop));
 
     let interval1 = 50.0;
     let interval2 = 250.0;
@@ -278,7 +278,7 @@ fn start_overrides() {
 // gtest: Timer.CanStopNonStartedTimer
 #[test]
 fn can_stop_non_started_timer() {
-    let _run_loop = RunLoop::new();
-    let timer = Timer::new();
+    let run_loop = RunLoop::new();
+    let timer = Timer::new(&run_loop);
     timer.stop();
 }

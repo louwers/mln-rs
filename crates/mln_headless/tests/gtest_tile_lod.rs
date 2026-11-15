@@ -26,13 +26,14 @@ struct TileLODTest {
 impl TileLODTest {
     fn new(camera_options: &CameraOptions) -> Self {
         let run_loop = RunLoop::new();
-        let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
+        let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
         let mut map = Map::with_resource_options(
             MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
             &ResourceOptions {
                 asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
                 ..ResourceOptions::default()
             },
+            &run_loop,
         )
         .unwrap();
         frontend.attach(&map);
@@ -52,7 +53,7 @@ impl TileLODTest {
             })),
             ..Default::default()
         };
-        let source = CustomGeometrySource::new("custom", options).unwrap();
+        let source = CustomGeometrySource::new("custom", options, run_loop.pool()).unwrap();
         handle.set(source.handle()).unwrap();
         map.style_mut().add_source(Box::new(source)).unwrap();
 

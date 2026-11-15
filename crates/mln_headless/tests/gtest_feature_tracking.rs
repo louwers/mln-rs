@@ -78,8 +78,8 @@ impl FeatureTrackingTest {
 
     fn with_geojson(geojson: &str, camera: CameraOptions) -> Self {
         let run_loop = RunLoop::new();
-        let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response(GLYPH_PATH)));
         let mut map = Map::with_file_source(
             file_source,
@@ -89,6 +89,7 @@ impl FeatureTrackingTest {
                 capture_rendered_features: true,
                 ..Default::default()
             },
+            &run_loop,
         )
         .expect("map");
         frontend.attach(&map);

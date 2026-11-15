@@ -8,9 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::thread::ThreadId;
 
-#[cfg(not(target_family = "wasm"))]
-use mln_actor::RunLoop;
-use mln_actor::{AsyncTask, SchedulerPtr, scheduler};
+use mln_actor::{AsyncTask, RunLoop, SchedulerPtr};
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use mln_storage::resource::Kind;
@@ -226,15 +224,17 @@ pub(crate) fn post(queue: &CoreQueue, task: impl FnOnce(&mut RuntimeCore, &mut O
     queue.post(move |core| run(core, task, false));
 }
 
-/// An `AsyncTask` on the runtime's loop that posts `task` to `queue`, which
-/// runs it once the loop has run the tasks queued on it. Sends before it
-/// runs make one run. It must be made on the runtime's thread.
+/// An `AsyncTask` on the runtime's loop, `run_loop`, that posts `task` to
+/// `queue`, which runs it once the loop has run the tasks queued on it.
+/// Sends before it runs make one run. It must be made on the runtime's
+/// thread.
 pub(crate) fn async_task(
+    run_loop: &RunLoop,
     queue: &CoreQueue,
     task: impl Fn(&mut RuntimeCore, &mut Outbox) + Send + Sync + 'static,
 ) -> AsyncTask {
     let (queue, task) = (queue.clone(), Arc::new(task));
-    AsyncTask::new(move || {
+    AsyncTask::new(run_loop, move || {
         let task = Arc::clone(&task);
         queue.post(move |core| run(core, |core, outbox| task(core, outbox), false));
     })
@@ -306,10 +306,11 @@ pub(crate) struct RuntimeCore {
     network: OnceCell<Arc<dyn FileSource>>,
     /// The runtime's thread's work.
     pub(crate) queue: CoreQueue,
-    /// The thread pool that the runtime's background work runs on, taken at
-    /// its first use: the process's, which a runtime shares with the others
-    /// and, in the browser, the instance's cooperative scheduler.
-    pool: OnceCell<SchedulerPtr>,
+    /// The runtime's thread's loop, which its maps run their own work on.
+    /// Its pool, the process's, which a runtime shares with the others and,
+    /// in the browser, the instance's cooperative scheduler, is taken at its
+    /// first use.
+    pub(crate) run_loop: RunLoop,
     /// [`RuntimeShared::queued`].
     queued: Arc<AtomicUsize>,
     /// The tasks of the burst in progress that haven't finished.
@@ -322,7 +323,7 @@ pub(crate) struct RuntimeCore {
 }
 
 impl RuntimeCore {
-    fn new(resource_options: ResourceOptions, queue: CoreQueue, queued: Arc<AtomicUsize>) -> Self {
+    fn new(resource_options: ResourceOptions, queue: CoreQueue, queued: Arc<AtomicUsize>, run_loop: &RunLoop) -> Self {
         RuntimeCore {
             maps: BTreeMap::new(),
             event_handler: None,
@@ -334,7 +335,7 @@ impl RuntimeCore {
             online: OnceCell::new(),
             network: OnceCell::new(),
             queue,
-            pool: OnceCell::new(),
+            run_loop: run_loop.clone(),
             queued,
             burst_left: 0,
             holding: false,
@@ -381,7 +382,7 @@ impl RuntimeCore {
             let builder = Loader::builder()
                 .asset_path(&self.resource_options.asset_path)
                 .network(Arc::clone(self.network()))
-                .pool(Arc::clone(self.pool()));
+                .pool(self.run_loop.pool());
             #[cfg(not(target_family = "wasm"))]
             let builder = builder.database(Arc::<RegionDatabase>::clone(self.database()));
             Arc::new(builder.build())
@@ -402,11 +403,7 @@ impl RuntimeCore {
 
     /// Where the runtime's background work runs, and its results come back.
     pub(crate) fn background(&self) -> Background {
-        Background { pool: Arc::clone(self.pool()), queue: self.queue.clone() }
-    }
-
-    fn pool(&self) -> &SchedulerPtr {
-        self.pool.get_or_init(scheduler::get_background)
+        Background { pool: self.run_loop.pool(), queue: self.queue.clone() }
     }
 
     /// Sends `events` to the event handler.
@@ -518,7 +515,7 @@ impl Runtime {
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         let thread = mln_util::thread::spawn("Runtime", move || {
             let run_loop = RunLoop::new();
-            let mut core = Some(RuntimeCore::new(resource_options, queue.clone(), queued));
+            let mut core = Some(RuntimeCore::new(resource_options, queue.clone(), queued, &run_loop));
             queue.run_until_stopped(&run_loop, &mut core);
             drop(core);
         })
@@ -538,8 +535,9 @@ impl Runtime {
         queued: Arc<AtomicUsize>,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         crate::web::install();
-        let core = RuntimeCore::new(resource_options, queue.clone(), queued);
-        crate::web::drive(queue, Some(core));
+        let run_loop = RunLoop::new();
+        let core = RuntimeCore::new(resource_options, queue.clone(), queued, &run_loop);
+        crate::web::drive(&run_loop, queue, Some(core));
         Ok((std::thread::current().id(), None))
     }
 

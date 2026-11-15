@@ -90,7 +90,9 @@ impl SourceBase {
 pub trait Source: Any {
     fn base(&self) -> &SourceBase;
 
-    fn load_description(&self, file_source: &dyn FileSource);
+    /// Loads the source's description through `file_source`, if it has
+    /// one to load. Its responses and background work answer on `run_loop`.
+    fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop);
 
     fn supports_layer_type(&self, type_info: &LayerTypeInfo) -> bool;
 

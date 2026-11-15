@@ -37,8 +37,11 @@ fn load(test: &str) -> Impl {
     // C++ style tests use a StubFileSource; sprite requests fail here
     // (background-opacity/color has a sprite), which C++ also counts as
     // loaded.
-    let file_source =
-        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Synchronous);
+    let run_loop = mln_actor::RunLoop::new();
+    let file_source = mln_storage::stub_file_source::StubFileSource::new(
+        &run_loop,
+        mln_storage::stub_file_source::ResponseType::Synchronous,
+    );
     let failed = |_: &mln_storage::Resource| {
         let mut response = mln_storage::Response::new();
         response.error = Some(Box::new(mln_storage::response::ResourceError::new(
@@ -49,14 +52,7 @@ fn load(test: &str) -> Impl {
     };
     file_source.set_response(mln_storage::Kind::SpriteJSON, failed);
     file_source.set_response(mln_storage::Kind::SpriteImage, failed);
-    let mut style = Impl::with_file_source(
-        Some(Arc::new(file_source)),
-        1.0,
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
-    );
+    let mut style = Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
     style.load_json(&json);
     assert!(style.loaded, "{test} did not load");
     assert!(style.is_loaded(), "{test}: style not fully loaded");

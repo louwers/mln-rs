@@ -415,6 +415,28 @@ impl Frustum {
     pub fn get_planes(&self) -> &[Vec4; 6] {
         &self.planes
     }
+
+    /// This frustum with its far plane `distance` farther from `camera`, GL
+    /// JS's `pushFrustumFarPlane`. Each far corner moves along its ray from
+    /// the camera to the moved plane, so the frustum stays a pyramid.
+    #[must_use]
+    pub fn with_far_plane_pushed(&self, distance: f64, camera: &Vec3) -> Frustum {
+        const FAR: usize = 5;
+        let far = self.planes[FAR];
+        let normal: Vec3 = [far[0], far[1], far[2]];
+        let mut points = self.points;
+        for point in &mut points[FAR_TL as usize..=FAR_BL as usize] {
+            let ray = vec3_sub(point, camera);
+            // The plane's normal points back into the frustum.
+            let ray_dot_normal = vec3_dot(&ray, &normal);
+            if ray_dot_normal < -1e-9 {
+                *point = vec3_add(point, &vec3_scale(&ray, distance / -ray_dot_normal));
+            }
+        }
+        let mut planes = self.planes;
+        planes[FAR][3] += distance;
+        Frustum::new(&points, &planes)
+    }
 }
 
 #[cfg(test)]

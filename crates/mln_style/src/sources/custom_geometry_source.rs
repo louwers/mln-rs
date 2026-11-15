@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use geojson::GeoJson;
 use mln_actor::actor::{Actor, PoolActorRef};
-use mln_actor::scheduler;
 use mln_storage::FileSource;
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
@@ -252,17 +251,20 @@ impl std::fmt::Debug for CustomGeometrySource {
 }
 
 impl CustomGeometrySource {
-    /// Creates the source. Fails for a tile size that isn't a power of two up
-    /// to the tile extent.
-    pub fn new(id: impl Into<String>, options: Options) -> Result<Self, CustomGeometrySourceError> {
+    /// Creates the source, whose tile functions run on `pool`. Fails for a
+    /// tile size that isn't a power of two up to the tile extent.
+    pub fn new(
+        id: impl Into<String>,
+        options: Options,
+        pool: mln_actor::SchedulerPtr,
+    ) -> Result<Self, CustomGeometrySourceError> {
         let tile_size = options.tile_options.tile_size;
         if !tile_size.is_power_of_two() || i32::from(tile_size) > constants::EXTENT {
             return Err(CustomGeometrySourceError::InvalidTileSize(tile_size));
         }
         let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), &options));
-        let loader = Actor::new(scheduler::get_background(), |_| {
-            CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function)
-        });
+        let loader =
+            Actor::new(pool, |_| CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function));
         Ok(CustomGeometrySource { inner: Rc::new(Inner { base: SourceBase::new(impl_), loader }) })
     }
 
@@ -306,7 +308,7 @@ impl Source for CustomGeometrySource {
         &self.inner.base
     }
 
-    fn load_description(&self, _file_source: &dyn FileSource) {
+    fn load_description(&self, _file_source: &dyn FileSource, _run_loop: &mln_actor::RunLoop) {
         let new_impl: Arc<dyn source_impl::Impl> =
             Arc::new(Impl::with_loader(&self.impl_(), self.inner.loader.self_ref()));
         self.inner.base.set_base_impl(new_impl);
@@ -330,7 +332,7 @@ mod tests {
     fn with_tile_size(tile_size: u16) -> Result<CustomGeometrySource, CustomGeometrySourceError> {
         let mut options = Options::default();
         options.tile_options.tile_size = tile_size;
-        CustomGeometrySource::new("custom", options)
+        CustomGeometrySource::new("custom", options, mln_actor::scheduler::get_background())
     }
 
     #[test]

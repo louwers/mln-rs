@@ -121,7 +121,7 @@ fn missing_and_empty() {
 fn parse_and_backfill_through_the_codec() {
     let test = RasterTileTest::new();
     let mut parameters = test.tile_parameters();
-    parameters.tile_worker_transport = serializing_transport(2);
+    parameters.tile_worker_transport = serializing_transport(&test.run_loop, 2);
     let errors = Rc::new(ErrorObserver::default());
     // Neighbours, so both instances get one.
     let tiles: Vec<RasterDEMTile> = (0..2)

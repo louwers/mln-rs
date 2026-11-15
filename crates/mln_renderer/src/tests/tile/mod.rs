@@ -39,10 +39,11 @@ pub(crate) struct RasterTileTest {
 impl RasterTileTest {
     #[must_use]
     pub(crate) fn new() -> Self {
+        let run_loop = mln_actor::RunLoop::new();
         RasterTileTest {
-            file_source: Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
+            file_source: Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
             transform_state: TransformState::default(),
-            run_loop: mln_actor::RunLoop::new(),
+            run_loop,
             thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
             // `Tileset tileset{{"https://example.com"}, {0, 22}, "none"}`.
             tileset: Tileset {
@@ -61,7 +62,7 @@ impl RasterTileTest {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: &self.transform_state,
             file_source: Some(file_source),
-            scheduler: scheduler::get_current(),
+            scheduler: self.run_loop.scheduler(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -73,8 +74,8 @@ impl RasterTileTest {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: crate::image_manager::ImageManager::create(),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
+            image_manager: crate::image_manager::ImageManager::on(Some(self.run_loop.scheduler())),
+            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &self.run_loop),
             dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
             tile_worker_transport: std::rc::Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
                 self.thread_pool.clone(),
@@ -93,11 +94,12 @@ impl Default for RasterTileTest {
 /// Port-only: a transport whose workers are in `count` worker instances on
 /// threads, reached only through the worker codec.
 #[must_use]
-pub(crate) fn serializing_transport(count: usize) -> std::rc::Rc<crate::tile::worker_codec::SerializingTransport> {
+pub(crate) fn serializing_transport(
+    run_loop: &mln_actor::RunLoop,
+    count: usize,
+) -> std::rc::Rc<crate::tile::worker_codec::SerializingTransport> {
     use crate::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
-    SerializingTransport::new(&scheduler::get_current(), |replies| {
-        Box::new(ThreadWorkerInstances::new(count, &replies))
-    })
+    SerializingTransport::new(&run_loop.scheduler(), |replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
 }
 
 /// Port-only: an opaque PNG whose pixels differ from their neighbours.

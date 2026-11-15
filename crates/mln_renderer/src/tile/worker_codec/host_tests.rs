@@ -80,7 +80,7 @@ impl Test {
         let run_loop = RunLoop::new();
         let corrupt = Rc::new(Cell::new(None));
         let next = Rc::clone(&corrupt);
-        let transport = SerializingTransport::new(&scheduler::get_current(), move |replies| {
+        let transport = SerializingTransport::new(&run_loop.scheduler(), move |replies| {
             Box::new(Corrupting { instances: ThreadWorkerInstances::new(1, &replies), next })
         });
         let transform_state = TransformState::default();
@@ -89,7 +89,7 @@ impl Test {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: &transform_state,
             file_source: None,
-            scheduler: scheduler::get_current(),
+            scheduler: run_loop.scheduler(),
             mode,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -101,8 +101,8 @@ impl Test {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: ImageManager::create(),
-            glyph_manager: GlyphManager::new(None),
+            image_manager: ImageManager::on(Some(run_loop.scheduler())),
+            glyph_manager: GlyphManager::new(None, &run_loop),
             dynamic_texture_atlas: Arc::new(DynamicTextureAtlas::new()),
             tile_worker_transport: transport,
             thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),

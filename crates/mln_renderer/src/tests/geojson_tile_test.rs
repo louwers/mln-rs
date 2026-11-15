@@ -45,7 +45,7 @@ impl GeoJSONTileTest {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: self.transform.get_state(),
             file_source: None,
-            scheduler: scheduler::get_current(),
+            scheduler: self.run_loop.scheduler(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -57,8 +57,8 @@ impl GeoJSONTileTest {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: crate::image_manager::ImageManager::create(),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
+            image_manager: crate::image_manager::ImageManager::on(Some(self.run_loop.scheduler())),
+            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &self.run_loop),
             dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
             tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
                 self.thread_pool.clone(),
@@ -230,10 +230,8 @@ fn evaluated_circle_layer_properties() -> Arc<dyn LayerProperties> {
 }
 
 /// A transport whose workers are in `count` worker instances on threads.
-fn serializing_transport(count: usize) -> Rc<SerializingTransport> {
-    SerializingTransport::new(&scheduler::get_current(), |replies| {
-        Box::new(ThreadWorkerInstances::new(count, &replies))
-    })
+fn serializing_transport(run_loop: &RunLoop, count: usize) -> Rc<SerializingTransport> {
+    SerializingTransport::new(&run_loop.scheduler(), |replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
 }
 
 // Port-only: GeoJSON.SynchronousUpdate with a `SerializingTransport`: the
@@ -245,7 +243,7 @@ fn synchronous_update_with_the_serializing_transport() {
 
     let mut tile_parameters = test.tile_parameters();
     tile_parameters.is_update_synchronous = true;
-    tile_parameters.tile_worker_transport = serializing_transport(1);
+    tile_parameters.tile_worker_transport = serializing_transport(&test.run_loop, 1);
     let tile = GeoJSONTile::new(
         OverscaledTileID::from_zxy(0, 0, 0),
         "source".to_owned(),
@@ -267,7 +265,7 @@ fn update_through_the_codec() {
     let test = GeoJSONTileTest::new();
 
     let mut tile_parameters = test.tile_parameters();
-    tile_parameters.tile_worker_transport = serializing_transport(2);
+    tile_parameters.tile_worker_transport = serializing_transport(&test.run_loop, 2);
     let layer_properties = evaluated_circle_layer_properties();
     // Two tiles, so both instances get one.
     let tiles: Vec<GeoJSONTile> = (0..2)

@@ -27,16 +27,12 @@ use crate::transition_options::TransitionOptions;
 
 /// A style impl over a stub file source, with pixel ratio 1.
 fn stub_style() -> Impl {
-    let file_source =
-        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Asynchronous);
-    Impl::with_file_source(
-        Some(Arc::new(file_source)),
-        1.0,
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
-    )
+    let run_loop = mln_actor::RunLoop::new();
+    let file_source = mln_storage::stub_file_source::StubFileSource::new(
+        &run_loop,
+        mln_storage::stub_file_source::ResponseType::Asynchronous,
+    );
+    Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop)
 }
 
 // gtest: Style.Properties
@@ -680,16 +676,12 @@ fn remove_source_in_use() {
 // gtest: Style.PublicLoadStateDoesNotWaitForResources
 #[test]
 fn public_load_state_does_not_wait_for_resources() {
-    let file_source =
-        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Manual);
-    let mut style = Style::with_file_source(
-        Some(Arc::new(file_source)),
-        1.0,
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
+    let run_loop = mln_actor::RunLoop::new();
+    let file_source = mln_storage::stub_file_source::StubFileSource::new(
+        &run_loop,
+        mln_storage::stub_file_source::ResponseType::Manual,
     );
+    let mut style = Style::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
 
     assert!(!style.is_loaded());
 
@@ -757,17 +749,12 @@ fn stub_with_style_response(
     responder: impl Fn(&mln_storage::Resource) -> Option<mln_storage::Response> + 'static,
 ) -> (Impl, Rc<ResponseObserver>, mln_actor::RunLoop) {
     let run_loop = mln_actor::RunLoop::new();
-    let file_source =
-        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Asynchronous);
-    file_source.set_response(mln_storage::Kind::Style, responder);
-    let mut style = Impl::with_file_source(
-        Some(Arc::new(file_source)),
-        1.0,
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
+    let file_source = mln_storage::stub_file_source::StubFileSource::new(
+        &run_loop,
+        mln_storage::stub_file_source::ResponseType::Asynchronous,
     );
+    file_source.set_response(mln_storage::Kind::Style, responder);
+    let mut style = Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
     let observer = Rc::new(ResponseObserver::default());
     style.set_observer(Some(Rc::<ResponseObserver>::clone(&observer)));
     (style, observer, run_loop)
@@ -872,7 +859,9 @@ fn load_json_parse_error() {
 // gtest: Style.LoadJSONCancelsPendingLoadURL
 #[test]
 fn load_json_cancels_pending_load_url() {
+    let run_loop = mln_actor::RunLoop::new();
     let file_source = Arc::new(mln_storage::stub_file_source::StubFileSource::new(
+        &run_loop,
         mln_storage::stub_file_source::ResponseType::Manual,
     ));
     file_source.set_response(mln_storage::Kind::Style, |_| {
@@ -883,10 +872,7 @@ fn load_json_cancels_pending_load_url() {
     let mut style = Impl::with_file_source(
         Some(Arc::<mln_storage::stub_file_source::StubFileSource>::clone(&file_source)),
         1.0,
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
+        &run_loop,
     );
 
     // Start loading a URL (this will be pending)

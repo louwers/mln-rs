@@ -965,7 +965,7 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<(ThreadId, Option<Joined>)
         prepared.await;
         // The session's own loop, which the renderer's work runs on, apart
         // from the work of the other sessions and runtimes on this thread.
-        let run_loop = RunLoop::detached();
+        let run_loop = RunLoop::new();
         let queue = shared.queue.clone();
         let mut worker = None;
         worker::build(&shared, &mut worker, &run_loop);

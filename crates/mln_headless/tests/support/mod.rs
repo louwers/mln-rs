@@ -281,10 +281,11 @@ impl StubMapObserver {
     /// Dispatches `map`'s events from the run loop whenever the map has
     /// some, while the returned task lives.
     pub(crate) fn observe(self: &Rc<Self>, map: &Rc<RefCell<Map>>) -> AsyncTask {
+        let run_loop = map.borrow().run_loop().clone();
         let task = {
             let observer = Rc::downgrade(self);
             let map = Rc::downgrade(map);
-            AsyncTask::new(move || {
+            AsyncTask::new(&run_loop, move || {
                 if let (Some(observer), Some(map)) = (observer.upgrade(), map.upgrade()) {
                     observer.dispatch_events(&map);
                 }
@@ -434,7 +435,7 @@ impl Drop for FixtureLog {
 #[track_caller]
 pub(crate) fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
     let timed_out = Rc::new(Cell::new(false));
-    let timer = Timer::new();
+    let timer = Timer::new(run_loop);
     {
         let timed_out = Rc::clone(&timed_out);
         let run_loop = run_loop.clone();
@@ -476,7 +477,7 @@ impl MapTest<StubFileSource> {
 
     pub(crate) fn with_mode(pixel_ratio: f32, mode: MapMode) -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         Self::create(run_loop, file_source, pixel_ratio, mode)
     }
 }
@@ -495,9 +496,9 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     /// .withSize(frontend.getSize()).withPixelRatio(pixelRatio))`.
     pub(crate) fn create(run_loop: RunLoop, file_source: Arc<FS>, pixel_ratio: f32, mode: MapMode) -> Self {
         let observer = Rc::new(StubMapObserver::default());
-        let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio).expect("a headless frontend");
+        let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio, &run_loop).expect("a headless frontend");
         let options = MapOptions { map_mode: mode, size: frontend.get_size(), pixel_ratio, ..Default::default() };
-        let map = Map::with_file_source(Arc::<FS>::clone(&file_source), options).unwrap();
+        let map = Map::with_file_source(Arc::<FS>::clone(&file_source), options, &run_loop).unwrap();
         frontend.attach(&map);
         let map = Rc::new(RefCell::new(map));
         let events = observer.observe(&map);

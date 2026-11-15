@@ -30,6 +30,8 @@ pub(crate) struct Impl {
     /// options' cache path.
     pub(crate) file_source: Option<Arc<dyn FileSource>>,
     pub(crate) map: Map,
+    /// The runner's loop, which the map runs on.
+    run_loop: RunLoop,
 }
 
 impl Impl {
@@ -39,16 +41,17 @@ impl Impl {
         metadata: &TestMetadata,
         resource_options: &ResourceOptions,
         impl_options: ImplOptions,
+        run_loop: &RunLoop,
     ) -> Result<Impl, String> {
         let resource_options = mln_storage::ResourceOptions {
             cache_path: resource_options.cache_path.clone(),
             ..mln_storage::ResourceOptions::default()
         };
-        let frontend =
-            HeadlessFrontend::with_options(metadata.size, metadata.pixel_ratio, true).map_err(|e| e.to_string())?;
+        let frontend = HeadlessFrontend::with_options(metadata.size, metadata.pixel_ratio, true, run_loop)
+            .map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let transport = SerializingTransport::new(&mln_actor::scheduler::get_current(), |replies| {
+            let transport = SerializingTransport::new(&run_loop.scheduler(), |replies| {
                 Box::new(ThreadWorkerInstances::new(count, &replies))
             });
             frontend.with_renderer(|renderer| renderer.set_tile_worker_transport(transport));
@@ -63,6 +66,7 @@ impl Impl {
                 cross_source_collisions: metadata.cross_source_collisions,
                 ..Default::default()
             },
+            run_loop,
         )
         .map_err(|e| e.to_string())?;
         frontend.attach(&map);
@@ -70,7 +74,7 @@ impl Impl {
             map.set_bounds(&BoundOptions { max_pitch: Some(f64::from(max_pitch)), ..Default::default() })
                 .map_err(|e| e.to_string())?;
         }
-        Ok(Impl { frontend, file_source: Some(file_source), map })
+        Ok(Impl { frontend, file_source: Some(file_source), map, run_loop: run_loop.clone() })
     }
 }
 
@@ -344,6 +348,7 @@ impl TestRunnerImpl for Impl {
             let maybe_image = Rc::clone(&maybe_image);
             let request_completed = Rc::clone(&request_completed);
             file_source.request(
+                &self.run_loop.scheduler(),
                 &mln_storage::Resource::image(&format!("mapbox://render-tests/{image_path}")),
                 Box::new(move |response: mln_storage::Response| {
                     if let Some(data) = &response.data {
@@ -355,7 +360,7 @@ impl TestRunnerImpl for Impl {
         };
 
         while !request_completed.get() {
-            RunLoop::get().run_once();
+            self.run_loop.run_once();
             self.map.process_events();
         }
 
@@ -391,25 +396,25 @@ impl TestRunnerImpl for Impl {
         // util::Timer sleepTimer; sleepTimer.start(duration, zero, ...);
         // while (sleeping) RunLoop::Get()->runOnce();
         let sleeping = Rc::new(Cell::new(true));
-        let sleep_timer = mln_actor::Timer::new();
+        let sleep_timer = mln_actor::Timer::new(&self.run_loop);
         {
             let sleeping = Rc::clone(&sleeping);
             sleep_timer.start(duration, std::time::Duration::ZERO, move || sleeping.set(false));
         }
         while sleeping.get() {
-            RunLoop::get().run_once();
+            self.run_loop.run_once();
             self.map.process_events();
         }
         Ok(())
     }
 }
 
-/// The factory `TestRunner::run` uses for `maps[key]`. Creates the thread's
-/// `util::RunLoop` first, as `runRenderTests` does, and keeps it alive.
+/// The factory `TestRunner::run` uses for `maps[key]`, on the runner's loop.
 pub fn factory() -> ImplFactory {
-    let run_loop = RunLoop::new();
-    Box::new(move |metadata: &TestMetadata, resource_options: &ResourceOptions, impl_options: &ImplOptions| {
-        let _ = &run_loop;
-        Ok(Box::new(Impl::new(metadata, resource_options, *impl_options)?))
-    })
+    Box::new(
+        |metadata: &TestMetadata,
+         resource_options: &ResourceOptions,
+         impl_options: &ImplOptions,
+         run_loop: &RunLoop| { Ok(Box::new(Impl::new(metadata, resource_options, *impl_options, run_loop)?)) },
+    )
 }

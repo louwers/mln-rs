@@ -70,18 +70,19 @@ impl Calls {
 /// above every layer, on `backend`, and drops the renderer. `None` where the
 /// machine has no device of `backend`, such as no EGL.
 fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&str>) -> Option<PremultipliedImage> {
-    let _run_loop = RunLoop::new();
-    let (mut frontend, mut map) = session(backend, host, before)?;
+    let run_loop = RunLoop::new();
+    let (mut frontend, mut map) = session(backend, host, before, &run_loop)?;
     Some(frontend.render(&mut map).expect("a frame").image)
 }
 
 /// A frontend on `backend` and a map of the style with `host`'s layer below
-/// the layer named `before`, or above every layer, on the thread's run loop.
+/// the layer named `before`, or above every layer, on `run_loop`.
 /// `None` where the machine has no device of `backend`.
 fn session(
     backend: BackendType,
     host: Arc<dyn CustomLayerHost>,
     before: Option<&str>,
+    run_loop: &RunLoop,
 ) -> Option<(HeadlessFrontend, Map)> {
     let size = Size::new(SIDE, SIDE);
     let device = match Device::with_backend(backend, DeviceOptions::default()) {
@@ -92,9 +93,11 @@ fn session(
         }
         Err(error) => panic!("a {backend:?} device: {error}"),
     };
-    let frontend = HeadlessFrontend::with_device(device, size, 1.0, true, Arc::default()).expect("a frontend");
+    let frontend =
+        HeadlessFrontend::with_device(device, size, 1.0, true, Arc::default(), run_loop).expect("a frontend");
     let mut map =
-        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() }).unwrap();
+        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() }, run_loop)
+            .unwrap();
     frontend.attach(&map);
     map.style_mut().load_json(STYLE);
     map.style_mut().add_custom_layer("quad", host, before).expect("the custom layer");
@@ -465,9 +468,9 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
     /// `end`, which can drop the frontend, and checks that the host
     /// deinitialized with the context it drew on current.
     fn check_end(end: impl FnOnce(&mut Option<HeadlessFrontend>, &mut Map)) {
-        let _run_loop = RunLoop::new();
+        let run_loop = RunLoop::new();
         let host = Arc::new(Host::default());
-        let Some((frontend, mut map)) = session(BackendType::OpenGL, Arc::<Host>::clone(&host), None) else {
+        let Some((frontend, mut map)) = session(BackendType::OpenGL, Arc::<Host>::clone(&host), None, &run_loop) else {
             return;
         };
         let mut frontend = Some(frontend);

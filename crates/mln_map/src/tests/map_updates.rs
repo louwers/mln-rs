@@ -17,9 +17,10 @@ use parking_lot::Mutex;
 
 use crate::{CameraOptions, ErrorKind, Map, MapOptions, UpdateReader};
 
-fn map() -> Map {
+fn map(run_loop: &RunLoop) -> Map {
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
-    Map::with_file_source(Arc::new(StubFileSource::new(ResponseType::Asynchronous)), options).expect("map")
+    Map::with_file_source(Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)), options, run_loop)
+        .expect("map")
 }
 
 /// A reader of `map`'s updates, and the times that it woke.
@@ -39,8 +40,8 @@ fn assert_near(actual: f64, expected: f64) {
 
 #[test]
 fn a_command_group_holds_its_updates_until_the_outermost_group_ends() {
-    let _loop = RunLoop::new();
-    let mut map = map();
+    let run_loop = RunLoop::new();
+    let mut map = map(&run_loop);
     map.drain_events();
     let reader = map.update_reader();
     let before = map.update_generation();
@@ -72,8 +73,8 @@ fn a_command_group_holds_its_updates_until_the_outermost_group_ends() {
 
 #[test]
 fn a_hold_keeps_updates_back_apart_from_the_groups() {
-    let _loop = RunLoop::new();
-    let mut map = map();
+    let run_loop = RunLoop::new();
+    let mut map = map(&run_loop);
     map.drain_events();
     let before = map.update_generation();
     let (_reader, wakes) = count_wakes(&map);
@@ -103,8 +104,8 @@ fn a_hold_keeps_updates_back_apart_from_the_groups() {
 
 #[test]
 fn a_group_without_changes_publishes_nothing() {
-    let _loop = RunLoop::new();
-    let mut map = map();
+    let run_loop = RunLoop::new();
+    let mut map = map(&run_loop);
     map.drain_events();
     let before = map.update_generation();
     map.begin_command_group();
@@ -125,8 +126,8 @@ fn carried_hover(reader: &UpdateReader) -> Option<Value> {
 
 #[test]
 fn feature_state_changes_publish_updates_that_carry_the_state() {
-    let _loop = RunLoop::new();
-    let mut map = map();
+    let run_loop = RunLoop::new();
+    let mut map = map(&run_loop);
     map.jump_to(&CameraOptions::default());
     let reader = map.update_reader();
     let before = map.update_generation();
@@ -161,8 +162,8 @@ fn feature_state_changes_publish_updates_that_carry_the_state() {
 
 #[test]
 fn a_style_load_clears_the_feature_state_that_it_publishes() {
-    let _loop = RunLoop::new();
-    let mut map = map();
+    let run_loop = RunLoop::new();
+    let mut map = map(&run_loop);
     map.jump_to(&CameraOptions::default());
     let reader = map.update_reader();
     map.set_feature_state("points", None, "1", hover(true));
@@ -189,7 +190,7 @@ fn a_style_load_clears_the_feature_state_that_it_publishes() {
 #[test]
 fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Style, |_| {
         let mut response = Response::new();
         let style = r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#;
@@ -197,7 +198,7 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
         Some(response)
     });
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
-    let mut map = Map::with_file_source(Arc::new(file_source), options).expect("map");
+    let mut map = Map::with_file_source(Arc::new(file_source), options, &run_loop).expect("map");
     map.jump_to(&CameraOptions::default());
     map.set_feature_state("points", None, "1", hover(true));
 
@@ -231,8 +232,8 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
 
 #[test]
 fn the_update_reader_sees_the_map_go() {
-    let _loop = RunLoop::new();
-    let mut map = map();
+    let run_loop = RunLoop::new();
+    let mut map = map(&run_loop);
     map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
     let reader = map.update_reader();
     let generation = reader.generation();
@@ -249,8 +250,8 @@ fn the_update_reader_sees_the_map_go() {
 
 #[test]
 fn an_update_reaches_a_reader_on_another_thread() {
-    let _loop = RunLoop::new();
-    let mut map = map();
+    let run_loop = RunLoop::new();
+    let mut map = map(&run_loop);
     let reader = map.update_reader();
     let (sender, receiver) = std::sync::mpsc::channel();
     reader.set_waker(Some(Arc::new(move || {
@@ -267,8 +268,8 @@ fn an_update_reaches_a_reader_on_another_thread() {
 
 #[test]
 fn each_reader_wakes_until_it_drops() {
-    let _loop = RunLoop::new();
-    let mut map = map();
+    let run_loop = RunLoop::new();
+    let mut map = map(&run_loop);
     let (first, first_wakes) = count_wakes(&map);
     let (second, second_wakes) = count_wakes(&map);
     map.set_prefetch_zoom_delta(1);
@@ -296,8 +297,8 @@ fn set_override_synchronous_update(map: &mut Map, value: bool) {
 
 #[test]
 fn the_synchronous_update_override_publishes_an_update() {
-    let _loop = RunLoop::new();
-    let mut map = map();
+    let run_loop = RunLoop::new();
+    let mut map = map(&run_loop);
     map.jump_to(&CameraOptions::default());
     let reader = map.update_reader();
     map.style_mut().load_json(

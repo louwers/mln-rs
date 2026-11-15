@@ -1,5 +1,5 @@
 // The asynchronous mode polls the pending requests from an AsyncTask on the
-// current RunLoop, re-armed every millisecond while requests are pending.
+// stub's RunLoop, re-armed every millisecond while requests are pending.
 // The stub lives on the thread that created it; requests must come from that
 // thread, and it answers them with `Responder::send_now`. A cancelled request
 // leaves `pending` at the next poll.
@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_actor::{AsyncTask, LocalObject};
+use mln_actor::{AsyncTask, LocalObject, RunLoop};
 use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
@@ -48,12 +48,13 @@ fn unexpected(resource: &Resource) -> Option<Response> {
 }
 
 impl StubFileSource {
+    /// A stub on `run_loop`, which polls the asynchronous one's requests.
     #[must_use]
-    pub fn new(type_: ResponseType) -> Self {
+    pub fn new(run_loop: &RunLoop, type_: ResponseType) -> Self {
         let state = Rc::new(RefCell::new(State::default()));
         if type_ == ResponseType::Asynchronous {
             let weak = Rc::downgrade(&state);
-            let timer = AsyncTask::new(move || {
+            let timer = AsyncTask::new(run_loop, move || {
                 if let Some(state) = weak.upgrade() {
                     Self::poll(&state);
                 }

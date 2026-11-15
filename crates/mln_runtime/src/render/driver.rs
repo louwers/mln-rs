@@ -27,9 +27,8 @@ use crate::runtime::Outbox;
 /// go of the graphics objects on this thread.
 pub struct DriverWork {
     shared: Arc<SessionShared>,
-    /// The loop that the session's renderer runs its own work on, which
-    /// isn't this thread's current loop: a thread may service several
-    /// sessions.
+    /// The loop that the session's renderer runs its own work on, of the
+    /// session's own: a thread may service several sessions.
     run_loop: RunLoop,
     /// The session's worker, once the first service built it.
     worker: RefCell<Option<Worker>>,
@@ -49,7 +48,7 @@ fn ended() -> Error {
 
 impl DriverWork {
     pub(crate) fn new(shared: Arc<SessionShared>) -> DriverWork {
-        let run_loop = RunLoop::detached();
+        let run_loop = RunLoop::new();
         // The renderer's work wakes the host as the session's does.
         let queue = shared.queue.clone();
         run_loop.set_waker(Some(Arc::new(move || queue.wake())));

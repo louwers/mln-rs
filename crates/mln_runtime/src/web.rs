@@ -30,10 +30,10 @@ pub(crate) fn install() {
 }
 
 /// Runs a runtime's `queue` with its `core` in the pump's slices until the
-/// queue stops, and with it this thread's loop, which the runtime's maps
-/// run their own work on.
-pub(crate) fn drive(queue: CoreQueue, mut core: Option<RuntimeCore>) {
-    let run_loop = RunLoop::get();
+/// queue stops, and with it the runtime's loop, `run_loop`, which the
+/// runtime's maps run their own work on.
+pub(crate) fn drive(run_loop: &RunLoop, queue: CoreQueue, mut core: Option<RuntimeCore>) {
+    let run_loop = run_loop.clone();
     run_loop.set_waker(Some(pump::waker()));
     queue.set_waker(Some(pump::waker()));
     pump::add(move || {
@@ -95,8 +95,8 @@ pub(crate) fn run_session_now(id: SessionId) {
     }
 }
 
-/// A transport that puts the tiles' workers of a renderer on this thread's
-/// current loop in the instance's tile worker Web Workers, or `None` where
+/// A transport that puts the tiles' workers of a renderer on `scheduler`'s
+/// loop in the instance's tile worker Web Workers, or `None` where
 /// none start, which leaves the workers on the cooperative scheduler, in the
 /// pump's slices.
 pub(crate) fn tile_worker_transport(scheduler: &mln_actor::SchedulerPtr) -> Option<Rc<SerializingTransport>> {

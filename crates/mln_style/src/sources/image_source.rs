@@ -189,7 +189,7 @@ impl Source for ImageSource {
         &self.inner.base
     }
 
-    fn load_description(&self, file_source: &dyn FileSource) {
+    fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop) {
         let url = self.inner.url.borrow().clone();
         let Some(url) = url else {
             self.inner.base.set_loaded(true);
@@ -201,8 +201,11 @@ impl Source for ImageSource {
         }
 
         let weak = Rc::downgrade(&self.inner);
-        let req =
-            file_source.request(&Resource::image(&url), Box::new(move |res: Response| on_image_response(&weak, &res)));
+        let req = file_source.request(
+            &run_loop.scheduler(),
+            &Resource::image(&url),
+            Box::new(move |res: Response| on_image_response(&weak, &res)),
+        );
         *self.inner.req.borrow_mut() = Some(req);
     }
 

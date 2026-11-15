@@ -124,12 +124,13 @@ pub(crate) fn run(launch: Launch) {
         .database(Arc::<DatabaseFileSource>::clone(&database_file_source))
         .build();
 
-    let mut renderer = Renderer::new(backend.renderer_backend(), pixel_ratio as f32, None);
+    let mut renderer = Renderer::new(backend.renderer_backend(), pixel_ratio as f32, None, &run_loop);
     let map_size = logical_size(size, pixel_ratio);
 
     let mut map = match Map::with_file_source(
         Arc::new(loader),
         MapOptions { size: map_size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
+        &run_loop,
     ) {
         Ok(map) => map,
         Err(e) => {
@@ -162,9 +163,10 @@ pub(crate) fn run(launch: Launch) {
         None => std::env::var("MLN_STYLE_URL").unwrap_or_else(|_| DEFAULT_STYLE.to_owned()),
     };
 
+    let wake = Timer::new(&run_loop);
     let mut view = View {
         run_loop,
-        wake: Timer::new(),
+        wake,
         inbox,
         proxy,
         start,
@@ -672,7 +674,7 @@ impl View {
                 return;
             }
         };
-        let mut renderer = Renderer::new(backend.renderer_backend(), self.pixel_ratio as f32, None);
+        let mut renderer = Renderer::new(backend.renderer_backend(), self.pixel_ratio as f32, None, &self.run_loop);
         renderer.set_event_queue(Some(self.map.renderer_events()));
         self.gfx = Some(Gfx { renderer, backend });
         // The new renderer draws the map's last update again.
