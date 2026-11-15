@@ -1013,11 +1013,15 @@ impl Gpu for WebGpu {
             let range = buffer
                 .get_mapped_range(..)
                 .map_err(|error| GpuError::Invalid(format!("a readback's range: {error}")))?;
-            let mut texels = Vec::with_capacity(bytes_per_row * rows);
-            for row in range.chunks(padded_bytes_per_row).take(rows) {
-                texels.extend_from_slice(&row[..bytes_per_row]);
+            if padded_bytes_per_row == bytes_per_row {
+                range[..bytes_per_row * rows].to_vec()
+            } else {
+                let mut texels = Vec::with_capacity(bytes_per_row * rows);
+                for row in range.chunks(padded_bytes_per_row).take(rows) {
+                    texels.extend_from_slice(&row[..bytes_per_row]);
+                }
+                texels
             }
-            texels
         };
         buffer.unmap();
         Ok(Some(texels))
