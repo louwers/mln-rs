@@ -127,9 +127,9 @@ fn background_visibility_visible() {
 /// one device, in turn.
 #[test]
 fn frontends_on_one_device_render_in_turn() {
-    let device = mln_headless::headless_frontend::harness_device().expect("device");
+    let device = mln_headless::harness_device().expect("device");
     let on_shared_device = |size, pixel_ratio, run_loop: &RunLoop| {
-        HeadlessFrontend::with_device(device.clone(), size, pixel_ratio, true, Arc::default(), run_loop)
+        HeadlessFrontend::with_device(device.clone(), size, pixel_ratio, Arc::default(), run_loop)
             .expect("a headless frontend")
     };
     for test in ["background-color/literal", "background-color/function", "background-color/literal"] {

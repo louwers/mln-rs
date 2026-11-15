@@ -1,8 +1,9 @@
 // The page: it runs no wasm itself. It compiles the module, gives its canvas
 // to the map's Web Worker (map-worker.ts) as an OffscreenCanvas, and starts
 // the tile workers' Web Workers (worker.ts) while the module compiles, each
-// connected to the map's by a MessageChannel, so that their requests and
-// replies never pass through this thread. Each Web Worker instantiates the
+// with a control port to the map's, where the map's runtime connects them
+// with MessageChannels of their own, so that their requests and replies
+// never pass through this thread. Each Web Worker instantiates the
 // same module with its own memory, so nothing needs SharedArrayBuffer or
 // COOP/COEP headers.
 //
@@ -23,10 +24,10 @@
 //   workers=<n>            Web Workers for the tiles (default: up to 4)
 //   width, height, ratio   a fixed map size in CSS pixels and pixel ratio
 //                          (default: the window and devicePixelRatio)
-//   localIdeographFontFamily=<CSS font-family list>
-//                          the font CJK glyphs are drawn in rather than
-//                          downloaded, as GL JS's option (default:
-//                          sans-serif); empty or `false` downloads them
+//   localIdeographFontFamily=false
+//                          download CJK glyphs rather than draw them in the
+//                          browser's sans-serif font, as GL JS's option
+//                          does when false (or empty)
 //   compare                MapLibre GL JS's map of the style beside this one
 //                          (compare.ts)
 //   freeBearing            free bearing on the globe: drags and zooms on it
@@ -58,15 +59,14 @@
 // draws with, `loaded` resolves with the
 // load time and the number of worker replies once the map is fully loaded,
 // and `readPixels()` draws the frame again and resolves with its RGBA
-// pixels, read back from the GPU. `fetches()` resolves with every URL the
-// map's Web Worker fetched and how many times, `idle()` with the camera
+// pixels, read back from the canvas. `fetches()` resolves with every URL
+// the map's Web Worker fetched and how many times, `idle()` with the camera
 // once the map is fully loaded and has stopped moving, and `nextFrame()`
 // once the map has run its next animation frame. `checkGpu()` runs a check
-// of the map's GPU (WebMap::start_gpu_check) and resolves once it passed.
-// A panic in any of
-// the Web Workers' wasm instances stops the map: the page shows its
-// message, `fatal` resolves with it as an Error, and `loaded` and the
-// methods reject with it.
+// of a GPU of the map's backend (WebMap::start_gpu_check) and resolves once
+// it passed. A panic in any of the Web Workers' wasm instances stops the
+// map: the page shows its message, `fatal` resolves with it as an Error,
+// and `loaded` and the methods reject with it.
 
 import type { Comparison } from "./compare.ts";
 import { createDebugOverlay } from "./debug.ts";
@@ -129,12 +129,12 @@ let ratio = number("ratio", window.devicePixelRatio || 1);
 // The map's size in CSS pixels, its box's; the worker resizes the map and
 // its surface. Its first report is the size the map started at.
 let size: [number, number] = [mapBox.clientWidth, mapBox.clientHeight];
-// The map draws its size times the pixel ratio, rounded, in device pixels
-// (map.rs). The canvas's box covers exactly those, as GL JS's does: at a
-// fractional pixel ratio, a box of whole CSS pixels covers a fractional
-// number of device pixels, and a browser that resamples the canvas into it
-// blurs the map.
-const devicePixels = (length: number) => Math.round(length * ratio);
+// The map draws its size times the pixel ratio, rounded down, in device
+// pixels (mln_runtime's render session). The canvas's box covers exactly
+// those, as GL JS's does: at a fractional pixel ratio, a box of whole CSS
+// pixels covers a fractional number of device pixels, and a browser that
+// resamples the canvas into it blurs the map.
+const devicePixels = (length: number) => Math.floor(length * ratio);
 function fitCanvas() {
   canvas.style.width = `${devicePixels(size[0]) / ratio}px`;
   canvas.style.height = `${devicePixels(size[1]) / ratio}px`;
@@ -143,7 +143,7 @@ canvas.width = devicePixels(size[0]);
 canvas.height = devicePixels(size[1]);
 fitCanvas();
 
-const localFamily = params.get("localIdeographFontFamily") ?? "sans-serif";
+const localFamily = params.get("localIdeographFontFamily");
 
 // What a tab whose WebGPU couldn't start the map draws with from then on.
 const BACKEND_KEY = "mln-backend";
@@ -224,11 +224,11 @@ const panicMessage = "panic=<map|tile> asked for this panic";
 // what they ask of the map waits in the map's Web Worker until it starts.
 compiling.then(
   (module) => {
-    const ports = tileWorkers.map((worker, i) => {
+    const controls = tileWorkers.map((worker, i) => {
       const channel = new MessageChannel();
       const start: StartTileWorker = {
         module,
-        port: channel.port2,
+        control: channel.port2,
         panic: panic === "tile" && i === 0 ? panicMessage : undefined,
       };
       worker.postMessage(start, [channel.port2]);
@@ -241,20 +241,17 @@ compiling.then(
         type: "start",
         module,
         canvas: offscreen,
-        ports,
+        tileWorkers: controls,
         width: size[0],
         height: size[1],
         ratio,
         style,
         fallbackFontFaces: params.get("fallbackFontFaces"),
         camera,
-        localIdeographFontFamily:
-          localFamily === "" || localFamily === "false"
-            ? undefined
-            : localFamily,
+        systemFonts: localFamily !== "" && localFamily !== "false",
         panic: panic === "map" ? panicMessage : undefined,
       },
-      [offscreen, ...ports],
+      [offscreen, ...controls],
     );
   },
   (error: unknown) =>

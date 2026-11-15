@@ -6,7 +6,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style_types::image::ImageMap;
+use mln_style_types::image::ImagePositions;
 use mln_style_types::{SymbolAnchorType, SymbolPlacementType, VariableAnchorOffsetCollection};
 use mln_text::glyph::{Shaping, WritingModeType};
 use mln_text::shaping::PositionedIcon;
@@ -115,7 +115,7 @@ impl SymbolInstanceSharedData {
         layout: &SymbolLayoutProperties::Values,
         text_placement: SymbolPlacementType,
         text_offset: [f32; 2],
-        image_map: &ImageMap,
+        icons: &ImagePositions,
         icon_rotation: f32,
         icon_type: SymbolContent,
         has_icon_text_fit: bool,
@@ -132,7 +132,7 @@ impl SymbolInstanceSharedData {
         }
 
         let quads = |shaping: &Shaping| {
-            get_glyph_quads(shaping, text_offset, layout, text_placement, image_map, allow_vertical_placement)
+            get_glyph_quads(shaping, text_offset, layout, text_placement, icons, allow_vertical_placement)
         };
 
         let mut single_line_initialized = false;

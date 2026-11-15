@@ -237,18 +237,17 @@ fn geojson_points(count: usize) -> Arc<Vec<u8>> {
 }
 
 /// The number of features in tile 0/0/0 of `source`'s data.
-fn geojson_source_feature_count(source: &GeoJSONSource, run_loop: &RunLoop) -> usize {
-    let count = Rc::new(RefCell::new(0));
+fn geojson_source_feature_count(source: &GeoJSONSource, _run_loop: &RunLoop) -> usize {
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     if let Some(data) = source.impl_().get_data().and_then(|data| data.upgrade()) {
-        let count = Rc::clone(&count);
+        let count = Arc::clone(&count);
         data.get_tile(
             &CanonicalTileID::new(0, 0, 0),
-            Box::new(move |features| *count.borrow_mut() = features.len()),
+            Box::new(move |features| count.store(features.len(), std::sync::atomic::Ordering::Relaxed)),
             true,
-            &run_loop.scheduler(),
         );
     }
-    *count.borrow()
+    count.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Runs `run_loop` until the background build of a URL response has

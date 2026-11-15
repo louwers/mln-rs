@@ -3,4 +3,4 @@
 
 pub mod headless_frontend;
 
-pub use headless_frontend::{HeadlessFrontend, RenderResult};
+pub use headless_frontend::{HeadlessFrontend, RenderResult, harness_device};

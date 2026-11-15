@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
@@ -218,8 +219,8 @@ impl GeometryTileFeature for StubGeometryTileFeature {
     fn get_id(&self) -> Identifier {
         Identifier::Null
     }
-    fn get_geometries(&self) -> &GeometryCollection {
-        &self.geometry
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+        Ok(Cow::Borrowed(&self.geometry))
     }
 }
 

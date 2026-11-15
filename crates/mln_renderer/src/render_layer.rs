@@ -91,8 +91,8 @@ pub(crate) type LayerPlacementData = Vec<BucketPlacementData>;
 
 pub struct LayerPrepareParameters<'a> {
     pub(crate) source: Option<&'a dyn RenderSource>,
-    /// conformance: `ImageManager& imageManager` (background-pattern).
-    pub(crate) image_manager: &'a crate::image_manager::ImageManager,
+    /// conformance: `ImageManager& imageManager` (background-pattern): the image store.
+    pub(crate) images: &'a crate::image_store::ImageStore,
     pub(crate) pattern_atlas: &'a RefCell<PatternAtlas>,
     pub(crate) line_atlas: &'a RefCell<LineAtlas>,
 }
@@ -750,6 +750,7 @@ pub trait RenderLayer {
         &self,
         _query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        _geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         _zoom: f32,
         _transform_state: &TransformState,
         _pixels_to_tile_units: f32,

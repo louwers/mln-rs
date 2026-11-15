@@ -138,7 +138,11 @@ caches and heap.
 A case may use API that older commits lack. When this checkout's harness doesn't
 build over the ref, the ref runs its own harness instead, the report says so,
 and the cases only this checkout has show as "only in the candidate". A case
-that changed between the two harnesses then compares different work.
+whose code differs between the two harnesses compares different work, so it gets
+no verdicts, and the report lists it. A case's code is the `Case::new` call that
+registers it and the functions and constants it uses, of its own module or of
+one it names through its path, compared as tokens. The scenes, the runtime and
+the meter, which every case shares, aren't compared.
 
 A lead metric gets a verdict when a two-sided Mann-Whitney U test,
 Holm-corrected over the case's lead metrics, gives p < 0.05 and the medians

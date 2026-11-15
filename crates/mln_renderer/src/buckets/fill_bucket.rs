@@ -48,6 +48,10 @@ pub(crate) struct FillBucket {
     pub(crate) basic_line_segments: Vec<SegmentBase>,
 
     pub(crate) vertices: GeometryVec<FillLayoutVertex>,
+    /// Where the outline segment that starts at each vertex ends, the
+    /// vertex itself where none does: an instanced outline draws a segment
+    /// per vertex. A device that draws the outlines as lines discards them.
+    pub(crate) outline_ends: GeometryVec<FillLayoutVertex>,
     pub(crate) triangles: GeometryVec<u16>,
     pub(crate) triangle_segments: Vec<SegmentBase>,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
@@ -83,6 +87,7 @@ impl FillBucket {
             basic_lines: GeometryVec::default(),
             basic_line_segments: Vec::new(),
             vertices: GeometryVec::default(),
+            outline_ends: GeometryVec::default(),
             triangles: GeometryVec::default(),
             triangle_segments: Vec::new(),
             subdivision_granularity: SubdivisionGranularitySetting::none(),
@@ -109,6 +114,7 @@ impl FillBucket {
             &mut self.triangle_segments,
             self.basic_lines.get_mut(),
             &mut self.basic_line_segments,
+            self.outline_ends.get_mut(),
             canonical,
             self.subdivision_granularity.fill.get_granularity_for_zoom_level(canonical.z),
         )
@@ -207,7 +213,7 @@ impl Bucket for FillBucket {
     fn update(
         &self,
         states: &crate::bucket::FeatureStates,
-        layer: &dyn mln_tile_id::geometry_tile_data::GeometryTileLayer,
+        layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,
     ) {

@@ -128,9 +128,7 @@ mod tests {
 
     use super::*;
 
-    struct StubGeometryTileFeature {
-        geometry: GeometryCollection,
-    }
+    struct StubGeometryTileFeature;
 
     impl GeometryTileFeature for StubGeometryTileFeature {
         fn get_type(&self) -> FeatureType {
@@ -138,9 +136,6 @@ mod tests {
         }
         fn get_value(&self, _key: &str) -> Option<Value> {
             None
-        }
-        fn get_geometries(&self) -> &GeometryCollection {
-            &self.geometry
         }
     }
 
@@ -154,7 +149,7 @@ mod tests {
     }
 
     fn symbol_feature_stub(geometry: GeometryCollection, text: &str) -> SymbolFeature {
-        let mut feature = SymbolFeature::new(&StubGeometryTileFeature { geometry });
+        let mut feature = SymbolFeature::new(&StubGeometryTileFeature, geometry);
         feature.formatted_text = Some(TaggedString::new(
             text.encode_utf16().collect(),
             SectionOptions::new(1.0, Vec::new(), GlyphIDType::FontPBF, 0, None),

@@ -22,6 +22,6 @@ pub use target::{
     Adapter, AttachOptions, BackendType, BorrowedRing, CanvasFormat, ConsumerSync, DepthStencilFormat,
     DepthStencilFormats, Device, DeviceOptions, DmaBufFormat, DmaBufPlane, Driver, ExportKind, ExportKinds,
     ExportedImage, ExportedRing, FrameDepth, FrameTexture, FrameTextureKind, GlApi, GpuSync, NativeTexture,
-    RenderTarget, Surface, SurfaceType, SyncKind, SyncKinds, Wake,
+    RenderTarget, Surface, SurfaceOverlay, SurfaceType, SyncKind, SyncKinds, Wake,
 };
 pub(crate) use worker::{SessionQueue, Worker, post as worker_post};

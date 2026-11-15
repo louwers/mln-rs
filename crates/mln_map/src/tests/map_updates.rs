@@ -15,7 +15,7 @@ use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
-use crate::{CameraOptions, ErrorKind, Map, MapOptions, UpdateReader};
+use crate::{CameraOptions, ErrorKind, Map, MapOptions, TileSettings, UpdateReader};
 
 fn map(run_loop: &RunLoop) -> Map {
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
@@ -53,7 +53,7 @@ fn a_command_group_holds_its_updates_until_the_outermost_group_ends() {
     assert_eq!(map.command_group_depth(), 2);
     map.jump_to(&CameraOptions { zoom: Some(3.0), ..Default::default() });
     map.end_command_group().expect("the inner group ends");
-    map.set_prefetch_zoom_delta(1);
+    map.set_tile_settings(&TileSettings { prefetch_zoom_delta: 1, ..map.snapshot().tile });
     assert_eq!(map.update_generation(), before);
     assert_eq!(wakes.load(Ordering::SeqCst), 0);
 
@@ -272,14 +272,14 @@ fn each_reader_wakes_until_it_drops() {
     let mut map = map(&run_loop);
     let (first, first_wakes) = count_wakes(&map);
     let (second, second_wakes) = count_wakes(&map);
-    map.set_prefetch_zoom_delta(1);
+    map.set_tile_settings(&TileSettings { prefetch_zoom_delta: 1, ..map.snapshot().tile });
     assert_eq!(first_wakes.load(Ordering::SeqCst), 1);
     assert_eq!(second_wakes.load(Ordering::SeqCst), 1);
 
     drop(first);
     // A clone starts without a waker.
     let _clone = second.clone();
-    map.set_prefetch_zoom_delta(2);
+    map.set_tile_settings(&TileSettings { prefetch_zoom_delta: 2, ..map.snapshot().tile });
     assert_eq!(first_wakes.load(Ordering::SeqCst), 1);
     assert_eq!(second_wakes.load(Ordering::SeqCst), 2);
 }

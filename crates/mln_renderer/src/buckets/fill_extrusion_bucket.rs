@@ -60,6 +60,16 @@ pub(crate) struct FillExtrusionLayoutVertex {
 /// vertex (0) or the next one (1), y the base (0) or the top (1).
 pub(crate) type FillExtrusionStaticVertex = [i16; 2];
 
+/// A corner of a wall drawn without instancing, and the outline vertex the
+/// wall starts at. A wall reads the next outline vertex four corners
+/// further on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+pub(crate) struct FillExtrusionWallVertex {
+    pub(crate) corner: FillExtrusionStaticVertex,
+    pub(crate) vertex: FillExtrusionLayoutVertex,
+}
+
 pub(crate) use crate::render_light::EvaluatedLight;
 
 #[derive(mln_wire::Wire)]
@@ -343,7 +353,7 @@ impl Bucket for FillExtrusionBucket {
     fn update(
         &self,
         states: &crate::bucket::FeatureStates,
-        layer: &dyn mln_tile_id::geometry_tile_data::GeometryTileLayer,
+        layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,
     ) {

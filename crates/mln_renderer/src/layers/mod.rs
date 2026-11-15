@@ -78,8 +78,8 @@ impl DrawableBinders {
 
 /// Refreshes the drawable's copies of the bucket's data-driven attributes
 /// when the bucket's version moved since the copy: `refresh(attrs)` re-reads
-/// them into the drawable's attribute array, and new attributes are uploaded
-/// again.
+/// them into the drawable's attribute array, its instance attributes where
+/// it has them, and new attributes are uploaded again.
 pub(crate) fn refresh_if_bucket_updated(
     drawable: &mut Drawable,
     refresh: impl FnOnce(&mut mln_gfx::vertex_attribute::VertexAttributeArray),
@@ -92,7 +92,7 @@ pub(crate) fn refresh_if_bucket_updated(
         return;
     }
     binders.version.set(version);
-    if let Some(attrs) = &drawable.vertex_attributes {
+    if let Some(attrs) = drawable.instance_attributes.as_ref().or(drawable.vertex_attributes.as_ref()) {
         refresh(&mut attrs.borrow_mut());
     }
 }

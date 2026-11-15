@@ -91,7 +91,7 @@ pub trait TestRunnerImpl {
 
     /// Port-only: `map.dumpDebugLogs()` and the renderer's, for a test that
     /// timed out (watchdog.rs): which tiles never loaded or completed.
-    fn dump_debug_logs(&self) {}
+    fn dump_debug_logs(&mut self) {}
 
     fn jump_to(&mut self, _camera: &CameraOptions) -> Result<(), MapError> {
         unsupported("Map::jumpTo")
@@ -1297,7 +1297,7 @@ fn self_check_image(metadata: &TestMetadata) -> PremultipliedImage {
 /// timed out, it first logs the map's state (`dumpDebugLogs`), so the output
 /// says whether a tile never loaded or the frame never drew.
 fn drop_map(maps: &mut HashMap<String, Box<dyn TestRunnerImpl>>, key: &str, panic: &Box<dyn std::any::Any + Send>) {
-    let Some(map) = maps.remove(key) else {
+    let Some(mut map) = maps.remove(key) else {
         return;
     };
     if panic.downcast_ref::<crate::watchdog::TestTimedOut>().is_some() {

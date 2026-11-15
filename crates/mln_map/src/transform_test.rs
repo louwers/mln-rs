@@ -1,23 +1,18 @@
 // The C++ AnimationOptions callbacks capture the Transform by reference and
-// assert on it. The Rust callbacks can't borrow the Transform that is calling
-// them (`ease_to`/`update_transitions` hold it mutably), so they record that
-// they ran (`CallbackLog`) and the test asserts on the Transform right after
-// the call that ran them. Nothing changes the state between a callback and
-// the return of that call: after `transition_end_fn` the end closure only
-// calls `on_camera_did_change`, and `update_transitions` only moves the
-// closures back. The checks of the C++ frame callbacks run after each
-// `update_transitions` that leaves the command running.
+// assert on it. Here the transform reports each command's end as an event,
+// which the tests find by the command's transition id (`EndLog`) right after
+// the call that ended it. The checks of the C++ frame callbacks run after
+// each `update_transitions` that leaves the command running.
 //
 // Commands start at the frame time that `start_clock` sets, so a test steps
 // them from a start it knows.
 
-use std::cell::{Cell, RefCell};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use mln_map_types::TileProjector;
 use mln_map_types::util_camera::Camera as UtilCamera;
-use mln_map_types::{TileProjector, TransitionEndFn};
 use mln_math::deg2rad;
 use mln_style_types::ProjectionType;
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
@@ -27,12 +22,11 @@ use mln_util::mat4::{Mat4, matrix};
 use mln_util::quaternion::Quaternion;
 use mln_util::time::Instant;
 use mln_util::vectors::{Vec3, Vec4};
-use parking_lot::Mutex;
 
 use super::*;
 
 fn new_transform() -> Transform {
-    Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default)
+    Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default)
 }
 
 fn ll(lat: f64, lon: f64) -> LatLng {
@@ -136,25 +130,68 @@ fn start_clock(transform: &mut Transform) -> Instant {
     start
 }
 
-/// Records the `AnimationOptions` end callback (see the file comment).
-struct CallbackLog {
-    finishes: Arc<AtomicU32>,
+/// Finds the ends of the commands with one transition id among what the
+/// transform reported (see the file comment).
+struct EndLog {
+    transition_id: u64,
+    /// The ends that [`Self::take_finish`] has seen.
+    seen: Cell<usize>,
 }
 
-impl CallbackLog {
-    fn install(options: &mut AnimationOptions) -> CallbackLog {
-        let log = CallbackLog { finishes: Arc::default() };
-        let finishes = Arc::clone(&log.finishes);
-        options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| {
-            finishes.fetch_add(1, Ordering::Relaxed);
-        }));
-        log
+impl EndLog {
+    /// Gives `options` a transition id of its own, unless it has one,
+    /// whose commands' ends the log finds.
+    fn install(options: &mut AnimationOptions) -> EndLog {
+        static NEXT: AtomicU64 = AtomicU64::new(1 << 32);
+        let transition_id = *options.transition_id.get_or_insert_with(|| NEXT.fetch_add(1, Ordering::Relaxed));
+        EndLog { transition_id, seen: Cell::new(0) }
     }
 
-    /// Whether the finish callback ran since the last call.
-    fn take_finish(&self) -> bool {
-        self.finishes.swap(0, Ordering::Relaxed) > 0
+    /// The ends of the log's commands, oldest first.
+    fn ends(&self, transform: &Transform) -> Vec<TransitionEnd> {
+        transform
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                TransformEvent::CommandEnded(end) if end.transition_id == Some(self.transition_id) => Some(end.end),
+                _ => None,
+            })
+            .collect()
     }
+
+    /// How many of the log's commands ended.
+    fn count(&self, transform: &Transform) -> usize {
+        self.ends(transform).len()
+    }
+
+    /// How the log's one command ended, if it has.
+    fn get(&self, transform: &Transform) -> Option<TransitionEnd> {
+        let ends = self.ends(transform);
+        assert!(ends.len() <= 1, "a command ends once");
+        ends.first().copied()
+    }
+
+    /// Whether a command of the log ended since the last call.
+    fn take_finish(&self, transform: &Transform) -> bool {
+        let count = self.count(transform);
+        count > self.seen.replace(count)
+    }
+}
+
+/// Takes the will-change ('w') and did-change ('d') events that the
+/// transform reported, with their changes, and leaves the others.
+fn take_changes(transform: &mut Transform) -> Vec<(char, CameraChange)> {
+    transform
+        .events
+        .extract_if(.., |event| {
+            matches!(event, TransformEvent::CameraWillChange(_) | TransformEvent::CameraDidChange(_))
+        })
+        .map(|event| match event {
+            TransformEvent::CameraWillChange(change) => ('w', change),
+            TransformEvent::CameraDidChange(change) => ('d', change),
+            _ => unreachable!(),
+        })
+        .collect()
 }
 
 // gtest: Transform.InvalidZoom
@@ -386,8 +423,7 @@ fn lat_lng_near_center() {
 // gtest: Transform.ConstrainHeightOnly
 #[test]
 fn constrain_height_only() {
-    let mut transform =
-        Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(2, 2)).unwrap();
 
     transform.jump_to(&CameraOptions {
@@ -406,8 +442,7 @@ fn constrain_height_only() {
 // gtest: Transform.ConstrainWidthAndHeight
 #[test]
 fn constrain_width_and_height() {
-    let mut transform =
-        Transform::new(Rc::new(NullTransformObserver), ConstrainMode::WidthAndHeight, ViewportMode::Default);
+    let mut transform = Transform::new(ConstrainMode::WidthAndHeight, ViewportMode::Default);
     transform.resize(Size::new(2, 2)).unwrap();
 
     transform.jump_to(&CameraOptions {
@@ -760,13 +795,13 @@ fn camera() {
     assert_double_eq(10.0, transform.get_zoom());
 
     let mut ease_options = AnimationOptions::new(Duration::from_secs(1));
-    let ease_log = CallbackLog::install(&mut ease_options);
+    let ease_log = EndLog::install(&mut ease_options);
     let check_ease = |transform: &Transform| {
         if transform.in_transition() {
             assert!(lat_lng1.latitude() >= transform.get_lat_lng(WrapMode::Wrapped).latitude());
             assert!(lat_lng1.longitude() <= transform.get_lat_lng(WrapMode::Wrapped).longitude());
         }
-        if ease_log.take_finish() {
+        if ease_log.take_finish(transform) {
             assert_double_eq(lat_lng1.latitude(), transform.get_lat_lng(WrapMode::Wrapped).latitude());
             assert_double_eq(lat_lng1.longitude(), transform.get_lat_lng(WrapMode::Wrapped).longitude());
             assert_double_eq(20.0, transform.get_zoom());
@@ -787,13 +822,13 @@ fn camera() {
     assert!(!transform.in_transition());
 
     let mut fly_options = AnimationOptions::new(Duration::from_secs(1));
-    let fly_log = CallbackLog::install(&mut fly_options);
+    let fly_log = EndLog::install(&mut fly_options);
     let check_fly = |transform: &Transform| {
         if transform.in_transition() {
             assert!(lat_lng2.latitude() <= transform.get_lat_lng(WrapMode::Wrapped).latitude());
             assert!(lat_lng2.longitude() >= transform.get_lat_lng(WrapMode::Unwrapped).longitude());
         }
-        if fly_log.take_finish() {
+        if fly_log.take_finish(transform) {
             // XXX Fix precision loss in flyTo:
             // https://github.com/mapbox/mapbox-gl-native/issues/4298
             assert_double_eq(lat_lng2.latitude(), transform.get_lat_lng(WrapMode::Wrapped).latitude());
@@ -851,12 +886,12 @@ fn is_panning() {
     let mut transform = new_transform();
 
     let mut ease_options = AnimationOptions::new(Duration::from_secs(1));
-    let log = CallbackLog::install(&mut ease_options);
+    let log = EndLog::install(&mut ease_options);
     let check = |transform: &Transform| {
         if transform.in_transition() {
             assert!(transform.get_state().is_panning());
         }
-        log.take_finish();
+        log.take_finish(transform);
     };
 
     transform.resize(Size::new(1000, 1000)).unwrap();
@@ -875,26 +910,13 @@ fn is_panning() {
 // gtest: Transform.DefaultTransform
 #[test]
 fn default_transform() {
-    #[derive(Default)]
-    struct CountingObserver {
-        camera_will_change_count: Cell<u32>,
-        camera_did_change_count: Cell<u32>,
-    }
+    let count = |transform: &Transform, kind: fn(&TransformEvent) -> bool| {
+        transform.events.iter().filter(|event| kind(event)).count()
+    };
+    let will_change = |event: &TransformEvent| matches!(event, TransformEvent::CameraWillChange(_));
+    let did_change = |event: &TransformEvent| matches!(event, TransformEvent::CameraDidChange(_));
 
-    impl TransformObserver for CountingObserver {
-        fn on_camera_will_change(&self, _change: CameraChange) {
-            self.camera_will_change_count.set(self.camera_will_change_count.get() + 1);
-        }
-
-        fn on_camera_did_change(&self, _change: CameraChange) {
-            self.camera_did_change_count.set(self.camera_did_change_count.get() + 1);
-        }
-    }
-
-    let observer = Rc::new(CountingObserver::default());
-
-    let mut transform =
-        Transform::new(Rc::<CountingObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = new_transform();
     assert!(!transform.get_state().valid());
 
     let null_island = LatLng::default();
@@ -914,15 +936,15 @@ fn default_transform() {
     assert!(!valid_size.is_empty());
 
     transform.resize(valid_size).expect("Should not throw");
-    assert_eq!(observer.camera_will_change_count.get(), 1);
-    assert_eq!(observer.camera_did_change_count.get(), 1);
+    assert_eq!(count(&transform, will_change), 1);
+    assert_eq!(count(&transform, did_change), 1);
 
     assert!(transform.get_state().valid());
 
     // Double resize
     transform.resize(valid_size).expect("Should not throw");
-    assert_eq!(observer.camera_will_change_count.get(), 1);
-    assert_eq!(observer.camera_did_change_count.get(), 1);
+    assert_eq!(count(&transform, will_change), 1);
+    assert_eq!(count(&transform, did_change), 1);
 
     let center = sc(f64::from(max) / 2.0, f64::from(max) / 2.0);
     let lat_lng = transform.get_state().screen_coordinate_to_lat_lng(&center, WrapMode::Unwrapped).unwrap();
@@ -1066,12 +1088,12 @@ fn lat_lng_bounds() {
 
     // Simulate swipe to the left.
     let mut ease_options = AnimationOptions::new(Duration::from_secs(1));
-    let log = CallbackLog::install(&mut ease_options);
+    let log = EndLog::install(&mut ease_options);
     let check_swipe = |transform: &Transform, longitude: f64| {
         if transform.in_transition() {
             assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), longitude, 1e-4);
         }
-        if log.take_finish() {
+        if log.take_finish(transform) {
             assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), longitude, 1e-4);
         }
     };
@@ -4080,14 +4102,9 @@ fn unsized_globe_moves_as_mercator() {
 
 const LINEAR: UnitBezier = UnitBezier::new(1.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
 
-/// An end function that counts its calls.
-fn counting_end(options: &mut AnimationOptions) -> Arc<AtomicU32> {
-    let count = Arc::new(AtomicU32::new(0));
-    let finished = Arc::clone(&count);
-    options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| {
-        finished.fetch_add(1, Ordering::Relaxed);
-    }));
-    count
+/// Counts the ends of the commands that start with `options`.
+fn counting_end(options: &mut AnimationOptions) -> EndLog {
+    EndLog::install(options)
 }
 
 fn bearing_degrees(transform: &Transform) -> f64 {
@@ -4111,14 +4128,14 @@ fn independent_camera_tracks() {
     let center_finished = counting_end(&mut center);
     let center_start = start_clock(&mut transform);
     transform.ease_to(&CameraOptions { center: Some(ll(20.0, 30.0)), ..Default::default() }, &center);
-    assert_eq!(zoom_finished.load(Ordering::Relaxed), 0);
+    assert_eq!(zoom_finished.count(&transform), 0);
     transform.update_transitions(Some(zoom_start + Duration::from_secs(2)));
     assert_near(transform.get_zoom(), 12.0, 1e-5);
     assert!(transform.get_lat_lng(WrapMode::Wrapped).longitude() > 0.0);
     assert!(transform.get_lat_lng(WrapMode::Wrapped).longitude() < 30.0);
     assert_near(transform.get_state().get_center_altitude(), 120.0, 1e-5);
-    assert_eq!(zoom_finished.load(Ordering::Relaxed), 1);
-    assert_eq!(center_finished.load(Ordering::Relaxed), 0);
+    assert_eq!(zoom_finished.count(&transform), 1);
+    assert_eq!(center_finished.count(&transform), 0);
     assert!(transform.is_panning());
     assert!(!transform.is_scaling());
     assert!(transform.in_transition());
@@ -4126,7 +4143,7 @@ fn independent_camera_tracks() {
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 20.0, 1e-5);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 30.0, 1e-5);
     assert_near(transform.get_zoom(), 12.0, 1e-5);
-    assert_eq!(center_finished.load(Ordering::Relaxed), 1);
+    assert_eq!(center_finished.count(&transform), 1);
     assert!(!transform.in_transition());
 }
 
@@ -4177,17 +4194,17 @@ fn partial_replacement_keeps_command_and_timing() {
     assert_near(transform.get_zoom(), 9.0, 1e-5);
     assert_near(bearing_degrees(&transform), 20.0, 1e-5);
     transform.jump_to(&CameraOptions { zoom: Some(10.0), ..Default::default() });
-    assert_eq!(finished.load(Ordering::Relaxed), 0);
+    assert_eq!(finished.count(&transform), 0);
     assert!(transform.is_rotating());
     assert!(!transform.is_scaling());
     transform.update_transitions(Some(start + Duration::from_secs(2)));
     assert_near(transform.get_zoom(), 10.0, 1e-5);
     assert_near(bearing_degrees(&transform), 40.0, 1e-5);
     transform.update_transitions(Some(start + Duration::from_secs(4)));
-    assert_eq!(finished.load(Ordering::Relaxed), 1);
+    assert_eq!(finished.count(&transform), 1);
     assert_near(bearing_degrees(&transform), 80.0, 1e-5);
     transform.cancel_transitions();
-    assert_eq!(finished.load(Ordering::Relaxed), 1);
+    assert_eq!(finished.count(&transform), 1);
 }
 
 // gtest: Transform.FlightAndAnchorCoupleCenterWithTheirProperties
@@ -4208,13 +4225,13 @@ fn flight_and_anchor_couple_center_with_their_properties() {
     assert_near(mln_math::rad2deg(transform.get_roll()), 5.0, 1e-5);
     let center = transform.get_lat_lng(WrapMode::Wrapped);
     transform.jump_to(&CameraOptions { zoom: Some(10.0), ..Default::default() });
-    assert_eq!(flight_finished.load(Ordering::Relaxed), 0); // Roll remains after the coupled flight ends.
+    assert_eq!(flight_finished.count(&transform), 0); // Roll remains after the coupled flight ends.
     transform.update_transitions(Some(start + Duration::from_secs(4)));
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), center.latitude(), 1e-5);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), center.longitude(), 1e-5);
     assert_near(transform.get_zoom(), 10.0, 1e-5);
     assert_near(mln_math::rad2deg(transform.get_roll()), 20.0, 1e-5);
-    assert_eq!(flight_finished.load(Ordering::Relaxed), 1);
+    assert_eq!(flight_finished.count(&transform), 1);
 
     let mut anchor_animation = AnimationOptions::new(Duration::from_secs(4));
     let anchor_finished = counting_end(&mut anchor_animation);
@@ -4231,9 +4248,9 @@ fn flight_and_anchor_couple_center_with_their_properties() {
     let rotated_pixel = transform.lat_lng_to_screen_coordinate(&fixed);
     assert_near(rotated_pixel.x, anchor.x, 1e-5);
     assert_near(rotated_pixel.y, anchor.y, 1e-5);
-    assert_eq!(anchor_finished.load(Ordering::Relaxed), 0);
+    assert_eq!(anchor_finished.count(&transform), 0);
     transform.jump_to(&CameraOptions { center: Some(ll(10.0, 15.0)), ..Default::default() });
-    assert_eq!(anchor_finished.load(Ordering::Relaxed), 1);
+    assert_eq!(anchor_finished.count(&transform), 1);
     assert!(!transform.in_transition());
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 10.0, 1e-5);
 
@@ -4245,9 +4262,9 @@ fn flight_and_anchor_couple_center_with_their_properties() {
         &CameraOptions { zoom: Some(14.0), ..Default::default() },
         &AnimationOptions::new(Duration::from_secs(2)),
     );
-    assert_eq!(anchor_finished.load(Ordering::Relaxed), 1); // Explicit center ignores the anchor.
+    assert_eq!(anchor_finished.count(&transform), 1); // Explicit center ignores the anchor.
     transform.cancel_transitions();
-    assert_eq!(anchor_finished.load(Ordering::Relaxed), 2);
+    assert_eq!(anchor_finished.count(&transform), 2);
 }
 
 // gtest: Transform.ComposePaddingPitchAndFieldOfView
@@ -4276,61 +4293,57 @@ fn compose_padding_pitch_and_field_of_view() {
 // port: its callbacks cancel and start commands on the Transform that is
 // calling them, which the Rust callbacks can't borrow (see transform.rs).
 
-#[derive(Default)]
-struct EventObserver {
-    /// 0 for each did-change notification, and what the tests push.
-    events: Arc<Mutex<Vec<i32>>>,
-    changes: Cell<u32>,
-}
-
-impl TransformObserver for EventObserver {
-    fn on_camera_did_change(&self, _change: CameraChange) {
-        self.events.lock().push(0);
-        self.changes.set(self.changes.get() + 1);
-    }
+/// Takes what the transform reported: 0 for each did-change, and the tag of
+/// each command's end that `tags` names by transition id.
+fn take_tagged(transform: &mut Transform, tags: &[(&EndLog, i32)]) -> Vec<i32> {
+    transform
+        .drain_events()
+        .filter_map(|event| match event {
+            TransformEvent::CameraDidChange(_) => Some(0),
+            TransformEvent::CommandEnded(end) => {
+                tags.iter().find(|(log, _)| end.transition_id == Some(log.transition_id)).map(|(_, tag)| *tag)
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 // gtest: Transform.PartialCameraCommandsFinishTogetherForStillImage
 #[test]
 fn partial_camera_commands_finish_together_for_still_image() {
-    let observer = Rc::new(EventObserver::default());
-    let mut transform =
-        Transform::new(Rc::<EventObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = new_transform();
     transform.resize(Size::new(512, 512)).unwrap();
-    let push = |event: i32| -> Option<TransitionEndFn> {
-        let events = Arc::clone(&observer.events);
-        Some(Arc::new(move |_: &TransitionEnd| events.lock().push(event)))
-    };
-    let position = AnimationOptions { transition_end_fn: push(1), ..AnimationOptions::new(Duration::from_secs(5)) };
-    let bearing = AnimationOptions { transition_end_fn: push(2), ..AnimationOptions::new(Duration::from_secs(10)) };
+    let mut position = AnimationOptions::new(Duration::from_secs(5));
+    let position_log = EndLog::install(&mut position);
+    let mut bearing = AnimationOptions::new(Duration::from_secs(10));
+    let bearing_log = EndLog::install(&mut bearing);
+    let tags = [(&position_log, 1), (&bearing_log, 2)];
     transform
         .ease_to(&CameraOptions { center: Some(ll(20.0, 30.0)), zoom: Some(12.0), ..Default::default() }, &position);
     transform.ease_to(&CameraOptions { bearing: Some(60.0), ..Default::default() }, &bearing);
-    observer.events.lock().clear();
+    transform.drain_events().for_each(drop);
     transform.jump_to(&CameraOptions { zoom: Some(10.0), ..Default::default() });
-    assert_eq!(*observer.events.lock(), [0]);
+    assert_eq!(take_tagged(&mut transform, &tags), [0]);
 
     // Static maps advance to the maximum time point for a still image. Each
     // command finishes before its own did-change notification, even when
     // another command has replaced one of its properties.
-    observer.events.lock().clear();
     transform.update_transitions(None);
-    assert_eq!(*observer.events.lock(), [1, 0, 2, 0]);
+    assert_eq!(take_tagged(&mut transform, &tags), [1, 0, 2, 0]);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 20.0, 1e-5);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 30.0, 1e-5);
     assert_near(transform.get_zoom(), 10.0, 1e-5);
     assert_near(bearing_degrees(&transform), 60.0, 1e-5);
     assert!(!transform.in_transition());
     transform.cancel_transitions();
-    assert_eq!(*observer.events.lock(), [1, 0, 2, 0]);
+    let after_cancel = take_tagged(&mut transform, &tags);
+    assert!(after_cancel.is_empty(), "{after_cancel:?}");
 }
 
 // gtest: Transform.CancelTransitionsByIdLeavesOthersRunning
 #[test]
 fn cancel_transitions_by_id_leaves_others_running() {
-    let observer = Rc::new(EventObserver::default());
-    let mut transform =
-        Transform::new(Rc::<EventObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = new_transform();
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { zoom: Some(8.0), ..Default::default() });
     let mut zoom = AnimationOptions { transition_id: Some(1), ..AnimationOptions::new(Duration::from_secs(4)) };
@@ -4342,14 +4355,16 @@ fn cancel_transitions_by_id_leaves_others_running() {
     transform.ease_to(&CameraOptions { bearing: Some(80.0), ..Default::default() }, &bearing);
     transform.update_transitions(Some(start + Duration::from_secs(1)));
     let zoom_at_cancel = transform.get_zoom();
-    observer.changes.set(0);
+    let did_changes =
+        |transform: &mut Transform| take_changes(transform).into_iter().filter(|(kind, _)| *kind == 'd').count();
+    did_changes(&mut transform);
 
     // Only the command with the identity finishes, once, and the other keeps
     // animating.
     assert!(transform.cancel_transitions_with_id(1));
-    assert_eq!(zoom_finished.load(Ordering::Relaxed), 1);
-    assert_eq!(bearing_finished.load(Ordering::Relaxed), 0);
-    assert_eq!(observer.changes.get(), 1);
+    assert_eq!(zoom_finished.count(&transform), 1);
+    assert_eq!(bearing_finished.count(&transform), 0);
+    assert_eq!(did_changes(&mut transform), 1);
     assert!(transform.in_transition());
     assert!(!transform.is_scaling());
     assert!(transform.is_rotating());
@@ -4358,15 +4373,15 @@ fn cancel_transitions_by_id_leaves_others_running() {
     // reports no change.
     assert!(!transform.cancel_transitions_with_id(1));
     assert!(!transform.cancel_transitions_with_id(3));
-    assert_eq!(zoom_finished.load(Ordering::Relaxed), 1);
-    assert_eq!(observer.changes.get(), 1);
+    assert_eq!(zoom_finished.count(&transform), 1);
+    assert_eq!(did_changes(&mut transform), 0);
     assert!(transform.in_transition());
 
     transform.update_transitions(Some(start + Duration::from_secs(4)));
     assert_near(transform.get_zoom(), zoom_at_cancel, 1e-5);
     assert_near(bearing_degrees(&transform), 80.0, 1e-5);
-    assert_eq!(zoom_finished.load(Ordering::Relaxed), 1);
-    assert_eq!(bearing_finished.load(Ordering::Relaxed), 1);
+    assert_eq!(zoom_finished.count(&transform), 1);
+    assert_eq!(bearing_finished.count(&transform), 1);
     assert!(!transform.in_transition());
 }
 
@@ -4383,7 +4398,7 @@ fn fly_duration_range() {
         let (animation, ended) = record_end();
         let animation = AnimationOptions { velocity: Some(velocity), ..animation };
         transform.fly_to(&camera, &animation, false);
-        assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+        assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Completed));
         assert_double_eq(transform.get_zoom(), 1.0);
         assert!(!transform.in_transition());
     }
@@ -4424,12 +4439,12 @@ fn fly_past_max_duration_jumps() {
     // Under the cap: the same flight.
     let capped =
         AnimationOptions { max_duration: Some(natural + Duration::from_millis(1)), ..AnimationOptions::default() };
-    assert_eq!(flight(capped.clone()), natural);
+    assert_eq!(flight(capped), natural);
     let (animation, ended) = record_end();
-    transform.fly_to(&target, &AnimationOptions { transition_end_fn: animation.transition_end_fn, ..capped }, false);
+    transform.fly_to(&target, &AnimationOptions { transition_id: animation.transition_id, ..capped }, false);
     assert!(transform.in_transition());
     transform.cancel_transitions();
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Cancelled));
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Cancelled));
 
     // Over it, derived or set: a jump.
     for animation in [
@@ -4441,9 +4456,9 @@ fn fly_past_max_duration_jumps() {
     ] {
         transform.jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(0.0), ..Default::default() });
         let (end, ended) = record_end();
-        transform.fly_to(&target, &AnimationOptions { transition_end_fn: end.transition_end_fn, ..animation }, false);
+        transform.fly_to(&target, &AnimationOptions { transition_id: end.transition_id, ..animation }, false);
         assert!(!transform.in_transition());
-        assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+        assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Completed));
         assert_near(transform.get_zoom(), 10.0, 1e-9);
         assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 40.0, 1e-9);
         assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), -74.0, 1e-9);
@@ -4486,7 +4501,6 @@ fn header_momentum() -> CameraMomentum {
     }
 }
 
-/// Animation options whose end function keeps how the command ended.
 /// How long the command that `command` starts on a new transform runs: the
 /// least time after its start at which it has ended.
 fn duration_of(command: impl Fn(&mut Transform)) -> Duration {
@@ -4516,15 +4530,10 @@ fn duration_of(command: impl Fn(&mut Transform)) -> Duration {
     high
 }
 
-fn record_end() -> (AnimationOptions, Arc<OnceLock<TransitionEnd>>) {
-    let ended = Arc::new(OnceLock::new());
-    let record = Arc::clone(&ended);
-    let animation = AnimationOptions {
-        transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| {
-            assert!(record.set(*end).is_ok(), "a command ends once");
-        })),
-        ..AnimationOptions::default()
-    };
+/// Animation options, and the log of how their command ended.
+fn record_end() -> (AnimationOptions, EndLog) {
+    let mut animation = AnimationOptions::default();
+    let ended = EndLog::install(&mut animation);
     (animation, ended)
 }
 
@@ -4561,7 +4570,7 @@ fn momentum_slows_each_part_by_friction() {
     let zoom_rate = friction_rate(Duration::from_millis(250));
     transform.update_transitions(Some(start + Duration::from_millis(500)));
     assert_near(transform.get_zoom(), 8.0 + 1.0 / zoom_rate * -(-zoom_rate * 0.5).exp_m1(), 1e-9);
-    assert!(ended.get().is_none());
+    assert!(ended.get(&transform).is_none());
 
     // Each part stops at its stop speed, so it moves (v - stop) / k.
     let rate = friction_rate(Duration::from_millis(140));
@@ -4571,7 +4580,7 @@ fn momentum_slows_each_part_by_friction() {
     assert_near(pitch_degrees(&transform), 10.0 + (5.0 - 1.0) / rate, 1e-9);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), center.latitude(), 1e-9);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), center.longitude(), 1e-9);
-    let ended = ended.get().expect("the momentum ended");
+    let ended = ended.get(&transform).expect("the momentum ended");
     assert_eq!(ended.outcome, TransitionOutcome::Completed);
     assert_eq!(ended.velocity.zoom, 0.0);
     assert!(!transform.in_transition());
@@ -4671,7 +4680,7 @@ fn momentum_follows_an_eased_glide() {
     transform.update_transitions(Some(start + Duration::from_millis(250)));
     assert_near(transform.get_zoom(), 8.0 - 0.5, 1e-6);
     transform.cancel_transitions();
-    assert_near(ended.get().expect("the momentum ended").velocity.zoom, -2.0, 1e-6);
+    assert_near(ended.get(&transform).expect("the momentum ended").velocity.zoom, -2.0, 1e-6);
 
     let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
@@ -4742,7 +4751,7 @@ fn momentum_reports_its_speed_when_cancelled() {
     transform.start_momentum(&momentum, &animation);
     transform.update_transitions(Some(start + Duration::from_secs(1)));
     transform.cancel_transitions();
-    let ended = ended.get().expect("the momentum ended");
+    let ended = ended.get(&transform).expect("the momentum ended");
     assert_eq!(ended.outcome, TransitionOutcome::Cancelled);
     // After one half-life, each part moves at half its release speed.
     assert_near(ended.velocity.pan.x, 500.0, 1e-9);
@@ -4771,7 +4780,7 @@ fn momentum_parts_give_way_to_commands() {
     assert!(transform.is_scaling());
 
     transform.jump_to(&CameraOptions { zoom: Some(3.0), ..Default::default() });
-    assert!(ended.get().is_none());
+    assert!(ended.get(&transform).is_none());
     assert!(transform.is_panning());
     assert!(!transform.is_scaling());
     let before = transform.get_lat_lng(WrapMode::Wrapped);
@@ -4780,7 +4789,7 @@ fn momentum_parts_give_way_to_commands() {
     assert_ne!(transform.get_lat_lng(WrapMode::Wrapped).longitude(), before.longitude());
 
     transform.jump_to(&CameraOptions { center: Some(ll(10.0, 20.0)), ..Default::default() });
-    assert_eq!(ended.get().expect("the momentum ended").outcome, TransitionOutcome::Replaced);
+    assert_eq!(ended.get(&transform).expect("the momentum ended").outcome, TransitionOutcome::Replaced);
     assert!(!transform.in_transition());
 }
 
@@ -4808,11 +4817,11 @@ fn momentum_settles_on_targets() {
     transform.start_momentum(&momentum, &animation);
     transform.update_transitions(Some(start + Duration::from_secs(1)));
     assert_near(bearing_degrees(&transform), 88.0, 1e-9);
-    assert_eq!(finished.load(Ordering::Relaxed), 0);
+    assert_eq!(finished.count(&transform), 0);
     assert!(transform.is_rotating());
     transform.update_transitions(Some(start + Duration::from_millis(1200)));
     assert_near(bearing_degrees(&transform), 90.0, 1e-9);
-    assert_eq!(finished.load(Ordering::Relaxed), 1);
+    assert_eq!(finished.count(&transform), 1);
 
     // Without motion, instant snaps settle at once: the bearing around the
     // circle, and the zoom on the nearest whole level. A value outside the
@@ -4830,7 +4839,7 @@ fn momentum_settles_on_targets() {
         ..Default::default()
     });
     transform.start_momentum(&snap_only, &animation);
-    assert_eq!(finished.load(Ordering::Relaxed), 2);
+    assert_eq!(finished.count(&transform), 2);
     assert_near(bearing_degrees(&transform), 0.0, 1e-9);
     assert_near(transform.get_zoom(), 7.0, 1e-9);
     assert_near(pitch_degrees(&transform), 30.0, 1e-9);
@@ -4865,7 +4874,7 @@ fn momentum_stops_a_part_that_limits_hold() {
     transform.start_momentum(&momentum, &animation);
     transform.update_transitions(Some(start + Duration::from_millis(20)));
     assert!(!transform.in_transition());
-    assert_eq!(ended.get().expect("the momentum ended").velocity.zoom, 0.0);
+    assert_eq!(ended.get(&transform).expect("the momentum ended").velocity.zoom, 0.0);
     assert_near(transform.get_zoom(), 10.0, 1e-9);
 }
 
@@ -4931,8 +4940,8 @@ fn outcome_transform() -> Transform {
     transform
 }
 
-fn outcome(ended: &OnceLock<TransitionEnd>) -> Option<TransitionOutcome> {
-    ended.get().map(|end| end.outcome)
+fn outcome(transform: &Transform, ended: &EndLog) -> Option<TransitionOutcome> {
+    ended.get(transform).map(|end| end.outcome)
 }
 
 #[test]
@@ -4945,10 +4954,10 @@ fn an_ease_that_runs_to_its_end_completes() {
         &AnimationOptions { duration: Some(Duration::from_secs(1)), ..animation },
     );
     transform.update_transitions(Some(start + Duration::from_millis(500)));
-    assert_eq!(outcome(&ended), None);
+    assert_eq!(outcome(&transform, &ended), None);
     transform.update_transitions(Some(start + Duration::from_secs(1)));
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
-    assert_eq!(ended.get().unwrap().velocity, CameraVelocity::default());
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Completed));
+    assert_eq!(ended.get(&transform).unwrap().velocity, CameraVelocity::default());
 }
 
 #[test]
@@ -4958,17 +4967,17 @@ fn cancelling_reports_cancelled_and_by_id_only_the_matching_commands() {
     let (bearing, bearing_ended) = record_end();
     transform.ease_to(
         &CameraOptions { zoom: Some(10.0), ..Default::default() },
-        &AnimationOptions { duration: Some(Duration::from_secs(1)), transition_id: Some(1), ..zoom },
+        &AnimationOptions { duration: Some(Duration::from_secs(1)), ..zoom },
     );
     transform.ease_to(
         &CameraOptions { bearing: Some(90.0), ..Default::default() },
         &AnimationOptions { duration: Some(Duration::from_secs(1)), ..bearing },
     );
-    assert!(transform.cancel_transitions_with_id(1));
-    assert_eq!(outcome(&zoom_ended), Some(TransitionOutcome::Cancelled));
-    assert_eq!(outcome(&bearing_ended), None);
+    assert!(transform.cancel_transitions_with_id(zoom_ended.transition_id));
+    assert_eq!(outcome(&transform, &zoom_ended), Some(TransitionOutcome::Cancelled));
+    assert_eq!(outcome(&transform, &bearing_ended), None);
     transform.cancel_transitions();
-    assert_eq!(outcome(&bearing_ended), Some(TransitionOutcome::Cancelled));
+    assert_eq!(outcome(&transform, &bearing_ended), Some(TransitionOutcome::Cancelled));
 }
 
 #[test]
@@ -4983,7 +4992,7 @@ fn a_command_whose_fields_a_later_one_takes_is_replaced() {
         &CameraOptions { zoom: Some(6.0), ..Default::default() },
         &AnimationOptions::new(Duration::from_secs(1)),
     );
-    assert_eq!(outcome(&first_ended), Some(TransitionOutcome::Replaced));
+    assert_eq!(outcome(&transform, &first_ended), Some(TransitionOutcome::Replaced));
 }
 
 #[test]
@@ -4997,9 +5006,9 @@ fn a_command_that_keeps_some_fields_completes_or_is_cancelled() {
         &AnimationOptions { duration: Some(Duration::from_secs(1)), ..both },
     );
     transform.jump_to(&CameraOptions { zoom: Some(6.0), ..Default::default() });
-    assert_eq!(outcome(&ended), None);
+    assert_eq!(outcome(&transform, &ended), None);
     transform.update_transitions(Some(start + Duration::from_secs(1)));
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Completed));
 
     // Losing the zoom, then a cancellation of the bearing: cancelled.
     let mut transform = outcome_transform();
@@ -5010,7 +5019,7 @@ fn a_command_that_keeps_some_fields_completes_or_is_cancelled() {
     );
     transform.jump_to(&CameraOptions { zoom: Some(6.0), ..Default::default() });
     transform.cancel_transitions();
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Cancelled));
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Cancelled));
 }
 
 #[test]
@@ -5018,41 +5027,21 @@ fn a_command_that_fails_before_it_moves_is_cancelled() {
     let mut transform = outcome_transform();
     let (animation, ended) = record_end();
     transform.ease_to(&CameraOptions { zoom: Some(f64::NAN), ..Default::default() }, &animation);
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Cancelled));
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Cancelled));
     assert_near(transform.get_zoom(), 8.0, 1e-9);
 }
 
 #[test]
-fn dropping_the_transform_closes_its_commands() {
+fn closing_the_transform_closes_its_commands() {
     let mut transform = outcome_transform();
     let (animation, ended) = record_end();
     transform.ease_to(
         &CameraOptions { zoom: Some(10.0), ..Default::default() },
         &AnimationOptions { duration: Some(Duration::from_secs(1)), ..animation },
     );
-    drop(transform);
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Closed));
-}
-
-/// Records each will-change ('w') and did-change ('d') with its change.
-#[derive(Default)]
-struct ChangeObserver {
-    changes: RefCell<Vec<(char, CameraChange)>>,
-}
-
-impl ChangeObserver {
-    fn take(&self) -> Vec<(char, CameraChange)> {
-        std::mem::take(&mut *self.changes.borrow_mut())
-    }
-}
-
-impl TransformObserver for ChangeObserver {
-    fn on_camera_will_change(&self, change: CameraChange) {
-        self.changes.borrow_mut().push(('w', change));
-    }
-    fn on_camera_did_change(&self, change: CameraChange) {
-        self.changes.borrow_mut().push(('d', change));
-    }
+    transform.close();
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Closed));
+    assert!(!transform.in_transition());
 }
 
 fn change(mode: CameraChangeMode, source: CameraChangeSource) -> CameraChange {
@@ -5063,16 +5052,14 @@ fn change(mode: CameraChangeMode, source: CameraChangeSource) -> CameraChange {
 fn camera_changes_report_whether_a_command_or_a_momentum_made_them() {
     use CameraChangeMode::{Animated, Immediate};
     use CameraChangeSource::{Command, Momentum};
-    let observer = Rc::new(ChangeObserver::default());
-    let mut transform =
-        Transform::new(Rc::<ChangeObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = new_transform();
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(8.0), ..Default::default() });
-    observer.take();
+    take_changes(&mut transform);
 
     // A jump starts and ends at once.
     transform.jump_to(&CameraOptions { zoom: Some(9.0), ..Default::default() });
-    assert_eq!(observer.take(), [('w', change(Immediate, Command)), ('d', change(Immediate, Command))]);
+    assert_eq!(take_changes(&mut transform), [('w', change(Immediate, Command)), ('d', change(Immediate, Command))]);
 
     // An ease and a momentum run together; each change that ends one
     // reports that one's source.
@@ -5086,11 +5073,11 @@ fn camera_changes_report_whether_a_command_or_a_momentum_made_them() {
         &CameraMomentum { pan_velocity: Some(sc(10_000.0, 0.0)), ..CameraMomentum::default() },
         &AnimationOptions::default(),
     );
-    assert_eq!(observer.take(), [('w', change(Animated, Command)), ('w', change(Animated, Momentum))]);
+    assert_eq!(take_changes(&mut transform), [('w', change(Animated, Command)), ('w', change(Animated, Momentum))]);
     transform.update_transitions(Some(ease_start + Duration::from_secs(1)));
-    assert_eq!(observer.take(), [('d', change(Animated, Command))]);
+    assert_eq!(take_changes(&mut transform), [('d', change(Animated, Command))]);
     transform.update_transitions(None);
-    assert_eq!(observer.take(), [('d', change(Animated, Momentum))]);
+    assert_eq!(take_changes(&mut transform), [('d', change(Animated, Momentum))]);
 }
 
 fn delta(phase: GesturePhase) -> CameraDelta {
@@ -5101,19 +5088,17 @@ fn delta(phase: GesturePhase) -> CameraDelta {
 fn a_gesture_reports_gesture_then_momentum_and_lasts_until_its_glide_ends() {
     use CameraChangeMode::{Animated, Immediate};
     use CameraChangeSource::{Gesture, Momentum};
-    let observer = Rc::new(ChangeObserver::default());
-    let mut transform =
-        Transform::new(Rc::<ChangeObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = new_transform();
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(8.0), ..Default::default() });
-    observer.take();
+    take_changes(&mut transform);
 
     let pan = |phase| CameraDelta { offset: Some(sc(10.0, 0.0)), ..delta(phase) };
     transform.apply_camera_delta(&pan(GesturePhase::Begin)).unwrap();
     assert!(transform.is_gesture_in_progress());
     transform.apply_camera_delta(&pan(GesturePhase::Update)).unwrap();
     assert_eq!(
-        observer.take(),
+        take_changes(&mut transform),
         [
             ('w', change(Immediate, Gesture)),
             ('d', change(Immediate, Gesture)),
@@ -5130,12 +5115,12 @@ fn a_gesture_reports_gesture_then_momentum_and_lasts_until_its_glide_ends() {
             ..delta(GesturePhase::End)
         })
         .unwrap();
-    assert_eq!(observer.take(), [('w', change(Animated, Momentum))]);
+    assert_eq!(take_changes(&mut transform), [('w', change(Animated, Momentum))]);
     // The gesture's input ended, but it lasts until its momentum does.
     assert!(transform.is_gesture_in_progress());
     transform.update_transitions(None);
-    assert_eq!(observer.take(), [('d', change(Animated, Momentum))]);
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+    assert_eq!(take_changes(&mut transform), [('d', change(Animated, Momentum))]);
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Completed));
     assert!(!transform.is_gesture_in_progress());
 }
 
@@ -5157,7 +5142,7 @@ fn a_new_gesture_catches_the_last_ones_glide_and_keeps_the_gesture_going() {
     // A press mid-glide: the glide is cancelled, with its speed, and the new
     // gesture is in progress.
     transform.apply_camera_delta(&CameraDelta { offset: Some(sc(1.0, 0.0)), ..delta(GesturePhase::Begin) }).unwrap();
-    let end = ended.get().expect("the glide ended");
+    let end = ended.get(&transform).expect("the glide ended");
     assert_eq!(end.outcome, TransitionOutcome::Cancelled);
     assert!(end.velocity.pan.x > 500.0 && end.velocity.pan.x < 2000.0, "{:?}", end.velocity);
     assert!(transform.is_gesture_in_progress());
@@ -5247,14 +5232,14 @@ fn a_delta_pans_and_zooms_around_its_anchor_and_ends_once() {
             ..CameraDelta::default()
         })
         .unwrap();
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Completed));
     assert_near(transform.get_zoom(), 9.0, 1e-9);
     assert_near(bearing_degrees(&transform), 90.0, 1e-9);
     let under = transform.lat_lng_to_screen_coordinate(&ground);
     assert_near(under.x, anchor.x, 1e-6);
     assert_near(under.y, anchor.y, 1e-6);
 
-    // Animated, both commands end the delta's one end function together.
+    // Animated, both commands end the delta's one command together.
     let (animation, ended) = record_end();
     let start = start_clock(&mut transform);
     transform
@@ -5266,9 +5251,9 @@ fn a_delta_pans_and_zooms_around_its_anchor_and_ends_once() {
         })
         .unwrap();
     transform.update_transitions(Some(start + Duration::from_millis(500)));
-    assert_eq!(outcome(&ended), None);
+    assert_eq!(outcome(&transform, &ended), None);
     transform.update_transitions(Some(start + Duration::from_secs(1)));
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Completed));
 }
 
 #[test]
@@ -5370,15 +5355,13 @@ fn camera_deltas_are_validated_as_maplibre_native_ffi_validates_them() {
     assert_near(transform.get_zoom(), 8.0, 1e-9);
     let (animation, ended) = record_end();
     transform.apply_camera_delta(&CameraDelta { animation, ..CameraDelta::default() }).unwrap();
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Completed));
 }
 
 #[test]
 fn an_update_with_a_phase_reports_a_gesture_and_begin_cancels_animations() {
     use CameraChangeSource::Gesture;
-    let observer = Rc::new(ChangeObserver::default());
-    let mut transform =
-        Transform::new(Rc::<ChangeObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = new_transform();
     transform.resize(Size::new(1000, 1000)).unwrap();
     let (animation, ended) = record_end();
     transform.ease_to(
@@ -5393,9 +5376,9 @@ fn an_update_with_a_phase_reports_a_gesture_and_begin_cancels_animations() {
         animation: AnimationOptions::new(Duration::from_millis(300)),
         phase: GesturePhase::End,
     });
-    assert_eq!(outcome(&ended), None);
+    assert_eq!(outcome(&transform, &ended), None);
     assert!(!transform.is_gesture_in_progress());
-    assert_eq!(observer.take().last().map(|(_, c)| c.source), Some(Gesture));
+    assert_eq!(take_changes(&mut transform).last().map(|(_, c)| c.source), Some(Gesture));
 
     // Begin cancels it.
     transform.update_camera(&CameraUpdate {
@@ -5403,7 +5386,7 @@ fn an_update_with_a_phase_reports_a_gesture_and_begin_cancels_animations() {
         phase: GesturePhase::Begin,
         ..CameraUpdate::default()
     });
-    assert_eq!(outcome(&ended), Some(TransitionOutcome::Cancelled));
+    assert_eq!(outcome(&transform, &ended), Some(TransitionOutcome::Cancelled));
     assert!(transform.is_gesture_in_progress());
     assert_near(pitch_degrees(&transform), 10.0, 1e-9);
 }

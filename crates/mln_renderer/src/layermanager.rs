@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_style::layer;
-use mln_style::layer::{downcast_arc, layer_type_info};
+use mln_style::layer::{LayerTypeInfo, downcast_arc, layer_type_info};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
 use mln_style::layers::circle_layer_impl::Impl as CircleLayerImpl;
@@ -31,7 +31,7 @@ use crate::layers::{
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{
-    FillLayoutSpec, LineLayoutSpec, PatternLayout, fill_layout_is_sorted, line_layout_is_sorted,
+    FillLayoutSpec, LineLayoutSpec, PatternLayout, fill_layout_is_sorted, line_layout_is_sorted, uses_pattern,
 };
 use crate::render_layer::RenderLayerPtr;
 
@@ -121,6 +121,26 @@ pub(crate) fn create_bucket(
     }
     Log::error(Event::Render, format!("no bucket for layer type '{}'", parameters.layer_type.type_));
     None
+}
+
+/// Whether the layout of `layers`, a group of `layer_type`, can need glyphs
+/// or images: a symbol group, or a fill, line or fill-extrusion group with a
+/// pattern.
+pub(crate) fn layout_can_need_dependencies(
+    layer_type: &'static LayerTypeInfo,
+    layers: &[Arc<dyn LayerProperties>],
+) -> bool {
+    if std::ptr::eq(layer_type, SymbolLayerImpl::static_type_info()) {
+        true
+    } else if std::ptr::eq(layer_type, FillLayerImpl::static_type_info()) {
+        uses_pattern::<FillLayoutSpec>(layers)
+    } else if std::ptr::eq(layer_type, LineLayerImpl::static_type_info()) {
+        uses_pattern::<LineLayoutSpec>(layers)
+    } else if std::ptr::eq(layer_type, FillExtrusionLayerImpl::static_type_info()) {
+        uses_pattern::<FillExtrusionLayoutSpec>(layers)
+    } else {
+        false
+    }
 }
 
 pub(crate) fn create_layout(

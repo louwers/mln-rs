@@ -1,7 +1,6 @@
 // `coalesceChanges(std::vector<RenderTile>&)` calls `tile.setFeatureState`
 // on every render tile; a Rust RenderTile has no reference to its Tile, so
-// `coalesce_changes` takes the tiles of the render source's pyramid (the same
-// tiles).
+// `coalesce_changes` takes the source's rendered tiles from the tile store.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock};
@@ -11,7 +10,15 @@ use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{FeatureStates, LayerFeatureStates};
-use crate::tile::tile::Tile;
+
+/// What holds a source's feature state: a tile's buckets.
+pub(crate) trait FeatureStateTarget {
+    /// The [`SourceFeatureState`] version the buckets hold; 0 for buckets
+    /// that have none.
+    fn feature_state_version(&mut self) -> &mut u64;
+    /// Brings the buckets to `states`.
+    fn set_feature_state(&self, states: &LayerFeatureStates);
+}
 
 /// The feature state of a map's sources, as the map's updates carry it: by
 /// source ID, the state of each source layer's features, where the empty
@@ -387,7 +394,10 @@ impl SourceFeatureState {
     /// version gets this frame's changes; a tile with new buckets, or one that
     /// was not rendered in a frame with changes, gets the whole state; a tile
     /// that is up to date gets nothing.
-    pub(crate) fn coalesce_changes<'a>(&mut self, tiles: impl IntoIterator<Item = &'a dyn Tile>) {
+    pub(crate) fn coalesce_changes<'a, T: FeatureStateTarget + 'a>(
+        &mut self,
+        tiles: impl IntoIterator<Item = &'a mut T>,
+    ) {
         let mut changes: LayerFeatureStates = LayerFeatureStates::default();
         let state_changes = std::mem::take(&mut self.state_changes);
         for (source_layer, layer_state_changes) in &state_changes {
@@ -432,14 +442,25 @@ impl SourceFeatureState {
         }
 
         for tile in tiles {
-            let tile_version = &tile.base().feature_state_version;
-            if tile_version.get() == self.version {
+            let tile_version = *tile.feature_state_version();
+            if tile_version == self.version {
                 continue;
             }
-            let previous = !changes.is_empty() && tile_version.get() != 0 && tile_version.get() + 1 == self.version;
+            let previous = !changes.is_empty() && tile_version != 0 && tile_version + 1 == self.version;
             tile.set_feature_state(if previous { &changes } else { &self.current_states });
-            tile_version.set(self.version);
+            *tile.feature_state_version() = self.version;
         }
+    }
+
+    /// The state the source's buckets show, as of the last
+    /// `coalesce_changes`.
+    pub(crate) fn current_states(&self) -> &LayerFeatureStates {
+        &self.current_states
+    }
+
+    /// The version of `current_states`.
+    pub(crate) fn version(&self) -> u64 {
+        self.version
     }
 
     pub(crate) fn remove_state(
@@ -516,22 +537,17 @@ mod tests {
     use std::cell::RefCell;
 
     use feature::Value;
-    use mln_style::layer_properties::LayerProperties;
-    use mln_tile_id::OverscaledTileID;
 
     use super::*;
-    use crate::tile::tile::{Kind, TileBase};
-    use crate::tile_render_data::TileRenderData;
 
     struct StubTile {
-        base: TileBase,
+        version: u64,
         applied: RefCell<Vec<LayerFeatureStates>>,
     }
 
     impl StubTile {
-        fn new(x: u32) -> Self {
-            let base = TileBase::new(Kind::Geometry, OverscaledTileID::from_zxy(1, x, 0), "source".to_owned(), None);
-            StubTile { base, applied: RefCell::default() }
+        fn new(_x: u32) -> Self {
+            StubTile { version: 0, applied: RefCell::default() }
         }
 
         fn applied(&self, i: usize) -> LayerFeatureStates {
@@ -582,16 +598,9 @@ mod tests {
         (SourceFeatureStates::new(layers), features)
     }
 
-    impl Tile for StubTile {
-        fn base(&self) -> &TileBase {
-            &self.base
-        }
-        fn create_render_data(&self) -> Box<dyn TileRenderData> {
-            unreachable!()
-        }
-        fn cancel(&self) {}
-        fn layer_properties_updated(&self, _layer_properties: &Arc<dyn LayerProperties>) -> bool {
-            false
+    impl FeatureStateTarget for StubTile {
+        fn feature_state_version(&mut self) -> &mut u64 {
+            &mut self.version
         }
         fn set_feature_state(&self, states: &LayerFeatureStates) {
             self.applied.borrow_mut().push(states.clone());
@@ -604,43 +613,43 @@ mod tests {
         state
     }
 
-    fn render_frame(state: &mut SourceFeatureState, tiles: &[&dyn Tile]) {
-        state.coalesce_changes(tiles.iter().copied());
+    fn render_frame(state: &mut SourceFeatureState, tiles: &mut [&mut StubTile]) {
+        state.coalesce_changes(tiles.iter_mut().map(|tile| &mut **tile));
     }
 
     // gtest: SourceFeatureState.CoalesceChanges
     #[test]
     fn coalesce_changes() {
         let mut state = SourceFeatureState::new();
-        let a = StubTile::new(0);
-        let b = StubTile::new(1);
+        let mut a = StubTile::new(0);
+        let mut b = StubTile::new(1);
         let layer = Some("layer");
 
         state.update_state(layer, "1", &hover());
-        render_frame(&mut state, &[&a]);
+        render_frame(&mut state, &mut [&mut a]);
         assert_eq!(a.applied_count(), 1);
         assert_eq!(a.applied(0)["layer"]["1"].get("hover"), Some(&Value::Bool(true)));
 
         // Nothing changed: nothing is applied again.
-        render_frame(&mut state, &[&a]);
+        render_frame(&mut state, &mut [&mut a]);
         assert_eq!(a.applied_count(), 1);
 
         // A tile rendered for the first time gets the stored state.
-        render_frame(&mut state, &[&a, &b]);
+        render_frame(&mut state, &mut [&mut a, &mut b]);
         assert_eq!(b.applied_count(), 1);
         assert_eq!(b.applied(0)["layer"]["1"].get("hover"), Some(&Value::Bool(true)));
         assert_eq!(a.applied_count(), 1);
 
         // A tile that is up to date gets only the change.
         state.update_state(layer, "2", &hover());
-        render_frame(&mut state, &[&a]);
+        render_frame(&mut state, &mut [&mut a]);
         assert_eq!(a.applied_count(), 2);
         assert_eq!(a.applied(1)["layer"].len(), 1);
         assert_eq!(a.applied(1)["layer"]["2"].get("hover"), Some(&Value::Bool(true)));
 
         // A tile that was not rendered when the state changed gets the whole
         // state.
-        render_frame(&mut state, &[&a, &b]);
+        render_frame(&mut state, &mut [&mut a, &mut b]);
         assert_eq!(a.applied_count(), 2);
         assert_eq!(b.applied_count(), 2);
         assert_eq!(b.applied(1)["layer"].len(), 2);
@@ -648,7 +657,7 @@ mod tests {
         // A removal and a change in the same frame both reach the tile.
         state.remove_state(layer, Some("1"), None);
         state.update_state(layer, "3", &hover());
-        render_frame(&mut state, &[&a, &b]);
+        render_frame(&mut state, &mut [&mut a, &mut b]);
         assert_eq!(a.applied_count(), 3);
         assert!(a.applied(2)["layer"]["1"].is_empty());
         assert_eq!(a.applied(2)["layer"]["3"].get("hover"), Some(&Value::Bool(true)));
@@ -658,14 +667,14 @@ mod tests {
     #[test]
     fn coalesce_changes_after_relayout() {
         let mut state = SourceFeatureState::new();
-        let a = StubTile::new(0);
+        let mut a = StubTile::new(0);
         let layer = Some("layer");
 
         state.update_state(layer, "1", &hover());
-        render_frame(&mut state, &[&a]);
+        render_frame(&mut state, &mut [&mut a]);
         state.update_state(layer, "2", &hover());
-        a.base.feature_state_version.set(0);
-        render_frame(&mut state, &[&a]);
+        a.version = 0;
+        render_frame(&mut state, &mut [&mut a]);
         assert_eq!(a.applied_count(), 2);
         assert_eq!(a.applied(1)["layer"].len(), 2);
     }
@@ -738,18 +747,18 @@ mod tests {
                     let sequence = [first, second, third];
                     let mut state = SourceFeatureState::new();
                     let mut expected = FeatureStates::default();
-                    let tile = StubTile::new(0);
+                    let mut tile = StubTile::new(0);
                     apply(&mut state, &mut expected, Op::Set("1", "a"));
                     apply(&mut state, &mut expected, Op::Set("1", "b"));
                     apply(&mut state, &mut expected, Op::Set("2", "a"));
-                    render_frame(&mut state, &[&tile]);
+                    render_frame(&mut state, &mut [&mut tile]);
 
                     for op in sequence {
                         apply(&mut state, &mut expected, op);
                     }
                     assert_state(&state, &expected, &format!("before rendering {sequence:?}"));
 
-                    render_frame(&mut state, &[&tile]);
+                    render_frame(&mut state, &mut [&mut tile]);
                     assert_state(&state, &expected, &format!("after rendering {sequence:?}"));
                     let mut drawn = tile.applied(0).remove("layer").unwrap_or_default();
                     if tile.applied_count() > 1 {
@@ -768,23 +777,23 @@ mod tests {
     #[test]
     fn given_states_replace_what_the_source_held() {
         let mut state = SourceFeatureState::new();
-        let tile = StubTile::new(0);
+        let mut tile = StubTile::new(0);
         let (first, _) = states_of(&[&hover(), &hover()]);
         state.set_states(Some(&first));
-        render_frame(&mut state, &[&tile]);
+        render_frame(&mut state, &mut [&mut tile]);
         assert_eq!(1, tile.applied_count());
         assert_eq!(2, tile.drawn().len());
 
         // The same state again changes nothing.
         state.set_states(Some(&first));
-        render_frame(&mut state, &[&tile]);
+        render_frame(&mut state, &mut [&mut tile]);
         assert_eq!(1, tile.applied_count());
 
         // Feature 2 loses its state, and the tile gets only that change.
         let (second, _) = states_of(&[&hover(), &FeatureState::new()]);
         state.set_states(Some(&second));
         assert!(state.get_state(Some("layer"), "2").is_empty());
-        render_frame(&mut state, &[&tile]);
+        render_frame(&mut state, &mut [&mut tile]);
         assert_eq!(2, tile.applied_count());
         assert_eq!(vec!["2"], tile.applied(1)["layer"].keys().map(String::as_str).collect::<Vec<_>>());
         assert_eq!(1, tile.drawn().len());
@@ -792,8 +801,8 @@ mod tests {
         // No state takes the rest, and a tile seen for the first time draws
         // none.
         state.set_states(None);
-        let fresh = StubTile::new(1);
-        render_frame(&mut state, &[&tile, &fresh]);
+        let mut fresh = StubTile::new(1);
+        render_frame(&mut state, &mut [&mut tile, &mut fresh]);
         assert!(tile.drawn().is_empty());
         assert!(fresh.drawn().is_empty());
         assert!(state.get_state(Some("layer"), "1").is_empty());
@@ -811,16 +820,16 @@ mod tests {
             for op in ops() {
                 for (second, expected) in &targets {
                     let mut state = SourceFeatureState::new();
-                    let tile = StubTile::new(0);
+                    let mut tile = StubTile::new(0);
                     state.set_states(Some(first));
-                    render_frame(&mut state, &[&tile]);
+                    render_frame(&mut state, &mut [&mut tile]);
                     apply(&mut state, &mut FeatureStates::default(), op);
                     // A copy, as the same state again changes nothing.
                     let (copy, _) = states_of(&[&second.get("layer", "1"), &second.get("layer", "2")]);
                     state.set_states(Some(&copy));
                     let context = format!("from {first:?} by {op:?} to {second:?}");
                     assert_state(&state, expected, &format!("before rendering, {context}"));
-                    render_frame(&mut state, &[&tile]);
+                    render_frame(&mut state, &mut [&mut tile]);
                     assert_state(&state, expected, &format!("after rendering, {context}"));
                     assert_eq!(&tile.drawn(), expected, "drawn, {context}");
                 }
@@ -851,15 +860,15 @@ mod tests {
                         for second_state in &options {
                             for between in ["render", "no render", "together"] {
                                 let mut state = SourceFeatureState::new();
-                                let tile = StubTile::new(0);
+                                let mut tile = StubTile::new(0);
                                 state.set_states(Some(start));
-                                render_frame(&mut state, &[&tile]);
+                                render_frame(&mut state, &mut [&mut tile]);
                                 let one = changed(start, &[(first, first_state)]);
                                 if between != "together" {
                                     state.set_states(Some(&one));
                                 }
                                 if between == "render" {
-                                    render_frame(&mut state, &[&tile]);
+                                    render_frame(&mut state, &mut [&mut tile]);
                                 }
                                 let two = changed(&one, &[(second, second_state)]);
                                 state.set_states(Some(&two));
@@ -876,7 +885,7 @@ mod tests {
                                      {second_state:?}, {between}"
                                 );
                                 assert_state(&state, &expected, &format!("before rendering, {context}"));
-                                render_frame(&mut state, &[&tile]);
+                                render_frame(&mut state, &mut [&mut tile]);
                                 assert_state(&state, &expected, &format!("after rendering, {context}"));
                                 assert_eq!(tile.drawn(), expected, "drawn, {context}");
                             }
@@ -891,12 +900,12 @@ mod tests {
     #[test]
     fn a_change_reaches_the_tiles_alone() {
         let mut state = SourceFeatureState::new();
-        let tile = StubTile::new(0);
+        let mut tile = StubTile::new(0);
         let (start, _) = states_of(&[&hover(), &hover()]);
         state.set_states(Some(&start));
-        render_frame(&mut state, &[&tile]);
+        render_frame(&mut state, &mut [&mut tile]);
         state.set_states(Some(&changed(&start, &[("2", &FeatureState::new())])));
-        render_frame(&mut state, &[&tile]);
+        render_frame(&mut state, &mut [&mut tile]);
         assert_eq!(2, tile.applied_count());
         assert_eq!(vec!["2"], tile.applied(1)["layer"].keys().map(String::as_str).collect::<Vec<_>>());
     }
@@ -906,14 +915,14 @@ mod tests {
     #[test]
     fn a_change_after_the_renderers_own_call_takes_the_whole_state() {
         let mut state = SourceFeatureState::new();
-        let tile = StubTile::new(0);
+        let mut tile = StubTile::new(0);
         let (start, _) = states_of(&[&hover(), &FeatureState::new()]);
         state.set_states(Some(&start));
-        render_frame(&mut state, &[&tile]);
+        render_frame(&mut state, &mut [&mut tile]);
         state.update_state(Some("layer"), "2", &hover());
-        render_frame(&mut state, &[&tile]);
+        render_frame(&mut state, &mut [&mut tile]);
         state.set_states(Some(&changed(&start, &[("1", &FeatureState::new())])));
-        render_frame(&mut state, &[&tile]);
+        render_frame(&mut state, &mut [&mut tile]);
         assert!(tile.drawn().is_empty());
         assert!(state.get_state(Some("layer"), "2").is_empty());
     }

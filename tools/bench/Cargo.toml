@@ -45,6 +45,9 @@ parking_lot.workspace = true
 # Encodes the basemap's tiles as MLT with their triangles (scene.rs).
 mlt-core.workspace = true
 pixelmatch.workspace = true
+# Reads the cases' code, to tell which changed between two harnesses
+# (compare.rs).
+proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 render_test.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -9,9 +9,8 @@ use std::sync::Arc;
 use geo_types::Geometry;
 use mln_actor::RunLoop;
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, ConstrainMode,
-    MapDebugOptions, MapMode, MapView, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
-    VerticalPerspectiveProjection, ViewportMode,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, MapDebugOptions, MapMode,
+    MapView, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
     FeatureInfo, LayerFeaturesMap, RendererEvent, RendererEvents, RenderingStats, SourceLayerID, UpdateParameters,
@@ -34,15 +33,11 @@ use mln_util::time::Instant;
 use mln_util::vectors::Vec3;
 
 use crate::feature_state::FeatureStateStore;
-use crate::map_event::{CameraChange, MapEvent, RenderFrameStatus, RenderMode};
+use crate::map_event::{MapEvent, RenderFrameStatus};
 use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
-use crate::transform::{Transform, TransformObserver};
-
-/// Receives the outcome of [`Map::render_still`]: `Ok` once a complete frame
-/// rendered, or why the image failed.
-pub(crate) type StillImageCallback = Box<dyn FnOnce(Result<(), Error>)>;
+use crate::transform::{CameraCommandId, CommandEnd, Transform, TransformEvent};
 
 /// A call of the style's observer.
 enum StyleEvent {
@@ -108,19 +103,14 @@ impl StyleObserver for StyleEvents {
     }
 }
 
-/// The transform's observer: queues the camera events for the map's owner.
-struct CameraEvents(EventQueue<MapEvent>);
-
-impl TransformObserver for CameraEvents {
-    fn on_camera_will_change(&self, change: CameraChange) {
-        self.0.push(MapEvent::CameraWillChange(change));
-    }
-    fn on_camera_is_changing(&self) {
-        self.0.push(MapEvent::CameraIsChanging);
-    }
-    fn on_camera_did_change(&self, change: CameraChange) {
-        self.0.push(MapEvent::CameraDidChange(change));
-    }
+/// Where a still image that [`Map::render_still`] asked for stands.
+#[derive(Debug, PartialEq)]
+enum StillImage {
+    None,
+    /// Waits for a complete frame.
+    Pending,
+    /// Ended, until [`Map::take_still_image`] takes it.
+    Ended(Result<(), Error>),
 }
 
 /// A map: its style, its camera, and the updates it publishes for its
@@ -130,9 +120,11 @@ impl TransformObserver for CameraEvents {
 /// renderer reads through [`update_reader`](Self::update_reader) and
 /// reports back to through [`renderer_events`](Self::renderer_events).
 /// The style and the renderer report to the map through queues, which the
-/// map handles in [`process_events`](Self::process_events) and at the start
-/// of each of its calls that take `&mut self`. What the map reports to its
-/// owner waits in another queue, for [`drain_events`](Self::drain_events).
+/// map handles only in [`process_events`](Self::process_events) (which
+/// [`drain_events`](Self::drain_events) calls): an owner calls it once per
+/// phase, before the commands that should see what was reported, such as a
+/// camera command that should land after the style's default camera. What
+/// the map reports to its owner waits in another queue, for `drain_events`.
 /// An owner that runs a `RunLoop` sets a waker
 /// ([`set_waker`](Self::set_waker)) that schedules those calls.
 pub struct Map {
@@ -155,18 +147,14 @@ pub struct Map {
     feature_state: FeatureStateStore,
 
     camera_mutated: bool,
-    prefetch_zoom_delta: u8,
+    /// How the map picks the tiles to load, as its snapshot reports it.
+    tile: TileSettings,
     loading: bool,
     renderer_fully_loaded: bool,
-    still_image_request: Option<StillImageCallback>,
+    /// A still image that [`Map::render_still`] asked for, until it ends.
+    still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
     still_image_request_id: u64,
-
-    tile_lod_min_radius: f64,
-    tile_lod_scale: f64,
-    tile_lod_pitch_threshold: f64,
-    tile_lod_zoom_shift: f64,
-    tile_lod_mode: TileLodMode,
 
     /// Grows with each change to the map's state.
     generation: u64,
@@ -175,6 +163,8 @@ pub struct Map {
     renderer_events: RendererEvents,
     /// What the map reports to its owner.
     events: EventQueue<MapEvent>,
+    /// The ends of the camera commands, for its owner.
+    command_ends: Vec<CommandEnd>,
 
     /// Declared after `style`, so the style and its requests go first.
     file_source: Option<Arc<dyn FileSource>>,
@@ -225,11 +215,7 @@ impl Map {
         let pixel_ratio = map_options.pixel_ratio;
         let mut style = Style::with_file_source(file_source.clone(), pixel_ratio, run_loop);
         style.impl_.set_observer(Some(Rc::new(StyleEvents(style_events.clone()))));
-        let mut transform = Transform::new(
-            Rc::new(CameraEvents(events.clone())),
-            map_options.constrain_mode,
-            map_options.viewport_mode,
-        );
+        let mut transform = Transform::new(map_options.constrain_mode, map_options.viewport_mode);
         transform.set_north_orientation(map_options.north_orientation);
         let mut map = Map {
             updates: UpdateSlot::new(),
@@ -246,21 +232,24 @@ impl Map {
             style,
             feature_state: FeatureStateStore::default(),
             camera_mutated: false,
-            // util::DEFAULT_PREFETCH_ZOOM_DELTA
-            prefetch_zoom_delta: 4,
+            tile: TileSettings {
+                // util::DEFAULT_PREFETCH_ZOOM_DELTA
+                prefetch_zoom_delta: 4,
+                lod_min_radius: 3.0,
+                lod_scale: 1.0,
+                lod_pitch_threshold: 60.0,
+                lod_zoom_shift: 0.0,
+                lod_mode: TileLodMode::Default,
+            },
             loading: false,
             renderer_fully_loaded: false,
-            still_image_request: None,
+            still_image: StillImage::None,
             still_image_request_id: 0,
-            tile_lod_min_radius: 3.0,
-            tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
-            tile_lod_zoom_shift: 0.0,
-            tile_lod_mode: TileLodMode::Default,
             generation: 1,
             style_events,
             renderer_events,
             events,
+            command_ends: Vec::new(),
             file_source,
             run_loop: run_loop.clone(),
         };
@@ -292,7 +281,6 @@ impl Map {
     /// between show in the same frame. Groups nest, and the changes show
     /// when the outermost group ends.
     pub fn begin_command_group(&mut self) {
-        self.process_events();
         self.updates.begin_group();
     }
 
@@ -300,7 +288,6 @@ impl Map {
     /// began. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
     /// when no group is open.
     pub fn end_command_group(&mut self) -> Result<(), Error> {
-        self.process_events();
         self.updates.end_group()
     }
 
@@ -320,7 +307,6 @@ impl Map {
     /// Ends the hold that [`hold_updates`](Self::hold_updates) began. The
     /// changes show unless a command group still holds them.
     pub fn release_updates(&mut self) {
-        self.process_events();
         self.updates.release();
     }
 
@@ -389,11 +375,37 @@ impl Map {
     /// events, oldest first.
     pub fn drain_events(&mut self) -> Vec<MapEvent> {
         self.process_events();
+        self.forward_camera_events();
         self.events.take()
     }
 
-    fn emit(&self, event: MapEvent) {
+    fn emit(&mut self, event: MapEvent) {
+        self.forward_camera_events();
         self.events.push(event);
+    }
+
+    /// Moves what the transform reported to the map's events, after the
+    /// events before it, and to its command ends.
+    fn forward_camera_events(&mut self) {
+        for event in self.transform.drain_events() {
+            match event {
+                TransformEvent::CameraWillChange(change) => self.events.push(MapEvent::CameraWillChange(change)),
+                TransformEvent::CameraIsChanging => self.events.push(MapEvent::CameraIsChanging),
+                TransformEvent::CameraDidChange(change) => self.events.push(MapEvent::CameraDidChange(change)),
+                TransformEvent::CommandEnded(end) => self.command_ends.push(end),
+            }
+        }
+    }
+
+    /// Drains the ends of the camera commands that ended since the last
+    /// call, oldest first: each command's end comes once, unless the map
+    /// drops while the command runs (see [`close_camera`](Self::close_camera)).
+    /// They come with the camera events of the same calls, which
+    /// [`drain_events`](Self::drain_events) takes. The map keeps its buffer
+    /// for the ends that come next.
+    pub fn drain_command_ends(&mut self) -> std::vec::Drain<'_, CommandEnd> {
+        self.forward_camera_events();
+        self.command_ends.drain(..)
     }
 
     fn handle_style_event(&mut self, event: StyleEvent) {
@@ -412,7 +424,7 @@ impl Map {
                 self.changed();
                 if !self.camera_mutated {
                     let camera = self.style.get_default_camera();
-                    self.jump(&camera);
+                    self.jump_to(&camera);
                 }
                 self.emit(MapEvent::StyleLoaded);
             }
@@ -460,7 +472,7 @@ impl Map {
             }
             RendererEvent::RenderMapFinished => {
                 if continuous && self.loading {
-                    self.emit(MapEvent::RenderMapFinished(RenderMode::Full));
+                    self.emit(MapEvent::RenderMapFinished(mln_renderer::RenderMode::Full));
                     self.loading = false;
                     self.emit(MapEvent::LoadingFinished);
                 }
@@ -496,10 +508,8 @@ impl Map {
 
     /// Fails the still image being rendered.
     fn on_resource_error(&mut self, error: Error) {
-        if self.mode != MapMode::Continuous
-            && let Some(callback) = self.still_image_request.take()
-        {
-            callback(Err(error));
+        if self.mode != MapMode::Continuous && self.still_image == StillImage::Pending {
+            self.still_image = StillImage::Ended(Err(error));
         }
     }
 
@@ -522,7 +532,7 @@ impl Map {
 
         if self.mode == MapMode::Continuous {
             self.emit(MapEvent::RenderFrameFinished(RenderFrameStatus {
-                mode: if fully_loaded { RenderMode::Full } else { RenderMode::Partial },
+                mode,
                 needs_repaint,
                 placement_changed,
                 rendering_stats: Arc::clone(&stats),
@@ -535,9 +545,9 @@ impl Map {
             }
         } else if self.renderer_fully_loaded
             && still_image_request_id == self.still_image_request_id
-            && let Some(callback) = self.still_image_request.take()
+            && self.still_image == StillImage::Pending
         {
-            callback(Ok(()));
+            self.still_image = StillImage::Ended(Ok(()));
         }
 
         self.last_frame_stats = Some(stats);
@@ -562,7 +572,7 @@ impl Map {
         self.changed();
 
         // Don't load/render anything in still mode until explicitly requested.
-        if self.mode != MapMode::Continuous && self.still_image_request.is_none() {
+        if self.mode != MapMode::Continuous && self.still_image != StillImage::Pending {
             return;
         }
 
@@ -594,17 +604,17 @@ impl Map {
             global_state: Some(style_impl.get_global_state_shared()),
             feature_states: self.feature_state.shared(),
             file_source: self.file_source.clone(),
-            prefetch_zoom_delta: self.prefetch_zoom_delta,
-            still_image_request: self.still_image_request.is_some(),
+            prefetch_zoom_delta: self.tile.prefetch_zoom_delta,
+            still_image_request: self.still_image == StillImage::Pending,
             still_image_request_id: self.still_image_request_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
             capture_rendered_features: self.capture_rendered_features,
-            tile_lod_min_radius: self.tile_lod_min_radius,
-            tile_lod_scale: self.tile_lod_scale,
-            tile_lod_pitch_threshold: self.tile_lod_pitch_threshold,
-            tile_lod_zoom_shift: self.tile_lod_zoom_shift,
-            tile_lod_mode: self.tile_lod_mode,
+            tile_lod_min_radius: self.tile.lod_min_radius,
+            tile_lod_scale: self.tile.lod_scale,
+            tile_lod_pitch_threshold: mln_math::deg2rad(self.tile.lod_pitch_threshold),
+            tile_lod_zoom_shift: self.tile.lod_zoom_shift,
+            tile_lod_mode: self.tile.lod_mode,
             subdivision_granularity: if self.mode == MapMode::Tile {
                 SubdivisionGranularitySetting::none()
             } else {
@@ -613,10 +623,10 @@ impl Map {
         };
 
         self.updates.publish(Arc::new(params));
+        self.forward_camera_events();
     }
 
-    /// Jumps the camera without handling the queued events first.
-    fn jump(&mut self, camera: &CameraOptions) {
+    pub fn jump_to(&mut self, camera: &CameraOptions) {
         self.camera_mutated = true;
         // The style's projection decides how the camera is constrained, so it
         // has to be in place first.
@@ -649,42 +659,52 @@ impl Map {
 
     // MARK: - Still images
 
-    /// Register a callback that will get called (on the render thread) when
-    /// all resources have been loaded and a complete render occurs.
-    pub fn render_still(&mut self, callback: StillImageCallback) {
-        self.process_events();
+    /// Asks for a still image: the map's renderer draws frames until one
+    /// has everything loaded, and [`take_still_image`](Self::take_still_image)
+    /// then reports it. Fails with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a continuous map
+    /// and while another still image is on its way, and with the style's
+    /// error when it failed to load.
+    pub fn render_still(&mut self) -> Result<(), Error> {
         if self.mode != MapMode::Static && self.mode != MapMode::Tile {
-            callback(Err(Error::invalid_state("Map is not in static or tile image render modes")));
-            return;
+            return Err(Error::invalid_state("Map is not in static or tile image render modes"));
         }
-
-        if self.still_image_request.is_some() {
-            callback(Err(Error::invalid_state("Map is currently rendering an image")));
-            return;
+        if self.still_image == StillImage::Pending {
+            return Err(Error::invalid_state("Map is currently rendering an image"));
         }
-
         if let Some(error) = self.style.impl_.get_last_error() {
-            callback(Err(error));
-            return;
+            return Err(error);
         }
-
-        self.still_image_request = Some(callback);
+        self.still_image = StillImage::Pending;
         self.still_image_request_id += 1;
-
         self.on_update();
+        Ok(())
+    }
+
+    /// How the still image that [`render_still`](Self::render_still) asked
+    /// for ended, once it has: `Ok` once a complete frame rendered, or why
+    /// the image failed. The map handles its renderer's reports in
+    /// [`process_events`](Self::process_events), so call that first.
+    pub fn take_still_image(&mut self) -> Option<Result<(), Error>> {
+        match std::mem::replace(&mut self.still_image, StillImage::None) {
+            StillImage::Ended(result) => Some(result),
+            other => {
+                self.still_image = other;
+                None
+            }
+        }
     }
 
     /// The still image request that waits for a frame, as the
     /// `still_image_request_id` of the updates that ask for it, or `None`
-    /// once it completed or failed.
+    /// once it ended.
     #[must_use]
     pub fn pending_still_image(&self) -> Option<u64> {
-        self.still_image_request.as_ref().map(|_| self.still_image_request_id)
+        (self.still_image == StillImage::Pending).then_some(self.still_image_request_id)
     }
 
     /// Triggers a repaint.
     pub fn trigger_repaint(&mut self) {
-        self.process_events();
         self.on_update();
     }
 
@@ -706,7 +726,6 @@ impl Map {
         feature_id: &str,
         state: mln_style::expression::expression::FeatureState,
     ) -> bool {
-        self.process_events();
         let changed = self.feature_state.set(source_id, source_layer_id.unwrap_or(""), feature_id, state);
         if changed {
             self.on_update();
@@ -737,7 +756,6 @@ impl Map {
         feature_id: Option<&str>,
         state_key: Option<&str>,
     ) -> bool {
-        self.process_events();
         let changed = self.feature_state.remove(source_id, source_layer_id.unwrap_or(""), feature_id, state_key);
         if changed {
             self.on_update();
@@ -749,7 +767,6 @@ impl Map {
     /// the source leaves the style. Publishes an update when the state
     /// changes. Returns whether it changed.
     pub fn remove_source_feature_state(&mut self, source_id: &str) -> bool {
-        self.process_events();
         let changed = self.feature_state.remove_source(source_id);
         if changed {
             self.on_update();
@@ -765,9 +782,8 @@ impl Map {
     }
 
     /// The map's style, to change. The map handles what the changes report
-    /// at its next call that takes `&mut self`.
+    /// at its next [`process_events`](Self::process_events).
     pub fn style_mut(&mut self) -> &mut Style {
-        self.process_events();
         self.changed();
         &mut self.style
     }
@@ -775,7 +791,6 @@ impl Map {
     // MARK: - Transitions
 
     pub fn cancel_transitions(&mut self) {
-        self.process_events();
         self.transform.cancel_transitions();
         self.on_update();
     }
@@ -784,7 +799,6 @@ impl Map {
     /// `transition_id`, and leaves the others running. Requests an update only
     /// when a command ended.
     pub fn cancel_transitions_with_id(&mut self, transition_id: u64) {
-        self.process_events();
         let ended = self.transform.cancel_transitions_with_id(transition_id);
         if ended {
             self.on_update();
@@ -794,38 +808,44 @@ impl Map {
     /// Moves the camera relative to where it is, as a gesture does
     /// (maplibre-native-ffi's `mln_map_apply_camera_delta`): a pan, a zoom,
     /// turn and tilt around an anchor, a gesture phase, and the momentum a
-    /// gesture's end continues with. See [`CameraDelta`].
-    pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<(), CameraError> {
-        self.process_events();
-        self.transform.apply_camera_delta(delta)?;
+    /// gesture's end continues with. See [`CameraDelta`]. Returns the
+    /// command, whose end [`drain_command_ends`](Self::drain_command_ends)
+    /// reports.
+    pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<CameraCommandId, CameraError> {
+        let command = self.transform.apply_camera_delta(delta)?;
         self.camera_mutated = true;
         self.on_update();
-        Ok(())
+        Ok(command)
     }
 
     /// Moves the camera to absolute values, by a jump, an ease or a flight,
     /// as a command or as part of a gesture (maplibre-native-ffi's
-    /// `mln_map_update_camera`). See [`CameraUpdate`].
-    pub fn update_camera(&mut self, update: &CameraUpdate) {
-        self.process_events();
+    /// `mln_map_update_camera`). See [`CameraUpdate`]. Returns the command,
+    /// whose end [`drain_command_ends`](Self::drain_command_ends) reports.
+    pub fn update_camera(&mut self, update: &CameraUpdate) -> CameraCommandId {
         self.camera_mutated = true;
-        self.transform.update_camera(update);
+        let command = self.transform.update_camera(update);
         self.on_update();
+        command
+    }
+
+    /// Ends the running camera commands as closed, as when the map closes,
+    /// which [`drain_command_ends`](Self::drain_command_ends) reports. An
+    /// owner that waits for the commands' ends calls it before it drops the
+    /// map.
+    pub fn close_camera(&mut self) {
+        self.transform.close();
+        self.forward_camera_events();
     }
 
     /// On the globe, let drags and zooms around a point turn the bearing so
     /// the planet keeps its orientation, for maps whose rotation gestures are
     /// enabled. Off, the default, they hold the bearing as GL JS does.
     pub fn set_globe_free_bearing(&mut self, free_bearing: bool) {
-        self.process_events();
-        if free_bearing != self.is_globe_free_bearing() {
+        if free_bearing != self.transform.is_globe_free_bearing() {
             self.transform.set_globe_free_bearing(free_bearing);
             self.changed();
         }
-    }
-
-    pub fn is_globe_free_bearing(&self) -> bool {
-        self.transform.is_globe_free_bearing()
     }
 
     /// Samples the camera's animations at the host's frame time, from now on,
@@ -838,30 +858,13 @@ impl Map {
     /// images ignore it. See
     /// [`Transform::set_frame_time`](crate::transform::Transform::set_frame_time).
     pub fn set_frame_time(&mut self, time: Option<Instant>) {
-        self.process_events();
         self.transform.set_frame_time(time);
         if self.transform.in_transition() {
             self.on_update();
         }
     }
 
-    /// Whether any camera command is still animating. A command's
-    /// [`MapEvent::CameraDidChange`] ends that command only, so this
-    /// tells whether the camera stopped once the last one ended.
-    pub fn in_transition(&self) -> bool {
-        self.transform.in_transition()
-    }
-
     // MARK: - Camera
-
-    pub fn get_camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
-        self.transform.get_camera_options(padding)
-    }
-
-    pub fn jump_to(&mut self, camera: &CameraOptions) {
-        self.process_events();
-        self.jump(camera);
-    }
 
     // query: the render-test runner's tile mode uses it.
     /// The bounds of the area the map shows from `camera`.
@@ -887,7 +890,6 @@ impl Map {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite
     /// point.
     pub fn move_by(&mut self, point: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), Error> {
-        self.process_events();
         self.camera_mutated = true;
         self.transform.move_by(point, animation)?;
         self.on_update();
@@ -993,7 +995,6 @@ impl Map {
     // MARK: - Bounds
 
     pub fn set_bounds(&mut self, options: &BoundOptions) -> Result<(), Error> {
-        self.process_events();
         if *options != BoundOptions::default() {
             self.changed();
         }
@@ -1055,27 +1056,33 @@ impl Map {
 
     // MARK: - Map options
 
-    pub fn set_north_orientation(&mut self, orientation: NorthOrientation) {
-        self.process_events();
-        self.transform.set_north_orientation(orientation);
-        self.on_update();
-    }
-
-    pub fn set_constrain_mode(&mut self, mode: ConstrainMode) {
-        self.process_events();
-        self.transform.set_constrain_mode(mode);
-        self.on_update();
-    }
-
-    pub fn set_viewport_mode(&mut self, mode: ViewportMode) {
-        self.process_events();
-        self.transform.set_viewport_mode(mode);
+    /// Sets how the map orients and constrains its view, every setting at
+    /// once.
+    pub fn set_viewport(&mut self, viewport: &Viewport) {
+        let state = self.transform.get_state();
+        let (orientation, constrain_mode, viewport_mode, frustum_offset) = (
+            state.get_north_orientation(),
+            state.get_constrain_mode(),
+            state.get_viewport_mode(),
+            state.get_frustum_offset(),
+        );
+        if viewport.north_orientation != orientation {
+            self.transform.set_north_orientation(viewport.north_orientation);
+        }
+        if viewport.constrain_mode != constrain_mode {
+            self.transform.set_constrain_mode(viewport.constrain_mode);
+        }
+        if viewport.viewport_mode != viewport_mode {
+            self.transform.set_viewport_mode(viewport.viewport_mode);
+        }
+        if viewport.frustum_offset != frustum_offset {
+            self.transform.set_frustum_offset(&viewport.frustum_offset);
+        }
         self.on_update();
     }
 
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty size.
     pub fn set_size(&mut self, size: Size) -> Result<(), Error> {
-        self.process_events();
         self.transform.resize(size)?;
         self.on_update();
         Ok(())
@@ -1092,7 +1099,6 @@ impl Map {
         if !pixel_ratio.is_finite() || pixel_ratio <= 0.0 {
             return Err(Error::invalid_argument(format!("pixel ratio {pixel_ratio} isn't finite and positive")));
         }
-        self.process_events();
         if pixel_ratio == self.pixel_ratio {
             return Ok(());
         }
@@ -1102,41 +1108,11 @@ impl Map {
         Ok(())
     }
 
-    pub fn get_pixel_ratio(&self) -> f32 {
-        self.pixel_ratio
-    }
-
-    pub fn set_frustum_offset(&mut self, frustum_offset: &EdgeInsets) {
-        self.process_events();
-        self.transform.set_frustum_offset(frustum_offset);
-        self.on_update();
-    }
-
-    pub fn get_map_options(&self) -> MapOptions {
-        let transform = &self.transform;
-        let state = transform.get_state();
-        MapOptions {
-            north_orientation: transform.get_north_orientation(),
-            map_mode: self.mode,
-            constrain_mode: state.get_constrain_mode(),
-            viewport_mode: state.get_viewport_mode(),
-            cross_source_collisions: self.cross_source_collisions,
-            size: state.get_size(),
-            pixel_ratio: self.pixel_ratio,
-            ..Default::default()
-        }
-    }
-
     // MARK: - Projection mode
 
     pub fn set_projection_mode(&mut self, options: &ProjectionMode) {
-        self.process_events();
         self.transform.set_projection_mode(options);
         self.on_update();
-    }
-
-    pub fn get_projection_mode(&self) -> ProjectionMode {
-        self.transform.get_projection_mode()
     }
 
     // MARK: - Transform
@@ -1145,55 +1121,16 @@ impl Map {
         self.transform.get_state().clone()
     }
 
-    // MARK: - Tile LOD
+    // MARK: - Tile settings
 
-    pub fn set_tile_lod_min_radius(&mut self, radius: f64) {
-        self.process_events();
-        if self.tile_lod_min_radius == radius {
-            return;
+    /// Sets how the map picks the tiles to load, every setting at once, in
+    /// the units that its snapshot reports them. Publishes an update when
+    /// they change.
+    pub fn set_tile_settings(&mut self, tile: &TileSettings) {
+        if self.tile != *tile {
+            self.tile = *tile;
+            self.on_update();
         }
-        self.tile_lod_min_radius = radius;
-        self.on_update();
-    }
-
-    pub fn set_tile_lod_scale(&mut self, scale: f64) {
-        self.process_events();
-        if self.tile_lod_scale == scale {
-            return;
-        }
-        self.tile_lod_scale = scale;
-        self.on_update();
-    }
-
-    pub fn set_tile_lod_pitch_threshold(&mut self, threshold: f64) {
-        self.process_events();
-        if self.tile_lod_pitch_threshold == threshold {
-            return;
-        }
-        self.tile_lod_pitch_threshold = threshold;
-        self.on_update();
-    }
-
-    pub fn get_tile_lod_pitch_threshold(&self) -> f64 {
-        self.tile_lod_pitch_threshold
-    }
-
-    pub fn set_tile_lod_zoom_shift(&mut self, shift: f64) {
-        self.process_events();
-        if self.tile_lod_zoom_shift == shift {
-            return;
-        }
-        self.tile_lod_zoom_shift = shift;
-        self.on_update();
-    }
-
-    pub fn set_tile_lod_mode(&mut self, mode: TileLodMode) {
-        self.process_events();
-        if self.tile_lod_mode == mode {
-            return;
-        }
-        self.tile_lod_mode = mode;
-        self.on_update();
     }
 
     // MARK: - Rendered features
@@ -1312,25 +1249,11 @@ impl Map {
         screen_coords.iter().map(|point| self.lat_lng_for_pixel(point, wrap_mode)).collect()
     }
 
-    pub fn set_prefetch_zoom_delta(&mut self, delta: u8) {
-        self.process_events();
-        if self.prefetch_zoom_delta == delta {
-            return;
-        }
-        self.prefetch_zoom_delta = delta;
-        self.on_update();
-    }
-
-    pub fn get_prefetch_zoom_delta(&self) -> u8 {
-        self.prefetch_zoom_delta
-    }
-
     /// Places the camera by its position and orientation, and cancels the
     /// running camera commands. A NaN position, or a NaN or zero-length
     /// orientation, is ignored; the position's height is clamped to the zoom
     /// range.
     pub fn set_free_camera_options(&mut self, camera: &mln_map_types::FreeCameraOptions) {
-        self.process_events();
         self.transform.set_free_camera_options(camera);
         self.camera_mutated = true;
         self.on_update();
@@ -1339,17 +1262,8 @@ impl Map {
     // MARK: - Debug
 
     pub fn set_debug(&mut self, debug_options: MapDebugOptions) {
-        self.process_events();
         self.debug_options = debug_options;
         self.on_update();
-    }
-
-    pub fn get_debug(&self) -> MapDebugOptions {
-        self.debug_options
-    }
-
-    pub fn is_rendering_stats_view_enabled(&self) -> bool {
-        self.rendering_stats_view.is_some()
     }
 
     /// Shows the rendering stats of the last frames in the top right corner,
@@ -1357,12 +1271,11 @@ impl Map {
     /// and keeps there, even when the style is replaced. The text needs the
     /// style's glyphs. Disabling the view removes them.
     pub fn enable_rendering_stats_view(&mut self, value: bool) {
-        self.process_events();
-        if value != self.is_rendering_stats_view_enabled() {
+        if value != self.rendering_stats_view.is_some() {
             self.changed();
         }
         if value {
-            if self.is_rendering_stats_view_enabled() {
+            if self.rendering_stats_view.is_some() {
                 return;
             }
             let view = RenderingStatsView::new(RenderingStatsViewOptions::default());
@@ -1371,7 +1284,6 @@ impl Map {
         } else if let Some(view) = self.rendering_stats_view.take() {
             view.destroy(&mut self.style);
         }
-        self.process_events();
     }
 
     /// Grows with each change to the map's state: each call that changes it,
@@ -1405,17 +1317,10 @@ impl Map {
             update_generation: self.updates.generation(),
             debug: self.debug_options,
             fully_loaded: self.is_fully_loaded(),
-            rendering_stats_view_enabled: self.is_rendering_stats_view_enabled(),
+            rendering_stats_view_enabled: self.rendering_stats_view.is_some(),
             gesture_in_progress: transform.is_gesture_in_progress(),
             transition_in_progress: transform.in_transition(),
-            tile: TileSettings {
-                prefetch_zoom_delta: self.prefetch_zoom_delta,
-                lod_min_radius: self.tile_lod_min_radius,
-                lod_scale: self.tile_lod_scale,
-                lod_pitch_threshold: mln_math::rad2deg(self.tile_lod_pitch_threshold),
-                lod_zoom_shift: self.tile_lod_zoom_shift,
-                lod_mode: self.tile_lod_mode,
-            },
+            tile: self.tile,
             bounds: CameraBounds {
                 bounds: (bounds != LatLngBounds::infinite()).then_some(bounds),
                 min_zoom: state.get_min_zoom(),
@@ -1433,7 +1338,7 @@ impl Map {
         }
     }
 
-    pub fn is_fully_loaded(&self) -> bool {
+    fn is_fully_loaded(&self) -> bool {
         self.style.impl_.is_loaded() && self.renderer_fully_loaded
     }
 

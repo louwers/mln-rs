@@ -167,9 +167,9 @@ fn rendering_stats_view_shows_the_stats_in_the_top_right() {
     test.load_json(GLYPHS_STYLE);
     let plain = render(&test, MapDebugOptions::NO_DEBUG, "stats_plain");
 
-    assert!(!test.map().is_rendering_stats_view_enabled());
+    assert!(!test.map().snapshot().rendering_stats_view_enabled);
     test.map().enable_rendering_stats_view(true);
-    assert!(test.map().is_rendering_stats_view_enabled());
+    assert!(test.map().snapshot().rendering_stats_view_enabled);
     assert_eq!(has_stats_view(&test), (true, true));
 
     // The first frame sets the text, the second shows it.
@@ -193,7 +193,7 @@ fn rendering_stats_view_shows_the_stats_in_the_top_right() {
     assert_eq!(has_stats_view(&test), (true, true));
 
     test.map().enable_rendering_stats_view(false);
-    assert!(!test.map().is_rendering_stats_view_enabled());
+    assert!(!test.map().snapshot().rendering_stats_view_enabled);
     assert_eq!(has_stats_view(&test), (false, false));
     assert_eq!(
         changed_pixels(&plain, &render(&test, MapDebugOptions::NO_DEBUG, "stats_disabled")),

@@ -3,7 +3,7 @@
 //! database, and maplibre-native-ffi's basemap, read from the files
 //! `fixtures.py` prepared. Nothing uses the network.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -208,8 +208,8 @@ pub enum Mode {
     /// A continuous map, drawn only when the case calls
     /// `Scene::render_frame`, as a host on a display clock does.
     OnDemand,
-    /// A continuous map, drawn whenever the map updates, as the run loop
-    /// delivers the update.
+    /// A continuous map, drawn whenever the map updates while the scene
+    /// runs the run loop.
     Driven,
 }
 
@@ -256,6 +256,9 @@ fn shared_file_source(resource_options: &ResourceOptions) -> Arc<dyn FileSource>
 
 pub struct Scene {
     frontend: HeadlessFrontend,
+    /// Whether the scene draws each update of the map as it waits for the
+    /// run loop, or only when the case asks.
+    draws_updates: bool,
     map: Map,
     observer: Observer,
     /// The loop of the scene's thread, which its map and frontend run on.
@@ -281,14 +284,14 @@ impl Scene {
         let resource_options =
             ResourceOptions { cache_path: cache.display().to_string(), ..ResourceOptions::default() };
         let run_loop = RunLoop::new();
-        let frontend = HeadlessFrontend::with_glyph_cache(size, 1.0, mode != Mode::OnDemand, glyph_cache, &run_loop)
-            .expect("a headless frontend");
+        let mut frontend =
+            HeadlessFrontend::with_glyph_cache(size, 1.0, glyph_cache, &run_loop).expect("a headless frontend");
         let file_source = shared_file_source(&resource_options);
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
         let options = MapOptions { map_mode, size, pixel_ratio: 1.0, ..Default::default() };
         let map = Map::with_file_source(file_source, options, &run_loop).expect("the map");
         frontend.attach(&map);
-        Scene { frontend, map, observer: Observer::default(), run_loop }
+        Scene { frontend, draws_updates: mode != Mode::OnDemand, map, observer: Observer::default(), run_loop }
     }
 
     /// Starts loading a style; it loads while the scene renders.
@@ -350,13 +353,14 @@ impl Scene {
     /// sleeps until there is work, rather than polling it, so the wait
     /// costs no CPU time.
     pub(crate) fn render_still(&mut self) -> PremultipliedImage {
-        let outcome: Rc<RefCell<Option<Result<(), String>>>> = Rc::default();
-        let done = Rc::clone(&outcome);
-        self.map.render_still(Box::new(move |result| {
-            *done.borrow_mut() = Some(result.map_err(|error| error.to_string()));
-        }));
-        self.run_until(|| outcome.borrow().is_some());
-        if let Some(Err(error)) = outcome.take() {
+        self.map.process_events();
+        self.map.render_still().unwrap_or_else(|error| panic!("still: {error}"));
+        let mut outcome = None;
+        self.run_until(|map| {
+            outcome = map.take_still_image();
+            outcome.is_some()
+        });
+        if let Some(Err(error)) = outcome {
             panic!("still: {error}");
         }
         self.frontend.read_still_image()
@@ -379,17 +383,21 @@ impl Scene {
         self.observe();
     }
 
-    /// Runs the run loop, and the map's events, until `done`. The loop
-    /// sleeps until there is work, rather than polling it, so the wait
-    /// costs no CPU time.
-    fn run_until(&mut self, done: impl Fn() -> bool) {
+    /// Runs the run loop, and the map's events, until `done`, drawing each
+    /// update of the map unless the case draws (`Mode::OnDemand`). The
+    /// loop sleeps until there is work, rather than polling it, so the
+    /// wait costs no CPU time.
+    fn run_until(&mut self, mut done: impl FnMut(&mut Map) -> bool) {
         let run_loop = self.run_loop.clone();
         loop {
             self.observe();
-            if done() {
+            if done(&mut self.map) {
                 return;
             }
-            if !run_loop.run_once() {
+            // A frame reports to the map, which handles that before the loop
+            // waits.
+            let drew = self.draws_updates && self.frontend.render_update();
+            if !run_loop.run_once() && !drew {
                 run_loop.wait_for_work();
             }
         }
@@ -479,7 +487,7 @@ impl Scene {
         let elapsed = Rc::new(Cell::new(false));
         let done = Rc::clone(&elapsed);
         timer.start(duration, Duration::ZERO, move || done.set(true));
-        self.run_until(|| elapsed.get());
+        self.run_until(|_| elapsed.get());
     }
 
     /// The frames the renderer has drawn.
@@ -529,8 +537,8 @@ impl Scene {
 
     /// Whether the renderer keeps tiles that left the view, to show them
     /// again without loading; it does by default.
-    pub(crate) fn set_tile_cache_enabled(&self, enabled: bool) {
-        self.frontend.with_renderer(|renderer| renderer.set_tile_cache_enabled(enabled));
+    pub(crate) fn set_tile_cache_enabled(&mut self, enabled: bool) {
+        self.frontend.renderer().set_tile_cache_enabled(enabled);
     }
 
     /// The vertex and index buffers the GPU held after the last frame, in
@@ -542,25 +550,23 @@ impl Scene {
 
     /// Drops every loaded tile and the renderer's other data, as after a
     /// memory warning: the next frames load and lay out again.
-    pub(crate) fn clear_data(&self) {
-        self.frontend.with_renderer(mln_renderer::Renderer::clear_data);
+    pub(crate) fn clear_data(&mut self) {
+        self.frontend.renderer().clear_data();
     }
 
     /// Sets `selected` on every other feature of `source_layer` in the
     /// loaded tiles, and `false` on the rest.
-    pub(crate) fn select_every_feature(&self, source: &str, source_layer: &str) {
-        self.frontend.with_renderer(|renderer| {
-            let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
-            let features = renderer.query_source_features(source, &options).expect("the source's features");
-            let ids: BTreeSet<String> =
-                features.iter().filter_map(|feature| feature_id_to_string(&feature.id)).collect();
-            assert!(!ids.is_empty(), "{source_layer} has no features with ids");
-            for (index, id) in ids.iter().enumerate() {
-                let mut state = ValueObject::new();
-                state.insert("selected".to_string(), Value::Bool(index % 2 == 0));
-                renderer.set_feature_state(source, Some(source_layer), id, &state);
-            }
-        });
+    pub(crate) fn select_every_feature(&mut self, source: &str, source_layer: &str) {
+        let renderer = self.frontend.renderer();
+        let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
+        let features = renderer.query_source_features(source, &options).expect("the source's features");
+        let ids: BTreeSet<String> = features.iter().filter_map(|feature| feature_id_to_string(&feature.id)).collect();
+        assert!(!ids.is_empty(), "{source_layer} has no features with ids");
+        for (index, id) in ids.iter().enumerate() {
+            let mut state = ValueObject::new();
+            state.insert("selected".to_string(), Value::Bool(index % 2 == 0));
+            renderer.set_feature_state(source, Some(source_layer), id, &state);
+        }
     }
 
     /// Sets `selected` on a feature through the map, as an app does: the
@@ -580,28 +586,25 @@ impl Scene {
     }
 
     /// Sets the `selected` state of one feature.
-    pub(crate) fn select_feature(&self, source: &str, source_layer: &str, id: &str, selected: bool) {
-        self.frontend.with_renderer(|renderer| {
-            let mut state = ValueObject::new();
-            state.insert("selected".to_string(), Value::Bool(selected));
-            renderer.set_feature_state(source, Some(source_layer), id, &state);
-        });
+    pub(crate) fn select_feature(&mut self, source: &str, source_layer: &str, id: &str, selected: bool) {
+        let renderer = self.frontend.renderer();
+        let mut state = ValueObject::new();
+        state.insert("selected".to_string(), Value::Bool(selected));
+        renderer.set_feature_state(source, Some(source_layer), id, &state);
     }
 
     /// The ids of the loaded features of a source layer.
-    pub(crate) fn feature_ids(&self, source: &str, source_layer: &str) -> Vec<String> {
-        self.frontend.with_renderer(|renderer| {
-            let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
-            let features = renderer.query_source_features(source, &options).expect("the source's features");
-            let ids: BTreeSet<String> =
-                features.iter().filter_map(|feature| feature_id_to_string(&feature.id)).collect();
-            ids.into_iter().collect()
-        })
+    pub(crate) fn feature_ids(&mut self, source: &str, source_layer: &str) -> Vec<String> {
+        let renderer = self.frontend.renderer();
+        let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
+        let features = renderer.query_source_features(source, &options).expect("the source's features");
+        let ids: BTreeSet<String> = features.iter().filter_map(|feature| feature_id_to_string(&feature.id)).collect();
+        ids.into_iter().collect()
     }
 
     /// The GPU's description, and whether it is a software rasterizer.
     pub fn gpu(&self) -> (String, bool) {
-        let backend = self.frontend.get_backend();
+        let backend = self.frontend.backend();
         #[cfg(target_vendor = "apple")]
         if let Device::Metal(metal) = self.frontend.device() {
             return (format!("{} (Metal)", metal.name()), false);

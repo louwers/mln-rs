@@ -32,7 +32,7 @@ use crate::compound_expression::{CompoundExpression, Op};
 use crate::distance::Distance;
 use crate::format_expression::FormatExpression;
 use crate::format_section_override::FormatSectionOverride;
-use crate::image_expression::ImageExpression;
+use crate::image_expression::{ImageExpression, UnavailableImages};
 use crate::in_::In;
 use crate::index_of::IndexOf;
 use crate::interpolate::Interpolate;
@@ -96,6 +96,9 @@ pub struct EvaluationContext<'a> {
     pub formatted_section: Option<&'a Value>,
     pub feature_state: Option<&'a FeatureState>,
     pub available_images: Option<&'a VecSet<String>>,
+    /// Where `image` expressions evaluated against `available_images` record
+    /// the images they don't find.
+    pub unavailable_images: Option<&'a UnavailableImages>,
     pub canonical: Option<&'a CanonicalTileID>,
     pub global_state: Option<&'a GlobalStateMap>,
     /// The style's font faces, which let "is-supported-script" accept the
@@ -160,6 +163,12 @@ impl<'a> EvaluationContext<'a> {
     #[must_use]
     pub fn with_available_images(mut self, available_images: Option<&'a VecSet<String>>) -> Self {
         self.available_images = available_images;
+        self
+    }
+
+    #[must_use]
+    pub fn with_unavailable_images(mut self, unavailable_images: Option<&'a UnavailableImages>) -> Self {
+        self.unavailable_images = unavailable_images;
         self
     }
 
@@ -943,8 +952,8 @@ impl GeometryTileFeature for GeoJSONFeature<'_> {
         to_feature_type(self.feature.geometry.as_ref())
     }
 
-    fn get_properties(&self) -> &ValueObject {
-        &self.feature.properties
+    fn get_properties(&self) -> Cow<'_, ValueObject> {
+        Cow::Borrowed(&self.feature.properties)
     }
 
     fn get_id(&self) -> FeatureIdentifier {
@@ -955,8 +964,8 @@ impl GeometryTileFeature for GeoJSONFeature<'_> {
         self.feature.properties.get(key).cloned()
     }
 
-    fn get_geometries(&self) -> &GeometryCollection {
-        &self.geometry
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+        Ok(Cow::Borrowed(&self.geometry))
     }
 }
 

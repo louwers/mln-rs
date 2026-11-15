@@ -4,6 +4,8 @@
 // copy of what the layout reads: type, id, properties and the geometry
 // (C++ also clones the geometry, for mergeLines).
 
+use std::borrow::Cow;
+
 use feature::{Identifier, PropertyMap, Value};
 use mln_expression::image::Image;
 use mln_text::TaggedString;
@@ -27,12 +29,12 @@ pub(crate) struct SymbolFeature {
 }
 
 impl SymbolFeature {
-    pub(crate) fn new(feature: &dyn GeometryTileFeature) -> Self {
-        let geometry = feature.get_geometries().clone();
+    /// A copy of `feature`, whose geometry is `geometry`.
+    pub(crate) fn new(feature: &dyn GeometryTileFeature, geometry: GeometryCollection) -> Self {
         SymbolFeature {
             feature_type: feature.get_type(),
             id: feature.get_id(),
-            properties: feature.to_properties(),
+            properties: feature.get_properties().into_owned(),
             original_geometry: geometry.clone(),
             geometry,
             formatted_text: None,
@@ -52,15 +54,15 @@ impl GeometryTileFeature for SymbolFeature {
         self.properties.get(key).cloned()
     }
 
-    fn get_properties(&self) -> &PropertyMap {
-        &self.properties
+    fn get_properties(&self) -> Cow<'_, PropertyMap> {
+        Cow::Borrowed(&self.properties)
     }
 
     fn get_id(&self) -> Identifier {
         self.id.clone()
     }
 
-    fn get_geometries(&self) -> &GeometryCollection {
-        &self.original_geometry
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+        Ok(Cow::Borrowed(&self.original_geometry))
     }
 }

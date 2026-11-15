@@ -2,9 +2,10 @@
 //! compares them with their expected images and results.
 //!
 //! The runner core reaches the map through [`runner::TestRunnerImpl`],
-//! implemented over the real map in [`map`]. `--self-check` runs the full
-//! comparison and reporting path without a map, with each test's expected
-//! image as the rendered one.
+//! implemented over the real map in [`map`], which draws it with
+//! `mln_headless::HeadlessFrontend`. `--self-check` runs the full comparison and
+//! reporting path without a map, with each test's expected image as the
+//! rendered one.
 
 pub mod file_source;
 mod filesystem;

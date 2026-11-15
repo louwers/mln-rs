@@ -8,15 +8,15 @@
 # through sqlite-wasm-rs, which needs a clang that targets wasm32, and the
 # in-process font-face shaper), the browser build's two modules as `mise run
 # web:build` builds them, which leave both out, with mln_web_host, the glue they
-# share, and the map's module with its `webgl` feature. The check fails if
-# anything turns SQLite back on in the browser build, or brings in a C build
-# (`cc`) that would need that clang, or if the module that draws with WebGPU
-# gets the OpenGL backend (mln_gl and its GL bindings), which only the `webgl`
-# module needs, or if the browser build brings in ICU4X: it takes its locale
-# services from the browser's `Intl`. Then the C library (crates/mln_c, with
-# mln_runtime) as its browser package builds it, once per backend, with the
-# same checks on what it brings in, and neither backend's package may carry
-# the other's.
+# share, and the map's module with its `webgl` feature in place of its
+# default `webgpu`. The check fails if anything turns SQLite back on in the
+# browser build, or brings in a C build (`cc`) that would need that clang, or
+# if either of the map's modules gets the other's backend (mln_gl and its GL
+# bindings, mln_webgpu and wgpu), or if the browser build brings in ICU4X: it
+# takes its locale services from the browser's `Intl`. Then the C library
+# (crates/mln_c, with mln_runtime) as its browser package builds it, once per
+# backend, with the same checks on what it brings in, and neither backend's
+# package may carry the other's.
 set -euo pipefail
 source tools/dev-shell.sh
 
@@ -33,10 +33,11 @@ lacks() {
 
 dev_shell cargo clippy --target wasm32-unknown-unknown -p mln-rs
 cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper -p mln-rs-web-host
-cargo clippy --target wasm32-unknown-unknown -p mln-rs-web --features webgl
+cargo clippy --target wasm32-unknown-unknown -p mln-rs-web --no-default-features --features webgl
 lacks '^rusqlite ' -p mln-rs-web --edges normal
 lacks '^cc ' -p mln-rs-web --edges normal,build
 lacks '^(mln-rs-gl|glow) ' -p mln-rs-web --edges normal
+lacks '^(mln-rs-webgpu|wgpu) ' -p mln-rs-web --no-default-features --features webgl --edges normal
 lacks '^icu_' -p mln-rs-web --edges normal
 for backend in webgpu gl; do
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features "$backend"

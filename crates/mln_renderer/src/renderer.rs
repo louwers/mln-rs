@@ -30,7 +30,7 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tree::RenderTree;
 use crate::renderer_event::{RenderMode, RendererEvent, RendererEvents};
-use crate::tile::tile_worker_transport::TileWorkerTransport;
+use crate::tile::worker_codec::RemoteWorkers;
 use crate::update_parameters::UpdateParameters;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,7 +76,6 @@ pub struct Renderer {
     clip_masks: ClipMasks,
     render_state: RenderState,
     frame_count: u64,
-    style_loaded: bool,
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
     timings: RenderTimings,
@@ -136,7 +135,6 @@ impl Renderer {
             clip_masks: ClipMasks::default(),
             render_state: RenderState::Never,
             frame_count: 0,
-            style_loaded: false,
             frame_projection: None,
             timings: RenderTimings::default(),
         }
@@ -163,11 +161,20 @@ impl Renderer {
         self.pixel_ratio
     }
 
-    /// Port-only: the transport that creates the tile workers of tiles
-    /// created from now on (by default on the map's thread pool). Set it
-    /// before the first render so that every tile uses it.
-    pub fn set_tile_worker_transport(&mut self, transport: Rc<dyn TileWorkerTransport>) {
-        self.orchestrator.set_tile_worker_transport(transport);
+    /// Port-only: runs the tiles' jobs, and the raster tiles' workers, in
+    /// `workers` (by default on the map's thread pool). Set it before the
+    /// first render so that every tile uses it.
+    pub fn set_tile_workers(&mut self, workers: &Rc<RemoteWorkers>) {
+        self.orchestrator.set_tile_workers(workers);
+    }
+
+    /// Takes in what arrived for the tiles since the last frame (their data,
+    /// their jobs' replies, glyphs) and starts the jobs it makes ready. Each
+    /// frame does this first; a host that draws frames on a clock calls it
+    /// as soon as the renderer asks for an update, so that the tiles' work
+    /// doesn't wait for the next frame to start.
+    pub fn receive_tiles(&mut self) {
+        self.orchestrator.receive_tiles();
     }
 
     /// Sets the queue the renderer pushes its events to: the map's, which
@@ -186,11 +193,6 @@ impl Renderer {
         // the context current.
         let backend = Rc::clone(&self.backend);
         let _hold = backend.hold();
-        let style_changed = self.style_loaded && !update_parameters.style_loaded;
-        self.style_loaded = update_parameters.style_loaded;
-        if style_changed {
-            self.orchestrator.reset_dynamic_texture_atlas();
-        }
         let start = Instant::now();
         let mut render_tree = self.orchestrator.create_render_tree(update_parameters)?;
         render_tree.prepare();
@@ -228,7 +230,7 @@ impl Renderer {
     // query: `Err` is the exception C++ throws out of the query (a
     // malformed tile).
     pub fn query_rendered_features(
-        &self,
+        &mut self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
@@ -236,7 +238,7 @@ impl Renderer {
     }
 
     pub fn query_rendered_features_at_point(
-        &self,
+        &mut self,
         point: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
@@ -244,7 +246,7 @@ impl Renderer {
     }
 
     pub fn query_rendered_features_in_box(
-        &self,
+        &mut self,
         min: &mln_util::geo::ScreenCoordinate,
         max: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
@@ -257,7 +259,7 @@ impl Renderer {
     }
 
     pub fn query_source_features(
-        &self,
+        &mut self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
@@ -453,7 +455,8 @@ impl Renderer {
 
         // - UPLOAD --------------------------------------------------------
         // Uploads all required buffers and images before we do any actual
-        // rendering.
+        // rendering. The atlas goes first: the tiles bind its textures.
+        orchestrator.upload_atlas(context);
         for item in render_tree.get_source_render_items() {
             item.upload(context);
         }

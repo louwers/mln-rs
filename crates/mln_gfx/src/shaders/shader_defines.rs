@@ -86,6 +86,10 @@ pub const ID_FILL_OPACITY_VERTEX_ATTRIBUTE: usize = 2;
 pub const ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE: usize = 3;
 pub const ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 4;
 pub const ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 5;
+/// Port-only: an outline instance's vertex, and where its segment of the
+/// outline ends, which the instanced outline shaders read per instance.
+pub const ID_FILL_OUTLINE_POS_ATTRIBUTE: usize = 6;
+pub const ID_FILL_OUTLINE_END_ATTRIBUTE: usize = 7;
 
 pub const ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_LINE_DATA_VERTEX_ATTRIBUTE: usize = 1;

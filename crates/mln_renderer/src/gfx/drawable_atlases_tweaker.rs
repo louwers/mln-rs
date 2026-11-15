@@ -54,8 +54,8 @@ impl DrawableAtlasesTweaker {
         let (Some(glyph_texture_id), Some(atlases)) = (self.glyph_texture_id, &self.atlases) else {
             return;
         };
-        let glyph = atlases.glyph.borrow().clone();
-        let icon = atlases.icon.borrow().clone();
+        let glyph = atlases.glyph();
+        let icon = atlases.icon();
         if let Some(glyph) = &glyph {
             glyph.borrow_mut().set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,

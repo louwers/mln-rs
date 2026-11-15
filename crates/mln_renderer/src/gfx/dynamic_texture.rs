@@ -1,32 +1,26 @@
-// C++ shares a `DynamicTexture` between the worker threads (which reserve
-// bins and queue images) and the render thread (which uploads them). The
-// atlas allocator and the queued images are behind a mutex here as there;
-// the GPU texture is render-thread state (`Texture2DPtr` is `Rc`), so it is
-// a `LocalObject` (a Send handle to a render-thread value) created in the
-// first `upload_deferred_images`, as the C++ WebGPU texture is
-// (`deferredCreation`). Dropping the DynamicTexture on the render thread
-// frees the GPU texture (and with the last one, the map's device).
+// A page of the dynamic texture atlas (dynamic_texture_atlas.rs), which owns
+// it on the render thread. The GPU texture is made in the first `upload`, as
+// the C++ WebGPU texture is (`deferredCreation`), and shared with the tiles'
+// leases through a `OnceCell`, so a tile's render data can bind it without
+// reaching the atlas.
 
-use std::cell::RefCell;
+use std::cell::OnceCell;
 use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::rc::Rc;
 
 use etagere::{AllocId, AtlasAllocator, size2};
-use mln_actor::LocalObject;
 use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use parking_lot::Mutex;
 
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 
 /// Identifies a bin within a dynamic texture.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, mln_wire::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct DynamicTextureBinId(NonZeroU32);
 
 impl DynamicTextureBinId {
@@ -34,7 +28,8 @@ impl DynamicTextureBinId {
         NonZeroU32::new(id).map(Self)
     }
 
-    fn first() -> Self {
+    /// The id of a page's first bin.
+    pub(crate) const fn first() -> Self {
         Self(NonZeroU32::MIN)
     }
 
@@ -44,7 +39,7 @@ impl DynamicTextureBinId {
 }
 
 /// A bin of a dynamic texture.
-#[derive(Clone, Copy, Debug, mln_wire::Wire)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct TextureHandle {
     id: DynamicTextureBinId,
     rectangle: RectU16,
@@ -84,7 +79,15 @@ struct Bin {
     refcount: u32,
 }
 
-struct Inner {
+/// A page's GPU texture, once the page's first `upload` made it. Shared with
+/// the leases on the page's bins.
+pub(crate) type PageTexture = Rc<OnceCell<Texture2DPtr>>;
+
+/// A texture atlas page of images or glyphs: its bins, and the pixels queued
+/// for the frame's next upload.
+pub(crate) struct DynamicTexture {
+    size: Size,
+    pixel_format: TexturePixelType,
     allocator: AtlasAllocator,
     /// The allocated bins, by handle id.
     bins: HashMap<DynamicTextureBinId, Bin>,
@@ -93,28 +96,12 @@ struct Inner {
     max_id: Option<DynamicTextureBinId>,
     /// The images queued for the frame's next upload, keyed by handle id.
     images_to_upload: HashMap<DynamicTextureBinId, (RectU16, Vec<u8>)>,
-}
-
-pub(crate) type DynamicTexturePtr = Arc<DynamicTexture>;
-
-static NEXT_DYNAMIC_TEXTURE_ID: AtomicUsize = AtomicUsize::new(1);
-
-/// The render-thread GPU texture of a dynamic texture.
-type GpuTexture = LocalObject<RefCell<Option<Texture2DPtr>>>;
-
-/// A texture atlas of images or glyphs. Workers reserve bins and queue
-/// images; the render thread uploads them.
-pub(crate) struct DynamicTexture {
-    id: usize,
-    size: Size,
-    pixel_format: TexturePixelType,
-    inner: Mutex<Inner>,
-    gpu_texture: Mutex<Option<GpuTexture>>,
+    texture: PageTexture,
 }
 
 impl std::fmt::Debug for DynamicTexture {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DynamicTexture").field("id", &self.id).field("size", &self.size).finish_non_exhaustive()
+        f.debug_struct("DynamicTexture").field("size", &self.size).finish_non_exhaustive()
     }
 }
 
@@ -128,32 +115,19 @@ fn pixel_stride(pixel_type: TexturePixelType) -> usize {
 impl DynamicTexture {
     pub(crate) fn new(size: Size, pixel_type: TexturePixelType) -> Self {
         DynamicTexture {
-            id: NEXT_DYNAMIC_TEXTURE_ID.fetch_add(1, Ordering::Relaxed),
             size,
             pixel_format: pixel_type,
-            inner: Mutex::new(Inner {
-                allocator: AtlasAllocator::new(size2(size.width as i32, size.height as i32)),
-                bins: HashMap::default(),
-                max_id: None,
-                images_to_upload: HashMap::default(),
-            }),
-            gpu_texture: Mutex::new(None),
+            allocator: AtlasAllocator::new(size2(size.width as i32, size.height as i32)),
+            bins: HashMap::default(),
+            max_id: None,
+            images_to_upload: HashMap::default(),
+            texture: PageTexture::default(),
         }
     }
 
-    pub(crate) fn id(&self) -> usize {
-        self.id
-    }
-
-    pub(crate) fn get_size(&self) -> Size {
-        self.size
-    }
-
-    /// The GPU texture, once `upload_deferred_images` has created it. Render
-    /// thread only.
-    pub(crate) fn get_texture(&self) -> Option<Texture2DPtr> {
-        let gpu_texture = self.gpu_texture.lock();
-        gpu_texture.as_ref().and_then(LocalObject::get).and_then(|t| t.borrow().clone())
+    /// The page's GPU texture, shared with the leases on its bins.
+    pub(crate) fn texture(&self) -> &PageTexture {
+        &self.texture
     }
 
     pub(crate) fn get_pixel_format(&self) -> TexturePixelType {
@@ -161,41 +135,45 @@ impl DynamicTexture {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.inner.lock().bins.is_empty()
+        self.bins.is_empty()
+    }
+
+    /// The rectangle of the bin with id `id`, if it has one.
+    pub(crate) fn bin(&self, id: DynamicTextureBinId) -> Option<RectU16> {
+        self.bins.get(&id).map(|bin| bin.rectangle)
     }
 
     /// Reserves a bin of `size`, or another reference to the bin with `id` if
     /// it has one. `None` asks for a new bin with a fresh id. The handle needs
     /// an upload when its bin is new.
-    pub(crate) fn reserve_size(&self, size: Size, id: Option<DynamicTextureBinId>) -> Option<TextureHandle> {
-        let mut inner = self.inner.lock();
+    pub(crate) fn reserve_size(&mut self, size: Size, id: Option<DynamicTextureBinId>) -> Option<TextureHandle> {
         if let Some(id) = id
-            && let Some(bin) = inner.bins.get_mut(&id)
+            && let Some(bin) = self.bins.get_mut(&id)
         {
             bin.refcount += 1;
             return Some(TextureHandle { id, rectangle: bin.rectangle, needs_upload: false });
         }
         let id = match id {
             Some(id) => id,
-            None => match inner.max_id {
+            None => match self.max_id {
                 Some(max_id) => max_id.next()?,
                 None => DynamicTextureBinId::first(),
             },
         };
         let width = u16::try_from(size.width).ok()?;
         let height = u16::try_from(size.height).ok()?;
-        let allocation = inner.allocator.allocate(size2(i32::from(width), i32::from(height)))?;
-        inner.max_id = Some(inner.max_id.map_or(id, |max_id| max_id.max(id)));
+        let allocation = self.allocator.allocate(size2(i32::from(width), i32::from(height)))?;
+        self.max_id = Some(self.max_id.map_or(id, |max_id| max_id.max(id)));
         // The allocation can be taller than asked for; the bin is the size
         // asked for, at its corner.
         let min = allocation.rectangle.min;
         let rectangle = RectU16 { x: min.x as u16, y: min.y as u16, w: width, h: height };
-        inner.bins.insert(id, Bin { alloc_id: allocation.id, rectangle, refcount: 1 });
+        self.bins.insert(id, Bin { alloc_id: allocation.id, rectangle, refcount: 1 });
         Some(TextureHandle { id, rectangle, needs_upload: true })
     }
 
     pub(crate) fn add_image(
-        &self,
+        &mut self,
         pixel_data: &[u8],
         image_size: Size,
         id: Option<DynamicTextureBinId>,
@@ -209,22 +187,29 @@ impl DynamicTexture {
 
     /// Queues the pixels of the handle's rectangle for the frame's next
     /// upload.
-    pub(crate) fn upload_image(&self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
-        let mut inner = self.inner.lock();
+    pub(crate) fn upload_image(&mut self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
         let rect = tex_handle.rectangle;
         let byte_size = rect.w as usize * rect.h as usize * pixel_stride(self.pixel_format);
         let image_data = pixel_data[..byte_size].to_vec();
-        inner.images_to_upload.entry(tex_handle.id).or_insert((rect, image_data));
+        self.images_to_upload.entry(tex_handle.id).or_insert((rect, image_data));
         tex_handle.needs_upload = false;
     }
 
-    /// Creates the texture on first use and uploads the queued images. Runs
-    /// on the render thread.
-    pub(crate) fn upload_deferred_images(&self, context: &Context) {
-        let mut inner = self.inner.lock();
-        let texture = if let Some(texture) = self.get_texture() {
-            texture
-        } else {
+    /// Queues new pixels for the bin with id `id`, replacing any still
+    /// queued for it: a same-size image update.
+    pub(crate) fn queue_upload(&mut self, id: DynamicTextureBinId, rect: RectU16, data: Vec<u8>) {
+        self.images_to_upload.insert(id, (rect, data));
+    }
+
+    /// The pixels queued for the frame's next upload, by handle id.
+    #[cfg(test)]
+    pub(crate) fn queued_uploads(&self) -> &HashMap<DynamicTextureBinId, (RectU16, Vec<u8>)> {
+        &self.images_to_upload
+    }
+
+    /// Makes the GPU texture on first use and uploads the queued images.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        let texture = self.texture.get_or_init(|| {
             let texture = context.create_texture_2d();
             {
                 let mut t = texture.borrow_mut();
@@ -240,52 +225,24 @@ impl DynamicTexture {
                     Log::error(Event::Render, format!("Making an atlas texture failed: {error}"));
                 }
             }
-            *self.gpu_texture.lock() = Some(LocalObject::new(RefCell::new(Some(std::rc::Rc::clone(&texture)))));
             texture
-        };
+        });
+        if self.images_to_upload.is_empty() {
+            return;
+        }
         let mut t = texture.borrow_mut();
-        for (rect, data) in inner.images_to_upload.values() {
+        for (rect, data) in self.images_to_upload.values() {
             let size = Size::new(u32::from(rect.w), u32::from(rect.h));
             if let Err(error) = t.upload_sub_region(context, data, size, rect.x, rect.y) {
                 Log::error(Event::Render, format!("Uploading to an atlas texture failed: {error}"));
             }
         }
-        inner.images_to_upload.clear();
-    }
-
-    /// Port-only: takes the queued images (handle id, rectangle, pixels),
-    /// in handle order, for a mirror of this texture in another wasm
-    /// instance (`tile/worker_codec`), which uploads them instead.
-    pub(crate) fn take_uploads(&self) -> Vec<(DynamicTextureBinId, RectU16, Vec<u8>)> {
-        let mut inner = self.inner.lock();
-        let mut uploads: Vec<_> = inner.images_to_upload.drain().map(|(id, (rect, data))| (id, rect, data)).collect();
-        uploads.sort_by_key(|(id, _, _)| *id);
-        uploads
-    }
-
-    /// Queues new pixels for a bin: a same-size image update, or a bin that
-    /// the texture this one mirrors reserved (`take_uploads`). They replace
-    /// whatever is still queued for the bin or for the space it takes: a
-    /// mirrored texture reserves a space again only after freeing it, so
-    /// pixels queued there before belong to a bin that is gone, and would
-    /// otherwise be uploaded over these in whatever order the queue is
-    /// drained.
-    pub(crate) fn queue_upload(&self, id: DynamicTextureBinId, rect: RectU16, data: Vec<u8>) {
-        let span = |start: u16, length: u16| u32::from(start)..u32::from(start) + u32::from(length);
-        let intersect = |a: std::ops::Range<u32>, b: std::ops::Range<u32>| a.start < b.end && b.start < a.end;
-        let overlaps = |other: &RectU16| {
-            intersect(span(other.x, other.w), span(rect.x, rect.w))
-                && intersect(span(other.y, other.h), span(rect.y, rect.h))
-        };
-        let mut inner = self.inner.lock();
-        inner.images_to_upload.retain(|_, (queued, _)| !overlaps(queued));
-        inner.images_to_upload.insert(id, (rect, data));
+        self.images_to_upload.clear();
     }
 
     /// Releases `tex_handle`'s bin; true when that was its last reference.
-    pub(crate) fn remove_texture(&self, tex_handle: &TextureHandle) -> bool {
-        let mut inner = self.inner.lock();
-        let Some(bin) = inner.bins.get_mut(&tex_handle.id) else {
+    pub(crate) fn remove_texture(&mut self, tex_handle: &TextureHandle) -> bool {
+        let Some(bin) = self.bins.get_mut(&tex_handle.id) else {
             return false;
         };
         bin.refcount -= 1;
@@ -293,21 +250,10 @@ impl DynamicTexture {
             return false;
         }
         let alloc_id = bin.alloc_id;
-        inner.bins.remove(&tex_handle.id);
-        inner.allocator.deallocate(alloc_id);
-        inner.images_to_upload.remove(&tex_handle.id);
+        self.bins.remove(&tex_handle.id);
+        self.allocator.deallocate(alloc_id);
+        self.images_to_upload.remove(&tex_handle.id);
         true
-    }
-
-    /// Drops the render-thread GPU texture (render thread; a no-op
-    /// elsewhere).
-    pub(crate) fn release_gpu_texture(&self) {
-        let gpu_texture = self.gpu_texture.lock().take();
-        if let Some(gpu_texture) = gpu_texture
-            && let Some(cell) = gpu_texture.get()
-        {
-            cell.borrow_mut().take();
-        }
     }
 }
 
@@ -323,7 +269,7 @@ mod tests {
 
     #[test]
     fn reserve_size_allocates_fresh_ids_and_reuses_explicit_ids() {
-        let texture = DynamicTexture::new(Size::new(64, 64), TexturePixelType::Alpha);
+        let mut texture = DynamicTexture::new(Size::new(64, 64), TexturePixelType::Alpha);
         let size = Size::new(8, 8);
         let first = texture.reserve_size(size, None).expect("first bin");
         let second = texture.reserve_size(size, None).expect("second bin");
@@ -334,20 +280,5 @@ mod tests {
         assert_eq!(reused.get_id(), first.get_id());
         assert!(!reused.is_upload_needed());
         assert_eq!(reused.get_rectangle(), first.get_rectangle());
-    }
-
-    /// Pixels queued for a bin of a mirrored texture replace those still
-    /// queued for a freed bin in the same space.
-    #[test]
-    fn queued_uploads_replace_the_space_they_take() {
-        let texture = DynamicTexture::new(Size::new(64, 64), TexturePixelType::Alpha);
-        let rect = |x, y, w, h| RectU16 { x, y, w, h };
-        let id = |id| DynamicTextureBinId::new(id).unwrap();
-        texture.queue_upload(id(1), rect(0, 0, 8, 8), vec![1; 64]);
-        texture.queue_upload(id(2), rect(8, 0, 8, 8), vec![2; 64]);
-        texture.queue_upload(id(3), rect(4, 4, 2, 2), vec![3; 4]);
-        let uploads: Vec<(DynamicTextureBinId, RectU16)> =
-            texture.take_uploads().into_iter().map(|(id, rect, _)| (id, rect)).collect();
-        assert_eq!(uploads, vec![(id(2), rect(8, 0, 8, 8)), (id(3), rect(4, 4, 2, 2))]);
     }
 }

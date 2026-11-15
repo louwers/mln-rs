@@ -2398,7 +2398,69 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
-pub(crate) const FILL_OUTLINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
+/// `outline_corner`, the corner of an instanced fill outline's quad.
+macro_rules! outline_corner {
+    () => {
+        r"
+// The width of the outline in pixels.
+constant float LINE_WIDTH = 2.0;
+
+struct OutlineCorner {
+    float4 position;
+    // The corner's end of the segment, from the top left in pixels, and how
+    // far along the segment that is, from 0 at its start to 1 at its end.
+    float2 pos;
+    float t;
+};
+
+// A corner of the quad that draws the segment from `start` to `end`, of clip
+// space, as a wide line covers it: LINE_WIDTH pixels across its minor axis
+// (vertically when it runs more across the screen than down it), from one
+// end to the other, with the attributes of its end as a wide line's
+// fragments get them.
+OutlineCorner outline_corner(float4 start, float4 end, short2 corner, float2 world) {
+    OutlineCorner result = {float4(0.0), float2(0.0), 0.0};
+    // The part of the segment in front of the camera, which the GPU clips
+    // further: its ends have to be on screen to widen it.
+    const float near_w = max(start.w, end.w) * 1e-4;
+    if (start.w <= near_w && end.w <= near_w) {
+        return result;
+    }
+    float4 a = start;
+    float4 b = end;
+    float ta = 0.0;
+    float tb = 1.0;
+    if (a.w < near_w) {
+        ta = (a.w - near_w) / (a.w - b.w);
+        a = mix(start, end, ta);
+    }
+    if (b.w < near_w) {
+        tb = (start.w - near_w) / (start.w - b.w);
+        b = mix(start, end, tb);
+    }
+
+    const float2 sa = (a.xy / a.w * float2(1.0, -1.0) + 1.0) / 2.0 * world;
+    const float2 sb = (b.xy / b.w * float2(1.0, -1.0) + 1.0) / 2.0 * world;
+    const float2 d = sb - sa;
+    if (all(d == float2(0.0))) {
+        return result;
+    }
+    const float2 across = abs(d.x) >= abs(d.y) ? float2(0.0, 1.0) : float2(1.0, 0.0);
+    const float2 offset = across * (float(corner.y) - 0.5) * LINE_WIDTH;
+
+    const bool at_end = corner.x != 0;
+    const float4 clip = at_end ? b : a;
+    result.position = clip + float4(offset * float2(2.0, -2.0) / world * clip.w, 0.0, 0.0);
+    result.pos = at_end ? sb : sa;
+    result.t = at_end ? tb : ta;
+    return result;
+}
+"
+    };
+}
+
+/// The pattern fill outline, drawn as an instance of a quad per segment.
+pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2541,10 +2603,16 @@ union FillTilePropsUnionUBO {
 };
 
 "#,
-    source: r"
+    source: concat!(
+        r"
 
 struct VertexStage {
+    // The quad's corner: x picks the segment's start (0) or end (1), y its side.
     short2 position [[attribute(0)]];
+    // Per instance: a vertex of the fill, and the end of the outline segment
+    // that starts there.
+    short2 outline_pos [[attribute(5)]];
+    short2 outline_end [[attribute(6)]];
 
 #if !defined(HAS_UNIFORM_u_color)
     float4 color [[attribute(1)]];
@@ -2579,7 +2647,9 @@ struct FragmentStage {
     half opacity;
 #endif
 };
-
+",
+        outline_corner!(),
+        r"
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
@@ -2619,15 +2689,18 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float2 display_size_a = float2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const float2 display_size_b = float2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
-    const float2 pos2 = float2(vertx.position);
-    const float4 position = projectTile(pos2, pos2, projectionVector[uboIndex]);
+    const float2 start = float2(vertx.outline_pos);
+    const float2 end = float2(vertx.outline_end);
+    const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
+                                                projectTile(end, end, projectionVector[uboIndex]),
+                                                vertx.position, paintParams.world_size);
+    const float2 pos2 = mix(start, end, corner.t);
 
     return {
-        .position       = position,
+        .position       = corner.position,
         .v_pos_a        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, pos2),
         .v_pos_b        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, pos2),
-        // Fragment positions use a top-left origin, while NDC Y points up.
-        .v_pos          = (position.xy / position.w * float2(1.0, -1.0) + 1.0) / 2.0 * paintParams.world_size,
+        .v_pos          = corner.pos,
 
 #if !defined(HAS_UNIFORM_u_color)
         .color          = half4(unpack_mix_color(vertx.color, drawable.color_t)),
@@ -2709,10 +2782,12 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // shaders.
     return half4(mix(color1, color2, props.fade) * alpha * opacity);
 }
-",
+"
+    ),
 };
 
-pub(crate) const FILL_OUTLINE_SHADER: MslShaderSource = MslShaderSource {
+/// The fill outline, drawn as an instance of a quad per segment.
+pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2855,12 +2930,18 @@ union FillTilePropsUnionUBO {
 };
 
 "#,
-    source: r"
+    source: concat!(
+        r"
 
 struct VertexStage {
+    // The quad's corner: x picks the segment's start (0) or end (1), y its side.
     short2 position [[attribute(0)]];
     float4 outline_color [[attribute(1)]];
     float2 opacity [[attribute(2)]];
+    // Per instance: a vertex of the fill, and the end of the outline segment
+    // that starts there.
+    short2 outline_pos [[attribute(3)]];
+    short2 outline_end [[attribute(4)]];
 };
 
 struct FragmentStage {
@@ -2873,7 +2954,9 @@ struct FragmentStage {
     half opacity;
 #endif
 };
-
+",
+        outline_corner!(),
+        r"
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
@@ -2882,10 +2965,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineDrawableUBO;
 
-    const float4 position = projectTile(float2(vertx.position), float2(vertx.position), projectionVector[uboIndex]);
+    const float2 start = float2(vertx.outline_pos);
+    const float2 end = float2(vertx.outline_end);
+    const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
+                                                projectTile(end, end, projectionVector[uboIndex]),
+                                                vertx.position, paintParams.world_size);
     return {
-        .position       = position,
-        .pos            = (position.xy / position.w * float2(1.0, -1.0) + 1.0) / 2.0 * paintParams.world_size,
+        .position       = corner.position,
+        .pos            = corner.pos,
 #if !defined(HAS_UNIFORM_u_outline_color)
         .outline_color  = half4(unpack_mix_color(vertx.outline_color, drawable.outline_color_t)),
 #endif
@@ -2920,7 +3007,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * opacity * half(alpha));
 }
-",
+"
+    ),
 };
 
 pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: MslShaderSource = MslShaderSource {

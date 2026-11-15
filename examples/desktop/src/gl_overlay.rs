@@ -1,10 +1,14 @@
 // The controls' overlay on OpenGL ES: egui's own painter (egui_glow), in the
 // map's context, over the window's framebuffer. It leaves its GL state
-// behind, which the backend's context forgets after each overlay.
+// behind, which the backend's context forgets after each overlay. It names
+// the context's GPU for the controls' status line too.
+
+#![expect(unsafe_code, reason = "glow's queries of the context are FFI")]
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use egui_glow::glow::{self, HasContext as _};
 use mln_gl::surface_target::{Overlay, OverlayTarget};
 use mln_util::logging::{Event, Log};
 
@@ -27,6 +31,9 @@ pub(crate) fn gl_overlay(paint: Rc<RefCell<Paint>>) -> Overlay {
     let mut failed = false;
     Box::new(move |target: &OverlayTarget<'_>| {
         if painter.is_none() && !failed {
+            // SAFETY: a query of the current context.
+            let renderer = unsafe { target.gl.get_parameter_string(glow::RENDERER) };
+            paint.borrow_mut().renderer = Some(renderer);
             // As egui-wgpu does by default, with dithering.
             match egui_glow::Painter::new(std::sync::Arc::clone(target.gl), "", None, true) {
                 Ok(made) => painter = Some(Painter(made)),

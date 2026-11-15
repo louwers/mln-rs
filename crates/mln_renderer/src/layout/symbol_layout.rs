@@ -17,12 +17,12 @@ use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::property_value::PropertyValue;
-use mln_style_types::image::{ImageMap, ImagePositions, ImageType};
+use mln_style_types::image::{ImagePositions, ImageType};
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
     TextJustifyType, TextTransformType, TextVariableAnchorType, TextWritingModeType, VariableAnchorOffsetCollection,
 };
-use mln_text::glyph::{GlyphID, GlyphIDType, GlyphMap, GlyphPositions, Shaping, WritingModeType};
+use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping, WritingModeType};
 use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
 use mln_text::tagged_string::SectionOptions;
 use mln_text::{BiDi, TaggedString, apply_arabic_shaping, starts_right_to_left};
@@ -52,7 +52,7 @@ use crate::layout::symbol_instance::{ShapedTextOrientations, SymbolContent, Symb
 use crate::render_layer::LayerRenderData;
 use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
-use crate::text::glyph_manager::HBShapeResults;
+use crate::text::glyph_store::{HBShapeResult, HBShapeResults};
 use crate::text::quads::{SymbolQuad, SymbolQuads};
 
 /// Whether `text-field` is set: a constant that is not empty, or an
@@ -431,7 +431,7 @@ impl SymbolLayout {
         // Determine glyph dependencies
         let source_layer = this.source_layer.clone();
         let geometry_layer = source_layer.layer()?;
-        let feature_count = geometry_layer.feature_count();
+        let feature_count = geometry_layer.len();
         let canonical_id = this.canonical_id;
         let context = EvaluationContext::new(this.zoom)
             .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
@@ -442,7 +442,7 @@ impl SymbolLayout {
         };
         let selected = layout_parameters.filter_groups.select(
             &source_layer.name,
-            &*geometry_layer,
+            &geometry_layer,
             &leader.filter,
             &context,
             passes,
@@ -452,21 +452,12 @@ impl SymbolLayout {
             if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;
             }
-            let feature = geometry_layer.get_feature(i)?;
-            if selected.is_none() {
-                let passes = passes(&*feature);
-                feature.check()?;
-                if !passes {
-                    continue;
-                }
+            let feature = geometry_layer.feature(i)?;
+            if selected.is_none() && !passes(&feature) {
+                continue;
             }
 
-            // C++ keeps the feature and reads its values lazily; the copy
-            // reads all of them, so a malformed one is an error here even if
-            // nothing reads it.
-            let mut ft = SymbolFeature::new(&*feature);
-            feature.check()?;
-            drop(feature);
+            let mut ft = SymbolFeature::new(&feature, feature.geometry()?);
 
             ft.index = i;
 
@@ -474,6 +465,7 @@ impl SymbolLayout {
                 let formatted = layout.text_field.evaluate(
                     &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
                         .with_available_images(Some(layout_parameters.available_images))
+                        .with_unavailable_images(Some(layout_parameters.unavailable_images))
                         .with_canonical_tile_id(Some(&canonical_id))
                         .with_font_faces(layout_parameters.font_faces.as_deref()),
                 );
@@ -607,6 +599,7 @@ impl SymbolLayout {
                 let icon = layout.icon_image.evaluate(
                     &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
                         .with_available_images(Some(layout_parameters.available_images))
+                        .with_unavailable_images(Some(layout_parameters.unavailable_images))
                         .with_canonical_tile_id(Some(&canonical_id)),
                 );
                 // An empty icon name means no icon, so it is not an image
@@ -752,7 +745,7 @@ impl SymbolLayout {
         feature: &SymbolFeature,
         shaped_text_orientations: &ShapedTextOrientations,
         mut shaped_icon: Option<PositionedIcon>,
-        image_map: &ImageMap,
+        icons: &ImagePositions,
         text_offset: [f32; 2],
         layout_text_size: f32,
         layout_icon_size: f32,
@@ -865,7 +858,7 @@ impl SymbolLayout {
                 &evaluated_layout_properties,
                 text_placement,
                 text_offset,
-                image_map,
+                icons,
                 icon_rotation,
                 icon_type,
                 has_icon_text_fit,
@@ -1439,7 +1432,8 @@ impl Layout for SymbolLayout {
         self.need_finalize_symbols_val
     }
 
-    fn finalize_symbols(&mut self, results: &mut HBShapeResults) {
+    fn finalize_symbols(&mut self, results: &HBShapeResults) {
+        let unshaped = HBShapeResult::default();
         for feature in &mut self.features {
             if feature.geometry.is_empty() {
                 continue;
@@ -1460,7 +1454,7 @@ impl Layout for SymbolLayout {
             let mut sub_string: Vec<u16> = Vec::new();
             let mut section_index = style_text.1.first().copied().unwrap_or(0);
 
-            let mut apply_sub_string = |sub_string: &[u16], section_index: u8, shaped_string: &mut TaggedString| {
+            let apply_sub_string = |sub_string: &[u16], section_index: u8, shaped_string: &mut TaggedString| {
                 if sub_string.is_empty() {
                     return;
                 }
@@ -1476,12 +1470,10 @@ impl Layout for SymbolLayout {
                     );
                 } else {
                     let result = results
-                        .entry(section.font_stack.clone())
-                        .or_default()
-                        .entry(section.type_)
-                        .or_default()
-                        .entry(sub_string.to_vec())
-                        .or_default();
+                        .get(&section.font_stack)
+                        .and_then(|types| types.get(&section.type_))
+                        .and_then(|strings| strings.get(sub_string))
+                        .unwrap_or(&unshaped);
 
                     shaped_string.add_text_section_with_adjusts(
                         &result.str_,
@@ -1520,13 +1512,7 @@ impl Layout for SymbolLayout {
         clippy::unnecessary_unwrap,
         reason = "the text is borrowed where it is used, as `feature` is also passed on in between"
     )]
-    fn prepare_symbols(
-        &mut self,
-        glyph_map: &GlyphMap,
-        glyph_positions: &GlyphPositions,
-        image_map: &ImageMap,
-        image_positions: &ImagePositions,
-    ) {
+    fn prepare_symbols(&mut self, glyphs: &GlyphPositions, icons: &ImagePositions) {
         let layout = Arc::clone(&self.layout);
         let zoom = self.zoom;
         let canonical = self.canonical_id;
@@ -1629,9 +1615,8 @@ impl Layout for SymbolLayout {
                         text_offset,
                         writing_mode,
                         bidi,
-                        glyph_map,
-                        glyph_positions,
-                        image_positions,
+                        glyphs,
+                        icons,
                         layout_text_size,
                         layout_text_size_at_bucket_zoom_level,
                         allow_vertical_placement,
@@ -1742,22 +1727,20 @@ impl Layout for SymbolLayout {
             // if feature has icon, get sprite atlas position
             let mut icon_type = SymbolContent::None;
             if let Some(icon) = &feature.icon
-                && let Some(image) = image_map.get(icon.id())
+                && let Some(image) = icons.get(icon.id())
             {
                 icon_type = SymbolContent::IconRGBA;
-                if let Some(position) = image_positions.get(icon.id()) {
-                    shaped_icon = Some(PositionedIcon::shape_icon(
-                        position,
-                        &layout.icon_offset.evaluate(
-                            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                                .with_canonical_tile_id(Some(&canonical)),
-                        ),
-                        layout.icon_anchor.evaluate(
-                            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                                .with_canonical_tile_id(Some(&canonical)),
-                        ),
-                    ));
-                }
+                shaped_icon = Some(PositionedIcon::shape_icon(
+                    image,
+                    &layout.icon_offset.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_canonical_tile_id(Some(&canonical)),
+                    ),
+                    layout.icon_anchor.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_canonical_tile_id(Some(&canonical)),
+                    ),
+                ));
                 if image.sdf {
                     icon_type = SymbolContent::IconSDF;
                 }
@@ -1776,7 +1759,7 @@ impl Layout for SymbolLayout {
                     feature,
                     &shaped_text_orientations,
                     shaped_icon,
-                    image_map,
+                    icons,
                     text_offset,
                     layout_text_size,
                     layout_icon_size,

@@ -103,15 +103,10 @@ pub type TileFeatures = geojson_vt::TileFeatures;
 pub type Features = Vec<Feature<f64>>;
 
 pub trait GeoJSONData: Send + Sync {
-    /// Gets the features of tile `id`. `callback` runs on the calling thread,
-    /// either right away or later from its `RunLoop`.
-    fn get_tile(
-        &self,
-        id: &CanonicalTileID,
-        callback: Box<dyn FnOnce(TileFeatures)>,
-        run_synchronously: bool,
-        reply_to: &SchedulerPtr,
-    );
+    /// Gets the features of tile `id`. `callback` runs either right away,
+    /// on the calling thread, or later on a thread of the data's own; with
+    /// `run_synchronously`, always right away.
+    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, run_synchronously: bool);
 
     // SuperclusterData: data that isn't clustered has no clusters, and
     // gives empty results. A cluster ID the data doesn't have fails with

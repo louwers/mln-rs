@@ -1,22 +1,17 @@
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 
-use crate::tile::tile::Tile;
 use crate::tile_mask::TileMask;
-
-fn tile_needs_mask(tile: &dyn Tile) -> bool {
-    tile.base().used_by_rendered_layers.get()
-}
 
 fn compute_tile_masks(
     root: &CanonicalTileID,
     ref_: &UnwrappedTileID,
-    renderables: &[(UnwrappedTileID, &dyn Tile)],
+    renderables: &[(UnwrappedTileID, bool)],
     mask: &mut TileMask,
 ) {
     // If the reference or any of its children is found in the list, we need
     // to recurse.
-    for (i, (id, tile)) in renderables.iter().enumerate() {
-        if !tile_needs_mask(*tile) {
+    for (i, (id, needs_mask)) in renderables.iter().enumerate() {
+        if !needs_mask {
             continue;
         }
         if ref_ == id {
@@ -45,12 +40,15 @@ fn compute_tile_masks(
     ));
 }
 
-/// Updates the `TileMask`s of all renderable tiles, which are sorted by id.
-/// A tile's mask describes the regions of the tile that are *not* covered by
-/// other renderable tiles, as tile ids relative to the tile.
-pub(crate) fn update_tile_masks(renderables: &[(UnwrappedTileID, &dyn Tile)]) {
-    for (i, (id, tile)) in renderables.iter().enumerate() {
-        if !tile_needs_mask(*tile) {
+/// The `TileMask`s of the renderable tiles, sorted by id, each with whether
+/// it needs one (`None` for those that don't). A tile's mask describes the
+/// regions of the tile that are *not* covered by other renderable tiles, as
+/// tile ids relative to the tile.
+pub(crate) fn update_tile_masks(renderables: &[(UnwrappedTileID, bool)]) -> Vec<Option<TileMask>> {
+    let mut masks = Vec::with_capacity(renderables.len());
+    for (i, (id, needs_mask)) in renderables.iter().enumerate() {
+        if !needs_mask {
+            masks.push(None);
             continue;
         }
         // Try to add all remaining ids as children. We sorted the tile list
@@ -63,42 +61,14 @@ pub(crate) fn update_tile_masks(renderables: &[(UnwrappedTileID, &dyn Tile)]) {
         let children_end = rest.partition_point(|(a, _)| *a < next_wrap);
         let mut mask = TileMask::new();
         compute_tile_masks(&id.canonical, id, &rest[..children_end], &mut mask);
-        tile.set_mask(mask);
+        masks.push(Some(mask));
     }
+    masks
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::sync::Arc;
-
-    use mln_style::layer_properties::LayerProperties;
-    use mln_tile_id::OverscaledTileID;
-
     use super::*;
-    use crate::tile::tile::{Kind, TileBase};
-    use crate::tile_render_data::TileRenderData;
-
-    struct FakeTile {
-        base: TileBase,
-        mask: RefCell<TileMask>,
-    }
-
-    impl Tile for FakeTile {
-        fn base(&self) -> &TileBase {
-            &self.base
-        }
-        fn create_render_data(&self) -> Box<dyn TileRenderData> {
-            unreachable!()
-        }
-        fn cancel(&self) {}
-        fn layer_properties_updated(&self, _layer_properties: &Arc<dyn LayerProperties>) -> bool {
-            false
-        }
-        fn set_mask(&self, mask: TileMask) {
-            *self.mask.borrow_mut() = mask;
-        }
-    }
 
     fn c(z: u8, x: u32, y: u32) -> CanonicalTileID {
         CanonicalTileID::new(z, x, y)
@@ -112,21 +82,12 @@ mod tests {
         let mut expected = expected;
         // std::map order
         expected.sort_by_key(|a| a.0);
-        let tiles: Vec<FakeTile> = expected
-            .iter()
-            .map(|_| {
-                let base = TileBase::new(Kind::Geometry, OverscaledTileID::from_zxy(0, 0, 0), String::new(), None);
-                // `usedByRenderedLayers = true`
-                base.used_by_rendered_layers.set(true);
-                FakeTile { base, mask: RefCell::new(TileMask::new()) }
-            })
-            .collect();
-        let renderables: Vec<(UnwrappedTileID, &dyn Tile)> =
-            expected.iter().zip(tiles.iter()).map(|((id, _), tile)| -> (_, &dyn Tile) { (*id, tile) }).collect();
-        update_tile_masks(&renderables);
-        for ((id, mask), tile) in expected.iter().zip(tiles.iter()) {
+        // `usedByRenderedLayers = true`
+        let renderables: Vec<(UnwrappedTileID, bool)> = expected.iter().map(|(id, _)| (*id, true)).collect();
+        let masks = update_tile_masks(&renderables);
+        for ((id, mask), actual) in expected.iter().zip(masks) {
             let expected_mask: TileMask = mask.iter().copied().collect();
-            assert_eq!(expected_mask, *tile.mask.borrow(), "mask of {id:?}");
+            assert_eq!(Some(expected_mask), actual, "mask of {id:?}");
         }
     }
 

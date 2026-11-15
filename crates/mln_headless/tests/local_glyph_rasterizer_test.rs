@@ -86,11 +86,11 @@ impl LocalGlyphRasterizerTest {
 
         // `HeadlessFrontend(1, NoFlush, ContextMode::Unique, fontFamily)`:
         // the default size is 256x256.
-        let frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop).expect("a headless frontend");
+        let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop).expect("a headless frontend");
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
         let map = Map::with_file_source(
             file_source,
-            MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+            MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
             &run_loop,
         )
         .unwrap();
@@ -130,8 +130,11 @@ fn no_local_with_content_insets() {
     // center. Rendered text should be on the same offset and keep the same
     // size as with no offset.
     let mut test = LocalGlyphRasterizerTest::new(None);
-    let view_size = test.frontend.get_size();
+    let view_size = test.frontend.size();
     test.map.style_mut().load_json(&mixed_json());
+    // The style's camera applies before the jump, as C++'s synchronous load
+    // applies it.
+    test.map.process_events();
 
     // Expected image was created using center offset as in the line below -
     // content insets, with no pitch defined, should produce the same output.
@@ -151,8 +154,11 @@ fn no_local_with_content_insets_and_pitch() {
     // center. Rendered text should be on the same offset and keep the same
     // size as with no offset.
     let mut test = LocalGlyphRasterizerTest::new(None);
-    let view_size = test.frontend.get_size();
+    let view_size = test.frontend.size();
     test.map.style_mut().load_json(&mixed_json());
+    // The style's camera applies before the jump, as C++'s synchronous load
+    // applies it.
+    test.map.process_events();
 
     // Expected image was verified using no-padding render, offsetted to right
     // using bitmap editor.

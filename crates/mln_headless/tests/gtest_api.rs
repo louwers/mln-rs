@@ -46,7 +46,7 @@ fn grid() {
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
     let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
@@ -115,7 +115,7 @@ fn recycle_map_update_images() {
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
     let mut map = Map::with_file_source(
         Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
-        MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &run_loop,
     )
     .unwrap();

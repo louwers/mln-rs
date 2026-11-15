@@ -1,11 +1,12 @@
 // Runs the runner as src/main.rs would: from the package directory (where
 // `cargo test` runs the tests), with the manifest for the OS and backend, and
-// the HTML report and the actual/diff images in target/tmp/<name>. Every
-// backend draws fill outlines as lines, as C++ does on OpenGL, so OpenGL,
-// Vulkan and WebGPU take C++'s OpenGL or Vulkan expectations. macOS adds the
-// C++ WebGPU ignore list, since wgpu renders through Metal there, and ignores
-// the tests whose expected images are C++ Metal's, which triangulates them
-// (ignores/rust-port-metal-outlines.json).
+// the HTML report and the actual/diff images in target/tmp/<name>. Fill
+// outlines are 2 px wide, as C++ draws them on OpenGL, so OpenGL, Vulkan and
+// WebGPU take C++'s OpenGL or Vulkan expectations; WebGPU on a CPU
+// rasterizer draws them 1 px wide (ignores/rust-port-1px-outlines.json).
+// macOS adds the C++ WebGPU ignore list, since wgpu renders through Metal
+// there, and ignores the tests whose expected images are C++ Metal's, which
+// triangulates them (ignores/rust-port-metal-outlines.json).
 //
 // The tests run in worker processes of the package's render-test binary
 // (`--jobs`, src/jobs.rs): one per CPU, or $RENDER_TEST_JOBS (1: in the

@@ -2034,6 +2034,292 @@ void main() {
 ",
 };
 
+/// `outline_corner`, the corner of an instanced outline's quad, in OpenGL's
+/// clip space, before `applySurfaceTransform`.
+macro_rules! outline_corner {
+    () => {
+        r"
+// The width of the outline in pixels.
+const float LINE_WIDTH = 2.0;
+
+// A corner of the quad that draws the segment from `start` to `end`, of clip
+// space, as a wide line covers it: LINE_WIDTH pixels across its minor axis
+// (vertically when it runs more across the screen than up it), from one end
+// to the other, with the attributes of its end as a wide line's fragments get
+// them: `pos`, the end in pixels from the bottom left, and `t`, how far along
+// the segment that is, from 0 at its start to 1 at its end.
+vec4 outline_corner(vec4 start, vec4 end, vec2 corner, out vec2 pos, out float t) {
+    pos = vec2(0.0);
+    t = 0.0;
+    // The part of the segment in front of the camera, which the GPU clips
+    // further: its ends have to be on screen to widen it.
+    const float near_w = max(start.w, end.w) * 1e-4;
+    if (start.w <= near_w && end.w <= near_w) {
+        return vec4(0.0);
+    }
+    vec4 a = start;
+    vec4 b = end;
+    float ta = 0.0;
+    float tb = 1.0;
+    if (a.w < near_w) {
+        ta = (a.w - near_w) / (a.w - b.w);
+        a = mix(start, end, ta);
+    }
+    if (b.w < near_w) {
+        tb = (start.w - near_w) / (start.w - b.w);
+        b = mix(start, end, tb);
+    }
+
+    const vec2 world = paintParams.world_size;
+    const vec2 sa = (a.xy / a.w + 1.0) / 2.0 * world;
+    const vec2 sb = (b.xy / b.w + 1.0) / 2.0 * world;
+    const vec2 d = sb - sa;
+    if (d == vec2(0.0)) {
+        return vec4(0.0);
+    }
+    const vec2 across = abs(d.x) >= abs(d.y) ? vec2(0.0, 1.0) : vec2(1.0, 0.0);
+    const vec2 offset = across * (corner.y - 0.5) * LINE_WIDTH;
+
+    const bool at_end = corner.x != 0.0;
+    const vec4 clip = at_end ? b : a;
+    pos = at_end ? sb : sa;
+    t = at_end ? tb : ta;
+    return clip + vec4(offset * 2.0 / world * clip.w, 0.0, 0.0);
+}
+"
+    };
+}
+
+pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "FillOutlineInstancedShader",
+    name: "FillOutlineInstancedShader",
+    prelude: FILL_SHADER_PRELUDE,
+    vertex: concat!(
+        r"
+
+// The quad's corner: x picks the segment's start (0) or end (1), y its side.
+layout(location = 0) in ivec2 in_position;
+// Per instance: a vertex of the fill, and the end of the outline segment that
+// starts there.
+layout(location = 3) in ivec2 in_outline_pos;
+layout(location = 4) in ivec2 in_outline_end;
+
+#if !defined(HAS_UNIFORM_u_outline_color)
+layout(location = 1) in vec4 in_color;
+#endif
+
+#if !defined(HAS_UNIFORM_u_opacity)
+layout(location = 2) in vec2 in_opacity;
+#endif
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct FillOutlineDrawableUBO {
+    mat4 matrix;
+    // Interpolations
+    float outline_color_t;
+    float opacity_t;
+    float pad1;
+    float pad2;
+    vec4 pad3;
+    vec4 pad4;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
+    FillOutlineDrawableUBO drawable_ubo[];
+} drawableVector;
+
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
+#if !defined(HAS_UNIFORM_u_outline_color)
+layout(location = 0) out vec4 frag_color;
+#endif
+
+#if !defined(HAS_UNIFORM_u_opacity)
+layout(location = 1) out float frag_opacity;
+#endif
+
+layout(location = 2) out vec2 frag_position;
+",
+        outline_corner!(),
+        r"
+void main() {
+    const FillOutlineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+
+#if !defined(HAS_UNIFORM_u_outline_color)
+    frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
+#endif
+
+#if !defined(HAS_UNIFORM_u_opacity)
+    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
+#endif
+
+    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const vec2 start = vec2(in_outline_pos);
+    const vec2 end = vec2(in_outline_end);
+    vec2 pos;
+    float t;
+    gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), vec2(in_position), pos, t);
+    applySurfaceTransform();
+
+    // From the top left, as applySurfaceTransform flips gl_Position.
+    frag_position = vec2(pos.x, paintParams.world_size.y - pos.y);
+}
+"
+    ),
+    fragment: FILL_OUTLINE_SHADER.fragment,
+};
+
+pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "FillOutlinePatternInstancedShader",
+    name: "FillOutlinePatternInstancedShader",
+    prelude: FILL_SHADER_PRELUDE,
+    vertex: concat!(
+        r"
+
+// The quad's corner: x picks the segment's start (0) or end (1), y its side.
+layout(location = 0) in ivec2 in_position;
+// Per instance: a vertex of the fill, and the end of the outline segment that
+// starts there.
+layout(location = 5) in ivec2 in_outline_pos;
+layout(location = 6) in ivec2 in_outline_end;
+
+#if !defined(HAS_UNIFORM_u_color)
+layout(location = 1) in vec4 in_color;
+#endif
+
+#if !defined(HAS_UNIFORM_u_pattern_from)
+layout(location = 2) in uvec4 in_pattern_from;
+#endif
+
+#if !defined(HAS_UNIFORM_u_pattern_to)
+layout(location = 3) in uvec4 in_pattern_to;
+#endif
+
+#if !defined(HAS_UNIFORM_u_opacity)
+layout(location = 4) in vec2 in_opacity;
+#endif
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct FillOutlinePatternDrawableUBO {
+    mat4 matrix;
+    vec2 pixel_coord_upper;
+    vec2 pixel_coord_lower;
+    float tile_ratio;
+    // Interpolations
+    float pattern_from_t;
+    float pattern_to_t;
+    float opacity_t;
+    float color_t;
+    float pad1;
+    float pad2;
+    float pad3;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlinePatternDrawableUBOVector {
+    FillOutlinePatternDrawableUBO drawable_ubo[];
+} drawableVector;
+
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
+struct FillOutlinePatternTilePropsUBO {
+    vec4 pattern_from;
+    vec4 pattern_to;
+    vec2 texsize;
+    float sdf;
+    float pad2;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
+    FillOutlinePatternTilePropsUBO tile_props_ubo[];
+} tilePropsVector;
+
+layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
+    vec4 color;
+    vec4 outline_color;
+    float opacity;
+    float fade;
+    float from_scale;
+    float to_scale;
+} props;
+
+layout(location = 0) out vec2 frag_pos_a;
+layout(location = 1) out vec2 frag_pos_b;
+layout(location = 2) out vec2 frag_pos;
+
+#if !defined(HAS_UNIFORM_u_color)
+layout(location = 3) out vec4 frag_color;
+#endif
+
+#if !defined(HAS_UNIFORM_u_pattern_from)
+layout(location = 4) flat out vec4 frag_pattern_from;
+#endif
+
+#if !defined(HAS_UNIFORM_u_pattern_to)
+layout(location = 5) flat out vec4 frag_pattern_to;
+#endif
+
+#if !defined(HAS_UNIFORM_u_opacity)
+layout(location = 6) out float frag_opacity;
+#endif
+",
+        outline_corner!(),
+        r"
+void main() {
+    const FillOutlinePatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillOutlinePatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+
+#if !defined(HAS_UNIFORM_u_color)
+    frag_color = unpack_mix_color(in_color, drawable.color_t);
+#endif
+
+#if defined(HAS_UNIFORM_u_pattern_from)
+    const vec4 frag_pattern_from = tileProps.pattern_from;
+#else
+    frag_pattern_from = in_pattern_from;
+#endif
+
+#if defined(HAS_UNIFORM_u_pattern_to)
+    const vec4 frag_pattern_to = tileProps.pattern_to;
+#else
+    frag_pattern_to = in_pattern_to;
+#endif
+
+#if !defined(HAS_UNIFORM_u_opacity)
+    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
+#endif
+
+    const vec2 display_size_a = (frag_pattern_from.zw - frag_pattern_from.xy) / paintParams.pixel_ratio;
+    const vec2 display_size_b = (frag_pattern_to.zw - frag_pattern_to.xy) / paintParams.pixel_ratio;
+
+    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const vec2 start = vec2(in_outline_pos);
+    const vec2 end = vec2(in_outline_end);
+    vec2 pos;
+    float t;
+    gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), vec2(in_position), pos, t);
+    applySurfaceTransform();
+
+    const vec2 position = mix(start, end, t);
+    frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, props.from_scale * display_size_a, drawable.tile_ratio, position);
+    frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, props.to_scale * display_size_b, drawable.tile_ratio, position);
+    // From the top left, as applySurfaceTransform flips gl_Position.
+    frag_pos = vec2(pos.x, paintParams.world_size.y - pos.y);
+}
+"
+    ),
+    fragment: FILL_OUTLINE_PATTERN_SHADER.fragment,
+};
+
 pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
     name: "FillOutlineTriangulatedShader",
@@ -3037,6 +3323,20 @@ void main() {
 #endif
 }
 ",
+};
+
+/// Port-only: the instanced walls' GLSL, which the wall shaders run with every
+/// attribute per vertex.
+pub(crate) const FILL_EXTRUSION_WALL_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "FillExtrusionWallShader",
+    name: "FillExtrusionWallShader",
+    ..FILL_EXTRUSION_INSTANCED_SHADER
+};
+
+pub(crate) const FILL_EXTRUSION_PATTERN_WALL_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "FillExtrusionPatternWallShader",
+    name: "FillExtrusionPatternWallShader",
+    ..FILL_EXTRUSION_PATTERN_INSTANCED_SHADER
 };
 
 pub(crate) const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
@@ -6465,11 +6765,15 @@ pub(crate) const ALL: &[&GlslShaderSource] = &[
     &FILL_OUTLINE_SHADER,
     &FILL_PATTERN_SHADER,
     &FILL_OUTLINE_PATTERN_SHADER,
+    &FILL_OUTLINE_INSTANCED_SHADER,
+    &FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
     &FILL_OUTLINE_TRIANGULATED_SHADER,
     &FILL_EXTRUSION_SHADER,
     &FILL_EXTRUSION_INSTANCED_SHADER,
+    &FILL_EXTRUSION_WALL_SHADER,
     &FILL_EXTRUSION_PATTERN_SHADER,
     &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
+    &FILL_EXTRUSION_PATTERN_WALL_SHADER,
     &GLOBE_DEPTH_SHADER,
     &HEATMAP_SHADER,
     &HEATMAP_TEXTURE_SHADER,

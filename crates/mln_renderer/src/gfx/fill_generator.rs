@@ -143,6 +143,7 @@ fn add_tessellated_polygon(
     fill_segments: &mut Vec<SegmentBase>,
     basic_line_indexes: &mut Vec<u16>,
     basic_line_segments: &mut Vec<SegmentBase>,
+    outline_ends: &mut Vec<FillLayoutVertex>,
 ) -> bool {
     let indices = geometry.get_triangles();
     let total_vertices: usize = geometry.iter().map(Vec::len).sum();
@@ -162,16 +163,72 @@ fn add_tessellated_polygon(
         let n_vertices = add_ring_vertices(fill_vertices, ring);
         if single || signed_area(ring) != 0.0 {
             add_outline_indices(base, n_vertices, basic_line_segments, basic_line_indexes);
+            add_ring_outline_ends(fill_vertices, outline_ends, base, n_vertices);
+        } else {
+            // A vertex where no segment starts ends where it starts.
+            outline_ends.extend_from_slice(&fill_vertices[base..]);
         }
     }
     add_fill_indices(fill_segments, fill_indexes, indices, start_vertices, total_vertices);
     true
 }
 
+/// Adds the outline ends of a ring's `n_vertices` vertices from `base`:
+/// each vertex's segment of the outline ends at the next vertex, and the
+/// last one's at the first, closing the ring.
+fn add_ring_outline_ends(
+    vertices: &[FillLayoutVertex],
+    ends: &mut Vec<FillLayoutVertex>,
+    base: usize,
+    n_vertices: usize,
+) {
+    if n_vertices > 0 {
+        ends.extend_from_slice(&vertices[base + 1..base + n_vertices]);
+        ends.push(vertices[base]);
+    }
+}
+
+/// Extends `ends` over the vertices a mesh added: where the outline segment
+/// that starts at a vertex ends, among the lines from `first_line_index`
+/// on, or the vertex itself where none starts. A vertex that starts a
+/// second segment, as one where two rings touch does, gets a copy after the
+/// others to start it from.
+fn add_mesh_outline_ends(
+    vertices: &mut Vec<FillLayoutVertex>,
+    ends: &mut Vec<FillLayoutVertex>,
+    line_indexes: &[u16],
+    line_segments: &[SegmentBase],
+    first_line_index: usize,
+) {
+    let first_vertex = ends.len();
+    ends.extend_from_slice(&vertices[first_vertex..]);
+    for segment in line_segments.iter().rev() {
+        let end = segment.index_offset + segment.index_length;
+        if end <= first_line_index {
+            break;
+        }
+        let start = segment.index_offset.max(first_line_index);
+        for line in line_indexes[start..end].as_chunks::<2>().0 {
+            let from = segment.vertex_offset + usize::from(line[0]);
+            let to = vertices[segment.vertex_offset + usize::from(line[1])];
+            if vertices[from] == to {
+                continue;
+            }
+            if ends[from] == vertices[from] {
+                ends[from] = to;
+            } else {
+                vertices.push(vertices[from]);
+                ends.push(to);
+            }
+        }
+    }
+}
+
 /// Generates the fill triangles of `geometry` and its outlines, as line
 /// primitives: the variant C++ builds without
 /// `MLN_TRIANGULATE_FILL_OUTLINES`. C++ defaults `subdivision_granularity`
-/// to 1.
+/// to 1. `outline_ends` gets each new vertex's outline end
+/// (`FillBucket::outline_ends`), which the instanced outline draws read.
 ///
 /// Without subdivision, a geometry that carries triangles is filled with
 /// them, and triangulated only when they can't be drawn.
@@ -186,6 +243,7 @@ pub(crate) fn generate_fill_and_outline_buffers(
     fill_segments: &mut Vec<SegmentBase>,
     basic_line_indexes: &mut Vec<u16>,
     basic_line_segments: &mut Vec<SegmentBase>,
+    outline_ends: &mut Vec<FillLayoutVertex>,
     canonical: &CanonicalTileID,
     subdivision_granularity: u32,
 ) -> Result<(), Error> {
@@ -198,6 +256,7 @@ pub(crate) fn generate_fill_and_outline_buffers(
             fill_segments,
             basic_line_indexes,
             basic_line_segments,
+            outline_ends,
         )
     {
         return Ok(());
@@ -210,6 +269,7 @@ pub(crate) fn generate_fill_and_outline_buffers(
         if subdivision_granularity >= 2 {
             let mut subdivided = subdivide_polygon(&polygon, canonical, subdivision_granularity, true);
             add_tile_border_strips(&mut subdivided, canonical, TILE_BORDER_STRIP_WIDTH);
+            let first_line_index = basic_line_indexes.len();
             add_subdivided_polygon(
                 &subdivided,
                 fill_vertices,
@@ -217,6 +277,13 @@ pub(crate) fn generate_fill_and_outline_buffers(
                 fill_segments,
                 basic_line_indexes,
                 basic_line_segments,
+            );
+            add_mesh_outline_ends(
+                fill_vertices,
+                outline_ends,
+                basic_line_indexes,
+                basic_line_segments,
+                first_line_index,
             );
             continue;
         }
@@ -228,6 +295,7 @@ pub(crate) fn generate_fill_and_outline_buffers(
             let base = fill_vertices.len();
             let n_vertices = add_ring_vertices(fill_vertices, ring);
             add_outline_indices(base, n_vertices, basic_line_segments, basic_line_indexes);
+            add_ring_outline_ends(fill_vertices, outline_ends, base, n_vertices);
         }
 
         let indices: Vec<u32> = triangulate(&polygon[..]);

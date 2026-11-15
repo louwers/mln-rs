@@ -4,7 +4,7 @@ use std::rc::Rc;
 use ash::vk;
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
+    invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts, wall_quads,
 };
 use mln_gfx::gpu::{
     ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc, ShaderKey, TextureDesc, TextureFormat, TextureRegion,
@@ -67,6 +67,13 @@ fn instanced_walls_through_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     instanced_walls(&mut gpu).expect("the frame");
+}
+
+#[test]
+fn wall_quads_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
+    wall_quads(&mut gpu).expect("the frame");
 }
 
 #[test]

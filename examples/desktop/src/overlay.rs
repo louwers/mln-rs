@@ -1,7 +1,7 @@
 // The controls' paint, which an overlay of the window's backend draws over
-// each frame of the map (`set_overlay`): egui's own renderer on WebGPU, its
-// own painter on OpenGL ES (gl_overlay.rs), and on Metal and Vulkan egui's
-// meshes drawn in the frame's command buffer (metal_overlay.rs,
+// each frame of the map (`Surface::with_overlay`): egui's own renderer on
+// WebGPU, its own painter on OpenGL ES (gl_overlay.rs), and on Metal and
+// Vulkan egui's meshes drawn in the frame's command buffer (metal_overlay.rs,
 // vulkan_overlay.rs).
 
 use std::cell::RefCell;
@@ -15,6 +15,9 @@ pub(crate) struct Paint {
     /// The textures to update before painting, and to free after.
     pub(crate) textures: egui::TexturesDelta,
     pub(crate) pixels_per_point: f32,
+    /// The GPU that the overlay draws on, where only the overlay can name
+    /// it: OpenGL's renderer, which its context names.
+    pub(crate) renderer: Option<String>,
 }
 
 impl Paint {

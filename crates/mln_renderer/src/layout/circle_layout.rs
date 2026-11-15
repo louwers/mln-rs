@@ -11,8 +11,9 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::CircleLayoutProperties;
 use mln_style::layers::circle_layer_properties::CircleLayerProperties;
 use mln_style_types::image::ImagePositions;
+use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
@@ -55,7 +56,7 @@ impl CircleLayout {
     pub(crate) fn new(
         parameters: &BucketParameters,
         group: &[Arc<dyn LayerProperties>],
-        source_layer: &dyn GeometryTileLayer,
+        source_layer: &TileLayer<'_>,
         filter_groups: &mut FilterGroups,
     ) -> Result<Self, Error> {
         debug_assert!(!group.is_empty());
@@ -80,7 +81,7 @@ impl CircleLayout {
         }
 
         let mut features: Vec<CircleFeature> = Vec::new();
-        let feature_count = source_layer.feature_count();
+        let feature_count = source_layer.len();
         let context = EvaluationContext::new(zoom)
             .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
             .with_global_state(parameters.global_state.as_deref());
@@ -92,13 +93,9 @@ impl CircleLayout {
             if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;
             }
-            let feature = source_layer.get_feature(i)?;
-            if selected.is_none() {
-                let passes = passes(&*feature);
-                feature.check()?;
-                if !passes {
-                    continue;
-                }
+            let feature = source_layer.feature(i)?;
+            if selected.is_none() && !passes(&feature) {
+                continue;
             }
 
             if !sort_features_by_key {
@@ -111,8 +108,7 @@ impl CircleLayout {
                 continue;
             }
 
-            let sort_key = sort_key_property.evaluate(&EvaluationContext::with_zoom_feature(zoom, Some(&*feature)));
-            feature.check()?;
+            let sort_key = sort_key_property.evaluate(&EvaluationContext::with_zoom_feature(zoom, Some(&feature)));
             let circle_feature = CircleFeature { i, sort_key };
             // std::lower_bound: the first feature whose key is not less.
             let sort_position = features.partition_point(|f| f.sort_key < sort_key);
@@ -144,7 +140,7 @@ impl CircleLayout {
         source_layer: SourceLayer,
         filter_groups: &mut FilterGroups,
     ) -> Result<Self, Error> {
-        let mut layout = CircleLayout::new(parameters, group, &*source_layer.layer()?, filter_groups)?;
+        let mut layout = CircleLayout::new(parameters, group, &source_layer.layer()?, filter_groups)?;
         layout.source_layer = Some(source_layer);
         Ok(layout)
     }
@@ -160,7 +156,7 @@ impl CircleLayout {
     /// index.
     pub(crate) fn create_bucket_with(
         &mut self,
-        source_layer: &dyn GeometryTileLayer,
+        source_layer: &TileLayer<'_>,
         insert_feature: &mut dyn FnMut(&GeometryCollection, usize, &str, &str),
         render_data: &mut HashMap<String, LayerRenderData>,
         canonical: &CanonicalTileID,
@@ -171,22 +167,20 @@ impl CircleLayout {
 
         for circle_feature in &self.features {
             let i = circle_feature.i;
-            let feature = source_layer.get_feature(i)?;
-            let geometries = feature.get_geometries();
-            feature.check()?;
+            let feature = source_layer.feature(i)?;
+            let geometries = feature.geometry()?;
             let vertex_offset = bucket.vertices.len();
 
-            Self::add_circle(&mut bucket, self.mode, &*feature, geometries, i, circle_feature.sort_key, canonical);
-            feature.check()?;
+            Self::add_circle(&mut bucket, self.mode, &feature, &geometries, i, circle_feature.sort_key, canonical);
 
             if self.retain_features_by_id {
                 let vertex_count = bucket.vertices.len() - vertex_offset;
                 if vertex_count > 0 {
-                    bucket.retain_feature(&*feature, vertex_offset, vertex_count);
+                    bucket.retain_feature(&feature, vertex_offset, vertex_count);
                 }
             }
 
-            insert_feature(geometries, i, &self.source_layer_id, &self.bucket_leader_id);
+            insert_feature(&geometries, i, &self.source_layer_id, &self.bucket_leader_id);
         }
 
         if !bucket.has_data() {
@@ -307,7 +301,7 @@ impl Layout for CircleLayout {
         let source_layer = self.source_layer.clone().expect("CircleLayout: source layer");
         let layer = source_layer.layer()?;
         self.create_bucket_with(
-            &*layer,
+            &layer,
             &mut |geometries, i, source_layer_id, bucket_leader_id| {
                 feature_index.insert(geometries, i, source_layer_id, bucket_leader_id);
             },

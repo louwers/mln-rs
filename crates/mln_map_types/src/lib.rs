@@ -15,7 +15,7 @@ mod projection_mode;
 pub use bound_options::BoundOptions;
 pub use camera::{
     AnimationOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity,
-    GesturePhase, TransitionEnd, TransitionEndFn, TransitionOutcome,
+    GesturePhase, TransitionEnd, TransitionOutcome,
 };
 pub use camera_momentum::{CameraMomentum, MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap};
 pub use frame_projection::{ClipDepthRange, FrameProjection};

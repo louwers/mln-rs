@@ -3,17 +3,15 @@
 //! wasm-bindgen. The page loads one wasm module, and Web Workers instantiate
 //! it, each instance with its own memory:
 //!
-//! - In the map's Web Worker, `WebMap` (map.rs): the map, its renderer (the
-//!   browser's WebGPU through wgpu, or its WebGL2 through `mln_gl` in the
-//!   `webgl` build, into the page's canvas as an `OffscreenCanvas`) and its
-//!   file sources. Each animation frame runs the `RunLoop`, draws, and runs the
-//!   cooperative scheduler's tasks until the frame's budget is spent; between
-//!   frames, `mln_web_host::pump` runs what arrives.
+//! - In the map's Web Worker, `WebMap` (map.rs): a runtime (`mln_runtime`)
+//!   and its map, whose render session presents to the page's canvas, an
+//!   `OffscreenCanvas`, with the browser's WebGPU, or its WebGL2 in the
+//!   `webgl` build. The runtime's and the session's work runs in the slices
+//!   of `mln_web_host::pump`, and the page's animation frames demand frames.
 //! - In each tile worker's Web Worker, `mln_web_host`'s tile worker side: a
-//!   `TileWorkerHost` on the instance's cooperative scheduler. The map's
-//!   `SerializingTransport` puts each tile's worker (geometry, raster or
-//!   raster-dem) in one of them and talks to it only through bytes, over a
-//!   `MessageChannel` between the two Web Workers.
+//!   `TileWorkerHost`, which runs the tiles' jobs: layouts, and raster and
+//!   raster-dem tiles' image decodes. The session's renderer sends them only
+//!   bytes, over a `MessageChannel` between the two Web Workers.
 //! - In the map's Web Worker again, once a style declares font faces: the
 //!   shaper module (`crates/mln_web_shaper`), which shapes and rasterizes them
 //!   (`mln_web_host::shaper`). Only the map's Web Worker loads it, and maps
@@ -30,13 +28,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
+mod gpu_check;
 mod map;
-
-use std::time::Duration;
 
 pub use map::{WebMap, set_preloads};
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
-use mln_util::time::Instant;
 use wasm_bindgen::prelude::*;
 
 /// Runs when an instance starts, in each Web Worker, before any
@@ -69,11 +65,6 @@ impl Observer for ConsoleLog {
         }
         true
     }
-}
-
-/// The time `budget_ms` milliseconds from now.
-fn deadline(budget_ms: f64) -> Instant {
-    Instant::now() + Duration::from_secs_f64(budget_ms.max(0.0) / 1000.0)
 }
 
 fn js_error(message: impl std::fmt::Display) -> JsValue {

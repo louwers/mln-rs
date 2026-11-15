@@ -1,8 +1,7 @@
 # The port and its crates.io release (RELEASING.md). Each library under
 # crates/ and vendor/ is the package mln-rs-<name> (library name unchanged,
 # so the code still says `mln_util::`), and the package here, mln-rs,
-# re-exports them all. Users depend on mln-rs only. The differential tests
-# against the C++ core (louwers/mln-rs-difftests) test the released crates.
+# re-exports them all. Users depend on mln-rs only.
 [workspace]
 resolver = "3"
 # The packages with `publish = false` are test helpers or unused by mln-rs.

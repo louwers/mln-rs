@@ -92,7 +92,7 @@ impl PatternAtlas {
 
         self.dirty = true;
 
-        let position = ImagePosition::new(bin, image, 0);
+        let position = ImagePosition::new(bin, image);
         self.patterns.insert(image.id.clone(), Pattern { alloc_id, position: position.clone() });
         Some(position)
     }

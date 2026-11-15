@@ -1,6 +1,7 @@
 // The geometry algorithms on these types (ring classification, coordinate
 // conversion, polygon fixup, ...) are in `mln_tile`.
 
+use std::borrow::Cow;
 use std::ops::{Deref, DerefMut, Range};
 use std::sync::Arc;
 
@@ -8,7 +9,6 @@ use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
-use mln_util::serialization::payload::shared_bytes;
 
 /// Normalized vector tile coordinates. Each geometry coordinate represents a
 /// point in a bidimensional space, varying from -V...0...+V, where V is the
@@ -87,33 +87,20 @@ impl DerefMut for GeometryCollection {
 static EMPTY_PROPERTIES: PropertyMap = PropertyMap::new();
 static EMPTY_GEOMETRIES: GeometryCollection = GeometryCollection::new();
 
-/// A feature of a tile layer.
-///
-/// C++ `getValue`, `getProperties` and `getGeometries` throw on malformed
-/// tiles, from inside expression evaluation as well. Here they return null
-/// or empty instead and keep the first exception, which
-/// [`error`](Self::error) returns: the code that C++ lets the exception
-/// escape from (the tile worker, layouts, queries) checks it after using
-/// the feature and returns it as its error. A tile errors for the same
-/// inputs and message as in C++; the rest of the work on the failing
-/// feature runs on the empty value before the check, and its result is
-/// dropped.
+/// A feature as expressions and buckets read it: a view of a tile's
+/// feature (`mln_tile::Feature`), or a feature made for evaluating an
+/// expression. Reading a value never fails: a reader whose data can be
+/// malformed checks it when it makes the view.
 pub trait GeometryTileFeature {
     fn get_type(&self) -> FeatureType;
 
+    /// The value of the property `key`; `None` for none or a null value.
     fn get_value(&self, key: &str) -> Option<Value>;
 
-    /// The feature's properties; empty by default.
-    fn get_properties(&self) -> &PropertyMap {
-        &EMPTY_PROPERTIES
-    }
-
-    /// An owned copy of [`get_properties`](Self::get_properties), for a
-    /// caller that keeps the properties past the feature. A feature that
-    /// decodes its properties on demand builds the copy without keeping one
-    /// of its own.
-    fn to_properties(&self) -> PropertyMap {
-        self.get_properties().clone()
+    /// The feature's properties; empty by default. A view that decodes its
+    /// properties on demand returns them owned.
+    fn get_properties(&self) -> Cow<'_, PropertyMap> {
+        Cow::Borrowed(&EMPTY_PROPERTIES)
     }
 
     /// The feature's id; [`Identifier::Null`] by default.
@@ -121,86 +108,12 @@ pub trait GeometryTileFeature {
         Identifier::Null
     }
 
-    /// The feature's geometries; empty by default.
-    fn get_geometries(&self) -> &GeometryCollection {
-        &EMPTY_GEOMETRIES
+    /// The feature's geometries; empty by default. A view that decodes its
+    /// geometry on demand returns it owned, and fails for a geometry it
+    /// can't decode.
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, Error> {
+        Ok(Cow::Borrowed(&EMPTY_GEOMETRIES))
     }
-
-    /// The first exception a C++ `getValue`, `getProperties` or
-    /// `getGeometries` call on this feature would have thrown (port-only).
-    fn error(&self) -> Option<Error> {
-        None
-    }
-
-    /// `Err` with [`error`](Self::error): where the C++ exception escapes.
-    fn check(&self) -> Result<(), Error> {
-        self.error().map_or(Ok(()), Err)
-    }
-}
-
-pub trait GeometryTileLayer {
-    fn feature_count(&self) -> usize;
-
-    /// Returns the feature object at the given position within the layer.
-    /// `Err`: the exception C++ throws (malformed tile, index past the end).
-    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, Error>;
-
-    fn get_name(&self) -> String;
-
-    /// Port-only: the features in groups whose members have the same
-    /// geometry type and the same values under each of `keys` (or lack each
-    /// alike), so that an expression reading only those of a feature gives
-    /// every member the same result. `None` if the layer can't group them
-    /// cheaply, or nearly every feature would be a group of its own.
-    fn group_features(&self, keys: &[String]) -> Option<FeatureGroups> {
-        let _ = keys;
-        None
-    }
-}
-
-/// Port-only: [`GeometryTileLayer::group_features`].
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FeatureGroups {
-    /// Each feature's group.
-    pub of_feature: Vec<u32>,
-    /// Each group's first feature; groups are numbered in feature order.
-    pub first: Vec<usize>,
-}
-
-pub trait GeometryTileData {
-    fn clone_data(&self) -> Box<dyn GeometryTileData>;
-
-    /// Returns the layer with the given name. `Err`: the exception C++
-    /// throws (malformed tile).
-    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, Error>;
-
-    /// Whether the data has a layer named `name`, found without decoding
-    /// the layer where the data can. `Err`: a malformed tile.
-    fn has_layer(&self, name: &str) -> Result<bool, Error> {
-        Ok(self.get_layer(name)?.is_some())
-    }
-
-    /// Port-only: what the data is made from, for a tile worker in another
-    /// wasm instance, which makes the data again (`mln_renderer`'s
-    /// `tile/worker_codec)`: a vector tile's bytes or a GeoJSON tile's
-    /// features. `None` for data that no longer has its bytes.
-    fn encoded(&self) -> Option<EncodedTileData> {
-        None
-    }
-}
-
-/// Port-only: what tile data is made from (`GeometryTileData::encoded`).
-/// The bytes travel beside a message (`mln_util::serialization::payload`).
-#[derive(Clone, Debug, mln_wire::Wire)]
-pub enum EncodedTileData {
-    Mvt(#[wire(with = "shared_bytes")] Arc<Vec<u8>>),
-    Mlt {
-        #[wire(with = "shared_bytes")]
-        data: Arc<Vec<u8>>,
-        fast_pfor_enabled: bool,
-    },
-    /// `GeoJSONTileData`'s features.
-    GeoJson(Arc<Vec<feature::Feature<i16, Arc<PropertyMap>>>>),
 }
 
 #[cfg(test)]
@@ -223,8 +136,7 @@ mod tests {
         let f = Feature;
         assert!(f.get_properties().is_empty());
         assert_eq!(f.get_id(), Identifier::Null);
-        assert!(f.get_geometries().is_empty());
-        assert!(f.error().is_none());
+        assert!(f.get_geometries().unwrap().is_empty());
         let mut c = GeometryCollection::new();
         c.push(vec![Point::new(1, 2)]);
         assert_eq!(c.clone()[0][0], Point::new(1, 2));

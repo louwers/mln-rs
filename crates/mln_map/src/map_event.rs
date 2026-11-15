@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, RenderingStats, TileOperation};
+use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, RenderMode, RenderingStats, TileOperation};
 use mln_style::StyleLoadError;
 use mln_style::sprite::Sprite;
 use mln_util::error::Error;
@@ -45,13 +45,6 @@ pub struct CameraChange {
     pub source: CameraChangeSource,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
-pub enum RenderMode {
-    Partial,
-    Full,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderFrameStatus {
     pub mode: RenderMode,
@@ -78,6 +71,7 @@ pub enum MapEvent {
     CameraIsChanging,
     /// A camera command ended.
     CameraDidChange(CameraChange),
+
     /// The style loaded and the map applied its default camera, unless a
     /// camera command came first.
     StyleLoaded,

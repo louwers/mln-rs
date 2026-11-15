@@ -6,32 +6,32 @@
 //! as an array, each reply an array of `Uint8Array`s: its bytes, then its
 //! payloads (pixels, vertices, indices), which the map takes as they are
 //! (`mln_util::host_bytes`). A Web Worker whose instance panicked sends
-//! `{fatal: message}` instead.
+//! `{fatal: message}` instead: its jobs are lost, and a new Web Worker takes
+//! its place if the map side can start one.
 
 use std::rc::Rc;
 
-use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
+use mln_renderer::tile::worker_codec::{Encoded, RemoteWorkers, ReplySink, WorkerInstances};
 use mln_util::host_bytes::HostBytes;
 use mln_util::serialization::payload::Payload;
 use wasm_bindgen::prelude::*;
 
-/// A transport whose tile workers are in the Web Workers at the other end of
-/// `ports` (at least one), for the renderer on `scheduler`'s `RunLoop`,
-/// which handles their replies (the transport's `ReplySink`).
-/// `on_reply(instance)` is called as each reply arrives, and
-/// `on_fatal(instance, message)` when an instance panicked.
-pub fn transport(
+/// Tile workers in the Web Workers at the other end of `ports` (at least
+/// one), for the renderer on `scheduler`'s `RunLoop`, which handles their
+/// replies (the workers' `ReplySink`). `on_reply(instance)` is called as
+/// each reply arrives, and `on_fatal(instance, message)` when an instance
+/// panicked. `respawn(instance)` gives a port to a new Web Worker in place
+/// of a lost one, if it can.
+pub fn workers(
     scheduler: &mln_actor::SchedulerPtr,
     ports: Vec<web_sys::MessagePort>,
     on_reply: impl Fn(usize) + 'static,
     on_fatal: impl Fn(usize, JsValue) + 'static,
-) -> Rc<SerializingTransport> {
-    SerializingTransport::new(scheduler, move |sink| {
-        let reply = move |instance, reply| {
-            on_reply(instance);
-            sink.send(instance, reply);
-        };
-        Box::new(PortInstances::new(ports, reply, on_fatal))
+    respawn: impl Fn(usize) -> Option<web_sys::MessagePort> + 'static,
+) -> Rc<RemoteWorkers> {
+    RemoteWorkers::new(scheduler, move |sink| {
+        let handlers = Rc::new(Handlers { sink, on_reply: Box::new(on_reply), on_fatal: Box::new(on_fatal) });
+        Box::new(PortInstances::new(ports, handlers, Box::new(respawn)))
     })
 }
 
@@ -39,47 +39,67 @@ pub fn transport(
 /// port's tile workers.
 const DISCONNECT: JsValue = JsValue::NULL;
 
+/// What the ports' messages go to.
+struct Handlers {
+    sink: ReplySink,
+    on_reply: Box<dyn Fn(usize)>,
+    on_fatal: Box<dyn Fn(usize, JsValue)>,
+}
+
 /// Tile worker instances behind `MessagePort`s, instance `i` behind port `i`.
 /// Dropping it disconnects them.
-pub(crate) struct PortInstances {
-    ports: Vec<web_sys::MessagePort>,
-    _listeners: Vec<Closure<dyn FnMut(web_sys::MessageEvent)>>,
+struct PortInstances {
+    ports: Vec<Port>,
+    handlers: Rc<Handlers>,
+    respawn: Box<dyn Fn(usize) -> Option<web_sys::MessagePort>>,
+}
+
+/// A port, and the listener that takes its messages.
+struct Port {
+    port: web_sys::MessagePort,
+    _listener: Closure<dyn FnMut(web_sys::MessageEvent)>,
+}
+
+impl Port {
+    /// Listens to `port`, as instance `instance`.
+    fn new(instance: usize, port: web_sys::MessagePort, handlers: &Rc<Handlers>) -> Port {
+        let handlers = Rc::clone(handlers);
+        let listener = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
+            let data = event.data();
+            match data.dyn_into::<js_sys::Array>() {
+                Ok(batch) => {
+                    for reply in batch.iter() {
+                        (handlers.on_reply)(instance);
+                        handlers.sink.send(instance, decode(&reply.unchecked_into()));
+                    }
+                }
+                Err(data) => {
+                    let message = js_sys::Reflect::get(&data, &JsValue::from_str("fatal")).unwrap_or(data);
+                    (handlers.on_fatal)(instance, message);
+                    handlers.sink.lost(instance);
+                }
+            }
+        });
+        port.set_onmessage(Some(listener.as_ref().unchecked_ref()));
+        Port { port, _listener: listener }
+    }
+
+    fn disconnect(&self) {
+        self.port.set_onmessage(None);
+        let _ = self.port.post_message(&DISCONNECT);
+        self.port.close();
+    }
 }
 
 impl PortInstances {
-    /// Instances behind `ports`, which must not be empty. Their replies go to
-    /// `reply(instance, reply)`, and a panic of an instance to
-    /// `fatal(instance, message)`, on this thread, as their messages arrive.
-    pub(crate) fn new(
+    fn new(
         ports: Vec<web_sys::MessagePort>,
-        reply: impl Fn(usize, Encoded) + 'static,
-        fatal: impl Fn(usize, JsValue) + 'static,
+        handlers: Rc<Handlers>,
+        respawn: Box<dyn Fn(usize) -> Option<web_sys::MessagePort>>,
     ) -> PortInstances {
-        let handlers = Rc::new((reply, fatal));
-        let listeners = ports
-            .iter()
-            .enumerate()
-            .map(|(instance, port)| {
-                let handlers = Rc::clone(&handlers);
-                let listener = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
-                    let data = event.data();
-                    match data.dyn_into::<js_sys::Array>() {
-                        Ok(batch) => {
-                            for reply in batch.iter() {
-                                (handlers.0)(instance, decode(&reply.unchecked_into()));
-                            }
-                        }
-                        Err(data) => {
-                            let message = js_sys::Reflect::get(&data, &JsValue::from_str("fatal")).unwrap_or(data);
-                            (handlers.1)(instance, message);
-                        }
-                    }
-                });
-                port.set_onmessage(Some(listener.as_ref().unchecked_ref()));
-                listener
-            })
-            .collect();
-        PortInstances { ports, _listeners: listeners }
+        let ports =
+            ports.into_iter().enumerate().map(|(instance, port)| Port::new(instance, port, &handlers)).collect();
+        PortInstances { ports, handlers, respawn }
     }
 }
 
@@ -96,21 +116,28 @@ impl WorkerInstances for PortInstances {
         self.ports.len()
     }
 
-    fn post(&self, instance: usize, request: Vec<u8>) {
+    fn post(&mut self, instance: usize, request: Vec<u8>) {
         let bytes = js_sys::Uint8Array::from(&request[..]);
         let transfer = js_sys::Array::of1(&bytes.buffer());
-        if let Err(error) = self.ports[instance].post_message_with_transferable(&bytes, &transfer) {
+        if let Err(error) = self.ports[instance].port.post_message_with_transferable(&bytes, &transfer) {
             web_sys::console::error_2(&JsValue::from_str("posting to a tile worker failed:"), &error);
         }
+    }
+
+    fn replace(&mut self, instance: usize) -> bool {
+        let Some(port) = (self.respawn)(instance) else {
+            return false;
+        };
+        self.ports[instance].disconnect();
+        self.ports[instance] = Port::new(instance, port, &self.handlers);
+        true
     }
 }
 
 impl Drop for PortInstances {
     fn drop(&mut self) {
         for port in &self.ports {
-            port.set_onmessage(None);
-            let _ = port.post_message(&DISCONNECT);
-            port.close();
+            port.disconnect();
         }
     }
 }
@@ -143,8 +170,7 @@ thread_local! {
 /// and `port` to serve with `mlnWebServeTileWorker`.
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = mlnWebConfigureTileWorkers)]
 pub fn configure(count: Option<u32>, spawn: Option<js_sys::Function>) {
-    POOL.with(|pool| {
-        let mut pool = pool.borrow_mut();
+    with_pool(|pool| {
         pool.count = count.map(|count| count as usize);
         pool.spawn = spawn;
     });
@@ -155,7 +181,11 @@ pub fn configure(count: Option<u32>, spawn: Option<js_sys::Function>) {
 /// each `{module, port}` it gets as `configure` describes. For the package
 /// that ships it beside the module's bindings.
 pub fn set_default_script(url: String) {
-    POOL.with(|pool| pool.borrow_mut().script = Some(url));
+    with_pool(|pool| pool.script = Some(url));
+}
+
+fn with_pool<R>(f: impl FnOnce(&mut Pool) -> R) -> R {
+    POOL.with(|pool| f(&mut pool.borrow_mut()))
 }
 
 fn default_count() -> usize {
@@ -172,46 +202,59 @@ fn start(pool: &Pool) -> Result<Vec<JsValue>, String> {
     if count == 0 {
         return Err("the instance was configured with no tile workers".to_owned());
     }
-    (0..count)
-        .map(|_| match (&pool.spawn, &pool.script) {
-            (Some(spawn), _) => spawn.call0(&JsValue::NULL).map_err(|error| format!("spawn() threw {error:?}")),
-            (None, Some(script)) => {
-                let options = web_sys::WorkerOptions::new();
-                options.set_type(web_sys::WorkerType::Module);
-                web_sys::Worker::new_with_options(script, &options)
-                    .map(JsValue::from)
-                    .map_err(|error| format!("the tile worker script {script} didn't start: {error:?}"))
-            }
-            (None, None) => Err("no tile worker script: configure a `spawn`".to_owned()),
-        })
-        .collect()
+    (0..count).map(|_| start_one(pool)).collect()
+}
+
+fn start_one(pool: &Pool) -> Result<JsValue, String> {
+    match (&pool.spawn, &pool.script) {
+        (Some(spawn), _) => spawn.call0(&JsValue::NULL).map_err(|error| format!("spawn() threw {error:?}")),
+        (None, Some(script)) => {
+            let options = web_sys::WorkerOptions::new();
+            options.set_type(web_sys::WorkerType::Module);
+            web_sys::Worker::new_with_options(script, &options)
+                .map(JsValue::from)
+                .map_err(|error| format!("the tile worker script {script} didn't start: {error:?}"))
+        }
+        (None, None) => Err("no tile worker script: configure a `spawn`".to_owned()),
+    }
+}
+
+/// A port to `worker` for a new map side.
+fn port_to(worker: &JsValue) -> Result<web_sys::MessagePort, String> {
+    let channel = web_sys::MessageChannel::new().map_err(|error| format!("{error:?}"))?;
+    let message = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&message, &JsValue::from_str("module"), &wasm_bindgen::module());
+    let _ = js_sys::Reflect::set(&message, &JsValue::from_str("port"), &channel.port2());
+    let post: js_sys::Function = js_sys::Reflect::get(worker, &JsValue::from_str("postMessage"))
+        .map_err(|error| format!("{error:?}"))?
+        .unchecked_into();
+    post.call2(worker, &message, &js_sys::Array::of1(&channel.port2()))
+        .map_err(|error| format!("posting to a tile worker failed: {error:?}"))?;
+    Ok(channel.port1())
 }
 
 /// Connects a new map side to each of this instance's tile workers' Web
 /// Workers, which start with the first: one port to each, for
-/// [`transport`].
+/// [`workers`].
 pub fn connect() -> Result<Vec<web_sys::MessagePort>, String> {
-    POOL.with(|pool| {
-        let mut pool = pool.borrow_mut();
+    with_pool(|pool| {
         if pool.workers.is_none() {
-            pool.workers = Some(start(&pool)?);
+            pool.workers = Some(start(pool)?);
         }
-        let module = wasm_bindgen::module();
-        let post = JsValue::from_str("postMessage");
-        pool.workers
-            .iter()
-            .flatten()
-            .map(|worker| {
-                let channel = web_sys::MessageChannel::new().map_err(|error| format!("{error:?}"))?;
-                let message = js_sys::Object::new();
-                let _ = js_sys::Reflect::set(&message, &JsValue::from_str("module"), &module);
-                let _ = js_sys::Reflect::set(&message, &JsValue::from_str("port"), &channel.port2());
-                let post: js_sys::Function =
-                    js_sys::Reflect::get(worker, &post).map_err(|error| format!("{error:?}"))?.unchecked_into();
-                post.call2(worker, &message, &js_sys::Array::of1(&channel.port2()))
-                    .map_err(|error| format!("posting to a tile worker failed: {error:?}"))?;
-                Ok(channel.port1())
-            })
-            .collect()
+        pool.workers.iter().flatten().map(port_to).collect()
+    })
+}
+
+/// Starts a Web Worker in place of the tile worker `instance`, which was
+/// lost, and returns a port to it for a map side; the map sides that connect
+/// later get it too.
+pub fn respawn(instance: usize) -> Result<web_sys::MessagePort, String> {
+    with_pool(|pool| {
+        let worker = start_one(pool)?;
+        let port = port_to(&worker)?;
+        if let Some(slot) = pool.workers.as_mut().and_then(|workers| workers.get_mut(instance)) {
+            *slot = worker;
+        }
+        Ok(port)
     })
 }

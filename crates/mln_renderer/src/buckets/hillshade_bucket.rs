@@ -15,8 +15,6 @@ use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
-use mln_util::image::PremultipliedImage;
-use mln_util::tileset::RasterEncoding;
 use mln_util::time::Instant;
 use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -48,20 +46,14 @@ fn full_mask() -> TileMask {
     mask
 }
 
-/// A raster-dem tile's DEM and the geometry that draws it. Serde writes the
-/// DEM, border included, which is what a worker sets (`tile/worker_codec`)
-/// and the tile backfills from its neighbours; the geometry is the tile's
-/// (`set_mask`) and the render state this side's.
-#[derive(mln_wire::Wire)]
-pub struct HillshadeBucket {
+/// A raster-dem tile's DEM, which the tile backfills from its neighbours,
+/// and the geometry that draws it, which the tile masks (`set_mask`).
+pub(crate) struct HillshadeBucket {
     pub(crate) base: BucketBase,
-    #[wire(skip, default = "unmasked")]
     geometry: Mutex<HillshadeBucketGeometry>,
     demdata: RwLock<DEMData>,
-    #[wire(skip)]
     prepared: AtomicBool,
     /// Incremented where C++ sets `renderTargetPrepared = false`.
-    #[wire(skip)]
     render_target_generation: AtomicU64,
 }
 
@@ -76,12 +68,6 @@ fn unmasked() -> Mutex<HillshadeBucketGeometry> {
 }
 
 impl HillshadeBucket {
-    /// Builds the bucket from a DEM image; `Err` if `DEMData::new` rejects
-    /// the image.
-    pub(crate) fn new(image: &PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
-        Ok(Self::with_dem_data(DEMData::new(image, encoding)?))
-    }
-
     #[must_use]
     pub(crate) fn with_dem_data(demdata: DEMData) -> Self {
         HillshadeBucket {

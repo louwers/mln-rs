@@ -277,7 +277,7 @@ impl Gfx {
             run_loop,
         );
         renderer.set_tile_cache_enabled(tile_cache_enabled);
-        set_tile_worker_transport(&mut renderer, run_loop);
+        set_tile_workers(&mut renderer, run_loop);
         Ok(Gfx {
             renderer,
             target,
@@ -314,17 +314,17 @@ impl Gfx {
         );
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
-        set_tile_worker_transport(&mut renderer, &self.run_loop);
+        set_tile_workers(&mut renderer, &self.run_loop);
         self.renderer = renderer;
     }
 }
 
 /// In the browser, puts the renderer's tile workers in the instance's Web
 /// Workers. Elsewhere they stay on the background threads.
-fn set_tile_worker_transport(renderer: &mut Renderer, run_loop: &RunLoop) {
+fn set_tile_workers(renderer: &mut Renderer, run_loop: &RunLoop) {
     #[cfg(target_family = "wasm")]
-    if let Some(transport) = crate::web::tile_worker_transport(&run_loop.scheduler()) {
-        renderer.set_tile_worker_transport(transport);
+    if let Some(workers) = crate::web::tile_workers(&run_loop.scheduler()) {
+        renderer.set_tile_workers(&workers);
     }
     #[cfg(not(target_family = "wasm"))]
     let _ = (renderer, run_loop);
@@ -724,8 +724,13 @@ impl Worker {
         self.reader.as_ref().map_or(0, UpdateReader::generation)
     }
 
-    /// Passes the renderer's events on to the map.
+    /// Passes the renderer's events on to the map. The renderer asks for an
+    /// update when something arrives for its tiles: it takes it in now, so
+    /// that the work it starts runs before the next frame.
     fn forward_events(&mut self) {
+        if let Some(gfx) = self.gfx.as_mut() {
+            gfx.renderer.receive_tiles();
+        }
         let events = self.renderer_events.take();
         self.forward(events);
     }
@@ -1082,13 +1087,9 @@ impl Worker {
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
         let report = events.iter().rev().find_map(|event| match event {
-            RendererEvent::RenderFrameFinished { mode, needs_repaint, .. } => Some(FrameReport {
-                mode: match mode {
-                    mln_renderer::RenderMode::Full => RenderMode::Full,
-                    mln_renderer::RenderMode::Partial => RenderMode::Partial,
-                },
-                needs_repaint: *needs_repaint,
-            }),
+            RendererEvent::RenderFrameFinished { mode, needs_repaint, .. } => {
+                Some(FrameReport { mode: *mode, needs_repaint: *needs_repaint })
+            }
             _ => None,
         });
         let result = match report {

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -62,8 +63,8 @@ impl GeometryTileFeature for StubGeometryTileFeature {
     fn get_id(&self) -> Identifier {
         self.id.clone()
     }
-    fn get_geometries(&self) -> &GeometryCollection {
-        &self.geometry
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+        Ok(Cow::Borrowed(&self.geometry))
     }
 }
 

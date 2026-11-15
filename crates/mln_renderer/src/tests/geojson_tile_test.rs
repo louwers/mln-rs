@@ -1,12 +1,9 @@
-use std::cell::RefCell;
-use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use feature::Feature;
 use geo_types::Point;
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
-use mln_map::transform::{NullTransformObserver, Transform};
-use mln_map_types::{ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
+use mln_map_types::MapMode;
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
@@ -16,17 +13,14 @@ use mln_style::sources::geojson_source::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::tile::geojson_tile::GeoJSONTile;
-use crate::tile::tile::{Tile, TileBase};
-use crate::tile::tile_observer::TileObserver;
-use crate::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
-use crate::tile_parameters::TileParameters;
+use crate::tests::{OneTile, style};
+use crate::tile::loading::DataOrigin;
+use crate::tile::tile::TileKind;
+use crate::tile::tile_workers::TileWorkers;
 
 struct GeoJSONTileTest {
     run_loop: RunLoop,
-    transform: Transform,
     thread_pool: TaggedScheduler,
 }
 
@@ -34,37 +28,47 @@ impl GeoJSONTileTest {
     fn new() -> Self {
         GeoJSONTileTest {
             run_loop: RunLoop::new(),
-            transform: Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default),
             thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
         }
     }
 
-    fn tile_parameters(&self) -> TileParameters<'_> {
-        TileParameters {
-            pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
-            transform_state: self.transform.get_state(),
-            file_source: None,
-            scheduler: self.run_loop.scheduler(),
-            mode: MapMode::Continuous,
-            prefetch_zoom_delta: 0,
-            tile_lod_min_radius: 3.0,
-            tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
-            tile_lod_zoom_shift: 0.0,
-            tile_lod_mode: TileLodMode::Default,
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
-            global_state: None,
-            is_update_synchronous: false,
-            capture_rendered_features: false,
-            image_manager: crate::image_manager::ImageManager::on(Some(self.run_loop.scheduler())),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &self.run_loop),
-            dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
-            tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
-                self.thread_pool.clone(),
-            )),
-            thread_pool: self.thread_pool.clone(),
+    /// Tiles `ids` of a GeoJSON source of `data`, whose jobs run on
+    /// `workers`, or on this thread at once for a source with `synchronous`
+    /// updates; the tiles get their data before their style.
+    fn tiles(
+        &self,
+        data: Arc<dyn GeoJSONData>,
+        ids: &[OverscaledTileID],
+        workers: Box<dyn TileWorkers>,
+        synchronous: bool,
+    ) -> OneTile {
+        let store = crate::tests::tile_store(&self.run_loop, &self.thread_pool, workers);
+        let mut tiles =
+            OneTile::with_origin(store, TileKind::Geometry, true, DataOrigin::GeoJson(data), ids, MapMode::Continuous);
+        let key = tiles.key;
+        tiles.store.source_mut(key).expect("the source").0.info.synchronous = synchronous;
+        tiles
+    }
+
+    fn pool(&self) -> Box<dyn TileWorkers> {
+        Box::new(crate::tile::tile_workers::PoolWorkers::new(self.thread_pool.clone(), 8))
+    }
+
+    /// Runs the loop and updates `tiles` until the tiles `ids` are complete.
+    fn settle(&self, tiles: &mut OneTile, ids: &[OverscaledTileID]) {
+        let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !ids.iter().all(|id| tiles.tile_at(id).is_complete()) {
+            assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't complete");
+            self.run_loop.run_once();
+            tiles.update();
+            std::thread::yield_now();
         }
+    }
+}
+
+impl Drop for GeoJSONTileTest {
+    fn drop(&mut self) {
+        self.thread_pool.wait_for_empty();
     }
 }
 
@@ -77,9 +81,8 @@ impl GeoJSONData for FakeGeoJSONData {
     fn get_tile(
         &self,
         _id: &CanonicalTileID,
-        callback: Box<dyn FnOnce(TileFeatures)>,
+        callback: Box<dyn FnOnce(TileFeatures) + Send>,
         _run_synchronously: bool,
-        _reply_to: &mln_actor::SchedulerPtr,
     ) {
         callback(self.features.clone());
     }
@@ -107,79 +110,41 @@ fn circle_layer_properties() -> Arc<dyn LayerProperties> {
     Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())))
 }
 
-type OnTileChanged = Box<dyn Fn(&TileBase)>;
-
-#[derive(Default)]
-struct StubTileObserver {
-    tile_changed: RefCell<Option<OnTileChanged>>,
-}
-
-impl TileObserver for StubTileObserver {
-    fn on_tile_changed(&self, tile: &TileBase) {
-        if let Some(f) = &*self.tile_changed.borrow() {
-            f(tile);
-        }
-    }
+fn root() -> OverscaledTileID {
+    OverscaledTileID::from_zxy(0, 0, 0)
 }
 
 // gtest: GeoJSONTile.SynchronousUpdate
 #[test]
 fn synchronous_update() {
     let test = GeoJSONTileTest::new();
-
-    let data = point_data();
-    let mut tile_parameters = test.tile_parameters();
-    tile_parameters.is_update_synchronous = true;
-    let tile = GeoJSONTile::new(OverscaledTileID::from_zxy(0, 0, 0), "source".to_owned(), &tile_parameters, data, None);
-    let layers = vec![circle_layer_properties()];
-    tile.set_layers(&layers, tile_parameters.global_state);
-    assert!(tile.is_complete());
-    assert!(tile.is_renderable());
+    let mut tiles = test.tiles(point_data(), &[root()], Box::new(crate::tile::tile_workers::InlineWorkers), true);
+    tiles.set_style(&style(&[circle_layer_properties()]));
+    assert!(tiles.tile().is_complete());
+    assert!(tiles.tile().is_renderable());
 }
 
 // gtest: GeoJSONTile.Issue7648
 #[test]
 fn issue_7648() {
     let test = GeoJSONTileTest::new();
-
     let data = point_data();
-    let tile_parameters = test.tile_parameters();
-    let tile = Rc::new(GeoJSONTile::new(
-        OverscaledTileID::from_zxy(0, 0, 0),
-        "source".to_owned(),
-        &tile_parameters,
-        Arc::clone(&data),
-        None,
-    ));
+    let mut tiles = test.tiles(Arc::clone(&data), &[root()], test.pool(), false);
     let layer_properties = circle_layer_properties();
-    let observer = Rc::new(StubTileObserver::default());
-    let changed = Rc::new(RefCell::new(0));
-    {
-        let weak: Weak<GeoJSONTile> = Rc::downgrade(&tile);
-        let layer_properties = Arc::clone(&layer_properties);
-        let changed = Rc::clone(&changed);
-        *observer.tile_changed.borrow_mut() = Some(Box::new(move |_tile| {
-            // Once present, the bucket should never "disappear", which would
-            // cause flickering.
-            let tile = weak.upgrade().unwrap();
-            assert!(tile.layer_properties_updated(&layer_properties));
-            *changed.borrow_mut() += 1;
-        }));
-    }
+    tiles.set_style(&style(&[Arc::clone(&layer_properties)]));
+    test.settle(&mut tiles, &[root()]);
+    assert!(tiles.changes() >= 1);
 
-    let layers = vec![Arc::clone(&layer_properties)];
-    tile.set_layers(&layers, tile_parameters.global_state.clone());
-    tile.set_observer(Rc::<StubTileObserver>::clone(&observer));
-
-    while !tile.is_complete() {
+    tiles.with(|info, tile, ctx| info.load_geojson(tile, ctx, &data, false));
+    // Once present, the bucket should never "disappear", which would cause
+    // flickering.
+    while !tiles.tile().is_complete() {
+        assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
         test.run_loop.run_once();
+        tiles.update();
     }
-
-    tile.update_data(data, false, tile_parameters.is_update_synchronous);
-    while !tile.is_complete() {
-        test.run_loop.run_once();
-    }
-    assert!(*changed.borrow() >= 1);
+    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
+    assert!(tiles.changes() >= 1);
 }
 
 // Tests that tiles remain renderable if they have been renderable and then
@@ -188,36 +153,27 @@ fn issue_7648() {
 #[test]
 fn issue_9927() {
     let test = GeoJSONTileTest::new();
-
-    let data = point_data();
-    let tile_parameters = test.tile_parameters();
-    let tile = GeoJSONTile::new(OverscaledTileID::from_zxy(0, 0, 0), "source".to_owned(), &tile_parameters, data, None);
+    let mut tiles = test.tiles(point_data(), &[root()], test.pool(), false);
 
     let layer_properties = circle_layer_properties();
-    let layers = vec![Arc::clone(&layer_properties)];
-    tile.set_layers(&layers, tile_parameters.global_state);
+    tiles.set_style(&style(&[Arc::clone(&layer_properties)]));
+    test.settle(&mut tiles, &[root()]);
 
-    while !tile.is_complete() {
-        test.run_loop.run_once();
-    }
-
-    assert!(tile.is_renderable());
-    assert!(tile.layer_properties_updated(&layer_properties));
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
 
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the
     // tile renderable.
-    tile.geometry_tile().set_error(Error::native("Connection offline"));
-    assert!(tile.is_renderable());
-    assert!(tile.layer_properties_updated(&layer_properties));
+    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("Connection offline")));
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
 
     // Then simulate a parsing failure and make sure that we keep it
-    // renderable in this situation as well. We're using 3 as a correlationID
-    // since we've done two three calls that increment this counter (as part
-    // of the GeoJSONTile constructor, setLayers, and setPlacementConfig).
-    tile.geometry_tile().inner().on_error(Error::native("Parse error"), 3);
-    assert!(tile.is_renderable());
-    assert!(tile.layer_properties_updated(&layer_properties));
+    // renderable in this situation as well.
+    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("Parse error")));
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
 }
 
 /// A circle layer as its render layer evaluates it, which records what the
@@ -229,65 +185,29 @@ fn evaluated_circle_layer_properties() -> Arc<dyn LayerProperties> {
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }
 
-/// A transport whose workers are in `count` worker instances on threads.
-fn serializing_transport(run_loop: &RunLoop, count: usize) -> Rc<SerializingTransport> {
-    SerializingTransport::new(&run_loop.scheduler(), |replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
-}
-
-// Port-only: GeoJSON.SynchronousUpdate with a `SerializingTransport`: the
-// worker of a synchronous update stays on this thread, so the tile still
-// completes before `set_layers` returns.
-#[test]
-fn synchronous_update_with_the_serializing_transport() {
-    let test = GeoJSONTileTest::new();
-
-    let mut tile_parameters = test.tile_parameters();
-    tile_parameters.is_update_synchronous = true;
-    tile_parameters.tile_worker_transport = serializing_transport(&test.run_loop, 1);
-    let tile = GeoJSONTile::new(
-        OverscaledTileID::from_zxy(0, 0, 0),
-        "source".to_owned(),
-        &tile_parameters,
-        point_data(),
-        None,
-    );
-    let layer_properties = evaluated_circle_layer_properties();
-    tile.set_layers(std::slice::from_ref(&layer_properties), tile_parameters.global_state);
-    assert!(tile.is_complete());
-    assert!(tile.is_renderable());
-    assert!(tile.layer_properties_updated(&layer_properties));
-}
-
 // Port-only: tiles whose workers are in worker instances on other threads
 // get their layouts back through the codec, and a data update replaces them.
 #[test]
 fn update_through_the_codec() {
     let test = GeoJSONTileTest::new();
-
-    let mut tile_parameters = test.tile_parameters();
-    tile_parameters.tile_worker_transport = serializing_transport(&test.run_loop, 2);
+    let workers = crate::tests::tile::remote_workers(&test.run_loop, 2);
+    let workers = Box::new(crate::tile::worker_codec::RemoteJobs(workers));
     let layer_properties = evaluated_circle_layer_properties();
     // Two tiles, so both instances get one.
-    let tiles: Vec<GeoJSONTile> = (0..2)
-        .map(|x| {
-            let id = OverscaledTileID::from_zxy(1, x, 0);
-            let tile = GeoJSONTile::new(id, "source".to_owned(), &tile_parameters, point_data(), None);
-            tile.set_layers(std::slice::from_ref(&layer_properties), tile_parameters.global_state.clone());
-            tile
-        })
-        .collect();
-    while !tiles.iter().all(Tile::is_complete) {
-        test.run_loop.run_once();
+    let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
+    let mut tiles = test.tiles(point_data(), &ids, workers, false);
+    for id in &ids {
+        tiles.with_at(id, |info, tile, ctx| info.set_style(tile, ctx, &style(std::slice::from_ref(&layer_properties))));
     }
-    for tile in &tiles {
-        assert!(tile.is_renderable());
-        assert!(tile.layer_properties_updated(&layer_properties));
+    test.settle(&mut tiles, &ids);
+    for id in &ids {
+        assert!(tiles.tile_at(id).is_renderable());
+        assert!(tiles.with_at(id, |_, tile, _| tile.layer_properties_updated(&layer_properties)));
     }
 
-    tiles[0].update_data(point_data(), false, false);
-    assert!(!tiles[0].is_complete());
-    while !tiles[0].is_complete() {
-        test.run_loop.run_once();
-    }
-    assert!(tiles[0].is_renderable());
+    let data = point_data();
+    tiles.with_at(&ids[0], |info, tile, ctx| info.load_geojson(tile, ctx, &data, false));
+    assert!(!tiles.tile_at(&ids[0]).is_complete());
+    test.settle(&mut tiles, &ids[..1]);
+    assert!(tiles.tile_at(&ids[0]).is_renderable());
 }

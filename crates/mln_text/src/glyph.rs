@@ -394,14 +394,17 @@ pub struct GlyphDependencies {
     pub shapes: HBShapeRequests,
 }
 
+/// Where a glyph is in an atlas, and its metrics. A glyph without a bitmap
+/// (a space, say) has an empty `rect`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct GlyphPosition {
     pub rect: RectU16,
     pub metrics: GlyphMetrics,
 }
 
-pub(crate) type GlyphPositionMap = BTreeMap<GlyphID, GlyphPosition>;
-pub type GlyphPositions = VecMap<FontStackHash, GlyphPositionMap>;
+/// The glyphs of a layout's font stacks: `None` for one that no font has, or
+/// whose range failed to load.
+pub type GlyphPositions = VecMap<FontStackHash, BTreeMap<GlyphID, Option<GlyphPosition>>>;
 
 /// Advances the process-wide glyph type counter, skipping zero when it wraps.
 fn gen_new_glyph_id_type_counter(counter: &mut u16) -> NonZeroU16 {

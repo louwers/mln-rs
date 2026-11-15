@@ -29,7 +29,9 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use super::target::{BorrowedRing, Device, DeviceOptions, FrameTexture, RingKind, Surface, SurfaceKind};
+use super::target::{
+    BorrowedRing, Device, DeviceOptions, FrameTexture, RingKind, Surface, SurfaceKind, SurfaceOverlay,
+};
 
 /// Frames read back: an offscreen target.
 trait Offscreen: FrameTarget {
@@ -401,7 +403,8 @@ impl Backend {
     /// A target on the backend that presents to `surface`, at `size`
     /// pixels. Fails with `Unsupported` when only a backend of the target's
     /// own can present to it: see [`surface_backend`].
-    fn surface(&self, surface: Surface, size: Size) -> Result<Box<dyn Presenting>, Error> {
+    fn surface(&self, mut surface: Surface, size: Size) -> Result<Box<dyn Presenting>, Error> {
+        let overlay = surface.take_overlay()?;
         match (self, surface.kind) {
             #[cfg(feature = "webgpu")]
             (Backend::WebGpu(backend), kind) => {
@@ -418,26 +421,69 @@ impl Backend {
                 let format = None;
                 let target = webgpu_surface(backend, kind)?;
                 let options = mln_webgpu::SurfaceOptions { format, ..mln_webgpu::SurfaceOptions::default() };
-                Ok(Box::new(mln_webgpu::SurfaceTarget::new(Rc::clone(backend), target, size, options)?))
+                let target = mln_webgpu::SurfaceTarget::new(Rc::clone(backend), target, size, options)?;
+                target.set_overlay(overlay_of(overlay, |overlay| match overlay {
+                    SurfaceOverlay::WebGpu(overlay) => Ok(overlay),
+                    other => Err(other),
+                })?);
+                Ok(Box::new(target))
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             (Backend::Metal(backend), SurfaceKind::MetalLayer(layer)) => {
-                Ok(Box::new(mln_mtl::SurfaceTarget::new(backend, layer, size, true)))
+                let target = mln_mtl::SurfaceTarget::new(backend, layer, size, true);
+                target.set_overlay(overlay_of(overlay, |overlay| match overlay {
+                    SurfaceOverlay::Metal(overlay) => Ok(overlay),
+                    other => Err(other),
+                })?);
+                Ok(Box::new(target))
             }
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             (Backend::Vulkan(backend), SurfaceKind::Window(window)) => {
-                Ok(Box::new(mln_vulkan::SurfaceTarget::new(Rc::clone(backend), window, size, true)?))
+                let target = mln_vulkan::SurfaceTarget::new(Rc::clone(backend), window, size, true)?;
+                target.set_overlay(vulkan_overlay(overlay)?);
+                Ok(Box::new(target))
             }
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             (Backend::Vulkan(backend), SurfaceKind::Vulkan(surface)) => {
-                Ok(Box::new(mln_vulkan::SurfaceTarget::on_host_surface(Rc::clone(backend), surface, size, true)?))
+                let target = mln_vulkan::SurfaceTarget::on_host_surface(Rc::clone(backend), surface, size, true)?;
+                target.set_overlay(vulkan_overlay(overlay)?);
+                Ok(Box::new(target))
             }
             _ => {
-                let _ = size;
+                let _ = (size, overlay);
                 Err(Error::unsupported("the session's backend presents to no surface of this kind"))
             }
         }
     }
+}
+
+/// The overlay of the backend that `own` picks out of `overlay`. Fails with
+/// `Unsupported` for another backend's.
+#[cfg_attr(
+    not(any(
+        feature = "webgpu",
+        all(feature = "metal", target_vendor = "apple"),
+        all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
+        all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))),
+    )),
+    expect(dead_code, reason = "a build without a backend that takes overlays uses none")
+)]
+fn overlay_of<T>(
+    overlay: Option<SurfaceOverlay>,
+    own: impl FnOnce(SurfaceOverlay) -> Result<T, SurfaceOverlay>,
+) -> Result<Option<T>, Error> {
+    overlay
+        .map(own)
+        .transpose()
+        .map_err(|_| Error::unsupported("the surface's overlay is for another backend than the session's"))
+}
+
+#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+fn vulkan_overlay(overlay: Option<SurfaceOverlay>) -> Result<Option<Box<dyn mln_vulkan::Overlay>>, Error> {
+    overlay_of(overlay, |overlay| match overlay {
+        SurfaceOverlay::Vulkan(overlay) => Ok(overlay),
+        other => Err(other),
+    })
 }
 
 /// A wgpu surface of `kind`, made with the instance of `backend`'s device
@@ -482,7 +528,11 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
     match (device, &surface.kind) {
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
         (Device::Vulkan(device), SurfaceKind::Window(window)) => {
-            let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(device, Arc::clone(window), size, true)?;
+            let window = Arc::clone(window);
+            let mut surface = surface;
+            let overlay = vulkan_overlay(surface.take_overlay()?)?;
+            let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(device, window, size, true)?;
+            target.set_overlay(overlay);
             Ok((Backend::Vulkan(backend), Box::new(target)))
         }
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -493,12 +543,22 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
         }
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         (Device::Gl(device), SurfaceKind::Gl(host)) => {
+            if surface.overlay.is_some() {
+                return Err(Error::unsupported("a host's EGL surface takes no overlay"));
+            }
             let (backend, target) = mln_gl::HostSurfaceTarget::with_backend(device, *host, size)?;
             Ok((Backend::Gl(backend), Box::new(target)))
         }
         #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
         (Device::Gl(_), SurfaceKind::Window(window)) => {
-            let (backend, target) = mln_gl::SurfaceTarget::with_backend(Arc::clone(window), size, true)?;
+            let window = Arc::clone(window);
+            let mut surface = surface;
+            let overlay = overlay_of(surface.take_overlay()?, |overlay| match overlay {
+                SurfaceOverlay::Gl(overlay) => Ok(overlay),
+                other => Err(other),
+            })?;
+            let (backend, target) = mln_gl::SurfaceTarget::with_backend(window, size, true)?;
+            target.set_overlay(overlay);
             Ok((Backend::Gl(backend), Box::new(target)))
         }
         #[cfg(all(feature = "gl", target_family = "wasm"))]

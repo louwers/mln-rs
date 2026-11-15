@@ -19,9 +19,9 @@ use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_headless::HeadlessFrontend;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
-    NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, ViewportMode,
+    NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
 };
-use mln_renderer::{OverscaledTileID, Renderer, TileOperation, UpdateParameters, UpdateReader};
+use mln_renderer::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -107,10 +107,10 @@ fn lat_lng_behavior() {
     let test = MapTest::new();
 
     test.map().jump_to(&CameraOptions { center: Some(ll(1.0, 1.0)), zoom: Some(0.0), ..Default::default() });
-    let lat_lng1 = test.map().get_camera_options(None).center.unwrap();
+    let lat_lng1 = CameraOptions::from(test.map().snapshot().view.camera).center.unwrap();
 
     test.map().jump_to(&CameraOptions { center: Some(ll(1.0, 1.0)), ..Default::default() });
-    let lat_lng2 = test.map().get_camera_options(None).center.unwrap();
+    let lat_lng2 = CameraOptions::from(test.map().snapshot().view.camera).center.unwrap();
 
     assert_double_eq(lat_lng1.latitude(), lat_lng2.latitude());
     assert_double_eq(lat_lng1.longitude(), lat_lng2.longitude());
@@ -179,7 +179,7 @@ fn lat_lng_bounds_to_camera_with_bearing_pitch_and_padding() {
     assert_double_eq(virtual_camera_padded.center.unwrap().latitude(), virtual_camera.center.unwrap().latitude());
     assert_double_eq(virtual_camera_padded.center.unwrap().longitude(), virtual_camera.center.unwrap().longitude());
 
-    let size = test.map().get_map_options().size;
+    let size = test.map().snapshot().view.extent.size;
     let width = f64::from(size.width);
     let height = f64::from(size.height);
     // std::min
@@ -315,7 +315,7 @@ fn a_sourceless_style_loaded_after_the_camera_renders() {
     test.observer.did_finish_loading_map_callback.clear();
     assert!(loaded.get(), "the map never finished loading");
 
-    let image = { test.frontend.read_still_image() };
+    let image = { test.frontend().read_still_image() };
     assert_eq!(center_pixel(&image), [0, 255, 0, 255]);
 }
 
@@ -353,8 +353,8 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
         animation: AnimationOptions { velocity: Some(f64::from_bits(1)), ..AnimationOptions::default() },
         ..mln_map::CameraUpdate::default()
     });
-    assert!(!test.map().in_transition());
-    assert_near(test.map().get_camera_options(None).zoom.unwrap(), 10.0, 1e-9);
+    assert!(!test.map().snapshot().transition_in_progress);
+    assert_near(CameraOptions::from(test.map().snapshot().view.camera).zoom.unwrap(), 10.0, 1e-9);
     assert!(run_until_idle());
 }
 
@@ -362,33 +362,28 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
 #[test]
 fn free_camera_options_place_the_camera_and_cancel_commands() {
     let test = MapTest::new();
-    let ended = Arc::new(OnceLock::new());
-    let record = Arc::clone(&ended);
-    let animation = AnimationOptions {
-        transition_end_fn: Some(Arc::new(move |end: &mln_map::TransitionEnd| {
-            record.set(end.outcome).expect("the ease ends once");
-        })),
-        ..AnimationOptions::new(Duration::from_secs(10))
-    };
-    test.map().update_camera(&mln_map::CameraUpdate {
+    let animation = AnimationOptions::new(Duration::from_secs(10));
+    let command = test.map().update_camera(&mln_map::CameraUpdate {
         mode: mln_map::CameraUpdateMode::Ease,
         camera: CameraOptions { zoom: Some(10.0), ..Default::default() },
         animation,
         ..mln_map::CameraUpdate::default()
     });
-    assert!(test.map().in_transition());
+    assert!(test.map().snapshot().transition_in_progress);
 
     let position = [0.25, 0.25, 0.01];
     test.map().set_free_camera_options(&mln_map::FreeCameraOptions { position: Some(position), orientation: None });
-    assert_eq!(ended.get(), Some(&mln_map::TransitionOutcome::Cancelled));
-    assert!(!test.map().in_transition());
+    let ended: Vec<_> =
+        test.map().drain_command_ends().filter(|end| end.command == command).map(|end| end.end.outcome).collect();
+    assert_eq!(ended, [mln_map::TransitionOutcome::Cancelled]);
+    assert!(!test.map().snapshot().transition_in_progress);
     let placed = test.map().snapshot().free_camera.position;
     for (placed, wanted) in placed.iter().zip(position) {
         assert_near(*placed, wanted, 1e-9);
     }
     // Looking straight down from a quarter of the world's width and height:
     // the center is 90° W, north of the equator.
-    let center = test.map().get_camera_options(None).center.unwrap();
+    let center = CameraOptions::from(test.map().snapshot().view.camera).center.unwrap();
     assert_near(center.longitude(), -90.0, 1e-6);
     assert!(center.latitude() > 0.0);
 
@@ -397,7 +392,7 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
         position: Some([f64::NAN, 0.0, 0.0]),
         orientation: None,
     });
-    assert_near(test.map().get_camera_options(None).center.unwrap().longitude(), -90.0, 1e-6);
+    assert_near(CameraOptions::from(test.map().snapshot().view.camera).center.unwrap().longitude(), -90.0, 1e-6);
 }
 
 // gtest: Map.CameraToLatLngBounds
@@ -407,7 +402,7 @@ fn camera_to_lat_lng_bounds() {
 
     test.map().jump_to(&CameraOptions { center: Some(ll(45.0, 90.0)), zoom: Some(16.0), ..Default::default() });
 
-    let size = test.map().get_map_options().size;
+    let size = test.map().snapshot().view.extent.size;
     let bounds = {
         let map = test.map();
         LatLngBounds::hull(
@@ -420,7 +415,7 @@ fn camera_to_lat_lng_bounds() {
         )
     };
 
-    let camera = test.map().get_camera_options(None);
+    let camera = CameraOptions::from(test.map().snapshot().view.camera);
 
     assert_eq!(bounds, test.map().lat_lng_bounds_for_camera(&camera).unwrap());
 
@@ -454,9 +449,9 @@ fn camera_to_lat_lng_bounds_unwrapped_with_rotation() {
         ..Default::default()
     });
 
-    let size = test.map().get_map_options().size;
+    let size = test.map().snapshot().view.extent.size;
 
-    let camera = test.map().get_camera_options(None);
+    let camera = CameraOptions::from(test.map().snapshot().view.camera);
 
     let map = test.map();
     for point in corners_and_center(size) {
@@ -476,9 +471,9 @@ fn camera_to_lat_lng_bounds_unwrapped_cross_date_line() {
 
     test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 180.0)), zoom: Some(16.0), ..Default::default() });
 
-    let size = test.map().get_map_options().size;
+    let size = test.map().snapshot().view.extent.size;
 
-    let camera = test.map().get_camera_options(None);
+    let camera = CameraOptions::from(test.map().snapshot().view.camera);
 
     let map = test.map();
     let points = corners_and_center(size);
@@ -552,7 +547,7 @@ fn pixel_for_lat_lng_after_zoom_around_a_point_across_the_antimeridian() {
     let place = test.map().lat_lng_for_pixel(&anchor, WrapMode::Wrapped).unwrap();
     test.map().jump_to(&CameraOptions { zoom: Some(6.0), anchor: Some(anchor), ..Default::default() });
 
-    assert!(test.map().get_camera_options(None).center.unwrap().longitude().abs() <= 180.0);
+    assert!(CameraOptions::from(test.map().snapshot().view.camera).center.unwrap().longitude().abs() <= 180.0);
     let point = test.map().pixel_for_lat_lng(&place);
     assert_near(anchor.x, point.x, 1e-6);
     assert_near(anchor.y, point.y, 1e-6);
@@ -573,7 +568,7 @@ fn pixel_for_lat_lng_with_the_center_past_the_antimeridian() {
         })
         .unwrap();
     test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 181.0)), zoom: Some(4.0), ..Default::default() });
-    assert_near(181.0, test.map().get_camera_options(None).center.unwrap().longitude(), 1e-9);
+    assert_near(181.0, CameraOptions::from(test.map().snapshot().view.camera).center.unwrap().longitude(), 1e-9);
 
     // A degree is 512 * 2^4 / 360 pixels at zoom 4.
     let degree = 512.0 * 16.0 / 360.0;
@@ -605,7 +600,7 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
             ..mln_map::CameraDelta::default()
         })
         .unwrap();
-    let center = test.map().get_camera_options(None).center.unwrap().longitude();
+    let center = CameraOptions::from(test.map().snapshot().view.camera).center.unwrap().longitude();
     assert!(center < -180.0, "{center}");
 
     let projection = MapProjection::new(&test.map());
@@ -648,7 +643,7 @@ fn offline() {
     // "Apple Paravirtual device", where a few labels' glyphs land on other
     // labels (image difference 0.0176). Placement is identical to a run on an
     // Apple GPU, where the image matches. Skip on that device, as C++ does.
-    let device = match test.frontend.device() {
+    let device = match test.frontend().device() {
         mln_runtime::Device::WebGpu(device) => Some(device.adapter_info().name),
         #[cfg(target_vendor = "apple")]
         mln_runtime::Device::Metal(device) => Some(device.name()),
@@ -705,19 +700,19 @@ fn offline() {
 fn set_style_default_camera() {
     let test = MapTest::new();
     test.load_json(&read_file("test/fixtures/api/empty.json"));
-    let mut camera = test.map().get_camera_options(None);
+    let mut camera = CameraOptions::from(test.map().snapshot().view.camera);
     assert_double_eq(camera.zoom.unwrap(), 0.0);
     assert_double_eq(camera.pitch.unwrap(), 0.0);
     assert_double_eq(camera.bearing.unwrap(), 0.0);
     assert_eq!(camera.center.unwrap(), LatLng::default());
 
     test.load_json(&read_file("test/fixtures/api/empty-zoomed.json"));
-    camera = test.map().get_camera_options(None);
+    camera = CameraOptions::from(test.map().snapshot().view.camera);
     assert_double_eq(camera.zoom.unwrap(), 0.0);
 
     let default_camera = test.map().style().get_default_camera();
     test.map().jump_to(&default_camera);
-    camera = test.map().get_camera_options(None);
+    camera = CameraOptions::from(test.map().snapshot().view.camera);
     assert_double_eq(camera.zoom.unwrap(), 0.5);
 }
 
@@ -727,7 +722,7 @@ fn projection_mode() {
     let test = MapTest::new();
 
     test.map().set_projection_mode(&ProjectionMode::default().with_axonometric(true).with_x_skew(1.0).with_y_skew(0.0));
-    let options = test.map().get_projection_mode();
+    let options = test.map().snapshot().view.projection_mode;
 
     assert!(options.axonometric.unwrap());
     assert_eq!(options.x_skew.unwrap(), 1.0);
@@ -775,19 +770,22 @@ fn map_options() {
     let pixel_ratio = 2.0;
     let test = MapTest::with_mode(pixel_ratio, MapMode::Continuous);
 
-    test.map().set_north_orientation(NorthOrientation::Rightwards);
-    test.map().set_constrain_mode(ConstrainMode::None);
-    test.map().set_viewport_mode(ViewportMode::FlippedY);
+    let viewport = Viewport {
+        north_orientation: NorthOrientation::Rightwards,
+        constrain_mode: ConstrainMode::None,
+        viewport_mode: ViewportMode::FlippedY,
+        ..test.map().snapshot().view.viewport
+    };
+    test.map().set_viewport(&viewport);
     let size = Size::new(512, 512);
     test.map().set_size(size).unwrap();
 
-    let options = test.map().get_map_options();
-    assert_eq!(options.map_mode, MapMode::Continuous);
-    assert_eq!(options.viewport_mode, ViewportMode::FlippedY);
-    assert_eq!(options.constrain_mode, ConstrainMode::None);
-    assert_eq!(options.north_orientation, NorthOrientation::Rightwards);
-    assert_eq!(options.size, size);
-    assert_eq!(options.pixel_ratio, pixel_ratio);
+    let view = test.map().snapshot().view;
+    assert_eq!(view.viewport.viewport_mode, ViewportMode::FlippedY);
+    assert_eq!(view.viewport.constrain_mode, ConstrainMode::None);
+    assert_eq!(view.viewport.north_orientation, NorthOrientation::Rightwards);
+    assert_eq!(view.extent.size, size);
+    assert_eq!(view.extent.scale_factor, f64::from(pixel_ratio));
 }
 
 // gtest: Map.DefaultMapOptions
@@ -795,15 +793,13 @@ fn map_options() {
 fn default_map_options() {
     let test = MapTest::new();
 
-    let options = test.map().get_map_options();
-    assert_eq!(options.map_mode, MapMode::Static);
-    assert_eq!(options.viewport_mode, ViewportMode::Default);
-    assert_eq!(options.constrain_mode, ConstrainMode::HeightOnly);
-    assert_eq!(options.north_orientation, NorthOrientation::Upwards);
-    assert!(options.cross_source_collisions);
-    assert_eq!(options.size.width, 256);
-    assert_eq!(options.size.height, 256);
-    assert_eq!(options.pixel_ratio, 1.0);
+    let view = test.map().snapshot().view;
+    assert_eq!(view.viewport.viewport_mode, ViewportMode::Default);
+    assert_eq!(view.viewport.constrain_mode, ConstrainMode::HeightOnly);
+    assert_eq!(view.viewport.north_orientation, NorthOrientation::Upwards);
+    assert_eq!(view.extent.size.width, 256);
+    assert_eq!(view.extent.size.height, 256);
+    assert_eq!(view.extent.scale_factor, 1.0);
 }
 
 // gtest: Map.SetStyleInvalidJSON
@@ -1259,7 +1255,7 @@ fn continuous_rendering() {
 
     let timer = Rc::new(Timer::new(&run_loop));
 
-    let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
 
     let observer = Rc::new(StubMapObserver::default());
     {
@@ -1278,7 +1274,7 @@ fn continuous_rendering() {
     }
 
     let map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Continuous, size: frontend.get_size(), ..Default::default() },
+        MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
@@ -1288,7 +1284,8 @@ fn continuous_rendering() {
     .unwrap();
     frontend.attach(&map);
     let map = Rc::new(RefCell::new(map));
-    let _events = observer.observe(&map);
+    let frontend = Rc::new(RefCell::new(frontend));
+    let _events = observer.observe(&map, Some(&frontend));
     map.borrow_mut().style_mut().load_json(&read_file("test/fixtures/api/water.json"));
 
     run_loop.run();
@@ -1638,9 +1635,9 @@ fn globe_image_source_below_zoom_zero() {
     test.map().style_mut().add_source(Box::new(source)).unwrap();
     test.map().style_mut().add_layer(Box::new(RasterLayer::new("raster", "image")), None).unwrap();
     test.map().jump_to(&CameraOptions { center: Some(ll(80.0, 0.0)), zoom: Some(-1.5), ..Default::default() });
-    assert_near(-1.5, test.map().get_camera_options(None).zoom.unwrap(), 1e-9);
+    assert_near(-1.5, CameraOptions::from(test.map().snapshot().view.camera).zoom.unwrap(), 1e-9);
     let image = test.render().image;
-    assert_eq!(test.frontend.get_size().width, image.size.width);
+    assert_eq!(test.frontend().size().width, image.size.width);
 }
 
 // https://github.com/maplibre/maplibre-native/pull/4753
@@ -1658,7 +1655,7 @@ fn image_source_beyond_mercator_latitudes() {
     test.map().style_mut().add_layer(Box::new(RasterLayer::new("image", "image")), None).unwrap();
 
     // Passes, if rendering a frame doesn't crash.
-    test.frontend.render_frame();
+    test.frontend().render_frame();
 }
 
 // An image source without a url starts empty: it requests nothing and draws
@@ -1906,7 +1903,7 @@ fn reduce_memory_use_removes_unused_requested_images() {
     test.map().style_mut().add_image(image("other-icon", false));
     test.render();
     let reduce_memory_use = || {
-        test.frontend.with_renderer(Renderer::reduce_memory_use);
+        test.frontend().renderer().reduce_memory_use();
         test.run_loop.run_once();
         let map = test.map();
         ["kept-icon", "dropped-icon", "other-icon"].map(|id| map.style().get_image(id).is_some())
@@ -2184,7 +2181,7 @@ fn globe_prefetch_requests_coarser_tiles() {
 #[test]
 fn globe_tile_drawn_for_its_children_meets_finer_tiles_without_a_gap() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
-    test.frontend.clone().set_size(Size::new(512, 512));
+    test.frontend().set_size(Size::new(512, 512));
     test.map().set_size(Size::new(512, 512)).unwrap();
     test.load_json(
         r#"{"version": 8, "projection": {"type": "vertical-perspective"},
@@ -2252,7 +2249,7 @@ fn globe_tile_drawn_for_its_children_meets_finer_tiles_without_a_gap() {
     test.map().jump_to(&CameraOptions { zoom: Some(8.2), ..Default::default() });
     run_with_timeout(&test.run_loop, 60);
 
-    let image = { test.frontend.read_still_image() };
+    let image = { test.frontend().read_still_image() };
     let background = image.data.as_chunks::<4>().0.iter().filter(|pixel| pixel[0] > 128 && pixel[2] < 128).count();
     assert_eq!(0, background);
 }
@@ -2324,14 +2321,15 @@ fn expired_sprite_sheet() {
     let run_loop = RunLoop::new();
     let (file_source, dbfs) = loader_with_database(":memory:", ".");
     let observer = Rc::new(StubMapObserver::default());
-    let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
     let options =
-        MapOptions { map_mode: MapMode::Continuous, size: frontend.get_size(), pixel_ratio: 1.0, ..Default::default() };
+        MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), pixel_ratio: 1.0, ..Default::default() };
     let map = Map::with_file_source(file_source, options, &run_loop).unwrap();
     frontend.attach(&map);
     let updates = map.update_reader();
     let map = Rc::new(RefCell::new(map));
-    let _events = observer.observe(&map);
+    let frontend = Rc::new(RefCell::new(frontend));
+    let _events = observer.observe(&map, Some(&frontend));
 
     // The server's own address replaces 127.0.0.1:3000 in the fixtures, as in
     // what it serves.
@@ -2490,7 +2488,7 @@ fn keep_render_data() {
     requests_count.set(0);
     // Clear render data.
     for i in 1..=iterations {
-        test.frontend.with_renderer(Renderer::clear_data);
+        test.frontend().renderer().clear_data();
         test.render();
         assert_eq!(resources_count * i, requests_count.get());
     }
@@ -2537,11 +2535,11 @@ fn disabled_placed_symbol_data() {
     });
 
     test.map().style_mut().load_url("https://example.com/maps/streets");
-    let viewport_size = test.frontend.get_size();
-    test.frontend.with_renderer(|renderer| renderer.collect_placed_symbol_data(true));
+    let viewport_size = test.frontend().size();
+    test.frontend().renderer().collect_placed_symbol_data(true);
     test.render();
 
-    let placed_symbols = test.frontend.with_renderer(|renderer| renderer.get_placed_symbols_data());
+    let placed_symbols = test.frontend().renderer().get_placed_symbols_data();
     assert_ne!(placed_symbols, Vec::<mln_renderer::text::placement::PlacedSymbolData>::new());
 
     let mut placed_text_inside_tile = 0;
@@ -2588,11 +2586,11 @@ fn disabled_placed_symbol_data() {
     assert_eq!(29, placed_icon);
 
     assert_eq!(50, placed_total);
-    test.frontend.with_renderer(|renderer| renderer.collect_placed_symbol_data(false));
+    test.frontend().renderer().collect_placed_symbol_data(false);
     test.render();
 
     assert_eq!(
-        test.frontend.with_renderer(|renderer| renderer.get_placed_symbols_data()),
+        test.frontend().renderer().get_placed_symbols_data(),
         Vec::<mln_renderer::text::placement::PlacedSymbolData>::new()
     );
 }
@@ -2789,27 +2787,27 @@ fn still_image_retries_failed_glyph_range() {
     }"#,
     );
     let labels = |test: &MapTest| {
-        let size = test.frontend.get_size();
+        let size = test.frontend().size();
         let center = ScreenCoordinate::new(f64::from(size.width) / 2.0, f64::from(size.height) / 2.0);
         let options = mln_renderer::query::RenderedQueryOptions::default();
-        test.frontend
-            .with_renderer(|renderer| renderer.query_rendered_features_at_point(&center, &options))
-            .unwrap()
-            .len()
+        test.frontend().renderer().query_rendered_features_at_point(&center, &options).unwrap().len()
     };
 
     assert_eq!(test.try_render().err().map(|e| e.message).as_deref(), Some("failed"));
-    assert_eq!(requests.get(), 1);
+    // The renderer takes the failure in at its next update; the stub file
+    // source may retry the request before then.
+    let failed = requests.get();
+    assert!(failed >= 1);
     assert_eq!(labels(&test), 0);
 
     // The tile laid out without the range lays out again with it.
     failing.set(false);
     assert!(test.try_render().is_ok());
-    assert_eq!(requests.get(), 2);
+    assert_eq!(requests.get(), failed + 1);
     assert_eq!(labels(&test), 1);
 
     assert!(test.try_render().is_ok());
-    assert_eq!(requests.get(), 2);
+    assert_eq!(requests.get(), failed + 1);
 }
 
 /// Answers every tile request with a server error.
@@ -2840,22 +2838,19 @@ fn still_image_after_tile_error() {
     // A new layer relays the errored tile out. The next still image finishes,
     // and as it retries the tile, it reports the tile's error again.
     test.map().style_mut().add_layer(Box::new(LineLayer::new("line", "mapbox")), None).unwrap();
-    let result: Rc<RefCell<Option<Result<(), mln_util::Error>>>> = Rc::new(RefCell::new(None));
-    {
-        let result = Rc::clone(&result);
-        let run_loop = test.run_loop.clone();
-        test.map().render_still(Box::new(move |outcome| {
-            *result.borrow_mut() = Some(outcome);
-            run_loop.stop();
-        }));
-    }
-    let timeout = Timer::new(&test.run_loop);
-    {
-        let run_loop = test.run_loop.clone();
-        timeout.start(Duration::from_secs(5), Duration::ZERO, move || run_loop.stop());
-    }
-    test.run_loop.run();
-    let result = result.borrow_mut().take().expect("the still image did not finish");
+    test.map().process_events();
+    test.map().render_still().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let result = loop {
+        test.map().process_events();
+        if let Some(result) = test.map().take_still_image() {
+            break result;
+        }
+        assert!(std::time::Instant::now() < deadline, "the still image did not finish");
+        if !test.run_loop.run_once() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
     assert_eq!(result.err().map(|e| e.message).as_deref(), Some("Tile failed"));
 }
 
@@ -3039,7 +3034,7 @@ fn observe_tile_lifecycle() {
 
     let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
     let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
@@ -3146,7 +3141,7 @@ fn empty_placement_does_not_request_repaint() {
     // Reuse the same update timestamp to stay within the placement interval.
     for frame in 0..2 {
         status.set(None);
-        test.frontend.render_frame();
+        test.frontend().render_frame();
         test.observer.dispatch_events(&test.map);
         let value = status.take().expect("rendered a frame");
         assert!(!value.needs_repaint, "frame {frame}");
@@ -3164,7 +3159,7 @@ fn empty_placement_does_not_request_repaint() {
     }
     test.run_loop.run_once();
     status.set(None);
-    test.frontend.render_frame();
+    test.frontend().render_frame();
     test.observer.dispatch_events(&test.map);
     let value = status.take().expect("rendered a frame");
     assert!(value.needs_repaint);
@@ -3282,7 +3277,7 @@ fn globe_hand_off_keeps_tiles() {
             asset_path: asset_path.to_str().expect("asset path").to_owned(),
             ..ResourceOptions::default()
         })),
-        MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &run_loop,
     )
     .unwrap();
@@ -3319,7 +3314,7 @@ fn globe_keeps_its_tiles_across_the_antimeridian() {
     // The globe's zoom-0 tile takes the wrap of the world copy the center is in, so it changes wrap whenever the
     // center crosses the antimeridian. It is the same piece of the sphere in either, and must not be parsed again.
     let test = MapTest::new();
-    test.frontend.clone().set_size(Size::new(512, 512));
+    test.frontend().set_size(Size::new(512, 512));
     test.map().set_size(Size::new(512, 512)).unwrap();
     test.load_json(
         r#"{"version": 8, "projection": {"type": "globe"},
@@ -3369,9 +3364,9 @@ fn globe_set_bounds_keeps_a_zoom_the_globe_allows() {
     let test = MapTest::new();
     test.load_json(r#"{"version":8,"projection":{"type":"vertical-perspective"},"sources":{},"layers":[]}"#);
     test.map().jump_to(&CameraOptions { center: Some(ll(70.0, 0.0)), zoom: Some(-1.5), ..Default::default() });
-    assert_near(-1.5, test.map().get_camera_options(None).zoom.unwrap(), 1e-9);
+    assert_near(-1.5, CameraOptions::from(test.map().snapshot().view.camera).zoom.unwrap(), 1e-9);
     test.map().set_bounds(&BoundOptions { min_zoom: Some(0.0), ..Default::default() }).unwrap();
-    assert_near(-1.5, test.map().get_camera_options(None).zoom.unwrap(), 1e-9);
+    assert_near(-1.5, CameraOptions::from(test.map().snapshot().view.camera).zoom.unwrap(), 1e-9);
 }
 
 // gtest: Map.GlobeBoundsForCamera
@@ -3543,7 +3538,7 @@ fn set_bounds_lifts_the_zoom_to_a_minimum_above_the_maximum() {
     test.map().set_bounds(&BoundOptions { max_zoom: Some(8.0), ..Default::default() }).unwrap();
     test.map().jump_to(&CameraOptions { zoom: Some(6.0), ..Default::default() });
     test.map().set_bounds(&BoundOptions { min_zoom: Some(10.0), max_zoom: Some(16.0), ..Default::default() }).unwrap();
-    assert_near(10.0, test.map().get_camera_options(None).zoom.unwrap(), 1e-9);
+    assert_near(10.0, CameraOptions::from(test.map().snapshot().view.camera).zoom.unwrap(), 1e-9);
 }
 
 // gtest: Map.GlobeBoundedSourceLoadsFinerTiles
@@ -3573,7 +3568,7 @@ fn globe_bounded_source_loads_finer_tiles() {
             asset_path: asset_path.to_str().expect("asset path").to_owned(),
             ..ResourceOptions::default()
         })),
-        MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &run_loop,
     )
     .unwrap();
@@ -3622,7 +3617,7 @@ fn line_layer_depth_distribution() {
     let colors = ["rgba(255,0,0,1)", "rgba(0,255,0,1)", "rgba(0,0,255,1)"];
     let bounds = {
         let map = test.map();
-        map.lat_lng_bounds_for_camera(&map.get_camera_options(None)).unwrap()
+        map.lat_lng_bounds_for_camera(&CameraOptions::from(map.snapshot().view.camera)).unwrap()
     };
 
     let get_source = |index: u32| {
@@ -3662,7 +3657,8 @@ fn set_frustum_offset() {
 
     check_image("test/fixtures/map/setFrustumOffset/before", &test.render().image, 0.0006, 0.1);
 
-    test.map().set_frustum_offset(&insets(50.0, 50.0, 50.0, 50.0));
+    let viewport = Viewport { frustum_offset: insets(50.0, 50.0, 50.0, 50.0), ..test.map().snapshot().view.viewport };
+    test.map().set_viewport(&viewport);
 
     check_image("test/fixtures/map/setFrustumOffset/after", &test.render().image, 0.0006, 0.1);
 }
@@ -3678,7 +3674,7 @@ fn red_image(width: u32, height: u32) -> PremultipliedImage {
 /// glyph requests.
 fn geojson_symbol_map() -> (MapTest, Rc<Cell<u32>>) {
     let test = MapTest::new();
-    test.frontend.clone().set_size(Size::new(512, 512));
+    test.frontend().set_size(Size::new(512, 512));
     test.map().set_size(Size::new(512, 512)).unwrap();
 
     let glyph_requests = Rc::new(Cell::new(0));
@@ -3827,9 +3823,10 @@ fn late_style_image_renders_image_added_after_layout_synchronous_with_text() {
 #[test]
 fn unrelated_image_preserves_tile_layout_and_cache() {
     let test = MapTest::new();
-    test.frontend.clone().set_size(Size::new(128, 128));
+    test.frontend().set_size(Size::new(128, 128));
     test.map().set_size(Size::new(128, 128)).unwrap();
-    test.map().set_prefetch_zoom_delta(0);
+    let tile = TileSettings { prefetch_zoom_delta: 0, ..test.map().snapshot().tile };
+    test.map().set_tile_settings(&tile);
     test.load_json(
         r#"{
         "version": 8,
@@ -3870,7 +3867,7 @@ fn unrelated_image_preserves_tile_layout_and_cache() {
 #[test]
 fn coalesced_image_added_after_layout_replaces_fallback() {
     let test = MapTest::new();
-    test.frontend.clone().set_size(Size::new(128, 128));
+    test.frontend().set_size(Size::new(128, 128));
     test.map().set_size(Size::new(128, 128)).unwrap();
     test.load_json(
         r#"{
@@ -3962,7 +3959,7 @@ fn feature_state_changes_rendered_style() {
     // frame, with no style edit
     let mut active = mln_style::expression::expression::FeatureState::new();
     active.insert("active".into(), Value::Bool(true));
-    test.frontend.with_renderer(|renderer| renderer.set_feature_state("fs", None, "1", &active));
+    test.frontend().renderer().set_feature_state("fs", None, "1", &active);
     {
         let result = test.render();
         assert!(center_channel(&result.image, 0) > 200, "red channel (active)");
@@ -3970,7 +3967,7 @@ fn feature_state_changes_rendered_style() {
     }
 
     // Removing the state reverts the rendered fill to blue.
-    test.frontend.with_renderer(|renderer| renderer.remove_feature_state("fs", None, Some("1"), None));
+    test.frontend().renderer().remove_feature_state("fs", None, Some("1"), None);
     {
         let result = test.render();
         assert!(center_channel(&result.image, 0) < 40, "red channel (removed)");
@@ -4039,11 +4036,11 @@ fn feature_state(key: &str) -> mln_style::expression::expression::FeatureState {
 }
 
 fn set_state(test: &MapTest, feature_id: &str, state: &mln_style::expression::expression::FeatureState) {
-    test.frontend.with_renderer(|renderer| renderer.set_feature_state("fs", None, feature_id, state));
+    test.frontend().renderer().set_feature_state("fs", None, feature_id, state);
 }
 
 fn remove_state(test: &MapTest, feature_id: Option<&str>, state_key: Option<&str>) {
-    test.frontend.with_renderer(|renderer| renderer.remove_feature_state("fs", None, feature_id, state_key));
+    test.frontend().renderer().remove_feature_state("fs", None, feature_id, state_key);
 }
 
 // gtest: Map.FeatureStateRemovalAndChangeOfAnotherFeatureBeforeOneRender
@@ -4195,14 +4192,14 @@ fn frame_status_carries_rendering_stats() {
     assert!(stats.num_frames > 0);
     assert!(stats.num_draw_calls > 0);
     assert!(stats.total_draw_calls >= stats.num_draw_calls);
-    assert_eq!(**stats, test.frontend.rendering_stats());
+    assert_eq!(**stats, test.frontend().rendering_stats());
 }
 
 /// Renders a frame and returns the RGB of the pixel at the centre of the map.
 fn render_center_pixel(test: &MapTest) -> [u8; 3] {
     test.map().trigger_repaint();
-    test.frontend.render_frame();
-    let [r, g, b, _] = center_pixel(&test.frontend.read_still_image());
+    test.frontend().render_frame();
+    let [r, g, b, _] = center_pixel(&test.frontend().read_still_image());
     [r, g, b]
 }
 
@@ -4211,8 +4208,8 @@ fn render_center_pixel(test: &MapTest) -> [u8; 3] {
 fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
     const SIDE: u32 = 24;
 
-    let mut test = MapTest::with_mode(1.0, MapMode::Continuous);
-    test.frontend.set_size(Size::new(256, 256));
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.frontend().set_size(Size::new(256, 256));
     test.map().set_size(Size::new(256, 256)).unwrap();
     test.load_json(
         r#"{"version": 8, "projection": {"type": "vertical-perspective"},
@@ -4225,7 +4222,7 @@ fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
     test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(1.0), ..Default::default() });
 
     let red_pixels = |test: &MapTest| {
-        let image = { test.frontend.read_still_image() };
+        let image = { test.frontend().read_still_image() };
         image.data.as_chunks::<4>().0.iter().filter(|pixel| pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60).count()
     };
 
@@ -4350,6 +4347,15 @@ fn tile_selection_options_publish_updates() {
         assert!(Arc::ptr_eq(&after, &parameters()));
     }
 
+    /// Sets one tile setting, through the setter of them all.
+    fn set<T>(change: impl Fn(&mut TileSettings, T)) -> impl Fn(&mut Map, T) {
+        move |map, value| {
+            let mut tile = map.snapshot().tile;
+            change(&mut tile, value);
+            map.set_tile_settings(&tile);
+        }
+    }
+
     let run_loop = RunLoop::new();
     let mut map = Map::with_file_source(
         Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
@@ -4362,12 +4368,14 @@ fn tile_selection_options_publish_updates() {
     map.process_events();
     assert!(updates.latest().is_some());
 
-    check(&mut map, &updates, Map::set_prefetch_zoom_delta, |p| p.prefetch_zoom_delta, 2u8);
-    check(&mut map, &updates, Map::set_tile_lod_min_radius, |p| p.tile_lod_min_radius, 4.0);
-    check(&mut map, &updates, Map::set_tile_lod_scale, |p| p.tile_lod_scale, 2.0);
-    check(&mut map, &updates, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
-    check(&mut map, &updates, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
-    check(&mut map, &updates, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
+    check(&mut map, &updates, set(|t, v| t.prefetch_zoom_delta = v), |p| p.prefetch_zoom_delta, 2u8);
+    check(&mut map, &updates, set(|t, v| t.lod_min_radius = v), |p| p.tile_lod_min_radius, 4.0);
+    check(&mut map, &updates, set(|t, v| t.lod_scale = v), |p| p.tile_lod_scale, 2.0);
+    // 45° converts to radians and back exactly.
+    let degrees = |p: &UpdateParameters| mln_math::rad2deg(p.tile_lod_pitch_threshold);
+    check(&mut map, &updates, set(|t, v| t.lod_pitch_threshold = v), degrees, 45.0);
+    check(&mut map, &updates, set(|t, v| t.lod_zoom_shift = v), |p| p.tile_lod_zoom_shift, 1.0);
+    check(&mut map, &updates, set(|t, v| t.lod_mode = v), |p| p.tile_lod_mode, TileLodMode::Distance);
 }
 
 const RED: [u8; 4] = [255, 0, 0, 255];
@@ -4414,11 +4422,11 @@ fn render_until_idle(test: &MapTest) {
 /// land.
 fn render_frame(test: &MapTest) {
     test.map().process_events();
-    test.frontend.render_frame();
+    test.frontend().render_frame();
 }
 
 fn center_pixel_of(test: &MapTest) -> [u8; 4] {
-    center_pixel(&test.frontend.read_still_image())
+    center_pixel(&test.frontend().read_still_image())
 }
 
 // gtest: Map.ImageUpdatedAgainBeforeResizeRelayout
@@ -4746,8 +4754,9 @@ fn inactive_layer_resources(stats: &mln_gfx::rendering_stats::RenderingStats) ->
 // the tiles they last rendered.
 fn releases_tiles_outside_zoom_range(param: InactiveLayerCase) {
     let test = MapTest::new();
-    test.map().set_prefetch_zoom_delta(0);
-    test.frontend.with_renderer(|renderer| renderer.set_tile_cache_enabled(false));
+    let tile = TileSettings { prefetch_zoom_delta: 0, ..test.map().snapshot().tile };
+    test.map().set_tile_settings(&tile);
+    test.frontend().renderer().set_tile_cache_enabled(false);
     test.file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
     let small_tile = Arc::new(mln_image::encode_png(&PremultipliedImage::new(Size::new(4, 4))));
     let large_tile = Arc::new(read_bytes("test/fixtures/resources/raster.tile"));

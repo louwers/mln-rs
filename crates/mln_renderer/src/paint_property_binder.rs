@@ -22,8 +22,9 @@ use mln_style::evaluated::{Evaluated, Faded};
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property_expression::PropertyExpression;
 use mln_style_types::image::ImagePositions;
+use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryTileFeature, GeometryTileLayer};
+use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
 use mln_vec_map::VecMap;
@@ -368,7 +369,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
         states: &crate::bucket::FeatureStates,
-        layer: &dyn GeometryTileLayer,
+        layer: &TileLayer<'_>,
     ) {
         let Self { kind, statistics } = self;
         let (feature_map, vertex_data) = match &*kind {
@@ -384,13 +385,12 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 continue;
             };
             for pos in positions {
-                // The worker got the feature from the same data. A value
-                // that C++ throws for (out of the render call) reads as
-                // missing here.
-                let Ok(feature) = layer.get_feature(pos.feature_index) else {
+                // The worker read the feature from the same data, so it
+                // can be read again.
+                let Ok(feature) = layer.feature(pos.feature_index) else {
                     continue;
                 };
-                kind.update_vertex_vector(statistics, buffer, vertex_offset, pos, &*feature, state);
+                kind.update_vertex_vector(statistics, buffer, vertex_offset, pos, &feature, state);
             }
         }
     }
@@ -635,7 +635,7 @@ pub(crate) trait PaintPropertyBinderBase {
         &mut self,
         _buffer: &mut InterleavedVertexBuffer,
         _states: &crate::bucket::FeatureStates,
-        _layer: &dyn GeometryTileLayer,
+        _layer: &TileLayer<'_>,
     ) {
     }
     /// True if a feature state change rewrites this binder's vertex data.
@@ -673,7 +673,7 @@ impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
         states: &crate::bucket::FeatureStates,
-        layer: &dyn GeometryTileLayer,
+        layer: &TileLayer<'_>,
     ) {
         self.update_vertex_vectors(buffer, states, layer);
     }
@@ -831,7 +831,7 @@ macro_rules! paint_property_binders {
             pub(crate) fn update_vertex_vectors(
                 &mut self,
                 states: &$crate::bucket::FeatureStates,
-                layer: &dyn mln_tile_id::geometry_tile_data::GeometryTileLayer,
+                layer: &mln_tile::TileLayer<'_>,
                 _image_positions: &mln_style_types::image::ImagePositions,
             ) {
                 // Values that moved to the render thread don't depend on

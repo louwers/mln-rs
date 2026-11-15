@@ -1,13 +1,11 @@
 // Port-only tests: a malformed vector tile reaches the tile as its error
-// (`onTileError`), only where C++ throws, and never panics the tile worker.
+// (`onTileError`), and never panics the tile worker.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
-use mln_map::transform::{NullTransformObserver, Transform};
+use mln_actor::{RunLoop, TaggedScheduler, scheduler};
+use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
@@ -21,7 +19,6 @@ use mln_style::layers::{
 use mln_style::sources::tile_source::TileSource;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
@@ -31,8 +28,8 @@ use mln_util::tileset::PartialTileset;
 use proptest::prelude::*;
 use serde_json::json;
 
-use crate::image_manager::ImageManagerObserver;
-use crate::render_source::{self as render_source, RenderSourceObserver};
+use crate::render_source;
+use crate::tile::store::StoreEvent;
 use crate::tile_parameters::TileParameters;
 
 /// What the render source reported for the tile.
@@ -41,37 +38,6 @@ enum Outcome {
     Loaded,
     Error(String),
 }
-
-#[derive(Default)]
-struct Observer {
-    outcome: RefCell<Option<Outcome>>,
-    end: RefCell<Option<Box<dyn Fn()>>>,
-}
-
-impl Observer {
-    fn report(&self, outcome: Outcome) {
-        if self.outcome.borrow().is_none() {
-            *self.outcome.borrow_mut() = Some(outcome);
-            if let Some(end) = &*self.end.borrow() {
-                end();
-            }
-        }
-    }
-}
-
-impl RenderSourceObserver for Observer {
-    fn on_tile_changed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {
-        self.report(Outcome::Loaded);
-    }
-
-    fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, error: Error) {
-        self.report(Outcome::Error(error.to_string()));
-    }
-}
-
-struct AnswerMissingImages;
-
-impl ImageManagerObserver for AnswerMissingImages {}
 
 /// A layer of the given style JSON, as the worker gets it.
 fn layer(json: &serde_json::Value) -> Arc<dyn LayerProperties> {
@@ -94,8 +60,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..Default::default() };
     let run_loop = RunLoop::new();
     let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
-    let mut transform =
-        Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(0.0), ..Default::default() });
 
@@ -107,43 +72,22 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
         Some(response)
     });
 
-    let observer = Rc::new(Observer::default());
-    let handle = run_loop.handle();
-    *observer.end.borrow_mut() = Some(Box::new(move || handle.stop()));
-    let timeout = Timer::new(&run_loop);
-    {
-        let observer = Rc::clone(&observer);
-        timeout.start(Duration::from_secs(30), Duration::ZERO, move || {
-            observer.report(Outcome::Error("timeout".to_owned()));
-        });
-    }
-
     let source = TileSource::vector("source", None, tileset);
     mln_style::source::Source::load_description(&source, &*file_source, &run_loop);
     let base_impl = mln_style::source::Source::base_impl(&source);
-    let mut render_source = render_source::create(&base_impl);
-    render_source.set_observer(Rc::<Observer>::clone(&observer));
-    let file_source: Arc<dyn FileSource> = file_source;
-    // A loaded sprite with the icon "v" answers the symbol layer's request.
-    // The observer answers missing icons as Map::Impl does, and the timer
-    // stands in for the RenderOrchestrator updates that then notify the
-    // tile.
-    let image_manager = crate::image_manager::ImageManager::on(Some(run_loop.scheduler()));
-    image_manager.set_observer(Some(Rc::new(AnswerMissingImages)));
-    let frame = Timer::new(&run_loop);
-    {
-        let image_manager = Rc::clone(&image_manager);
-        frame.start(Duration::from_millis(10), Duration::from_millis(10), move || {
-            image_manager.notify_if_missing_image_added();
-        });
-    }
+    // A loaded sprite with the icon "v" answers the symbol layer's request,
+    // and missing icons stay missing.
+    let mut store = crate::tests::pool_store(&run_loop, &thread_pool);
     let mut icon = PremultipliedImage::new(Size::new(1, 1));
     icon.data.fill(255);
-    image_manager.add_image(Arc::new(
+    store.images_mut().add_image(Arc::new(
         ImageImpl::new("v".to_owned(), icon, 1.0, false, Vec::new(), Vec::new(), None, None, None).unwrap(),
     ));
-    image_manager.set_loaded(true);
+    store.images_mut().set_loaded(true);
+    let mut render_source = render_source::create(&base_impl, &mut store);
+    let file_source: Arc<dyn FileSource> = file_source;
     render_source.update(
+        &mut store,
         base_impl,
         layers,
         true,
@@ -153,7 +97,6 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: transform.get_state(),
             file_source: Some(file_source),
-            scheduler: run_loop.scheduler(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -165,20 +108,33 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: Rc::clone(&image_manager),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &run_loop),
-            dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
-            tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
-                thread_pool.clone(),
-            )),
-            thread_pool: thread_pool.clone(),
+            font_faces: None,
         },
     );
 
-    run_loop.run();
+    // What the renderer's updates do, until the tile shows its layout or
+    // fails.
+    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    let outcome = loop {
+        run_loop.run_once();
+        crate::tests::update(&mut store);
+        let outcome = store.take_events().into_iter().find_map(|event| match event {
+            StoreEvent::Changed => Some(Outcome::Loaded),
+            StoreEvent::Error { error, .. } => Some(Outcome::Error(error.to_string())),
+            StoreEvent::Action { .. } => None,
+        });
+        if let Some(outcome) = outcome {
+            break outcome;
+        }
+        if mln_util::time::Instant::now() > deadline {
+            break Outcome::Error("timeout".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    };
     drop(render_source);
+    drop(store);
     thread_pool.wait_for_empty();
-    observer.outcome.take().unwrap()
+    outcome
 }
 
 // protobuf encoding for hand-made tiles.
@@ -318,21 +274,16 @@ fn truncated_tile_is_a_tile_error() {
     assert_eq!(outcome, Outcome::Error("protobuf decode error: unexpected end of buffer".to_owned()));
 }
 
-// C++ throws from getValue inside the filter evaluation.
+// A feature's tags are checked when the feature is read, so a malformed one
+// fails the tile whether or not anything reads its values.
 #[test]
-fn bad_value_read_by_a_filter_is_a_tile_error() {
+fn bad_value_is_a_tile_error() {
     let mut json = json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" });
     json["filter"] = json!(["==", ["get", "k"], "v"]);
-    let outcome = load(tile_with_bad_value(), &[layer(&json)]);
-    assert_eq!(outcome, Outcome::Error("invalid value index 7".to_owned()));
-}
-
-// C++ reads the values lazily: the fill path reads none, so the tile loads.
-// (A line layer would fail: LineBucket::addFeature reads
-// "mapbox_clip_start", and getValue walks every tag.)
-#[test]
-fn bad_value_nothing_reads_is_not_an_error() {
-    assert_eq!(load(tile_with_bad_value(), &[fill_layer()]), Outcome::Loaded);
+    for layer in [layer(&json), fill_layer()] {
+        let outcome = load(tile_with_bad_value(), &[layer]);
+        assert_eq!(outcome, Outcome::Error("invalid value index 7".to_owned()));
+    }
 }
 
 /// A truncation or some overwritten bytes.
@@ -375,16 +326,14 @@ proptest! {
     }
 }
 
-// C++ throws out of querySourceFeatures for a value it can't read
-// (convertFeature reads the properties); the port returns the error.
+// querySourceFeatures returns the error of a feature it can't read.
 #[test]
 fn query_of_a_bad_value_is_an_error() {
-    use mln_tile_id::GeometryTileData;
-    let data = mln_tile::VectorMVTTileData::new(Arc::new(tile_with_bad_value()));
-    let layer = data.get_layer("l").unwrap().unwrap();
+    let data = mln_tile::TileData::Mvt(mln_tile::MvtTile::new(Arc::new(tile_with_bad_value())));
+    let layer = data.layer("l").unwrap().unwrap();
     let mut result = Vec::new();
-    let error = crate::tile::geometry_tile::query_layer_source_features(
-        &*layer,
+    let error = crate::tile::contents::query_layer_source_features(
+        &layer,
         &mut result,
         &crate::query::SourceQueryOptions::default(),
         None,

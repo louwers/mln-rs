@@ -1,139 +1,114 @@
-// The wire format is decoded by the `mlt-core` crate, not by a port of the
-// C++ decoder (about 70k lines), and is assumed correct. This module turns mlt-core's
-// columnar result into the C++ model, with the C++ behaviour that
-// VectorMLTTileData can observe:
+// MapLibre Tiles are decoded by the mlt-core crate. A tile's layers decode on
+// the first read, all at once, into columns the layer owns: mlt-core's
+// decoded layer borrows the tile's bytes, so it can't be kept beside them.
+// The geometry columns are mlt-core's own; the property columns are copied
+// out with one value or absence per feature. A feature is an index into the
+// columns, and reads its geometry from them when asked.
 //
-// - a layer with an unknown tag is skipped; any error fails the whole tile;
-// - with `supportFastPFOR == false`, an integer stream with the FastPFOR
-//   physical technique fails the tile ("FastPFOR decoding is not enabled");
-// - coordinates are `float`s converted from the int32 vertices;
-// - a polygon ring gets its first vertex appended only when the first and
-//   last differ (compared as floats);
-// - an empty line or ring at the start of the vertex buffer fails the tile
-//   ("vertexBuffer underflow": the C++ bounds check wraps);
-// - a multi-point without points is dropped from the layer (the C++ adds no
-//   geometry for it), which shifts the property index of later features;
-//   an id column whose length then differs fails the tile;
-// - the triangles of a tessellated (multi-)polygon are its slice of the index
-//   buffer, counted from the feature's first decoded vertex. Unlike the C++,
-//   which counts them as the tile stores its rings, without the closing
-//   vertices that decoding appends, this skips those vertices: otherwise
-//   the triangles of a polygon with several rings name the wrong vertices.
-// - property columns keep their presence: a value of an optional column is
-//   absent past its end, and a non-optional column shorter than the layer
-//   throws "Missing property value" when read (PresentProperties::getProperty);
-// - 8-bit integer columns fail the tile; strings of string columns lose a
-//   leading UTF-8 byte order mark (StringDecoder::view), those of shared
-//   dictionaries keep it; of two columns with the same name the first wins
-//   (std::unordered_map::insert).
-//
-// Where mlt-core rejects a tile that the C++ decoder reads (or the other way
-// round), the tile fails here too.
+// A tile mlt-core can't decode, and one that uses FastPFOR where it isn't
+// enabled, is logged and reads as a tile without layers.
 
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
+use feature::{Identifier, PropertyMap, Value};
+use mln_tile_id::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
+use mln_util::constants::EXTENT;
+use mln_util::geometry::FeatureType;
 use mln_util::hash::HashMap;
-use mlt_core::wire::{Analyze as _, ColumnDecl, LogicalEncoding, PhysicalEncoding};
-use mlt_core::{GeometryType as WireGeometryType, GeometryValues, ParsedLayer01, ParsedProperty};
+use mln_util::logging::{Event, Log};
+use mlt_core::wire::{Analyze as _, LogicalEncoding, PhysicalEncoding};
+use mlt_core::{GeometryType, GeometryValues, ParsedLayer01, ParsedProperty};
 
-/// A C++ exception from the decoder or from reading a property (all are
-/// `std::runtime_error`s); `what()` is the message. Messages of tiles that
-/// mlt-core rejects are mlt-core's.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{message}")]
-pub(crate) struct Error {
-    message: String,
+use crate::TileError;
+use crate::tile_data::FeatureGroups;
+
+struct MltData {
+    bytes: Arc<Vec<u8>>,
+    fast_pfor_enabled: bool,
+    /// The decoded layers, in tile order.
+    layers: OnceLock<Vec<Layer>>,
 }
 
-impl Error {
-    pub(crate) fn new(message: impl Into<String>) -> Self {
-        Error { message: message.into() }
+/// MapLibre Tile data. Cloning shares the bytes and the decoded layers.
+#[derive(Clone)]
+pub struct MltTile(Arc<MltData>);
+
+impl MltTile {
+    /// Tile data that decodes `bytes`; with `fast_pfor_enabled` false, a tile
+    /// that uses FastPFOR integer encoding has no layers.
+    #[must_use]
+    pub fn new(bytes: Arc<Vec<u8>>, fast_pfor_enabled: bool) -> Self {
+        MltTile(Arc::new(MltData { bytes, fast_pfor_enabled, layers: OnceLock::new() }))
+    }
+
+    /// The tile's bytes.
+    #[must_use]
+    pub fn bytes(&self) -> &Arc<Vec<u8>> {
+        &self.0.bytes
+    }
+
+    #[must_use]
+    pub fn fast_pfor_enabled(&self) -> bool {
+        self.0.fast_pfor_enabled
+    }
+
+    fn layers(&self) -> &[Layer] {
+        self.0.layers.get_or_init(|| {
+            decode(&self.0.bytes, self.0.fast_pfor_enabled).unwrap_or_else(|e| {
+                Log::warning(Event::ParseTile, format!("MLT parse failed: {e}"));
+                Vec::new()
+            })
+        })
+    }
+
+    /// The first layer named `name`.
+    pub(crate) fn layer(&self, name: &str) -> Option<MltLayer<'_>> {
+        self.layers().iter().find(|layer| layer.name == name).map(MltLayer)
+    }
+
+    /// The names of the tile's layers, in tile order, duplicates included.
+    #[cfg(test)]
+    pub(crate) fn layer_names(&self) -> Vec<String> {
+        self.layers().iter().map(|layer| layer.name.clone()).collect()
     }
 }
 
-impl From<mlt_core::MltError> for Error {
-    fn from(e: mlt_core::MltError) -> Self {
-        Error::new(e.to_string())
+/// Decodes the tile's layers; a layer of a version mlt-core reads but this
+/// doesn't is skipped.
+fn decode(data: &[u8], fast_pfor_enabled: bool) -> Result<Vec<Layer>, String> {
+    let error = |e: mlt_core::MltError| e.to_string();
+    let mut parser = mlt_core::Parser::default();
+    let mut decoder = mlt_core::Decoder::default();
+    let mut layers = Vec::new();
+    for layer in parser.parse_layers(data).map_err(error)? {
+        let mlt_core::Layer::Tag01(layer) = layer else {
+            continue;
+        };
+        if !fast_pfor_enabled && uses_fast_pfor(&layer) {
+            return Err("FastPFOR decoding is not enabled".to_owned());
+        }
+        layers.push(Layer::new(&layer.decode_all(&mut decoder).map_err(error)?)?);
     }
+    Ok(layers)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Coordinate {
-    pub(crate) x: f32,
-    pub(crate) y: f32,
+/// Whether an integer or vertex stream of the layer uses FastPFOR.
+fn uses_fast_pfor(layer: &mlt_core::Layer01<'_>) -> bool {
+    let mut found = false;
+    layer.for_each_stream(&mut |meta| {
+        found |= matches!(meta.encoding.physical, PhysicalEncoding::FastPFor(_))
+            && matches!(meta.encoding.logical, LogicalEncoding::Int(_) | LogicalEncoding::Vertex(_));
+    });
+    found
 }
 
-impl Coordinate {
-    /// Converts an int32 vertex to `f32` coordinates.
-    fn from_vertex(x: i32, y: i32) -> Self {
-        Coordinate { x: x as f32, y: y as f32 }
-    }
-}
-
-pub(crate) type CoordVec = Vec<Coordinate>;
-
-/// The data of the `mlt::geometry::Geometry` subclasses.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum Shape {
-    Point(Coordinate),
-    MultiPoint(CoordVec),
-    LineString(CoordVec),
-    Polygon(Vec<CoordVec>),
-    MultiLineString(Vec<CoordVec>),
-    MultiPolygon(Vec<Vec<CoordVec>>),
-}
-
-/// A feature's geometry: its type, data and triangle span.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Geometry {
-    pub(crate) shape: Shape,
-    /// The geometry's triangles, as a range of the layer's triangle buffer
-    /// ([`Layer::triangle_buffer`]): three indices per triangle into the
-    /// vertices of the shape's rings, closing vertices included, numbered
-    /// from 0 across the rings in order. `None` for an empty span, and for a
-    /// span that names a vertex outside the feature.
-    pub(crate) triangles: Option<Range<usize>>,
-}
-
-/// The scalar type of a property column.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ScalarType {
-    Boolean,
-    Int32,
-    UInt32,
-    Int64,
-    UInt64,
-    Float,
-    Double,
-    String,
-}
-
-/// A property value: the alternatives of C++'s `mlt::Property` that a
-/// column produces (its `std::optional<T>` and `nullptr_t` ones never are).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Property<'a> {
-    Bool(bool),
-    I32(i32),
-    U32(u32),
-    I64(i64),
-    U64(u64),
-    F32(f32),
-    F64(f64),
-    Str(&'a str),
-}
-
-/// One value per feature (`None`: absent), the C++ `PropertyVec` with the
-/// present bits applied.
-#[derive(Clone, Debug, PartialEq)]
-enum PropertyVec {
+/// A property column: each feature's value, `None` for an absent one.
+enum Values {
     Bool(Vec<Option<bool>>),
-    I32(Vec<Option<i32>>),
-    U32(Vec<Option<u32>>),
-    I64(Vec<Option<i64>>),
-    U64(Vec<Option<u64>>),
-    F32(Vec<Option<f32>>),
-    F64(Vec<Option<f64>>),
+    Int(Vec<Option<i64>>),
+    Uint(Vec<Option<u64>>),
+    Double(Vec<Option<f64>>),
     /// The strings back to back, and each feature's byte range in them.
     Str {
         data: String,
@@ -141,609 +116,454 @@ enum PropertyVec {
     },
 }
 
-impl PropertyVec {
-    fn len(&self) -> usize {
-        match self {
-            PropertyVec::Bool(v) => v.len(),
-            PropertyVec::I32(v) => v.len(),
-            PropertyVec::U32(v) => v.len(),
-            PropertyVec::I64(v) => v.len(),
-            PropertyVec::U64(v) => v.len(),
-            PropertyVec::F32(v) => v.len(),
-            PropertyVec::F64(v) => v.len(),
-            PropertyVec::Str { spans, .. } => spans.len(),
-        }
-    }
-
-    fn get(&self, i: usize) -> Option<Property<'_>> {
-        match self {
-            PropertyVec::Bool(v) => v[i].map(Property::Bool),
-            PropertyVec::I32(v) => v[i].map(Property::I32),
-            PropertyVec::U32(v) => v[i].map(Property::U32),
-            PropertyVec::I64(v) => v[i].map(Property::I64),
-            PropertyVec::U64(v) => v[i].map(Property::U64),
-            PropertyVec::F32(v) => v[i].map(Property::F32),
-            PropertyVec::F64(v) => v[i].map(Property::F64),
-            PropertyVec::Str { data, spans } => {
-                spans[i].map(|(start, end)| Property::Str(&data[start as usize..end as usize]))
-            }
-        }
-    }
-
-    fn strings<'a>(len: usize, get: impl Fn(usize) -> Option<&'a str>, strip_bom: bool) -> PropertyVec {
+impl Values {
+    fn strings<'a>(len: usize, get: impl Fn(usize) -> Option<&'a str>) -> Values {
         let mut data = String::new();
-        let mut spans = Vec::with_capacity(len);
-        for i in 0..len {
-            spans.push(get(i).map(|s| {
-                // StringDecoder::view: "Drop the useless codepoint produced
-                // when a UTF-16 Byte-Order-Mark is included in the conversion
-                // to UTF-8".
-                let s = if strip_bom { s.strip_prefix('\u{feff}').unwrap_or(s) } else { s };
-                let start = data.len() as u32;
-                data.push_str(s);
-                (start, data.len() as u32)
-            }));
+        let spans = (0..len)
+            .map(|i| {
+                get(i).map(|s| {
+                    let start = data.len() as u32;
+                    data.push_str(s);
+                    (start, data.len() as u32)
+                })
+            })
+            .collect();
+        Values::Str { data, spans }
+    }
+
+    /// The value of feature `i`; `None` for an absent value, also past the
+    /// end of the column.
+    fn get(&self, i: usize) -> Option<Value> {
+        match self {
+            Values::Bool(v) => v.get(i).copied().flatten().map(Value::Bool),
+            Values::Int(v) => v.get(i).copied().flatten().map(Value::Int),
+            Values::Uint(v) => v.get(i).copied().flatten().map(Value::Uint),
+            Values::Double(v) => v.get(i).copied().flatten().map(Value::Double),
+            Values::Str { data, spans } => spans
+                .get(i)
+                .copied()
+                .flatten()
+                .map(|(start, end)| Value::String(data[start as usize..end as usize].to_owned())),
         }
-        PropertyVec::Str { data, spans }
     }
 }
 
-/// A property column.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct PresentProperties {
-    type_: ScalarType,
-    /// The column has a present stream (C++ `physicalIndexes` is set).
-    optional: bool,
-    values: PropertyVec,
-    /// Port-only: the codes of a string column ([`PresentProperties::codes`]).
-    string_codes: StringCodes,
+struct Column {
+    values: Values,
+    /// Each string's code, numbered by first use, made by the first
+    /// [`Column::codes`]; `None` if the strings are too varied to be worth
+    /// coding.
+    string_codes: OnceLock<Option<Box<[u32]>>>,
 }
 
-/// Each string's code, numbered by first use; [`StringCodes::ABSENT`] for an
-/// absent value. `None` if the strings are too varied to be worth coding.
-/// Made on first use; a cache, so it never makes two columns unequal.
-#[derive(Clone, Debug, Default)]
-struct StringCodes(OnceLock<Option<Box<[u32]>>>);
-
-impl StringCodes {
-    const ABSENT: u32 = u32::MAX;
-
-    fn get_or_init(&self, spans: &[Option<(u32, u32)>], data: &str) -> Option<&[u32]> {
-        let codes = self.0.get_or_init(|| {
-            // Past about a quarter as many strings as values, the codes would
-            // group little and cost about as much as reading every value.
-            let limit = spans.len() / 4 + 8;
-            let mut index: HashMap<&str, u32> = HashMap::default();
-            let mut codes = Vec::with_capacity(spans.len());
-            for span in spans {
-                codes.push(match *span {
-                    Some((start, end)) => {
-                        let next = index.len() as u32;
-                        let code = *index.entry(&data[start as usize..end as usize]).or_insert(next);
-                        if index.len() > limit {
-                            return None;
-                        }
-                        code
-                    }
-                    None => Self::ABSENT,
-                });
-            }
-            Some(codes.into_boxed_slice())
-        });
-        codes.as_deref()
-    }
-}
-
-impl PartialEq for StringCodes {
-    fn eq(&self, _: &Self) -> bool {
-        true
-    }
-}
-
-/// Port-only: [`PresentProperties::codes`].
-#[derive(Clone, Copy)]
-pub(crate) struct ValueCodes<'a> {
-    column: &'a PresentProperties,
+/// Equal codes for equal values ([`Column::codes`]).
+struct ValueCodes<'a> {
+    values: &'a Values,
     strings: &'a [u32],
 }
 
 impl ValueCodes<'_> {
-    /// The code of the value at `logical_index`, `None` for an absent value;
-    /// throws where [`PresentProperties::get_property`] does.
-    pub(crate) fn get(&self, logical_index: u32) -> Result<Option<u64>, Error> {
-        let i = logical_index as usize;
-        let column = self.column;
-        if i >= column.values.len() {
-            return if column.optional { Ok(None) } else { Err(Error::new("Missing property value")) };
+    /// The code of feature `i`'s value, `None` for an absent value.
+    fn get(&self, i: usize) -> Option<u64> {
+        match self.values {
+            Values::Bool(v) => v.get(i).copied().flatten().map(u64::from),
+            Values::Int(v) => v.get(i).copied().flatten().map(|x| x as u64),
+            Values::Uint(v) => v.get(i).copied().flatten(),
+            Values::Double(v) => v.get(i).copied().flatten().map(f64::to_bits),
+            Values::Str { .. } => self.strings.get(i).copied().filter(|&code| code != u32::MAX).map(u64::from),
         }
-        Ok(match &column.values {
-            PropertyVec::Bool(v) => v[i].map(u64::from),
-            PropertyVec::I32(v) => v[i].map(|x| u64::from(x as u32)),
-            PropertyVec::U32(v) => v[i].map(u64::from),
-            PropertyVec::I64(v) => v[i].map(|x| x as u64),
-            PropertyVec::U64(v) => v[i],
-            PropertyVec::F32(v) => v[i].map(|x| u64::from(x.to_bits())),
-            PropertyVec::F64(v) => v[i].map(f64::to_bits),
-            PropertyVec::Str { .. } => match self.strings[i] {
-                StringCodes::ABSENT => None,
-                code => Some(u64::from(code)),
-            },
-        })
     }
 }
 
-impl PresentProperties {
+impl Column {
+    fn new(values: Values) -> Self {
+        Column { values, string_codes: OnceLock::new() }
+    }
+
     /// A code for each value, equal codes for equal values (equal values may
     /// differ in code). Numbers and booleans are their bits; strings are
     /// numbered, on the first call. `None` for a string column with more
     /// distinct strings than about a quarter of its values.
-    pub(crate) fn codes(&self) -> Option<ValueCodes<'_>> {
+    fn codes(&self) -> Option<ValueCodes<'_>> {
         let strings = match &self.values {
-            PropertyVec::Str { data, spans } => self.string_codes.get_or_init(spans, data)?,
+            Values::Str { data, spans } => self
+                .string_codes
+                .get_or_init(|| {
+                    // Past about a quarter as many strings as values, the codes
+                    // would group little and cost about as much as reading
+                    // every value.
+                    let limit = spans.len() / 4 + 8;
+                    let mut index: HashMap<&str, u32> = HashMap::default();
+                    let mut codes = Vec::with_capacity(spans.len());
+                    for span in spans {
+                        codes.push(match *span {
+                            Some((start, end)) => {
+                                let next = index.len() as u32;
+                                let code = *index.entry(&data[start as usize..end as usize]).or_insert(next);
+                                if index.len() > limit {
+                                    return None;
+                                }
+                                code
+                            }
+                            None => u32::MAX,
+                        });
+                    }
+                    Some(codes.into_boxed_slice())
+                })
+                .as_deref()?,
             _ => &[],
         };
-        Some(ValueCodes { column: self, strings })
-    }
-
-    /// The value at `logical_index`; `None` for an absent value. Past the end
-    /// of a column without a present stream fails with "Missing property
-    /// value", which C++ throws as a `std::runtime_error` (after a failing
-    /// `assert` in debug builds).
-    pub(crate) fn get_property(&self, logical_index: u32) -> Result<Option<Property<'_>>, Error> {
-        let i = logical_index as usize;
-        if i < self.values.len() {
-            Ok(self.values.get(i))
-        } else if self.optional {
-            Ok(None)
-        } else {
-            Err(Error::new("Missing property value"))
-        }
+        Some(ValueCodes { values: &self.values, strings })
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Feature {
-    id: Option<u64>,
-    index: u32,
-    geometry: Geometry,
+/// The triangles of a layer's tessellated polygons.
+struct Triangles {
+    /// Three indices per triangle, each into its feature's decoded vertices
+    /// (see [`GeometryCollection::get_triangles`]).
+    indices: Arc<[u32]>,
+    /// Each feature's range of `indices`; `None` for a feature without
+    /// triangles.
+    of_feature: Vec<Option<Range<usize>>>,
 }
 
-impl Feature {
-    #[must_use]
-    pub(crate) fn get_id(&self) -> Option<u64> {
-        self.id
-    }
-
-    /// The index of the feature's values in the property columns.
-    #[must_use]
-    pub(crate) fn get_index(&self) -> u32 {
-        self.index
-    }
-
-    #[must_use]
-    pub(crate) fn get_geometry(&self) -> &Geometry {
-        &self.geometry
-    }
-
-    /// The value of this feature's property `key` in `layer`; `None` for an
-    /// unknown key or an absent value.
-    pub(crate) fn get_property<'l>(&self, key: &str, layer: &'l Layer) -> Result<Option<Property<'l>>, Error> {
-        match layer.get_property_column(key) {
-            Some(column) => column.get_property(self.index),
-            None => Ok(None),
-        }
-    }
+/// The lines or rings of a feature, as the vertices they take.
+enum Parts {
+    /// A point, or the points of a multi-point, as one line.
+    Points(Vec<usize>),
+    Lines(Vec<Range<usize>>),
+    /// Polygon rings, which decoding closes.
+    Rings(Vec<Range<usize>>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Layer {
+struct Layer {
     name: String,
     extent: u32,
-    features: Vec<Feature>,
-    /// The property columns, in wire order (C++ keeps them in an
-    /// `unordered_map`).
-    properties: Vec<(String, PresentProperties)>,
-    property_index: HashMap<String, usize>,
-    /// The tile's triangle indices, per feature (see [`Geometry::triangles`]).
-    triangles: Option<Arc<[u32]>>,
+    geometry: GeometryValues,
+    ids: Option<Vec<Option<u64>>>,
+    /// The property columns in wire order; of two with the same name, the
+    /// first.
+    columns: Vec<(String, Column)>,
+    column_index: HashMap<String, usize>,
+    triangles: Option<Triangles>,
 }
 
 impl Layer {
-    #[must_use]
-    pub(crate) fn get_name(&self) -> &str {
-        &self.name
-    }
-
-    #[must_use]
-    pub(crate) fn get_extent(&self) -> u32 {
-        self.extent
-    }
-
-    #[must_use]
-    pub(crate) fn get_features(&self) -> &[Feature] {
-        &self.features
-    }
-
-    /// Every property column, in wire order (C++ lists them in hash order).
-    #[must_use]
-    pub(crate) fn get_properties(&self) -> &[(String, PresentProperties)] {
-        &self.properties
-    }
-
-    #[must_use]
-    pub(crate) fn get_property_column(&self, key: &str) -> Option<&PresentProperties> {
-        self.property_index.get(key).map(|&i| &self.properties[i].1)
-    }
-
-    /// The buffer that the features' triangle ranges index.
-    #[must_use]
-    pub(crate) fn triangle_buffer(&self) -> Option<&Arc<[u32]>> {
-        self.triangles.as_ref()
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct MapLibreTile {
-    layers: Vec<Layer>,
-}
-
-impl MapLibreTile {
-    pub(crate) fn decode(data: &[u8], support_fast_pfor: bool) -> Result<MapLibreTile, Error> {
-        let mut parser = mlt_core::Parser::default();
-        let layers = parser.parse_layers(data)?;
-        let mut decoder = mlt_core::Decoder::default();
-        let mut result = Vec::new();
-        for layer in layers {
-            let mlt_core::Layer::Tag01(lazy) = layer else {
-                // Skipping unknown layer
-                continue;
-            };
-            if !support_fast_pfor && uses_fast_pfor(&lazy) {
-                // IntegerDecoder::decodeFastPfor
-                return Err(Error::new("FastPFOR decoding is not enabled"));
-            }
-            let mut optional = Vec::new();
-            lazy.for_each_column_decl(&mut |decl| {
-                if let ColumnDecl::Value { optional: o, .. } = decl {
-                    optional.push(o);
-                }
-            });
-            let parsed = lazy.decode_all(&mut decoder)?;
-            result.push(Layer::from_parsed(&parsed, &optional)?);
-        }
-        Ok(MapLibreTile { layers: result })
-    }
-
-    #[must_use]
-    pub(crate) fn get_layers(&self) -> &[Layer] {
-        &self.layers
-    }
-}
-
-/// Whether the C++ `IntegerDecoder` would decode a FastPFOR stream of the
-/// layer: integer and vertex streams go through it; present, boolean and
-/// float streams are read raw whatever their physical technique.
-fn uses_fast_pfor(layer: &mlt_core::Layer01<'_>) -> bool {
-    let mut found = false;
-    layer.for_each_stream(&mut |meta| {
-        if matches!(meta.encoding.physical, PhysicalEncoding::FastPFor(_))
-            && matches!(meta.encoding.logical, LogicalEncoding::Int(_) | LogicalEncoding::Vertex(_))
-        {
-            found = true;
-        }
-    });
-    found
-}
-
-impl Layer {
-    /// Builds a layer from its decoded streams: a feature for each geometry,
-    /// and the property columns. `optional` is the present flag of each
-    /// property column (shared dictionary children one by one).
-    fn from_parsed(parsed: &ParsedLayer01<'_>, optional: &[bool]) -> Result<Layer, Error> {
-        let (geometries, triangles) = get_geometries(parsed.geometry_values())?;
-
-        let ids: Vec<Option<u64>> = parsed.id().map(|id| id.iter_optional().collect()).unwrap_or_default();
-        let feature_count = geometries.len();
-        if !ids.is_empty() && ids.len() != feature_count {
-            return Err(Error::new(format!(
-                "ID count ({}) does not match geometry count ({feature_count})",
-                ids.len()
-            )));
-        }
-        let features = geometries
-            .into_iter()
-            .enumerate()
-            .map(|(i, geometry)| Feature { id: if ids.is_empty() { None } else { ids[i] }, index: i as u32, geometry })
-            .collect();
-
-        let mut names = parsed.iterate_prop_names().map(|name| name.to_string());
-        let mut optional = optional.iter().copied();
+    fn new(parsed: &ParsedLayer01<'_>) -> Result<Layer, String> {
         let mut layer = Layer {
-            name: parsed.name().to_string(),
+            name: parsed.name().to_owned(),
             extent: parsed.extent().get(),
-            features,
-            properties: Vec::new(),
-            property_index: HashMap::default(),
-            triangles,
+            geometry: parsed.geometry_values().clone(),
+            ids: parsed.id().map(|id| id.iter_optional().collect()),
+            columns: Vec::new(),
+            column_index: HashMap::default(),
+            triangles: None,
         };
-        let mut next = || -> Result<(String, bool), Error> {
-            match (names.next(), optional.next()) {
-                (Some(name), Some(optional)) => Ok((name, optional)),
-                _ => Err(Error::new("property column count mismatch")),
-            }
-        };
+        let mut names = parsed.iterate_prop_names().map(|name| name.to_string());
+        let mut next_name = || names.next().ok_or_else(|| "property column count mismatch".to_owned());
         for column in parsed.properties() {
-            let (type_, values) = match column {
-                ParsedProperty::Bool(s) => (ScalarType::Boolean, PropertyVec::Bool(s.iter_optional().collect())),
-                ParsedProperty::I8(_) | ParsedProperty::U8(_) => {
-                    return Err(Error::new("8-bit integer type not implemented"));
-                }
-                ParsedProperty::I32(s) => (ScalarType::Int32, PropertyVec::I32(s.iter_optional().collect())),
-                ParsedProperty::U32(s) => (ScalarType::UInt32, PropertyVec::U32(s.iter_optional().collect())),
-                ParsedProperty::I64(s) => (ScalarType::Int64, PropertyVec::I64(s.iter_optional().collect())),
-                ParsedProperty::U64(s) => (ScalarType::UInt64, PropertyVec::U64(s.iter_optional().collect())),
-                ParsedProperty::F32(s) => (ScalarType::Float, PropertyVec::F32(s.iter_optional().collect())),
-                ParsedProperty::F64(s) => (ScalarType::Double, PropertyVec::F64(s.iter_optional().collect())),
-                ParsedProperty::Str(s) => {
-                    (ScalarType::String, PropertyVec::strings(s.feature_count(), |i| s.get(i as u32), true))
-                }
+            let values = match column {
+                ParsedProperty::Bool(s) => Values::Bool(s.iter_optional().collect()),
+                ParsedProperty::I8(s) => Values::Int(s.iter_optional().map(|v| v.map(i64::from)).collect()),
+                ParsedProperty::U8(s) => Values::Uint(s.iter_optional().map(|v| v.map(u64::from)).collect()),
+                ParsedProperty::I32(s) => Values::Int(s.iter_optional().map(|v| v.map(i64::from)).collect()),
+                ParsedProperty::U32(s) => Values::Uint(s.iter_optional().map(|v| v.map(u64::from)).collect()),
+                ParsedProperty::I64(s) => Values::Int(s.iter_optional().collect()),
+                ParsedProperty::U64(s) => Values::Uint(s.iter_optional().collect()),
+                ParsedProperty::F32(s) => Values::Double(s.iter_optional().map(|v| v.map(f64::from)).collect()),
+                ParsedProperty::F64(s) => Values::Double(s.iter_optional().collect()),
+                ParsedProperty::Str(s) => Values::strings(s.feature_count(), |i| s.get(i as u32)),
                 ParsedProperty::SharedDict(dict) => {
-                    // StringDecoder::decodeSharedDictionary: one column per
-                    // child, named prefix + suffix.
+                    // One column per child, named prefix + suffix.
                     for item in dict.items() {
-                        let (name, optional) = next()?;
-                        let values = PropertyVec::strings(item.feature_count(), |i| item.get(dict, i), false);
-                        layer.insert_column(
-                            name,
-                            PresentProperties {
-                                type_: ScalarType::String,
-                                optional,
-                                values,
-                                string_codes: StringCodes::default(),
-                            },
-                        );
+                        let values = Values::strings(item.feature_count(), |i| item.get(dict, i));
+                        layer.insert_column(next_name()?, values);
                     }
                     continue;
                 }
-                _ => return Err(Error::new("unsupported property column")),
+                _ => return Err(format!("unsupported property column type {:?}", column.kind())),
             };
-            let (name, optional) = next()?;
-            layer.insert_column(
-                name,
-                PresentProperties { type_, optional, values, string_codes: StringCodes::default() },
-            );
+            layer.insert_column(next_name()?, values);
         }
+        layer.triangles = layer.triangles();
         Ok(layer)
     }
 
-    /// Adds a property column; an existing name keeps its column.
-    fn insert_column(&mut self, name: String, column: PresentProperties) {
-        if !self.property_index.contains_key(&name) {
-            self.property_index.insert(name.clone(), self.properties.len());
-            self.properties.push((name, column));
+    fn insert_column(&mut self, name: String, values: Values) {
+        if !self.column_index.contains_key(&name) {
+            self.column_index.insert(name.clone(), self.columns.len());
+            self.columns.push((name, Column::new(values)));
         }
     }
-}
 
-/// A tile's triangle indices, which its features index by range (see
-/// [`Geometry::triangles`]).
-type TriangleIndices = Arc<[u32]>;
-
-/// The geometries of mlt-core's decoded topology: one geometry per feature,
-/// except multi-points without points, plus the per-feature triangle
-/// indices.
-fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<TriangleIndices>), Error> {
-    fn require<'v>(level: Option<&'v [u32]>, what: &str) -> Result<&'v [u32], Error> {
-        level.ok_or_else(|| Error::new(format!("{what} geometry without topology vector")))
-    }
-    let vertices = values.vertices().unwrap_or(&[]);
-    let geoms = values.geometry_offsets();
-    let parts = values.part_offsets();
-    let rings = values.ring_offsets();
-    let types = values.vector_types();
-
-    let vertex = |i: usize| -> Result<Coordinate, Error> {
-        match vertices.get(2 * i..2 * i + 2) {
-            Some(v) => Ok(Coordinate::from_vertex(v[0], v[1])),
-            None => Err(Error::new("vertexBuffer underflow")),
-        }
-    };
-    let offset = |level: &[u32], i: usize, name: &str| -> Result<usize, Error> {
-        match level.get(i) {
-            Some(&v) => Ok(v as usize),
-            None => Err(Error::new(format!("{name} underflow"))),
-        }
-    };
-    let span = |level: &[u32], i: usize, name: &str| -> Result<Range<usize>, Error> {
-        Ok(offset(level, i, name)?..offset(level, i + 1, name)?)
-    };
-    // getLineStringCoords: the C++ bounds check `startIndex + numVertices - 1`
-    // wraps for an empty line at the start of the buffer.
-    let line = |range: Range<usize>, close: bool| -> Result<CoordVec, Error> {
-        if range.is_empty() && range.start == 0 {
-            return Err(Error::new("vertexBuffer underflow"));
-        }
-        let mut coords = Vec::with_capacity(range.len() + usize::from(close));
-        for i in range {
-            coords.push(vertex(i)?);
-        }
-        if close
-            && let (Some(&front), Some(&back)) = (coords.first(), coords.last())
-            && front != back
-        {
-            coords.push(front);
-        }
-        Ok(coords)
-    };
-
-    let mut geometries = Vec::with_capacity(types.len());
-    // The geometry of each feature (`None`: dropped).
-    let mut geometry_of = Vec::with_capacity(types.len());
-    // With triangles, the stored and decoded vertex counts of each polygon
-    // ring, and the range of them that each feature's rings take.
-    let tessellated = values.index_buffer().is_some() && values.triangle_offsets().is_some();
-    let mut ring_lens: Vec<(u32, u32)> = Vec::new();
-    let mut rings_of: Vec<Range<usize>> = if tessellated { vec![0..0; types.len()] } else { Vec::new() };
-    let ring = |range: Range<usize>, ring_lens: &mut Vec<(u32, u32)>| -> Result<CoordVec, Error> {
-        let stored = range.len() as u32;
-        let coords = line(range, true)?;
-        if tessellated {
-            ring_lens.push((stored, coords.len() as u32));
-        }
-        Ok(coords)
-    };
-
-    if parts.is_none() && values.index_buffer().is_some() {
-        // A FlatGpuVector without topology: points read the vertex buffer in
-        // order, every other type throws.
-        let mut next_vertex = 0;
-        for &t in types {
-            match t {
-                WireGeometryType::Point => {
-                    geometries.push(Geometry { shape: Shape::Point(vertex(next_vertex)?), triangles: None });
-                    next_vertex += 1;
-                }
-                other => return Err(Error::new(format!("{} geometry without topology vector", cpp_name(other)))),
-            }
-        }
-        return Ok((geometries, None));
+    fn column(&self, key: &str) -> Option<&Column> {
+        self.column_index.get(key).map(|&i| &self.columns[i].1)
     }
 
-    for (index, &t) in types.iter().enumerate() {
-        let shape = match t {
-            WireGeometryType::Point => {
-                let mut i = match geoms {
-                    Some(g) => offset(g, index, "geometryOffsets")?,
-                    None => index,
-                };
+    fn len(&self) -> usize {
+        self.geometry.feature_count()
+    }
+
+    fn feature_type(&self, index: usize) -> FeatureType {
+        match self.geometry.vector_types()[index] {
+            GeometryType::Point | GeometryType::MultiPoint => FeatureType::Point,
+            GeometryType::LineString | GeometryType::MultiLineString => FeatureType::LineString,
+            GeometryType::Polygon | GeometryType::MultiPolygon => FeatureType::Polygon,
+        }
+    }
+
+    /// The lines or rings of feature `index`.
+    fn parts(&self, index: usize) -> Result<Parts, TileError> {
+        let values = &self.geometry;
+        let geometry_type = values.vector_types()[index];
+        let geoms = values.geometry_offsets();
+        let parts = values.part_offsets();
+        let rings = values.ring_offsets();
+        let malformed = |what: &str| TileError::Geometry(format!("MLT {what} out of range"));
+        let offset =
+            |level: &[u32], i: usize, what: &str| level.get(i).map(|&v| v as usize).ok_or_else(|| malformed(what));
+        let span = |level: &[u32], i: usize, what: &str| {
+            Ok::<_, TileError>(offset(level, i, what)?..offset(level, i + 1, what)?)
+        };
+        let no_topology = || TileError::Geometry(format!("MLT {geometry_type} geometry without topology"));
+        // The geometry, else this feature's first part.
+        let first = |i: usize| geoms.map_or(Ok(i), |g| offset(g, i, "geometry offset"));
+        // A line: a range of rings, else of parts.
+        let line = |part: usize, p: &[u32]| match rings {
+            Some(r) => span(r, offset(p, part, "part offset")?, "ring offset"),
+            None => span(p, part, "part offset"),
+        };
+
+        if parts.is_none() && values.index_buffer().is_some() {
+            // Tessellated without topology: only points can be read.
+            return match geometry_type {
+                GeometryType::Point => Ok(Parts::Points(vec![index])),
+                _ => Err(no_topology()),
+            };
+        }
+        Ok(match geometry_type {
+            GeometryType::Point => {
+                let mut i = first(index)?;
                 if let Some(p) = parts {
-                    i = offset(p, i, "partOffsets")?;
+                    i = offset(p, i, "part offset")?;
                 }
                 if let Some(r) = rings {
-                    i = offset(r, i, "ringOffsets")?;
+                    i = offset(r, i, "ring offset")?;
                 }
-                Shape::Point(vertex(i)?)
+                Parts::Points(vec![i])
             }
-            WireGeometryType::LineString => {
-                let p = require(parts, cpp_name(t))?;
-                let part = match geoms {
-                    Some(g) => offset(g, index, "geometryOffsets")?,
-                    None => index,
-                };
-                let range = match rings {
-                    Some(r) => span(r, offset(p, part, "partOffsets")?, "ringOffsets")?,
-                    None => span(p, part, "partOffsets")?,
-                };
-                Shape::LineString(line(range, false)?)
-            }
-            WireGeometryType::Polygon => {
-                let p = require(parts, cpp_name(t))?;
-                let r = require(rings, cpp_name(t))?;
-                let polygon = match geoms {
-                    Some(g) => offset(g, index, "geometryOffsets")?,
-                    None => index,
-                };
-                let first_ring = ring_lens.len();
-                let mut result = Vec::new();
-                for i in span(p, polygon, "partOffsets")? {
-                    result.push(ring(span(r, i, "ringOffsets")?, &mut ring_lens)?);
-                }
-                if tessellated {
-                    rings_of[index] = first_ring..ring_lens.len();
-                }
-                Shape::Polygon(result)
-            }
-            WireGeometryType::MultiPoint => {
-                let g = require(geoms, cpp_name(t))?;
+            GeometryType::MultiPoint => {
+                let g = geoms.ok_or_else(no_topology)?;
                 let mut points = Vec::new();
-                for i in span(g, index, "geometryOffsets")? {
-                    let i = match (parts, rings) {
-                        (Some(p), Some(r)) => offset(r, offset(p, i, "partOffsets")?, "ringOffsets")?,
-                        (Some(p), None) => offset(p, i, "partOffsets")?,
+                for i in span(g, index, "geometry offset")? {
+                    points.push(match (parts, rings) {
+                        (Some(p), Some(r)) => offset(r, offset(p, i, "part offset")?, "ring offset")?,
+                        (Some(p), None) => offset(p, i, "part offset")?,
                         (None, _) => i,
-                    };
-                    points.push(vertex(i)?);
+                    });
                 }
-                if points.is_empty() {
-                    // `if (numPoints)`: no geometry for this feature.
-                    geometry_of.push(None);
-                    continue;
-                }
-                Shape::MultiPoint(points)
+                Parts::Points(points)
             }
-            WireGeometryType::MultiLineString => {
-                let g = require(geoms, cpp_name(t))?;
-                let lines = span(g, index, "geometryOffsets")?;
+            GeometryType::LineString => Parts::Lines(vec![line(first(index)?, parts.ok_or_else(no_topology)?)?]),
+            GeometryType::MultiLineString => {
+                let lines = span(geoms.ok_or_else(no_topology)?, index, "geometry offset")?;
                 let mut result = Vec::with_capacity(lines.len());
-                if !lines.is_empty() {
-                    let p = require(parts, cpp_name(t))?;
-                    for i in lines {
-                        let range = match rings {
-                            Some(r) => span(r, offset(p, i, "partOffsets")?, "ringOffsets")?,
-                            None => span(p, i, "partOffsets")?,
-                        };
-                        result.push(line(range, false)?);
+                for i in lines {
+                    result.push(line(i, parts.ok_or_else(no_topology)?)?);
+                }
+                Parts::Lines(result)
+            }
+            GeometryType::Polygon => {
+                let (p, r) = (parts.ok_or_else(no_topology)?, rings.ok_or_else(no_topology)?);
+                let mut result = Vec::new();
+                for i in span(p, first(index)?, "part offset")? {
+                    result.push(span(r, i, "ring offset")?);
+                }
+                Parts::Rings(result)
+            }
+            GeometryType::MultiPolygon => {
+                let polygons = span(geoms.ok_or_else(no_topology)?, index, "geometry offset")?;
+                let mut result = Vec::new();
+                for polygon in polygons {
+                    let (p, r) = (parts.ok_or_else(no_topology)?, rings.ok_or_else(no_topology)?);
+                    for i in span(p, polygon, "part offset")? {
+                        result.push(span(r, i, "ring offset")?);
                     }
                 }
-                Shape::MultiLineString(result)
+                Parts::Rings(result)
             }
-            WireGeometryType::MultiPolygon => {
-                let g = require(geoms, cpp_name(t))?;
-                let polygons = span(g, index, "geometryOffsets")?;
-                let first_ring = ring_lens.len();
-                let mut result = Vec::with_capacity(polygons.len());
-                if !polygons.is_empty() {
-                    let p = require(parts, cpp_name(t))?;
-                    let r = require(rings, cpp_name(t))?;
-                    for polygon in polygons {
-                        let mut rings_out = Vec::new();
-                        for i in span(p, polygon, "partOffsets")? {
-                            rings_out.push(ring(span(r, i, "ringOffsets")?, &mut ring_lens)?);
-                        }
-                        result.push(rings_out);
-                    }
-                }
-                if tessellated {
-                    rings_of[index] = first_ring..ring_lens.len();
-                }
-                Shape::MultiPolygon(result)
-            }
-        };
-        geometry_of.push(Some(geometries.len()));
-        geometries.push(Geometry { shape, triangles: None });
+        })
     }
 
-    // GeometryVector::applyTriangles: each (multi-)polygon takes the next
-    // count of triangles from the index buffer.
-    let mut buffer = None;
-    if let (Some(indices), Some(counts)) = (values.index_buffer(), values.triangle_offsets()) {
+    /// The geometry of feature `index`, scaled to `util::EXTENT`. Decoding
+    /// closes polygon rings, which the tile stores without their closing
+    /// vertex.
+    fn geometry(&self, index: usize) -> Result<GeometryCollection, TileError> {
+        let vertices = self.geometry.vertices().unwrap_or(&[]);
+        let scale = f64::from(EXTENT) / f64::from(self.extent);
+        let vertex = |i: usize| -> Result<GeometryCoordinate, TileError> {
+            let v = vertices
+                .get(2 * i..2 * i + 2)
+                .ok_or_else(|| TileError::Geometry("MLT vertex out of range".to_owned()))?;
+            let convert = |c: i32| (f64::from(c) * scale).round() as i16;
+            Ok(GeometryCoordinate::new(convert(v[0]), convert(v[1])))
+        };
+        let line = |range: Range<usize>, close: bool| -> Result<GeometryCoordinates, TileError> {
+            let mut coords = Vec::with_capacity(range.len() + usize::from(close));
+            for i in range.clone() {
+                coords.push(vertex(i)?);
+            }
+            if close && let Some(&first) = coords.first() {
+                coords.push(first);
+            }
+            Ok(coords)
+        };
+        let mut geometry = match self.parts(index)? {
+            Parts::Points(points) => {
+                GeometryCollection::from(vec![points.into_iter().map(vertex).collect::<Result<Vec<_>, _>>()?])
+            }
+            Parts::Lines(lines) => {
+                GeometryCollection::from(lines.into_iter().map(|l| line(l, false)).collect::<Result<Vec<_>, _>>()?)
+            }
+            Parts::Rings(rings) => {
+                GeometryCollection::from(rings.into_iter().map(|r| line(r, true)).collect::<Result<Vec<_>, _>>()?)
+            }
+        };
+        if let Some(triangles) = &self.triangles
+            && let Some(Some(range)) = triangles.of_feature.get(index)
+        {
+            geometry.set_triangles(Arc::clone(&triangles.indices), range.clone());
+        }
+        Ok(geometry)
+    }
+
+    /// The triangles of the tessellated polygons: each polygon and
+    /// multi-polygon takes the next count of triangles from the index
+    /// buffer. A feature whose triangles name a vertex it doesn't have, or
+    /// that the counts run out before, has none.
+    fn triangles(&self) -> Option<Triangles> {
+        let values = &self.geometry;
+        let (indices, counts) = (values.index_buffer()?, values.triangle_offsets()?);
         let mut rebased = Vec::with_capacity(indices.len());
-        let mut ring_shifts = Vec::new();
+        let mut of_feature = vec![None; self.len()];
+        let (mut ring_lens, mut ring_shifts) = (Vec::new(), Vec::new());
         let mut runs = counts.windows(2);
-        for (index, &t) in types.iter().enumerate() {
-            if !matches!(t, WireGeometryType::Polygon | WireGeometryType::MultiPolygon) {
+        for (index, &t) in values.vector_types().iter().enumerate() {
+            if !matches!(t, GeometryType::Polygon | GeometryType::MultiPolygon) {
                 continue;
             }
-            let run = runs.next().ok_or_else(|| Error::new("triangleCounts underflow"))?;
-            let run = run[0] as usize * 3..run[1] as usize * 3;
-            let corners = indices.get(run).ok_or_else(|| Error::new("indexBuffer underflow"))?;
+            let Some(run) = runs.next() else { break };
+            let Some(corners) = indices.get(run[0] as usize * 3..run[1] as usize * 3) else { break };
             if corners.is_empty() {
                 continue;
             }
-            let start = values.vertex_range(index)?.start as u32;
+            let (Ok(Parts::Rings(rings)), Ok(vertices)) = (self.parts(index), values.vertex_range(index)) else {
+                continue;
+            };
+            ring_lens.clear();
+            ring_lens.extend(rings.iter().map(|r| (r.len() as u32, (r.len() + usize::from(!r.is_empty())) as u32)));
             let first = rebased.len();
-            let ring_counts = &ring_lens[rings_of[index].clone()];
-            // Polygons are never dropped.
-            if let Some(g) = geometry_of[index]
-                && rebase_triangles(corners, start, ring_counts, &mut ring_shifts, &mut rebased)
-            {
-                geometries[g].triangles = Some(first..rebased.len());
+            if rebase_triangles(corners, vertices.start as u32, &ring_lens, &mut ring_shifts, &mut rebased) {
+                of_feature[index] = Some(first..rebased.len());
             }
         }
-        buffer = Some(Arc::from(rebased));
+        Some(Triangles { indices: Arc::from(rebased), of_feature })
     }
 
-    Ok((geometries, buffer))
+    /// Port-only: groups by geometry type and by each key's value code
+    /// ([`Column::codes`]): equal codes are equal values, and equal values
+    /// with distinct codes only split a group. A key without a column is
+    /// absent from every feature.
+    fn group_features(&self, keys: &[String]) -> Option<FeatureGroups> {
+        let count = self.len();
+        // Grouping costs about as much as evaluating each feature once.
+        let limit = count / 4 + 8;
+        let columns: Vec<ValueCodes<'_>> =
+            keys.iter().filter_map(|key| self.column(key)).map(Column::codes).collect::<Option<_>>()?;
+        let mut index: HashMap<Box<[Option<u64>]>, u32> = HashMap::default();
+        let mut codes = vec![None; columns.len() + 1];
+        let mut groups = FeatureGroups { of_feature: Vec::with_capacity(count), first: Vec::new() };
+        for i in 0..count {
+            codes[columns.len()] = Some(self.feature_type(i) as u64);
+            for (code, column) in codes.iter_mut().zip(&columns) {
+                *code = column.get(i);
+            }
+            let group = if let Some(&group) = index.get(codes.as_slice()) {
+                group
+            } else {
+                if groups.first.len() == limit {
+                    return None;
+                }
+                let group = groups.first.len() as u32;
+                index.insert(codes.as_slice().into(), group);
+                groups.first.push(i);
+                group
+            };
+            groups.of_feature.push(group);
+        }
+        Some(groups)
+    }
+}
+
+/// A layer of an [`MltTile`].
+#[derive(Clone, Copy)]
+pub struct MltLayer<'a>(&'a Layer);
+
+impl<'a> MltLayer<'a> {
+    pub(crate) fn name(self) -> &'a str {
+        &self.0.name
+    }
+
+    pub(crate) fn len(self) -> usize {
+        self.0.len()
+    }
+
+    /// The feature at `index`; fails with [`TileError::OutOfRange`] past the
+    /// end.
+    pub(crate) fn feature(self, index: usize) -> Result<MltFeature<'a>, TileError> {
+        if index < self.len() {
+            Ok(MltFeature { layer: self.0, index })
+        } else {
+            Err(TileError::vector_range_check(index, self.len()))
+        }
+    }
+
+    pub(crate) fn group_features(self, keys: &[String]) -> Option<FeatureGroups> {
+        self.0.group_features(keys)
+    }
+}
+
+/// A feature of an [`MltLayer`].
+#[derive(Clone, Copy)]
+pub struct MltFeature<'a> {
+    layer: &'a Layer,
+    index: usize,
+}
+
+impl MltFeature<'_> {
+    pub(crate) fn get_type(&self) -> FeatureType {
+        self.layer.feature_type(self.index)
+    }
+
+    pub(crate) fn get_id(&self) -> Identifier {
+        let id = self.layer.ids.as_ref().and_then(|ids| ids.get(self.index).copied().flatten());
+        id.map_or(Identifier::Null, Identifier::Uint)
+    }
+
+    pub(crate) fn get_value(&self, key: &str) -> Option<Value> {
+        self.layer.column(key)?.values.get(self.index)
+    }
+
+    /// Every property; an absent value is a null.
+    pub(crate) fn get_properties(&self) -> PropertyMap {
+        (self.layer.columns.iter())
+            .map(|(key, column)| (key.clone(), column.values.get(self.index).unwrap_or(Value::Null)))
+            .collect()
+    }
+
+    pub(crate) fn geometry(&self) -> Result<GeometryCollection, TileError> {
+        self.layer.geometry(self.index)
+    }
 }
 
 /// Appends `corners`, the triangles of a feature as indices of the layer's
@@ -785,21 +605,93 @@ fn rebase_triangles(
     true
 }
 
-/// The geometry names of the C++ "... geometry without topology vector" errors.
-fn cpp_name(t: WireGeometryType) -> &'static str {
-    match t {
-        WireGeometryType::Point => "Point",
-        WireGeometryType::LineString => "Linestring",
-        WireGeometryType::Polygon => "Polygon",
-        WireGeometryType::MultiPoint => "Multi-point",
-        WireGeometryType::MultiLineString => "Multi-Linestring",
-        WireGeometryType::MultiPolygon => "Multi-polygon",
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::rebase_triangles;
+    use std::path::Path;
+
+    use feature::Value;
+    use geometry::Point;
+    use mlt_core::encoder::{EncoderConfig, Network, Profile};
+    use mlt_core::geo_types::Coord;
+    use mlt_core::{LayerWriter, PropKind};
+
+    use super::*;
+
+    /// A layer "l" with a multi-point, a polygon and a line, an 8-bit
+    /// integer column, and a string column the line lacks.
+    fn tile() -> Vec<u8> {
+        let mut layer = LayerWriter::new("l", 2 * EXTENT as u32).unwrap();
+        let small = layer.add_property("small", PropKind::I8).unwrap();
+        let name = layer.add_property("name", PropKind::Str).unwrap();
+        let points = [Coord { x: 2, y: 4 }, Coord { x: 6, y: 8 }];
+        let ring = [Coord { x: 0, y: 0 }, Coord { x: 100, y: 0 }, Coord { x: 100, y: 100 }];
+        for (i, geometry_type) in
+            [GeometryType::MultiPoint, GeometryType::Polygon, GeometryType::LineString].into_iter().enumerate()
+        {
+            let mut feature = layer.feature(geometry_type);
+            match geometry_type {
+                GeometryType::MultiPoint => feature.points(points),
+                GeometryType::Polygon => feature.exterior_ring(ring),
+                _ => feature.line(points),
+            }
+            .unwrap();
+            feature.id(Some(i as u64 + 10));
+            feature.property(small, -(i as i8)).unwrap();
+            if geometry_type != GeometryType::LineString {
+                feature.property(name, "n").unwrap();
+            }
+            feature.finish().unwrap();
+        }
+        layer.encode(EncoderConfig::from_profile(Profile::Web(Network::Offline))).unwrap()
+    }
+
+    #[test]
+    fn features_read_their_columns() {
+        let tile = MltTile::new(Arc::new(tile()), false);
+        let layer = tile.layer("l").unwrap();
+        assert_eq!((layer.name(), layer.len()), ("l", 3));
+        let [multi_point, polygon, line] = [0, 1, 2].map(|i| layer.feature(i).unwrap());
+        assert!(layer.feature(3).is_err());
+
+        // A multi-point is a point feature, its points one line; an extent
+        // of twice `util::EXTENT` halves the coordinates.
+        assert_eq!(multi_point.get_type(), FeatureType::Point);
+        assert_eq!(*multi_point.geometry().unwrap(), [vec![Point::new(1, 2), Point::new(3, 4)]]);
+        assert_eq!(multi_point.get_id(), Identifier::Uint(10));
+        // Decoding closes a polygon's rings.
+        assert_eq!(polygon.get_type(), FeatureType::Polygon);
+        assert_eq!(
+            *polygon.geometry().unwrap(),
+            [vec![Point::new(0, 0), Point::new(50, 0), Point::new(50, 50), Point::new(0, 0)]]
+        );
+        assert_eq!(line.get_type(), FeatureType::LineString);
+
+        // 8-bit integers read as integers; an absent value is none, and a
+        // null among the properties.
+        assert_eq!(polygon.get_value("small"), Some(Value::Int(-1)));
+        assert_eq!(polygon.get_value("name"), Some(Value::String("n".to_owned())));
+        assert_eq!(line.get_value("name"), None);
+        assert_eq!(line.get_properties().get("name"), Some(&Value::Null));
+        assert_eq!(line.get_value("nothing"), None);
+    }
+
+    /// Clones share one decoding, which threads may race to make.
+    #[test]
+    fn clones_share_the_decoded_layers() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/map/issue12432/0-0-0.mlt");
+        let tile = MltTile::new(Arc::new(std::fs::read(path).unwrap()), false);
+        let layers: Vec<usize> = std::thread::scope(|scope| {
+            let threads: Vec<_> = (0..4)
+                .map(|_| {
+                    let tile = tile.clone();
+                    scope.spawn(move || std::ptr::from_ref(tile.layer("admin").unwrap().0) as usize)
+                })
+                .collect();
+            threads.into_iter().map(|thread| thread.join().unwrap()).collect()
+        });
+        let here = std::ptr::from_ref(tile.layer("admin").unwrap().0) as usize;
+        assert!(layers.iter().all(|&layer| layer == here));
+    }
 
     fn rebase(corners: &[u32], first_vertex: u32, rings: &[(u32, u32)]) -> Option<Vec<u32>> {
         let mut out = vec![7];

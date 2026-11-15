@@ -26,19 +26,19 @@ mice and trackpads in each browser yet.
 Serve dist/ over HTTP and open `index.html`. It takes these URL parameters
 (web/main.ts):
 
-| Parameter                                 | Effect                                                                                   |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `style=<key or URL>`                      | a style from web/styles.ts, or any style URL (default: OpenFreeMap Liberty)              |
-| `lat`, `lon`, `zoom`, `bearing`, `pitch`  | the starting camera, unless the URL hash has one (`#zoom/lat/lon[/bearing/pitch]`)       |
-| `backend=webgpu` or `webgl2`              | the renderer (default: WebGPU where the browser has it)                                  |
-| `workers=<n>`                             | the number of tile workers (default: up to 4)                                            |
-| `width`, `height`, `ratio`                | a fixed map size in CSS pixels, and pixel ratio                                          |
-| `compare`                                 | overlay MapLibre GL JS's map of the same style, right of a draggable divider             |
-| `debug`                                   | the debug overlay: frame rate, frame time by phase, draw calls, memory, requests         |
-| `freeBearing`                             | free bearing on the globe                                                                |
-| `localIdeographFontFamily=<CSS families>` | the font for CJK glyphs (default: `sans-serif`); empty or `false` downloads them         |
-| `fallbackFontFaces=<json>`                | font files that every font stack falls back to, as a style's `font-faces` entry, unnamed |
-| `panic=map` or `panic=tile`               | make the map's or the first tile worker's wasm instance panic at startup, for the check  |
+| Parameter                                | Effect                                                                                   |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `style=<key or URL>`                     | a style from web/styles.ts, or any style URL (default: OpenFreeMap Liberty)              |
+| `lat`, `lon`, `zoom`, `bearing`, `pitch` | the starting camera, unless the URL hash has one (`#zoom/lat/lon[/bearing/pitch]`)       |
+| `backend=webgpu` or `webgl2`             | the renderer (default: WebGPU where the browser has it)                                  |
+| `workers=<n>`                            | the number of tile workers (default: up to 4)                                            |
+| `width`, `height`, `ratio`               | a fixed map size in CSS pixels, and pixel ratio                                          |
+| `compare`                                | overlay MapLibre GL JS's map of the same style, right of a draggable divider             |
+| `debug`                                  | the debug overlay: frame rate, frame time by phase, draw calls, memory, requests         |
+| `freeBearing`                            | free bearing on the globe                                                                |
+| `localIdeographFontFamily=false`         | download CJK glyphs rather than draw them in the browser's `sans-serif` font             |
+| `fallbackFontFaces=<json>`               | font files that every font stack falls back to, as a style's `font-faces` entry, unnamed |
+| `panic=map` or `panic=tile`              | make the map's or the first tile worker's wasm instance panic at startup, for the check  |
 
 The page draws its own controls over the map: a style picker, zoom buttons, a
 compass, attributions, and a panel that lists the gestures and has switches for
@@ -48,7 +48,7 @@ compass, attributions, and a panel that lists the gestures and has switches for
 
 ```
 page (main thread, no wasm)
- ├─ map worker:    WebMap: style, camera, renderer, file source
+ ├─ map worker:    WebMap: a runtime, its map and a render session on the canvas
  │   └─ shaper module, loaded on demand
  ├─ tile worker 0: TileWorkerHost: parses, lays out and decodes tiles
  ├─ tile worker 1
@@ -60,16 +60,20 @@ page (main thread, no wasm)
   worker as an OffscreenCanvas, and forwards pointer, wheel, keyboard and focus
   events to it. The map worker's gesture recognizer (mln_gestures) turns them
   into camera moves.
-- Each worker runs a `CooperativeScheduler` in place of threads. The map worker
-  runs its loop, draws and runs tasks on each animation frame. Between frames,
-  finished fetches and tile replies are handled as they arrive
+- The map worker drives the map through mln_runtime, as any host does: a
+  `Runtime` and its `Map`, and a `RenderSession` that presents to the canvas.
+  The runtime's and the session's work runs in short tasks as it arrives, and
+  each animation frame demands a frame when the map has something new to draw.
+- Each worker runs a `CooperativeScheduler` in place of threads, and finished
+  fetches, tile replies and tasks are handled as they arrive
   ([crates/mln_web_host](../../crates/mln_web_host)).
-- The map sends work to the tile workers as serialized messages over
-  MessageChannels. Large arrays, such as pixels and vertices, are transferred
-  rather than copied.
+- The render session sends work to the tile workers as serialized messages over
+  MessageChannels, which the runtime connects through a control port that the
+  page gives the map worker for each tile worker. Large arrays, such as pixels
+  and vertices, are transferred rather than copied.
 - The module comes in two builds, and a browser downloads only one: WebGPU
-  (mln_webgpu), or WebGL2 (mln_gl, the `webgl` feature) for browsers without a
-  working WebGPU.
+  (mln_webgpu), or WebGL2 (mln_gl, the `webgl` feature without the default ones)
+  for browsers without a working WebGPU.
 - Shaping font faces (complex scripts, right-to-left text) needs HarfRust,
   skrifa and the glyph rasterizer, a large share of the code, so it lives in a
   second module, [crates/mln_web_shaper](../../crates/mln_web_shaper). The map
@@ -100,19 +104,20 @@ doesn't have. `--module` picks mln_web_webgl or mln_web_shaper instead.
 1. It loads views of the render test suite in headless Chromium, through
    Playwright, offline, with every fixture served from the suite's cache
    database.
-2. The page reads each frame back from the GPU. A screenshot won't do, because
-   headless Chromium composites WebGPU canvases as white.
+2. The page reads each frame back from the canvas, in the task that drew it. A
+   screenshot won't do, because headless Chromium composites WebGPU canvases as
+   white.
 3. The native render-test runner renders the same views and compares them with
    the page's frames.
 
 It fails when a frame differs too much, when the page or a worker logs an error,
 or when a view's tiles get no worker replies. Two views also drag and pinch the
 map over a slow network first, and fail if that makes the map fetch URLs again.
-It also runs mln_gfx's conformance case of writes from JS arrays on the map's
-GPU, and checks that a panic stops the page, and that the GL JS comparison lines
-up. The page's frames come from SwiftShader and the native ones from lavapipe,
-which match in most views. check/check.mjs documents the options, and
-check/views.mjs lists the views.
+It also runs mln_gfx's conformance case of writes from JS arrays on a GPU of the
+map's backend, and checks that a panic stops the page, and that the GL JS
+comparison lines up. The page's frames come from SwiftShader and the native ones
+from lavapipe, which match in most views. check/check.mjs documents the options,
+and check/views.mjs lists the views.
 
 Before the first run, install the Chromium that the lockfile's playwright-core
 pins, and keep lavapipe installed for the native runner (`VK_DRIVER_FILES`):

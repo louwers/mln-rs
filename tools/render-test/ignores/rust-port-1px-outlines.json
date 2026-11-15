@@ -1,7 +1,3 @@
 {
-  "render-tests/projection/globe/source-bounds": "Metal and WebGPU draw fill outlines 1 px wide, where the expected image has a 2 px outline's fringe on both sides of the edge",
-  "render-tests/within/layout-text": "Metal and WebGPU draw fill outlines as 1 px lines, and a GPU that follows GL's diamond-exit rule gives the polygon's bottom-right corner one edge's outline, where the expected image's 2 px lines blend both edges there (lavapipe draws both)",
-  "render-tests/within/paint-circle": "Metal and WebGPU draw fill outlines as 1 px lines, and a GPU that follows GL's diamond-exit rule gives the polygon's bottom-right corner one edge's outline, where the expected image's 2 px lines blend both edges there (lavapipe draws both)",
-  "render-tests/within/paint-icon": "Metal and WebGPU draw fill outlines as 1 px lines, and a GPU that follows GL's diamond-exit rule gives the polygon's bottom-right corner one edge's outline, where the expected image's 2 px lines blend both edges there (lavapipe draws both)",
-  "render-tests/within/paint-text": "Metal and WebGPU draw fill outlines as 1 px lines, and a GPU that follows GL's diamond-exit rule gives the polygon's bottom-right corner one edge's outline, where the expected image's 2 px lines blend both edges there (lavapipe draws both)"
+  "render-tests/projection/globe/source-bounds": "WebGPU on a CPU rasterizer (lavapipe) draws fill outlines as 1 px lines, where the expected image has a 2 px outline's fringe on both sides of the edge"
 }

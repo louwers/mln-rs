@@ -1,7 +1,7 @@
 //! The browser's local glyph rasterizer: draws a glyph with an
 //! `OffscreenCanvas` 2D context in a CSS font family, as MapLibre GL JS
 //! draws CJK glyphs in its `localIdeographFontFamily` (with TinySDF, which
-//! `GlyphManager` applies here).
+//! `GlyphStore` applies here).
 //!
 //! The bitmap and metrics are those of C++'s Darwin and Qt rasterizers: a
 //! 24px em drawn at 2x into a 60 × 60 bitmap, a 3px border, and the glyph's

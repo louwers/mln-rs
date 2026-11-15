@@ -1,5 +1,6 @@
 //! A gesture recognizer for hosts that have none: pointer, touch, wheel,
-//! platform pinch and keyboard input turned into camera moves on a [`mln_map::Map`], through
+//! platform pinch and keyboard input turned into camera moves on a
+//! [`GestureCamera`], such as `mln_runtime::Map`, through
 //! maplibre-native-ffi's camera calls with their gesture phases
 //! ([`Map::apply_camera_delta`](mln_map::Map::apply_camera_delta)), and
 //! releases continued with the map's momentum.
@@ -16,7 +17,7 @@
 //! Hosts read two clocks each frame: the recognizer's, in milliseconds on any
 //! clock their input events use (`performance.now()`, an `Instant`), which
 //! times taps, releases and scrolls; and the map's `Instant::now()`, which they
-//! give [`Map::set_frame_time`](mln_map::Map::set_frame_time) and which times
+//! give the map's frame time (`mln_runtime::RenderSession`'s frames) and which times
 //! the camera's animations. The two never meet, so their epochs don't
 //! matter.
 
@@ -26,7 +27,7 @@ mod options;
 mod recognizer;
 mod velocity;
 
-pub use camera::GestureCamera;
+pub use camera::{GestureCamera, PendingEnd, center_latitude, zoom_range};
 pub use input::{Button, GestureEvent, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
 pub use options::GestureOptions;
 pub use recognizer::GestureRecognizer;

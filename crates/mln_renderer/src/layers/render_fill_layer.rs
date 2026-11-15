@@ -2,9 +2,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::{
-    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_POS_VERTEX_ATTRIBUTE,
+    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OUTLINE_END_ATTRIBUTE,
+    ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
@@ -22,6 +24,7 @@ use mln_util::Color;
 use super::fill_layer_tweaker::FillLayerTweaker;
 use super::{
     DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_layer_tweaker, refresh_if_bucket_updated,
+    shared_vertices,
 };
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
@@ -36,6 +39,7 @@ use crate::render_layer::{
     RenderLayer, RenderLayerBase, Stats, capture_retained_features, vertex_color_alpha, vertex_opacity,
 };
 use crate::render_pass::RenderPass;
+use crate::render_static_data::RenderStaticData;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
@@ -44,6 +48,18 @@ const FILL_SHADER_NAME: &str = "FillShader";
 const FILL_OUTLINE_SHADER_NAME: &str = "FillOutlineShader";
 const FILL_PATTERN_SHADER_NAME: &str = "FillPatternShader";
 const FILL_OUTLINE_PATTERN_SHADER_NAME: &str = "FillOutlinePatternShader";
+const FILL_OUTLINE_INSTANCED_SHADER_NAME: &str = "FillOutlineInstancedShader";
+const FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME: &str = "FillOutlinePatternInstancedShader";
+
+/// The outlines' line width, which the style spec doesn't give. GL JS sets
+/// none, so it draws 1 px; C++ draws 2 px on OpenGL. The outline shaders
+/// fade the pixels on both sides of a fill's edge by their distance from it,
+/// and the render tests' expected images have both. A device that draws no
+/// lines this wide draws each segment of an outline as an instance of a
+/// quad, which the instanced outline shaders lay over the pixels such a line
+/// covers. One that rasterizes on the CPU, where an instance costs about as
+/// much as a draw, draws its 1 px lines instead.
+const LINE_WIDTH: f32 = 2.0;
 
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), FillLayerImpl::static_type_info()));
@@ -189,9 +205,15 @@ pub(crate) struct RenderFillLayer {
     unevaluated: FillPaintProperties::Unevaluated,
 
     fill_shader_group: Option<ShaderGroupPtr>,
+    /// The outline shaders: the line ones, or the instanced ones on a
+    /// device that draws no `LINE_WIDTH` lines and rasterizes on the GPU.
     outline_shader_group: Option<ShaderGroupPtr>,
     pattern_shader_group: Option<ShaderGroupPtr>,
     outline_pattern_shader_group: Option<ShaderGroupPtr>,
+
+    /// The instanced outlines' quad (`RenderStaticData::fill_outline_vertices`).
+    outline_quad_vertices: Option<VertexVectorBasePtr>,
+    outline_quad_indices: Option<IndexVectorBasePtr>,
 }
 
 impl RenderFillLayer {
@@ -207,6 +229,8 @@ impl RenderFillLayer {
             outline_shader_group: None,
             pattern_shader_group: None,
             outline_pattern_shader_group: None,
+            outline_quad_vertices: None,
+            outline_quad_indices: None,
         }
     }
 }
@@ -268,7 +292,8 @@ impl RenderLayer for RenderFillLayer {
     fn query_intersects_feature(
         &self,
         query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         _zoom: f32,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
@@ -286,28 +311,20 @@ impl RenderLayer for RenderFillLayer {
 
         mln_util::intersection_tests::polygon_intersects_multi_polygon(
             translated_query_geometry.as_ref().unwrap_or(query_geometry),
-            feature.get_geometries(),
+            geometry,
         )
     }
 
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        _context: &Context,
+        context: &Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
         render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
-        // The outlines' line width, which the style spec doesn't give. GL JS
-        // sets none, so it draws 1 px; C++ draws 2 px on OpenGL. The outline
-        // shader fades the pixels on both sides of a fill's edge by their
-        // distance from it, and the render tests' expected images have both.
-        // Metal, WebGPU and devices without wide lines draw 1 px, which
-        // reaches one of the two.
-        const LINE_WIDTH: f32 = 2.0;
-
         self.base.stats.rendered_features.clear();
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
@@ -335,14 +352,21 @@ impl RenderLayer for RenderFillLayer {
         if self.fill_shader_group.is_none() {
             self.fill_shader_group = shaders.shader_group(FILL_SHADER_NAME);
         }
+        let caps = context.caps();
+        let outline_quads = caps.max_line_width < LINE_WIDTH && !caps.cpu_rasterizer;
+        let (outline_name, outline_pattern_name) = if outline_quads {
+            (FILL_OUTLINE_INSTANCED_SHADER_NAME, FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME)
+        } else {
+            (FILL_OUTLINE_SHADER_NAME, FILL_OUTLINE_PATTERN_SHADER_NAME)
+        };
         if self.outline_shader_group.is_none() {
-            self.outline_shader_group = shaders.shader_group(FILL_OUTLINE_SHADER_NAME);
+            self.outline_shader_group = shaders.shader_group(outline_name);
         }
         if self.pattern_shader_group.is_none() {
             self.pattern_shader_group = shaders.shader_group(FILL_PATTERN_SHADER_NAME);
         }
         if self.outline_pattern_shader_group.is_none() {
-            self.outline_pattern_shader_group = shaders.shader_group(FILL_OUTLINE_PATTERN_SHADER_NAME);
+            self.outline_pattern_shader_group = shaders.shader_group(outline_pattern_name);
         }
         let (Some(fill_shader_group), Some(outline_shader_group), Some(_), Some(_)) = (
             self.fill_shader_group.clone(),
@@ -379,6 +403,23 @@ impl RenderLayer for RenderFillLayer {
             tile_layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
         }
 
+        // The quad's corners, which every instanced outline reads per vertex.
+        let outline_quad = outline_quads.then(|| {
+            let vertices = Rc::clone(
+                self.outline_quad_vertices
+                    .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_outline_vertices())),
+            );
+            let indices = Rc::clone(self.outline_quad_indices.get_or_insert_with(|| {
+                Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())))
+            }));
+            let mut attributes = VertexAttributeArray::new();
+            if let Some(attr) = attributes.set(ID_FILL_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+                let stride = size_of::<[i16; 2]>() as u32;
+                attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 0, 0, stride, AttributeDataType::Short2);
+            }
+            (vertices, indices, Rc::new(RefCell::new(attributes)))
+        });
+
         let layer_tweaker = self.base.layer_tweaker.clone();
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
         for tile in render_tiles.iter() {
@@ -410,7 +451,7 @@ impl RenderLayer for RenderFillLayer {
 
             let evaluated = get_evaluated::<FillLayerProperties>(&render_data.layer_properties);
             let geometry = tile.get_bucket_geometry();
-            let paint = || {
+            let paint_of = || {
                 paint_vertices(geometry, bucket, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state())
             };
 
@@ -428,7 +469,7 @@ impl RenderLayer for RenderFillLayer {
                 let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
                 if current {
                     refresh_if_bucket_updated(drawable, |attrs| {
-                        read_fill_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
+                        read_fill_attributes(attrs, binders, &paint_of(), evaluated, &mut Default::default());
                     });
                 }
                 current
@@ -436,16 +477,21 @@ impl RenderLayer for RenderFillLayer {
             if self.update_tile(render_pass, &tile_id, update_existing) {
                 continue;
             }
+            if outline_quad.is_none() {
+                // Only the instanced outlines read the outline ends.
+                bucket.outline_ends.discard();
+            }
 
             properties_as_uniforms.0.clear();
             properties_as_uniforms.1.clear();
 
             // `Fill*Program` all use `style::FillPaintProperties`
+            let paint = paint_of();
             let vertex_attrs: VertexAttributeArrayPtr = VertexAttributeArray::new_ptr();
             read_fill_attributes(
                 &mut vertex_attrs.borrow_mut(),
                 binders,
-                &paint(),
+                &paint,
                 evaluated,
                 &mut properties_as_uniforms,
             );
@@ -468,6 +514,41 @@ impl RenderLayer for RenderFillLayer {
                     AttributeDataType::Short2,
                 );
             }
+
+            // The outline: the bucket's lines, or an instance of the quad for
+            // each vertex, from it to its outline end.
+            let set_outline_geometry = |builder: &mut DrawableBuilder| {
+                let stride = size_of::<FillLayoutVertex>() as u32;
+                if let Some((quad_vertices, quad_indices, quad_attributes)) = &outline_quad {
+                    let mut instance_attrs = VertexAttributeArray::new();
+                    read_fill_attributes(&mut instance_attrs, binders, &paint, evaluated, &mut Default::default());
+                    for (id, ends) in [
+                        (ID_FILL_OUTLINE_POS_ATTRIBUTE, &bucket.vertices),
+                        (ID_FILL_OUTLINE_END_ATTRIBUTE, &bucket.outline_ends),
+                    ] {
+                        if let Some(attr) = instance_attrs.set(id, -1, AttributeDataType::Invalid, 0) {
+                            let ends = bucket_vertices(geometry, bucket, ends);
+                            attr.set_shared_raw_data(Some(ends), 0, 0, stride, AttributeDataType::Short2);
+                        }
+                    }
+                    builder.set_raw_vertices(Vec::new(), quad_vertices.get_raw_count(), AttributeDataType::Short2);
+                    builder.set_vertex_attributes(Some(Rc::clone(quad_attributes)));
+                    builder.set_instance_attributes(Some(Rc::new(RefCell::new(instance_attrs))));
+                    builder.set_segments_shared(
+                        DrawMode::Triangles(),
+                        Some(Rc::clone(quad_indices)),
+                        &[RenderStaticData::fill_outline_segment(fill_vertex_count)],
+                    );
+                } else {
+                    builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
+                    builder.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
+                    builder.set_segments_shared(
+                        DrawMode::Lines(LINE_WIDTH),
+                        Some(bucket_indexes(geometry, bucket, &bucket.basic_lines)),
+                        &bucket.basic_line_segments,
+                    );
+                }
+            };
 
             let layer_id = self.base.base_impl.id.clone();
             let finish = |builder: &mut DrawableBuilder, type_: FillVariant| {
@@ -522,9 +603,6 @@ impl RenderLayer for RenderFillLayer {
                     && !bucket.triangles.is_empty()
                 {
                     builder.set_shader(Some(Rc::clone(&fill_shader)));
-                    if do_outline && let Some(outline) = outline_builder.as_mut() {
-                        outline.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
-                    }
                     builder.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
 
                     builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
@@ -541,12 +619,7 @@ impl RenderLayer for RenderFillLayer {
                     && !bucket.basic_lines.is_empty()
                 {
                     builder.set_shader(outline_shader.clone());
-                    builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
-                    builder.set_segments_shared(
-                        DrawMode::Lines(LINE_WIDTH),
-                        Some(bucket_indexes(geometry, bucket, &bucket.basic_lines)),
-                        &bucket.basic_line_segments,
-                    );
+                    set_outline_geometry(builder.as_mut());
                     finish(builder.as_mut(), FillVariant::FillOutline);
                 }
             } else {
@@ -569,7 +642,7 @@ impl RenderLayer for RenderFillLayer {
                 };
 
                 // getAtlasTweaker()
-                let atlas_tweaker = tile.get_atlas_textures().filter(|a| a.icon.borrow().is_some()).map(|atlases| {
+                let atlas_tweaker = tile.get_atlas_textures().filter(|a| a.icon().is_some()).map(|atlases| {
                     Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
                         Some(Rc::clone(atlases)),
                         None,
@@ -615,9 +688,6 @@ impl RenderLayer for RenderFillLayer {
                 {
                     builder.set_shader(Some(Rc::clone(&fill_shader)));
                     builder.set_render_pass(render_pass);
-                    if do_outline && let Some(outline) = outline_pattern_builder.as_mut() {
-                        outline.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
-                    }
                     builder.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
                     builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
                     builder.set_segments_shared(
@@ -635,12 +705,7 @@ impl RenderLayer for RenderFillLayer {
                 {
                     builder.set_shader(outline_shader.clone());
                     builder.set_render_pass(render_pass);
-                    builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
-                    builder.set_segments_shared(
-                        DrawMode::Lines(LINE_WIDTH),
-                        Some(bucket_indexes(geometry, bucket, &bucket.basic_lines)),
-                        &bucket.basic_line_segments,
-                    );
+                    set_outline_geometry(builder.as_mut());
 
                     finish(builder.as_mut(), FillVariant::FillOutlinePattern);
                 }

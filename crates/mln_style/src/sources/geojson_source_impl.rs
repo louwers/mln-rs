@@ -1,7 +1,7 @@
 use std::sync::{Arc, Weak};
 
 use feature::{Feature, PropertyMap, Value};
-use mln_actor::scheduler::{self, SchedulerPtr};
+use mln_actor::scheduler::SchedulerPtr;
 use mln_expression::expression::evaluate_accumulated;
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
@@ -42,25 +42,14 @@ impl std::fmt::Debug for GeoJSONVTData {
 }
 
 impl GeoJSONData for GeoJSONVTData {
-    fn get_tile(
-        &self,
-        id: &CanonicalTileID,
-        callback: Box<dyn FnOnce(TileFeatures)>,
-        run_synchronously: bool,
-        reply_to: &SchedulerPtr,
-    ) {
+    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, run_synchronously: bool) {
         if run_synchronously {
             callback(geojsonvt_tile_features(&self.impl_, id));
         } else {
             let id = *id;
             let geojsonvt_impl = Arc::clone(&self.impl_);
-            scheduler::schedule_and_reply_value(
-                &*self.sequenced_scheduler,
-                None,
-                reply_to,
-                move || -> TileFeatures { geojsonvt_tile_features(&geojsonvt_impl, &id) },
-                callback,
-            );
+            self.sequenced_scheduler
+                .schedule(Box::new(move || callback(geojsonvt_tile_features(&geojsonvt_impl, &id))));
         }
     }
 
@@ -88,13 +77,7 @@ impl std::fmt::Debug for SuperclusterData {
 }
 
 impl GeoJSONData for SuperclusterData {
-    fn get_tile(
-        &self,
-        id: &CanonicalTileID,
-        callback: Box<dyn FnOnce(TileFeatures)>,
-        _run_synchronously: bool,
-        _reply_to: &SchedulerPtr,
-    ) {
+    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, _run_synchronously: bool) {
         callback(self.impl_.get_tile(id.z, id.x, id.y));
     }
 

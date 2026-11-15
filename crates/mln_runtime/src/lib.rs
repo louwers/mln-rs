@@ -32,6 +32,7 @@ mod camera;
 mod completion;
 mod event;
 mod feature_state;
+mod gestures;
 mod map;
 #[cfg(not(target_family = "wasm"))]
 mod offline;
@@ -64,7 +65,7 @@ pub use render::{
     ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDemand, FrameDepth, FrameDisposition, FrameResult,
     FrameTexture, FrameTextureKind, FrameView, GlApi, GpuSync, LocalTarget, NativeTexture, RenderSession,
     RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget, RenderedQueryGeometry, Surface,
-    SurfaceType, SyncKind, SyncKinds, Wake,
+    SurfaceOverlay, SurfaceType, SyncKind, SyncKinds, Wake,
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};

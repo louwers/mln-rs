@@ -78,14 +78,14 @@ impl FeatureTrackingTest {
 
     fn with_geojson(geojson: &str, camera: CameraOptions) -> Self {
         let run_loop = RunLoop::new();
-        let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+        let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
         let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response(GLYPH_PATH)));
         let mut map = Map::with_file_source(
             file_source,
             MapOptions {
                 map_mode: MapMode::Static,
-                size: frontend.get_size(),
+                size: frontend.size(),
                 capture_rendered_features: true,
                 ..Default::default()
             },
@@ -320,7 +320,7 @@ fn ndc_bound_translated_variable_anchor() {
             set(layer, "text-translate", &json!(translate));
         });
         test.run(None, 0.0);
-        (max_y(&test, SYMBOL_LAYER_NAME), f64::from(test.frontend.get_size().height))
+        (max_y(&test, SYMBOL_LAYER_NAME), f64::from(test.frontend.size().height))
     };
     let (untranslated, _) = capture_at([0.0, 0.0]);
     let (translated, height) = capture_at([0.0, -50.0]);
@@ -342,7 +342,7 @@ fn ndc_bound_shared_bucket_at_another_translation() {
         style.add_layer(follower, None).expect("add layer");
     }
     test.run(None, 0.0);
-    let expected = 2.0 * 50.0 / f64::from(test.frontend.get_size().height);
+    let expected = 2.0 * 50.0 / f64::from(test.frontend.size().height);
     let difference = max_y(&test, "follower") - max_y(&test, SYMBOL_LAYER_NAME);
     assert!((difference - expected).abs() <= 1e-3, "{difference} != {expected}");
 }
@@ -446,7 +446,7 @@ fn ndc_bound_tilt() {
     assert_eq!(0, test.count(Some("pt0"), None, None)); // out of view
 
     // tilt and the feature appears
-    let pitched = CameraOptions { pitch: Some(60.0), ..test.map.get_camera_options(None) };
+    let pitched = CameraOptions { pitch: Some(60.0), ..CameraOptions::from(test.map.snapshot().view.camera) };
     test.map.jump_to(&pitched);
     test.run(Some("NDCBoundTilt"), 0.01);
 
@@ -590,7 +590,7 @@ impl FeatureTrackingTest {
     /// Where `lat_lng` is, in NDC.
     fn ndc(&self, lat_lng: &LatLng) -> (f64, f64) {
         let pixel = self.map.pixel_for_lat_lng(lat_lng);
-        let size = self.frontend.get_size();
+        let size = self.frontend.size();
         (pixel.x / f64::from(size.width) * 2.0 - 1.0, 1.0 - pixel.y / f64::from(size.height) * 2.0)
     }
 

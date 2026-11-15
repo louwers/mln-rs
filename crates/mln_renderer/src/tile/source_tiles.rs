@@ -1,9 +1,13 @@
-// `renderedTiles` (`std::map<UnwrappedTileID, std::reference_wrapper<Tile>>`)
-// maps to the key of the tile in `tiles`: every rendered tile is one of the
-// pyramid's tiles.
+//! A source's tiles: those its cover holds and those it caches, in one map,
+//! and which of them each update renders. `update_cover` is the pyramid
+//! update: the ideal and prefetched covers of the view, the tiles that stand
+//! in for those that haven't loaded, the cache of recently used tiles, wrap
+//! jumps and fade holds.
+//!
+//! `rendered` maps each rendered tile id to the key of its tile in `tiles`:
+//! every rendered tile is one of the source's tiles.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
@@ -24,10 +28,15 @@ use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
+use crate::algorithm::update_tile_masks::update_tile_masks;
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::tile::tile::{Tile, TileLoadOrder, TileNecessity, TileUpdateParameters};
-use crate::tile::tile_cache::TileCache;
-use crate::tile::tile_observer::{NullTileObserver, TileObserver};
+use crate::layout::tile_layout::LayoutParams;
+use crate::tile::contents::Contents;
+use crate::tile::dem::{self, DEMTileNeighbors};
+use crate::tile::job::{JobId, SourceStyle};
+use crate::tile::store::{SourceInfo, StoreContext};
+use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
+use crate::tile::tile_workers::{Lane, ReplyBody};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
 
@@ -42,16 +51,30 @@ const GLOBE_BASE_LEVEL_MAX_ZOOM: u8 = 1;
 /// tile loaded for the view covers.
 const GLOBE_BASE_LEVEL_MAX_RADIUS: f64 = 2.0;
 
-pub(crate) struct TilePyramid {
-    tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>>,
-    cache: TileCache,
+/// What a source's update gives its cover.
+pub(crate) struct CoverUpdate<'a, 'p> {
+    /// The source's visible layers, in style order.
+    pub(crate) layers: &'a [Arc<dyn LayerProperties>],
+    pub(crate) needs_rendering: bool,
+    pub(crate) needs_relayout: bool,
+    pub(crate) parameters: &'a TileParameters<'p>,
+    pub(crate) source_impl: &'a dyn source::Impl,
+    pub(crate) tile_size: u16,
+    pub(crate) zoom_range: Range<u8>,
+    pub(crate) bounds: Option<LatLngBounds>,
+}
 
+/// A source's tiles.
+pub(crate) struct SourceTiles {
+    pub(crate) info: SourceInfo,
+    /// The cover's tiles and the cached ones, by id.
+    pub(crate) tiles: BTreeMap<OverscaledTileID, Tile>,
+    /// The cached tiles' ids, oldest first.
+    cache: Vec<OverscaledTileID>,
+    cache_size: usize,
     /// Sorted by tile id.
-    rendered_tiles: BTreeMap<UnwrappedTileID, OverscaledTileID>,
-    observer: Rc<dyn TileObserver>,
-
+    rendered: BTreeMap<UnwrappedTileID, OverscaledTileID>,
     prev_lng: f32,
-
     fading_tiles: bool,
     cache_enabled: bool,
     last_subdivision_granularity: SubdivisionGranularitySetting,
@@ -60,159 +83,9 @@ pub(crate) struct TilePyramid {
     /// when the tile that held it unloads, or the tile could not come back
     /// while its symbols are in view.
     max_content_elevation: f32,
-}
-
-/// The `TilePyramid::update` callbacks of `algorithm::updateRenderables`.
-struct UpdateContext<'p, 'a, F>
-where
-    F: FnMut(&OverscaledTileID, Rc<dyn TileObserver>) -> Option<Box<dyn Tile>>,
-{
-    tiles: &'p mut BTreeMap<OverscaledTileID, Box<dyn Tile>>,
-    cache: &'p mut TileCache,
-    rendered_tiles: &'p mut BTreeMap<UnwrappedTileID, OverscaledTileID>,
-    previously_rendered_tiles: &'p mut BTreeMap<UnwrappedTileID, OverscaledTileID>,
-    retain: &'p mut BTreeSet<OverscaledTileID>,
-    observer: &'p Rc<dyn TileObserver>,
-    layers: &'p [Arc<dyn LayerProperties>],
-    parameters: &'p TileParameters<'a>,
-    tile_range: Option<TileRange>,
-    needs_relayout: bool,
-    minimum_update_interval: std::time::Duration,
-    is_volatile: bool,
-    create_tile: F,
-    /// Whether `renderTile` marks tiles and updates `previouslyRenderedTiles`
-    /// (the ideal pass; the pan pass passes a no-op).
-    render: bool,
-    /// The tiles the current pass has retained. A pass retains tiles in its
-    /// cover's order, nearest the view's centre first, each followed by the
-    /// parents that stand in for it.
-    pass_rank: usize,
-}
-
-impl<F> RenderablesContext for UpdateContext<'_, '_, F>
-where
-    F: FnMut(&OverscaledTileID, Rc<dyn TileObserver>) -> Option<Box<dyn Tile>>,
-{
-    fn get_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
-        if self.tiles.contains_key(id) {
-            return Some(*id);
-        }
-        // On the globe every wrap of a tile is the same piece of the sphere,
-        // and the cover gives the tiles either side of the antimeridian
-        // different wraps: a tile there finds its parent under the wrap of
-        // the tiles on the other side. The cover's wraps are at most two
-        // apart.
-        if self.finds_tiles_across_wraps() {
-            return [-1, 1, -2, 2]
-                .into_iter()
-                .map(|delta| id.unwrap_to(id.wrap.wrapping_add(delta)))
-                .find(|other| self.tiles.contains_key(other));
-        }
-        None
-    }
-
-    fn create_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
-        if let Some(tile_range) = &self.tile_range
-            && !tile_range.contains(&id.canonical)
-        {
-            return None;
-        }
-        let mut tile = self.cache.pop(id);
-        if tile.is_none() && self.parameters.transform_state.is_globe_rendering() {
-            tile = self.cache.pop_any_wrap(id);
-        }
-        let tile = if let Some(tile) = tile {
-            // A tile cached before the pixel ratio changed.
-            if tile.set_pixel_ratio(self.parameters.pixel_ratio) {
-                tile.set_layers(self.layers, self.parameters.global_state.clone());
-            }
-            tile
-        } else {
-            let tile = (self.create_tile)(id, Rc::clone(self.observer))?;
-            tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
-            tile.set_pixel_ratio(self.parameters.pixel_ratio);
-            tile.set_layers(self.layers, self.parameters.global_state.clone());
-            tile
-        };
-
-        // `tiles.emplace(tileID, std::move(tile))` keeps an existing tile.
-        self.tiles.entry(*id).or_insert(tile);
-        Some(*id)
-    }
-
-    fn retain_tile(&mut self, key: &OverscaledTileID, necessity: TileNecessity) {
-        let tile = &self.tiles[key];
-        if self.retain.insert(tile.id()) {
-            tile.set_update_parameters(&TileUpdateParameters {
-                minimum_update_interval: self.minimum_update_interval,
-                is_volatile: self.is_volatile,
-            });
-            // The pan pass comes first, so a tile of both covers loads with
-            // the coarse ones.
-            let order =
-                if self.render { TileLoadOrder::ideal(self.pass_rank) } else { TileLoadOrder::coarse(self.pass_rank) };
-            self.pass_rank += 1;
-            tile.set_load_order(order);
-            tile.set_necessity(necessity);
-            tile.base().retained_necessity.set(necessity);
-        }
-
-        // A new pixel ratio lays the tile out again, without the relayout
-        // that drops the cached tiles.
-        let pixel_ratio_changed = tile.set_pixel_ratio(self.parameters.pixel_ratio);
-        if self.needs_relayout || pixel_ratio_changed {
-            tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
-            tile.set_layers(self.layers, self.parameters.global_state.clone());
-        }
-    }
-
-    fn render_tile(&mut self, id: &UnwrappedTileID, key: &OverscaledTileID) {
-        if !self.render {
-            return;
-        }
-        // A globe tile found under another wrap is drawn once, under its own.
-        let id = if self.finds_tiles_across_wraps() { &key.to_unwrapped() } else { id };
-        // addRenderTile(tileID, tile)
-        debug_assert!(self.tiles[key].is_renderable());
-        self.rendered_tiles.entry(*id).or_insert(*key);
-        // Still rendering this tile, no need for special fading logic.
-        self.previously_rendered_tiles.remove(id);
-        self.tiles[key].mark_rendered_ideal();
-    }
-
-    fn prefetched_tiles(&self) -> Vec<PrefetchedTile> {
-        if !self.render {
-            // The pan pass: `emptyPrefetchedTiles`.
-            return Vec::new();
-        }
-        // The ideal pass: `tiles`.
-        self.tiles.keys().map(|id| (*id, *id)).collect()
-    }
-
-    fn is_renderable(&self, key: &OverscaledTileID) -> bool {
-        self.tiles[key].is_renderable()
-    }
-
-    fn has_tried_cache(&self, key: &OverscaledTileID) -> bool {
-        self.tiles[key].has_tried_cache()
-    }
-
-    fn is_loaded(&self, key: &OverscaledTileID) -> bool {
-        self.tiles[key].is_loaded()
-    }
-}
-
-impl<F> UpdateContext<'_, '_, F>
-where
-    F: FnMut(&OverscaledTileID, Rc<dyn TileObserver>) -> Option<Box<dyn Tile>>,
-{
-    /// Whether a tile lookup that misses looks under the neighbouring wraps:
-    /// on the full globe only. While it blends into Mercator, a tile's flat
-    /// half is placed by its wrap, so a tile of another wrap would land a
-    /// world away there.
-    fn finds_tiles_across_wraps(&self) -> bool {
-        self.parameters.transform_state.get_projection_transition() >= 1.0
-    }
+    /// The style the source's tiles last got, which the next update reuses
+    /// while its values stay the same.
+    style: Option<Arc<SourceStyle>>,
 }
 
 /// Whether every tile of the source's minimum zoom is kept loaded: on the
@@ -263,90 +136,318 @@ impl WantedTiles {
     }
 }
 
-impl Default for TilePyramid {
-    fn default() -> Self {
-        Self::new()
+/// The `update_renderables` callbacks of `update_cover`.
+struct CoverContext<'s, 'a, 'p> {
+    source: &'s mut SourceTiles,
+    ctx: &'s mut StoreContext,
+    previously_rendered: &'s mut BTreeMap<UnwrappedTileID, OverscaledTileID>,
+    retain: &'s mut BTreeSet<OverscaledTileID>,
+    style: &'s Arc<SourceStyle>,
+    update: &'s CoverUpdate<'a, 'p>,
+    tile_range: Option<TileRange>,
+    needs_relayout: bool,
+    minimum_update_interval: std::time::Duration,
+    is_volatile: bool,
+    /// Whether `render_tile` marks tiles and updates the previously rendered
+    /// tiles (the ideal pass; the pan pass renders nothing).
+    render: bool,
+    /// The tiles the current pass has retained. A pass retains tiles in its
+    /// cover's order, nearest the view's centre first, each followed by the
+    /// parents that stand in for it.
+    pass_rank: usize,
+}
+
+impl CoverContext<'_, '_, '_> {
+    /// Whether a tile lookup that misses looks under the neighbouring wraps:
+    /// on the full globe only. While it blends into Mercator, a tile's flat
+    /// half is placed by its wrap, so a tile of another wrap would land a
+    /// world away there.
+    fn finds_tiles_across_wraps(&self) -> bool {
+        self.update.parameters.transform_state.get_projection_transition() >= 1.0
+    }
+
+    fn tile(&self, key: &OverscaledTileID) -> Option<&Tile> {
+        self.source.tiles.get(key)
+    }
+
+    fn in_cover(&self, key: &OverscaledTileID) -> bool {
+        self.tile(key).is_some_and(|tile| !tile.cached)
     }
 }
 
-impl TilePyramid {
-    /// An empty pyramid. Takes no thread pool (see `TileCache::new`).
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        TilePyramid {
+impl RenderablesContext for CoverContext<'_, '_, '_> {
+    fn get_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
+        if self.in_cover(id) {
+            return Some(*id);
+        }
+        // On the globe every wrap of a tile is the same piece of the sphere,
+        // and the cover gives the tiles either side of the antimeridian
+        // different wraps: a tile there finds its parent under the wrap of
+        // the tiles on the other side. The cover's wraps are at most two
+        // apart.
+        if self.finds_tiles_across_wraps() {
+            return [-1, 1, -2, 2]
+                .into_iter()
+                .map(|delta| id.unwrap_to(id.wrap.wrapping_add(delta)))
+                .find(|other| self.in_cover(other));
+        }
+        None
+    }
+
+    fn create_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
+        if let Some(tile_range) = &self.tile_range
+            && !tile_range.contains(&id.canonical)
+        {
+            return None;
+        }
+        let parameters = self.update.parameters;
+        let mut found = self.source.cache_pop(id);
+        if !found && parameters.transform_state.is_globe_rendering() {
+            found = self.source.cache_pop_any_wrap(id, self.ctx);
+        }
+        let SourceTiles { info, tiles, .. } = &mut *self.source;
+        if found {
+            // A tile cached before the pixel ratio changed.
+            let tile = tiles.get_mut(id)?;
+            if tile.pixel_ratio != parameters.pixel_ratio {
+                tile.pixel_ratio = parameters.pixel_ratio;
+                info.set_style(tile, self.ctx, self.style);
+            }
+            return Some(*id);
+        }
+        let params = LayoutParams {
+            mode: parameters.mode,
+            pixel_ratio: parameters.pixel_ratio,
+            show_collision_boxes: parameters.debug_options.contains(MapDebugOptions::COLLISION),
+            subdivision_granularity: parameters.subdivision_granularity,
+            first_load: true,
+            capture_rendered_features: parameters.capture_rendered_features,
+        };
+        let mut tile = info.new_tile(*id, params)?;
+        info.start_load(&mut tile, self.ctx);
+        info.set_style(&mut tile, self.ctx, self.style);
+        tiles.insert(*id, tile);
+        Some(*id)
+    }
+
+    fn retain_tile(&mut self, key: &OverscaledTileID, necessity: TileNecessity) {
+        let SourceTiles { info, tiles, .. } = &mut *self.source;
+        let Some(tile) = tiles.get_mut(key) else {
+            return;
+        };
+        if self.retain.insert(tile.id) {
+            let update_parameters = TileUpdateParameters {
+                minimum_update_interval: self.minimum_update_interval,
+                is_volatile: self.is_volatile,
+            };
+            info.set_update_parameters(tile, self.ctx, &update_parameters);
+            // The pan pass comes first, so a tile of both covers loads with
+            // the coarse ones.
+            let order =
+                if self.render { TileLoadOrder::ideal(self.pass_rank) } else { TileLoadOrder::coarse(self.pass_rank) };
+            self.pass_rank += 1;
+            SourceInfo::set_load_order(tile, order);
+            info.set_necessity(tile, self.ctx, necessity);
+            tile.retained_necessity = necessity;
+        }
+
+        // A new pixel ratio lays the tile out again, without the relayout
+        // that drops the cached tiles.
+        let parameters = self.update.parameters;
+        let pixel_ratio_changed = tile.kind == TileKind::Geometry && tile.pixel_ratio != parameters.pixel_ratio;
+        tile.pixel_ratio = parameters.pixel_ratio;
+        if self.needs_relayout || pixel_ratio_changed {
+            tile.granularity = parameters.subdivision_granularity;
+            info.set_style(tile, self.ctx, self.style);
+        }
+    }
+
+    fn render_tile(&mut self, id: &UnwrappedTileID, key: &OverscaledTileID) {
+        if !self.render {
+            return;
+        }
+        // A globe tile found under another wrap is drawn once, under its own.
+        let id = if self.finds_tiles_across_wraps() { &key.to_unwrapped() } else { id };
+        debug_assert!(self.tile(key).is_some_and(Tile::is_renderable));
+        self.source.rendered.entry(*id).or_insert(*key);
+        // Still rendering this tile, no need for special fading logic.
+        self.previously_rendered.remove(id);
+        if let Some(tile) = self.source.tiles.get_mut(key) {
+            tile.mark_rendered_ideal();
+        }
+    }
+
+    fn prefetched_tiles(&self) -> Vec<PrefetchedTile> {
+        if !self.render {
+            // The pan pass: `emptyPrefetchedTiles`.
+            return Vec::new();
+        }
+        // The ideal pass: the cover's tiles.
+        self.source.tiles.values().filter(|tile| !tile.cached).map(|tile| (tile.id, tile.id)).collect()
+    }
+
+    fn is_renderable(&self, key: &OverscaledTileID) -> bool {
+        self.tile(key).is_some_and(Tile::is_renderable)
+    }
+
+    fn has_tried_cache(&self, key: &OverscaledTileID) -> bool {
+        self.tile(key).is_some_and(|tile| tile.tried_cache)
+    }
+
+    fn is_loaded(&self, key: &OverscaledTileID) -> bool {
+        self.tile(key).is_some_and(|tile| tile.loaded)
+    }
+}
+
+impl SourceTiles {
+    pub(crate) fn new(info: SourceInfo) -> Self {
+        SourceTiles {
+            info,
             tiles: BTreeMap::new(),
-            cache: TileCache::new(0),
-            rendered_tiles: BTreeMap::new(),
-            observer: Rc::new(NullTileObserver),
+            cache: Vec::new(),
+            cache_size: 0,
+            rendered: BTreeMap::new(),
             prev_lng: 0.0,
             fading_tiles: false,
             cache_enabled: true,
             last_subdivision_granularity: SubdivisionGranularitySetting::none(),
             max_content_elevation: 0.0,
+            style: None,
         }
     }
 
-    #[must_use]
-    pub(crate) fn is_loaded(&self) -> bool {
-        self.tiles.values().all(|tile| tile.is_complete())
+    /// The cover's tiles, in id order.
+    pub(crate) fn cover(&self) -> impl Iterator<Item = &Tile> + '_ {
+        self.tiles.values().filter(|tile| !tile.cached)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the layers, the update flags, the source and its tile range, and the callback that makes a tile"
-    )]
-    pub(crate) fn update(
+    /// Whether every tile of the cover is complete.
+    #[must_use]
+    pub(crate) fn is_loaded(&self) -> bool {
+        self.cover().all(Tile::is_complete)
+    }
+
+    /// Calls `f` with each tile, cached ones included.
+    pub(crate) fn for_each_tile_mut(
         &mut self,
-        layers: &[Arc<dyn LayerProperties>],
-        needs_rendering: bool,
-        needs_relayout: bool,
-        parameters: &TileParameters<'_>,
-        source_impl: &dyn source::Impl,
-        tile_size: u16,
-        zoom_range: Range<u8>,
-        bounds: Option<LatLngBounds>,
-        create_tile: impl FnMut(&OverscaledTileID, Rc<dyn TileObserver>) -> Option<Box<dyn Tile>>,
+        ctx: &mut StoreContext,
+        mut f: impl FnMut(&mut SourceInfo, &mut Tile, &mut StoreContext),
     ) {
+        let SourceTiles { info, tiles, .. } = self;
+        for tile in tiles.values_mut() {
+            f(info, tile, ctx);
+        }
+    }
+
+    /// Calls `f` with tile `id`, if the source has it.
+    pub(crate) fn with_tile(
+        &mut self,
+        id: &OverscaledTileID,
+        ctx: &mut StoreContext,
+        f: impl FnOnce(&mut SourceInfo, &mut Tile, &mut StoreContext),
+    ) {
+        let SourceTiles { info, tiles, .. } = self;
+        if let Some(tile) = tiles.get_mut(id) {
+            f(info, tile, ctx);
+        }
+    }
+
+    /// Applies the reply to job `job` of tile `id`. A DEM that arrives
+    /// takes its borders from its neighbours, and gives them its own.
+    pub(crate) fn apply_reply(
+        &mut self,
+        id: &OverscaledTileID,
+        ctx: &mut StoreContext,
+        lane: Lane,
+        job: JobId,
+        body: ReplyBody,
+    ) {
+        let SourceTiles { info, tiles, .. } = self;
+        let Some(tile) = tiles.get_mut(id) else {
+            return;
+        };
+        if info.apply_reply(tile, ctx, lane, job, body) && matches!(info.kind, TileKind::Dem(_)) {
+            self.backfill_dem(id);
+        }
+    }
+
+    /// Moves tile `id`'s work on (`SourceInfo::drive`).
+    pub(crate) fn drive(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) -> bool {
+        let SourceTiles { info, tiles, .. } = self;
+        tiles.get_mut(id).is_some_and(|tile| info.drive(tile, ctx))
+    }
+
+    /// The worker of `lane` is gone: the tiles whose work it had start it
+    /// again.
+    pub(crate) fn lane_lost(&mut self, lane: Lane) {
+        let SourceTiles { info, tiles, .. } = self;
+        for tile in tiles.values_mut() {
+            info.lane_lost(tile, lane);
+        }
+    }
+
+    /// Backfills the borders of DEM tile `id` and of its loaded neighbours
+    /// from each other.
+    fn backfill_dem(&mut self, id: &OverscaledTileID) {
+        let Some(mut tile) = self.tiles.remove(id) else {
+            return;
+        };
+        if tile.is_renderable() && tile.dem_neighbors != DEMTileNeighbors::COMPLETE {
+            // Only the neighbours not backfilled before.
+            for mask in dem::masks() {
+                if tile.dem_neighbors.has(mask) {
+                    continue;
+                }
+                if let Some(border) = self.tiles.get_mut(&dem::neighbor(&tile.id, mask)) {
+                    dem::backfill_pair(&mut tile, border, mask);
+                }
+            }
+        }
+        self.tiles.insert(*id, tile);
+    }
+
+    /// Updates the source's cover for the view in `update`'s parameters:
+    /// creates, retains and caches its tiles, and picks the ones to render.
+    pub(crate) fn update_cover(&mut self, update: &CoverUpdate<'_, '_>, ctx: &mut StoreContext) {
+        let parameters = update.parameters;
         let subdivision_granularity = parameters.subdivision_granularity;
-        let relayout = needs_relayout || subdivision_granularity != self.last_subdivision_granularity;
+        let relayout = update.needs_relayout || subdivision_granularity != self.last_subdivision_granularity;
         self.last_subdivision_granularity = subdivision_granularity;
+        self.info.synchronous = parameters.is_update_synchronous;
 
         // If we need a relayout, abandon any cached tiles; they're now stale.
         if relayout {
-            self.cache.clear();
+            self.cache_clear(ctx);
             self.max_content_elevation = 0.0;
         }
 
         // If we're not going to render anything, move our existing tiles
         // into the cache (if they're not stale) or abandon them, and return.
-        if !needs_rendering {
-            let tiles = std::mem::take(&mut self.tiles);
-            for (id, tile) in tiles {
+        if !update.needs_rendering {
+            let cover: Vec<OverscaledTileID> = self.cover().map(|tile| tile.id).collect();
+            for id in cover {
                 if relayout {
-                    self.cache.deferred_release(tile);
+                    self.release(&id, ctx);
+                    continue;
+                }
+                // These tiles are invisible, we set optional necessity for
+                // them and thus suppress network requests on tiles
+                // expiration. One that hasn't loaded then stops loading, and
+                // is released.
+                self.set_necessity(&id, ctx, TileNecessity::Optional);
+                if self.tiles.get(&id).is_some_and(Tile::is_renderable) {
+                    self.cache_add(id, ctx);
                 } else {
-                    // These tiles are invisible, we set optional necessity
-                    // for them and thus suppress network requests on tiles
-                    // expiration (see `OnlineFileRequest`). One that hasn't
-                    // loaded then stops loading, and is released, as in C++.
-                    tile.set_necessity(TileNecessity::Optional);
-                    if tile.is_renderable() {
-                        self.cache.add(id, tile);
-                    } else {
-                        self.cache.deferred_release(tile);
-                    }
+                    self.release(&id, ctx);
                 }
             }
             // So are the tiles that went on loading in the cache.
-            self.cache.release_loading(|_| false);
-
-            self.rendered_tiles.clear();
-            self.cache.defer_pending_releases();
-
+            self.cache_release_loading(ctx, |_| false);
+            self.rendered.clear();
             return;
         }
 
-        self.handle_wrap_jump(parameters.transform_state.get_lat_lng(WrapMode::Unwrapped).longitude() as f32);
+        self.handle_wrap_jump(parameters.transform_state.get_lat_lng(WrapMode::Unwrapped).longitude() as f32, ctx);
 
         // Optionally shift the zoom level
         let zoom = mln_math::clamp_f64(
@@ -355,6 +456,9 @@ impl TilePyramid {
             parameters.transform_state.get_max_zoom(),
         );
 
+        let source_impl = update.source_impl;
+        let zoom_range = update.zoom_range;
+        let tile_size = update.tile_size;
         let type_ = source_impl.type_;
         // Determine the overzooming/underzooming amounts and required tiles.
         let overscaled_zoom: i32 = covering_zoom_level(zoom, type_, tile_size);
@@ -377,7 +481,7 @@ impl TilePyramid {
             tile_lod_mode: parameters.tile_lod_mode,
             requested_zoom: Some(zoom + (constants::TILE_SIZE_D / f64::from(tile_size)).log2()),
             round_zoom: type_ == SourceType::Raster || type_ == SourceType::RasterDEM,
-            max_content_elevation: f64::from(self.update_max_content_elevation(layers)),
+            max_content_elevation: f64::from(self.update_max_content_elevation(update.layers)),
         };
 
         if overscaled_zoom >= i32::from(zoom_range.min) {
@@ -458,7 +562,7 @@ impl TilePyramid {
         // asks for tiles finer than the nominal zoom, up to the source's
         // maximum; the globe cover does, like `TileLodMode::Distance`.
         let mut tile_range: Option<TileRange> = None;
-        if let Some(bounds) = &bounds {
+        if let Some(bounds) = &update.bounds {
             let variable_zoom =
                 parameters.tile_lod_mode == TileLodMode::Distance || parameters.transform_state.is_globe_rendering();
             let max_zoom: i32 = if variable_zoom {
@@ -470,59 +574,55 @@ impl TilePyramid {
         }
 
         if parameters.transform_state.is_globe_rendering() {
-            self.move_tiles_to_wanted_wraps(&ideal_tiles, &pan_tiles);
+            self.move_tiles_to_wanted_wraps(&ideal_tiles, &pan_tiles, ctx);
         }
 
-        let mut previously_rendered_tiles = std::mem::take(&mut self.rendered_tiles);
+        let mut previously_rendered = std::mem::take(&mut self.rendered);
 
-        self.rendered_tiles.clear();
-
-        let mut ctx = UpdateContext {
-            tiles: &mut self.tiles,
-            cache: &mut self.cache,
-            rendered_tiles: &mut self.rendered_tiles,
-            previously_rendered_tiles: &mut previously_rendered_tiles,
-            retain: &mut retain,
-            observer: &self.observer,
-            layers,
-            parameters,
-            tile_range,
-            needs_relayout: relayout,
-            minimum_update_interval,
-            is_volatile,
-            create_tile,
-            render: false,
-            pass_rank: 0,
-        };
-
-        if !pan_tiles.is_empty() {
-            // `[](const UnwrappedTileID&, Tile&) {}` and no prefetched tiles.
-            ctx.render = false;
-            update_renderables(&mut ctx, &pan_tiles, zoom_range, max_parent_tile_overscale_factor);
-        }
-
-        ctx.render = true;
-        ctx.pass_rank = 0;
-        update_renderables(&mut ctx, &ideal_tiles, zoom_range, max_parent_tile_overscale_factor);
-
-        let previously_rendered: Vec<(UnwrappedTileID, OverscaledTileID)> =
-            ctx.previously_rendered_tiles.iter().map(|(id, key)| (*id, *key)).collect();
-        for (unwrapped, key) in previously_rendered {
-            let Some(tile) = ctx.tiles.get(&key) else {
-                continue;
+        let style = self.source_style(update.layers, parameters);
+        {
+            let mut cover = CoverContext {
+                source: self,
+                ctx,
+                previously_rendered: &mut previously_rendered,
+                retain: &mut retain,
+                style: &style,
+                update,
+                tile_range,
+                needs_relayout: relayout,
+                minimum_update_interval,
+                is_volatile,
+                render: false,
+                pass_rank: 0,
             };
-            tile.mark_rendered_previously();
-            if tile.hold_for_fade() {
-                // Since it was rendered in the last frame, we know we have it
-                // Don't mark the tile "Required" to avoid triggering a new
-                // network request
-                ctx.retain_tile(&key, TileNecessity::Optional);
-                // addRenderTile(previouslyRenderedTile.first, tile)
-                debug_assert!(ctx.tiles[&key].is_renderable());
-                ctx.rendered_tiles.entry(unwrapped).or_insert(key);
+
+            if !pan_tiles.is_empty() {
+                // `[](const UnwrappedTileID&, Tile&) {}` and no prefetched tiles.
+                cover.render = false;
+                update_renderables(&mut cover, &pan_tiles, zoom_range, max_parent_tile_overscale_factor);
+            }
+
+            cover.render = true;
+            cover.pass_rank = 0;
+            update_renderables(&mut cover, &ideal_tiles, zoom_range, max_parent_tile_overscale_factor);
+
+            let previously: Vec<(UnwrappedTileID, OverscaledTileID)> =
+                cover.previously_rendered.iter().map(|(id, key)| (*id, *key)).collect();
+            for (unwrapped, key) in previously {
+                let Some(tile) = cover.source.tiles.get_mut(&key) else {
+                    continue;
+                };
+                tile.mark_rendered_previously();
+                if tile.hold_for_fade() {
+                    // Since it was rendered in the last frame, we know we have it
+                    // Don't mark the tile "Required" to avoid triggering a new
+                    // network request
+                    cover.retain_tile(&key, TileNecessity::Optional);
+                    debug_assert!(cover.is_renderable(&key));
+                    cover.source.rendered.entry(unwrapped).or_insert(key);
+                }
             }
         }
-        drop(ctx);
 
         if self.cache_enabled {
             let size = parameters.transform_state.get_size();
@@ -530,9 +630,9 @@ impl TilePyramid {
                 * f64::max(f64::from(size.height) / f64::from(tile_size), 1.0)
                 * (parameters.transform_state.get_max_zoom() - parameters.transform_state.get_min_zoom() + 1.0)
                 * 0.5) as usize;
-            self.cache.set_size(conservative_cache_size);
+            self.cache_set_size(conservative_cache_size, ctx);
         } else {
-            self.cache.set_size(0);
+            self.cache_set_size(0, ctx);
         }
 
         // Port-only: a tile that leaves the view while it loads goes on
@@ -543,67 +643,88 @@ impl TilePyramid {
         // that a fast zoom passed, stops loading as in C++: it would hold up
         // the requests and the tile workers that the view's own tiles need.
         let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles));
-        self.cache.release_loading(|id| wanted.is_near(id));
+        self.cache_release_loading(ctx, |id| wanted.is_near(id));
 
-        // Remove stale tiles. This goes through the (sorted!) tiles map and
-        // retain set in lockstep and removes items from tiles that don't
-        // have the corresponding key in the retain set.
-        let stale: Vec<OverscaledTileID> = self.tiles.keys().filter(|key| !retain.contains(key)).copied().collect();
-        for key in stale {
-            // Remove the tile from the map. If it requires re-layout,
-            // discard it asynchronously, otherwise keep it in the cache
-            if let Some(tile) = self.tiles.remove(&key) {
-                if relayout {
-                    self.cache.deferred_release(tile);
-                } else if tile.is_renderable() {
-                    tile.set_necessity(TileNecessity::Optional);
-                    self.cache.add(key, tile);
-                } else if tile.base().retained_necessity.get() == TileNecessity::Required && wanted.is_near(&key) {
-                    // Still loading, near the view: it keeps its necessity
-                    // and goes on loading in the cache. Its request waits
-                    // behind those of the tiles in view.
-                    tile.set_load_order(TileLoadOrder::UNWANTED);
-                    self.cache.add(key, tile);
-                } else {
-                    // A fallback that looked only in the cache, and found
-                    // nothing there, loads nothing: kept, it would only push
-                    // the tiles that the view needed out of the cache. A
-                    // tile still loading far from the view stops loading.
-                    tile.set_necessity(TileNecessity::Optional);
-                    self.cache.deferred_release(tile);
+        // Remove stale tiles: those of the cover that weren't retained. If
+        // they require a relayout, let go of them, otherwise keep them in
+        // the cache.
+        let stale: Vec<OverscaledTileID> = self.cover().map(|tile| tile.id).filter(|id| !retain.contains(id)).collect();
+        for id in stale {
+            let Some(tile) = self.tiles.get_mut(&id) else {
+                continue;
+            };
+            // Its jobs come after those of the tiles in view.
+            tile.load_order = TileLoadOrder::UNWANTED;
+            let renderable = tile.is_renderable();
+            let loading_near = tile.retained_necessity == TileNecessity::Required && wanted.is_near(&id);
+            if relayout {
+                self.release(&id, ctx);
+            } else if renderable {
+                self.set_necessity(&id, ctx, TileNecessity::Optional);
+                self.cache_add(id, ctx);
+            } else if loading_near {
+                // Still loading, near the view: it keeps its necessity and
+                // goes on loading in the cache. Its request waits behind
+                // those of the tiles in view.
+                if let Some(tile) = self.tiles.get_mut(&id) {
+                    SourceInfo::set_load_order(tile, TileLoadOrder::UNWANTED);
                 }
+                self.cache_add(id, ctx);
+            } else {
+                // A fallback that looked only in the cache, and found nothing
+                // there, loads nothing: kept, it would only push the tiles
+                // that the view needed out of the cache. A tile still loading
+                // far from the view stops loading.
+                self.set_necessity(&id, ctx, TileNecessity::Optional);
+                self.release(&id, ctx);
             }
         }
 
-        for tile in self.tiles.values() {
-            tile.set_show_collision_boxes(parameters.debug_options.contains(MapDebugOptions::COLLISION));
+        let show_collision_boxes = parameters.debug_options.contains(MapDebugOptions::COLLISION);
+        let SourceTiles { info, tiles, .. } = self;
+        for tile in tiles.values_mut().filter(|tile| !tile.cached) {
+            info.set_show_collision_boxes(tile, ctx, show_collision_boxes);
         }
 
         // Initialize renderable tiles and update the contained layer render
         // data.
-        for key in self.rendered_tiles.values() {
-            let tile = &self.tiles[key];
+        for key in self.rendered.values() {
+            let Some(tile) = self.tiles.get_mut(key) else {
+                continue;
+            };
             debug_assert!(tile.is_renderable());
-            tile.base().used_by_rendered_layers.set(false);
-
+            tile.used_by_rendered_layers = false;
             let hold_for_fade = tile.hold_for_fade();
-            for layer_properties in layers {
+            for layer_properties in update.layers {
                 let type_info = layer_properties.base_impl.get_type_info();
                 if hold_for_fade && type_info.fading_tiles == layer_type_info::FadingTiles::NotRequired {
                     continue;
                 }
                 let updated = tile.layer_properties_updated(layer_properties);
-                let used = tile.base().used_by_rendered_layers.get();
-                tile.base().used_by_rendered_layers.set(used | updated);
+                tile.used_by_rendered_layers |= updated;
             }
         }
 
-        self.cache.defer_pending_releases();
+        if self.info.kind != TileKind::Geometry {
+            let renderables: Vec<(UnwrappedTileID, bool)> = self
+                .rendered
+                .iter()
+                .map(|(id, key)| (*id, self.tiles.get(key).is_some_and(|tile| tile.used_by_rendered_layers)))
+                .collect();
+            let masks = update_tile_masks(&renderables);
+            for ((_, key), mask) in self.rendered.iter().zip(masks) {
+                if let (Some(mask), Some(contents)) =
+                    (mask, self.tiles.get(key).and_then(|tile| tile.contents.as_deref()))
+                {
+                    contents.set_mask(mask);
+                }
+            }
+        }
     }
 
     /// Raises the high-water mark of the source's `symbol-height-offset` to
-    /// the constants of `layers` and the highest symbols of the loaded tiles,
-    /// and returns it.
+    /// the constants of `layers` and the highest symbols of the cover's
+    /// loaded tiles, and returns it.
     fn update_max_content_elevation(&mut self, layers: &[Arc<dyn LayerProperties>]) -> f32 {
         let mut max = self.max_content_elevation;
         // Only the buckets know the heights of an expression.
@@ -619,10 +740,10 @@ impl TilePyramid {
             }
         }
         if !expression_layers.is_empty() {
-            for tile in self.tiles.values() {
-                let render_data = tile.create_render_data();
+            let contents = self.tiles.values().filter(|tile| !tile.cached).filter_map(|tile| tile.contents.as_deref());
+            for contents in contents {
                 for layer in &expression_layers {
-                    if let Some(bucket) = render_data.get_bucket(*layer)
+                    if let Some(bucket) = contents.get_bucket(*layer)
                         && let Some(bucket) = (**bucket).downcast_ref::<SymbolBucket>()
                     {
                         max = max.max(bucket.max_height_offset);
@@ -634,30 +755,136 @@ impl TilePyramid {
         max
     }
 
-    /// The rendered tiles, sorted by tile id.
-    pub(crate) fn get_rendered_tiles(&self) -> impl Iterator<Item = (&UnwrappedTileID, &dyn Tile)> + '_ {
-        self.rendered_tiles.iter().map(|(id, key)| (id, self.tiles[key].as_ref()))
-    }
-
-    #[must_use]
-    pub(crate) fn rendered_tile_count(&self) -> usize {
-        self.rendered_tiles.len()
-    }
-
-    /// The tile with this id, from the pyramid or the cache.
-    #[must_use]
-    pub(crate) fn get_tile(&self, tile_id: &OverscaledTileID) -> Option<&dyn Tile> {
-        match self.tiles.get(tile_id) {
-            Some(tile) => Some(tile.as_ref()),
-            None => self.cache.get(tile_id),
+    fn set_necessity(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext, necessity: TileNecessity) {
+        let SourceTiles { info, tiles, .. } = self;
+        if let Some(tile) = tiles.get_mut(id) {
+            info.set_necessity(tile, ctx, necessity);
         }
     }
 
-    // query
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the query geometry, camera, layers, options, global and feature state and projection that select the features"
-    )]
+    /// Lets go of tile `id`.
+    fn release(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) {
+        if let Some(tile) = self.tiles.remove(id) {
+            if tile.cached {
+                self.cache.retain(|cached| cached != id);
+            }
+            self.info.drop_tile(tile, ctx);
+        }
+    }
+
+    /// Lets go of cached tile `id`. One still loading is made optional
+    /// first, so that its load stops: a custom source hears of it.
+    fn evict(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) {
+        if self.tiles.get(id).is_some_and(|tile| !tile.is_renderable()) {
+            self.set_necessity(id, ctx, TileNecessity::Optional);
+        }
+        self.release(id, ctx);
+    }
+
+    /// Moves cover tile `id` into the cache as its newest, evicting the
+    /// oldest past the cache's size. A tile still loading goes on loading
+    /// there.
+    fn cache_add(&mut self, id: OverscaledTileID, ctx: &mut StoreContext) {
+        if self.cache_size == 0 {
+            self.evict(&id, ctx);
+            return;
+        }
+        let Some(tile) = self.tiles.get_mut(&id) else {
+            return;
+        };
+        tile.cached = true;
+        self.cache.push(id);
+        if self.cache.len() > self.cache_size {
+            let oldest = self.cache[0];
+            self.evict(&oldest, ctx);
+        }
+    }
+
+    /// Moves cached tile `id`, if there is one, into the cover.
+    fn cache_pop(&mut self, id: &OverscaledTileID) -> bool {
+        let Some(tile) = self.tiles.get_mut(id).filter(|tile| tile.cached) else {
+            return false;
+        };
+        tile.cached = false;
+        self.cache.retain(|cached| cached != id);
+        true
+    }
+
+    /// Moves the tile cached under any wrap of `id` into the cover under
+    /// `id`'s wrap. On the globe every wrap of a tile is the same piece of
+    /// the sphere. The tile may still be loading; it goes on loading under
+    /// its new wrap.
+    fn cache_pop_any_wrap(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) -> bool {
+        let Some(found) = self
+            .tiles
+            .values()
+            .find(|tile| tile.cached && tile.id.overscaled_z == id.overscaled_z && tile.id.canonical == id.canonical)
+            .map(|tile| tile.id)
+        else {
+            return false;
+        };
+        self.cache_pop(&found);
+        self.rekey(&found, *id, ctx);
+        true
+    }
+
+    /// Moves tile `from` to id `to`. A cached tile already at `to` goes.
+    fn rekey(&mut self, from: &OverscaledTileID, to: OverscaledTileID, ctx: &mut StoreContext) {
+        if self.tiles.get(&to).is_some_and(|tile| tile.cached) {
+            self.release(&to, ctx);
+        }
+        if let Some(mut tile) = self.tiles.remove(from) {
+            tile.id = to;
+            self.tiles.insert(to, tile);
+        }
+    }
+
+    fn cache_set_size(&mut self, size: usize, ctx: &mut StoreContext) {
+        self.cache_size = size;
+        while self.cache.len() > self.cache_size {
+            let oldest = self.cache[0];
+            self.evict(&oldest, ctx);
+        }
+    }
+
+    fn cache_clear(&mut self, ctx: &mut StoreContext) {
+        for id in std::mem::take(&mut self.cache) {
+            self.evict(&id, ctx);
+        }
+    }
+
+    /// Lets go of the tiles still loading in the cache whose id `keep` turns
+    /// down, so that they stop loading. Renderable tiles stay.
+    fn cache_release_loading(&mut self, ctx: &mut StoreContext, keep: impl Fn(&OverscaledTileID) -> bool) {
+        let released: Vec<OverscaledTileID> = self
+            .tiles
+            .values()
+            .filter(|tile| tile.cached && !tile.is_renderable() && !keep(&tile.id))
+            .map(|tile| tile.id)
+            .collect();
+        for id in released {
+            self.evict(&id, ctx);
+        }
+    }
+
+    /// The rendered tiles, sorted by tile id.
+    pub(crate) fn rendered(&self) -> impl Iterator<Item = (&UnwrappedTileID, &Tile)> + '_ {
+        self.rendered.iter().filter_map(|(id, key)| Some((id, self.tiles.get(key)?)))
+    }
+
+    #[must_use]
+    pub(crate) fn rendered_count(&self) -> usize {
+        self.rendered.len()
+    }
+
+    /// Brings the rendered tiles' buckets up to the source's feature state.
+    pub(crate) fn coalesce_feature_state(&mut self) {
+        let keys: BTreeSet<OverscaledTileID> = self.rendered.values().copied().collect();
+        let SourceTiles { info, tiles, .. } = self;
+        info.feature_state.coalesce_changes(tiles.values_mut().filter(|tile| keys.contains(&tile.id)));
+    }
+
+    /// The rendered features of the source's rendered tiles in `geometry`.
     pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
@@ -666,13 +893,13 @@ impl TilePyramid {
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
-        feature_state: &crate::source_state::SourceFeatureState,
     ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
         use mln_map_types::tile_coordinate::TileCoordinate;
-        use mln_util::constants;
+
+        let feature_state = &self.info.feature_state;
 
         let mut result = crate::geometry::feature_index::QueryResults::default();
-        if self.rendered_tiles.is_empty() || geometry.is_empty() {
+        if self.rendered.is_empty() || geometry.is_empty() {
             return Ok(result);
         }
 
@@ -709,15 +936,15 @@ impl TilePyramid {
                     ));
                 }
             }
-            traced.push(*geometry.last().expect("geometry"));
+            traced.extend(geometry.last().copied());
         }
         let screen_geometry: &[mln_util::geo::ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
         let mut query_geometry: Vec<geometry::Point<f64>> = screen_geometry.iter().map(to_world).collect();
 
-        // mapbox::geometry::envelope
+        // mapbox::geometry::envelope, of points the geometry has at least one
+        // of.
         let envelope = |points: &mut dyn Iterator<Item = (f64, f64)>| {
-            let (x, y) = points.next().expect("points");
-            let (mut min, mut max) = ((x, y), (x, y));
+            let (mut min, mut max) = ((f64::INFINITY, f64::INFINITY), (f64::NEG_INFINITY, f64::NEG_INFINITY));
             for (x, y) in points {
                 min = (f64::min(min.0, x), f64::min(min.1, y));
                 max = (f64::max(max.0, x), f64::max(max.1, y));
@@ -782,7 +1009,7 @@ impl TilePyramid {
 
         // Sorted by (z, y, wrap, x). GL JS sorts the globe's query tiles by
         // their copy on the main world, so there the wrap only breaks ties.
-        let mut sorted_tiles: Vec<(&UnwrappedTileID, &OverscaledTileID)> = self.rendered_tiles.iter().collect();
+        let mut sorted_tiles: Vec<(&UnwrappedTileID, &OverscaledTileID)> = self.rendered.iter().collect();
         sorted_tiles.sort_by(|(a, _), (b, _)| {
             if globe {
                 return (a.canonical.z, a.canonical.y, a.canonical.x, a.wrap).cmp(&(
@@ -809,12 +1036,17 @@ impl TilePyramid {
         let mut canonical_tile_start: mln_util::hash::HashMap<String, usize> = mln_util::hash::HashMap::default();
 
         for (id, key) in sorted_tiles {
-            let tile = self.tiles[key].as_ref();
+            let Some(tile) = self.tiles.get(key) else {
+                continue;
+            };
+            let Some(contents) = tile.contents.as_deref().and_then(Contents::geometry) else {
+                continue;
+            };
 
             // equivalent to std::pow(2, transformState.getZoom() - id.canonical.z);
             let scale = (transform_state.get_scale() / f64::from(1u32 << id.canonical.z)) as f32;
             let query_padding =
-                f64::from(max_pitch_scale_factor * tile.get_query_padding(layers) * constants::EXTENT as f32)
+                f64::from(max_pitch_scale_factor * contents.query_padding(layers) * constants::EXTENT as f32)
                     / constants::TILE_SIZE_D
                     / f64::from(scale);
 
@@ -857,7 +1089,8 @@ impl TilePyramid {
                     query_geometry.iter().map(|c| TileCoordinate::to_geometry_coordinate(copy, c)).collect();
 
                 if !globe {
-                    tile.query_rendered_features(
+                    contents.query_rendered_features(
+                        &tile.id,
                         &mut result,
                         &tile_space_query_geometry,
                         transform_state,
@@ -871,7 +1104,8 @@ impl TilePyramid {
                 }
 
                 let mut found = crate::geometry::feature_index::QueryResults::default();
-                tile.query_rendered_features(
+                contents.query_rendered_features(
+                    &tile.id,
                     &mut found,
                     &tile_space_query_geometry,
                     transform_state,
@@ -903,17 +1137,18 @@ impl TilePyramid {
         Ok(result)
     }
 
+    /// The features of the cover's tiles that `options` select.
     pub(crate) fn query_source_features(
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         let mut result = Vec::new();
-
-        for tile in self.tiles.values() {
-            tile.query_source_features(&mut result, options, global_state)?;
+        for tile in self.cover() {
+            if let Some(contents) = tile.contents.as_deref().and_then(Contents::geometry) {
+                contents.query_source_features(&tile.id, self.info.single_layer, &mut result, options, global_state)?;
+            }
         }
-
         Ok(result)
     }
 
@@ -923,35 +1158,40 @@ impl TilePyramid {
     /// instead of loading again, which would leave its part of the globe bare
     /// until it did: the whole globe at the zoom-0 tile, which changes wrap
     /// whenever the center crosses the antimeridian.
-    fn move_tiles_to_wanted_wraps(&mut self, ideal_tiles: &[OverscaledTileID], pan_tiles: &[OverscaledTileID]) {
+    fn move_tiles_to_wanted_wraps(
+        &mut self,
+        ideal_tiles: &[OverscaledTileID],
+        pan_tiles: &[OverscaledTileID],
+        ctx: &mut StoreContext,
+    ) {
         let mut wanted: BTreeSet<OverscaledTileID> = ideal_tiles.iter().copied().collect();
         wanted.extend(pan_tiles.iter().copied());
         for id in &wanted {
-            if self.tiles.contains_key(id) {
+            if self.tiles.get(id).is_some_and(|tile| !tile.cached) {
                 continue;
             }
             let Some(loaded) = self
-                .tiles
-                .keys()
-                .find(|key| {
-                    key.overscaled_z == id.overscaled_z && key.canonical == id.canonical && !wanted.contains(key)
+                .cover()
+                .find(|tile| {
+                    tile.id.overscaled_z == id.overscaled_z
+                        && tile.id.canonical == id.canonical
+                        && !wanted.contains(&tile.id)
                 })
-                .copied()
+                .map(|tile| tile.id)
             else {
                 continue;
             };
             let rendered_id = loaded.to_unwrapped();
-            let tile = self.tiles.remove(&loaded).expect("loaded tile");
-            tile.base().set_id(*id);
-            self.tiles.insert(*id, tile);
+            self.rekey(&loaded, *id, ctx);
             // `renderedTiles.insert(node)` keeps an entry already at the key.
-            if self.rendered_tiles.remove(&rendered_id).is_some() {
-                self.rendered_tiles.entry(id.to_unwrapped()).or_insert(*id);
+            if self.rendered.remove(&rendered_id).is_some() {
+                self.rendered.entry(id.to_unwrapped()).or_insert(*id);
             }
         }
     }
 
-    /// Reassigns the tiles' wrap values when the map pans by whole worlds.
+    /// Reassigns the cover's tiles' wrap values when the map pans by whole
+    /// worlds.
     ///
     /// On top of the regular z/x/y values, `TileIDs` have a `wrap` value that
     /// specify which copy of the world the tile belongs to. For example, at
@@ -972,79 +1212,113 @@ impl TilePyramid {
     ///
     /// This enables us to reuse the tiles at more ideal locations and
     /// prevent flickering.
-    pub(crate) fn handle_wrap_jump(&mut self, lng: f32) {
+    pub(crate) fn handle_wrap_jump(&mut self, lng: f32, ctx: &mut StoreContext) {
         let lng_difference = lng - self.prev_lng;
         let world_difference = lng_difference / 360.0f32;
         let wrap_delta = world_difference.round() as i16;
         self.prev_lng = lng;
-
-        if wrap_delta != 0 {
-            let mut new_tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>> = BTreeMap::new();
-            let mut key_map: BTreeMap<OverscaledTileID, OverscaledTileID> = BTreeMap::new();
-            for (old_key, tile) in std::mem::take(&mut self.tiles) {
-                let old_id = tile.id();
-                let new_id = old_id.unwrap_to(old_id.wrap.wrapping_add(wrap_delta));
-                tile.base().set_id(new_id);
-                key_map.insert(old_key, new_id);
-                // `emplace` keeps the first tile with an id.
-                new_tiles.entry(new_id).or_insert(tile);
-            }
-            self.tiles = new_tiles;
-
-            let mut new_render_tiles: BTreeMap<UnwrappedTileID, OverscaledTileID> = BTreeMap::new();
-            for (id, key) in std::mem::take(&mut self.rendered_tiles) {
-                let new_id = id.unwrap_to(id.wrap.wrapping_add(wrap_delta));
-                let new_key = key_map.get(&key).copied().unwrap_or(key);
-                new_render_tiles.entry(new_id).or_insert(new_key);
-            }
-            self.rendered_tiles = new_render_tiles;
+        if wrap_delta == 0 {
+            return;
         }
+
+        let cover: Vec<OverscaledTileID> = self.cover().map(|tile| tile.id).collect();
+        let mut moved: Vec<Tile> = Vec::with_capacity(cover.len());
+        let mut key_map: BTreeMap<OverscaledTileID, OverscaledTileID> = BTreeMap::new();
+        for id in cover {
+            if let Some(mut tile) = self.tiles.remove(&id) {
+                let new_id = id.unwrap_to(id.wrap.wrapping_add(wrap_delta));
+                key_map.insert(id, new_id);
+                tile.id = new_id;
+                moved.push(tile);
+            }
+        }
+        for tile in moved {
+            let id = tile.id;
+            match self.tiles.get(&id) {
+                // A cached tile at the id makes way for the cover's.
+                Some(existing) if existing.cached => self.release(&id, ctx),
+                // `emplace` keeps the first tile with an id.
+                Some(_) => {
+                    self.info.drop_tile(tile, ctx);
+                    continue;
+                }
+                None => {}
+            }
+            self.tiles.insert(id, tile);
+        }
+
+        let mut new_render_tiles: BTreeMap<UnwrappedTileID, OverscaledTileID> = BTreeMap::new();
+        for (id, key) in std::mem::take(&mut self.rendered) {
+            let new_id = id.unwrap_to(id.wrap.wrapping_add(wrap_delta));
+            let new_key = key_map.get(&key).copied().unwrap_or(key);
+            new_render_tiles.entry(new_id).or_insert(new_key);
+        }
+        self.rendered = new_render_tiles;
     }
 
     pub(crate) fn set_cache_enabled(&mut self, enable: bool) {
         self.cache_enabled = enable;
     }
 
-    pub(crate) fn reduce_memory_use(&mut self) {
-        self.cache.clear();
+    pub(crate) fn reduce_memory_use(&mut self, ctx: &mut StoreContext) {
+        self.cache_clear(ctx);
     }
 
-    pub(crate) fn retry_failed_tiles(&self) {
-        for tile in self.tiles.values() {
-            tile.retry_failed_load();
+    /// Requests the cover's tiles whose load failed again.
+    pub(crate) fn retry_failed_tiles(&mut self, ctx: &mut StoreContext) {
+        let SourceTiles { info, tiles, .. } = self;
+        for tile in tiles.values_mut().filter(|tile| !tile.cached) {
+            info.retry_failed_load(tile, ctx);
         }
     }
 
-    pub(crate) fn set_observer(&mut self, observer: Rc<dyn TileObserver>) {
-        self.observer = observer;
-    }
-
     pub(crate) fn dump_debug_logs(&self) {
-        for tile in self.tiles.values() {
+        for tile in self.cover() {
             tile.dump_debug_logs();
         }
     }
 
-    #[must_use]
-    pub(crate) fn get_tiles(&self) -> &BTreeMap<OverscaledTileID, Box<dyn Tile>> {
-        &self.tiles
+    /// The source's style with `layers` and `parameters`' global state and
+    /// font faces: the last one, if it has those values.
+    fn source_style(
+        &mut self,
+        layers: &[Arc<dyn LayerProperties>],
+        parameters: &TileParameters<'_>,
+    ) -> Arc<SourceStyle> {
+        let global_state = parameters.global_state.as_ref();
+        let font_faces = parameters.font_faces.as_ref();
+        match &self.style {
+            Some(style) if style.is(layers, global_state, font_faces) => Arc::clone(style),
+            previous => {
+                let style = Arc::new(SourceStyle {
+                    version: previous.as_ref().map_or(0, |style| style.version + 1),
+                    layers: layers.to_vec(),
+                    global_state: global_state.cloned(),
+                    font_faces: font_faces.cloned(),
+                });
+                self.style = Some(Arc::clone(&style));
+                style
+            }
+        }
     }
 
-    pub(crate) fn clear_all(&mut self) {
+    /// Lets go of every tile.
+    pub(crate) fn clear_all(&mut self, ctx: &mut StoreContext) {
         self.fading_tiles = false;
         self.max_content_elevation = 0.0;
-        self.tiles.clear();
-        self.rendered_tiles.clear();
+        self.rendered.clear();
         self.cache.clear();
-        // C++ drops the cache's released tiles on the thread pool later.
-        self.cache.defer_pending_releases();
+        for (_, tile) in std::mem::take(&mut self.tiles) {
+            self.info.drop_tile(tile, ctx);
+        }
     }
 
     pub(crate) fn update_fading_tiles(&mut self) {
         self.fading_tiles = false;
-        for key in self.rendered_tiles.values() {
-            let tile = &self.tiles[key];
-            if tile.hold_for_fade() {
+        for key in self.rendered.values() {
+            if let Some(tile) = self.tiles.get_mut(key)
+                && tile.hold_for_fade()
+            {
                 self.fading_tiles = true;
                 tile.performed_fade_placement();
             }

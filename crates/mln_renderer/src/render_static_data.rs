@@ -1,8 +1,12 @@
 use mln_gfx::ShaderRegistry;
-use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_util::constants;
 
 use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
+
+/// The most walls whose quads a segment draws: as many as its 16-bit
+/// indices reach.
+const FILL_EXTRUSION_SEGMENT_WALLS: usize = MAX_SEGMENT_VERTICES / 4;
 
 pub(crate) struct RenderStaticData {
     pub(crate) has_3d: bool,
@@ -75,6 +79,45 @@ impl RenderStaticData {
     /// A segment that draws `instance_count` fill-extrusion walls.
     #[must_use]
     pub(crate) fn fill_extrusion_segment(instance_count: usize) -> SegmentBase {
+        SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 6) }
+    }
+
+    /// The triangles of the walls that a segment of
+    /// `fill_extrusion_wall_segments` draws, each wall's quad four vertices
+    /// after the last's, as `fill_extrusion_triangle_indices` draws the quad.
+    #[must_use]
+    pub(crate) fn fill_extrusion_wall_indices() -> Vec<u16> {
+        let quad = Self::fill_extrusion_triangle_indices();
+        (0..FILL_EXTRUSION_SEGMENT_WALLS as u16)
+            .flat_map(|wall| quad.iter().map(move |&index| 4 * wall + index))
+            .collect()
+    }
+
+    /// The segments that draw `walls` fill-extrusion walls whose quads are in
+    /// the vertex buffer, one after the other, from the indices of
+    /// `fill_extrusion_wall_indices`.
+    #[must_use]
+    pub(crate) fn fill_extrusion_wall_segments(walls: usize) -> Vec<SegmentBase> {
+        (0..walls)
+            .step_by(FILL_EXTRUSION_SEGMENT_WALLS)
+            .map(|first| {
+                let count = FILL_EXTRUSION_SEGMENT_WALLS.min(walls - first);
+                SegmentBase::with_lengths(4 * first, 0, 4 * count, 6 * count)
+            })
+            .collect()
+    }
+
+    /// The corners of the quad that an instanced fill outline draws a
+    /// segment with: x picks the segment's start (0) or end (1), y its side.
+    #[must_use]
+    pub(crate) fn fill_outline_vertices() -> Vec<[i16; 2]> {
+        vec![[0, 0], [0, 1], [1, 0], [1, 1]]
+    }
+
+    /// A segment that draws `instance_count` fill outline segments, as
+    /// quads of `fill_outline_vertices` and `quad_triangle_indices`.
+    #[must_use]
+    pub(crate) fn fill_outline_segment(instance_count: usize) -> SegmentBase {
         SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 6) }
     }
 

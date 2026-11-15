@@ -8,9 +8,9 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-include.workspace = true
-# The runner of the shared render and query tests; published for the
-# difftests (louwers/mln-rs-difftests).
+# The runner of the shared render and query tests. Not released: the
+# difftests (louwers/mln-rs-difftests) take it from a git revision.
+publish = false
 # The [[test]]s below; tests/ also holds their module.
 autotests = false
 
@@ -34,6 +34,7 @@ mln_headless.workspace = true
 mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
+mln_math.workspace = true
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 # The ambient cache (cache_path) and mbtiles:// sources, as in C++.
 mln_storage = { workspace = true, features = ["sqlite"] }

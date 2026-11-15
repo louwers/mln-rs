@@ -41,6 +41,8 @@ const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::FillOutlineShader,
     BuiltIn::FillPatternShader,
     BuiltIn::FillOutlinePatternShader,
+    BuiltIn::FillOutlineInstancedShader,
+    BuiltIn::FillOutlinePatternInstancedShader,
     BuiltIn::FillOutlineTriangulatedShader,
     BuiltIn::FillExtrusionShader,
     BuiltIn::FillExtrusionInstancedShader,
@@ -222,6 +224,8 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
         | "FillOutlineShader"
         | "FillPatternShader"
         | "FillOutlinePatternShader"
+        | "FillOutlineInstancedShader"
+        | "FillOutlinePatternInstancedShader"
         | "FillOutlineTriangulatedShader" => (
             &[
                 ("idFillDrawableUBO", ID_FILL_DRAWABLE_UBO),

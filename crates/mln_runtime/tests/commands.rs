@@ -350,7 +350,7 @@ fn a_resize_sets_the_scale_factor_and_rejects_one_that_isnt_positive() {
     let map = map(&runtime);
     wait(map.resize(LogicalExtent::new(Size::new(128, 64), 2.0)));
     assert_eq!(2.0, map.scale_factor());
-    assert_eq!(2.0, wait(map.with_core(|core| core.get_pixel_ratio())));
+    assert_eq!(2.0, wait(map.with_core(|core| core.snapshot().view.extent.scale_factor)));
     for scale_factor in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         let rejected = map.resize(LogicalExtent::new(Size::new(128, 64), scale_factor));
         assert_eq!(ErrorKind::InvalidArgument, rejected.unwrap_err().kind);

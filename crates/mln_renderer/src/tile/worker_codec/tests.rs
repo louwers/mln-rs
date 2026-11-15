@@ -1,8 +1,7 @@
-// The worker codec on a real tile: a worker behind the codec gives the same
-// layout as one the tile reaches directly, and it crosses without loss.
+// The worker codec on a real tile: a job behind the codec gives the same
+// layout as one run directly, and it crosses without loss.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
@@ -15,47 +14,32 @@ use mln_style_types::image::{ImageMap, ImageType};
 use mln_text::glyph::{GlyphIDType, GlyphMap, GlyphRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
+use mln_tile::{MltTile, MvtTile, TileData};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
-use parking_lot::Mutex;
 
-use super::envelope::{self, Request};
-use super::fields;
-use super::map_side::{MapCodec, Reply};
-use super::worker_side::{WorkerAction, WorkerCodec};
-use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, ImageVersionMap};
+use super::map_side::MapCodec;
+use super::worker_side::WorkerCodec;
+use super::{Encoded, TileWorkerHost, envelope, fields};
+use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layermanager;
-use crate::text::glyph_manager::HBShapeResults;
-use crate::tile::geometry_tile::LayoutResult;
-use crate::tile::geometry_tile_worker::{GeometryTileWorker, SharedTileData, TileMessage, WorkerMessage};
-use crate::tile::tile_worker_transport::{TileEndpoint, WorkerParameters};
-
-const TILE: u64 = 7;
-
-/// Where a test worker's messages go.
-#[derive(Clone, Default)]
-struct Replies(Arc<Mutex<Vec<TileMessage>>>);
-
-impl TileEndpoint for Replies {
-    fn send(&self, message: TileMessage) {
-        self.0.lock().push(message);
-    }
-}
-
-impl Replies {
-    fn take(&self) -> Vec<TileMessage> {
-        std::mem::take(&mut *self.0.lock())
-    }
-}
+use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
+use crate::text::glyph_store::HBShapeResults;
+use crate::tile::contents::LayoutResult;
+use crate::tile::job::{
+    DataCache, DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceKey, SourceStyle,
+    TileKey, run_job,
+};
+use crate::tile::tile_workers::InlineWorkers;
 
 fn fixture(path: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(path);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-fn tile_data() -> SharedTileData {
-    Arc::new(mln_tile::VectorMVTTileData::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mvt"))))
+fn tile_data() -> TileData {
+    TileData::Mvt(MvtTile::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mvt"))))
 }
 
 fn convert(json: &str) -> Box<dyn Layer> {
@@ -76,207 +60,175 @@ fn layers(jsons: &[&str]) -> Vec<Arc<dyn LayerProperties>> {
     jsons.iter().map(|json| layer(json, 0.0)).collect()
 }
 
-/// The worker of tile 0/0/0.
-fn parameters() -> WorkerParameters {
-    WorkerParameters {
-        id: OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0)),
-        obsolete: Arc::new(AtomicBool::new(false)),
-        mode: MapMode::Static,
-        pixel_ratio: 1.0,
-        show_collision_boxes: false,
-        dynamic_texture_atlas: Some(Arc::new(DynamicTextureAtlas::new())),
-        font_faces: None,
-        capture_rendered_features: true,
-        synchronous: true,
-    }
+fn style(layers: &[Arc<dyn LayerProperties>]) -> Arc<SourceStyle> {
+    Arc::new(SourceStyle { version: 0, layers: layers.to_vec(), global_state: None, font_faces: None })
 }
 
-fn set_layers(layers: &[Arc<dyn LayerProperties>], correlation_id: u64) -> WorkerMessage {
-    WorkerMessage::SetLayers {
-        layers: layers.to_vec(),
-        global_state: None,
+/// The job id of tile 0/0/0's `generation`.
+fn id(generation: u64) -> JobId {
+    let tile = TileKey { source: SourceKey(1), id: OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0)) };
+    JobId { tile, generation }
+}
+
+/// The key of `load` of tile 0/0/0's data.
+fn key(load: u64) -> DataKey {
+    DataKey { source: SourceKey(1), tile: CanonicalTileID::new(0, 0, 0), load }
+}
+
+/// A layout job of tile 0/0/0.
+fn job(style: &Arc<SourceStyle>, data: DataInput, resolved: Resolved) -> Run {
+    let job = LayoutJob {
+        style: Arc::clone(style),
         available_images: Arc::new(VecSet::new()),
-        subdivision_granularity: SubdivisionGranularitySetting::none(),
-        pixel_ratio: 1.0,
-        correlation_id,
-    }
+        data,
+        params: LayoutParams {
+            mode: MapMode::Static,
+            pixel_ratio: 1.0,
+            show_collision_boxes: false,
+            subdivision_granularity: SubdivisionGranularitySetting::none(),
+            first_load: true,
+            capture_rendered_features: true,
+        },
+        resolved: Arc::new(resolved),
+    };
+    Run { id: id(1), job: Job::Layout(job), superseded: Arc::default() }
 }
 
-fn set_data(data: &SharedTileData, correlation_id: u64) -> WorkerMessage {
-    WorkerMessage::SetData { data: Some(Arc::clone(data)), available_images: Arc::new(VecSet::new()), correlation_id }
+fn full(data: &TileData) -> DataInput {
+    DataInput::Full { key: key(1), data: Some(data.clone()) }
 }
 
-/// What the tile answers a worker's glyph and image requests with: the
-/// glyphs of the 0-255 fixture range, for any font stack, and the images of
-/// the emerald sprite.
-fn answer(request: &TileMessage) -> WorkerMessage {
-    match request {
-        TileMessage::GetGlyphs(dependencies) => {
-            let range = GlyphRange::new(0, 255, GlyphIDType::FontPBF);
-            let glyphs = parse_glyph_pbf(&range, &fixture("test/fixtures/resources/glyphs.pbf")).unwrap();
-            let mut glyph_map = GlyphMap::new();
-            for (font_stack, ids) in &dependencies.glyphs {
-                let font_glyphs = glyph_map.entry(font_stack_hash(font_stack)).or_default();
-                for id in ids {
-                    let glyph = glyphs.iter().find(|glyph| glyph.id == *id).cloned().map(Arc::new);
-                    font_glyphs.insert(*id, glyph);
-                }
-            }
-            WorkerMessage::GlyphsAvailable { glyph_map, results: HBShapeResults::new() }
+/// What a tile answers `NeedsDeps` with: the glyphs of the 0-255 fixture
+/// range, for any font stack, and the images of the emerald sprite, packed
+/// into a fresh atlas.
+fn answer(dependencies: &Dependencies) -> Resolved {
+    let range = GlyphRange::new(0, 255, GlyphIDType::FontPBF);
+    let glyphs = parse_glyph_pbf(&range, &fixture("test/fixtures/resources/glyphs.pbf")).unwrap();
+    let mut glyph_map = GlyphMap::new();
+    for (font_stack, ids) in &dependencies.glyphs.glyphs {
+        let font_glyphs = glyph_map.entry(font_stack_hash(font_stack)).or_default();
+        for id in ids {
+            let glyph = glyphs.iter().find(|glyph| glyph.id == *id).cloned().map(Arc::new);
+            font_glyphs.insert(*id, glyph);
         }
-        TileMessage::GetImages((dependencies, image_correlation_id)) => {
-            let sprite = mln_sprite::sprite_parser::parse_sprite(
-                "default",
-                &fixture("test/fixtures/annotations/emerald.png"),
-                &fixture("test/fixtures/annotations/emerald.json"),
-            )
-            .unwrap();
-            let (mut icon_map, mut pattern_map) = (ImageMap::new(), ImageMap::new());
-            for image in sprite {
-                match dependencies.get(&image.id) {
-                    Some(ImageType::Icon) => icon_map.insert(image.id.clone(), image),
-                    Some(ImageType::Pattern) => pattern_map.insert(image.id.clone(), image),
-                    None => None,
-                };
-            }
-            WorkerMessage::ImagesAvailable {
-                icon_map,
-                pattern_map,
-                version_map: ImageVersionMap::default(),
-                image_correlation_id: *image_correlation_id,
-            }
-        }
-        _ => panic!("not a request"),
     }
-}
-
-/// A synchronous worker (no actor) that sends its messages to `replies`.
-fn worker(parameters: WorkerParameters, replies: &Replies) -> GeometryTileWorker {
-    GeometryTileWorker::new(
-        None,
-        Box::new(replies.clone()),
-        parameters.id,
-        parameters.obsolete,
-        parameters.mode,
-        parameters.pixel_ratio,
-        parameters.show_collision_boxes,
-        parameters.dynamic_texture_atlas,
-        parameters.font_faces,
-        parameters.capture_rendered_features,
+    let sprite = mln_sprite::sprite_parser::parse_sprite(
+        "default",
+        &fixture("test/fixtures/annotations/emerald.png"),
+        &fixture("test/fixtures/annotations/emerald.json"),
     )
+    .unwrap();
+    let (mut icon_map, mut pattern_map) = (ImageMap::new(), ImageMap::new());
+    for image in sprite {
+        match dependencies.images.get(&image.id) {
+            Some(ImageType::Icon) => icon_map.insert(image.id.clone(), image),
+            Some(ImageType::Pattern) => pattern_map.insert(image.id.clone(), image),
+            None => None,
+        };
+    }
+    let missing_images = dependencies
+        .images
+        .keys()
+        .filter(|id| !icon_map.contains_key(*id) && !pattern_map.contains_key(*id))
+        .cloned()
+        .collect();
+    let mut atlas = DynamicTextureAtlas::new();
+    let glyph_page = atlas.pack_glyphs(&glyph_map);
+    let image_page = atlas.pack_images(&icon_map, &pattern_map);
+    Resolved {
+        glyphs: glyph_page.positions,
+        shaping: HBShapeResults::new(),
+        icons: image_page.icons,
+        patterns: image_page.patterns,
+        missing_images,
+    }
 }
 
-/// A worker the tile reaches directly, as the in-process transport does:
-/// its layout, once the tile answered its requests.
-fn direct(messages: Vec<WorkerMessage>) -> LayoutResult {
-    let replies = Replies::default();
-    let mut worker = worker(parameters(), &replies);
-    for message in messages {
-        worker.handle(message);
-    }
+/// Runs `run` on this thread, as `PoolWorkers` does.
+fn direct_result(run: Run) -> JobResult {
+    InlineWorkers::run(run).result
+}
+
+/// Runs the job of `layers` and `data` until it lays out, answering its
+/// `NeedsDeps` with `run`.
+fn lay_out(
+    layers: &[Arc<dyn LayerProperties>],
+    data: &TileData,
+    mut run: impl FnMut(Run) -> JobResult,
+) -> LayoutOutput {
+    let style = style(layers);
+    let mut resolved = Resolved::default();
     loop {
-        let mut layouts = Vec::new();
-        for reply in replies.take() {
-            match reply {
-                TileMessage::Layout { result, .. } => layouts.push(result),
-                TileMessage::Error { error, .. } => panic!("{error}"),
-                request => worker.handle(answer(&request)),
-            }
-        }
-        if let Some(layout) = layouts.pop() {
-            return layout;
+        match run(job(&style, full(data), resolved)) {
+            JobResult::Laid(output) => return output,
+            JobResult::NeedsDeps(needs) => resolved = answer(&needs),
+            JobResult::NeedsData => panic!("the job carried its data"),
+            JobResult::Raster(_) | JobResult::Dem(_) => panic!("a decode's result"),
+            JobResult::Failed(error) => panic!("{error}"),
         }
     }
 }
 
-/// A worker behind the codec: each message is encoded on the map side,
-/// decoded on the worker's, and each reply back.
+/// The two sides of the codec, with a worker's data cache: a job is encoded
+/// on the map side, decoded on the worker's, and its reply back.
 struct ThroughCodec {
     map: MapCodec,
-    worker_codec: WorkerCodec,
-    worker: GeometryTileWorker,
-    replies: Replies,
+    worker: WorkerCodec,
+    cache: DataCache,
 }
 
 impl ThroughCodec {
     fn new() -> Self {
-        let mut map = MapCodec::new();
-        let mut worker_codec = WorkerCodec::new();
-        let replies = Replies::default();
-        let create = map.create(TILE, &parameters());
-        let WorkerAction::Create { tile: TILE, parameters } = worker_codec.decode(&create).unwrap() else {
-            panic!("not a create");
-        };
-        let worker = worker(parameters, &replies);
-        ThroughCodec { map, worker_codec, worker, replies }
+        ThroughCodec { map: MapCodec::default(), worker: WorkerCodec::new(), cache: DataCache::new(1 << 20) }
     }
 
-    /// Sends a message; returns the replies it caused, decoded.
-    fn send(&mut self, message: &WorkerMessage) -> Vec<TileMessage> {
-        let request = self.map.message(TILE, message).unwrap();
-        self.handle(&request);
-        self.replies.take().into_iter().map(|reply| self.reply(reply)).collect()
+    /// The reply to `run`, encoded on the worker's side.
+    fn reply(&mut self, request: &[u8]) -> Encoded {
+        let (id, body) = envelope::read_job_id(request).unwrap();
+        let job = self.worker.decode_job(body).unwrap();
+        let (sender, reply) = std::sync::mpsc::channel();
+        run_job(Run { id, job, superseded: Arc::default() }, Some(&mut self.cache), None, move |r, times| {
+            let _ = sender.send((r, times));
+        });
+        let (reply, times) = reply.try_recv().expect("a reply before returning");
+        self.worker.encode_reply(&reply, &times)
     }
 
-    /// A reply of the worker, encoded and decoded.
-    fn reply(&mut self, reply: TileMessage) -> TileMessage {
-        let encoded = self.worker_codec.encode(TILE, reply);
-        let Some((TILE, Reply::Geometry(message))) = self.map.decode(encoded).unwrap() else {
-            panic!("not a message for the tile");
-        };
-        message
+    /// Decodes a reply on the map side.
+    fn decode(&mut self, reply: Encoded) -> (JobId, JobResult) {
+        let (id, _, body) = envelope::read_reply_header(&reply.bytes).unwrap();
+        let body = Encoded { bytes: body.to_vec(), payloads: reply.payloads };
+        (id, self.map.decode_result(body))
     }
 
-    fn handle(&mut self, request: &[u8]) {
-        match self.worker_codec.decode(request).unwrap() {
-            WorkerAction::Message { tile: TILE, message, .. } => {
-                let message = self.worker_codec.decode_message(&message).unwrap();
-                self.worker.handle(message);
-            }
-            WorkerAction::None => {}
-            _ => panic!("not a message for the tile"),
-        }
-    }
-
-    /// Sends the messages and answers the worker's requests; returns its
-    /// layout, decoded.
-    fn layout(&mut self, messages: Vec<WorkerMessage>) -> LayoutResult {
-        let mut replies = Vec::new();
-        for message in messages {
-            replies.extend(self.send(&message));
-        }
-        loop {
-            let mut next = Vec::new();
-            for reply in replies {
-                match reply {
-                    TileMessage::Layout { result, .. } => return result,
-                    TileMessage::Error { error, .. } => panic!("{error}"),
-                    request => next.extend(self.send(&answer(&request))),
-                }
-            }
-            replies = next;
-        }
+    fn run(&mut self, run: &Run) -> JobResult {
+        let id = run.id;
+        let request = self.map.encode_run(run).unwrap();
+        let reply = self.reply(&request);
+        let (replied, result) = self.decode(reply);
+        assert_eq!(replied, id);
+        result
     }
 }
 
-/// What of a layout tells it apart: the encodings of its buckets, feature
-/// index and atlases outside a codec's session, with every value in full.
-/// (The feature index without its data, which may no longer have its bytes.)
-fn comparable(result: &LayoutResult) -> [Vec<u8>; 3] {
-    [fields::encode_buckets(result), result.feature_index.encode_grid(), mln_wire::to_vec(&*result.atlases).unwrap()]
+/// What of a layout tells it apart: the encodings of its buckets and feature
+/// index outside a codec's session, with every value in full.
+fn comparable(result: &LayoutResult) -> [Vec<u8>; 2] {
+    [fields::encode_buckets(result), result.feature_index.encode_grid()]
 }
 
 /// Lays the tile out with `layers` and `data` through the codec, then
 /// directly (in that order: decoding MLT data drops its bytes, and a tile
 /// sends its data before anything decodes it), checks that both layouts
-/// are the same, and returns the one that crossed, with its codec.
-fn cross(layers: &[Arc<dyn LayerProperties>], data: &SharedTileData) -> (ThroughCodec, LayoutResult) {
-    let messages = || vec![set_layers(layers, 1), set_data(data, 2)];
+/// are the same, and returns the one that crossed.
+fn cross(layers: &[Arc<dyn LayerProperties>], data: &TileData) -> LayoutResult {
     let mut codec = ThroughCodec::new();
-    let result = codec.layout(messages());
+    let result = lay_out(layers, data, |run| codec.run(&run)).result;
     assert_eq!(result.layer_render_data.len(), layers.len());
-    assert_eq!(comparable(&direct(messages())), comparable(&result));
-    (codec, result)
+    assert_eq!(comparable(&lay_out(layers, data, direct_result).result), comparable(&result));
+    // The tile attaches its own data.
+    assert!(result.feature_index.get_data().is_none());
+    result
 }
 
 const FILL: &str = r#"{"id": "water", "type": "fill", "source": "s", "source-layer": "water",
@@ -318,11 +270,11 @@ const EXTRUSION_PATTERN: &str = r#"{"id": "extrusion-pattern", "type": "fill-ext
     "source-layer": "water", "paint": {"fill-extrusion-height": 10,
         "fill-extrusion-pattern": ["coalesce", ["get", "pattern"], "grass_pattern"]}}"#;
 
-/// A worker behind the codec lays the tile out as a worker reached directly
-/// for a layer of every type that takes geometry tiles (each type of the
-/// style specification whose layers do must have a layer here, and its
-/// buckets a wire form), and the layout comes back with the map side's own
-/// layer properties and data.
+/// A job behind the codec lays the tile out as one run directly, for a layer
+/// of every type that takes geometry tiles (each type of the style
+/// specification whose layers do must have a layer here, and its buckets a
+/// wire form), and the layout comes back with the map side's own layer
+/// properties.
 #[test]
 fn every_geometry_layer_type_crosses() {
     // The layer types of the style specification (v8.json).
@@ -358,47 +310,39 @@ fn every_geometry_layer_type_crosses() {
     }
 
     let layers: Vec<_> = layers_of_type.iter().flat_map(|(_, jsons)| jsons).map(|json| layer(json, 0.0)).collect();
-    let data = tile_data();
-    let (_, result) = cross(&layers, &data);
+    let result = cross(&layers, &tile_data());
     for (layer_id, render_data) in &result.layer_render_data {
         let sent = layers.iter().find(|layer| &layer.base_impl.id == layer_id).unwrap();
         assert!(Arc::ptr_eq(&render_data.layer_properties, sent));
         assert!(render_data.bucket.has_data());
     }
-    assert!(std::ptr::addr_eq(result.feature_index.get_data().unwrap(), Arc::as_ptr(&data)));
 }
 
-/// Symbol layers cross too: the worker's glyph and image requests reach
-/// the tile and its answers the worker, the symbol buckets come back, and
-/// the map side's copy of the worker's atlas gets the glyphs' and icons'
-/// pixels. Once the map side drops the layout, the worker's atlas frees
-/// their bins.
+/// Symbol layers cross too: the first job answers what it needs, the
+/// second carries the positions it resolved to, and the symbol buckets come
+/// back.
 #[test]
 fn symbol_layouts_cross_with_their_glyphs_and_images() {
-    let (mut codec, result) = cross(&layers(&[LABELS, LABELS_HALO]), &tile_data());
-    for render_data in result.layer_render_data.values() {
+    let mut codec = ThroughCodec::new();
+    let style = style(&layers(&[LABELS, LABELS_HALO]));
+    let data = tile_data();
+    let JobResult::NeedsDeps(needs) = codec.run(&job(&style, full(&data), Resolved::default())) else {
+        panic!("expected the dependencies");
+    };
+    assert!(!needs.glyphs.glyphs.is_empty());
+    assert_eq!(needs.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
+
+    let resolved = answer(&needs);
+    assert!(!resolved.glyphs.is_empty() && resolved.icons.contains_key("interstate_1"));
+    let JobResult::Laid(output) = codec.run(&job(&style, DataInput::Cached(key(1)), resolved)) else {
+        panic!("expected the layout");
+    };
+    assert_eq!(output.deps.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
+    for render_data in output.result.layer_render_data.values() {
         let symbols = render_data.bucket.downcast_ref::<crate::buckets::symbol_bucket::SymbolBucket>().unwrap();
         assert!(symbols.has_text_data() && symbols.has_icon_data());
         assert!(!symbols.state().symbol_instances.is_empty());
     }
-    assert!(!result.glyph_atlas().glyph_positions.is_empty() && !result.image_atlas().icon_positions.is_empty());
-
-    // The copies of the worker's textures have every bin's pixels.
-    let glyph_texture = result.glyph_atlas().dynamic_texture.clone().unwrap();
-    let glyph_bins = result.glyph_atlas().texture_handles.len();
-    assert!(glyph_bins > 0);
-    assert_eq!(glyph_texture.take_uploads().len(), glyph_bins);
-    let image_texture = result.image_atlas().dynamic_texture.clone().unwrap();
-    assert_eq!(image_texture.take_uploads().len(), result.image_atlas().texture_handles.len());
-
-    // Dropped, the layout releases its bins, and the worker's atlas frees
-    // them and its textures.
-    let worker_textures = codec.worker_codec.atlas().textures().len();
-    drop((result, glyph_texture, image_texture));
-    let releases = codec.map.releases().expect("releases");
-    codec.handle(&releases);
-    assert_eq!(codec.worker_codec.atlas().textures().len(), worker_textures - 2);
-    assert!(codec.map.releases().is_none());
 }
 
 /// A text color in a format section overrides the paint property, which
@@ -423,8 +367,7 @@ fn format_section_overrides_cross() {
 /// MLT tile data crosses as its bytes too.
 #[test]
 fn mlt_tiles_cross() {
-    let data: SharedTileData =
-        Arc::new(mln_tile::VectorMLTTileData::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mlt")), false));
+    let data = TileData::Mlt(MltTile::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mlt")), false));
     cross(&layers(&[FILL, LINE]), &data);
 }
 
@@ -433,8 +376,7 @@ fn mlt_tiles_cross() {
 /// pattern positions with them.
 #[test]
 fn pattern_layouts_cross() {
-    let (_, result) = cross(&layers(&[FILL_PATTERN, LINE_PATTERN, EXTRUSION_PATTERN]), &tile_data());
-    assert!(result.image_atlas().pattern_positions.contains_key("grass_pattern"));
+    let result = cross(&layers(&[FILL_PATTERN, LINE_PATTERN, EXTRUSION_PATTERN]), &tile_data());
     let extrusion = result.layer_render_data["extrusion-pattern"]
         .bucket
         .downcast_ref::<crate::buckets::fill_extrusion_bucket::FillExtrusionBucket>()
@@ -451,7 +393,7 @@ fn pattern_layouts_cross() {
 
 /// GeoJSON tiles cross as their features: each geometry type, properties
 /// and identifiers come out as they went in, and the layout is the one a
-/// worker reached directly makes, over the map side's own data.
+/// job run directly makes.
 #[test]
 fn geojson_tiles_cross() {
     use feature::{Feature, Identifier, PropertyMap};
@@ -512,22 +454,22 @@ fn geojson_tiles_cross() {
         ),
     ];
 
-    let encoded = mln_wire::to_vec(&mln_tile_id::EncodedTileData::GeoJson(Arc::new(features.clone()))).unwrap();
-    let Ok(mln_tile_id::EncodedTileData::GeoJson(decoded)) = mln_wire::from_slice(&encoded) else {
-        panic!("not GeoJSON")
+    // Outside a codec, the features are written in full.
+    let data = TileData::Features(Arc::new(features));
+    let Ok(TileData::Features(decoded)) = mln_wire::from_slice(&mln_wire::to_vec(&data).unwrap()) else {
+        panic!("not features")
     };
-    assert_eq!(*decoded, features);
+    let TileData::Features(features) = &data else { unreachable!() };
+    assert_eq!(decoded, *features);
 
     // A GeoJSON tile's one layer is every source layer.
-    let data: SharedTileData = Arc::new(crate::tile::geojson_tile_data::GeoJSONTileData::new(features));
-    let (_, result) = cross(&layers(&[FILL, LINE, CIRCLE]), &data);
-    assert!(std::ptr::addr_eq(result.feature_index.get_data().unwrap(), Arc::as_ptr(&data)));
+    cross(&layers(&[FILL, LINE, CIRCLE]), &data);
 }
 
 /// A fill layer whose color the tile's render layer is transitioning from
-/// data-driven to constant: the worker gets the properties as the render
-/// layer evaluated them, mid-transition, and the layout's render data has
-/// them back.
+/// data-driven to constant: the job gets the properties as the render layer
+/// evaluated them, mid-transition, and the layout's render data has them
+/// back.
 #[test]
 fn properties_cross_while_a_paint_property_transitions() {
     use std::time::Duration;
@@ -552,97 +494,99 @@ fn properties_cross_while_a_paint_property_transitions() {
     assert!(!get_evaluated::<FillLayerProperties>(&transitioning).fill_color.is_constant());
 
     let mut codec = ThroughCodec::new();
-    codec.send(&set_layers(std::slice::from_ref(&transitioning), 1));
-    let mut replies = codec.send(&set_data(&tile_data(), 2));
-    let TileMessage::Layout { result, .. } = replies.remove(0) else {
+    let style = style(std::slice::from_ref(&transitioning));
+    let JobResult::Laid(output) = codec.run(&job(&style, full(&tile_data()), Resolved::default())) else {
         panic!("not a layout");
     };
-    assert!(Arc::ptr_eq(&result.layer_render_data["water"].layer_properties, &transitioning));
+    assert!(Arc::ptr_eq(&output.result.layer_render_data["water"].layer_properties, &transitioning));
 }
 
-/// A layout's render data has the layers the worker had when it laid the
-/// tile out, not layers sent since.
+/// A layout's render data has the layers of its job, not of a job sent
+/// since.
 #[test]
 fn layouts_have_the_layers_they_answer() {
-    let sent = layers(&[FILL, LINE]);
-    let newer = layers(&[FILL, LINE]);
+    let sent = style(&layers(&[FILL, LINE]));
+    let newer = style(&layers(&[FILL, LINE]));
 
     let mut codec = ThroughCodec::new();
-    codec.send(&set_layers(&sent, 1));
-    let request = codec.map.message(TILE, &set_data(&tile_data(), 2)).unwrap();
-    codec.handle(&request);
-    let reply = codec.worker_codec.encode(TILE, codec.replies.take().remove(0));
-    codec.map.message(TILE, &set_layers(&newer, 3)).unwrap();
+    let request = codec.map.encode_run(&job(&sent, full(&tile_data()), Resolved::default())).unwrap();
+    let reply = codec.reply(&request);
+    codec.map.encode_run(&job(&newer, full(&tile_data()), Resolved::default())).unwrap();
     drop(newer);
 
-    let Some((_, Reply::Geometry(TileMessage::Layout { result, correlation_id: 2 }))) =
-        codec.map.decode(reply).unwrap()
-    else {
+    let (_, JobResult::Laid(output)) = codec.decode(reply) else {
         panic!("not a layout");
     };
-    for render_data in result.layer_render_data.values() {
-        assert!(sent.iter().any(|layer| Arc::ptr_eq(layer, &render_data.layer_properties)));
+    for render_data in output.result.layer_render_data.values() {
+        assert!(sent.layers.iter().any(|layer| Arc::ptr_eq(layer, &render_data.layer_properties)));
     }
 }
 
-/// A map side with the worker of `TILE` created.
-fn map_codec() -> MapCodec {
-    let mut map = MapCodec::new();
-    map.create(TILE, &parameters());
-    map
+/// The keys of each table that a job's frame tells the worker to forget.
+fn forgotten(request: &[u8]) -> Vec<(String, Vec<u64>)> {
+    let (_, body) = envelope::read_job_id(request).unwrap();
+    envelope::take(body).unwrap().0
 }
 
-/// A layer travels once per worker instance, then by key, and the instance
-/// forgets it when it is gone on the map side.
+/// A source's style travels once per worker instance, then by key; a new
+/// version of it brings only the layers it changed, and the instance
+/// forgets each value when it is gone on the map side.
 #[test]
-fn layers_are_defined_once() {
-    let mut map = map_codec();
-    let mut layers = layers(&[FILL, LINE]);
-    let first = map.message(TILE, &set_layers(&layers, 1)).unwrap();
-    let second = map.message(TILE, &set_layers(&layers, 2)).unwrap();
-    assert!(second.len() * 15 < first.len(), "{} bytes, then {}", first.len(), second.len());
+fn styles_and_layers_are_defined_once() {
+    let mut map = MapCodec::default();
+    let data = DataInput::Cached(key(1));
+    let layers = layers(&[FILL, LINE]);
+    let first_style = style(&layers);
+    let first = map.encode_run(&job(&first_style, data_input(&data), Resolved::default())).unwrap();
+    let second = map.encode_run(&job(&first_style, data_input(&data), Resolved::default())).unwrap();
+    assert!(second.len() * 5 < first.len(), "{} bytes, then {}", first.len(), second.len());
 
-    // Evaluated again (another zoom), the layers' properties travel again,
-    // but not the layers or their expressions.
-    let again: Vec<_> = layers
-        .iter()
-        .map(|properties| {
-            let render_layer = layermanager::create_render_layer(&properties.base_impl).unwrap();
-            render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(1.0));
-            Arc::clone(&render_layer.borrow().base().evaluated_properties)
-        })
-        .collect();
-    let third = map.message(TILE, &set_layers(&again, 3)).unwrap();
+    // Evaluated again (another zoom), the line layer's properties travel
+    // again, but not the layer or its expressions, and the fill layer by key.
+    let line = layermanager::create_render_layer(&layers[1].base_impl).unwrap();
+    line.borrow_mut().evaluate(&PropertyEvaluationParameters::new(1.0));
+    let again = style(&[Arc::clone(&layers[0]), Arc::clone(&line.borrow().base().evaluated_properties)]);
+    drop(line);
+    let third = map.encode_run(&job(&again, data_input(&data), Resolved::default())).unwrap();
     assert!(third.len() < first.len() / 2 && third.len() > second.len());
 
     // Once nothing holds the line layer, the instance forgets it, its
-    // expression and its properties, and the properties evaluated again.
-    layers.truncate(1);
-    drop(again);
-    let removed = envelope::take::<Request>(&map.remove(TILE)).unwrap().0;
-    let forgotten =
-        |table: &str| removed.forget.iter().find(|(name, _)| name == table).map_or(0, |(_, keys)| keys.len());
-    assert_eq!((forgotten("layer"), forgotten("expression"), forgotten("layer properties")), (1, 1, 3));
+    // expression, its properties as evaluated twice, and both styles.
+    drop((first_style, again));
+    let fill_only = style(&layers[..1]);
+    drop(layers);
+    let forget = forgotten(&map.encode_run(&job(&fill_only, data_input(&data), Resolved::default())).unwrap());
+    let count = |table: &str| forget.iter().find(|(name, _)| name == table).map_or(0, |(_, keys)| keys.len());
+    assert_eq!((count("source style"), count("layer"), count("expression"), count("layer properties")), (2, 1, 1, 2));
 }
 
-/// An image travels once per worker instance.
+fn data_input(data: &DataInput) -> DataInput {
+    match data {
+        DataInput::Cached(key) => DataInput::Cached(*key),
+        DataInput::Full { key, data } => DataInput::Full { key: *key, data: data.clone() },
+    }
+}
+
+/// A job's answer crosses as positions: no glyph bitmaps or image pixels, so
+/// a CJK tile's resume stays small.
 #[test]
-fn images_are_defined_once() {
-    let mut map = map_codec();
-    let dependencies = [("interstate_1".to_owned(), ImageType::Icon)].into_iter().collect();
-    let WorkerMessage::ImagesAvailable { icon_map, .. } = answer(&TileMessage::GetImages((dependencies, 1))) else {
-        unreachable!()
+fn answers_cross_without_pixels() {
+    let mut map = MapCodec::default();
+    let ids = (0..256).map(mln_text::glyph::GlyphID::new).collect();
+    let dependencies = Dependencies {
+        glyphs: mln_text::glyph::GlyphDependencies {
+            glyphs: [(vec!["Open Sans Regular".to_owned()], ids)].into_iter().collect(),
+            shapes: mln_vec_map::VecMap::default(),
+        },
+        images: [("interstate_1".to_owned(), ImageType::Icon)].into_iter().collect(),
+        unavailable_images: VecSet::new(),
     };
-    assert_eq!(icon_map.len(), 1);
-    let images = |image_correlation_id| WorkerMessage::ImagesAvailable {
-        icon_map: icon_map.clone(),
-        pattern_map: ImageMap::new(),
-        version_map: ImageVersionMap::default(),
-        image_correlation_id,
-    };
-    let first = map.message(TILE, &images(1)).unwrap();
-    let second = map.message(TILE, &images(2)).unwrap();
-    assert!(second.len() * 20 < first.len(), "{} bytes, then {}", first.len(), second.len());
+    let style = style(&layers(&[LABELS]));
+    let empty = map.encode_run(&job(&style, DataInput::Cached(key(1)), Resolved::default())).unwrap();
+    let resumed = map.encode_run(&job(&style, DataInput::Cached(key(1)), answer(&dependencies))).unwrap();
+    // Positions and metrics: tens of bytes a glyph, where its bitmap is
+    // hundreds.
+    assert!(resumed.len() - empty.len() < 256 * 40, "{} bytes", resumed.len() - empty.len());
 }
 
 /// Layer properties of a type without a wire form.
@@ -661,24 +605,174 @@ impl LayerProperties for Unknown {
     }
 }
 
-/// A `setLayers` that can't be encoded changes nothing: a layer that was
-/// new in it is still defined with the next one.
+/// A job that can't be encoded defines nothing: a layer that was new in it
+/// is still defined with the next job.
 #[test]
-fn failed_set_layers_define_nothing() {
-    let mut map = map_codec();
+fn failed_jobs_define_nothing() {
+    let mut map = MapCodec::default();
     let fill = layer(FILL, 0.0);
     let unknown: Arc<dyn LayerProperties> = Arc::new(Unknown(mln_style::layer_properties::LayerPropertiesBase::new(
         Arc::clone(&layer(LINE, 0.0).base_impl),
     )));
-    assert!(map.message(TILE, &set_layers(&[Arc::clone(&fill), unknown], 1)).is_err());
+    let failed = style(&[Arc::clone(&fill), unknown]);
+    assert!(map.encode_run(&job(&failed, DataInput::Cached(key(1)), Resolved::default())).is_err());
 
-    // Decoded without the failed request, the next one defines the layer.
-    let mut worker_codec = WorkerCodec::new();
-    worker_codec.decode(&MapCodec::new().create(TILE, &parameters())).unwrap();
-    let request = map.message(TILE, &set_layers(&[fill], 2)).unwrap();
-    let WorkerAction::Message { message, .. } = worker_codec.decode(&request).unwrap() else { panic!("not a message") };
-    let WorkerMessage::SetLayers { layers, .. } = worker_codec.decode_message(&message).unwrap() else {
-        panic!("not setLayers")
+    // Decoded without the failed job, the next one defines the layer.
+    let request = map.encode_run(&job(&style(&[fill]), DataInput::Cached(key(1)), Resolved::default())).unwrap();
+    let (_, body) = envelope::read_job_id(&request).unwrap();
+    let Job::Layout(job) = WorkerCodec::new().decode_job(body).unwrap() else {
+        panic!("not a layout job");
     };
-    assert_eq!(layers[0].base_impl.id, "water");
+    assert_eq!(job.style.layers[0].base_impl.id, "water");
+}
+
+/// A host that can't decode a job's body replies `Failed` with the job's
+/// id, which the map side reads before the body.
+#[test]
+fn an_undecodable_body_fails_its_job() {
+    let replies = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let sink = Arc::clone(&replies);
+    let host = TileWorkerHost::new(move |reply| sink.lock().push(reply));
+    let mut request = Vec::new();
+    envelope::write_job_header(&mut request, &id(4));
+    request.extend_from_slice(&[0xff; 16]);
+    host.handle(&request);
+
+    let reply = replies.lock().pop().expect("a reply");
+    let (job, JobResult::Failed(error)) = ThroughCodec::new().decode(reply) else {
+        panic!("not a failure");
+    };
+    assert_eq!(job, id(4));
+    assert!(error.to_string().contains("a tile worker request"), "{error}");
+
+    // A frame without a job id can't be answered: the host replies with
+    // nothing, which the map side takes as the instance lost.
+    host.handle(&[1, 2]);
+    assert_eq!(replies.lock().pop(), Some(Encoded::default()));
+}
+
+/// A worker keeps the data of its jobs up to its budget, least recently
+/// used first out, and a job that names data it no longer has answers
+/// `NeedsData`.
+#[test]
+fn evicted_data_needs_sending_again() {
+    let mut codec = ThroughCodec::new();
+    let data = tile_data();
+    let size = match &data {
+        TileData::Mvt(tile) => tile.bytes().len(),
+        _ => unreachable!(),
+    };
+    codec.cache.set_budget(size * 3 / 2);
+    let style = style(&layers(&[FILL]));
+    let full_load = |load| DataInput::Full { key: key(load), data: Some(data.clone()) };
+    assert!(matches!(codec.run(&job(&style, full_load(1), Resolved::default())), JobResult::Laid(_)));
+    assert!(matches!(codec.run(&job(&style, DataInput::Cached(key(1)), Resolved::default())), JobResult::Laid(_)));
+    assert!(codec.cache.retained_bytes() <= size * 3 / 2);
+
+    // Another load takes the budget.
+    assert!(matches!(codec.run(&job(&style, full_load(2), Resolved::default())), JobResult::Laid(_)));
+    assert!(matches!(codec.run(&job(&style, DataInput::Cached(key(1)), Resolved::default())), JobResult::NeedsData));
+    assert!(matches!(codec.run(&job(&style, DataInput::Cached(key(2)), Resolved::default())), JobResult::Laid(_)));
+}
+
+/// A PNG of opaque pixels that differ from their neighbours.
+fn png(width: u32, height: u32) -> Arc<Vec<u8>> {
+    let mut image = mln_util::image::PremultipliedImage::new(mln_util::size::Size::new(width, height));
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        *pixel = [(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255];
+    }
+    Arc::new(mln_image::encode_png(&image))
+}
+
+/// A decode job of tile 0/0/0.
+fn decode_job(job: Job) -> Run {
+    Run { id: id(1), job, superseded: Arc::default() }
+}
+
+/// A raster tile's image crosses as it decodes directly, its pixels as a
+/// payload, and a decoding error crosses as the tile's.
+#[test]
+fn raster_decodes_cross() {
+    for data in [Arc::new(fixture("test/fixtures/annotations/emerald.png")), png(64, 64)] {
+        let raster = || decode_job(Job::Raster { data: Arc::clone(&data) });
+        let (JobResult::Raster(direct), JobResult::Raster(through)) =
+            (direct_result(raster()), ThroughCodec::new().run(&raster()))
+        else {
+            panic!("not images");
+        };
+        assert!(direct.valid());
+        assert_eq!((through.size, &through.data), (direct.size, &direct.data));
+    }
+
+    let mut codec = ThroughCodec::new();
+    let request = codec.map.encode_run(&decode_job(Job::Raster { data: png(64, 64) })).unwrap();
+    let reply = codec.reply(&request);
+    assert_eq!(reply.payloads.len(), 1, "the pixels travel as a payload");
+    assert!(reply.bytes.len() < 64);
+
+    let garbage = || decode_job(Job::Raster { data: Arc::new(b"not an image".to_vec()) });
+    let (JobResult::Failed(direct), JobResult::Failed(through)) =
+        (direct_result(garbage()), ThroughCodec::new().run(&garbage()))
+    else {
+        panic!("not errors");
+    };
+    assert_eq!(through.to_string(), direct.to_string());
+}
+
+/// A raster-dem tile's DEM crosses with its border, as it decodes directly,
+/// and the `DEMData` constructor's error crosses as the tile's.
+#[test]
+fn dem_decodes_cross() {
+    use mln_util::tileset::RasterEncoding;
+    let custom = RasterEncoding::Custom { red_factor: 0.0, green_factor: 25.6, blue_factor: 0.1, base_shift: 3446.4 };
+    for encoding in [RasterEncoding::Mapbox, RasterEncoding::Terrarium, custom] {
+        let dem = || decode_job(Job::Dem { data: png(16, 16), encoding });
+        let (JobResult::Dem(direct), JobResult::Dem(through)) = (direct_result(dem()), ThroughCodec::new().run(&dem()))
+        else {
+            panic!("not DEMs");
+        };
+        assert_eq!((through.dim, through.stride, through.encoding), (16, 18, encoding));
+        assert_eq!(through.get_image().data, direct.get_image().data);
+        assert_eq!(through.get(-1, 3), through.get(0, 3), "the border repeats the edge");
+    }
+
+    let not_square = || decode_job(Job::Dem { data: png(16, 8), encoding: RasterEncoding::Mapbox });
+    let JobResult::Failed(error) = ThroughCodec::new().run(&not_square()) else {
+        panic!("not an error");
+    };
+    assert_eq!(error.to_string(), "raster-dem tiles must be square.");
+}
+
+/// A DEM the map side can't read back fails its job: sizes whose byte
+/// counts overflow 32 bits, or members `DEMData::new` can't make.
+#[test]
+fn malformed_dems_fail() {
+    use mln_util::image::PremultipliedImage;
+    use mln_util::size::Size;
+    use mln_util::tileset::RasterEncoding;
+
+    /// What a `JobResult::Dem` crosses as, with a `DEMData` of any members.
+    #[derive(mln_wire::Wire)]
+    enum Malformed {
+        _Laid,
+        _NeedsDeps,
+        _NeedsData,
+        _Raster,
+        Dem(i32, i32, RasterEncoding, PremultipliedImage),
+    }
+
+    let image = |size, bytes| PremultipliedImage::from_vec(Size::new(size, size), vec![0; bytes]);
+    let dems = [
+        (4, 5, image(6, 6 * 6 * 4)),
+        (-1, 1, image(1, 4)),
+        (i32::MAX, 1, image(1, 4)),
+        (32766, 32768, image(32768, 0)),
+    ];
+    for (dim, stride, image) in dems {
+        let mut bytes = Vec::new();
+        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image)).unwrap();
+        let JobResult::Failed(_) = MapCodec::default().decode_result(Encoded::from(bytes)) else {
+            panic!("dim {dim}, stride {stride}: not a failure");
+        };
+    }
 }

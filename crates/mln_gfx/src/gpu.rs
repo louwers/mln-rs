@@ -69,7 +69,7 @@ pub enum ClipDepth {
 }
 
 /// What a backend's device allows, and how the renderer draws on it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Caps {
     /// The alignment of the offset a uniform or storage buffer binds at.
     pub buffer_offset_alignment: u32,
@@ -88,6 +88,13 @@ pub struct Caps {
     /// expression mask marks the properties they evaluate, where other
     /// backends' marks the constant ones.
     pub line_expressions: bool,
+    /// Whether the device rasterizes on the CPU, as Mesa's llvmpipe and
+    /// lavapipe do. Their vertex pipeline runs once per instance, so an
+    /// instanced draw costs about as much as a draw of each instance.
+    pub cpu_rasterizer: bool,
+    /// The widest line in pixels that a pipeline of line primitives draws
+    /// ([`DynamicState::line_width`]): 1 on a device without wide lines.
+    pub max_line_width: f32,
 }
 
 /// How a buffer is bound.
@@ -499,8 +506,7 @@ pub struct DynamicState {
     /// The constant the pipeline's `Constant*` blend factors read.
     pub blend_constant: Color,
     /// The width in pixels of the lines that a pipeline of line primitives
-    /// draws, on a backend that draws wide lines. Others draw them 1 pixel
-    /// wide.
+    /// draws, up to [`Caps::max_line_width`].
     pub line_width: f32,
 }
 

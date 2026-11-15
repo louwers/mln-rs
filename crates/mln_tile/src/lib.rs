@@ -1,14 +1,13 @@
-//! Tile data: the decoded layers and features of vector tiles, and the
-//! geometry functions that work on them.
+//! Tile data: the layers and features of vector tiles, and the geometry
+//! functions that work on them.
 //!
-//! - `vector_mvt_tile_data`: Mapbox Vector Tile data (`VectorMVTTileData`,
-//!   `VectorMVTTileLayer`, `VectorMVTTileFeature`) on the fast-mvt reader.
-//! - `vector_mlt_tile_data`: MapLibre Tile data (`VectorMLTTileData`,
-//!   `VectorMLTTileLayer`, `VectorMLTTileFeature`) on `mlt`, the C++ MLT
-//!   decoder's output model filled by the mlt-core crate.
+//! - [`TileData`]: a tile's data, which is an MVT tile read lazily with
+//!   fast-mvt, an MLT tile decoded with mlt-core, or features already in
+//!   tile coordinates (GeoJSON and custom geometry sources). Its layers
+//!   ([`TileLayer`]) and features ([`Feature`]) are views that borrow it.
 //! - [`geometry_tile_data`]: ring classification, hole limits, polygon fixup
 //!   on `i_overlay`, coordinate conversion and corner rounding. The feature
-//!   interfaces are in `mln_tile_id`.
+//!   interface that expressions read is in `mln_tile_id`.
 //!
 //! This crate is deliberately low in the crate graph (no style, renderer or
 //! expression dependencies), so `mln_expression` and the buckets can use
@@ -18,16 +17,17 @@
 mod error;
 pub mod geometry_tile_data;
 mod mlt;
-mod vector_mlt_tile_data;
-mod vector_mvt_tile_data;
+mod mvt;
+mod tile_data;
 
-pub(crate) use error::Error;
+pub use error::TileError;
 pub use geometry_tile_data::{
     classify_rings, convert_feature, convert_geometry, convert_geometry_to_tile, limit_holes, round_polygon_corners,
     to_geometry_collection,
 };
-pub use vector_mlt_tile_data::VectorMLTTileData;
-pub use vector_mvt_tile_data::VectorMVTTileData;
+pub use mlt::{MltFeature, MltLayer, MltTile};
+pub use mvt::{MvtFeature, MvtLayer, MvtTile};
+pub use tile_data::{Feature, FeatureGroups, GeoJsonFeature, TileData, TileLayer};
 
 #[cfg(test)]
 mod malformed_tile_test;

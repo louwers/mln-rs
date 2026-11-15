@@ -3,6 +3,7 @@
 // GlobalStateExpression.FormatSectionOverrideUsesCapturedState and
 // Layer.SymbolLayerOverrides.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
@@ -50,8 +51,8 @@ impl GeometryTileFeature for StubGeometryTileFeature {
         self.properties.get(key).cloned()
     }
 
-    fn get_properties(&self) -> &PropertyMap {
-        &self.properties
+    fn get_properties(&self) -> Cow<'_, PropertyMap> {
+        Cow::Borrowed(&self.properties)
     }
 }
 

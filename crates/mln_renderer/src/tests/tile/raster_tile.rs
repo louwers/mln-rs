@@ -1,37 +1,38 @@
-use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_style::layer::Layer;
-use mln_style::layers::RasterLayer;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use super::{ErrorObserver, RasterTileTest, png, serializing_transport};
-use crate::buckets::raster_bucket::RasterBucket;
-use crate::tile::raster_tile::RasterTile;
-use crate::tile::tile::Tile;
-use crate::tile::tile_loader::{LoaderTile, VectorTileEncoding};
+use super::{RasterTileTest, png};
+use crate::tests::OneTile;
+use crate::tile::contents::Contents;
+use crate::tile::job::JobResult;
+use crate::tile::tile::TileKind;
+use crate::tile::tile_workers::InlineWorkers;
 
-fn tile(test: &RasterTileTest) -> RasterTile {
-    RasterTile::new(
-        OverscaledTileID::from_zxy(0, 0, 0),
-        "testSource".to_owned(),
-        &test.tile_parameters(),
-        &test.tileset,
-        None,
-    )
+fn tiles(test: &RasterTileTest) -> OneTile {
+    test.tiles(TileKind::Raster, OverscaledTileID::from_zxy(0, 0, 0), Box::new(InlineWorkers))
+}
+
+/// The size of the image tile `id` shows.
+fn image_size(tiles: &OneTile, id: &OverscaledTileID) -> Option<Size> {
+    match tiles.tile_at(id).contents.as_deref() {
+        Some(Contents::Raster(bucket)) => bucket.image.as_ref().map(|image| image.size),
+        _ => None,
+    }
 }
 
 // gtest: RasterTile.setError
 #[test]
 fn set_error() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
-    LoaderTile::set_error(&**tile.inner(), Error::native("test"));
+    let mut tiles = tiles(&test);
+    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("test")));
+    let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.is_loaded());
+    assert!(tile.loaded);
     assert!(tile.is_complete());
 }
 
@@ -39,10 +40,11 @@ fn set_error() {
 #[test]
 fn on_error() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
-    tile.inner().on_error(Error::native("test"), 0);
+    let mut tiles = tiles(&test);
+    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("test")));
+    let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.is_loaded());
+    assert!(tile.loaded);
     assert!(tile.is_complete());
 }
 
@@ -50,26 +52,27 @@ fn on_error() {
 #[test]
 fn on_parsed() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
-    tile.inner().on_parsed(Some(Arc::new(RasterBucket::new(PremultipliedImage::new(Size::new(0, 0))))), 0);
-    assert!(tile.is_renderable());
-    assert!(tile.is_loaded());
-    assert!(tile.is_complete());
+    let mut tiles = tiles(&test);
+    tiles
+        .with(|info, tile, ctx| info.apply_now(tile, ctx, JobResult::Raster(PremultipliedImage::new(Size::new(0, 0)))));
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_complete());
 
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the tile
     // renderable.
-    LoaderTile::set_error(&**tile.inner(), Error::native("Connection offline"));
-    assert!(tile.is_renderable());
-    assert!(tile.is_loaded());
-    assert!(tile.is_complete());
+    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("Connection offline")));
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_complete());
 
     // Then simulate a parsing failure and make sure that we keep it renderable
     // in this situation as well.
-    tile.inner().on_error(Error::native("Parse error"), 0);
-    assert!(tile.is_renderable());
-    assert!(tile.is_loaded());
-    assert!(tile.is_complete());
+    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("Parse error")));
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_complete());
 }
 
 // gtest: RasterTile.onParsedEmpty. Unlike in C++, a parse without data is a tile with nothing in
@@ -77,11 +80,12 @@ fn on_parsed() {
 #[test]
 fn on_parsed_empty() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
-    tile.inner().on_parsed(None, 0);
-    assert!(tile.is_renderable());
-    assert!(tile.is_loaded());
-    assert!(tile.is_complete());
+    let mut tiles = tiles(&test);
+    let id = tiles.id;
+    tiles.set_image(&id, None);
+    assert!(tiles.tile().is_renderable());
+    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_complete());
 }
 
 // Port-only: a tile the tileset doesn't have (HTTP 404) isn't renderable, so the pyramid draws a
@@ -90,68 +94,47 @@ fn on_parsed_empty() {
 #[test]
 fn missing_and_empty() {
     let test = RasterTileTest::new();
-    let tile = tile(&test);
-    let layer = RasterLayer::new("r", "s").base_impl();
-    let wait = || {
-        while !tile.is_complete() {
-            test.run_loop.run_once();
-        }
-    };
+    let mut tiles = test.pool_tiles(TileKind::Raster);
+    let id = tiles.id;
 
-    tile.inner().set_data(Some(png(16, 16)), VectorTileEncoding::Mvt);
-    wait();
-    assert!(tile.is_renderable());
-    assert!(tile.create_render_data().get_bucket(&*layer).is_some());
+    tiles.set_image(&id, Some(png(16, 16)));
+    test.settle(&mut tiles, &[id]);
+    assert!(tiles.tile().is_renderable());
+    assert!(image_size(&tiles, &id).is_some());
 
-    LoaderTile::set_missing(&**tile.inner(), VectorTileEncoding::Mvt);
-    wait();
-    assert!(!tile.is_renderable());
-    assert!(tile.create_render_data().get_bucket(&*layer).is_none());
+    tiles.set_missing(&id);
+    test.settle(&mut tiles, &[id]);
+    assert!(!tiles.tile().is_renderable());
+    assert!(tiles.tile().contents.is_none());
 
-    tile.inner().set_data(None, VectorTileEncoding::Mvt);
-    wait();
-    assert!(tile.is_renderable());
-    assert!(tile.create_render_data().get_bucket(&*layer).is_none());
+    tiles.set_image(&id, None);
+    test.settle(&mut tiles, &[id]);
+    assert!(tiles.tile().is_renderable());
+    assert!(matches!(tiles.tile().contents.as_deref(), Some(Contents::Empty)));
 }
 
-// Port-only: raster tiles whose workers are in worker instances on other
-// threads get their images back through the codec; an image that doesn't
-// decode becomes the tile's error.
+// Port-only: raster tiles whose jobs run in worker instances on other threads get their images
+// back through the codec; an image that doesn't decode becomes the tile's error.
 #[test]
-fn parse_through_the_codec() {
+fn decode_through_the_codec() {
     let test = RasterTileTest::new();
-    let mut parameters = test.tile_parameters();
-    parameters.tile_worker_transport = serializing_transport(&test.run_loop, 2);
-    let errors = Rc::new(ErrorObserver::default());
     // Two tiles, so both instances get one.
-    let tiles: Vec<RasterTile> = (0..2)
-        .map(|x| {
-            let id = OverscaledTileID::from_zxy(1, x, 0);
-            RasterTile::new(id, "s".to_owned(), &parameters, &test.tileset, Some(Rc::<ErrorObserver>::clone(&errors)))
-        })
-        .collect();
-    for (tile, size) in tiles.iter().zip([16, 32]) {
-        tile.inner().set_data(Some(png(size, size)), VectorTileEncoding::Mvt);
-        assert!(!tile.is_complete());
+    let mut tiles = test.remote_tiles(TileKind::Raster, 2);
+    let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
+    for (id, size) in ids.iter().zip([16, 32]) {
+        tiles.set_image(id, Some(png(size, size)));
+        assert!(!tiles.tile_at(id).is_complete());
     }
-    while !tiles.iter().all(Tile::is_complete) {
-        test.run_loop.run_once();
+    test.settle(&mut tiles, &ids);
+    for (id, size) in ids.iter().zip([16, 32]) {
+        assert!(tiles.tile_at(id).is_renderable());
+        assert_eq!(image_size(&tiles, id), Some(Size::new(size, size)));
     }
-    let layer = RasterLayer::new("r", "s").base_impl();
-    for (tile, size) in tiles.iter().zip([16, 32]) {
-        assert!(tile.is_renderable());
-        let render_data = tile.create_render_data();
-        let bucket = render_data.get_bucket(&*layer).expect("a bucket");
-        let image = bucket.downcast_ref::<RasterBucket>().unwrap().image.clone().unwrap();
-        assert_eq!(image.size, Size::new(size, size));
-    }
-    assert!(errors.0.borrow().is_empty());
+    assert_eq!(tiles.errors(), Vec::<String>::new());
 
-    tiles[0].inner().set_data(Some(Arc::new(b"not an image".to_vec())), VectorTileEncoding::Mvt);
-    while !tiles[0].is_complete() {
-        test.run_loop.run_once();
-    }
-    assert_eq!(errors.0.borrow().len(), 1);
+    tiles.set_image(&ids[0], Some(Arc::new(b"not an image".to_vec())));
+    test.settle(&mut tiles, &ids[..1]);
+    assert_eq!(tiles.errors().len(), 1);
     // It keeps the image it had.
-    assert!(tiles[0].is_renderable());
+    assert!(tiles.tile_at(&ids[0]).is_renderable());
 }

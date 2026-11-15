@@ -14,8 +14,11 @@ use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer::layer_type_info;
 use mln_style_types::TranslateAnchorType;
+use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData};
+use mln_tile_id::geometry_tile_data::{
+    GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature,
+};
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::feature::{Feature, feature_id_to_string};
@@ -76,7 +79,7 @@ pub(crate) struct FeatureIndex {
 
     bucket_layer_ids: HashMap<Arc<str>, Vec<String>>,
     unique_layer_ids: HashSet<Arc<str>>,
-    tile_data: Option<Arc<dyn GeometryTileData + Send + Sync>>,
+    tile_data: Option<TileData>,
 }
 
 impl std::fmt::Debug for FeatureIndex {
@@ -105,7 +108,7 @@ fn envelope(points: impl IntoIterator<Item = GeometryCoordinate>) -> Option<(Geo
 impl FeatureIndex {
     /// An empty index of `tile_data`'s features, sharing the tile data.
     #[must_use]
-    pub(crate) fn new(tile_data: Option<Arc<dyn GeometryTileData + Send + Sync>>) -> Self {
+    pub(crate) fn new(tile_data: Option<TileData>) -> Self {
         FeatureIndex {
             // 16x16 grid -> 32px cell
             grid: GridIndex::new(constants::EXTENT as f32, constants::EXTENT as f32, (constants::EXTENT / 16) as u32),
@@ -117,8 +120,13 @@ impl FeatureIndex {
     }
 
     #[must_use]
-    pub(crate) fn get_data(&self) -> Option<&(dyn GeometryTileData + Send + Sync)> {
-        self.tile_data.as_deref()
+    pub(crate) fn get_data(&self) -> Option<&TileData> {
+        self.tile_data.as_ref()
+    }
+
+    /// Sets the tile data the index's features are in.
+    pub(crate) fn set_data(&mut self, tile_data: Option<TileData>) {
+        self.tile_data = tile_data;
     }
 
     /// Set the expected number of elements per cell to avoid small
@@ -361,12 +369,13 @@ impl FeatureIndex {
         if !layer_ids.iter().any(|layer_id| layers.contains_key(layer_id)) {
             return Ok(());
         }
-        let Some(source_layer) = tile_data.get_layer(source_layer_name)? else {
+        let Some(source_layer) = tile_data.layer(source_layer_name)? else {
             debug_assert!(false, "source layer {source_layer_name} missing");
             return Ok(());
         };
-        let feature = source_layer.get_feature(index)?;
-        let source_layer_id = source_layer.get_name();
+        let feature = source_layer.feature(index)?;
+        let geometry = feature.geometry()?;
+        let source_layer_id = source_layer.name().to_owned();
         let mut state = FeatureState::default();
         if let Some(source_feature_state) = source_feature_state
             && let Some(id_str) = feature_id_to_string(&feature.get_id())
@@ -387,34 +396,28 @@ impl FeatureIndex {
             let intersects = needs_cross_tile_index
                 || render_layer.query_intersects_feature(
                     query_geometry,
-                    &*feature,
+                    &feature,
+                    &geometry,
                     transform_state.get_zoom() as f32,
                     transform_state,
                     pixels_to_tile_units,
                     projector,
                     &state,
                 );
-            feature.check()?;
             if !intersects {
                 continue;
             }
 
             // Match layer filters and source queries, including overzoomed tiles.
             if let Some(filter) = &options.filter {
-                let context = EvaluationContext::with_zoom_feature(f32::from(tile_id.overscaled_z), Some(&*feature))
+                let context = EvaluationContext::with_zoom_feature(f32::from(tile_id.overscaled_z), Some(&feature))
                     .with_global_state(global_state);
-                let passes = filter.evaluate(&context);
-                feature.check()?;
-                if !passes {
+                if !filter.evaluate(&context) {
                     continue;
                 }
             }
 
-            // C++ throws out of the query for a malformed geometry (from
-            // `convertFeature`) or value.
-            let converted = mln_tile::geometry_tile_data::convert_feature(&*feature, &tile_id.canonical)
-                .map_err(|e| Error::native(e.to_string()))?;
-            feature.check()?;
+            let converted = mln_tile::convert_feature(&feature, &geometry, &tile_id.canonical)?;
             let mut converted = Feature::from(converted);
             converted.source = render_layer.base().base_impl.source.clone();
             converted.source_layer = source_layer_id.clone();
@@ -521,6 +524,12 @@ impl FeatureIndex {
         Ok(Grid { sort_index: self.sort_index, strings, bucket_layer_ids: self.bucket_layer_ids(), elements })
     }
 
+    /// The bucket leader of each box, in the order they were inserted.
+    #[cfg(test)]
+    pub(crate) fn leaders(&self) -> Vec<&str> {
+        self.grid.box_elements().iter().map(|(element, _)| &*element.bucket_leader_id).collect()
+    }
+
     /// The index as it crosses, without its tile data.
     #[cfg(test)]
     pub(crate) fn encode_grid(&self) -> Vec<u8> {
@@ -528,19 +537,19 @@ impl FeatureIndex {
     }
 }
 
+/// An index crosses without its tile data, which the side that reads it
+/// sets (`set_data`).
 impl mln_wire::Wire for FeatureIndex {
     fn write(&self, w: &mut mln_wire::Writer) {
         match self.wire_grid() {
             Ok(grid) => grid.write(w),
-            Err(error) => return w.fail(error.to_owned()),
+            Err(error) => w.fail(error.to_owned()),
         }
-        crate::tile::worker_codec::fields::tile_data::write(&self.tile_data, w);
     }
 
     fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
         let parts = Grid::read(r)?;
-        let tile_data = crate::tile::worker_codec::fields::tile_data::read(r)?;
-        let mut index = FeatureIndex::new(tile_data);
+        let mut index = FeatureIndex::new(None);
         let strings: Vec<Arc<str>> = parts.strings.iter().map(|string| index.intern_layer_name(string)).collect();
         for (leader, layer_ids) in &parts.bucket_layer_ids {
             index.set_bucket_layer_ids(leader, layer_ids);

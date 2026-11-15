@@ -51,6 +51,9 @@
 //   shaders draw the roofs, and the instanced ones, which C++ has no GLSL
 //   for, the walls: an instance of a quad per outline vertex, as the port's
 //   WGSL does (C++'s GLSL draws both from one vertex buffer with normals).
+// - The instanced fill outline shaders, which C++ doesn't have, draw an
+//   outline where the context draws no 2 px lines: a quad per segment, two
+//   pixels wide as a wide line is, with the line shaders' fragment shaders.
 // - The fill, fill outline, fill extrusion and line pattern fragment shaders
 //   set `precision highp float` on GL ES, as GL JS's do: overzoomed past a
 //   source's maxzoom, their pattern positions outgrow a 16-bit mediump
@@ -1976,6 +1979,246 @@ lowp float opacity = u_opacity;
 #endif
 }
 ",
+};
+
+/// `outline_corner`, the corner of an instanced outline's quad, after the
+/// uniform blocks.
+macro_rules! outline_corner {
+    () => {
+        r"
+// The width of the outline in pixels.
+const float LINE_WIDTH = 2.0;
+
+// A corner of the quad that draws the segment from `start` to `end`, of clip
+// space, as a wide line covers it: LINE_WIDTH pixels across its minor axis
+// (vertically when it runs more across the screen than up it), from one end
+// to the other, with the attributes of its end as a wide line's fragments get
+// them: `pos`, the end in window coordinates, and `t`, how far along the
+// segment that is, from 0 at its start to 1 at its end.
+vec4 outline_corner(highp vec4 start, highp vec4 end, vec2 corner, out highp vec2 pos, out highp float t) {
+    pos = vec2(0.0);
+    t = 0.0;
+    // The part of the segment in front of the camera, which the GPU clips
+    // further: its ends have to be on screen to widen it.
+    highp float near_w = max(start.w, end.w) * 1e-4;
+    if (start.w <= near_w && end.w <= near_w) {
+        return vec4(0.0);
+    }
+    highp vec4 a = start;
+    highp vec4 b = end;
+    highp float ta = 0.0;
+    highp float tb = 1.0;
+    if (a.w < near_w) {
+        ta = (a.w - near_w) / (a.w - b.w);
+        a = mix(start, end, ta);
+    }
+    if (b.w < near_w) {
+        tb = (start.w - near_w) / (start.w - b.w);
+        b = mix(start, end, tb);
+    }
+
+    highp vec2 sa = (a.xy / a.w + 1.0) / 2.0 * u_world_size;
+    highp vec2 sb = (b.xy / b.w + 1.0) / 2.0 * u_world_size;
+    highp vec2 d = sb - sa;
+    if (d == vec2(0.0)) {
+        return vec4(0.0);
+    }
+    highp vec2 across = abs(d.x) >= abs(d.y) ? vec2(0.0, 1.0) : vec2(1.0, 0.0);
+    highp vec2 offset = across * (corner.y - 0.5) * LINE_WIDTH;
+
+    bool at_end = corner.x != 0.0;
+    highp vec4 clip = at_end ? b : a;
+    pos = at_end ? sb : sa;
+    t = at_end ? tb : ta;
+    return clip + vec4(offset * 2.0 / u_world_size * clip.w, 0.0, 0.0);
+}
+"
+    };
+}
+
+pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: concat!(
+        r"layout (std140) uniform GlobalPaintParamsUBO {
+    highp vec2 u_pattern_atlas_texsize;
+    highp vec2 u_units_to_pixels;
+    highp vec2 u_world_size;
+    highp float u_camera_to_center_distance;
+    highp float u_symbol_fade_change;
+    highp float u_aspect_ratio;
+    highp float u_pixel_ratio;
+    highp float u_map_zoom;
+    lowp float global_pad1;
+};
+
+layout (std140) uniform FillOutlineDrawableUBO {
+    highp mat4 u_matrix;
+    // Interpolations
+    highp float u_outline_color_t;
+    highp float u_opacity_t;
+    lowp float drawable_pad1;
+    lowp float drawable_pad2;
+};
+
+layout (std140) uniform FillEvaluatedPropsUBO {
+    highp vec4 u_color;
+    highp vec4 u_outline_color;
+    highp float u_opacity;
+    highp float u_fade;
+    highp float u_from_scale;
+    highp float u_to_scale;
+};
+
+// The quad's corner: x picks the segment's start (0) or end (1), y its side.
+layout (location = 0) in vec2 a_pos;
+// Per instance: a vertex of the fill, and the end of the outline segment
+// that starts there.
+layout (location = 3) in vec2 a_outline_pos;
+layout (location = 4) in vec2 a_outline_end;
+
+out vec2 v_pos;
+
+#ifndef HAS_UNIFORM_u_outline_color
+layout (location = 1) in highp vec4 a_outline_color;
+out highp vec4 outline_color;
+#endif
+#ifndef HAS_UNIFORM_u_opacity
+layout (location = 2) in lowp vec2 a_opacity;
+out lowp float opacity;
+#endif
+",
+        outline_corner!(),
+        r"
+void main() {
+    #ifndef HAS_UNIFORM_u_outline_color
+outline_color = unpack_mix_color(a_outline_color, u_outline_color_t);
+#else
+highp vec4 outline_color = u_outline_color;
+#endif
+    #ifndef HAS_UNIFORM_u_opacity
+opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
+#else
+lowp float opacity = u_opacity;
+#endif
+
+    highp float t;
+    gl_Position = outline_corner(projectTile(a_outline_pos, a_outline_pos), projectTile(a_outline_end, a_outline_end), a_pos, v_pos, t);
+}
+"
+    ),
+    fragment: FILL_OUTLINE_SHADER.fragment,
+};
+
+pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: concat!(
+        r"layout (std140) uniform GlobalPaintParamsUBO {
+    highp vec2 u_pattern_atlas_texsize;
+    highp vec2 u_units_to_pixels;
+    highp vec2 u_world_size;
+    highp float u_camera_to_center_distance;
+    highp float u_symbol_fade_change;
+    highp float u_aspect_ratio;
+    highp float u_pixel_ratio;
+    highp float u_map_zoom;
+    lowp float global_pad1;
+};
+
+layout (std140) uniform FillOutlinePatternDrawableUBO {
+    highp mat4 u_matrix;
+    highp vec2 u_pixel_coord_upper;
+    highp vec2 u_pixel_coord_lower;
+    highp float u_tile_ratio;
+    // Interpolations
+    highp float u_pattern_from_t;
+    highp float u_pattern_to_t;
+    highp float u_opacity_t;
+    highp float u_color_t;
+    lowp float drawable_pad1;
+    lowp float drawable_pad2;
+    lowp float drawable_pad3;
+};
+
+layout (std140) uniform FillOutlinePatternTilePropsUBO {
+    highp vec4 u_pattern_from;
+    highp vec4 u_pattern_to;
+    highp vec2 u_texsize;
+    lowp float u_sdf;
+    lowp float tileprops_pad2;
+};
+
+layout (std140) uniform FillEvaluatedPropsUBO {
+    highp vec4 u_color;
+    highp vec4 u_outline_color;
+    highp float u_opacity;
+    highp float u_fade;
+    highp float u_from_scale;
+    highp float u_to_scale;
+};
+
+// The quad's corner: x picks the segment's start (0) or end (1), y its side.
+layout (location = 0) in vec2 a_pos;
+// Per instance: a vertex of the fill, and the end of the outline segment
+// that starts there.
+layout (location = 5) in vec2 a_outline_pos;
+layout (location = 6) in vec2 a_outline_end;
+
+out vec2 v_pos_a;
+out vec2 v_pos_b;
+out vec2 v_pos;
+
+#ifndef HAS_UNIFORM_u_color
+layout (location = 1) in highp vec4 a_color;
+out highp vec4 color;
+#endif
+#ifndef HAS_UNIFORM_u_opacity
+layout (location = 2) in lowp vec2 a_opacity;
+out lowp float opacity;
+#endif
+#ifndef HAS_UNIFORM_u_pattern_from
+layout (location = 3) in lowp vec4 a_pattern_from;
+flat out lowp vec4 pattern_from;
+#endif
+#ifndef HAS_UNIFORM_u_pattern_to
+layout (location = 4) in lowp vec4 a_pattern_to;
+flat out lowp vec4 pattern_to;
+#endif
+",
+        outline_corner!(),
+        r"
+void main() {
+    #ifndef HAS_UNIFORM_u_color
+color = unpack_mix_color(a_color, u_color_t);
+#else
+highp vec4 color = u_color;
+#endif
+    #ifndef HAS_UNIFORM_u_opacity
+opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
+#else
+lowp float opacity = u_opacity;
+#endif
+    #ifndef HAS_UNIFORM_u_pattern_from
+pattern_from = a_pattern_from;
+#else
+mediump vec4 pattern_from = u_pattern_from;
+#endif
+    #ifndef HAS_UNIFORM_u_pattern_to
+pattern_to = a_pattern_to;
+#else
+mediump vec4 pattern_to = u_pattern_to;
+#endif
+
+    vec2 display_size_a = (pattern_from.zw - pattern_from.xy) / u_pixel_ratio;
+    vec2 display_size_b = (pattern_to.zw - pattern_to.xy) / u_pixel_ratio;
+
+    highp float t;
+    gl_Position = outline_corner(projectTile(a_outline_pos, a_outline_pos), projectTile(a_outline_end, a_outline_end), a_pos, v_pos, t);
+    vec2 pos = mix(a_outline_pos, a_outline_end, t);
+
+    v_pos_a = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, u_from_scale * display_size_a, u_tile_ratio, pos);
+    v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, u_to_scale * display_size_b, u_tile_ratio, pos);
+}
+"
+    ),
+    fragment: FILL_OUTLINE_PATTERN_SHADER.fragment,
 };
 
 pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource {

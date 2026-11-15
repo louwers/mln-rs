@@ -10,6 +10,8 @@
 // draws it, so the bucket and the drawables don't each keep a copy. The gfx
 // vector is released, so it frees the data once it is uploaded, and the
 // drawables a layer builds again for the same bucket reuse its buffer.
+// Vertices that a layer makes of a bucket's vector are kept there too, made
+// before the vector moves.
 //
 // In the browser, the arrays a bucket gets from a tile worker in another
 // wasm instance stay the JS arrays they arrived in (mln_util::host_bytes)
@@ -125,6 +127,15 @@ impl<T: bytemuck::Pod> GeometryVec<T> {
         Some(bytes)
     }
 
+    /// Frees the data, which nothing will draw. `len` still counts it.
+    pub(crate) fn discard(&self) {
+        #[cfg(target_family = "wasm")]
+        if self.take_host().is_some() {
+            return;
+        }
+        drop(self.take(false));
+    }
+
     /// A released gfx vector of the data, moved out unless `keep`.
     fn vertex_vector(&self, keep: bool) -> VertexVector<T> {
         #[cfg(target_family = "wasm")]
@@ -207,6 +218,8 @@ impl<T: bytemuck::Pod> mln_wire::Wire for GeometryVec<T> {
 pub(crate) struct BucketGeometry {
     vertices: RefCell<HashMap<(SimpleIdentity, usize), VertexVectorBasePtr>>,
     indexes: RefCell<HashMap<(SimpleIdentity, usize), IndexVectorBasePtr>>,
+    /// The vertices a layer made of a bucket's vector, by the vector's key.
+    derived: RefCell<HashMap<(SimpleIdentity, usize), VertexVectorBasePtr>>,
 }
 
 /// The key of a bucket's `GeometryVec`: the bucket and the vector's address,
@@ -221,25 +234,54 @@ fn keep(bucket: &dyn Bucket) -> bool {
     bucket.base().retain_features_by_id
 }
 
+/// The vector of `key` in `map`, which `make` makes the first time.
+fn cached<T: ?Sized>(
+    map: &RefCell<HashMap<(SimpleIdentity, usize), Rc<T>>>,
+    key: (SimpleIdentity, usize),
+    make: impl FnOnce() -> Rc<T>,
+) -> Rc<T> {
+    Rc::clone(map.borrow_mut().entry(key).or_insert_with(make))
+}
+
 impl BucketGeometry {
     /// The shared vertex vector of `vec`, one of `bucket`'s.
     pub(crate) fn vertices<V: bytemuck::Pod>(&self, bucket: &dyn Bucket, vec: &GeometryVec<V>) -> VertexVectorBasePtr {
-        Rc::clone(
-            self.vertices
-                .borrow_mut()
-                .entry(key(bucket, vec))
-                .or_insert_with(|| Rc::new(vec.vertex_vector(keep(bucket)))),
-        )
+        cached(&self.vertices, key(bucket, vec), || Rc::new(vec.vertex_vector(keep(bucket))))
     }
 
     /// The shared index vector of `vec`, one of `bucket`'s.
     pub(crate) fn indexes(&self, bucket: &dyn Bucket, vec: &GeometryVec<u16>) -> IndexVectorBasePtr {
-        Rc::clone(
-            self.indexes
-                .borrow_mut()
-                .entry(key(bucket, vec))
-                .or_insert_with(|| Rc::new(RefCell::new(vec.index_vector(keep(bucket))))),
-        )
+        cached(&self.indexes, key(bucket, vec), || Rc::new(RefCell::new(vec.index_vector(keep(bucket)))))
+    }
+
+    /// The vertex vector that `make` makes of the data of `vec`, one of
+    /// `bucket`'s, the first time it is asked for, which is before
+    /// `vertices` moves the data. One per vector.
+    pub(crate) fn derived_vertices<V: bytemuck::Pod>(
+        &self,
+        bucket: &dyn Bucket,
+        vec: &GeometryVec<V>,
+        make: impl FnOnce(&[V]) -> VertexVectorBasePtr,
+    ) -> VertexVectorBasePtr {
+        cached(&self.derived, key(bucket, vec), || {
+            debug_assert!(!vec.is_moved(), "vertices derived from data that moved to its gfx vector");
+            make(&vec.data())
+        })
+    }
+}
+
+/// The vertex vector that `make` makes of one of `bucket`'s vectors, kept
+/// with the tile's `geometry` when it has one (see
+/// `BucketGeometry::derived_vertices`), else made each time.
+pub(crate) fn derived_vertices<V: bytemuck::Pod>(
+    geometry: Option<&BucketGeometry>,
+    bucket: &dyn Bucket,
+    vec: &GeometryVec<V>,
+    make: impl FnOnce(&[V]) -> VertexVectorBasePtr,
+) -> VertexVectorBasePtr {
+    match geometry {
+        Some(geometry) => geometry.derived_vertices(bucket, vec, make),
+        None => make(&vec.data()),
     }
 }
 

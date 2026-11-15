@@ -26,6 +26,7 @@ pub use mailbox::Mailbox;
 pub use run_loop::{RunLoop, RunLoopHandle};
 pub use scheduler::{Scheduler, SchedulerPtr, TaggedScheduler};
 pub use thread::Thread;
+pub use thread_pool::BACKGROUND_THREADS;
 pub use timer::Timer;
 
 #[cfg(test)]

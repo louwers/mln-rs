@@ -1,26 +1,33 @@
-// The window's renderer backend and the target it presents with: Metal by
-// default on macOS, WebGPU (through wgpu, the default where there is no
-// Metal) everywhere, Vulkan elsewhere than on Apple's platforms and OpenGL ES
-// on Linux, picked with --backend and switched in the controls. C++'s GLFW
-// app builds one backend and ignores the flag. On macOS both present to the
-// window's one CAMetalLayer (metal_layer.rs). Elsewhere each makes its own
-// surface of the window, which takes one backend's frames at a time: the
-// backend that goes gives it up before the next one takes it.
+// The window's render session: Metal by default on macOS, WebGPU (through
+// wgpu, the default where there is no Metal) everywhere, Vulkan elsewhere
+// than on Apple's platforms and OpenGL ES on Linux, picked with --backend and
+// switched in the controls. Each backend renders in a session of its own, on
+// a device of its own, which the render thread drives (`Driver::CallerThread`)
+// so that the controls' overlay (overlay.rs) draws over each frame on that
+// thread. On macOS both backends present to the window's one CAMetalLayer
+// (metal_layer.rs). Elsewhere each makes its own surface of the window, which
+// takes one session's frames at a time: the session that goes gives it up
+// before the next one takes it.
 //
 // OpenGL ES is Linux's only: EGL is no system library on Windows, and macOS
 // has neither it nor OpenGL ES.
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use mln_gfx::{FrameTarget, RendererBackend};
+use mln_map::RenderMode;
+use mln_runtime::{
+    AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Driver, DriverWork, FrameDemand,
+    FrameDisposition, Map, RenderSession, RenderTarget, Surface, SurfaceOverlay,
+};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use winit::event_loop::EventLoopProxy;
 
-use crate::host::UserEvent;
+use crate::host::Inbox;
 use crate::overlay::Paint;
 
 /// A backend --backend names.
@@ -88,6 +95,31 @@ impl Kind {
             Kind::OpenGl => "OpenGL ES",
         }
     }
+
+    fn backend_type(self) -> BackendType {
+        match self {
+            #[cfg(target_os = "macos")]
+            Kind::Metal => BackendType::Metal,
+            #[cfg(not(target_vendor = "apple"))]
+            Kind::Vulkan => BackendType::Vulkan,
+            Kind::WebGpu => BackendType::WebGPU,
+            #[cfg(target_os = "linux")]
+            Kind::OpenGl => BackendType::OpenGL,
+        }
+    }
+
+    /// The overlay that paints the controls' `paint` over each frame.
+    fn overlay(self, paint: Rc<RefCell<Paint>>) -> SurfaceOverlay {
+        match self {
+            #[cfg(target_os = "macos")]
+            Kind::Metal => SurfaceOverlay::Metal(crate::metal_overlay::metal_overlay(paint)),
+            #[cfg(not(target_vendor = "apple"))]
+            Kind::Vulkan => SurfaceOverlay::Vulkan(crate::vulkan_overlay::vulkan_overlay(paint)),
+            Kind::WebGpu => SurfaceOverlay::WebGpu(crate::overlay::webgpu_overlay(paint)),
+            #[cfg(target_os = "linux")]
+            Kind::OpenGl => SurfaceOverlay::Gl(crate::gl_overlay::gl_overlay(paint)),
+        }
+    }
 }
 
 impl Default for Kind {
@@ -99,240 +131,201 @@ impl Default for Kind {
     }
 }
 
-/// The backend presenting to the window, and its target.
-pub(crate) enum WindowTarget {
+/// Makes the window's surfaces: on macOS through the window's thread, which
+/// makes the window's Metal layer and the wgpu surfaces of it, and elsewhere
+/// from the window itself.
+pub(crate) struct WindowSurfaces {
     #[cfg(target_os = "macos")]
-    Metal(Rc<mln_mtl::RendererBackend>, mln_mtl::SurfaceTarget),
-    #[cfg(not(target_vendor = "apple"))]
-    Vulkan(Rc<mln_vulkan::RendererBackend>, mln_vulkan::SurfaceTarget),
-    WebGpu(Rc<mln_webgpu::RendererBackend>, mln_webgpu::SurfaceTarget),
-    #[cfg(target_os = "linux")]
-    OpenGl(Rc<mln_gl::RendererBackend>, mln_gl::SurfaceTarget, String),
+    pub(crate) proxy: winit::event_loop::EventLoopProxy<crate::host::UserEvent>,
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) window: Arc<winit::window::Window>,
 }
 
-/// The window's thread ended before it answered the render thread.
-pub(crate) fn closed() -> Error {
-    Error::cancelled("The window closed before it had a surface")
-}
+impl WindowSurfaces {
+    /// A surface of the window that a session of `kind` on `device`
+    /// presents to.
+    #[cfg(target_os = "macos")]
+    fn surface(&self, kind: Kind, device: &Device) -> Result<Surface, Error> {
+        use std::sync::mpsc;
 
-/// A wgpu surface of the window for `instance`, which the window's thread
-/// makes when asked through `proxy`.
-fn make_surface(proxy: &EventLoopProxy<UserEvent>, instance: &wgpu::Instance) -> Result<wgpu::Surface<'static>, Error> {
-    let (reply, surface) = mpsc::channel();
-    proxy.send_event(UserEvent::MakeSurface(instance.clone(), reply)).map_err(|_| closed())?;
-    surface.recv().map_err(|_| closed())?.map_err(Error::native)
-}
+        use crate::host::UserEvent;
 
-/// The window, from the window's thread.
-#[cfg(not(target_vendor = "apple"))]
-fn window(proxy: &EventLoopProxy<UserEvent>) -> Result<std::sync::Arc<winit::window::Window>, Error> {
-    let (reply, window) = mpsc::channel();
-    proxy.send_event(UserEvent::Window(reply)).map_err(|_| closed())?;
-    window.recv().map_err(|_| closed())
-}
-
-impl WindowTarget {
-    /// A backend of `kind` on a device of its own, and a target that
-    /// presents to the window, whose surface or layer the window's thread
-    /// makes when asked through `proxy`.
-    pub(crate) fn new(
-        kind: Kind,
-        proxy: &EventLoopProxy<UserEvent>,
-        framebuffer_size: Size,
-        cap_frame_rate: bool,
-    ) -> Result<WindowTarget, Error> {
+        let closed = || Error::cancelled("The window closed before it had a surface");
         match kind {
-            #[cfg(target_os = "macos")]
             Kind::Metal => {
                 let (reply, layer) = mpsc::channel();
-                proxy.send_event(UserEvent::MakeLayer(reply)).map_err(|_| closed())?;
+                self.proxy.send_event(UserEvent::MakeLayer(reply)).map_err(|_| closed())?;
                 let layer = layer.recv().map_err(|_| closed())?.map_err(Error::native)?;
-                let backend = Rc::new(mln_mtl::RendererBackend::new(&mln_mtl::Device::new(None)?));
-                let layer = mln_mtl::Layer::new(layer.into_layer());
-                let target = mln_mtl::SurfaceTarget::new(&backend, layer, framebuffer_size, cap_frame_rate);
-                Ok(WindowTarget::Metal(backend, target))
-            }
-            #[cfg(not(target_vendor = "apple"))]
-            Kind::Vulkan => {
-                let device = mln_vulkan::Device::new(None)?;
-                let (backend, target) =
-                    mln_vulkan::SurfaceTarget::with_backend(&device, window(proxy)?, framebuffer_size, cap_frame_rate)?;
-                Ok(WindowTarget::Vulkan(backend, target))
+                Ok(Surface::metal_layer(mln_mtl::Layer::new(layer.into_layer())))
             }
             Kind::WebGpu => {
-                let device = mln_webgpu::Device::new(None)?;
+                let Device::WebGpu(device) = device else {
+                    return Err(Error::invalid_argument("A WebGPU surface needs a WebGPU device"));
+                };
                 let instance = device.instance().cloned().ok_or_else(|| Error::native("The device has no instance"))?;
-                let backend = Rc::new(mln_webgpu::RendererBackend::new(&device));
-                let options = mln_webgpu::SurfaceOptions { cap_frame_rate, ..Default::default() };
-                let surface = make_surface(proxy, &instance)?;
-                let target = mln_webgpu::SurfaceTarget::new(Rc::clone(&backend), surface, framebuffer_size, options)?;
-                Ok(WindowTarget::WebGpu(backend, target))
-            }
-            #[cfg(target_os = "linux")]
-            Kind::OpenGl => {
-                let (backend, target) =
-                    mln_gl::SurfaceTarget::with_backend(window(proxy)?, framebuffer_size, cap_frame_rate)?;
-                let name = backend.get_renderer_name();
-                Ok(WindowTarget::OpenGl(backend, target, name))
+                let (reply, surface) = mpsc::channel();
+                self.proxy.send_event(UserEvent::MakeSurface(instance, reply)).map_err(|_| closed())?;
+                Ok(Surface::wgpu(surface.recv().map_err(|_| closed())?.map_err(Error::native)?))
             }
         }
+    }
+
+    /// A surface of the window that a session of `kind` on `device`
+    /// presents to.
+    #[cfg(not(target_os = "macos"))]
+    #[expect(clippy::unnecessary_wraps, reason = "macOS's surfaces come from the window's thread, which can fail")]
+    fn surface(&self, kind: Kind, device: &Device) -> Result<Surface, Error> {
+        let _ = (kind, device);
+        Ok(Surface::window(Arc::clone(&self.window)))
+    }
+}
+
+/// Services `driver` until `completion` completes, and returns its result.
+fn serviced<T: Send + 'static>(driver: &DriverWork, completion: Completion<T>) -> Result<T, Error> {
+    while !completion.is_complete() {
+        driver.service()?;
+        if !completion.is_complete() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    completion.wait()
+}
+
+/// The attach options of a session that the render thread drives, which
+/// wakes it through `inbox`.
+fn attach_options(inbox: &Arc<Inbox>) -> AttachOptions {
+    let work = Arc::clone(inbox);
+    let results = Arc::clone(inbox);
+    let redraw = Arc::clone(inbox);
+    AttachOptions {
+        driver: Driver::CallerThread,
+        driver_work_wake: Some(Arc::new(move || work.wake())),
+        frame_wake: Some(Arc::new(move || results.wake())),
+        redraw_wake: Some(Arc::new(move || redraw.wake_for_redraw())),
+        ..AttachOptions::default()
+    }
+}
+
+/// The map's render session on the window, with one backend.
+pub(crate) struct WindowSession {
+    kind: Kind,
+    device: Device,
+    session: RenderSession,
+    driver: DriverWork,
+}
+
+impl WindowSession {
+    /// Attaches a session of `kind` to `map`, on `device` or a new device of
+    /// the backend, that presents to the window at `size` logical pixels with
+    /// the controls' `paint` over each frame, and wakes the render thread
+    /// through `inbox`.
+    pub(crate) fn attach(
+        kind: Kind,
+        device: Option<Device>,
+        map: &Map,
+        surfaces: &WindowSurfaces,
+        size: Size,
+        paint: Rc<RefCell<Paint>>,
+        inbox: &Arc<Inbox>,
+    ) -> Result<WindowSession, Error> {
+        let device = match device {
+            Some(device) => device,
+            None => Device::with_backend(kind.backend_type(), DeviceOptions::default())?,
+        };
+        let surface = surfaces.surface(kind, &device)?.with_overlay(kind.overlay(paint));
+        let target = RenderTarget::Surface { size, surface, device: Some(device.clone()) };
+        let (session, attached) = map.attach(target, attach_options(inbox))?;
+        let driver = session.take_driver_work()?;
+        // A session that failed to attach lets go of what it made as its
+        // driver work drops.
+        serviced(&driver, attached)?;
+        Ok(WindowSession { kind, device, session, driver })
     }
 
     pub(crate) fn kind(&self) -> Kind {
-        match self {
-            #[cfg(target_os = "macos")]
-            WindowTarget::Metal(..) => Kind::Metal,
-            #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(..) => Kind::Vulkan,
-            WindowTarget::WebGpu(..) => Kind::WebGpu,
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(..) => Kind::OpenGl,
-        }
+        self.kind
     }
 
-    /// The size of the frames, in physical pixels.
-    pub(crate) fn framebuffer_size(&self) -> Size {
-        match self {
-            #[cfg(target_os = "macos")]
-            WindowTarget::Metal(_, target) => target.size(),
-            #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(_, target) => target.size(),
-            WindowTarget::WebGpu(_, target) => target.size(),
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(_, target, _) => target.size(),
-        }
+    pub(crate) fn device(&self) -> &Device {
+        &self.device
     }
 
-    /// What renders and where, for the log.
-    pub(crate) fn describe(&self) -> String {
-        match self {
-            #[cfg(target_os = "macos")]
-            WindowTarget::Metal(backend, target) => {
-                format!(
-                    "Rendering with {} (Metal), surface format {:?}",
-                    backend.device().name(),
-                    target.get_pixel_format()
-                )
-            }
-            #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(backend, target) => {
-                format!(
-                    "Rendering with {} (Vulkan), surface format {:?}",
-                    backend.get_device_name(),
-                    target.get_color_format()
-                )
-            }
-            WindowTarget::WebGpu(backend, target) => {
-                let info = backend.device().adapter_info();
-                format!(
-                    "Rendering with {} (wgpu {:?}, driver {} {}), surface format {:?}",
-                    info.name,
-                    info.backend,
-                    info.driver,
-                    info.driver_info,
-                    target.format()
-                )
-            }
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(_, _, name) => format!("Rendering with {name} (OpenGL ES through EGL)"),
-        }
+    pub(crate) fn session(&self) -> &RenderSession {
+        &self.session
     }
 
-    /// The GPU and how the map renders on it, for the status line.
-    pub(crate) fn adapter(&self) -> String {
-        match self {
-            #[cfg(target_os = "macos")]
-            WindowTarget::Metal(backend, _) => format!("{} (Metal)", backend.device().name()),
-            #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(backend, _) => format!("{} (Vulkan)", backend.get_device_name()),
-            WindowTarget::WebGpu(backend, _) => {
-                let info = backend.device().adapter_info();
+    /// Runs the session's work that is ready: its frames among it.
+    pub(crate) fn service(&self) -> Result<(), Error> {
+        self.driver.service()
+    }
+
+    /// The GPU and how the map renders on it, for the status line. OpenGL
+    /// names its GPU only in a context, which the controls' overlay has.
+    pub(crate) fn adapter(&self, paint: &Paint) -> String {
+        match &self.device {
+            Device::WebGpu(device) => {
+                let info = device.adapter_info();
                 format!("{} (wgpu {:?})", info.name, info.backend)
             }
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(_, _, name) => format!("{name} (OpenGL ES)"),
-        }
-    }
-
-    /// Paints the controls' `paint` over each frame of the map.
-    pub(crate) fn set_controls_overlay(&self, paint: Rc<RefCell<Paint>>) {
-        match self {
             #[cfg(target_os = "macos")]
-            WindowTarget::Metal(_, target) => target.set_overlay(Some(crate::metal_overlay::metal_overlay(paint))),
+            Device::Metal(device) => format!("{} (Metal)", device.name()),
             #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(_, target) => target.set_overlay(Some(crate::vulkan_overlay::vulkan_overlay(paint))),
-            WindowTarget::WebGpu(_, target) => target.set_overlay(Some(crate::overlay::webgpu_overlay(paint))),
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(_, target, _) => target.set_overlay(Some(crate::gl_overlay::gl_overlay(paint))),
+            Device::Vulkan(device) => format!("{} (Vulkan)", crate::vulkan_overlay::device_name(device)),
+            _ => match &paint.renderer {
+                Some(renderer) => format!("{renderer} ({})", self.kind.name()),
+                None => self.kind.name().to_owned(),
+            },
         }
     }
 
-    pub(crate) fn renderer_backend(&self) -> Rc<dyn RendererBackend> {
-        match self {
-            #[cfg(target_os = "macos")]
-            WindowTarget::Metal(backend, _) => Rc::<mln_mtl::RendererBackend>::clone(backend),
-            #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(backend, _) => Rc::<mln_vulkan::RendererBackend>::clone(backend),
-            WindowTarget::WebGpu(backend, _) => Rc::<mln_webgpu::RendererBackend>::clone(backend),
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(backend, ..) => Rc::<mln_gl::RendererBackend>::clone(backend),
+    /// Releases the session, servicing it until it has let go of the
+    /// window's surface and its graphics objects.
+    pub(crate) fn close(self) {
+        let released = self.session.release().and_then(|released| serviced(&self.driver, released));
+        if let Err(e) = released {
+            Log::warning(Event::Render, format!("The render session didn't end cleanly: {e}"));
         }
     }
+}
 
-    /// The frames the renderer draws into.
-    pub(crate) fn frames(&self) -> &dyn FrameTarget {
-        match self {
-            #[cfg(target_os = "macos")]
-            WindowTarget::Metal(_, target) => target,
-            #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(_, target) => target,
-            WindowTarget::WebGpu(_, target) => target,
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(_, target, _) => target,
+/// Renders `map` at `size` logical pixels in an offscreen session on
+/// `device`, once everything it shows has loaded or `timeout` passed, and
+/// reads the frame's pixels. The map has no other session meanwhile.
+pub(crate) fn read_offscreen(
+    map: &Map,
+    device: Device,
+    size: Size,
+    inbox: &Arc<Inbox>,
+    timeout: Duration,
+) -> Result<PremultipliedImage, Error> {
+    let target = RenderTarget::Offscreen { size, device: Some(device) };
+    let (session, attached) = map.attach(target, attach_options(inbox))?;
+    let driver = session.take_driver_work()?;
+    serviced(&driver, attached)?;
+    let deadline = Instant::now() + timeout;
+    // The first frame draws what the session has; the next ones wait for the
+    // map's updates as the session's tiles load.
+    let mut mode = DemandMode::Force;
+    loop {
+        session.demand_frame(FrameDemand::new(mode, 0))?;
+        mode = DemandMode::WaitForUpdate;
+        let mut results = Vec::new();
+        while results.is_empty() && Instant::now() < deadline {
+            driver.service()?;
+            results = session.drain_frame_results()?;
+            if results.is_empty() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        // Labels fade in after the frame that has everything loaded.
+        let settled = results.iter().any(|result| {
+            result.disposition == FrameDisposition::Rendered && result.mode == RenderMode::Full && !result.needs_repaint
+        });
+        if settled || Instant::now() >= deadline {
+            break;
         }
     }
-
-    /// Takes the surface's next texture ahead of a frame, where the backend
-    /// has it then; false when there is none to draw into right now.
-    pub(crate) fn acquire_next_texture(&self) -> bool {
-        self.frames().begin_frame().is_some()
-    }
-
-    pub(crate) fn set_framebuffer_size(&self, size: Size) {
-        match self {
-            #[cfg(target_os = "macos")]
-            WindowTarget::Metal(_, target) => target.resize(size),
-            #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(_, target) => target.resize(size),
-            WindowTarget::WebGpu(_, target) => target.resize(size),
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(_, target, _) => target.resize(size),
-        }
-    }
-
-    /// Copy a presented frame (see `take_readback`).
-    pub(crate) fn request_readback(&self) {
-        match self {
-            #[cfg(target_os = "macos")]
-            WindowTarget::Metal(_, target) => target.request_readback(),
-            #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(_, target) => target.request_readback(),
-            WindowTarget::WebGpu(_, target) => target.request_readback(),
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(_, target, _) => target.request_readback(),
-        }
-    }
-
-    /// The frame copied after `request_readback`, once presented.
-    pub(crate) fn take_readback(&self) -> Option<PremultipliedImage> {
-        match self {
-            #[cfg(target_os = "macos")]
-            WindowTarget::Metal(_, target) => target.take_readback(),
-            #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(_, target) => target.take_readback(),
-            WindowTarget::WebGpu(_, target) => target.take_readback(),
-            #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(_, target, _) => target.take_readback(),
-        }
-    }
+    let image = serviced(&driver, session.read_texture()?);
+    serviced(&driver, session.release()?)?;
+    image
 }

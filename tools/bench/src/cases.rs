@@ -24,12 +24,16 @@ use crate::{Context, Metrics};
 
 pub struct Case {
     pub name: String,
+    /// The `Case::new` call that registers the case, where `compare` reads
+    /// its code.
+    pub(crate) registered: &'static std::panic::Location<'static>,
     run: Box<dyn Fn(&Context) -> Metrics>,
 }
 
 impl Case {
+    #[track_caller]
     fn new(name: impl Into<String>, run: impl Fn(&Context) -> Metrics + 'static) -> Case {
-        Case { name: name.into(), run: Box::new(run) }
+        Case { name: name.into(), registered: std::panic::Location::caller(), run: Box::new(run) }
     }
 
     #[must_use]

@@ -11,8 +11,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use mln_style_types::image::ImagePositions;
+use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::error::Error;
 use mln_util::feature::feature_id_to_string;
 use mln_util::identity::SimpleIdentity;
@@ -103,7 +104,7 @@ pub(crate) trait Bucket: Any + Send + Sync {
     fn update(
         &self,
         _states: &FeatureStates,
-        _layer: &dyn GeometryTileLayer,
+        _layer: &TileLayer<'_>,
         _layer_id: &str,
         _image_positions: &ImagePositions,
     ) {

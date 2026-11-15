@@ -2488,6 +2488,7 @@ dependencies = [
  "mln-rs-vulkan",
  "mlt-core",
  "parking_lot",
+ "proc-macro2",
  "serde",
  "serde_json",
  "tempfile",
@@ -2569,8 +2570,6 @@ dependencies = [
  "egui-winit",
  "egui_extras",
  "egui_glow",
- "mln-rs-actor",
- "mln-rs-feature",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
@@ -2579,11 +2578,8 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-mtl",
  "mln-rs-renderer",
+ "mln-rs-runtime",
  "mln-rs-storage",
- "mln-rs-style",
- "mln-rs-style-types",
- "mln-rs-system-fonts",
- "mln-rs-text",
  "mln-rs-util",
  "mln-rs-vulkan",
  "mln-rs-webgpu",
@@ -2689,7 +2685,6 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-style-types",
  "mln-rs-util",
- "parking_lot",
 ]
 
 [[package]]
@@ -2867,6 +2862,7 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-map-types",
+ "mln-rs-math",
  "mln-rs-pixelmatch",
  "mln-rs-renderer",
  "mln-rs-storage",
@@ -2933,6 +2929,7 @@ dependencies = [
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-feature",
+ "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-map",
@@ -3154,8 +3151,8 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-wire",
  "mlt-core",
- "parking_lot",
  "proptest",
  "thiserror 2.0.21",
 ]
@@ -3239,9 +3236,8 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-map",
- "mln-rs-renderer",
+ "mln-rs-runtime",
  "mln-rs-storage",
- "mln-rs-text",
  "mln-rs-util",
  "mln-rs-web-host",
  "mln-rs-webgpu",
@@ -3249,7 +3245,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "wgpu",
 ]
 
 [[package]]

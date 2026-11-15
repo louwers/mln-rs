@@ -5,20 +5,18 @@ version:
 
 - **mln-rs**, the package in the repository root. It re-exports the libraries
   under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
-  `mln_rs::geojson_vt`, and so on, all but `mln_actor` and `mln_headless`. Users
-  depend on this one.
+  `mln_rs::geojson_vt`, and so on, all but `mln_actor`. Users depend on this
+  one.
 - **`mln-rs-<name>`**, one package per library under `crates/` and `vendor/`
   (for example `mln-rs-util` for `mln_util`, `mln-rs-geojson-vt` for
   `geojson_vt`). Their library names are unchanged, so the code still says
   `mln_util::`. They exist for mln-rs only.
-- The test tooling the differential tests
-  ([mln-rs-difftests](https://github.com/louwers/mln-rs-difftests)) use:
-  `mln-rs-render-test`, `mln-rs-style-codegen` and `mln-rs-pixelmatch`. mln-rs
-  does not depend on them.
 
-The other `publish = false` packages (the desktop app, the browser build in
-examples/web and crates/mln_web_shaper, the expression test runner) are not
-released.
+The `publish = false` packages (the desktop app, the browser build in
+examples/web and crates/mln_web_shaper, the test tools and their headless
+frontend) are not released. The differential tests
+([mln-rs-difftests](https://github.com/louwers/mln-rs-difftests)) take the test
+tools from a git revision.
 
 ## Releasing a version
 
@@ -148,10 +146,8 @@ A new library under `crates/` or `vendor/` needs:
   `src/lib.rs`.
 
 A library that should not be released gets `publish = false` instead of the
-README and the last three steps; test tooling the difftests use gets the README
-(without the `mln_rs::<name>` path), the workspace entry and the
-`changelog_include` entry, but no mln-rs dependency. A new third-party crate
-goes into `[workspace.dependencies]` only.
+README and the last three steps. A new third-party crate goes into
+`[workspace.dependencies]` only.
 
 ## Secrets and settings
 

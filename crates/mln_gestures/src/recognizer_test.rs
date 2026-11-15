@@ -1,24 +1,119 @@
 // The rig runs the transform on its own frame clock, as a host does with
 // `set_frame_time`: each frame samples the animations 16 ms after the one
 // before, and commands start at the latest frame's time. The clock runs an
-// hour ahead of `Instant::now()`, so its frame time never goes stale.
+// hour ahead of `Instant::now()`, so its frame time never goes stale. The
+// rig's camera is a bare transform (`TestCamera`), which needs no renderer.
 
+use std::cell::RefCell;
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::time::Duration;
 
-use mln_map::transform::{NullTransformObserver, Transform};
-use mln_map::{ConstrainMode, MomentumSnap, ViewportMode};
+use mln_map::transform::{CameraCommandId, Transform, TransformEvent};
+use mln_map::{CameraChangeSource, ConstrainMode, MomentumSnap, TransitionEnd, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
 use mln_util::geo::LatLngBounds;
+use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::*;
 
+/// A transform as the recognizer's camera. It keeps the ends of its commands
+/// for the releases' [`PendingEnd`]s, and the source of each camera change
+/// that started.
+struct TestCamera {
+    transform: Transform,
+    ends: Rc<RefCell<HashMap<CameraCommandId, TransitionEnd>>>,
+    sources: Vec<CameraChangeSource>,
+}
+
+impl TestCamera {
+    /// Takes what the transform reported.
+    fn take_events(&mut self) {
+        for event in self.transform.drain_events() {
+            match event {
+                TransformEvent::CommandEnded(end) => {
+                    self.ends.borrow_mut().insert(end.command, end.end);
+                }
+                TransformEvent::CameraWillChange(change) => self.sources.push(change.source),
+                _ => {}
+            }
+        }
+    }
+}
+
+impl Deref for TestCamera {
+    type Target = Transform;
+
+    fn deref(&self) -> &Transform {
+        &self.transform
+    }
+}
+
+impl DerefMut for TestCamera {
+    fn deref_mut(&mut self) -> &mut Transform {
+        &mut self.transform
+    }
+}
+
+#[derive(Debug)]
+struct TestEnd {
+    command: CameraCommandId,
+    ends: Rc<RefCell<HashMap<CameraCommandId, TransitionEnd>>>,
+}
+
+impl PendingEnd for TestEnd {
+    fn take(&mut self) -> Option<TransitionEnd> {
+        self.ends.borrow_mut().remove(&self.command)
+    }
+}
+
+impl GestureCamera for TestCamera {
+    fn viewport(&self) -> ScreenCoordinate {
+        let size = self.transform.get_state().get_size();
+        ScreenCoordinate::new(f64::from(size.width), f64::from(size.height))
+    }
+
+    fn camera(&self) -> CameraOptions {
+        self.transform.get_camera_options(None)
+    }
+
+    fn zoom_range(&self) -> (f64, f64) {
+        let state = self.transform.get_state();
+        crate::zoom_range(state, crate::center_latitude(state))
+    }
+
+    fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng> {
+        self.transform.screen_coordinate_to_lat_lng(&pixel, mln_util::geo::WrapMode::Unwrapped).ok()
+    }
+
+    fn apply_camera_delta(&mut self, delta: &CameraDelta) {
+        let applied = self.transform.apply_camera_delta(delta);
+        assert!(applied.is_ok(), "{applied:?}");
+        self.take_events();
+    }
+
+    fn release(&mut self, delta: &CameraDelta) -> Box<dyn PendingEnd> {
+        let command = self.transform.apply_camera_delta(delta).expect("a valid delta");
+        self.take_events();
+        Box::new(TestEnd { command, ends: Rc::clone(&self.ends) })
+    }
+
+    fn update_camera(&mut self, update: &CameraUpdate) {
+        self.transform.update_camera(update);
+        self.take_events();
+    }
+
+    fn cancel_transitions_with_id(&mut self, transition_id: u64) {
+        self.transform.cancel_transitions_with_id(transition_id);
+        self.take_events();
+    }
+}
+
 fn transform() -> Transform {
-    let mut transform =
-        Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(800, 600)).unwrap();
     transform.jump_to(&CameraOptions {
         center: Some(LatLng::new(35.68, 139.7).unwrap()),
@@ -39,7 +134,7 @@ fn distance(a: ScreenCoordinate, b: ScreenCoordinate) -> f64 {
 const SHIFT: Modifiers = Modifiers { shift: true, ctrl: false, alt: false, meta: false };
 
 struct Rig {
-    camera: Transform,
+    camera: TestCamera,
     input: GestureRecognizer,
     now: f64,
     time: Instant,
@@ -54,6 +149,8 @@ impl Rig {
         let time = Instant::now() + Duration::from_secs(3600);
         let mut camera = transform();
         camera.set_frame_time(Some(time));
+        camera.drain_events().for_each(drop);
+        let camera = TestCamera { transform: camera, ends: Rc::default(), sources: Vec::new() };
         Rig { camera, input: GestureRecognizer::new(*options), now: 1000.0, time }
     }
 
@@ -113,6 +210,7 @@ impl Rig {
         self.time += Duration::from_millis(16);
         self.camera.update_transitions(Some(self.time));
         self.camera.set_frame_time(Some(self.time));
+        self.camera.take_events();
         gesture || self.camera.in_transition()
     }
 
@@ -714,6 +812,13 @@ fn a_flick_that_catches_a_glide_carries_its_speed() {
     let compounded = rig.fling(300.0, 10.0);
     assert!(compounded > again && compounded <= glide(10_000.0) + 0.01, "{compounded}");
 
+    // A glide that a command stopped before the press carries nothing.
+    let mut rig = Rig::new();
+    fling_and_glide(&mut rig, 100.0, 1.0, 6);
+    rig.camera.cancel_transitions_with_id(GestureOptions::DEFAULT.transition_id);
+    let after_cancel = rig.fling(300.0, 10.0);
+    assert!((after_cancel - alone).abs() < 0.01, "{after_cancel} vs {alone}");
+
     // Off, each release glides at its own speed, as ffi's demo and GL JS do.
     let mut rig = Rig::with(&GestureOptions { carry_caught_glide: false, ..GestureOptions::DEFAULT });
     fling_and_glide(&mut rig, 100.0, 1.0, 6);
@@ -875,30 +980,15 @@ fn zoom_and_pitch_settle_only_when_their_snaps_are_set() {
     assert!(pitch.abs() < 1e-6, "{pitch}");
 }
 
-/// Records the source of each camera change that starts.
-#[derive(Default)]
-struct Sources(std::cell::RefCell<Vec<mln_map::CameraChangeSource>>);
-
-impl mln_map::transform::TransformObserver for Sources {
-    fn on_camera_will_change(&self, change: mln_map::CameraChange) {
-        self.0.borrow_mut().push(change.source);
-    }
-}
-
 #[test]
 fn gestures_and_their_steps_report_themselves_as_gestures() {
     use mln_map::CameraChangeSource::{Gesture, Momentum};
-    let sources = Rc::new(Sources::default());
     let mut rig = Rig::new();
-    rig.camera = Transform::new(Rc::<Sources>::clone(&sources), ConstrainMode::HeightOnly, ViewportMode::Default);
-    rig.camera.resize(Size::new(800, 600)).unwrap();
-    rig.camera.set_frame_time(Some(rig.time));
-    let take = || std::mem::take(&mut *sources.0.borrow_mut());
-    take();
+    let take = |rig: &mut Rig| std::mem::take(&mut rig.camera.sources);
 
     // A drag and its glide.
     rig.fling(100.0, 10.0);
-    let seen = take();
+    let seen = take(&mut rig);
     assert!(seen[..seen.len() - 1].iter().all(|&s| s == Gesture), "{seen:?}");
     assert_eq!(seen.last(), Some(&Momentum));
 
@@ -908,7 +998,7 @@ fn gestures_and_their_steps_report_themselves_as_gestures() {
     assert!(!rig.camera.is_gesture_in_progress());
     assert!(rig.camera.in_transition());
     rig.settle();
-    assert!(take().iter().all(|&s| s == Gesture));
+    assert!(take(&mut rig).iter().all(|&s| s == Gesture));
     for _ in 0..2 {
         rig.down(1, PointerKind::Mouse, 400.0, 300.0);
         rig.now += 50.0;
@@ -917,7 +1007,7 @@ fn gestures_and_their_steps_report_themselves_as_gestures() {
     }
     assert!(!rig.camera.is_gesture_in_progress());
     rig.settle();
-    assert!(take().iter().all(|&s| s == Gesture));
+    assert!(take(&mut rig).iter().all(|&s| s == Gesture));
 }
 
 #[test]
@@ -1035,7 +1125,7 @@ fn a_host_step_during_a_drag_leaves_the_drag_going() {
     }
     // Unanchored: an anchored zoom couples the center, which the drag's next
     // move takes over, ending the step (maplibre-native-ffi's patch 0015).
-    rig.input.step(&mut rig.camera, host_zoom(0.5, None)).unwrap();
+    rig.input.step(&mut rig.camera, &host_zoom(0.5, None)).unwrap();
     assert!(rig.camera.is_gesture_in_progress());
     for i in 5..=8 {
         rig.now += 16.0;
@@ -1056,7 +1146,7 @@ fn a_host_step_during_a_notch_ease_keeps_both_zooms() {
     let at = p(100.0, 100.0);
     rig.send(notches(at, -1.0));
     rig.frame();
-    rig.input.step(&mut rig.camera, host_zoom(0.5, Some(at))).unwrap();
+    rig.input.step(&mut rig.camera, &host_zoom(0.5, Some(at))).unwrap();
     assert!(rig.camera.is_gesture_in_progress());
     rig.settle();
     assert!((rig.zoom() - (zoom + 1.0 / 3.0 + 0.5)).abs() < 1e-6, "{}", rig.zoom() - zoom);
@@ -1066,7 +1156,7 @@ fn a_host_step_during_a_notch_ease_keeps_both_zooms() {
 fn a_host_step_must_be_valid() {
     let mut rig = Rig::new();
     let step = CameraDelta { scale: Some(0.0), ..CameraDelta::default() };
-    assert!(rig.input.step(&mut rig.camera, step).is_err());
+    assert!(rig.input.step(&mut rig.camera, &step).is_err());
 }
 
 // Port-only: a mouse drag on the globe turns it around the cursor, as

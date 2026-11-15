@@ -1,5 +1,10 @@
 // The messages between the page (main.ts), the map's Web Worker
 // (map-worker.ts) and the tile workers' Web Workers (tile-worker.ts).
+//
+// Each tile workers' Web Worker has a control port to the map's: the map's
+// runtime connects each of its render sessions to it there, with a port of
+// its own (TileWorkerConnect), and the Web Worker reports there
+// (TileWorkerReport).
 
 /** What the map draws with, each a build of the module. */
 export type Backend = "webgpu" | "webgl2";
@@ -65,8 +70,8 @@ export interface Start {
   type: "start";
   module: WebAssembly.Module;
   canvas: OffscreenCanvas;
-  /** One per tile worker, connected to it. */
-  ports: MessagePort[];
+  /** One per tile workers' Web Worker: its control port. */
+  tileWorkers: MessagePort[];
   /** CSS pixels. */
   width: number;
   height: number;
@@ -75,7 +80,11 @@ export interface Start {
   /** JSON: font files that every font stack falls back to. */
   fallbackFontFaces: string | null;
   camera: Camera;
-  localIdeographFontFamily: string | undefined;
+  /**
+   * Whether the map draws CJK glyphs in the browser's sans-serif font rather
+   * than downloading them.
+   */
+  systemFonts: boolean;
   /** A message to panic with once the map exists, for check/check.mjs. */
   panic: string | undefined;
 }
@@ -85,8 +94,8 @@ export type ToMap =
   | { type: "preload"; style: string; ratio: number; zoom: number }
   | Start
   | { type: "readPixels" }
-  // Run mln_gfx's conformance case of writes from JS arrays on the map's
-  // GPU (WebMap::start_gpu_check), for check/check.mjs.
+  // Run mln_gfx's conformance case of writes from JS arrays on a GPU of the
+  // map's backend (WebMap::start_gpu_check), for check/check.mjs.
   | { type: "checkGpu" }
   | { type: "fetches" }
   | { type: "idle" }
@@ -137,16 +146,7 @@ export interface FrameSample {
 }
 
 /** The phases of FrameSample's `phases`, in order. */
-export const PHASES = [
-  "map",
-  "tiles",
-  "sources",
-  "symbols",
-  "layers",
-  "upload",
-  "draw",
-  "tasks",
-] as const;
+export const PHASES = ["render", "submit", "tasks"] as const;
 
 /** What the debug overlay shows of the map beside its frames. */
 export interface DebugStats {
@@ -189,17 +189,33 @@ export type FromMap =
   // The map didn't start: the browser's API couldn't draw it.
   | { type: "unsupported"; message: string };
 
-/** From the page to a tile worker's Web Worker. */
+/** From the page to a tile workers' Web Worker. */
 export interface StartTileWorker {
   module: WebAssembly.Module;
-  /** Connected to the map's Web Worker. */
-  port: MessagePort;
+  /** The control port, whose other end is the map's Web Worker. */
+  control: MessagePort;
   /** A message to panic with once the instance starts, for check/check.mjs. */
   panic: string | undefined;
 }
 
 /**
- * From a tile worker to the map's Web Worker, over its port: a batch of
+ * From the map's runtime to a tile workers' Web Worker, over its control
+ * port, for each render session (mln_web_host's tile_workers): a port to
+ * serve the session's tile workers on.
+ */
+export interface TileWorkerConnect {
+  module: WebAssembly.Module;
+  port: MessagePort;
+}
+
+/**
+ * From a tile workers' Web Worker to the map's, over its control port: how
+ * many replies it sent in a batch, or that its instance panicked.
+ */
+export type TileWorkerReport = { replies: number } | { fatal: string };
+
+/**
+ * From a tile worker to the map's runtime, over a session's port: a batch of
  * replies, each its bytes and its payloads, or that its instance panicked.
  */
 export type FromTileWorker = Uint8Array[][] | { fatal: string };

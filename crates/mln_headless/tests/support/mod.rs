@@ -27,7 +27,7 @@ use std::sync::{Arc, OnceLock};
 use mln_actor::{AsyncTask, LocalObject, RunLoop, Timer};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
-use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation};
+use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Responder, Response};
 use mln_style::custom_tile_loader::TileFunction;
@@ -279,13 +279,26 @@ impl StubMapObserver {
     }
 
     /// Dispatches `map`'s events from the run loop whenever the map has
-    /// some, while the returned task lives.
-    pub(crate) fn observe(self: &Rc<Self>, map: &Rc<RefCell<Map>>) -> AsyncTask {
+    /// some, while the returned value lives. With a `frontend`, which
+    /// renders `map`, it also draws each update that the map publishes
+    /// first, as a window's frontend draws when the display asks for a
+    /// frame; while someone else holds the frontend, they draw.
+    pub(crate) fn observe(
+        self: &Rc<Self>,
+        map: &Rc<RefCell<Map>>,
+        frontend: Option<&Rc<RefCell<HeadlessFrontend>>>,
+    ) -> Observing {
         let run_loop = map.borrow().run_loop().clone();
         let task = {
             let observer = Rc::downgrade(self);
             let map = Rc::downgrade(map);
+            let frontend = frontend.map(Rc::downgrade);
             AsyncTask::new(&run_loop, move || {
+                if let Some(frontend) = frontend.as_ref().and_then(Weak::upgrade)
+                    && let Ok(mut frontend) = frontend.try_borrow_mut()
+                {
+                    frontend.render_update();
+                }
                 if let (Some(observer), Some(map)) = (observer.upgrade(), map.upgrade()) {
                     observer.dispatch_events(&map);
                 }
@@ -293,8 +306,24 @@ impl StubMapObserver {
         };
         let sender = task.sender();
         map.borrow_mut().set_waker(Some(Arc::new(move || sender.send())));
-        task
+        let updates = frontend.map(|_| {
+            let updates = map.borrow().update_reader();
+            let sender = task.sender();
+            updates.set_waker(Some(Arc::new(move || sender.send())));
+            // The update that the map published already.
+            task.send();
+            updates
+        });
+        Observing { _task: task, _updates: updates }
     }
+}
+
+/// What [`StubMapObserver::observe`] handles from the run loop, while it
+/// lives.
+pub(crate) struct Observing {
+    _task: AsyncTask,
+    /// The map's updates, whose waker wakes the task.
+    _updates: Option<UpdateReader>,
 }
 
 // MARK: - FakeFileSource (test/include/mln/test/fake_file_source.hpp)
@@ -461,9 +490,9 @@ pub(crate) fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
 /// call through it, or through [`render`](Self::render), returns, as C++
 /// observers get the calls at once. Otherwise they come from the run loop.
 pub(crate) struct MapTest<FS: FileSource + 'static = StubFileSource> {
-    events: AsyncTask,
+    events: Observing,
     pub map: Rc<RefCell<Map>>,
-    pub frontend: HeadlessFrontend,
+    pub frontend: Rc<RefCell<HeadlessFrontend>>,
     pub observer: Rc<StubMapObserver>,
     pub file_source: Arc<FS>,
     pub run_loop: RunLoop,
@@ -496,13 +525,20 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     /// .withSize(frontend.getSize()).withPixelRatio(pixelRatio))`.
     pub(crate) fn create(run_loop: RunLoop, file_source: Arc<FS>, pixel_ratio: f32, mode: MapMode) -> Self {
         let observer = Rc::new(StubMapObserver::default());
-        let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio, &run_loop).expect("a headless frontend");
-        let options = MapOptions { map_mode: mode, size: frontend.get_size(), pixel_ratio, ..Default::default() };
+        let mut frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio, &run_loop).expect("a headless frontend");
+        let options = MapOptions { map_mode: mode, size: frontend.size(), pixel_ratio, ..Default::default() };
         let map = Map::with_file_source(Arc::<FS>::clone(&file_source), options, &run_loop).unwrap();
         frontend.attach(&map);
         let map = Rc::new(RefCell::new(map));
-        let events = observer.observe(&map);
+        let frontend = Rc::new(RefCell::new(frontend));
+        let events = observer.observe(&map, Some(&frontend));
         MapTest { events, map, frontend, observer, file_source, run_loop }
+    }
+
+    /// `test.frontend`, which draws each update of the map from the run
+    /// loop while nobody holds it.
+    pub(crate) fn frontend(&self) -> RefMut<'_, HeadlessFrontend> {
+        self.frontend.borrow_mut()
     }
 
     /// `test.map`: the map, whose events reach the observer when the
@@ -524,8 +560,12 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     }
 
     pub(crate) fn try_render(&self) -> Result<RenderResult, Error> {
-        let mut frontend = self.frontend.clone();
-        frontend.render(&mut self.map())
+        let mut map = self.map();
+        let result = self.frontend().render(&mut map);
+        // The observer's callbacks, which run as the map goes, may use the
+        // frontend.
+        drop(map);
+        result
     }
 
     pub(crate) fn load_json(&self, json: &str) {

@@ -5,7 +5,7 @@ use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
+    invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts, wall_quads,
 };
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
@@ -136,6 +136,14 @@ fn instanced_walls_through_gpu() {
         return;
     };
     instanced_walls(&mut gpu).expect("the frame");
+}
+
+#[test]
+fn wall_quads_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    wall_quads(&mut gpu).expect("the frame");
 }
 
 fn buffer(gpu: &mut GlGpu, usage: BufferUsage, data: &[u8]) -> BufferId {

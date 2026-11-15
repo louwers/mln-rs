@@ -25,6 +25,7 @@ use crate::buckets::raster_bucket::RasterBucket;
 use crate::gfx::context::Context;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
 use crate::render_tree::RenderItem;
+use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds};
 
@@ -216,6 +217,13 @@ impl RenderImageSource {
         }
     }
 
+    /// Whether the source's image has arrived. Unlike C++, a source without
+    /// an image (one made without a url) has nothing to load, so a still
+    /// render of it finishes.
+    fn loaded(&self) -> bool {
+        self.bucket.is_some() || self.impl_().get_image().is_none()
+    }
+
     fn impl_(&self) -> Arc<image_source::Impl> {
         downcast_arc::<image_source::Impl>(&self.base.base_impl)
     }
@@ -226,14 +234,13 @@ impl RenderSource for RenderImageSource {
         &self.base
     }
 
-    fn is_loaded(&self) -> bool {
-        // Unlike C++, a source without an image (one made without a url) has
-        // nothing to load, so a still render of it finishes.
-        self.bucket.is_some() || self.impl_().get_image().is_none()
+    fn is_loaded(&self, _store: &TileStore) -> bool {
+        self.loaded()
     }
 
     fn update(
         &mut self,
+        _store: &mut TileStore,
         base_impl: Arc<dyn source::Impl>,
         _layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
@@ -381,10 +388,10 @@ impl RenderSource for RenderImageSource {
         Box::new(ImageSourceRenderItem(render_data))
     }
 
-    fn prepare(&mut self, _parameters: &SourcePrepareParameters<'_>) {
+    fn prepare(&mut self, _store: &mut TileStore, _parameters: &SourcePrepareParameters<'_>) {
         self.render_data = Some(Rc::new(ImageSourceRenderData::new(
             self.bucket.clone(),
-            if self.is_loaded() { self.tile_ids.clone() } else { Vec::new() },
+            if self.loaded() { self.tile_ids.clone() } else { Vec::new() },
         )));
     }
 
@@ -392,19 +399,8 @@ impl RenderSource for RenderImageSource {
         self.render_data.clone()
     }
 
-    fn update_fading_tiles(&mut self) {}
-
-    fn has_fading_tiles(&self) -> bool {
-        false
-    }
-
-    fn reduce_memory_use(&mut self) {}
-
     fn dump_debug_logs(&self) {
         Log::info(Event::General, format!("RenderImageSource::id: {}", self.base.base_impl.id));
-        Log::info(
-            Event::General,
-            format!("RenderImageSource::loaded: {}", if self.is_loaded() { "yes" } else { "no" }),
-        );
+        Log::info(Event::General, format!("RenderImageSource::loaded: {}", if self.loaded() { "yes" } else { "no" }));
     }
 }

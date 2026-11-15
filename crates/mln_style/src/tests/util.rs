@@ -1,6 +1,7 @@
 //! Test helpers: the C++ `FixtureLog` (per thread, see `mln_util::logging`)
 //! and `convertJSON`.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
@@ -141,16 +142,18 @@ impl mln_tile_id::geometry_tile_data::GeometryTileFeature for StubGeometryTileFe
         self.properties.get(key).cloned()
     }
 
-    fn get_properties(&self) -> &feature::PropertyMap {
-        &self.properties
+    fn get_properties(&self) -> Cow<'_, feature::PropertyMap> {
+        Cow::Borrowed(&self.properties)
     }
 
     fn get_id(&self) -> feature::Identifier {
         self.id.clone()
     }
 
-    fn get_geometries(&self) -> &mln_tile_id::geometry_tile_data::GeometryCollection {
-        &self.geometry
+    fn get_geometries(
+        &self,
+    ) -> Result<Cow<'_, mln_tile_id::geometry_tile_data::GeometryCollection>, mln_util::error::Error> {
+        Ok(Cow::Borrowed(&self.geometry))
     }
 }
 

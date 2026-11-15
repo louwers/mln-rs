@@ -1,328 +1,99 @@
-// Port-only: the tile workers of one worker instance, behind bytes (mod.rs).
+// Port-only: what one worker instance runs, behind bytes (mod.rs).
 //
-// A `TileWorkerHost` is what a worker instance runs: it decodes the map
-// side's requests with the instance's `WorkerCodec`, keeps a worker (a
-// `GeometryTileWorker`, `RasterTileWorker` or `RasterDEMTileWorker`) for
-// each tile the map side created there, and encodes what the workers send
-// their tiles. It creates the workers as `InProcessTransport` does, so they
-// are actors on the scheduler the host is given, and a GeometryTileWorker's
-// own messages coalesce as in C++.
-//
-// A `setData` or `setLayers` the host can't decode becomes an error for the
-// tile, as a parse that throws does in C++, where the worker then keeps the
-// data or layers it couldn't parse, so that it lays out nothing until the
-// tile sends others. Here the worker never got them, so the host resets it
-// (which drops both the data and the layers) and gives it back the other of
-// the two, as its tile last sent it. Until the tile sends what failed again,
-// each `setData`, `setLayers` or `setAvailableImages` gets that error, as each
-// parse would throw in C++, rather than no answer, which would leave the tile
-// pending.
+// A `TileWorkerHost` decodes the map side's frames. It runs each job as its
+// frame arrives, one job per frame, and sends the reply back once the job
+// answers: a layout before `handle` returns, an image decode when the
+// platform's decoder answers, which in the browser is later. It keeps the
+// tile data of the jobs in a cache of its own, which a later job can name
+// instead of carrying the data. A job whose body it can't decode gets a
+// `Failed` reply with the header's id, and a frame whose header it can't
+// read an empty reply, which the map side takes as the instance lost.
 
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_actor::TaggedScheduler;
-use mln_style::expression::GlobalStateMap;
-use mln_style::layer_properties::LayerProperties;
 use mln_util::error::Error;
-use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecSet;
-use parking_lot::Mutex;
 
-use super::envelope::{About, Encoded, MessageKind};
-use super::worker_side::{WorkerAction, WorkerCodec};
-use crate::tile::geometry_tile_worker::{SharedTileData, TileMessage, WorkerMessage};
-use crate::tile::raster_dem_tile::{RasterDEMTileMessage, RasterDEMWorkerMessage};
-use crate::tile::raster_tile::{RasterTileMessage, RasterWorkerMessage};
-use crate::tile::tile_worker_transport::{InProcessTransport, TileEndpoint, TileWorkerTransport, WorkerEndpoint};
+use super::envelope::{self, Encoded};
+use super::worker_side::WorkerCodec;
+use crate::tile::job::{DEFAULT_DATA_CACHE_BYTES, DataCache, DiscoveryMemo, JobResult, JobTimes, Reply, Run, run_job};
 
 /// Where a host's replies go, encoded: back to the map side of its
 /// instance. Their payloads (pixels, vertices, indices) can be transferred
 /// there rather than copied.
 pub(crate) type Replies = Arc<dyn Fn(Encoded) + Send + Sync>;
 
-/// The tile workers of one worker instance.
+/// What one worker instance runs.
 pub struct TileWorkerHost {
-    codec: Arc<Mutex<WorkerCodec>>,
-    /// Creates the workers.
-    workers: InProcessTransport,
+    jobs: RefCell<Jobs>,
+    /// Shared with the replies of image decodes, which encode with it when
+    /// the decoder answers.
+    codec: Rc<RefCell<WorkerCodec>>,
     replies: Replies,
-    hosted: RefCell<HashMap<u64, Hosted>>,
 }
 
-/// A message for a worker, decoded as its type's.
-enum Decoded {
-    Geometry(WorkerMessage),
-    Raster(RasterWorkerMessage),
-    RasterDEM(RasterDEMWorkerMessage),
-}
-
-/// A tile's worker.
-enum Hosted {
-    Geometry {
-        /// The worker's `obsolete` flag, set when the map side drops the
-        /// worker.
-        obsolete: Arc<AtomicBool>,
-        worker: Box<dyn WorkerEndpoint>,
-        /// What the worker has of its tile's data and layers.
-        sent: Sent,
-    },
-    Raster(Box<dyn WorkerEndpoint<RasterWorkerMessage>>),
-    RasterDEM(Box<dyn WorkerEndpoint<RasterDEMWorkerMessage>>),
-}
-
-/// The layers, global state, available images, subdivision granularity and
-/// pixel ratio a geometry tile's worker got with its layers.
-type SentLayers = (
-    Vec<Arc<dyn LayerProperties>>,
-    Option<Arc<GlobalStateMap>>,
-    Arc<VecSet<String>>,
-    SubdivisionGranularitySetting,
-    f32,
-);
-
-/// What a geometry tile's worker has of its tile's data and of its layers.
-#[derive(Default)]
-struct Sent {
-    data: Kept<(Option<SharedTileData>, Arc<VecSet<String>>)>,
-    layers: Kept<SentLayers>,
-}
-
-/// The tile's data or its layers, as the worker last got them, with the
-/// available images of that message.
-#[derive(Default)]
-enum Kept<T> {
-    #[default]
-    Nothing,
-    Sent(T),
-    /// The message couldn't be decoded, with this error.
-    Failed(String),
-}
-
-impl<T> Kept<T> {
-    fn error(&self) -> Option<String> {
-        match self {
-            Kept::Failed(error) => Some(error.clone()),
-            _ => None,
-        }
-    }
-}
-
-impl Sent {
-    /// Keeps what `message` gives the worker. Returns the error its tile
-    /// gets for it: that of the data or layers the worker lacks because
-    /// they failed, with the message's correlation id.
-    fn keep(&mut self, message: &WorkerMessage) -> Option<(String, u64)> {
-        match message {
-            WorkerMessage::SetData { data, available_images, correlation_id } => {
-                self.data = Kept::Sent((data.clone(), Arc::clone(available_images)));
-                self.layers.error().map(|error| (error, *correlation_id))
-            }
-            WorkerMessage::SetLayers {
-                layers,
-                global_state,
-                available_images,
-                subdivision_granularity,
-                pixel_ratio,
-                correlation_id,
-            } => {
-                self.layers = Kept::Sent((
-                    layers.clone(),
-                    global_state.clone(),
-                    Arc::clone(available_images),
-                    *subdivision_granularity,
-                    *pixel_ratio,
-                ));
-                self.data.error().map(|error| (error, *correlation_id))
-            }
-            WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
-                if let Kept::Sent((_, images)) = &mut self.data {
-                    *images = Arc::clone(available_images);
-                }
-                if let Kept::Sent((_, _, images, _, _)) = &mut self.layers {
-                    *images = Arc::clone(available_images);
-                }
-                self.data.error().or_else(|| self.layers.error()).map(|error| (error, *correlation_id))
-            }
-            WorkerMessage::Reset { .. } => {
-                *self = Sent::default();
-                None
-            }
-            _ => None,
-        }
-    }
-
-    /// Records that the `setData` or `setLayers` with `correlation_id`
-    /// failed with `error`. Returns the message that gives the worker, once
-    /// reset, back the other of the two.
-    fn fail(&mut self, failed: MessageKind, correlation_id: u64, error: String) -> Option<WorkerMessage> {
-        match failed {
-            MessageKind::SetData => {
-                self.data = Kept::Failed(error);
-                match &self.layers {
-                    Kept::Sent((layers, global_state, available_images, subdivision_granularity, pixel_ratio)) => {
-                        Some(WorkerMessage::SetLayers {
-                            layers: layers.clone(),
-                            global_state: global_state.clone(),
-                            available_images: Arc::clone(available_images),
-                            subdivision_granularity: *subdivision_granularity,
-                            pixel_ratio: *pixel_ratio,
-                            correlation_id,
-                        })
-                    }
-                    _ => None,
-                }
-            }
-            MessageKind::SetLayers => {
-                self.layers = Kept::Failed(error);
-                match &self.data {
-                    Kept::Sent((data, available_images)) => Some(WorkerMessage::SetData {
-                        data: data.clone(),
-                        available_images: Arc::clone(available_images),
-                        correlation_id,
-                    }),
-                    _ => None,
-                }
-            }
-            MessageKind::Other => None,
-        }
-    }
+/// The jobs' side of an instance.
+struct Jobs {
+    cache: DataCache,
+    memo: DiscoveryMemo,
 }
 
 impl TileWorkerHost {
-    /// A host whose workers are actors on `workers`; it sends its replies to
-    /// `replies`.
-    pub fn new(workers: TaggedScheduler, replies: impl Fn(Encoded) + Send + Sync + 'static) -> Self {
+    /// A host that sends its replies to `replies`. Its data cache keeps
+    /// 32 MiB.
+    pub fn new(replies: impl Fn(Encoded) + Send + Sync + 'static) -> Self {
         TileWorkerHost {
-            codec: Arc::new(Mutex::new(WorkerCodec::new())),
-            workers: InProcessTransport::new(workers),
+            jobs: RefCell::new(Jobs {
+                cache: DataCache::new(DEFAULT_DATA_CACHE_BYTES),
+                // The labelled tiles of a view that resume here, about.
+                memo: DiscoveryMemo::new(16),
+            }),
+            codec: Rc::new(RefCell::new(WorkerCodec::new())),
             replies: Arc::new(replies),
-            hosted: RefCell::new(HashMap::default()),
         }
     }
 
-    /// Handles a request from the map side.
+    /// Sets how many bytes of tile data the host keeps for later jobs.
+    pub fn set_data_cache_budget(&self, bytes: usize) {
+        self.jobs.borrow_mut().cache.set_budget(bytes);
+    }
+
+    /// The bytes of tile data the host keeps, by its estimate.
+    #[must_use]
+    pub fn data_cache_bytes(&self) -> usize {
+        self.jobs.borrow().cache.retained_bytes()
+    }
+
+    /// Runs the job in a frame from the map side, and sends its reply.
     pub fn handle(&self, request: &[u8]) {
-        let action = self.codec.lock().decode(request);
-        match action {
-            Ok(WorkerAction::Create { tile, parameters }) => {
-                let obsolete = Arc::clone(&parameters.obsolete);
-                let worker = self.workers.create(parameters, Box::new(self.tile(tile)));
-                self.hosted.borrow_mut().insert(tile, Hosted::Geometry { obsolete, worker, sent: Sent::default() });
-            }
-            Ok(WorkerAction::CreateRaster { tile }) => {
-                let worker = self.workers.create_raster(Box::new(self.tile(tile)));
-                self.hosted.borrow_mut().insert(tile, Hosted::Raster(worker));
-            }
-            Ok(WorkerAction::CreateRasterDEM { tile }) => {
-                let worker = self.workers.create_raster_dem(Box::new(self.tile(tile)));
-                self.hosted.borrow_mut().insert(tile, Hosted::RasterDEM(worker));
-            }
-            Ok(WorkerAction::Message { tile, about, message }) => self.message(tile, about, &message),
-            Ok(WorkerAction::Remove { tile }) => {
-                let hosted = self.hosted.borrow_mut().remove(&tile);
-                if let Some(Hosted::Geometry { obsolete, .. }) = hosted {
-                    obsolete.store(true, Ordering::SeqCst);
-                }
-            }
-            Ok(WorkerAction::None) => {}
-            Err(error) => Log::error(Event::General, format!("Not a tile worker request: {error}")),
-        }
-    }
-
-    /// Decodes a message for the worker of `tile` and sends it there. One
-    /// that can't be decoded becomes an error for the tile.
-    fn message(&self, tile: u64, about: About, message: &[u8]) {
-        let correlation_id = about.correlation_id;
-        let decoded = {
-            let mut codec = self.codec.lock();
-            match self.hosted.borrow().get(&tile) {
-                Some(Hosted::Geometry { .. }) => codec.decode_message(message).map(Decoded::Geometry),
-                Some(Hosted::Raster(_)) => codec.decode_message(message).map(Decoded::Raster),
-                Some(Hosted::RasterDEM(_)) => codec.decode_message(message).map(Decoded::RasterDEM),
-                None => return,
-            }
+        let Some((id, body)) = envelope::read_job_id(request) else {
+            return self.lost("a tile worker request without a job id");
         };
-        let error = match decoded {
-            Ok(Decoded::Geometry(message)) => match self.hosted.borrow_mut().get_mut(&tile) {
-                Some(Hosted::Geometry { worker, sent, .. }) => {
-                    let error = sent.keep(&message);
-                    worker.send(message);
-                    error
-                }
-                _ => None,
-            },
-            Ok(Decoded::Raster(message)) => {
-                if let Some(Hosted::Raster(worker)) = self.hosted.borrow().get(&tile) {
-                    worker.send(message);
-                }
-                None
-            }
-            Ok(Decoded::RasterDEM(message)) => {
-                if let Some(Hosted::RasterDEM(worker)) = self.hosted.borrow().get(&tile) {
-                    worker.send(message);
-                }
-                None
+        let decoded = self.codec.borrow_mut().decode_job(body);
+        let send = {
+            let codec = Rc::clone(&self.codec);
+            let replies = Arc::clone(&self.replies);
+            move |reply: Reply, times| replies(codec.borrow_mut().encode_reply(&reply, &times))
+        };
+        match decoded {
+            Ok(job) => {
+                let mut jobs = self.jobs.borrow_mut();
+                let Jobs { cache, memo } = &mut *jobs;
+                run_job(Run { id, job, superseded: Arc::default() }, Some(cache), Some(memo), send);
             }
             Err(error) => {
-                if let Some(Hosted::Geometry { worker, sent, .. }) = self.hosted.borrow_mut().get_mut(&tile)
-                    && about.kind != MessageKind::Other
-                {
-                    worker.send(WorkerMessage::Reset { correlation_id });
-                    if let Some(restore) = sent.fail(about.kind, correlation_id, error.clone()) {
-                        worker.send(restore);
-                    }
-                }
-                Some((error, correlation_id))
+                let result = JobResult::Failed(Error::native(format!("a tile worker request: {error}")));
+                send(Reply { id, result }, JobTimes::default());
             }
-        };
-        let Some((error, correlation_id)) = error else {
-            return;
-        };
-        let error = Error::native(error);
-        let endpoint = self.tile(tile);
-        match self.hosted.borrow().get(&tile) {
-            Some(Hosted::Geometry { .. }) => endpoint.send(TileMessage::Error { error, correlation_id }),
-            Some(Hosted::Raster(_)) => endpoint.send(RasterTileMessage::Error { error, correlation_id }),
-            Some(Hosted::RasterDEM(_)) => endpoint.send(RasterDEMTileMessage::Error { error, correlation_id }),
-            None => {}
         }
     }
 
-    /// The endpoint through which the worker of `tile` reaches its tile.
-    fn tile(&self, tile: u64) -> EncodingTile {
-        EncodingTile { tile, codec: Arc::clone(&self.codec), replies: Arc::clone(&self.replies) }
-    }
-}
-
-/// A worker's tile, on the map side: its messages are encoded and sent
-/// there.
-struct EncodingTile {
-    tile: u64,
-    codec: Arc<Mutex<WorkerCodec>>,
-    replies: Replies,
-}
-
-impl TileEndpoint for EncodingTile {
-    fn send(&self, message: TileMessage) {
-        let reply = self.codec.lock().encode(self.tile, message);
-        (self.replies)(reply);
-    }
-}
-
-impl TileEndpoint<RasterTileMessage> for EncodingTile {
-    fn send(&self, message: RasterTileMessage) {
-        let reply = self.codec.lock().encode_raster(self.tile, &message);
-        (self.replies)(reply);
-    }
-}
-
-impl TileEndpoint<RasterDEMTileMessage> for EncodingTile {
-    fn send(&self, message: RasterDEMTileMessage) {
-        let reply = self.codec.lock().encode_raster_dem(self.tile, &message);
-        (self.replies)(reply);
+    /// Tells the map side that this instance can't go on: a frame it can't
+    /// read leaves it out of step with the map side's tables.
+    fn lost(&self, error: &str) {
+        Log::error(Event::General, format!("Not a tile worker request: {error}"));
+        (self.replies)(Encoded::default());
     }
 }

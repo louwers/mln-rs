@@ -1,4 +1,4 @@
-// Port-only: how the members of the tile worker messages that the derive
+// Port-only: how the members of the tile workers' messages that the derive
 // can't write cross (mod.rs): trait objects, as the types they can be, and
 // the values that cross once per worker instance, then by key
 // (mln_util::serialization::shared).
@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::shared_layer_properties;
-use mln_tile_id::EncodedTileData;
-use mln_util::serialization::shared::{self, Kind, WireKind};
+use mln_util::serialization::shared;
+use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::bucket::{Bucket, BucketPtr};
@@ -19,108 +19,11 @@ use crate::buckets::heatmap_bucket::HeatmapBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndex;
-use crate::gfx::dynamic_texture::DynamicTexture;
 use crate::render_layer::LayerRenderData;
-use crate::tile::geojson_tile_data::GeoJSONTileData;
-use crate::tile::geometry_tile::{LayoutAtlases, LayoutResult};
-use crate::tile::geometry_tile_worker::SharedTileData;
+use crate::tile::contents::LayoutResult;
+use crate::tile::job::SourceStyle;
 
-/// The `shared::Kind` of tile data: what it is made from
-/// (`GeometryTileData::encoded`), which the other side makes it from again.
-/// A layout's feature index refers to the data it indexes by key.
-pub(crate) struct SharedTileDataKind;
-
-impl Kind for SharedTileDataKind {
-    type Value = dyn mln_tile_id::GeometryTileData + Send + Sync;
-    const NAME: &'static str = "tile data";
-}
-
-impl WireKind for SharedTileDataKind {
-    fn write(data: &Self::Value, w: &mut Writer) {
-        match data.encoded() {
-            Some(encoded) => encoded.write(w),
-            None => w.fail("tile data that no longer has its bytes can't cross".to_owned()),
-        }
-    }
-
-    fn read(r: &mut Reader<'_>) -> Option<SharedTileData> {
-        Some(match EncodedTileData::read(r)? {
-            EncodedTileData::Mvt(bytes) => Arc::new(mln_tile::VectorMVTTileData::new(bytes)),
-            EncodedTileData::Mlt { data, fast_pfor_enabled } => {
-                Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled))
-            }
-            EncodedTileData::GeoJson(features) => Arc::new(GeoJSONTileData::new(Arc::unwrap_or_clone(features))),
-        })
-    }
-}
-
-/// `#[wire(with)]` for an `Option<SharedTileData>`.
-pub(crate) mod tile_data {
-    use super::{Reader, SharedTileData, SharedTileDataKind, Writer, shared};
-
-    #[expect(clippy::ref_option, reason = "`#[wire(with)]` passes the field by reference")]
-    pub(crate) fn write(data: &Option<SharedTileData>, w: &mut Writer) {
-        shared::write_option::<SharedTileDataKind>(data, w);
-    }
-
-    #[expect(clippy::option_option, reason = "a read that can fail, of an `Option`")]
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Option<SharedTileData>> {
-        shared::read_option::<SharedTileDataKind>(r)
-    }
-}
-
-/// The `shared::Kind` of the textures of a worker instance's atlas, which
-/// come from the instance: the map side keeps a copy of each
-/// (`map_side.rs`, `AtlasMirror`), made from its size and pixel type.
-pub(crate) struct SharedTexture;
-
-impl Kind for SharedTexture {
-    type Value = DynamicTexture;
-    const NAME: &'static str = "texture";
-}
-
-impl WireKind for SharedTexture {
-    fn write(texture: &DynamicTexture, w: &mut Writer) {
-        texture.get_size().write(w);
-        texture.get_pixel_format().write(w);
-    }
-
-    fn read(r: &mut Reader<'_>) -> Option<Arc<DynamicTexture>> {
-        let size = Wire::read(r)?;
-        let pixel_type = Wire::read(r)?;
-        Some(Arc::new(DynamicTexture::new(size, pixel_type)))
-    }
-}
-
-/// `#[wire(with)]` for an `Option<DynamicTexturePtr>`.
-pub(crate) mod texture {
-    use super::{Arc, DynamicTexture, Reader, SharedTexture, Writer, shared};
-
-    #[expect(clippy::ref_option, reason = "`#[wire(with)]` passes the field by reference")]
-    pub(crate) fn write(texture: &Option<Arc<DynamicTexture>>, w: &mut Writer) {
-        shared::write_option::<SharedTexture>(texture, w);
-    }
-
-    #[expect(clippy::option_option, reason = "a read that can fail, of an `Option`")]
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Option<Arc<DynamicTexture>>> {
-        shared::read_option::<SharedTexture>(r)
-    }
-}
-
-/// `#[wire(with)]` for a `DynamicTexturePtr`.
-pub(crate) mod shared_texture {
-    use super::{Arc, DynamicTexture, Reader, SharedTexture, Writer, shared};
-
-    pub(crate) fn write(texture: &Arc<DynamicTexture>, w: &mut Writer) {
-        shared::write::<SharedTexture>(texture, w);
-    }
-
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<DynamicTexture>> {
-        shared::read::<SharedTexture>(r)
-    }
-}
-
-/// `#[wire(with)]` for the layers of a `setLayers`.
+/// `#[wire(with)]` for a source style's layers, each by key.
 pub(crate) mod layers {
     use super::{Arc, LayerProperties, Reader, Writer, shared_layer_properties};
 
@@ -141,7 +44,78 @@ pub(crate) mod layers {
     }
 }
 
-/// The bucket types a `GeometryTileWorker` makes (debug, raster and
+/// The `shared::Kind` of a source's style: its version, its layers by key,
+/// its global state and font faces.
+pub(crate) struct SharedSourceStyle;
+
+impl shared::Kind for SharedSourceStyle {
+    type Value = SourceStyle;
+    const NAME: &'static str = "source style";
+}
+
+impl shared::WireKind for SharedSourceStyle {
+    fn write(style: &SourceStyle, w: &mut Writer) {
+        style.version.write(w);
+        layers::write(&style.layers, w);
+        style.global_state.write(w);
+        style.font_faces.write(w);
+    }
+
+    fn read(r: &mut Reader<'_>) -> Option<Arc<SourceStyle>> {
+        Some(Arc::new(SourceStyle {
+            version: u64::read(r)?,
+            layers: layers::read(r)?,
+            global_state: Wire::read(r)?,
+            font_faces: Wire::read(r)?,
+        }))
+    }
+}
+
+/// `#[wire(with)]` for a job's source style.
+pub(crate) mod source_style {
+    use super::{Arc, Reader, SharedSourceStyle, SourceStyle, Writer, shared};
+
+    pub(crate) fn write(style: &Arc<SourceStyle>, w: &mut Writer) {
+        shared::write::<SharedSourceStyle>(style, w);
+    }
+
+    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<SourceStyle>> {
+        shared::read::<SharedSourceStyle>(r)
+    }
+}
+
+/// The `shared::Kind` of the sets of images that exist.
+pub(crate) struct SharedAvailableImages;
+
+impl shared::Kind for SharedAvailableImages {
+    type Value = VecSet<String>;
+    const NAME: &'static str = "available images";
+}
+
+impl shared::WireKind for SharedAvailableImages {
+    fn write(images: &VecSet<String>, w: &mut Writer) {
+        images.write(w);
+    }
+
+    fn read(r: &mut Reader<'_>) -> Option<Arc<VecSet<String>>> {
+        VecSet::read(r).map(Arc::new)
+    }
+}
+
+/// `#[wire(with)]` for a job's available images.
+pub(crate) mod available_images {
+    use super::{Arc, Reader, SharedAvailableImages, VecSet, Writer, shared};
+
+    pub(crate) fn write(images: &Arc<VecSet<String>>, w: &mut Writer) {
+        shared::write::<SharedAvailableImages>(images, w);
+    }
+
+    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<VecSet<String>>> {
+        shared::read::<SharedAvailableImages>(r)
+    }
+}
+
+/// The bucket types a layout makes (debug, raster and
 /// hillshade buckets never come from one), each as its index and then the
 /// bucket: a bucket is a trait object.
 macro_rules! bucket_types {
@@ -225,10 +199,8 @@ pub(super) fn encode_buckets(result: &LayoutResult) -> Vec<u8> {
 }
 
 /// A `LayoutResult` crosses as each bucket once, with the layers that render
-/// it (a layer group's layers share their bucket), and the feature index.
-/// The atlases cross apart from the layout (envelope.rs), so that the map
-/// side releases their bins even when it can't read the rest; a layout read
-/// back has empty ones until the codec sets them.
+/// it (a layer group's layers share their bucket), and the feature index
+/// without its data.
 impl Wire for LayoutResult {
     fn write(&self, w: &mut Writer) {
         self.write_buckets(w);
@@ -247,10 +219,6 @@ impl Wire for LayoutResult {
                 layer_render_data.insert(layer_id, LayerRenderData { bucket: Arc::clone(&bucket), layer_properties });
             }
         }
-        Some(LayoutResult {
-            layer_render_data,
-            feature_index: Arc::new(FeatureIndex::read(r)?),
-            atlases: Arc::new(LayoutAtlases::default()),
-        })
+        Some(LayoutResult { layer_render_data, feature_index: Arc::new(FeatureIndex::read(r)?) })
     }
 }

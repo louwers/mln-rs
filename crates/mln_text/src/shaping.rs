@@ -12,7 +12,7 @@ use mln_vec_map::VecSet;
 
 use crate::bidi::{BiDi, StyledText};
 use crate::glyph::{
-    Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
+    Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
     WritingModeType,
 };
 use crate::harfbuzz::HBShapeAdjust;
@@ -276,14 +276,14 @@ fn justify_line(positioned_glyphs: &mut [PositionedGlyph], justify: f32, line_of
 fn get_glyph_advance(
     code_point: u16,
     section: &SectionOptions,
-    glyph_map: &GlyphMap,
+    glyphs: &GlyphPositions,
     image_positions: &ImagePositions,
     layout_text_size: f32,
     spacing: f32,
 ) -> f32 {
     match &section.image_id {
         None => {
-            let Some(glyphs) = glyph_map.get(&section.font_stack_hash) else {
+            let Some(glyphs) = glyphs.get(&section.font_stack_hash) else {
                 return 0.0;
             };
             match glyphs.get(&GlyphID::from(code_point)) {
@@ -304,7 +304,7 @@ fn determine_average_line_width(
     logical_input: &TaggedString,
     spacing: f32,
     max_width: f32,
-    glyph_map: &GlyphMap,
+    glyphs: &GlyphPositions,
     image_positions: &ImagePositions,
     layout_text_size: f32,
 ) -> f32 {
@@ -316,7 +316,7 @@ fn determine_average_line_width(
             continue;
         }
         let code_point = logical_input.get_char_code_at(i);
-        total_width += get_glyph_advance(code_point, section, glyph_map, image_positions, layout_text_size, spacing);
+        total_width += get_glyph_advance(code_point, section, glyphs, image_positions, layout_text_size, spacing);
     }
 
     // static_cast<int32_t>(::fmax(1, std::ceil(totalWidth / maxWidth)))
@@ -426,7 +426,7 @@ pub(crate) fn determine_line_breaks(
     logical_input: &TaggedString,
     spacing: f32,
     max_width: f32,
-    glyph_map: &GlyphMap,
+    glyphs: &GlyphPositions,
     image_positions: &ImagePositions,
     layout_text_size: f32,
 ) -> VecSet<usize> {
@@ -439,7 +439,7 @@ pub(crate) fn determine_line_breaks(
     }
 
     let target_width =
-        determine_average_line_width(logical_input, spacing, max_width, glyph_map, image_positions, layout_text_size);
+        determine_average_line_width(logical_input, spacing, max_width, glyphs, image_positions, layout_text_size);
 
     let mut potential_breaks: Vec<PotentialBreak> = Vec::new();
     let mut current_x: f32 = 0.0;
@@ -451,7 +451,7 @@ pub(crate) fn determine_line_breaks(
         let section = logical_input.get_section(i);
         let code_point = logical_input.get_char_code_at(i);
         if !i18n::is_whitespace(code_point) {
-            current_x += get_glyph_advance(code_point, section, glyph_map, image_positions, layout_text_size, spacing);
+            current_x += get_glyph_advance(code_point, section, glyphs, image_positions, layout_text_size, spacing);
         }
 
         // Ideographic characters, spaces, and word-breaking punctuation
@@ -578,8 +578,7 @@ fn shape_lines(
     text_anchor: SymbolAnchorType,
     text_justify: TextJustifyType,
     writing_mode: WritingModeType,
-    glyph_map: &GlyphMap,
-    glyph_positions: &GlyphPositions,
+    glyphs: &GlyphPositions,
     image_positions: &ImagePositions,
     layout_text_size: f32,
     allow_vertical_placement: bool,
@@ -638,7 +637,7 @@ fn shape_lines(
             // (double baselineOffset = 0.0, float advance = 0.0f: every
             // path that reaches the positioned glyph assigns both)
             let baseline_offset: f64;
-            let mut rect = RectU16::default();
+            let rect: RectU16;
             let mut metrics = GlyphMetrics::default();
             let mut advance: f32;
             let mut x_hb_offset: f32 = 0.0;
@@ -668,23 +667,13 @@ fn shape_lines(
 
             match &section.image_id {
                 None => {
-                    let Some(glyph_position_map) = glyph_positions.get(&section.font_stack_hash) else {
+                    let Some(Some(glyph)) =
+                        glyphs.get(&section.font_stack_hash).and_then(|glyphs| glyphs.get(&code_point))
+                    else {
                         continue;
                     };
-
-                    if let Some(glyph_position) = glyph_position_map.get(&code_point) {
-                        rect = glyph_position.rect;
-                        metrics = glyph_position.metrics;
-                    } else {
-                        let Some(glyphs) = glyph_map.get(&section.font_stack_hash) else {
-                            continue;
-                        };
-
-                        let Some(Some(glyph)) = glyphs.get(&code_point) else {
-                            continue;
-                        };
-                        metrics = glyph.metrics;
-                    }
+                    rect = glyph.rect;
+                    metrics = glyph.metrics;
                     advance = metrics.advance as f32;
 
                     if let Some(adjust) = adjust {
@@ -876,8 +865,7 @@ pub fn get_shaping(
     translate: &[f32; 2],
     writing_mode: WritingModeType,
     bidi: &mut BiDi,
-    glyph_map: &GlyphMap,
-    glyph_positions: &GlyphPositions,
+    glyphs: &GlyphPositions,
     image_positions: &ImagePositions,
     layout_text_size: f32,
     layout_text_size_at_bucket_zoom_level: f32,
@@ -894,7 +882,7 @@ pub fn get_shaping(
                         formatted_string,
                         spacing,
                         max_width,
-                        glyph_map,
+                        glyphs,
                         image_positions,
                         layout_text_size,
                     ),
@@ -969,7 +957,7 @@ pub fn get_shaping(
                             ),
                             spacing,
                             max_width,
-                            glyph_map,
+                            glyphs,
                             image_positions,
                             layout_text_size,
                         );
@@ -1070,8 +1058,7 @@ pub fn get_shaping(
         text_anchor,
         text_justify,
         writing_mode,
-        glyph_map,
-        glyph_positions,
+        glyphs,
         image_positions,
         layout_text_size_at_bucket_zoom_level,
         allow_vertical_placement,

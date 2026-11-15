@@ -39,7 +39,7 @@ fn heatmap_style() -> String {
 
 fn map_test(size: Size) -> MapTest {
     let test = MapTest::new();
-    test.frontend.clone().set_size(size);
+    test.frontend().set_size(size);
     test.map().set_size(size).unwrap();
     test.load_json(&heatmap_style());
     test
@@ -59,7 +59,7 @@ fn a_heatmap_whose_map_is_resized_renders_as_one_made_at_that_size() {
 
     let test = map_test(sizes[0]);
     for (&size, expected) in sizes.iter().zip(&made_at).chain([(&sizes[0], &made_at[0])]) {
-        test.frontend.clone().set_size(size);
+        test.frontend().set_size(size);
         test.map().set_size(size).unwrap();
         assert_same(&test.render().image, expected);
     }

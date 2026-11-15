@@ -1,15 +1,14 @@
 {
-  "render-tests/combinations/heatmap-translucent--fill-translucent": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/combinations/hillshade-translucent--fill-opaque": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/combinations/raster-translucent--fill-translucent": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/fill-extrusion-base/default": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/fill-extrusion-base/function": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/fill-extrusion-base/literal": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/fill-extrusion-base/negative": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/fill-extrusion-translate-anchor/map": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/fill-extrusion-translate-anchor/viewport": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/projection/globe/fill-planet-pole": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/projection/globe/fill-planet-tiles": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/projection/globe/fill-seams/checkerboard": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines",
-  "render-tests/within/filter-with-inlined-geojson": "The expected image is C++ Metal's, which draws fill outlines as triangles; Metal and WebGPU draw them as 1 px lines"
+  "render-tests/combinations/heatmap-translucent--fill-translucent": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/combinations/hillshade-translucent--fill-opaque": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/combinations/raster-translucent--fill-translucent": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/fill-extrusion-base/default": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/fill-extrusion-base/function": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/fill-extrusion-base/literal": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/fill-extrusion-base/negative": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/fill-extrusion-translate-anchor/map": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/fill-extrusion-translate-anchor/viewport": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/projection/globe/fill-planet-pole": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/projection/globe/fill-planet-tiles": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL",
+  "render-tests/within/filter-with-inlined-geojson": "The expected image is C++ Metal's, which draws fill outlines as triangles 1 logical px wide; mln-rs draws them 2 px wide, as C++ does on OpenGL"
 }

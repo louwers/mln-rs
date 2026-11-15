@@ -65,11 +65,15 @@ pub(super) const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::FillOutlineShader,
     BuiltIn::FillPatternShader,
     BuiltIn::FillOutlinePatternShader,
+    BuiltIn::FillOutlineInstancedShader,
+    BuiltIn::FillOutlinePatternInstancedShader,
     BuiltIn::FillOutlineTriangulatedShader,
     BuiltIn::FillExtrusionShader,
     BuiltIn::FillExtrusionInstancedShader,
+    BuiltIn::FillExtrusionWallShader,
     BuiltIn::FillExtrusionPatternShader,
     BuiltIn::FillExtrusionPatternInstancedShader,
+    BuiltIn::FillExtrusionPatternWallShader,
     BuiltIn::HeatmapShader,
     BuiltIn::HeatmapTextureShader,
     BuiltIn::HillshadePrepareShader,
@@ -265,28 +269,30 @@ fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
             (LayerUniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO), size_of::<ColorReliefEvaluatedPropsUBO>()),
         ],
         "DebugShader" => vec![projection, (DrawableUniform(ID_DEBUG_UBO), DEBUG_UBO_SIZE)],
-        "FillShader" | "FillOutlineShader" | "FillOutlineTriangulatedShader" => vec![
+        "FillShader" | "FillOutlineShader" | "FillOutlineInstancedShader" | "FillOutlineTriangulatedShader" => vec![
             (LayerStorage(ID_FILL_DRAWABLE_UBO), size_of::<FillDrawableUnionUBO>()),
             projection,
             (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
         ],
-        "FillPatternShader" | "FillOutlinePatternShader" => vec![
+        "FillPatternShader" | "FillOutlinePatternShader" | "FillOutlinePatternInstancedShader" => vec![
             (LayerStorage(ID_FILL_DRAWABLE_UBO), size_of::<FillDrawableUnionUBO>()),
             projection,
             (LayerStorage(ID_FILL_TILE_PROPS_UBO), size_of::<FillTilePropsUnionUBO>()),
             (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
         ],
-        "FillExtrusionShader" | "FillExtrusionInstancedShader" => vec![
+        "FillExtrusionShader" | "FillExtrusionInstancedShader" | "FillExtrusionWallShader" => vec![
             (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
             projection,
             (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
         ],
-        "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" => vec![
-            (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
-            projection,
-            (LayerStorage(ID_FILL_EXTRUSION_TILE_PROPS_UBO), size_of::<FillExtrusionTilePropsUBO>()),
-            (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
-        ],
+        "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" | "FillExtrusionPatternWallShader" => {
+            vec![
+                (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
+                projection,
+                (LayerStorage(ID_FILL_EXTRUSION_TILE_PROPS_UBO), size_of::<FillExtrusionTilePropsUBO>()),
+                (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
+            ]
+        }
         "GlobeDepthShader" => vec![projection],
         "HeatmapShader" => vec![
             (LayerStorage(ID_HEATMAP_DRAWABLE_UBO), size_of::<HeatmapDrawableUBO>()),
@@ -647,7 +653,9 @@ fn vertex_inputs_are_the_attribute_tables() {
 // outline vertex, a vertex further on: the two have the same formats.
 #[test]
 fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
-    let instanced: Vec<&ShaderSource> = sources().filter(|source| !source.instance_attributes.is_empty()).collect();
+    let instanced: Vec<&ShaderSource> = sources()
+        .filter(|source| source.name.starts_with("FillExtrusion") && !source.instance_attributes.is_empty())
+        .collect();
     assert_eq!(instanced.len(), 2);
     for source in instanced {
         let format = |id: usize| {
@@ -744,7 +752,8 @@ fn bindings_follow_from_the_packed_ids() {
 
 // The tables and `glsl_sources::ALL` list the same shaders, under their
 // `BuiltIn` names, and no table has more attributes and textures than a
-// shader can have. Only the fill extrusion walls have instance attributes.
+// shader can have. Only the fill extrusion walls and the instanced fill
+// outlines have instance attributes.
 #[test]
 fn tables_and_sources_are_the_same_shaders() {
     let names: Vec<&str> = sources().map(|source| source.name).collect();
@@ -757,7 +766,13 @@ fn tables_and_sources_are_the_same_shaders() {
         assert_eq!(source.name, source.glsl.name);
         assert!(all_attributes(source).count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", source.name);
         assert!(source.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER, "{}", source.name);
-        let instanced = matches!(source.name, "FillExtrusionInstancedShader" | "FillExtrusionPatternInstancedShader");
+        let instanced = matches!(
+            source.name,
+            "FillExtrusionInstancedShader"
+                | "FillExtrusionPatternInstancedShader"
+                | "FillOutlineInstancedShader"
+                | "FillOutlinePatternInstancedShader"
+        );
         assert_eq!(!source.instance_attributes.is_empty(), instanced, "{}", source.name);
         let ids: BTreeSet<usize> = source.attributes.iter().map(|attr| attr.id).collect();
         assert_eq!(ids.len(), source.attributes.len(), "{}: attribute ids repeat", source.name);

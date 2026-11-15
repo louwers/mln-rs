@@ -5,7 +5,7 @@
 
 mod support;
 
-use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use mln_map::{
@@ -16,17 +16,16 @@ use mln_runtime::{
     CameraFitArea, CameraFitOptions, CameraFitUpdate, ErrorKind, EventMask, TileOptions, ViewportOptions,
 };
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
-use parking_lot::Mutex;
 use support::{map, runtime, wait, wait_err};
 
-/// An animation whose ends `ends` records.
-fn recorded(ends: &Arc<Mutex<Vec<TransitionEnd>>>, duration: Duration) -> AnimationOptions {
-    let ends = Arc::clone(ends);
-    AnimationOptions {
-        duration: Some(duration),
-        transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| ends.lock().push(*end))),
-        ..AnimationOptions::default()
-    }
+fn animation(duration: Duration) -> AnimationOptions {
+    AnimationOptions { duration: Some(duration), ..AnimationOptions::default() }
+}
+
+/// An end callback that sends the end, and where it arrives.
+fn end_channel() -> (impl FnOnce(Result<TransitionEnd, mln_runtime::Error>) + Send + 'static, Receiver<TransitionEnd>) {
+    let (sender, receiver): (Sender<TransitionEnd>, _) = channel();
+    (move |end: Result<TransitionEnd, mln_runtime::Error>| sender.send(end.expect("an end")).unwrap(), receiver)
 }
 
 fn zoom_to(zoom: f64, animation: AnimationOptions) -> CameraUpdate {
@@ -42,21 +41,24 @@ fn zoom_to(zoom: f64, animation: AnimationOptions) -> CameraUpdate {
 fn an_end_reports_the_snapshot_that_shows_it_before_its_completion() {
     let runtime = runtime();
     let map = map(&runtime);
-    let ends = Arc::new(Mutex::new(Vec::new()));
 
-    let jumped = wait(map.update_camera(zoom_to(3.0, recorded(&ends, Duration::ZERO))));
-    let end = ends.lock().pop().unwrap();
+    // The end arrives before the command's completion.
+    let (on_end, ended) = end_channel();
+    let jumped = wait(map.update_camera_then(zoom_to(3.0, animation(Duration::ZERO)), on_end));
+    let end = ended.try_recv().expect("the end, before the completion");
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Completed, jumped.generation));
     assert_eq!(jumped.generation, map.snapshot().unwrap().generation);
 
-    drop(map.update_camera(zoom_to(9.0, recorded(&ends, Duration::from_secs(60)))).unwrap());
+    let (on_end, ended) = end_channel();
+    drop(map.update_camera_then(zoom_to(9.0, animation(Duration::from_secs(60))), on_end).unwrap());
     let cancelled = wait(map.cancel_camera_transitions());
-    let end = ends.lock().pop().unwrap();
+    let end = ended.try_recv().expect("the end, before the cancel's completion");
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Cancelled, cancelled.generation));
 
-    drop(map.update_camera(zoom_to(9.0, recorded(&ends, Duration::from_secs(60)))).unwrap());
+    let (on_end, ended) = end_channel();
+    drop(map.update_camera_then(zoom_to(9.0, animation(Duration::from_secs(60))), on_end).unwrap());
     wait(map.release());
-    let end = ends.lock().pop().unwrap();
+    let end = ended.recv().unwrap();
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Closed, 0));
     wait(runtime.release());
 }
@@ -79,15 +81,14 @@ fn a_fit_moves_the_camera_where_the_query_fits() {
     assert!((moved.zoom - camera.zoom.unwrap()).abs() < 1e-9);
     assert!((moved.bearing - 5.0).abs() < 1e-9);
 
-    let ends = Arc::new(Mutex::new(Vec::new()));
     let crowded =
         CameraFitOptions { padding: EdgeInsets { left: 128.0, right: 128.0, ..EdgeInsets::default() }, ..fit };
-    let refused =
-        CameraFitUpdate { fit: crowded, animation: recorded(&ends, Duration::from_secs(1)), ..Default::default() };
-    let error = wait_err(map.fit_camera(area, refused));
+    let refused = CameraFitUpdate { fit: crowded, animation: animation(Duration::from_secs(1)), ..Default::default() };
+    let (on_end, ended) = end_channel();
+    let error = wait_err(map.fit_camera_then(area, refused, on_end));
     assert_eq!(error.kind, ErrorKind::InvalidArgument);
     assert!(error.message.contains("padding"), "{}", error.message);
-    assert_eq!(ends.lock()[0].outcome, TransitionOutcome::Cancelled);
+    assert_eq!(ended.try_recv().unwrap().outcome, TransitionOutcome::Cancelled);
     assert_eq!(wait(map.camera()).camera, moved);
 
     assert_eq!(ErrorKind::InvalidArgument, wait_err(map.camera_for(CameraFitArea::Coordinates(Vec::new()), fit)).kind);
@@ -154,6 +155,28 @@ fn an_event_mask_change_is_a_new_generation() {
     let changed = wait(map.set_event_mask(EventMask::NONE));
     assert!(changed.generation > before);
     assert_eq!(changed.generation, wait(map.set_event_mask(EventMask::NONE)).generation);
+    wait(map.release());
+    wait(runtime.release());
+}
+
+#[test]
+fn a_jumps_end_callback_runs_on_the_runtimes_thread() {
+    let runtime = runtime();
+    let map = map(&runtime);
+    let (sender, ended) = channel();
+    for _ in 0..20 {
+        let sender = sender.clone();
+        let jumped = map.update_camera_then(zoom_to(3.0, animation(Duration::ZERO)), move |end| {
+            sender.send((end.map(|end| end.outcome), std::thread::current().id())).unwrap();
+        });
+        wait(jumped);
+    }
+    let here = std::thread::current().id();
+    for _ in 0..20 {
+        let (outcome, thread) = ended.recv().unwrap();
+        assert_eq!(outcome, Ok(TransitionOutcome::Completed));
+        assert_ne!(thread, here);
+    }
     wait(map.release());
     wait(runtime.release());
 }
