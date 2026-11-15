@@ -1,4 +1,4 @@
-//! The D3D12 backend, so far its shaders: [`ShaderCompiler`] compiles
+//! The D3D12 backend, so far its shaders: `ShaderCompiler` compiles
 //! `mln_glsl`'s GLSL to DXIL, through naga's HLSL back end and DXC, which
 //! loads from `dxcompiler.dll` at run time.
 //!
