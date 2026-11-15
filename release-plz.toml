@@ -88,6 +88,14 @@ changelog_include = [
   "mln-rs-webgpu",
 ]
 
+[[package]]
+name = "mln-rs-system-fonts"
+# Its 0.0.11 on crates.io doesn't build, so cargo-semver-checks has nothing to
+# compare with. It went out on 2026-11-14 from a later commit than the rest of
+# 0.0.11, and uses mln_text::weight, which mln-rs-text 0.0.11 doesn't have.
+# Turn the check back on once a release publishes the two together.
+semver_check = false
+
 # Each release's commits, newest first, by their subjects with links to their
 # pull requests: the commits aren't conventional commits, which release-plz's
 # default groups by type. release-plz gives the commits package by package, so
