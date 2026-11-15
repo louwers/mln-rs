@@ -125,6 +125,17 @@ pub(crate) fn basemap_style(fixtures: &Path) -> String {
     style.replace("mln-bench-fixtures:/", &format!("file://{}/", fixtures.display()))
 }
 
+/// The basemap's style with its projection set to globe. Its tiles are at
+/// zoom 14, where the globe has handed over to Mercator, but a style that
+/// can show the globe at any zoom subdivides its tiles' geometry for it.
+#[must_use]
+pub(crate) fn basemap_globe_style(fixtures: &Path) -> String {
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(fixtures)).expect("the basemap style is JSON");
+    style["projection"] = serde_json::json!({ "type": "globe" });
+    style.to_string()
+}
+
 /// Where `prepare_basemap_mlt` writes the basemap's tiles as MLT, under
 /// the fixtures.
 const BASEMAP_MLT_DIR: &str = "basemap/mlt-tessellated";
