@@ -2,13 +2,14 @@ use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
-use crate::locale::{self, FractionDigits, currency_code};
+use crate::locale::{self, FractionDigits, Style, Unit, currency_code};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
 use crate::value::to_string;
 
 const LOCALE_KEY: &str = "locale";
 const CURRENCY_KEY: &str = "currency";
+const UNIT_KEY: &str = "unit";
 const MIN_FRACTION_DIGITS_KEY: &str = "min-fraction-digits";
 const MAX_FRACTION_DIGITS_KEY: &str = "max-fraction-digits";
 
@@ -20,21 +21,29 @@ const MAX_FRACTION_DIGITS_KEY: &str = "max-fraction-digits";
 /// limits default to 0 and 3, or to the currency's digits for currency, and
 /// an explicit maximum wins over a minimum. With an ISO 4217 currency code, it
 /// formats as an amount of that currency, with the locale's pattern and
-/// symbol.
+/// symbol. Otherwise, with a unit `Intl.NumberFormat` takes, it formats as a
+/// measure in that unit, with the locale's short pattern for it. An empty
+/// currency or unit means none.
 ///
 /// # Errors
 ///
-/// When the currency isn't three ASCII letters, or the platform fails to
-/// format.
+/// When the currency isn't three ASCII letters, the unit isn't one
+/// `Intl.NumberFormat` takes, or the platform fails to format.
 fn format_number(
     number: f64,
     locale: &str,
     currency: &str,
+    unit: &str,
     min: Option<u8>,
     max: Option<u8>,
 ) -> Result<String, String> {
     let currency = currency_code(currency)?;
-    locale::format_number(number, locale, currency.as_deref(), FractionDigits::new(min, max))
+    let style = match (&currency, Unit::parse(unit)?) {
+        (Some(currency), _) => Style::Currency(currency),
+        (None, Some(unit)) => Style::Unit(unit),
+        (None, None) => Style::Decimal,
+    };
+    locale::format_number(number, locale, style, FractionDigits::new(min, max))
 }
 
 /// `["number-format", number, options]`.
@@ -43,6 +52,7 @@ pub(crate) struct NumberFormat {
     number: Expr,
     locale: Option<Expr>,
     currency: Option<Expr>,
+    unit: Option<Expr>,
     min_fraction_digits: Option<Expr>,
     max_fraction_digits: Option<Expr>,
 }
@@ -95,6 +105,11 @@ impl NumberFormat {
         let locale_result = parse_option(LOCALE_KEY, Type::String, "Number-format locale parsing failed.").ok()?;
         let currency_result =
             parse_option(CURRENCY_KEY, Type::String, "Number-format currency parsing failed.").ok()?;
+        let unit_result = parse_option(UNIT_KEY, Type::String, "Number-format unit parsing failed.").ok()?;
+        if currency_result.is_some() && unit_result.is_some() {
+            ctx.error("NumberFormat options `currency` and `unit` are mutually exclusive".to_owned());
+            return None;
+        }
         let min_fraction_digits_result =
             parse_option(MIN_FRACTION_DIGITS_KEY, Type::Number, "Number-format min-fraction-digits parsing failed.")
                 .ok()?;
@@ -106,6 +121,7 @@ impl NumberFormat {
             number: number_result,
             locale: locale_result,
             currency: currency_result,
+            unit: unit_result,
             min_fraction_digits: min_fraction_digits_result,
             max_fraction_digits: max_fraction_digits_result,
         }))))
@@ -124,6 +140,11 @@ impl NumberFormat {
             evaluated_currency = to_string(&*currency.evaluate_ref(params)?);
         }
 
+        let mut evaluated_unit = String::new();
+        if let Some(unit) = &self.unit {
+            evaluated_unit = to_string(&*unit.evaluate_ref(params)?);
+        }
+
         let mut evaluated_min_fraction_digits = None;
         if let Some(min) = &self.min_fraction_digits {
             evaluated_min_fraction_digits = Some(static_cast_u8(min.eval_num(params)?));
@@ -138,6 +159,7 @@ impl NumberFormat {
             evaluated_number,
             &evaluated_locale,
             &evaluated_currency,
+            &evaluated_unit,
             evaluated_min_fraction_digits,
             evaluated_max_fraction_digits,
         )
@@ -146,8 +168,9 @@ impl NumberFormat {
 
     pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
         visit(&self.number);
-        for e in
-            [&self.locale, &self.currency, &self.min_fraction_digits, &self.max_fraction_digits].into_iter().flatten()
+        for e in [&self.locale, &self.currency, &self.unit, &self.min_fraction_digits, &self.max_fraction_digits]
+            .into_iter()
+            .flatten()
         {
             visit(e);
         }
@@ -160,6 +183,9 @@ impl NumberFormat {
         }
         if let Some(currency) = &self.currency {
             options.insert(CURRENCY_KEY.to_owned(), currency.serialize());
+        }
+        if let Some(unit) = &self.unit {
+            options.insert(UNIT_KEY.to_owned(), unit.serialize());
         }
         if let Some(min) = &self.min_fraction_digits {
             options.insert(MIN_FRACTION_DIGITS_KEY.to_owned(), min.serialize());
@@ -180,7 +206,7 @@ mod tests {
     use super::format_number;
 
     fn format(number: f64, locale: &str, currency: &str, min: Option<u8>, max: Option<u8>) -> String {
-        format_number(number, locale, currency, min, max).expect("formatted number")
+        format_number(number, locale, currency, "", min, max).expect("formatted number")
     }
 
     #[test]
@@ -241,8 +267,14 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_that_intl_does_not_take_fails() {
+        assert!(format_number(1.0, "en-US", "", "square-meter", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "", "Meter", None, None).is_err());
+    }
+
+    #[test]
     fn a_currency_that_is_not_an_iso_4217_code_fails() {
-        assert!(format_number(1.0, "en-US", "US$", None, None).is_err());
-        assert!(format_number(1.0, "en-US", "EURO", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "US$", "", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "EURO", "", None, None).is_err());
     }
 }

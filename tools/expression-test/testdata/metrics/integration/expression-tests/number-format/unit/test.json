@@ -1,0 +1,78 @@
+{
+  "expression": [
+    "number-format",
+    1234.567,
+    {
+      "locale": [
+        "get",
+        "locale"
+      ],
+      "unit": [
+        "get",
+        "unit"
+      ]
+    }
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {
+          "locale": "en-US",
+          "unit": "meter"
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "locale": "en-US",
+          "unit": "celsius"
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "locale": "en-US",
+          "unit": "kilobyte"
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "string"
+    },
+    "outputs": [
+      "1,234.567 m",
+      "1,234.567°C",
+      "1,234.567 kB"
+    ],
+    "serialized": [
+      "number-format",
+      1234.567,
+      {
+        "locale": [
+          "string",
+          [
+            "get",
+            "locale"
+          ]
+        ],
+        "unit": [
+          "string",
+          [
+            "get",
+            "unit"
+          ]
+        ]
+      }
+    ]
+  }
+}

@@ -1,6 +1,8 @@
 //! The locale services on platforms without their own (Linux, Windows,
 //! Android): ICU4X, with the CLDR data it compiles into the library. The
 //! default locale comes from the POSIX environment.
+//!
+//! It leaves out a `number-format`'s unit: the number formats as a decimal.
 
 use std::cmp::Ordering;
 use std::sync::OnceLock;
@@ -21,7 +23,7 @@ use icu_locale::{Locale, LocaleCanonicalizer, LocaleExpander, locale};
 use icu_provider::prelude::*;
 use writeable::Writeable;
 
-use super::{FractionDigits, Sensitivity};
+use super::{FractionDigits, Sensitivity, Style};
 
 /// The POSIX locale category whose environment variable names the default
 /// locale of an expression.
@@ -185,7 +187,7 @@ fn non_finite(number: f64) -> &'static str {
 pub(crate) fn format_number(
     number: f64,
     locale: &str,
-    currency: Option<&str>,
+    style: Style<'_>,
     digits: FractionDigits,
 ) -> Result<String, String> {
     let prefs = DecimalFormatterPreferences::from(&resolve_locale(locale, Category::Numeric));
@@ -193,12 +195,17 @@ pub(crate) fn format_number(
         DecimalFormatter::try_new(prefs, DecimalFormatterOptions::default()).map_err(|error| error.to_string())?;
     // Negative zero keeps its sign, as in ICU and JavaScript's Intl.
     let sign = if number.is_sign_negative() && !number.is_nan() { Sign::Negative } else { Sign::None };
-    let Some(currency) = currency else {
-        let formatted = match round(number, digits, None) {
-            Some(decimal) => formatter.format(&decimal).write_to_string().into_owned(),
-            None => AbstractFormatter::format_sign(&formatter, non_finite(number), sign).write_to_string().into_owned(),
-        };
-        return Ok(formatted);
+    let currency = match style {
+        Style::Currency(currency) => currency,
+        Style::Decimal | Style::Unit(_) => {
+            let formatted = match round(number, digits, None) {
+                Some(decimal) => formatter.format(&decimal).write_to_string().into_owned(),
+                None => {
+                    AbstractFormatter::format_sign(&formatter, non_finite(number), sign).write_to_string().into_owned()
+                }
+            };
+            return Ok(formatted);
+        }
     };
 
     let currency = CurrencyType::try_from_str(currency).map_err(|error| error.to_string())?;

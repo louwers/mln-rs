@@ -22,7 +22,8 @@
 //! - A number formats with the locale's digits, separators and grouping,
 //!   rounded half to even to the fraction limits. With a currency, it takes
 //!   the locale's currency pattern and symbol, and the currency's digits
-//!   unless the limits override them.
+//!   unless the limits override them. With a unit, it takes the locale's
+//!   short pattern for the unit, as `Intl.NumberFormat` does by default.
 
 #[cfg(target_vendor = "apple")]
 mod apple;
@@ -30,6 +31,7 @@ mod apple;
 mod icu4x;
 #[cfg(any(target_family = "wasm", target_vendor = "apple", test))]
 mod keywords;
+mod unit;
 #[cfg(target_family = "wasm")]
 mod web;
 
@@ -37,6 +39,7 @@ mod web;
 pub(crate) use apple::{Collator, format_number};
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
 pub(crate) use icu4x::{Collator, format_number};
+pub(crate) use unit::Unit;
 #[cfg(target_family = "wasm")]
 pub(crate) use web::{Collator, format_number};
 
@@ -45,6 +48,16 @@ pub(crate) use web::{Collator, format_number};
 pub(crate) struct Sensitivity {
     pub(crate) case: bool,
     pub(crate) diacritics: bool,
+}
+
+/// What `number-format` formats a number as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Style<'a> {
+    Decimal,
+    /// An amount of a currency, by its upper-case ISO 4217 code.
+    Currency(&'a str),
+    /// A measure in a unit.
+    Unit(Unit),
 }
 
 /// The fraction digit limits of a number format, as the expression gives

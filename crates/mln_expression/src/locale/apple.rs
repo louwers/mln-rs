@@ -7,6 +7,8 @@
 //! effect, and its resolved locale leaves them out. Its case- and
 //! diacritic-insensitive options select the strength.
 //!
+//! It leaves out a `number-format`'s unit: the number formats as a decimal.
+//!
 //! Each entry point drains an autorelease pool of its own: expressions are
 //! evaluated on threads that have none, and Foundation hands its locales and
 //! strings back through one.
@@ -26,7 +28,7 @@ use objc2_foundation::{
 };
 
 use super::keywords::CollationKeywords;
-use super::{FractionDigits, Sensitivity};
+use super::{FractionDigits, Sensitivity, Style};
 
 /// The language of an ICU locale identifier or a language tag.
 fn language_of(identifier: &str) -> &str {
@@ -142,19 +144,22 @@ fn currency_digits(code: &str) -> u8 {
 pub(crate) fn format_number(
     number: f64,
     tag: &str,
-    currency: Option<&str>,
+    style: Style<'_>,
     digits: FractionDigits,
 ) -> Result<String, String> {
     autoreleasepool(|_| {
         let formatter = NSNumberFormatter::new();
         formatter.setLocale(Some(&resolve_locale(tag)));
-        let currency_digits = if let Some(code) = currency {
-            formatter.setNumberStyle(NSNumberFormatterStyle::CurrencyStyle);
-            formatter.setCurrencyCode(Some(&NSString::from_str(code)));
-            Some(currency_digits(code))
-        } else {
-            formatter.setNumberStyle(NSNumberFormatterStyle::DecimalStyle);
-            None
+        let currency_digits = match style {
+            Style::Decimal | Style::Unit(_) => {
+                formatter.setNumberStyle(NSNumberFormatterStyle::DecimalStyle);
+                None
+            }
+            Style::Currency(code) => {
+                formatter.setNumberStyle(NSNumberFormatterStyle::CurrencyStyle);
+                formatter.setCurrencyCode(Some(&NSString::from_str(code)));
+                Some(currency_digits(code))
+            }
         };
         let (min, max) = digits.resolve(currency_digits);
         // The maximum first: setting a limit moves the other past it.

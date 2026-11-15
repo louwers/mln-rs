@@ -21,7 +21,7 @@ use mln_util::hash::HashMap;
 use wasm_bindgen::prelude::*;
 
 use super::keywords::CollationKeywords;
-use super::{FractionDigits, Sensitivity};
+use super::{FractionDigits, Sensitivity, Style, Unit};
 
 mod intl {
     use js_sys::Object;
@@ -168,23 +168,36 @@ impl Collator {
     }
 }
 
+/// An owned [`Style`].
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum NumberStyle {
+    Decimal,
+    Currency(String),
+    Unit(Unit),
+}
+
 /// What makes an `Intl.NumberFormat`.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct NumberFormatSettings {
     tag: String,
-    currency: Option<String>,
+    style: NumberStyle,
     digits: FractionDigits,
 }
 
 impl NumberFormatSettings {
     fn construct(&self) -> Result<intl::NumberFormat, String> {
         let options = Object::new();
-        match &self.currency {
-            Some(currency) => {
+        match &self.style {
+            NumberStyle::Decimal => set(&options, "style", "decimal"),
+            NumberStyle::Currency(currency) => {
                 set(&options, "style", "currency");
                 set(&options, "currency", currency.as_str());
             }
-            None => set(&options, "style", "decimal"),
+            NumberStyle::Unit(unit) => {
+                set(&options, "style", "unit");
+                set(&options, "unit", unit.to_string());
+                set(&options, "unitDisplay", "short");
+            }
         }
         if let Some(min) = self.digits.min {
             set(&options, "minimumFractionDigits", min.min(MAX_FRACTION_DIGITS));
@@ -197,15 +210,20 @@ impl NumberFormatSettings {
     }
 }
 
-/// Formats with an `Intl.NumberFormat` in the decimal or currency style,
-/// which applies the default fraction limits itself.
+/// Formats with an `Intl.NumberFormat` in the decimal, currency or unit
+/// style, which applies the default fraction limits itself.
 pub(crate) fn format_number(
     number: f64,
     tag: &str,
-    currency: Option<&str>,
+    style: Style<'_>,
     digits: FractionDigits,
 ) -> Result<String, String> {
-    let settings = NumberFormatSettings { tag: tag.to_owned(), currency: currency.map(str::to_owned), digits };
+    let style = match style {
+        Style::Decimal => NumberStyle::Decimal,
+        Style::Currency(currency) => NumberStyle::Currency(currency.to_owned()),
+        Style::Unit(unit) => NumberStyle::Unit(unit),
+    };
+    let settings = NumberFormatSettings { tag: tag.to_owned(), style, digits };
     NUMBER_FORMATS.with_borrow_mut(|formats| {
         let format = match formats.entry(settings) {
             Entry::Occupied(entry) => entry.into_mut(),
