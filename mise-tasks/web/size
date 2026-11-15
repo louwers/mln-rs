@@ -15,7 +15,7 @@ web_wasm_opt_require
 export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
 case "$usage_module" in
     mln_web) package=(-p mln-rs-web) crate=mln_web ;;
-    mln_web_webgl) package=(-p mln-rs-web --features webgl) crate=mln_web ;;
+    mln_web_webgl) package=(-p mln-rs-web --no-default-features --features webgl) crate=mln_web ;;
     mln_web_shaper) package=(-p mln-rs-web-shaper) crate=mln_web_shaper ;;
     *) echo "error: unknown module $usage_module" >&2; exit 1 ;;
 esac

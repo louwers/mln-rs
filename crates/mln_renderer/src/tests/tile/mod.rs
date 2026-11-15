@@ -3,7 +3,7 @@
 // other test/tile files are ported elsewhere: geojson_tile (geojson_tile_test),
 // vector_tile (vector_tile_test, mln_tile), geometry_tile_data (mln_tile),
 // tile_cache (crate::tile::tile_cache), tile_id (mln_tile_id),
-// tile_lod (mln_headless, which has the HeadlessFrontend).
+// tile_lod (render_test, which has the HeadlessFrontend).
 
 mod custom_geometry_tile;
 mod custom_vector_tile;

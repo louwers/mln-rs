@@ -54,11 +54,11 @@ impl QueryTest {
     }
 
     fn query_rendered_features(&self, point: &ScreenCoordinate, options: &RenderedQueryOptions) -> Vec<Feature> {
-        self.0.frontend.with_renderer(|renderer| renderer.query_rendered_features_at_point(point, options)).unwrap()
+        self.0.frontend().renderer().query_rendered_features_at_point(point, options).unwrap()
     }
 
     fn query_source_features(&self, source_id: &str, options: &SourceQueryOptions) -> Vec<Feature> {
-        self.0.frontend.with_renderer(|renderer| renderer.query_source_features(source_id, options)).unwrap()
+        self.0.frontend().renderer().query_source_features(source_id, options).unwrap()
     }
 
     fn set_global_state_property(&self, name: &str, value: &str) {
@@ -394,10 +394,10 @@ fn query_source_feature_states() {
     let mut new_state = FeatureState::new();
     new_state.insert("hover".into(), Value::Bool(true));
     new_state.insert("radius".into(), Value::Uint(20));
-    test.0.frontend.with_renderer(|renderer| renderer.set_feature_state("source1", None, "feature1", &new_state));
+    test.0.frontend().renderer().set_feature_state("source1", None, "feature1", &new_state);
 
     // C++ fills an out-parameter; the Rust getter returns the state.
-    let states = test.0.frontend.with_renderer(|renderer| renderer.get_feature_state("source1", None, "feature1"));
+    let states = test.0.frontend().renderer().get_feature_state("source1", None, "feature1");
     assert_eq!(states.len(), 2);
     assert_eq!(states["hover"], Value::Bool(true));
     assert_eq!(states["radius"], Value::Uint(20));
@@ -408,38 +408,36 @@ fn query_source_feature_states() {
 #[test]
 fn remove_source_feature_state() {
     let test = QueryTest::new();
-    let frontend = test.0.frontend.clone();
 
     // Set two state values on a feature. Updates are visible immediately,
     // without waiting for a render pass.
     let mut new_state = FeatureState::new();
     new_state.insert("hover".into(), Value::Bool(true));
     new_state.insert("radius".into(), Value::Uint(20));
-    frontend.with_renderer(|renderer| renderer.set_feature_state("source1", None, "feature1", &new_state));
+    test.0.frontend().renderer().set_feature_state("source1", None, "feature1", &new_state);
 
     // Read back (C++: the out-parameter overload).
-    let after_set = frontend.with_renderer(|renderer| renderer.get_feature_state("source1", None, "feature1"));
+    let after_set = test.0.frontend().renderer().get_feature_state("source1", None, "feature1");
     assert_eq!(after_set, new_state);
 
     // Remove a single key. Unlike updates, removals are only reflected once a
     // render pass has coalesced the pending changes into the source state, so
     // render before reading back.
-    frontend.with_renderer(|renderer| renderer.remove_feature_state("source1", None, Some("feature1"), Some("hover")));
+    test.0.frontend().renderer().remove_feature_state("source1", None, Some("feature1"), Some("hover"));
     test.render();
 
     // Read back (C++: the return-value overload).
-    let after_key_removal = frontend.with_renderer(|renderer| renderer.get_feature_state("source1", None, "feature1"));
+    let after_key_removal = test.0.frontend().renderer().get_feature_state("source1", None, "feature1");
     assert_eq!(after_key_removal.len(), 1);
     assert!(!after_key_removal.contains_key("hover"));
     assert_eq!(after_key_removal["radius"], Value::Uint(20));
 
     // Removing the whole feature (no state key) clears any remaining state.
-    frontend.with_renderer(|renderer| renderer.remove_feature_state("source1", None, Some("feature1"), None));
+    test.0.frontend().renderer().remove_feature_state("source1", None, Some("feature1"), None);
     test.render();
 
     // Read back (C++: the out-parameter overload again).
-    let after_feature_removal =
-        frontend.with_renderer(|renderer| renderer.get_feature_state("source1", None, "feature1"));
+    let after_feature_removal = test.0.frontend().renderer().get_feature_state("source1", None, "feature1");
     assert!(after_feature_removal.is_empty());
 }
 
@@ -492,8 +490,7 @@ fn query_source_features_source_layer() {
 
     let query = |source_layers: &[&str], filter: Option<Filter>| -> Vec<(u64, String)> {
         let options = SourceQueryOptions::new(Some(layers(source_layers)), filter);
-        let features =
-            test.frontend.with_renderer(|renderer| renderer.query_source_features("tiles", &options)).unwrap();
+        let features = test.frontend().renderer().query_source_features("tiles", &options).unwrap();
         let mut hits: Vec<(u64, String)> = features
             .into_iter()
             .map(|feature| {
@@ -538,10 +535,9 @@ fn query_feature_extensions(
     args: Option<&PropertyMap>,
 ) -> FeatureExtensionValue {
     test.0
-        .frontend
-        .with_renderer(|renderer| {
-            renderer.query_feature_extensions(source_id, feature, extension, extension_field, args)
-        })
+        .frontend()
+        .renderer()
+        .query_feature_extensions(source_id, feature, extension, extension_field, args)
         .expect("queryFeatureExtensions")
 }
 
@@ -706,9 +702,13 @@ fn query_feature_extensions_unknown_cluster() {
     assert_eq!(top_cluster_feature.len(), 1);
     top_cluster_feature[0].properties.insert("cluster_id".to_owned(), Value::Uint(7));
 
-    let result = test.0.frontend.with_renderer(|renderer| {
-        renderer.query_feature_extensions("cluster_source", &top_cluster_feature[0], "supercluster", "children", None)
-    });
+    let result = test.0.frontend().renderer().query_feature_extensions(
+        "cluster_source",
+        &top_cluster_feature[0],
+        "supercluster",
+        "children",
+        None,
+    );
     let error = result.expect_err("unknown cluster");
     assert_eq!(error.kind, ErrorKind::NotFound, "{error}");
 }

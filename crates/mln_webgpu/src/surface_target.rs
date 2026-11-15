@@ -15,6 +15,13 @@ use mln_util::size::Size;
 use crate::gpu::from_wgpu_format;
 use crate::renderer_backend::RendererBackend;
 
+/// How a surface's frames composite with what is behind them. A browser's
+/// canvas shows the page where the map draws nothing, as a WebGL2 canvas
+/// does: the renderer's colors are premultiplied. Elsewhere the surface
+/// picks.
+const ALPHA_MODE: wgpu::CompositeAlphaMode =
+    if cfg!(target_family = "wasm") { wgpu::CompositeAlphaMode::PreMultiplied } else { wgpu::CompositeAlphaMode::Auto };
+
 /// What an overlay draws into ([`SurfaceTarget::set_overlay`]): the frame's
 /// surface texture, after the map and before it is presented.
 pub struct OverlayTarget<'a> {
@@ -256,7 +263,7 @@ impl State {
                     height: size.height,
                     present_mode: self.present_mode,
                     desired_maximum_frame_latency: 2,
-                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    alpha_mode: ALPHA_MODE,
                     view_formats: vec![self.format],
                     color_space: wgpu::SurfaceColorSpace::Auto,
                 },

@@ -47,14 +47,14 @@ impl Impl {
             cache_path: resource_options.cache_path.clone(),
             ..mln_storage::ResourceOptions::default()
         };
-        let frontend = HeadlessFrontend::with_options(metadata.size, metadata.pixel_ratio, true, run_loop)
-            .map_err(|e| e.to_string())?;
+        let mut frontend =
+            HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, run_loop).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
             let transport = SerializingTransport::new(&run_loop.scheduler(), |replies| {
                 Box::new(ThreadWorkerInstances::new(count, &replies))
             });
-            frontend.with_renderer(|renderer| renderer.set_tile_worker_transport(transport));
+            frontend.renderer().set_tile_worker_transport(transport);
         }
         let file_source = proxy_loader(&resource_options);
         let mut map = Map::with_file_source(
@@ -87,7 +87,7 @@ impl Impl {
 
 impl TestRunnerImpl for Impl {
     fn reset_context(&mut self, metadata: &TestMetadata) -> Result<(), MapError> {
-        self.frontend.with_renderer(mln_renderer::Renderer::clear_data);
+        self.frontend.renderer().clear_data();
         self.frontend.set_size(metadata.size);
         self.map.set_size(metadata.size).map_err(|e| MapError::Exception(e.to_string()))?;
         self.map.set_projection_mode(
@@ -116,9 +116,9 @@ impl TestRunnerImpl for Impl {
         result.map(|result| result.image).map_err(|e| e.to_string())
     }
 
-    fn dump_debug_logs(&self) {
+    fn dump_debug_logs(&mut self) {
         self.map.dump_debug_logs();
-        self.frontend.with_renderer(|renderer| renderer.dump_debug_logs());
+        self.frontend.renderer().dump_debug_logs();
     }
 
     // query: tile mode.
@@ -156,27 +156,26 @@ impl TestRunnerImpl for Impl {
     }
 
     fn collect_placed_symbol_data(&mut self, enable: bool) {
-        self.frontend.with_renderer(|renderer| renderer.collect_placed_symbol_data(enable));
+        self.frontend.renderer().collect_placed_symbol_data(enable);
     }
 
     fn get_placed_symbols_data(&mut self) -> Vec<crate::runner::PlacedSymbol> {
         let to_box = |b: &mln_util::grid_index::BBox| [b.min.x, b.min.y, b.max.x, b.max.y];
-        self.frontend.with_renderer(|renderer| {
-            renderer
-                .get_placed_symbols_data()
-                .iter()
-                .map(|data| crate::runner::PlacedSymbol {
-                    key: data.key.clone(),
-                    text_collision_box: data.text_collision_box.as_ref().map(to_box),
-                    icon_collision_box: data.icon_collision_box.as_ref().map(to_box),
-                    text_placed: data.text_placed,
-                    icon_placed: data.icon_placed,
-                    intersects_tile_border: data.intersects_tile_border,
-                    viewport_padding: data.viewport_padding,
-                    layer: data.layer.clone(),
-                })
-                .collect()
-        })
+        self.frontend
+            .renderer()
+            .get_placed_symbols_data()
+            .iter()
+            .map(|data| crate::runner::PlacedSymbol {
+                key: data.key.clone(),
+                text_collision_box: data.text_collision_box.as_ref().map(to_box),
+                icon_collision_box: data.icon_collision_box.as_ref().map(to_box),
+                text_placed: data.text_placed,
+                icon_placed: data.icon_placed,
+                intersects_tile_border: data.intersects_tile_border,
+                viewport_padding: data.viewport_padding,
+                layer: data.layer.clone(),
+            })
+            .collect()
     }
 
     fn jump_to(&mut self, camera: &CameraOptions) -> Result<(), MapError> {
@@ -239,7 +238,7 @@ impl TestRunnerImpl for Impl {
         if self.frontend.render(&mut self.map).is_err() {
             return Ok(false);
         }
-        self.frontend.with_renderer(|renderer| renderer.set_feature_state(source_id, source_layer, feature_id, state));
+        self.frontend.renderer().set_feature_state(source_id, source_layer, feature_id, state);
         Ok(true)
     }
 
@@ -252,9 +251,7 @@ impl TestRunnerImpl for Impl {
         if self.frontend.render(&mut self.map).is_err() {
             return Ok(false);
         }
-        self.frontend.with_renderer(|renderer| {
-            let _ = renderer.get_feature_state(source_id, source_layer, feature_id);
-        });
+        let _ = self.frontend.renderer().get_feature_state(source_id, source_layer, feature_id);
         Ok(true)
     }
 
@@ -268,8 +265,7 @@ impl TestRunnerImpl for Impl {
         if self.frontend.render(&mut self.map).is_err() {
             return Ok(false);
         }
-        self.frontend
-            .with_renderer(|renderer| renderer.remove_feature_state(source_id, source_layer, feature_id, state_key));
+        self.frontend.renderer().remove_feature_state(source_id, source_layer, feature_id, state_key);
         Ok(true)
     }
 
@@ -295,14 +291,14 @@ impl TestRunnerImpl for Impl {
             None => None,
         };
         let options = mln_renderer::query::RenderedQueryOptions::new(options.layer_ids.clone(), filter);
-        self.frontend
-            .with_renderer(|renderer| match geometry {
-                QueryGeometry::Point(point) => renderer.query_rendered_features_at_point(point, &options),
-                QueryGeometry::Box(screen_box) => {
-                    renderer.query_rendered_features_in_box(&screen_box.min, &screen_box.max, &options)
-                }
-            })
-            .map_err(|e| MapError::Exception(e.to_string()))
+        let renderer = self.frontend.renderer();
+        match geometry {
+            QueryGeometry::Point(point) => renderer.query_rendered_features_at_point(point, &options),
+            QueryGeometry::Box(screen_box) => {
+                renderer.query_rendered_features_in_box(&screen_box.min, &screen_box.max, &options)
+            }
+        }
+        .map_err(|e| MapError::Exception(e.to_string()))
     }
 
     // conformance: setTileLod* (Map::setTileLod*, glfw ported them).

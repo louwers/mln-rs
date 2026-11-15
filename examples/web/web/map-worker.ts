@@ -1,9 +1,11 @@
-// The map's Web Worker: its own instance of the page's module, rendering
-// into the page's canvas (an OffscreenCanvas), so that the map's work never
-// runs on the page's thread. Its tile workers (worker.ts) talk to its
-// instance directly, each over a MessageChannel port the page connected:
-// requests go as bytes, and replies come back as bytes and payloads,
-// transferred.
+// The map's Web Worker: its own instance of the page's module, whose
+// runtime renders the map into the page's canvas (an OffscreenCanvas), so
+// that the map's work never runs on the page's thread. The page starts the
+// tile workers' Web Workers (worker.ts) and gives this worker a control port
+// to each, where the runtime connects its render session to them
+// (`mlnWebConfigureTileWorkers`): requests go as bytes, and replies come back
+// as bytes and payloads, transferred, straight to this worker's instance.
+// The control ports also carry how many replies each tile worker sent.
 //
 // The page sends a preload as soon as it starts, the start once the module
 // compiled, then the rest of ToMap (protocol.ts); this worker answers with
@@ -31,6 +33,7 @@ import type {
   Input,
   Loaded,
   Start,
+  TileWorkerReport,
   ToMap,
 } from "./protocol.ts";
 
@@ -79,7 +82,13 @@ const webgl2 = self.name === "webgl2";
 // Imported rather than a static import, so that the preloads below don't
 // wait for it.
 const bindings: Promise<
-  Bindings<"WebMap" | "set_preloads" | "panic_for_check" | "mlnWebStopPump">
+  Bindings<
+    | "WebMap"
+    | "set_preloads"
+    | "panic_for_check"
+    | "mlnWebStopPump"
+    | "mlnWebConfigureTileWorkers"
+  >
 > = webgl2 ? import("./pkg/webgl/mln_web.js") : import("./pkg/mln_web.js");
 
 type Handle = (message: ToMap) => void;
@@ -301,14 +310,14 @@ function percentEncode(text: string): string {
 async function run({
   module,
   canvas,
-  ports,
+  tileWorkers,
   width,
   height,
   ratio,
   style,
   fallbackFontFaces,
   camera,
-  localIdeographFontFamily,
+  systemFonts,
   panic,
 }: Start): Promise<Handle> {
   const {
@@ -317,6 +326,7 @@ async function run({
     set_preloads,
     panic_for_check,
     mlnWebStopPump,
+    mlnWebConfigureTileWorkers,
   } = await bindings;
   const exports = (await init({ module_or_path: module })) as {
     memory?: WebAssembly.Memory;
@@ -324,8 +334,21 @@ async function run({
   stopPump = mlnWebStopPump;
   set_preloads(takePreload);
 
-  // The map's work between frames (finished fetches, worker replies, queued
-  // tasks) runs as soon as the map asks for it, in a task of its own
+  // The runtime connects its session to the tile workers' Web Workers over
+  // their control ports, which report the replies they send and their
+  // panics.
+  let replies = 0;
+  tileWorkers.forEach((control, i) => {
+    control.onmessage = ({ data }: MessageEvent<TileWorkerReport>) => {
+      if ("fatal" in data) fatal(`tile worker ${i}`, data.fatal);
+      else replies += data.replies;
+    };
+  });
+  let spawned = 0;
+  mlnWebConfigureTileWorkers(tileWorkers.length, () => tileWorkers[spawned++]);
+
+  // The map's work (finished fetches, worker replies, queued tasks, its
+  // frames) runs as soon as the map asks for it, in a task of its own
   // (mln_web_host's pump), rather than waiting for the next animation frame:
   // each step of a load (a tile's response, its parsing, the next request)
   // would otherwise wait a frame.
@@ -337,8 +360,12 @@ async function run({
     await shaper.default();
     return shaper;
   };
-  const tileWorkerFatal = (instance: number, message: unknown) =>
-    fatal(`tile worker ${instance}`, message);
+  // In the task that rendered a frame, while the canvas has it.
+  let rendering: WebMap | undefined;
+  const onFrame = () =>
+    guard(() => {
+      if (rendering) framesRendered(rendering);
+    });
   let map: WebMap;
   try {
     map = await WebMap.create(
@@ -346,24 +373,23 @@ async function run({
       width,
       height,
       ratio,
-      ports,
-      tileWorkerFatal,
       loadShaper,
-      localIdeographFontFamily,
+      fallbackFontFaces,
+      systemFonts,
+      onFrame,
     );
   } catch (error) {
     if (self.mlnPanic !== undefined) throw error;
+    if (!(error instanceof Error && error.name === "NotSupportedError"))
+      throw error;
     stopped = true;
-    post({
-      type: "unsupported",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    post({ type: "unsupported", message: error.message });
     return () => {};
   }
+  rendering = map;
 
   if (panic) panic_for_check(panic);
 
-  if (fallbackFontFaces) map.set_fallback_font_faces(fallbackFontFaces);
   map.set_style_url(style);
   map.jump_to(...camera);
 
@@ -386,13 +412,15 @@ async function run({
     post({
       type: "status",
       text:
-        `${ports.length} tile workers, ${map.received()} replies` +
+        `${tileWorkers.length} tile workers, ${replies} replies` +
         (webgl2 ? ", WebGL2" : "") +
         (loaded === null
           ? ""
           : `, loaded in ${Math.round(loaded.loadedMs)} ms`),
     });
-    // A source's attribution can come later than its style, with its TileJSON.
+    // A source's attribution can come later than its style, with its
+    // TileJSON. They come from the last read, a report ago.
+    map.read_style_info();
     const next = map.attributions();
     if (next.join("\n") !== attribution) {
       attribution = next.join("\n");
@@ -423,10 +451,11 @@ async function run({
     if (!stopped) requestAnimationFrame(frame);
   }
   let shownCamera = "";
-  // When the last frame that drew began, for the debug overlay.
+  // When the last animation frame that found a frame drawn began, for the
+  // debug overlay.
   let lastDrawn: number | null = null;
   function drawFrame(time: number) {
-    const drew = map.frame(8, performance.now());
+    const drew = map.frame(performance.now());
     if (drew) {
       if (debug && lastDrawn !== null) {
         post({
@@ -461,26 +490,28 @@ async function run({
     if (loaded === null && map.is_fully_loaded()) {
       loaded = {
         loadedMs: performance.now() - started,
-        replies: map.received(),
+        replies,
       };
       post({ type: "loaded", loaded });
       report(true);
     }
-    if (readPixels > 0) {
-      const pixels = webgl2 ? canvasPixels(canvas) : map.take_pixels();
-      if (pixels !== undefined) {
-        readPixels--;
-        post(
-          {
-            type: "pixels",
-            pixels: { width: canvas.width, height: canvas.height, pixels },
-          },
-          [pixels.buffer],
-        );
-        if (readPixels > 0) map.request_pixels();
-      }
-    }
     report(false);
+  }
+  // The session rendered frames: the canvas has the last one until this task
+  // ends.
+  function framesRendered(map: WebMap) {
+    if (map.drain_frames() === 0 || readPixels === 0) return;
+    const pixels = canvasPixels(canvas);
+    if (pixels === undefined) return;
+    readPixels--;
+    post(
+      {
+        type: "pixels",
+        pixels: { width: canvas.width, height: canvas.height, pixels },
+      },
+      [pixels.buffer],
+    );
+    if (readPixels > 0) map.request_pixels();
   }
   requestAnimationFrame(frame);
 
@@ -564,9 +595,8 @@ async function run({
   return handle;
 }
 
-// The frame just drawn, in the task that drew it: a WebGL2 canvas can't be
-// copied from on the GPU, and keeps its frame only until it is shown. The
-// rows are RGBA, not premultiplied.
+// The frame just drawn, in the task that drew it: the canvas keeps its frame
+// only until it is shown. The rows are RGBA, not premultiplied.
 function canvasPixels(canvas: OffscreenCanvas): Uint8Array | undefined {
   const copy = new OffscreenCanvas(canvas.width, canvas.height).getContext(
     "2d",

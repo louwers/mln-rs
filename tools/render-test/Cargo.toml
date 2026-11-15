@@ -8,9 +8,9 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-include.workspace = true
-# The runner of the shared render and query tests; published for the
-# difftests (louwers/mln-rs-difftests).
+# The runner of the shared render and query tests. Not released: the
+# difftests (louwers/mln-rs-difftests) take it from a git revision.
+publish = false
 # The [[test]]s below; tests/ also holds their module.
 autotests = false
 

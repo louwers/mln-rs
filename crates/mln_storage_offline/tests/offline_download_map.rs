@@ -160,10 +160,10 @@ fn resource_offline_usage_unset() {
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 
-    let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
     let mut map = Map::with_file_source(
         stubfile_source,
-        MapOptions { map_mode: MapMode::Continuous, size: frontend.get_size(), ..Default::default() },
+        MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
         &run_loop,
     )
     .unwrap();
@@ -180,7 +180,10 @@ fn resource_offline_usage_unset() {
         if full_frame {
             break;
         }
-        if !run_loop.run_once() {
+        // A frame reports to the map, which handles that before the loop
+        // waits.
+        let drew = frontend.render_update();
+        if !run_loop.run_once() && !drew {
             run_loop.wait_for_work();
         }
     }

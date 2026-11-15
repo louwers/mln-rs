@@ -115,8 +115,8 @@ export async function load(context, view) {
 }
 
 /**
- * Loads `view` and, once the map is loaded, runs the page's check of the
- * map's GPU (`checkGpu`); returns how it failed, if it did.
+ * Loads `view` and, once the map is loaded, runs the page's check of a GPU
+ * of the map's backend (`checkGpu`); returns how it failed, if it did.
  */
 export async function checkGpu(context, view) {
   const session = await context.browser.open(pageUrl(context, view));

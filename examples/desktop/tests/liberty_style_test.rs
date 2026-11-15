@@ -1,13 +1,9 @@
 // Loads OpenFreeMap Liberty (main.cpp's default style) over HTTPS through
-// the path mln-desktop uses: Map -> its ResourceLoader ->
-// OnlineFileSource -> HTTPFileSource (the platform transport),
-// `Style::loadURL`, the Map's style-response event and the parser. Needs
-// network access.
+// the path mln-desktop uses: a runtime's map, whose resource loader goes
+// through the online file source to the platform's HTTP transport, and the
+// style's parser. Needs network access.
 
-use std::time::{Duration, Instant};
-
-use mln_actor::{RunLoop, Timer};
-use mln_map::{Map, MapEvent, MapOptions};
+use mln_runtime::{Completion, MapOptions, Runtime, RuntimeOptions};
 use mln_util::size::Size;
 
 const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
@@ -15,42 +11,25 @@ const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
 #[test]
 #[ignore = "needs network access"]
 fn loads_liberty_over_https() {
-    let run_loop = RunLoop::new();
-    let mut map =
-        Map::new(MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() }, &run_loop).unwrap();
+    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() },
+        ..Default::default()
+    };
+    let (map, created) = runtime.create_map(options).unwrap();
+    created.wait().unwrap();
 
-    map.style_mut().load_url(LIBERTY);
-    assert!(!map.style().is_loaded());
+    // Completes once the style has loaded and parsed, or failed to.
+    map.set_style_url(LIBERTY).unwrap().wait().unwrap();
 
-    // Give up after 60 s: the timer wakes the loop then.
-    let timeout = Timer::new(&run_loop);
-    timeout.start(Duration::from_secs(60), Duration::ZERO, || {});
-    let deadline = Instant::now() + Duration::from_secs(60);
-    let mut loaded = false;
-    let mut failed = None;
-    while !loaded && failed.is_none() && Instant::now() < deadline {
-        if !run_loop.run_once() {
-            run_loop.wait_for_work();
-        }
-        for event in map.drain_events() {
-            match event {
-                MapEvent::StyleLoaded => loaded = true,
-                MapEvent::LoadingFailed(error) => failed = Some(error.to_string()),
-                _ => {}
-            }
-        }
-    }
-
-    assert_eq!(None, failed);
-    assert!(loaded, "the style did not load within 60 s");
-
-    let style = map.style();
-    assert_eq!(LIBERTY, style.get_url());
-    let json: serde_json::Value = serde_json::from_str(&style.get_json()).unwrap();
+    assert_eq!(Some(LIBERTY.to_owned()), map.style_url().and_then(Completion::wait).unwrap());
+    let json: serde_json::Value =
+        serde_json::from_str(&map.loaded_style_json().and_then(Completion::wait).unwrap()).unwrap();
     assert_eq!(json["sources"]["openmaptiles"]["type"], "vector");
-    let layers = style.get_layers();
+    let layers = map.style_layers().and_then(Completion::wait).unwrap();
     assert!(layers.len() > 100, "{} layers", layers.len());
-    assert_eq!("background", layers[0].get_id());
-    assert!(style.get_sources().iter().any(|s| s.get_id() == "openmaptiles"));
-    assert!(map.update_generation() > 0);
+    assert_eq!("background", layers[0].id);
+    let sources = map.style_sources().and_then(Completion::wait).unwrap();
+    assert!(sources.iter().any(|source| source.id == "openmaptiles"));
+    assert!(map.snapshot().unwrap().update_generation > 0);
 }

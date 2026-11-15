@@ -43,16 +43,17 @@ fn prefetch_tiles() {
         observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     }
 
-    let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
     let map = Map::with_file_source(
         Arc::<StubFileSource>::clone(&file_source),
-        MapOptions { map_mode: MapMode::Continuous, size: frontend.get_size(), ..Default::default() },
+        MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
         &run_loop,
     )
     .unwrap();
     frontend.attach(&map);
     let map = Rc::new(RefCell::new(map));
-    let _events = observer.observe(&map);
+    let frontend = Rc::new(RefCell::new(frontend));
+    let _events = observer.observe(&map, Some(&frontend));
 
     let tiles: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
 

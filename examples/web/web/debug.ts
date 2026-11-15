@@ -21,41 +21,19 @@ import {
 type Phase = (typeof PHASES)[number];
 
 const PHASE_INFO: Record<Phase, { color: string; title: string }> = {
-  map: {
-    color: "#8b9bb0",
-    title: "Gestures, animations and the map's RunLoop, but for tile replies",
-  },
-  tiles: {
-    color: "#ff7a9a",
-    title:
-      "Decoding the tile workers' replies: each tile's buckets, feature index and symbols",
-  },
-  sources: {
+  render: {
     color: "#a594ff",
     title:
-      "Updating the render layers and sources: the sources' tiles and their matrices",
+      "The renderer's frames: updating the sources and layers, placing symbols, uploading buffers and textures, and encoding the render passes",
   },
-  symbols: {
-    color: "#f4e04d",
-    title: "Placing symbols across tiles and updating their opacities",
-  },
-  layers: {
-    color: "#4cc3ff",
-    title: "Updating the layer groups and their drawables from the tiles",
-  },
-  upload: {
-    color: "#3ddbd9",
-    title:
-      "Running the layer tweakers and uploading buffers and textures (and making shaders)",
-  },
-  draw: {
+  submit: {
     color: "#5ee08a",
-    title: "Encoding the render passes and submitting them",
+    title: "Submitting the frames' render passes",
   },
   tasks: {
     color: "#ff9b5e",
     title:
-      "The cooperative scheduler's tasks, in the frame (8 ms budget) and between frames: glyphs and sprites, and with no tile workers the tiles' parsing and layout",
+      "The cooperative scheduler's tasks: glyphs and sprites, and with no tile workers the tiles' parsing and layout",
   },
 };
 

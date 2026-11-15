@@ -3,7 +3,7 @@
 // its fixtures (GlyphCache), one module per C++ file. The others are ported next to their code: bidi,
 // tagged_string, glyph_pbf and shaping in mln_text;
 // quads, get_anchors and cross_tile_symbol_index in crate::text;
-// local_glyph_rasterizer in mln_headless (it renders a map).
+// local_glyph_rasterizer in render_test (it renders a map).
 
 mod calculate_tile_distances;
 mod formatted;

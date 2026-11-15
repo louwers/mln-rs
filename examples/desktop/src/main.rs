@@ -3,8 +3,9 @@
 //
 // - host.rs: the window and its event loop on the main thread, which only
 //   turns window events into messages for the render thread.
-// - view.rs: the render thread, which owns the RunLoop, the map, its
-//   renderer and the surface, applies the messages and draws.
+// - view.rs: the render thread, which drives the map through its runtime
+//   (mln_runtime) and the render session that presents it to the window
+//   (backend.rs), applies the messages and draws.
 // - ui.rs: the controls, which view.rs lays out and an overlay of the window's
 //   backend paints over the map (overlay.rs, metal_overlay.rs,
 //   vulkan_overlay.rs, gl_overlay.rs).
@@ -15,11 +16,11 @@
 // -P/--maxPitch, --backend (metal, the default on macOS, webgpu: wgpu, the
 // default elsewhere, vulkan, elsewhere than on Apple's platforms, or opengl:
 // OpenGL ES, on Linux; see backend.rs), and for checking the app:
-// --readback FILE.png (write the presented frame once the map is idle, see
-// view.rs), --quit-after SECONDS, --gesture-test (scripted input through the
-// view's handlers) and --no-system-fonts: without it, the map falls back to
-// system fonts for the scripts that its glyph PBFs can't shape, and for CJK
-// (mln_system_fonts).
+// --readback FILE.png (write the map once it is idle, without the controls,
+// see view.rs), --quit-after SECONDS, --gesture-test (scripted input through
+// the view's handlers) and --no-system-fonts: without it, the map falls back
+// to system fonts for the scripts that its glyph PBFs can't shape, and for
+// CJK (mln_system_fonts).
 
 mod backend;
 #[cfg(target_os = "linux")]
@@ -62,7 +63,7 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       -P[degrees], --maxPitch=[degrees] Max Pitch
       --backend=[backend]               Rendering backend: metal (macOS), webgpu,
                                         vulkan (not macOS) or opengl (Linux)
-      --readback=[file.png]             Write the frame once the map is idle
+      --readback=[file.png]             Write the map once it is idle
       --quit-after=[seconds]            Close the window after this time
       --gesture-test                    Replay scripted input, log the camera, quit
       --free-bearing                    Let drags and zooms on the globe turn the bearing

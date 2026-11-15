@@ -126,14 +126,14 @@ fn a_map_whose_pixel_ratio_changes_renders_as_one_made_at_that_ratio() {
     assert_eq!(*requests.sprites.borrow(), ["http://sprites/sprite.json", "http://sprites/sprite.png"]);
 
     test.map().set_pixel_ratio(2.0).unwrap();
-    test.frontend.clone().set_pixel_ratio(2.0);
+    test.frontend().set_pixel_ratio(2.0);
     assert_same(&test.render().image, &made_at_2);
     // The map kept its tile, and loaded the sprite at the new resolution.
     assert_eq!(requests.tiles.get(), 1);
     assert_eq!(requests.sprites.borrow()[2..], ["http://sprites/sprite@2x.json", "http://sprites/sprite@2x.png"]);
 
     test.map().set_pixel_ratio(1.0).unwrap();
-    test.frontend.clone().set_pixel_ratio(1.0);
+    test.frontend().set_pixel_ratio(1.0);
     assert_same(&test.render().image, &made_at_1);
     assert_eq!(requests.tiles.get(), 1);
 }
@@ -143,7 +143,7 @@ fn a_ratio_that_picks_the_same_sprite_loads_nothing() {
     let (test, requests) = map_test(2.0);
     test.render();
     test.map().set_pixel_ratio(3.0).unwrap();
-    test.frontend.clone().set_pixel_ratio(3.0);
+    test.frontend().set_pixel_ratio(3.0);
     let image = test.render().image;
     assert_eq!(image.size, Size::new(768, 768));
     assert_eq!(requests.tiles.get(), 1);

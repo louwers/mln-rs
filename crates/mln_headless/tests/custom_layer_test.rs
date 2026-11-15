@@ -93,8 +93,7 @@ fn session(
         }
         Err(error) => panic!("a {backend:?} device: {error}"),
     };
-    let frontend =
-        HeadlessFrontend::with_device(device, size, 1.0, true, Arc::default(), run_loop).expect("a frontend");
+    let mut frontend = HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), run_loop).expect("a frontend");
     let mut map =
         Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() }, run_loop)
             .unwrap();
@@ -500,7 +499,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
 
     #[test]
     fn clearing_the_data_deinitializes_on_its_context() {
-        check_end(|frontend, _| frontend.as_ref().unwrap().with_renderer(mln_renderer::Renderer::clear_data));
+        check_end(|frontend, _| frontend.as_mut().unwrap().renderer().clear_data());
     }
 
     #[test]

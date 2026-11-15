@@ -1,8 +1,6 @@
 //! The map's event queue: what it reports to its owner, what it does with
 //! the events of its style and renderer, and its waker.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -232,9 +230,8 @@ fn a_still_image_completes_with_a_full_frame() {
     let run_loop = RunLoop::new();
     let mut map = map(MapOptions { map_mode: MapMode::Static, ..Default::default() }, &run_loop);
     map.style_mut().load_json(STYLE);
-    let outcome = Rc::new(RefCell::new(None));
-    let result = Rc::clone(&outcome);
-    map.render_still(Box::new(move |done| *result.borrow_mut() = Some(done)));
+    map.process_events();
+    map.render_still().unwrap();
 
     let stats = Arc::default();
     let frame = |mode, still_image_request_id| RendererEvent::RenderFrameFinished {
@@ -246,21 +243,21 @@ fn a_still_image_completes_with_a_full_frame() {
     };
     report(&map, frame(mln_renderer::RenderMode::Partial, 1));
     map.process_events();
-    assert!(outcome.borrow().is_none());
+    assert_eq!(map.take_still_image(), None);
     report(&map, frame(mln_renderer::RenderMode::Full, 1));
     map.process_events();
-    assert_eq!(*outcome.borrow(), Some(Ok(())));
+    assert_eq!(map.take_still_image(), Some(Ok(())));
+    assert_eq!(map.take_still_image(), None);
     assert!(map.snapshot().fully_loaded);
 
     // A full frame of the first image's update, drawn late, doesn't complete
-    // the next image.
-    *outcome.borrow_mut() = None;
-    let result = Rc::clone(&outcome);
-    map.render_still(Box::new(move |done| *result.borrow_mut() = Some(done)));
+    // the next image, nor does a request while one is on its way.
+    map.render_still().unwrap();
+    assert!(map.render_still().is_err());
     report(&map, frame(mln_renderer::RenderMode::Full, 1));
     map.process_events();
-    assert!(outcome.borrow().is_none());
+    assert_eq!(map.take_still_image(), None);
     report(&map, frame(mln_renderer::RenderMode::Full, 2));
     map.process_events();
-    assert_eq!(*outcome.borrow(), Some(Ok(())));
+    assert_eq!(map.take_still_image(), Some(Ok(())));
 }

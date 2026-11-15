@@ -21,33 +21,33 @@ name = "mln_web"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# The module for browsers without WebGPU, which draws with WebGL2 through
-# mln_gl (src/map_webgl.rs). `mise run web:build` builds it beside the WebGPU
-# one; the page loads one of the two. Nothing in it calls mln_webgpu or wgpu, so the
-# linker leaves them out of it.
-webgl = ["dep:mln_gl"]
+# The module draws with the browser's WebGPU, or with the `webgl` feature
+# and without the default ones, with its WebGL2 through mln_gl, for browsers
+# without WebGPU. `mise run web:build` builds both; the page loads one of the
+# two. Each carries only its backend and its shaders.
+default = ["webgpu"]
+webgpu = ["mln_runtime/webgpu", "dep:mln_webgpu"]
+webgl = ["mln_runtime/gl", "dep:mln_gl"]
 
 # Only the browser target has anything to build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 mln_actor.workspace = true
 mln_gestures.workspace = true
-# gpu-conformance: the host writes case, which check/check.mjs runs
-# (`WebMap::start_gpu_check`).
+# gpu-conformance: the host writes case, which check/check.mjs runs on a
+# backend of the map's kind (src/gpu_check.rs).
 mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 mln_gl = { workspace = true, optional = true }
 mln_map.workspace = true
-mln_renderer.workspace = true
+mln_runtime.workspace = true
 mln_storage.workspace = true
-mln_text.workspace = true
 mln_util.workspace = true
 mln_web_host.workspace = true
-mln_webgpu.workspace = true
+mln_webgpu = { workspace = true, optional = true }
 parking_lot.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys.workspace = true
-wgpu.workspace = true
 
 [lints]
 workspace = true

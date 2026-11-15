@@ -9,12 +9,12 @@ use std::time::Duration;
 use mln_map::CameraError;
 use mln_map::{
     AnimationOptions, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity,
-    CommandEnd, GesturePhase, MomentumDecay, TransitionOutcome,
+    GesturePhase, MomentumDecay, TransitionOutcome,
 };
 use mln_util::UnitBezier;
 use mln_util::geo::ScreenCoordinate;
 
-use crate::camera::GestureCamera;
+use crate::camera::{GestureCamera, PendingEnd};
 use crate::input::{Button, GestureEvent, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
 use crate::options::GestureOptions;
 use crate::velocity::VelocityTracker;
@@ -436,10 +436,12 @@ pub struct GestureRecognizer {
     /// Whether the recognizer's gesture has begun in the camera and not
     /// ended: a pointer gesture, a scroll, or both.
     begun: bool,
-    /// The glide that this gesture's press caught, which its release carries
-    /// (`carry_caught_glide`), as [`camera_command_ended`](Self::camera_command_ended)
-    /// hears of it.
-    caught_glide: Option<CameraVelocity>,
+    /// The end of the recognizer's last release, whose glide a press may
+    /// stop.
+    release_end: Option<Box<dyn PendingEnd>>,
+    /// The end of the glide that this gesture's press stopped, whose speed
+    /// its release carries (`carry_caught_glide`) if the press cancelled it.
+    caught_glide: Option<Box<dyn PendingEnd>>,
     /// The last tap, for double taps: where and when.
     last_tap: Option<(V2, f64, PointerKind)>,
     scroll: Option<Scroll>,
@@ -462,6 +464,7 @@ impl GestureRecognizer {
             mode: Mode::Idle,
             tracking: Tracking::default(),
             begun: false,
+            release_end: None,
             caught_glide: None,
             last_tap: None,
             scroll: None,
@@ -499,21 +502,6 @@ impl GestureRecognizer {
     /// Clicks and double clicks recognized since the last call.
     pub fn take_events(&mut self) -> Vec<GestureEvent> {
         std::mem::take(&mut self.events)
-    }
-
-    /// Hears how a camera command ended: a host passes on each end that its
-    /// camera reports. A glide of the recognizer's that a press stopped
-    /// carries its speed into the press's release (`carry_caught_glide`),
-    /// if the end arrives before the release.
-    pub fn camera_command_ended(&mut self, end: &CommandEnd) {
-        if self.begun
-            && self.options.carry_caught_glide
-            && end.transition_id == Some(self.options.transition_id)
-            && end.end.outcome == TransitionOutcome::Cancelled
-            && end.end.velocity != CameraVelocity::default()
-        {
-            self.caught_glide = Some(end.end.velocity);
-        }
     }
 
     /// A host's own eased step, such as the desktop app's `+` and `-`: it gets
@@ -612,13 +600,13 @@ impl GestureRecognizer {
     /// press. Without `interrupt_animations`, it stops only the recognizer's
     /// own, and begins with `Update`, which keeps the others. A glide that
     /// this stops is caught: the release may carry its speed, which the
-    /// glide's end reports (see [`Self::camera_command_ended`]).
+    /// glide's end reports.
     fn begin(&mut self, camera: &mut dyn GestureCamera) {
         if self.begun {
             return;
         }
         self.begun = true;
-        self.caught_glide = None;
+        self.caught_glide = self.release_end.take();
         let phase = if self.options.interrupt_animations {
             GesturePhase::Begin
         } else {
@@ -644,7 +632,8 @@ impl GestureRecognizer {
             AnimationOptions { transition_id: Some(self.options.transition_id), ..AnimationOptions::default() };
         let phase = GesturePhase::End;
         let momentum = momentum.copied();
-        camera.apply_camera_delta(&CameraDelta { momentum, animation, phase, ..CameraDelta::default() });
+        let end = camera.release(&CameraDelta { momentum, animation, phase, ..CameraDelta::default() });
+        self.release_end = Some(end);
     }
 
     /// The platform cancelled the gesture: it ends, and the `Cancel` phase
@@ -993,7 +982,12 @@ impl GestureRecognizer {
     fn finish(&mut self, camera: &mut dyn GestureCamera, now: f64, finish: Finish) {
         self.mode = Mode::Idle;
         self.scroll = None;
-        let caught_glide = self.caught_glide.take();
+        let caught_glide = self
+            .caught_glide
+            .take()
+            .and_then(|mut end| end.take())
+            .filter(|end| self.options.carry_caught_glide && end.outcome == TransitionOutcome::Cancelled)
+            .map(|end| end.velocity);
         match finish {
             Finish::Cancel => self.cancel_phase(camera),
             Finish::Stop => self.end_phase(camera, None),

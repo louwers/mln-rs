@@ -39,10 +39,6 @@ use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::transform::{CameraCommandId, CommandEnd, Transform, TransformEvent};
 
-/// Receives the outcome of [`Map::render_still`]: `Ok` once a complete frame
-/// rendered, or why the image failed.
-pub(crate) type StillImageCallback = Box<dyn FnOnce(Result<(), Error>)>;
-
 /// A call of the style's observer.
 enum StyleEvent {
     SourceChanged(String),
@@ -107,6 +103,16 @@ impl StyleObserver for StyleEvents {
     }
 }
 
+/// Where a still image that [`Map::render_still`] asked for stands.
+#[derive(Debug, PartialEq)]
+enum StillImage {
+    None,
+    /// Waits for a complete frame.
+    Pending,
+    /// Ended, until [`Map::take_still_image`] takes it.
+    Ended(Result<(), Error>),
+}
+
 /// A map: its style, its camera, and the updates it publishes for its
 /// renderer.
 ///
@@ -145,7 +151,8 @@ pub struct Map {
     tile: TileSettings,
     loading: bool,
     renderer_fully_loaded: bool,
-    still_image_request: Option<StillImageCallback>,
+    /// A still image that [`Map::render_still`] asked for, until it ends.
+    still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
     still_image_request_id: u64,
 
@@ -236,7 +243,7 @@ impl Map {
             },
             loading: false,
             renderer_fully_loaded: false,
-            still_image_request: None,
+            still_image: StillImage::None,
             still_image_request_id: 0,
             generation: 1,
             style_events,
@@ -500,10 +507,8 @@ impl Map {
 
     /// Fails the still image being rendered.
     fn on_resource_error(&mut self, error: Error) {
-        if self.mode != MapMode::Continuous
-            && let Some(callback) = self.still_image_request.take()
-        {
-            callback(Err(error));
+        if self.mode != MapMode::Continuous && self.still_image == StillImage::Pending {
+            self.still_image = StillImage::Ended(Err(error));
         }
     }
 
@@ -539,9 +544,9 @@ impl Map {
             }
         } else if self.renderer_fully_loaded
             && still_image_request_id == self.still_image_request_id
-            && let Some(callback) = self.still_image_request.take()
+            && self.still_image == StillImage::Pending
         {
-            callback(Ok(()));
+            self.still_image = StillImage::Ended(Ok(()));
         }
 
         self.last_frame_stats = Some(stats);
@@ -566,7 +571,7 @@ impl Map {
         self.changed();
 
         // Don't load/render anything in still mode until explicitly requested.
-        if self.mode != MapMode::Continuous && self.still_image_request.is_none() {
+        if self.mode != MapMode::Continuous && self.still_image != StillImage::Pending {
             return;
         }
 
@@ -599,7 +604,7 @@ impl Map {
             feature_states: self.feature_state.shared(),
             file_source: self.file_source.clone(),
             prefetch_zoom_delta: self.tile.prefetch_zoom_delta,
-            still_image_request: self.still_image_request.is_some(),
+            still_image_request: self.still_image == StillImage::Pending,
             still_image_request_id: self.still_image_request_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
@@ -653,36 +658,48 @@ impl Map {
 
     // MARK: - Still images
 
-    /// Register a callback that will get called (on the render thread) when
-    /// all resources have been loaded and a complete render occurs.
-    pub fn render_still(&mut self, callback: StillImageCallback) {
+    /// Asks for a still image: the map's renderer draws frames until one
+    /// has everything loaded, and [`take_still_image`](Self::take_still_image)
+    /// then reports it. Fails with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a continuous map
+    /// and while another still image is on its way, and with the style's
+    /// error when it failed to load.
+    pub fn render_still(&mut self) -> Result<(), Error> {
         if self.mode != MapMode::Static && self.mode != MapMode::Tile {
-            callback(Err(Error::invalid_state("Map is not in static or tile image render modes")));
-            return;
+            return Err(Error::invalid_state("Map is not in static or tile image render modes"));
         }
-
-        if self.still_image_request.is_some() {
-            callback(Err(Error::invalid_state("Map is currently rendering an image")));
-            return;
+        if self.still_image == StillImage::Pending {
+            return Err(Error::invalid_state("Map is currently rendering an image"));
         }
-
         if let Some(error) = self.style.impl_.get_last_error() {
-            callback(Err(error));
-            return;
+            return Err(error);
         }
-
-        self.still_image_request = Some(callback);
+        self.still_image = StillImage::Pending;
         self.still_image_request_id += 1;
-
         self.on_update();
+        Ok(())
+    }
+
+    /// How the still image that [`render_still`](Self::render_still) asked
+    /// for ended, once it has: `Ok` once a complete frame rendered, or why
+    /// the image failed. The map handles its renderer's reports in
+    /// [`process_events`](Self::process_events), so call that first.
+    pub fn take_still_image(&mut self) -> Option<Result<(), Error>> {
+        match std::mem::replace(&mut self.still_image, StillImage::None) {
+            StillImage::Ended(result) => Some(result),
+            other => {
+                self.still_image = other;
+                None
+            }
+        }
     }
 
     /// The still image request that waits for a frame, as the
     /// `still_image_request_id` of the updates that ask for it, or `None`
-    /// once it completed or failed.
+    /// once it ended.
     #[must_use]
     pub fn pending_still_image(&self) -> Option<u64> {
-        self.still_image_request.as_ref().map(|_| self.still_image_request_id)
+        (self.still_image == StillImage::Pending).then_some(self.still_image_request_id)
     }
 
     /// Triggers a repaint.

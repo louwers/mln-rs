@@ -1,8 +1,6 @@
 //! A handle to a map that lives on its runtime's thread.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
@@ -670,12 +668,8 @@ impl Map {
                         let error = Error::invalid_state("a still image can't render while a command group is open");
                         return outbox.resolve(resolver, Err(error));
                     }
-                    let outcome = Rc::new(RefCell::new(None));
-                    let done = Rc::clone(&outcome);
-                    entry.core.render_still(Box::new(move |result| {
-                        *done.borrow_mut() = Some(result.map_err(still_image_error));
-                    }));
-                    entry.pending_still = Some(PendingStill { resolver, outcome });
+                    let refused = entry.core.render_still().err().map(|error| Err(still_image_error(error)));
+                    entry.pending_still = Some(PendingStill { resolver, refused });
                 },
                 |_, (), _, _| {},
             );
@@ -1415,11 +1409,13 @@ pub(crate) struct SessionLink {
     awaited: Arc<AtomicU64>,
 }
 
-/// A still image on its way: the map's callback leaves its outcome for the
-/// next flush.
+/// A still image on its way, whose outcome the next flush that finds it
+/// reports.
 struct PendingStill {
     resolver: Resolver<()>,
-    outcome: Rc<RefCell<Option<Result<(), Error>>>>,
+    /// Why the map refused the image, which the flush after the command
+    /// reports.
+    refused: Option<Result<(), Error>>,
 }
 
 /// A still image's error as the handle reports it: a load failure is the
@@ -1642,7 +1638,13 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
         }
     }
     let style_outcome = style_outcome.map(|outcome| (outcome, entry.pending_style.take(), entry.applied()));
-    let still_outcome = entry.pending_still.as_ref().and_then(|pending| pending.outcome.borrow_mut().take());
+    let still_outcome = match &mut entry.pending_still {
+        Some(pending) => pending
+            .refused
+            .take()
+            .or_else(|| entry.core.take_still_image().map(|result| result.map_err(still_image_error))),
+        None => None,
+    };
     let still = still_outcome.and_then(|outcome| Some((outcome, entry.pending_still.take()?.resolver)));
     // The session demands a frame for the image while it waits, and lets
     // the demand go once it doesn't.

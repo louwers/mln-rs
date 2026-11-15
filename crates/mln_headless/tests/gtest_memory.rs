@@ -59,15 +59,10 @@ impl MemoryTest {
         MemoryTest { file_source, run_loop }
     }
 
-    fn map(&self, frontend: &HeadlessFrontend, ratio: f32) -> Map {
+    fn map(&self, frontend: &mut HeadlessFrontend, ratio: f32) -> Map {
         let map = Map::with_file_source(
             Arc::<StubFileSource>::clone(&self.file_source),
-            MapOptions {
-                map_mode: MapMode::Static,
-                size: frontend.get_size(),
-                pixel_ratio: ratio,
-                ..Default::default()
-            },
+            MapOptions { map_mode: MapMode::Static, size: frontend.size(), pixel_ratio: ratio, ..Default::default() },
             &self.run_loop,
         )
         .unwrap();
@@ -83,7 +78,7 @@ fn vector() {
     let ratio = 2.0;
 
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio, &test.run_loop).expect("a headless frontend");
-    let mut map = test.map(&frontend, ratio);
+    let mut map = test.map(&mut frontend, ratio);
     map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     map.style_mut().load_url("https://example.com/maps/streets");
 
@@ -97,7 +92,7 @@ fn raster() {
     let ratio = 2.0;
 
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio, &test.run_loop).expect("a headless frontend");
-    let mut map = test.map(&frontend, ratio);
+    let mut map = test.map(&mut frontend, ratio);
     map.style_mut().load_url("https://example.com/maps/hybrid");
 
     frontend.render(&mut map).expect("render");
@@ -139,7 +134,7 @@ fn footprint() {
         fn new(test: &MemoryTest, style: &str) -> Self {
             let mut frontend =
                 HeadlessFrontend::new(Size::new(256, 256), 2.0, &test.run_loop).expect("a headless frontend");
-            let mut map = test.map(&frontend, 2.0);
+            let mut map = test.map(&mut frontend, 2.0);
             map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
             map.style_mut().load_url(style);
             frontend.render(&mut map).expect("render");
@@ -217,7 +212,7 @@ fn rendering_stats_count_live_resources() {
     const EMPTY: &str = r#"{"version": 8, "sources": {}, "layers": []}"#;
     let test = MemoryTest::new();
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &test.run_loop).expect("a headless frontend");
-    let mut map = test.map(&frontend, 1.0);
+    let mut map = test.map(&mut frontend, 1.0);
     map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
 
     map.style_mut().load_url("https://example.com/maps/streets");
@@ -249,9 +244,9 @@ fn rendering_stats_count_live_resources() {
     frontend.render(&mut map).expect("render");
     assert_eq!(live_resources(&frontend), evicted);
 
-    // The frontend drops its renderer on the run loop once the map goes.
+    // The frontend drops its renderer once it finds the map gone.
     drop(map);
-    test.run_loop.run_once();
+    assert!(!frontend.render_update());
     let torn_down = live_resources(&frontend);
     assert!(live(&torn_down, "num_active_textures") < live(&loaded, "num_active_textures"));
     assert!(live(&torn_down, "mem_textures") < live(&loaded, "mem_textures"));
@@ -264,7 +259,7 @@ fn rendering_stats_count_live_resources() {
 fn rendering_stats_count_one_frame_of_globe_clip_masks() {
     let test = MemoryTest::new();
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &test.run_loop).expect("a headless frontend");
-    let mut map = test.map(&frontend, 1.0);
+    let mut map = test.map(&mut frontend, 1.0);
     map.style_mut().load_json(
         r#"{"version": 8, "projection": {"type": "vertical-perspective"},
             "sources": {"shape": {"type": "geojson", "data": {"type": "Polygon",

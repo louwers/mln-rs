@@ -9,11 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mln_actor::{AsyncTask, RunLoop};
-use mln_gfx::rendering_stats::RenderingStats;
+use mln_actor::RunLoop;
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
-use mln_renderer::UpdateReader;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::conversion::Convertible;
@@ -87,95 +85,30 @@ fn lat_lng(latitude: f64, longitude: f64) -> LatLng {
     LatLng::new(latitude, longitude).expect("a coordinate")
 }
 
-/// A frontend that loads resources asynchronously, but renders a frame only
-/// when the test asks, at the time it chooses.
-#[derive(Clone)]
-struct TimedHeadlessFrontend {
-    frontend: HeadlessFrontend,
-    updates: Rc<RefCell<Option<UpdateReader>>>,
-}
-
-impl TimedHeadlessFrontend {
-    fn new(run_loop: &RunLoop) -> Self {
-        TimedHeadlessFrontend {
-            frontend: HeadlessFrontend::with_options(Size::new(256, 256), 1.0, false, run_loop)
-                .expect("a headless frontend"),
-            updates: Rc::default(),
-        }
-    }
-
-    fn render_at(&self, time: Instant) -> RenderResult {
-        let update = self.updates.borrow().as_ref().and_then(UpdateReader::latest).expect("update parameters");
-        let mut parameters = (*update.parameters).clone();
-        parameters.time_point = Some(time);
-        let parameters = Arc::new(parameters);
-        if let Some(frames) = self.frontend.target().frames() {
-            self.frontend.with_renderer(|renderer| renderer.render(&parameters, frames));
-        }
-        RenderResult { image: self.frontend.read_still_image(), stats: stats(&self.frontend) }
-    }
-}
-
-/// A frontend that renders the map it's attached to.
-trait Frontend: Clone + 'static {
-    fn attach(&self, map: &Map);
-}
-
-impl Frontend for HeadlessFrontend {
-    fn attach(&self, map: &Map) {
-        HeadlessFrontend::attach(self, map);
-    }
-}
-
-impl Frontend for TimedHeadlessFrontend {
-    fn attach(&self, map: &Map) {
-        self.frontend.attach(map);
-        *self.updates.borrow_mut() = Some(map.update_reader());
-    }
-}
-
-/// The rendering stats of the frontend's last frame.
-fn stats(frontend: &HeadlessFrontend) -> RenderingStats {
-    frontend.rendering_stats()
-}
-
-struct SymbolRenderingTest<F> {
-    _events: AsyncTask,
+struct SymbolRenderingTest {
+    _events: Observing,
     run_loop: RunLoop,
-    frontend: F,
+    frontend: Rc<RefCell<HeadlessFrontend>>,
     observer: Rc<StubMapObserver>,
     map: Rc<RefCell<Map>>,
 }
 
-impl SymbolRenderingTest<HeadlessFrontend> {
+impl SymbolRenderingTest {
+    /// A test whose frontend draws each update of the map from the run loop.
     fn new(count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
-        Self::with_frontend(
-            |run_loop| HeadlessFrontend::new(Size::new(256, 256), 1.0, run_loop).expect("a headless frontend"),
-            count,
-            spacing,
-            kind,
-            mode,
-        )
+        Self::with_frontend(true, count, spacing, kind, mode)
     }
 
-    fn render(&self) -> RenderResult {
-        let result = self.frontend.clone().render(&mut self.map.borrow_mut()).expect("render");
-        self.observer.dispatch_events(&self.map);
-        result
+    /// A test whose frontend loads resources asynchronously, but renders a
+    /// frame only when the test asks ([`render_at`](Self::render_at)), at
+    /// the time it chooses.
+    fn timed(count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
+        Self::with_frontend(false, count, spacing, kind, mode)
     }
-}
 
-impl<F: Frontend> SymbolRenderingTest<F> {
-    /// `frontend` makes the frontend on the test's run loop.
-    fn with_frontend(
-        frontend: impl FnOnce(&RunLoop) -> F,
-        count: usize,
-        spacing: f64,
-        kind: SymbolKind,
-        mode: MapMode,
-    ) -> Self {
+    fn with_frontend(live: bool, count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
         let run_loop = RunLoop::new();
-        let frontend = frontend(&run_loop);
+        let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop).expect("a headless frontend");
         let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
         let observer = Rc::new(StubMapObserver::default());
@@ -190,8 +123,25 @@ impl<F: Frontend> SymbolRenderingTest<F> {
         map.style_mut().add_image(marker(kind == SymbolKind::SdfIcon));
         map.jump_to(&CameraOptions { center: Some(lat_lng(5.0, 5.0)), zoom: Some(4.0), ..Default::default() });
         let map = Rc::new(RefCell::new(map));
-        let events = observer.observe(&map);
+        let frontend = Rc::new(RefCell::new(frontend));
+        let events = observer.observe(&map, live.then_some(&frontend));
         SymbolRenderingTest { _events: events, run_loop, frontend, observer, map }
+    }
+
+    fn render(&self) -> RenderResult {
+        let result = self.frontend.borrow_mut().render(&mut self.map.borrow_mut()).expect("render");
+        self.observer.dispatch_events(&self.map);
+        result
+    }
+
+    /// Draws the map's latest update as at `time`.
+    fn render_at(&self, time: Instant) -> RenderResult {
+        let update = self.map.borrow().update_reader().latest().expect("update parameters");
+        let mut parameters = (*update.parameters).clone();
+        parameters.time_point = Some(time);
+        let mut frontend = self.frontend.borrow_mut();
+        frontend.draw(&Arc::new(parameters));
+        RenderResult { image: frontend.read_still_image(), stats: frontend.rendering_stats() }
     }
 
     fn jump_to(&self, camera: CameraOptions) {
@@ -266,7 +216,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
     {
         let phase = Rc::clone(&phase);
         let failures = Rc::clone(&failures);
-        let frontend = test.frontend.clone();
+        let frontend = Rc::clone(&test.frontend);
         let map = Rc::downgrade(&test.map);
         let saw_fade_out = Cell::new(false);
         let initial_image = RefCell::new(None::<PremultipliedImage>);
@@ -286,7 +236,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
                     if draw_calls != 2 {
                         failures.borrow_mut().push(format!("initial: {draw_calls} draw calls"));
                     }
-                    *initial_image.borrow_mut() = Some(frontend.read_still_image());
+                    *initial_image.borrow_mut() = Some(frontend.borrow().read_still_image());
                     phase.set(Phase::Colliding);
                     map.borrow_mut().jump_to(&CameraOptions { zoom: Some(4.1), ..Default::default() });
                 }
@@ -312,7 +262,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
                     if draw_calls != 2 {
                         failures.borrow_mut().push(format!("reappeared: {draw_calls} draw calls"));
                     }
-                    if initial_image.borrow().as_ref() != Some(&frontend.read_still_image()) {
+                    if initial_image.borrow().as_ref() != Some(&frontend.borrow().read_still_image()) {
                         failures.borrow_mut().push("the reappeared frame differs from the initial one".to_owned());
                     }
                     phase.set(Phase::Complete);
@@ -331,8 +281,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
 // gtest: SymbolRendering.CollisionFadeIntermediateFrames
 #[test]
 fn collision_fade_intermediate_frames() {
-    let test =
-        SymbolRenderingTest::with_frontend(TimedHeadlessFrontend::new, 2, 0.5, SymbolKind::Icon, MapMode::Continuous);
+    let test = SymbolRenderingTest::timed(2, 0.5, SymbolKind::Icon, MapMode::Continuous);
     test.jump_to(CameraOptions { center: Some(lat_lng(5.0, 5.25)), zoom: Some(4.9), ..Default::default() });
 
     let fully_loaded = Rc::new(Cell::new(false));
@@ -345,7 +294,7 @@ fn collision_fade_intermediate_frames() {
     let start = Instant::now();
     let frame = |ms: u64| {
         test.run_loop.run_once();
-        test.frontend.render_at(start + Duration::from_millis(ms))
+        test.render_at(start + Duration::from_millis(ms))
     };
 
     // Wait only for resources; simulated time stays fixed while loading.

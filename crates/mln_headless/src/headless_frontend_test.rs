@@ -1,5 +1,6 @@
 // Smoke tests for the HeadlessFrontend + Map still-image path (the C++
-// tree tests this through test/api/*.test.cpp and the render tests).
+// tree tests this through test/api/*.test.cpp and the render tests), and of
+// the frames the frontend draws when asked.
 
 use mln_map::{CameraOptions, MapMode, MapOptions};
 
@@ -52,31 +53,52 @@ fn frames(map: &mut Map) -> usize {
 }
 
 #[test]
-fn draws_each_update_of_the_attached_map_on_the_run_loop() {
+fn render_update_draws_each_update_of_the_attached_map_once() {
     let run_loop = RunLoop::new();
     let size = Size::new(16, 16);
-    let frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
     let mut map = Map::new(MapOptions { size, ..Default::default() }, &run_loop).unwrap();
     map.style_mut().load_json(&background_style("red"));
     map.drain_events();
     // The map published before the frontend attached: the frontend draws the
-    // latest update at once.
+    // latest update.
     frontend.attach(&map);
-    run_loop.run_once();
+    assert!(frontend.render_update());
+    // Nothing new until the map publishes again.
+    assert!(!frontend.render_update());
     assert_eq!(frames(&mut map), 1);
-
     assert_eq!(pixel(&frontend.read_still_image(), 0, 0), [255, 0, 0, 255]);
 
     map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
-    run_loop.run_once();
+    assert!(frontend.render_update());
     assert_eq!(frames(&mut map), 1);
+
+    // render_frame draws the latest update again.
+    assert!(frontend.render_frame());
+    assert_eq!(frames(&mut map), 1);
+}
+
+#[test]
+fn render_update_drops_the_renderer_once_the_map_is_gone() {
+    let run_loop = RunLoop::new();
+    let size = Size::new(16, 16);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
+    let mut map = Map::new(MapOptions { size, ..Default::default() }, &run_loop).unwrap();
+    map.style_mut().load_json(&background_style("red"));
+    map.process_events();
+    frontend.attach(&map);
+    assert!(frontend.render_update());
+    drop(map);
+    assert!(!frontend.render_update());
+    assert!(frontend.renderer.is_none());
+    assert!(!frontend.render_frame());
 }
 
 #[test]
 fn attaching_another_map_renders_that_map() {
     let run_loop = RunLoop::new();
     let size = Size::new(16, 16);
-    let frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
     let mut first = Map::new(MapOptions { size, ..Default::default() }, &run_loop).unwrap();
     let mut second = Map::new(MapOptions { size, ..Default::default() }, &run_loop).unwrap();
     first.style_mut().load_json(&background_style("red"));
@@ -85,14 +107,14 @@ fn attaching_another_map_renders_that_map() {
     second.drain_events();
     frontend.attach(&first);
     frontend.attach(&second);
-    run_loop.run_once();
+    assert!(frontend.render_update());
     first.drain_events();
     assert_eq!(frames(&mut second), 1);
     assert_eq!(pixel(&frontend.read_still_image(), 0, 0), [0, 0, 255, 255]);
 
     // The first map's updates no longer reach the frontend.
     first.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
-    run_loop.run_once();
+    frontend.render_update();
     assert_eq!(frames(&mut first), 0);
     assert_eq!(pixel(&frontend.read_still_image(), 0, 0), [0, 0, 255, 255]);
 }

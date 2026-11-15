@@ -24,20 +24,16 @@ egui.workspace = true
 egui-wgpu.workspace = true
 egui_extras.workspace = true
 egui-winit.workspace = true
-feature.workspace = true
-mln_actor.workspace = true
 mln_gestures.workspace = true
-mln_gfx.workspace = true
 mln_image.workspace = true
 mln_map.workspace = true
 mln_math.workspace = true
+# Only for its feature: the sessions shape the style's font faces, and the
+# system's fonts that the map falls back to, in-process.
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
-# The ambient cache and mbtiles:// sources, as in C++.
-mln_storage = { workspace = true, features = ["sqlite"] }
-mln_style.workspace = true
-mln_style_types.workspace = true
-mln_system_fonts.workspace = true
-mln_text.workspace = true
+mln_runtime = { workspace = true, features = ["default"] }
+# The responses of the offline mode's resource provider.
+mln_storage.workspace = true
 mln_util.workspace = true
 mln_webgpu.workspace = true
 parking_lot.workspace = true
@@ -58,6 +54,7 @@ raw-window-metal.workspace = true
 # The Vulkan backend and the controls drawn on Vulkan (vulkan_overlay.rs).
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
 ash.workspace = true
+mln_gfx.workspace = true
 mln_vulkan.workspace = true
 
 # The OpenGL ES backend, which presents to the window through EGL, and the
@@ -66,13 +63,16 @@ mln_vulkan.workspace = true
 egui_glow.workspace = true
 mln_gl.workspace = true
 
-# Loads the OpenFreeMap Liberty style over HTTPS through the Map's file
-# sources (OnlineFileSource -> HTTPFileSource) and Style::loadURL, and parses
-# it. Needs network access, so it is ignored by default: `cargo test -p
-# mln-rs-desktop -- --ignored`.
+# Loads the OpenFreeMap Liberty style over HTTPS through a runtime's map, as
+# the app does, and parses it. Needs network access, so it is ignored by
+# default: `cargo test -p mln-rs-desktop -- --ignored`.
 [[test]]
 name = "liberty_style_test"
 path = "tests/liberty_style_test.rs"
+
+# The renderer is a dependency for its feature only.
+[package.metadata.cargo-udeps.ignore]
+normal = ["mln_renderer"]
 
 [lints]
 workspace = true

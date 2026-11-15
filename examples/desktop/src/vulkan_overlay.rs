@@ -105,6 +105,18 @@ pub(crate) fn vulkan_overlay(paint: Rc<RefCell<Paint>>) -> Box<dyn Overlay> {
     Box::new(VulkanOverlay { paint, painter: None, failed: false })
 }
 
+/// The name of the GPU that `device` renders on, for the controls' status
+/// line.
+pub(crate) fn device_name(device: &mln_vulkan::Device) -> String {
+    let raw = device.raw();
+    let entry = ash::StaticFn { get_instance_proc_addr: raw.get_instance_proc_addr };
+    // SAFETY: the device's instance and physical device live as long as the
+    // device, and the query reads only the physical device's properties.
+    let properties =
+        unsafe { ash::Instance::load(&entry, raw.instance).get_physical_device_properties(raw.physical_device) };
+    properties.device_name_as_c_str().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
 impl Overlay for VulkanOverlay {
     fn draw(&mut self, target: &mut OverlayTarget<'_>) {
         if self.failed {

@@ -1,10 +1,10 @@
 // The window: winit's event loop on the main thread, and the render thread
-// (view.rs) that owns the map and presents.
+// (view.rs) that drives the map and presents it.
 //
 // The main thread only turns window events into `Message`s for the render
-// thread and carries out what the render thread asks of the window (a
-// surface, its title, its size, egui's cursor and links). Frames wait for
-// the display on the render thread: on macOS, waiting in
+// thread and carries out what the render thread asks of the window (on
+// macOS a surface, its title, its size, egui's cursor and links). Frames
+// wait for the display on the render thread: on macOS, waiting in
 // `-[CAMetalLayer nextDrawable]` on the main thread holds up the window's
 // input with it, and a trackpad's first moves arrive ~100 ms late
 // (rust-windowing/winit#1737).
@@ -21,13 +21,16 @@
 // window's.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, OnceLock, mpsc};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use mln_actor::RunLoopHandle;
 use mln_gestures::{Button, Input, Modifiers, PinchPhase, PointerKind, WheelDelta};
+use mln_map::MapEvent;
 use mln_util::geo::ScreenCoordinate;
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::{Condvar, Mutex};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
@@ -44,7 +47,8 @@ use crate::view::{self, Launch};
 /// The window's size before it opens, in logical pixels (C++'s 1024x768).
 const WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1024.0, 768.0);
 
-/// What the main thread hands the render thread, in the order it happened.
+/// What the main thread and the runtime hand the render thread, in the order
+/// it happened.
 pub(crate) enum Message {
     /// Input for the gesture recognizer, in the map's logical pixels.
     Input {
@@ -70,21 +74,23 @@ pub(crate) enum Message {
     },
     /// The window was asked to close.
     Close,
+    /// An event of the map, from the runtime's thread.
+    Map(MapEvent),
+    /// What the controls show of the map's style, read on the runtime's
+    /// thread.
+    Style(view::StyleInfo),
 }
 
 /// What the render thread asks of the main thread.
 pub(crate) enum UserEvent {
-    /// A surface for the window, from this instance, sent back on the
-    /// channel. The window's thread makes it.
+    /// A surface for the window's Metal layer, from this instance, sent back
+    /// on the channel. The window's thread makes it.
+    #[cfg(target_os = "macos")]
     MakeSurface(wgpu::Instance, mpsc::Sender<Result<wgpu::Surface<'static>, String>>),
     /// A Metal layer in the window, sent back on the channel. The window's
     /// thread makes it.
     #[cfg(target_os = "macos")]
     MakeLayer(mpsc::Sender<Result<MetalLayer, String>>),
-    /// The window, sent back on the channel, for a backend that makes its
-    /// surface from the window's handles (Vulkan, and OpenGL ES through EGL).
-    #[cfg(not(target_vendor = "apple"))]
-    Window(mpsc::Sender<Arc<Window>>),
     SetTitle(String),
     RequestSize(LogicalSize<f64>),
     /// What egui asks of the window after a frame: its cursor, a link to open.
@@ -93,37 +99,74 @@ pub(crate) enum UserEvent {
     Ended,
 }
 
-/// The messages the render thread hasn't taken yet. Sending one wakes the
-/// render thread's `RunLoop`.
+/// The messages the render thread hasn't taken yet, and the wakes of the
+/// map's render session. The render thread sleeps in [`wait`](Self::wait)
+/// until one comes.
 #[derive(Default)]
 pub(crate) struct Inbox {
-    messages: Mutex<Vec<Message>>,
-    waker: OnceLock<RunLoopHandle>,
+    state: Mutex<InboxState>,
+    arrived: Condvar,
+    /// The map has something new to draw.
+    redraw: AtomicBool,
+}
+
+#[derive(Default)]
+struct InboxState {
+    messages: Vec<Message>,
+    /// A message or a wake came since the render thread last waited.
+    woken: bool,
 }
 
 impl Inbox {
-    fn messages(&self) -> MutexGuard<'_, Vec<Message>> {
-        self.messages.lock()
-    }
-
     pub(crate) fn send(&self, message: Message) {
-        self.messages().push(message);
-        if let Some(waker) = self.waker.get() {
-            waker.invoke(|| {});
-        }
+        let mut state = self.state.lock();
+        state.messages.push(message);
+        state.woken = true;
+        drop(state);
+        self.arrived.notify_one();
     }
 
-    /// Wakes `run_loop` whenever a message arrives from now on.
-    pub(crate) fn set_waker(&self, run_loop: RunLoopHandle) {
-        let _ = self.waker.set(run_loop);
+    /// Wakes the render thread to service its render session.
+    pub(crate) fn wake(&self) {
+        self.state.lock().woken = true;
+        self.arrived.notify_one();
+    }
+
+    /// Wakes the render thread to draw the map's latest update.
+    pub(crate) fn wake_for_redraw(&self) {
+        self.redraw.store(true, Ordering::SeqCst);
+        self.wake();
+    }
+
+    /// Whether the map has had something new to draw since the last call.
+    pub(crate) fn take_redraw(&self) -> bool {
+        self.redraw.swap(false, Ordering::SeqCst)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.messages().is_empty()
+        self.state.lock().messages.is_empty()
     }
 
     pub(crate) fn take(&self) -> Vec<Message> {
-        std::mem::take(&mut *self.messages())
+        std::mem::take(&mut self.state.lock().messages)
+    }
+
+    /// Sleeps until a message or a wake comes, or until `deadline`. A
+    /// message or wake that came since the last wait ends it at once; the
+    /// messages that wait don't.
+    pub(crate) fn wait(&self, deadline: Option<Instant>) {
+        let mut state = self.state.lock();
+        while !state.woken {
+            match deadline {
+                Some(deadline) => {
+                    if self.arrived.wait_until(&mut state, deadline).timed_out() {
+                        break;
+                    }
+                }
+                None => self.arrived.wait(&mut state),
+            }
+        }
+        state.woken = false;
     }
 }
 
@@ -287,6 +330,8 @@ impl ApplicationHandler<UserEvent> for Host {
             None,
         );
         let launch = Launch {
+            #[cfg(not(target_os = "macos"))]
+            window: Arc::clone(&window),
             ui,
             args,
             settings,
@@ -446,22 +491,13 @@ impl ApplicationHandler<UserEvent> for Host {
             return;
         };
         match event {
+            #[cfg(target_os = "macos")]
             UserEvent::MakeSurface(instance, reply) => {
-                #[cfg(target_os = "macos")]
-                let surface = open.metal_layer().and_then(|layer| layer.create_surface(&instance));
-                #[cfg(not(target_os = "macos"))]
-                let surface = instance
-                    .create_surface(Arc::clone(&open.window))
-                    .map_err(|e| format!("Failed to create a surface for the window: {e}"));
-                let _ = reply.send(surface);
+                let _ = reply.send(open.metal_layer().and_then(|layer| layer.create_surface(&instance)));
             }
             #[cfg(target_os = "macos")]
             UserEvent::MakeLayer(reply) => {
                 let _ = reply.send(open.metal_layer());
-            }
-            #[cfg(not(target_vendor = "apple"))]
-            UserEvent::Window(reply) => {
-                let _ = reply.send(Arc::clone(&open.window));
             }
             UserEvent::SetTitle(title) => open.window.set_title(&title),
             UserEvent::Ui(output) => open.egui.handle_platform_output(&open.window, *output),

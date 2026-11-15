@@ -1,27 +1,34 @@
-// The render thread: the RunLoop, the map, its renderer, the window's surface
-// and the controls over the map (ui.rs).
+// The render thread: the map's runtime, the render session that presents the
+// map to the window, and the controls over the map (ui.rs).
 //
-// The thread sleeps in the RunLoop until it has work: a message from the
-// window (host.rs), a task (a tile or style response) or a timer. A frame
-// waits for the surface's next texture first, then takes the messages that
-// came meanwhile, so that it draws the latest input. Frames come at most once
-// per refresh of the display the window opened on, or as fast as they can in
+// The map lives on its runtime's thread (mln_runtime), which loads its
+// resources and reports its events; this thread sends it commands and reads
+// its snapshot. The map's render session renders on this thread, in the
+// session's driver work (backend.rs), so that the controls draw over its
+// frames here.
+//
+// The thread sleeps until it has work: a message from the window (host.rs)
+// or the runtime, a wake from the render session, or a deadline. Each frame
+// takes the messages that came since the last, and the session's frame waits
+// for the surface's next texture. Frames come at most once per refresh of the
+// display the window opened on, or as fast as the surface takes them in
 // benchmark mode.
 //
 // Mouse, touch, wheel, trackpad and the arrow, `+` and `-` keys go to a
-// `GestureRecognizer` (mln_gestures), which moves the camera and continues
-// releases with the map's momentum.
+// `GestureRecognizer` (mln_gestures), which moves the map's camera and
+// continues releases with the map's momentum.
 //
 // The controls lay out in egui on this thread, in the frames that have their
 // input, a repaint they asked for, or a new frame of the map. egui paints
-// them over the map's frame before it is presented
-// (overlay.rs); when only the controls change, the map
-// draws its last frame again under them.
+// them over the map's frame before it is presented (overlay.rs); when only
+// the controls change, the session draws the map's last update again under
+// them.
 //
-// For checking frames without screenshots: `--readback <file.png>` writes the
-// presented frame once the map is idle (or at exit), `--quit-after <seconds>`
-// closes the window; the style report prints once which layers and sources
-// the renderer skips.
+// For checking frames without screenshots: `--readback <file.png>` writes
+// the map once it is idle (or at exit), as an offscreen session on the
+// window's device renders it, without the controls; `--quit-after <seconds>`
+// closes the window; the style report prints once the style's layers and the
+// sources that the map didn't load.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -30,17 +37,18 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mln_actor::{RunLoop, Timer};
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
 use mln_map::{
-    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapDebugOptions,
-    MapEvent, MapOptions, UpdateReader,
+    AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase,
+    MapDebugOptions, MapEvent,
 };
-use mln_renderer::Renderer;
-use mln_storage::{DatabaseFileSource, FileSource, Loader, OnlineFileSource, ResourceOptions};
-use mln_style::PropertyValue;
-use mln_style::projection::Projection;
-use mln_style_types::{ProjectionDefinition, ProjectionType};
+use mln_runtime::{
+    CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
+    FrameDisposition, LogicalExtent, Map, MapOptions, ResourceRequest, Runtime, RuntimeEventKind, RuntimeOptions,
+};
+use mln_storage::response::Reason;
+use mln_storage::{ResourceError, Response};
+use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -49,7 +57,7 @@ use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
 
 use crate::Args;
-use crate::backend::{Kind, WindowTarget};
+use crate::backend::{self, Kind, WindowSession, WindowSurfaces};
 use crate::host::{Inbox, Message, UserEvent};
 use crate::overlay::Paint;
 use crate::settings::Settings;
@@ -60,6 +68,9 @@ use crate::ui::{Action, Controls, Shown};
 pub(crate) struct Launch {
     pub args: Args,
     pub settings: Settings,
+    /// The window, which the render sessions make their surfaces of.
+    #[cfg(not(target_os = "macos"))]
+    pub window: Arc<winit::window::Window>,
     /// The controls' egui context, which the window's thread feeds.
     pub ui: egui::Context,
     /// The window's scale factor when it opened: the map's first pixel
@@ -78,73 +89,93 @@ pub(crate) struct Launch {
 /// Where the app opens without `--style` or `MLN_STYLE_URL`.
 const DEFAULT_STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
 
+/// How long a readback waits for its offscreen session to load the map.
+const READBACK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// What the controls show of the map's style.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct StyleInfo {
+    /// The style's own name.
+    name: String,
+    /// The sources' attributions, as HTML.
+    attributions: Vec<String>,
+    /// Whether the style's projection is the globe.
+    globe: bool,
+}
+
+impl StyleInfo {
+    /// Reads the style of `map`, on the runtime's thread.
+    fn read(map: &mut mln_map::Map) -> StyleInfo {
+        let style = map.style();
+        let attributions = style
+            .get_sources()
+            .iter()
+            .filter_map(|source| source.get_attribution())
+            .filter(|attribution| !attribution.is_empty())
+            .collect();
+        let projection = style.root_property_json("projection").ok().flatten();
+        let globe = projection
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+            .is_some_and(|projection| projection["type"] == "globe");
+        StyleInfo { name: style.get_name(), attributions, globe }
+    }
+}
+
 /// Opens the map in the window and runs it until the window closes.
 pub(crate) fn run(launch: Launch) {
-    let Launch { args, settings, ui, pixel_ratio, size, frame_interval, start, inbox, proxy } = launch;
-    let run_loop = RunLoop::new();
-    inbox.set_waker(run_loop.handle());
-
-    // Finds the system fonts while the surface and the map get ready.
-    if !args.no_system_fonts {
-        mln_system_fonts::prefetch();
-    }
-
-    let framebuffer_size = Size::new(size.width, size.height);
-    // Vsync unless benchmarking.
-    let backend = match WindowTarget::new(args.backend, &proxy, framebuffer_size, !args.benchmark) {
-        Ok(backend) => backend,
-        Err(e) => {
-            Log::error(Event::GraphicsBackend, e.message);
-            return;
-        }
-    };
-    Log::info(Event::Render, backend.describe());
-    let adapter = backend.adapter();
-    let paint = Rc::new(RefCell::new(Paint::default()));
-    backend.set_controls_overlay(Rc::clone(&paint));
+    let Launch { args, settings, ui, pixel_ratio, size, frame_interval, start, inbox, proxy, .. } = launch;
+    #[cfg(not(target_os = "macos"))]
+    let surfaces = WindowSurfaces { window: launch.window };
+    #[cfg(target_os = "macos")]
+    let surfaces = WindowSurfaces { proxy: proxy.clone() };
 
     if args.benchmark {
         Log::info(Event::General, "BENCHMARK MODE: Some optimizations are disabled.");
     }
 
     let cache_db = args.cache.clone().unwrap_or_else(|| "/tmp/mbgl-cache.db".to_owned());
-    let resource_options = ResourceOptions { cache_path: cache_db, ..ResourceOptions::default() };
-
-    let online = Arc::new(OnlineFileSource::new());
+    let runtime = match Runtime::new(&RuntimeOptions { cache_path: Some(cache_db.into()), ..RuntimeOptions::default() })
+    {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            Log::error(Event::Setup, e.message);
+            return;
+        }
+    };
     if !settings.online {
-        online.set_online(false);
+        // The cache still serves what it has.
+        log_failure(runtime.set_resource_provider(|request: ResourceRequest| {
+            let mut response = Response::new();
+            response.error = Some(Box::new(ResourceError::new(Reason::Connection, "The application is offline")));
+            let _ = request.respond(response);
+        }));
         Log::warning(Event::Setup, "Application is offline.");
     }
-    let network: Arc<dyn FileSource> = online;
-    let database_file_source =
-        Arc::new(DatabaseFileSource::new(&resource_options.cache_path, Some(Arc::clone(&network))));
-    let loader = Loader::builder()
-        .asset_path(&resource_options.asset_path)
-        .network(network)
-        .database(Arc::<DatabaseFileSource>::clone(&database_file_source))
-        .build();
+    let events = Arc::clone(&inbox);
+    log_failure(runtime.set_event_handler(move |batch| {
+        for event in batch {
+            if let RuntimeEventKind::Map(event) = &event.kind {
+                events.send(Message::Map(event.clone()));
+            }
+        }
+    }));
 
-    let mut renderer = Renderer::new(backend.renderer_backend(), pixel_ratio as f32, None, &run_loop);
     let map_size = logical_size(size, pixel_ratio);
-
-    let mut map = match Map::with_file_source(
-        Arc::new(loader),
-        MapOptions { size: map_size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
-        &run_loop,
-    ) {
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: map_size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
+        event_mask: EventMask::NONE | EventType::MapStyleLoaded | EventType::MapIdle | EventType::MapSourceChanged,
+        system_fonts: !args.no_system_fonts,
+        ..MapOptions::default()
+    };
+    let map = match runtime.create_map(options).and_then(|(map, created)| created.wait().map(|_| map)) {
         Ok(map) => map,
         Err(e) => {
             Log::error(Event::Setup, e.message);
             return;
         }
     };
-    renderer.set_event_queue(Some(map.renderer_events()));
-    let updates = map.update_reader();
-
-    if let Err(e) = map.set_bounds(&BoundOptions { max_pitch: Some(settings.max_pitch), ..Default::default() }) {
-        Log::warning(Event::Setup, e.message);
-    }
-    map.jump_to(&CameraOptions {
+    log_failure(map.set_bounds(BoundOptions { max_pitch: Some(settings.max_pitch), ..Default::default() }));
+    let camera = CameraOptions {
         center: LatLng::new(settings.latitude, settings.longitude).ok(),
         center_altitude: Some(settings.altitude),
         zoom: Some(settings.zoom),
@@ -153,9 +184,20 @@ pub(crate) fn run(launch: Launch) {
         roll: Some(settings.roll),
         fov: Some(settings.fov),
         ..Default::default()
-    });
-    map.set_debug(MapDebugOptions(settings.debug));
-    map.set_globe_free_bearing(settings.free_bearing);
+    };
+    log_failure(map.update_camera(CameraUpdate { camera, ..Default::default() }).map(|command| command.applied));
+    log_failure(map.set_debug_flags(MapDebugOptions(settings.debug)));
+    log_failure(map.set_globe_free_bearing_enabled(settings.free_bearing));
+
+    let paint = Rc::new(RefCell::new(Paint::default()));
+    let window = match WindowSession::attach(args.backend, None, &map, &surfaces, map_size, Rc::clone(&paint), &inbox) {
+        Ok(window) => window,
+        Err(e) => {
+            Log::error(Event::GraphicsBackend, e.message);
+            return;
+        }
+    };
+    Log::info(Event::Render, format!("Rendering with {}", window.adapter(&paint.borrow())));
 
     let style_url = match &args.style {
         Some(style) if !style.contains("://") => format!("file://{style}"),
@@ -163,20 +205,21 @@ pub(crate) fn run(launch: Launch) {
         None => std::env::var("MLN_STYLE_URL").unwrap_or_else(|_| DEFAULT_STYLE.to_owned()),
     };
 
-    let wake = Timer::new(&run_loop);
     let mut view = View {
-        run_loop,
-        wake,
         inbox,
         proxy,
         start,
         frame_interval,
         next_frame_at: Instant::now(),
-        gfx: Some(Gfx { renderer, backend }),
-        updates,
-        drawn_update: 0,
-        dirty: false,
+        runtime,
         map,
+        surfaces,
+        kind: window.kind(),
+        window: Some(window),
+        demanded: None,
+        next_token: 0,
+        redraw: false,
+        dirty: true,
         style_loaded: false,
         idle: false,
         gestures: GestureRecognizer::default(),
@@ -188,14 +231,14 @@ pub(crate) fn run(launch: Launch) {
         ui_repaint_at: None,
         ui_shapes: Vec::new(),
         paint,
-        database_file_source,
+        style_info: StyleInfo::default(),
         styles: styles::styles(),
         style: styles::style_for(&style_url),
-        adapter,
         next_backend: None,
         frame_report: String::new(),
         benchmark: args.benchmark,
         pixel_ratio,
+        physical_size: size,
         size: map_size,
         quit: false,
         frames: 0,
@@ -203,48 +246,34 @@ pub(crate) fn run(launch: Launch) {
         last_reported: Instant::now(),
         gesture_test: args.gesture_test.then_some(GestureTest { step: 0, next_at: None }),
         readback_path: args.readback.as_ref().map(PathBuf::from),
-        readback_requested: false,
         quit_at: args.quit_after.map(|s| Instant::now() + Duration::from_secs_f64(s)),
         style_reported: false,
     };
-
-    if !args.no_system_fonts {
-        let faces = mln_system_fonts::fallback_font_faces();
-        if faces.is_empty() {
-            Log::info(Event::Setup, "No system fonts found for complex scripts or CJK");
-        } else {
-            let families: Vec<&str> = faces.iter().map(|face| face.family.as_str()).collect();
-            Log::info(Event::Setup, format!("Falling back to system fonts: {}", families.join(", ")));
-        }
-        view.map.style_mut().set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
-    }
     let style = view.style.clone();
     view.load_style(style);
 
     view.run();
 
-    let camera = CameraOptions::from(view.map.snapshot().view.camera);
-    let center = camera.center.unwrap_or_default();
-    Log::info(
-        Event::General,
-        format!(
-            "Exit location: --lat={:.6} --lon={:.6} --zoom={:.6} --bearing={:.6} --pitch={:.6}",
-            center.latitude(),
-            center.longitude(),
-            camera.zoom.unwrap_or_default(),
-            camera.bearing.unwrap_or_default(),
-            camera.pitch.unwrap_or_default(),
-        ),
-    );
-    // Drop order: the renderer, then the map, then the backend's surface,
-    // while the window is still open.
-    let View { gfx, map, .. } = view;
-    let backend = gfx.map(|Gfx { renderer, backend }| {
-        drop(renderer);
-        backend
-    });
-    drop(map);
-    drop(backend);
+    match view.map.camera().and_then(Completion::wait) {
+        Ok(query) => {
+            let camera = query.camera;
+            Log::info(
+                Event::General,
+                format!(
+                    "Exit location: --lat={:.6} --lon={:.6} --zoom={:.6} --bearing={:.6} --pitch={:.6}",
+                    camera.center.latitude(),
+                    camera.center.longitude(),
+                    camera.zoom,
+                    camera.bearing,
+                    camera.pitch,
+                ),
+            );
+        }
+        Err(e) => Log::warning(Event::General, e.message),
+    }
+    // The session lets go of the window's surface while the window is still
+    // open; the map and the runtime go after it.
+    view.close_window();
 }
 
 /// A physical size in the map's logical pixels.
@@ -253,32 +282,41 @@ fn logical_size(size: PhysicalSize<u32>, pixel_ratio: f64) -> Size {
     Size::new(size.width, size.height)
 }
 
-/// Logs a camera change's error (a NaN pan from the input).
-fn log_error(result: Result<(), mln_util::Error>) {
-    if let Err(e) = result {
-        Log::error(Event::General, e.message);
+/// Logs a command's failure: one that couldn't be sent, or that completed
+/// with an error.
+fn log_failure<T: Send + 'static>(sent: Result<Completion<T>, Error>) {
+    match sent {
+        Ok(completion) => completion.on_complete(|result| {
+            if let Err(e) = result {
+                Log::warning(Event::General, e.message);
+            }
+        }),
+        Err(e) => Log::warning(Event::General, e.message),
     }
 }
 
 struct View {
-    run_loop: RunLoop,
-    /// Wakes the `RunLoop` when the next frame or a deadline is due.
-    wake: Timer,
     inbox: Arc<Inbox>,
     proxy: EventLoopProxy<UserEvent>,
     start: Instant,
     frame_interval: Duration,
     next_frame_at: Instant,
 
-    /// `None` only while the backend switches.
-    gfx: Option<Gfx>,
-    /// The map's updates for the renderer.
-    updates: UpdateReader,
-    /// The generation of the update the renderer drew last.
-    drawn_update: u64,
+    runtime: Runtime,
+    map: Map,
+    surfaces: WindowSurfaces,
+    /// The backend the map renders with.
+    kind: Kind,
+    /// The map's session on the window. `None` only while the backend
+    /// switches or a readback renders.
+    window: Option<WindowSession>,
+    /// The token of the frame demand whose result hasn't come yet.
+    demanded: Option<u64>,
+    next_token: u64,
+    /// The map has something new to draw.
+    redraw: bool,
     /// The view has something new to draw besides the map's updates.
     dirty: bool,
-    map: Map,
     /// The map loaded the current style.
     style_loaded: bool,
     /// The map has become idle since the view opened.
@@ -301,16 +339,17 @@ struct View {
     /// The controls' last frame, to tell whether a frame changed them.
     ui_shapes: Vec<egui::epaint::ClippedShape>,
     paint: Rc<RefCell<Paint>>,
-    database_file_source: Arc<DatabaseFileSource>,
+    style_info: StyleInfo,
     styles: Vec<Style>,
     style: Style,
-    adapter: String,
     /// The backend the controls asked for, which the next frame switches to.
     next_backend: Option<Kind>,
     frame_report: String,
 
     benchmark: bool,
     pixel_ratio: f64,
+    /// The window's size in physical pixels.
+    physical_size: PhysicalSize<u32>,
     /// The map's size, in logical pixels.
     size: Size,
     quit: bool,
@@ -322,27 +361,11 @@ struct View {
 
     gesture_test: Option<GestureTest>,
     readback_path: Option<PathBuf>,
-    readback_requested: bool,
     quit_at: Option<Instant>,
     style_reported: bool,
 }
 
-/// The renderer and the backend it draws with, which it goes before.
-struct Gfx {
-    renderer: Renderer,
-    backend: WindowTarget,
-}
-
 impl View {
-    /// The backend presenting to the window.
-    fn backend(&self) -> &WindowTarget {
-        &self.gfx.as_ref().expect("a backend").backend
-    }
-
-    fn renderer(&mut self) -> &mut Renderer {
-        &mut self.gfx.as_mut().expect("a renderer").renderer
-    }
-
     /// Milliseconds on the gesture recognizer's clock.
     fn ms(&self, at: Instant) -> f64 {
         at.saturating_duration_since(self.start).as_secs_f64() * 1000.0
@@ -350,7 +373,15 @@ impl View {
 
     /// Loads `style` and names the window after it.
     fn load_style(&mut self, style: Style) {
-        self.map.style_mut().load_url(&style.url);
+        match self.map.set_style_url(&style.url) {
+            Ok(loaded) => loaded.on_complete(|result| match result {
+                // Another style's load replaced it.
+                Err(e) if e.kind == ErrorKind::Cancelled => {}
+                Err(e) => Log::error(Event::General, format!("Failed to load the style: {}", e.message)),
+                Ok(_) => {}
+            }),
+            Err(e) => Log::error(Event::General, e.message),
+        }
         let name = if style.name.is_empty() { style.url.clone() } else { style.name.clone() };
         let _ = self.proxy.send_event(UserEvent::SetTitle(format!("mln-rs: {name}")));
         self.style = style;
@@ -358,62 +389,99 @@ impl View {
         self.style_loaded = false;
     }
 
+    /// Reads what the controls show of the map's style, once the commands
+    /// sent before have run.
+    fn read_style(&self) {
+        let inbox = Arc::clone(&self.inbox);
+        match self.map.with_core(StyleInfo::read) {
+            Ok(read) => read.on_complete(move |info| {
+                if let Ok(info) = info {
+                    inbox.send(Message::Style(info));
+                }
+            }),
+            Err(e) => Log::warning(Event::General, e.message),
+        }
+    }
+
     /// Frames and work until the window closes. A readback that never
-    /// happened (the map never became idle) is taken from one last frame.
+    /// happened (the map never became idle) renders at exit.
     fn run(&mut self) {
         while !self.quit {
-            self.run_loop.run_once();
-            self.handle_map_events();
+            self.service();
             if self.quit {
                 break;
             }
             let now = Instant::now();
             if !self.frame_due(now) {
-                self.wait_until(self.next_deadline());
+                self.inbox.wait(self.next_deadline());
                 continue;
             }
             if !self.benchmark && now < self.next_frame_at {
-                self.wait_until(Some(self.next_frame_at));
+                self.inbox.wait(Some(self.next_frame_at));
                 continue;
             }
             self.next_frame_at = now + self.frame_interval;
             self.frame();
         }
         if self.readback_path.is_some() {
-            self.backend().request_readback();
-            self.dirty = true;
-            self.render();
-            self.save_readback();
+            self.read_back();
         }
     }
 
-    /// Lets the map handle what its renderer and its style reported, and
-    /// notes what the view waits for.
-    fn handle_map_events(&mut self) {
-        for event in self.map.drain_events() {
-            match event {
-                MapEvent::StyleLoaded => self.style_loaded = true,
-                MapEvent::Idle => self.idle = true,
-                _ => {}
+    /// Runs the render session's work that is ready, and takes its frame
+    /// results.
+    fn service(&mut self) {
+        self.redraw |= self.inbox.take_redraw();
+        let Some(window) = &self.window else { return };
+        let started = Instant::now();
+        let results = window.service().and_then(|()| window.session().drain_frame_results());
+        let elapsed = started.elapsed();
+        let results = match results {
+            Ok(results) => results,
+            Err(e) => {
+                Log::error(Event::Render, format!("The render session ended: {e}"));
+                self.quit = true;
+                return;
             }
+        };
+        let mut rendered = false;
+        for result in results {
+            if result.token.is_some() && result.token == self.demanded {
+                self.demanded = None;
+            }
+            match result.disposition {
+                FrameDisposition::Rendered => rendered = true,
+                // No texture right now (e.g. a timeout while the compositor
+                // is busy, or a hidden window): try again on the next frame.
+                FrameDisposition::TargetNotReady => self.dirty = true,
+                FrameDisposition::Failed => {
+                    let failure = window.session().snapshot().ok().and_then(|snapshot| snapshot.failure);
+                    let failure = failure.map_or_else(|| "unknown".to_owned(), |e| e.message);
+                    Log::error(Event::Render, format!("The render session failed: {failure}"));
+                    self.quit = true;
+                }
+                FrameDisposition::NoUpdate | FrameDisposition::Superseded => {}
+            }
+        }
+        if rendered {
+            self.report((1000.0 * elapsed.as_secs_f64()) as f32);
         }
     }
 
     /// Whether the map has a frame to draw: a new update, or what the view
     /// marked.
     fn needs_frame(&self) -> bool {
-        self.dirty || self.updates.generation() != self.drawn_update
+        self.redraw || self.dirty || self.benchmark
     }
 
     /// Whether a frame has something to do.
     fn frame_due(&self, now: Instant) -> bool {
         self.needs_frame()
             || self.gestures_animating
-            || self.benchmark
             || !self.inbox.is_empty()
             || self.ui_input.is_some()
             || self.next_deadline().is_some_and(|at| at <= now)
-            || (self.readback_path.is_some() && (self.readback_requested || self.idle))
+            || (self.readback_path.is_some() && self.idle)
     }
 
     /// When a frame is due without input: the controls' repaint, the gesture
@@ -423,58 +491,61 @@ impl View {
         [self.ui_repaint_at, test, self.quit_at].into_iter().flatten().min()
     }
 
-    /// Sleeps in the `RunLoop` until it has work, or until `deadline`.
-    fn wait_until(&self, deadline: Option<Instant>) {
-        match deadline {
-            Some(at) => self.wake.start(at.saturating_duration_since(Instant::now()), Duration::ZERO, || {}),
-            None => self.wake.stop(),
-        }
-        self.run_loop.wait_for_work();
-    }
-
-    /// One frame: the surface's next texture, the messages that came while
-    /// waiting for it, the recognizer's eases, the controls, and the map's
-    /// frame.
+    /// One frame: the messages that came since the last, the recognizer's
+    /// eases, the controls, and the map's frame.
     fn frame(&mut self) {
         if let Some(kind) = self.next_backend.take() {
             self.switch_backend(kind);
         }
-        // Wait for the display first, so that the frame takes the input that
-        // came meanwhile.
-        let drawable = (self.needs_frame() || !self.inbox.is_empty()) && self.backend().acquire_next_texture();
-
-        // The map samples its animations at this frame's time.
-        self.map.set_frame_time(Some(Instant::now()));
         for message in self.inbox.take() {
             self.handle(message);
         }
         let now = Instant::now();
         let ms = self.ms(now);
         self.gestures_animating = self.gestures.frame(&mut self.map, ms);
-        self.forward_command_ends();
 
         // A perf probe: `MLN_PAN_PX=<px>` pans the map by that many pixels
         // every frame, reversing every 2 s (so it stays over the same area),
         // so the "Frame time" log measures continuous camera movement.
         if let Some(dx) = std::env::var("MLN_PAN_PX").ok().and_then(|v| v.parse::<f64>().ok()) {
             let dx = if (ms / 2000.0) as i64 % 2 == 0 { dx } else { -dx };
-            log_error(self.map.move_by(&ScreenCoordinate::new(dx, 0.0), &AnimationOptions::default()));
-            self.dirty = true;
+            let pan = CameraDelta { offset: Some(ScreenCoordinate::new(dx, 0.0)), ..Default::default() };
+            log_failure(self.map.apply_camera_delta(pan).map(|command| command.applied));
         }
 
+        self.redraw |= self.inbox.take_redraw();
         if self.ui_input.is_some() || self.needs_frame() || self.ui_repaint_at.is_some_and(|at| at <= now) {
             self.controls_frame(now);
         }
-
-        // No texture right now (e.g. a timeout while the compositor is busy,
-        // or a hidden window): try again on the next frame.
-        if drawable || (self.needs_frame() && self.backend().acquire_next_texture()) {
-            self.render();
-        }
+        self.demand_frame();
+        self.service();
         self.after_frame();
     }
 
-    /// Applies one message from the window.
+    /// Asks the session for a frame when the map or the controls have
+    /// something new, unless a frame is on its way: one of the controls'
+    /// changes draws the map's last update again.
+    fn demand_frame(&mut self) {
+        if self.demanded.is_some() || !self.needs_frame() {
+            return;
+        }
+        let Some(window) = &self.window else { return };
+        let mode = if self.dirty || self.benchmark { DemandMode::Force } else { DemandMode::IfChanged };
+        self.next_token += 1;
+        match window.session().demand_frame(FrameDemand::new(mode, self.next_token)) {
+            Ok(()) => {
+                self.demanded = Some(self.next_token);
+                self.redraw = false;
+                self.dirty = false;
+            }
+            Err(e) => {
+                Log::error(Event::Render, format!("The render session takes no frames: {e}"));
+                self.quit = true;
+            }
+        }
+    }
+
+    /// Applies one message from the window or the runtime.
     fn handle(&mut self, message: Message) {
         match message {
             Message::Input { input, at } => self.gesture(input, at),
@@ -489,10 +560,23 @@ impl View {
                 if !focused {
                     // A drag the window can't see the end of ends here.
                     self.gesture(Input::Blur, at);
-                    self.renderer().reduce_memory_use();
+                    if let Some(window) = &self.window {
+                        log_failure(window.session().reduce_memory_use());
+                    }
                 }
             }
             Message::Close => self.quit = true,
+            Message::Map(MapEvent::StyleLoaded) => {
+                self.style_loaded = true;
+                self.read_style();
+            }
+            Message::Map(MapEvent::SourceChanged { .. }) => self.read_style(),
+            Message::Map(MapEvent::Idle) => self.idle = true,
+            Message::Map(_) => {}
+            Message::Style(info) => {
+                self.style_info = info;
+                self.ui_repaint_at = Some(Instant::now());
+            }
         }
     }
 
@@ -500,25 +584,16 @@ impl View {
     fn gesture(&mut self, input: Input, at: Instant) {
         let at = self.ms(at);
         self.gestures.handle(&mut self.map, input, at);
-        self.forward_command_ends();
         // The app has no use for clicks.
         self.gestures.take_events();
     }
 
-    /// Tells the gesture recognizer how the camera commands ended, so that a
-    /// press that catches a glide carries it into its release.
-    fn forward_command_ends(&mut self) {
-        for end in self.map.take_command_ends() {
-            self.gestures.camera_command_ended(&end);
-        }
-    }
-
     fn on_resize(&mut self, size: PhysicalSize<u32>) {
-        self.backend().set_framebuffer_size(Size::new(size.width, size.height));
+        self.physical_size = size;
         self.size = logical_size(size, self.pixel_ratio);
-        // An empty size (a minimized window) fails.
-        if let Err(e) = self.map.set_size(self.size) {
-            Log::warning(Event::General, e.message);
+        if let Some(window) = &self.window {
+            // An empty size (a minimized window) fails.
+            log_failure(window.session().resize(LogicalExtent { size: self.size, scale_factor: self.pixel_ratio }));
         }
         self.dirty = true;
     }
@@ -527,14 +602,8 @@ impl View {
     /// sizes it in logical pixels of the new ratio. The window's `Resized`
     /// that follows brings the new physical size, where it changed.
     fn on_scale_factor_changed(&mut self, pixel_ratio: f64) {
-        if let Err(e) = self.map.set_pixel_ratio(pixel_ratio as f32) {
-            Log::warning(Event::General, e.message);
-            return;
-        }
         self.pixel_ratio = pixel_ratio;
-        self.renderer().set_pixel_ratio(pixel_ratio as f32);
-        let size = self.backend().framebuffer_size();
-        self.on_resize(PhysicalSize::new(size.width, size.height));
+        self.on_resize(self.physical_size);
     }
 
     /// The keys the map takes, which the controls didn't: the arrows pan
@@ -572,32 +641,22 @@ impl View {
         }
         input.time = Some(now.saturating_duration_since(self.start).as_secs_f64());
 
-        let camera = CameraOptions::from(self.map.snapshot().view.camera);
-        let style = self.map.style();
-        let attributions: Vec<String> = style
-            .get_sources()
-            .iter()
-            .filter_map(|source| source.get_attribution())
-            .filter(|attribution| !attribution.is_empty())
-            .collect();
-        let style_name = style.get_name();
-        let status = [self.adapter.clone(), self.frame_report.clone()];
+        let snapshot = self.map.snapshot().ok();
+        let camera = snapshot.as_ref().map(|snapshot| snapshot.view.camera);
+        let adapter = self.window.as_ref().map(|window| window.adapter(&self.paint.borrow())).unwrap_or_default();
+        let status = [adapter, self.frame_report.clone()];
         let shown = Shown {
             styles: &self.styles,
             style: &self.style,
-            style_name: &style_name,
-            loading: !self.map.snapshot().fully_loaded,
-            bearing: camera.bearing.unwrap_or_default(),
-            pitch: camera.pitch.unwrap_or_default(),
-            attributions: &attributions,
-            debug: self.map.snapshot().debug,
-            globe: {
-                let style = self.map.style();
-                let type_ = style.get_projection().get_type();
-                type_.is_constant() && type_.as_constant().from == ProjectionType::Globe
-            },
-            free_bearing: self.map.snapshot().globe_free_bearing,
-            backend: self.backend().kind(),
+            style_name: &self.style_info.name,
+            loading: !snapshot.as_ref().is_some_and(|snapshot| snapshot.fully_loaded),
+            bearing: camera.map_or(0.0, |camera| camera.bearing),
+            pitch: camera.map_or(0.0, |camera| camera.pitch),
+            attributions: &self.style_info.attributions,
+            debug: snapshot.as_ref().map_or_else(MapDebugOptions::default, |snapshot| snapshot.debug),
+            globe: self.style_info.globe,
+            free_bearing: snapshot.as_ref().is_some_and(|snapshot| snapshot.globe_free_bearing),
+            backend: self.kind,
             status: &status,
         };
         let mut actions = Vec::new();
@@ -644,14 +703,13 @@ impl View {
                     self.load_style(style);
                 }
             }
-            Action::SetDebug(debug) => self.map.set_debug(debug),
+            Action::SetDebug(debug) => log_failure(self.map.set_debug_flags(debug)),
             Action::SetGlobe(globe) => {
-                let mut projection = Projection::new();
-                let type_ = if globe { ProjectionType::Globe } else { ProjectionType::Mercator };
-                projection.set_type(PropertyValue::Constant(ProjectionDefinition::new(type_)));
-                self.map.style_mut().set_projection(projection);
+                let projection = if globe { r#"{"type":"globe"}"# } else { r#"{"type":"mercator"}"# };
+                log_failure(self.map.set_style_root_property("projection", projection));
+                self.read_style();
             }
-            Action::SetFreeBearing(free_bearing) => self.map.set_globe_free_bearing(free_bearing),
+            Action::SetFreeBearing(free_bearing) => log_failure(self.map.set_globe_free_bearing_enabled(free_bearing)),
             Action::ResetCache => self.reset_cache(),
             Action::SetBackend(kind) => {
                 self.next_backend = Some(kind);
@@ -660,82 +718,78 @@ impl View {
         }
     }
 
-    /// Renders with `kind` from now on: a new backend on the window, and a
-    /// new renderer on it, which loads the tiles again (from the cache).
+    /// Renders with `kind` from now on: a new session on a device of its
+    /// own, which loads the tiles again (from the cache).
     fn switch_backend(&mut self, kind: Kind) {
-        let old = self.backend().kind();
+        let old = self.kind;
         if old == kind {
             return;
         }
-        let size = self.backend().framebuffer_size();
-        // The old renderer and backend go first: the window takes one
-        // backend's frames at a time. When there is no new one, the old kind
-        // takes the window back.
-        self.gfx = None;
-        let made = WindowTarget::new(kind, &self.proxy, size, !self.benchmark).or_else(|e| {
+        // The old session goes first: the window takes one session's frames
+        // at a time. When the new one fails, the old kind takes the window
+        // back.
+        self.close_window();
+        let attached = self.reattach(kind, None).or_else(|e| {
             Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name()));
-            WindowTarget::new(old, &self.proxy, size, !self.benchmark)
+            self.reattach(old, None)
         });
-        let backend = match made {
-            Ok(backend) => backend,
-            Err(e) => {
-                Log::error(Event::GraphicsBackend, e.message);
-                self.quit = true;
-                return;
-            }
-        };
-        let mut renderer = Renderer::new(backend.renderer_backend(), self.pixel_ratio as f32, None, &self.run_loop);
-        renderer.set_event_queue(Some(self.map.renderer_events()));
-        self.gfx = Some(Gfx { renderer, backend });
-        // The new renderer draws the map's last update again.
-        self.dirty = true;
-        self.backend().set_controls_overlay(Rc::clone(&self.paint));
-        self.paint.borrow_mut().resend_textures(&self.ui);
+        if let Err(e) = attached {
+            Log::error(Event::GraphicsBackend, e.message);
+            self.quit = true;
+        }
+    }
+
+    /// Releases the window's session.
+    fn close_window(&mut self) {
+        if let Some(window) = self.window.take() {
+            window.close();
+        }
+        self.demanded = None;
+    }
+
+    /// Attaches a session of `kind` to the window again, on `device` or a
+    /// new one, after another session let go of it.
+    fn reattach(&mut self, kind: Kind, device: Option<Device>) -> Result<(), Error> {
+        let (map, surfaces, size, paint) = (&self.map, &self.surfaces, self.size, Rc::clone(&self.paint));
+        let window = WindowSession::attach(kind, device, map, surfaces, size, paint, &self.inbox)?;
+        {
+            // The new overlay has none of egui's textures, and names its GPU
+            // again.
+            let mut paint = self.paint.borrow_mut();
+            paint.resend_textures(&self.ui);
+            paint.renderer = None;
+        }
+        Log::info(Event::Render, format!("Rendering with {}", window.adapter(&self.paint.borrow())));
+        self.kind = kind;
+        self.window = Some(window);
         // The controls take egui's textures before the map's next frame.
         self.ui_repaint_at = Some(Instant::now());
-        self.adapter = self.backend().adapter();
-        Log::info(Event::Render, self.backend().describe());
-        self.map.trigger_repaint();
+        self.dirty = true;
+        Ok(())
     }
 
     /// Empties the cache database.
     fn reset_cache(&self) {
-        self.database_file_source.reset_database(|result| match result {
-            Ok(()) => Log::info(Event::Database, "Reset the cache"),
-            Err(e) => Log::error(Event::Database, format!("Failed to reset cache: {e}")),
-        });
-    }
-
-    fn render(&mut self) {
-        if !self.needs_frame() {
-            return;
-        }
-        self.dirty = false;
-        let Some(update) = self.updates.latest() else {
-            return;
-        };
-        self.drawn_update = update.generation;
-        let started = Instant::now();
-        {
-            let Some(Gfx { renderer, backend: target }) = self.gfx.as_mut() else {
-                return;
-            };
-            renderer.render(&update.parameters, target.frames());
-        }
-        self.report((1000.0 * started.elapsed().as_secs_f64()) as f32);
-        if self.benchmark {
-            self.dirty = true;
+        match self.runtime.run_cache_database_operation(CacheDatabaseOperation::Reset) {
+            Ok(reset) => reset.on_complete(|result| match result {
+                Ok(()) => Log::info(Event::Database, "Reset the cache"),
+                Err(e) => Log::error(Event::Database, format!("Failed to reset cache: {e}")),
+            }),
+            Err(e) => Log::warning(Event::Database, format!("There is no cache database to reset: {e}")),
         }
     }
 
-    /// `report(float duration)`: the frame time, logged and shown in the
+    /// `report(float duration)`: the time the session took for a frame,
+    /// waiting for the surface's texture included, logged and shown in the
     /// controls' panel once a second.
     fn report(&mut self, duration: f32) {
         self.frames += 1;
         self.frame_time += duration;
-        if self.last_reported.elapsed().as_secs_f64() >= 1.0 {
+        let elapsed = self.last_reported.elapsed().as_secs_f64();
+        if elapsed >= 1.0 {
+            let fps = f64::from(self.frames) / elapsed;
             self.frame_time /= self.frames as f32;
-            self.frame_report = format!("Frame time: {:.2} ms ({:.0} fps)", self.frame_time, 1000.0 / self.frame_time);
+            self.frame_report = format!("Frame time: {:.2} ms ({fps:.0} fps)", self.frame_time);
             Log::info(Event::Render, &self.frame_report);
             self.frames = 0;
             self.frame_time = 0.0;
@@ -755,14 +809,8 @@ impl View {
             report_style(&self.map);
         }
 
-        if self.readback_path.is_some() {
-            if self.readback_requested {
-                self.save_readback();
-            } else if self.idle && self.style_reported {
-                self.backend().request_readback();
-                self.readback_requested = true;
-                self.dirty = true;
-            }
+        if self.readback_path.is_some() && self.idle && self.style_reported {
+            self.read_back();
         }
 
         if let Some(quit_at) = self.quit_at
@@ -773,34 +821,53 @@ impl View {
         }
     }
 
-    fn save_readback(&mut self) {
-        let Some(image) = self.backend().take_readback() else {
+    /// Writes the map to the readback's file, as an offscreen session on the
+    /// window's device renders it once everything has loaded. The window's
+    /// session gives the map up meanwhile, and a new one takes it back unless
+    /// the window is closing.
+    fn read_back(&mut self) {
+        let (Some(path), Some(window)) = (self.readback_path.take(), self.window.as_ref()) else {
             return;
         };
-        let Some(path) = self.readback_path.take() else {
-            return;
-        };
-        let png = mln_image::encode_png(&image);
-        match std::fs::write(&path, png) {
-            Ok(()) => Log::info(
-                Event::General,
-                format!(
-                    "Read back the presented frame ({}x{}) to {}",
-                    image.size.width,
-                    image.size.height,
-                    path.display()
-                ),
-            ),
-            Err(e) => Log::error(Event::General, format!("Failed to write {}: {e}", path.display())),
+        let device = window.device().clone();
+        self.close_window();
+        match backend::read_offscreen(&self.map, device.clone(), self.size, &self.inbox, READBACK_TIMEOUT) {
+            Ok(image) => {
+                let png = mln_image::encode_png(&image);
+                match std::fs::write(&path, png) {
+                    Ok(()) => Log::info(
+                        Event::General,
+                        format!("Read back the map ({}x{}) to {}", image.size.width, image.size.height, path.display()),
+                    ),
+                    Err(e) => Log::error(Event::General, format!("Failed to write {}: {e}", path.display())),
+                }
+            }
+            Err(e) => Log::error(Event::General, format!("Failed to read the map back: {e}")),
+        }
+        if !self.quit
+            && let Err(e) = self.reattach(self.kind, Some(device))
+        {
+            Log::error(Event::GraphicsBackend, e.message);
+            self.quit = true;
         }
     }
 }
 
-/// Prints once which layers the renderer draws and which it
-/// skips (unported layer types, or sources of unported types).
-pub(crate) fn report_style(map: &Map) {
-    let style = map.style();
-    let json: serde_json::Value = serde_json::from_str(&style.get_json()).unwrap_or_default();
+/// Prints once how many layers of each type the style has, and which
+/// sources the map didn't load, with the layers on them.
+fn report_style(map: &Map) {
+    let queried = (|| -> Result<_, Error> {
+        let (json, layers, sources) = (map.loaded_style_json()?, map.style_layers()?, map.style_sources()?);
+        Ok((json.wait()?, layers.wait()?, sources.wait()?))
+    })();
+    let (json, layers, sources) = match queried {
+        Ok(queried) => queried,
+        Err(e) => {
+            Log::warning(Event::General, format!("Can't report on the style: {e}"));
+            return;
+        }
+    };
+    let json: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
     let declared_sources: BTreeMap<String, String> = json
         .get("sources")
         .and_then(|s| s.as_object())
@@ -811,41 +878,38 @@ pub(crate) fn report_style(map: &Map) {
                 .collect()
         })
         .unwrap_or_default();
-    let loaded_sources: Vec<String> = style.get_sources().iter().map(|s| s.get_id()).collect();
+    let loaded_sources: Vec<String> = sources.into_iter().map(|source| source.id).collect();
 
-    let mut drawn: BTreeMap<&'static str, usize> = BTreeMap::new();
-    let mut skipped_type: BTreeMap<&'static str, usize> = BTreeMap::new();
-    let mut skipped_source: BTreeMap<String, usize> = BTreeMap::new();
-    let impls = style.impl_.get_layer_impls();
-    for layer in impls.iter() {
-        let type_ = layer.get_type_info().type_;
-        // Ask the renderer's layer manager itself, so this summary can't go
-        // stale as layer types get ported.
-        if mln_renderer::layermanager::create_render_layer(layer).is_none() {
-            *skipped_type.entry(type_).or_default() += 1;
-        } else if !layer.source.is_empty() && !loaded_sources.contains(&layer.source) {
-            let source_type = declared_sources.get(&layer.source).map_or("missing", String::as_str);
-            *skipped_source.entry(format!("{type_} on {source_type} source '{}'", layer.source)).or_default() += 1;
-        } else {
-            *drawn.entry(type_).or_default() += 1;
+    let mut by_type: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut unloaded_source: BTreeMap<String, usize> = BTreeMap::new();
+    for layer in &layers {
+        *by_type.entry(layer.layer_type).or_default() += 1;
+        if let Some(source) = layer.source_id.as_ref().filter(|source| !loaded_sources.contains(source)) {
+            let source_type = declared_sources.get(source).map_or("missing", String::as_str);
+            *unloaded_source.entry(format!("{} on {source_type} source '{source}'", layer.layer_type)).or_default() +=
+                1;
         }
     }
-    let unported_sources: Vec<String> = declared_sources
+    let unloaded_sources: Vec<String> = declared_sources
         .iter()
         .filter(|(id, _)| !loaded_sources.contains(id))
         .map(|(id, t)| format!("{id} ({t})"))
         .collect();
-    let list = |m: Vec<(String, usize)>| m.iter().map(|(k, v)| format!("{k} x{v}")).collect::<Vec<_>>().join(", ");
+    let list = |m: Vec<(String, usize)>| {
+        if m.is_empty() {
+            return "none".to_owned();
+        }
+        m.iter().map(|(k, v)| format!("{k} x{v}")).collect::<Vec<_>>().join(", ")
+    };
     Log::info(
         Event::General,
         format!(
-            "Style \"{}\": {} layers. Rendered: {}. Skipped, layer type not ported: {}. Skipped, source not ported: {}. Unported sources: {}.",
-            style.get_name(),
-            impls.len(),
-            list(drawn.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()),
-            list(skipped_type.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()),
-            list(skipped_source.into_iter().collect()),
-            if unported_sources.is_empty() { "none".to_owned() } else { unported_sources.join(", ") },
+            "Style \"{}\": {} layers: {}. On sources the map didn't load: {}. Sources the map didn't load: {}.",
+            json.get("name").and_then(|name| name.as_str()).unwrap_or_default(),
+            layers.len(),
+            list(by_type.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()),
+            list(unloaded_source.into_iter().collect()),
+            if unloaded_sources.is_empty() { "none".to_owned() } else { unloaded_sources.join(", ") },
         ),
     );
 }
@@ -944,7 +1008,7 @@ impl View {
                 ("window resize to 800x600", vec![], vec![], vec![])
             }
             step if Kind::ALL.len() > 1 && (16..16 + Kind::ALL.len()).contains(&step) => {
-                let next = self.backend().kind().next();
+                let next = self.kind.next();
                 ("switch to the next backend", vec![], vec![], vec![Action::SetBackend(next)])
             }
             _ => {
@@ -967,17 +1031,23 @@ impl View {
         for action in actions {
             self.apply(action, time);
         }
-        let camera = CameraOptions::from(self.map.snapshot().view.camera);
-        let center = camera.center.unwrap_or_default();
+        // The camera once the step's commands ran.
+        let camera = match self.map.camera().and_then(Completion::wait) {
+            Ok(query) => query.camera,
+            Err(e) => {
+                Log::warning(Event::General, e.message);
+                return;
+            }
+        };
         Log::info(
             Event::General,
             format!(
                 "Gesture test step {step} ({name}): center {:.5},{:.5} zoom {:.3} bearing {:.1} pitch {:.1}",
-                center.latitude(),
-                center.longitude(),
-                camera.zoom.unwrap_or(f64::NAN),
-                camera.bearing.unwrap_or(f64::NAN),
-                camera.pitch.unwrap_or(f64::NAN),
+                camera.center.latitude(),
+                camera.center.longitude(),
+                camera.zoom,
+                camera.bearing,
+                camera.pitch,
             ),
         );
     }
