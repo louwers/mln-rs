@@ -352,10 +352,9 @@ fn buffer_target(usage: BufferUsage) -> u32 {
     }
 }
 
-/// Logs the GPU that `context` renders on, once per process, as C++'s
-/// context does when it loads its extensions. The renderer's backend logs it
-/// at its first hold.
-pub(crate) fn log_gpu_identifier(context: &Rc<GlContext>) {
+/// Logs the GPU that `context` renders on, once per process. A `GlGpu` logs
+/// it at its first pass or flush: the first time it draws or waits on the GPU.
+fn log_gpu_identifier(context: &Rc<GlContext>) {
     static LOGGED: Once = Once::new();
     LOGGED.call_once(|| {
         let _current = context.enter();
@@ -1459,6 +1458,7 @@ impl Gpu for GlGpu {
     }
 
     fn begin_pass(&mut self, desc: &PassDesc<'_>) -> Result<(), GpuError> {
+        log_gpu_identifier(&self.context);
         if self.pass.is_some() {
             return Err(open_pass("a pass"));
         }
@@ -1585,6 +1585,7 @@ impl Gpu for GlGpu {
     /// Has GL run the commands so far, which with `wait` blocks until it
     /// has.
     fn flush(&mut self, wait: bool) -> Result<(), GpuError> {
+        log_gpu_identifier(&self.context);
         if self.pass.is_some() {
             return Err(open_pass("a flush"));
         }

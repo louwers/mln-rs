@@ -75,9 +75,6 @@ pub struct Renderer {
     /// Kept across frames; dropped in `drop` inside the hold.
     clip_masks: ClipMasks,
     render_state: RenderState,
-    /// Whether a frame began, which may have lent the backend to custom
-    /// layers' hosts.
-    began_frame: bool,
     frame_count: u64,
     style_loaded: bool,
     /// Where the last frame drew the map.
@@ -108,7 +105,6 @@ impl Renderer {
             static_data: None,
             clip_masks: ClipMasks::default(),
             render_state: RenderState::Never,
-            began_frame: false,
             frame_count: 0,
             style_loaded: false,
             frame_projection: None,
@@ -370,7 +366,6 @@ impl Renderer {
         let context = &*context;
 
         let image = target.begin_frame()?;
-        self.began_frame = true;
         {
             let mut stats = context.rendering_stats();
             stats.num_draw_calls = 0;
@@ -740,16 +735,11 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        // Held where a frame began: before, no custom layer's host was lent
-        // the backend, so none deinitializes on it.
         let backend = Rc::clone(&self.backend);
-        let _hold = self.began_frame.then(|| backend.hold());
+        let _hold = backend.hold();
         // SAFETY: `orchestrator` is dropped once, here, and nothing reads it
         // afterwards: the remaining fields' drops don't touch it.
-        #[expect(
-            unsafe_code,
-            reason = "drops the orchestrator inside the backend's hold, where a frame began; see its field"
-        )]
+        #[expect(unsafe_code, reason = "drops the orchestrator inside the backend's hold; see its field")]
         unsafe {
             ManuallyDrop::drop(&mut self.orchestrator);
         }

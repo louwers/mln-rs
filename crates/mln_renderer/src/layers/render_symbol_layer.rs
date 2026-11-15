@@ -689,7 +689,10 @@ fn set_placed_attribute<V: bytemuck::Pod>(
     let updated = attribs
         .get(id)
         .and_then(|attr| attr.get_shared_raw_data())
-        .and_then(|shared| (&**shared as &dyn Any).downcast_ref::<VertexVector<V>>())
+        .and_then(|shared| {
+            let any: &dyn Any = &**shared;
+            any.downcast_ref::<VertexVector<V>>()
+        })
         .is_some_and(|shared| shared.update(vertices));
     if updated {
         return;

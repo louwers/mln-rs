@@ -54,9 +54,10 @@ fn each_device_logs_its_platform_and_the_first_context_its_gpu() {
     }
     let mut renderer = String::new();
     for device in &devices {
-        // The renderer's first hold of the context logs the GPU.
+        // A hold alone logs nothing; the first flush logs the GPU.
         let backend = RendererBackend::new(device).unwrap();
         drop(mln_gfx::RendererBackend::hold(&backend));
+        mln_gfx::RendererBackend::gpu(&backend).flush(true).unwrap();
         renderer = backend.get_renderer_name();
     }
     drop(Log::set_thread_observer(previous));

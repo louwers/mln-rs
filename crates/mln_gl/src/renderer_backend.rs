@@ -196,10 +196,8 @@ impl renderer_backend::RendererBackend for RendererBackend {
     /// Mesa. Releasing it leaves no samplers bound, for what draws on the
     /// context outside the renderer, and in debug builds logs an error GL
     /// recorded.
-    /// The first hold in the process logs the GPU the context renders on.
     fn hold(&self) -> Hold<'_> {
         let current = self.context.enter();
-        crate::gpu::log_gpu_identifier(&self.context);
         Hold::new(move || {
             // Not while a panic unwinds through a call that has the `GlGpu`.
             if let Ok(mut gpu) = self.gpu.try_borrow_mut() {
