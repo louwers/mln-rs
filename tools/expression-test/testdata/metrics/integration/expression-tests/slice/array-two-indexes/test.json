@@ -17,8 +17,8 @@
       "serialized": [
             "slice",
             ["array", ["get", "val"]],
-            ["get", "i1"],
-            ["get", "i2"]
+            ["number", ["get", "i1"]],
+            ["number", ["get", "i2"]]
         ],
       "compiled": {
         "result": "success",

@@ -8,7 +8,7 @@
       [{}, {"properties": {"val": "0123456789", "i1": 0, "i2": 99}}]
     ],
     "expected": {
-      "serialized": ["slice", ["get", "val"], ["get", "i1"], ["get", "i2"]],
+      "serialized": ["slice", ["get", "val"], ["number", ["get", "i1"]], ["number", ["get", "i2"]]],
       "compiled": {
         "result": "success",
         "isFeatureConstant": false,

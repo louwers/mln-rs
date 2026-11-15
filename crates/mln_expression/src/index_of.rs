@@ -4,6 +4,7 @@ use mln_util::string::to_string_double;
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_;
+use crate::type_::Type;
 use crate::utf8_op_helpers::{get_unicode_character_offset_on_validated_utf8, unicode_length_on_validated_utf8};
 use crate::value::{Value, type_of};
 
@@ -60,12 +61,21 @@ impl IndexOf {
 
         let keyword = ctx.parse(&value.array_member(1), 1, None, None);
         let input = ctx.parse(&value.array_member(2), 2, None, None);
-
-        let from_index = if length == 4 { ctx.parse(&value.array_member(3), 3, None, None) } else { None };
-
         let (Some(keyword), Some(input)) = (keyword, input) else {
             return None;
         };
+
+        let keyword_type = keyword.get_type();
+        if ![Type::Boolean, Type::String, Type::Number, Type::Null, Type::Value].contains(&keyword_type) {
+            ctx.error(format!(
+                "Expected first argument to be of type boolean, string, number or null, but found {} instead",
+                type_::to_string(&keyword_type)
+            ));
+            return None;
+        }
+
+        let from_index =
+            if length == 4 { Some(ctx.parse(&value.array_member(3), 3, Some(Type::Number), None)?) } else { None };
 
         Some(Expr::new(Node::IndexOf(Box::new(IndexOf { keyword, input, from_index }))))
     }
@@ -83,19 +93,11 @@ impl IndexOf {
             )));
         }
 
-        let mut from_index_value: usize = 0;
-        if let Some(from_index) = &self.from_index {
-            let evaluated_from_index = from_index.evaluate(params)?;
-            let Value::Number(f) = evaluated_from_index else {
-                return Err(EvaluationError::new(format!(
-                    "Expected third argument to be of type number, but found {} instead.",
-                    type_::to_string(&type_of(&evaluated_from_index))
-                )));
-            };
-            // static_cast<size_t>(std::max(f, 0.0))
-            let f = if f < 0.0 { 0.0 } else { f };
-            from_index_value = f as usize;
-        }
+        // A negative or NaN index starts at 0.
+        let from_index_value = match &self.from_index {
+            Some(from_index) => from_index.eval_num(params)?.max(0.0) as usize,
+            None => 0,
+        };
 
         match &*evaluated_input {
             Value::String(s) => Ok(Self::evaluate_for_string_input(s, &evaluated_keyword, from_index_value)),

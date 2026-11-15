@@ -272,10 +272,8 @@ impl Coercion {
             "to-boolean" => Type::Boolean,
             "to-color" => Type::Color,
             "to-padding" => Type::Padding,
-            "to-projection-definition" => Type::ProjectionDefinition,
             "to-number" => Type::Number,
             "to-string" => Type::String,
-            "to-variableanchoroffset" => Type::VariableAnchorOffsetCollection,
             _ => unreachable!("unknown coercion {op}"),
         };
 
@@ -361,11 +359,13 @@ impl Coercion {
             // or a value, so the input alone parses back to it. Later inputs
             // never matter, since `to_image` can't fail.
             Type::Image => self.inputs[0].serialize(),
-            // Port-only: C++ writes "to-variableanchoroffset", which no
-            // parser knows. The coercion is made implicitly, where a
-            // collection is expected and the input is an array or a value, so
-            // the input alone parses back to it.
-            Type::VariableAnchorOffsetCollection if self.inputs.len() == 1 => self.inputs[0].serialize(),
+            // There is no coercion operator to these types either. The parser
+            // makes the coercion implicitly where one is expected and the
+            // input is an array or a value (or a string, for a projection
+            // definition), so the input alone parses back to it.
+            Type::ProjectionDefinition | Type::VariableAnchorOffsetCollection if self.inputs.len() == 1 => {
+                self.inputs[0].serialize()
+            }
             _ => {
                 let mut serialized = vec![MbglValue::String(self.get_operator().to_owned())];
                 serialized.extend(self.inputs.iter().map(Expr::serialize));
@@ -442,6 +442,22 @@ mod tests {
         for (s, expected) in cases {
             assert_eq!(string_to_number(s), expected, "{s:?}");
         }
+    }
+
+    /// A projection definition from a value serializes to an expression that
+    /// parses back to it.
+    #[test]
+    fn projection_definition_coercion_parses_back() {
+        let parse = |json: &serde_json::Value| {
+            ParsingContext::with_expected(Type::ProjectionDefinition)
+                .parse_expression(&Convertible::from(json), None)
+                .unwrap()
+        };
+        let json = serde_json::json!(["global-state", "projection"]);
+        let expression = parse(&json);
+        let serialized = mln_conversion::value_to_json(&expression.serialize());
+        assert_eq!(serialized, json);
+        assert_eq!(parse(&serialized).serialize(), expression.serialize());
     }
 
     #[test]

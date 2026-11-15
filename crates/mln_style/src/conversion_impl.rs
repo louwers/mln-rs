@@ -3,7 +3,8 @@ use mln_style_types::{Position, ProjectionDefinition, Rotation, VariableAnchorOf
 use mln_util::{Color, Padding};
 
 use crate::color_ramp_property_value::ColorRampPropertyValue;
-use crate::expression::{Formatted, Image};
+use crate::expression::value::to_mbgl_value;
+use crate::expression::{Formatted, Image, Value as ExpressionValue};
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -13,6 +14,11 @@ use crate::transition_options::TransitionOptions;
 /// constants are reported as expressions, as in C++).
 pub(crate) trait ValueFactory {
     fn make_value(&self) -> Value;
+
+    /// The value as an element of an array value.
+    fn make_element_value(&self) -> Value {
+        self.make_value()
+    }
 
     #[must_use]
     fn constant_kind() -> Kind {
@@ -29,6 +35,12 @@ impl ValueFactory for TransitionOptions {
 impl ValueFactory for Color {
     fn make_value(&self) -> Value {
         self.serialize()
+    }
+
+    /// A color string, since a color array's elements are constants, not
+    /// expressions.
+    fn make_element_value(&self) -> Value {
+        Value::String(self.stringify())
     }
 
     fn constant_kind() -> Kind {
@@ -100,15 +112,18 @@ impl ValueFactory for Rotation {
     }
 }
 
+/// The image's ID.
 impl ValueFactory for Image {
     fn make_value(&self) -> Value {
-        self.to_value()
+        Value::String(self.id().to_owned())
     }
 }
 
+/// The constant `format` expression that makes the text. A plain string could
+/// parse back as a `{token}` expression.
 impl ValueFactory for Formatted {
     fn make_value(&self) -> Value {
-        self.to_object()
+        to_mbgl_value(&ExpressionValue::Formatted(self.clone()))
     }
 }
 
@@ -121,13 +136,13 @@ impl ValueFactory for ColorRampPropertyValue {
 /// An array of the elements' values.
 impl<T: ValueFactory, const N: usize> ValueFactory for [T; N] {
     fn make_value(&self) -> Value {
-        Value::Array(self.iter().map(ValueFactory::make_value).collect())
+        Value::Array(self.iter().map(ValueFactory::make_element_value).collect())
     }
 }
 
 impl<T: ValueFactory> ValueFactory for Vec<T> {
     fn make_value(&self) -> Value {
-        Value::Array(self.iter().map(ValueFactory::make_value).collect())
+        Value::Array(self.iter().map(ValueFactory::make_element_value).collect())
     }
 }
 

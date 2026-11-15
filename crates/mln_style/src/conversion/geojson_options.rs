@@ -140,13 +140,9 @@ impl Converter for GeoJSONOptions {
                         return None;
                     };
                     // Reformulate reduce expression to [operator,
-                    // ['accumulated'], ['get', key]]. The reason to create
-                    // expression via parsing string instead of invoking
-                    // function createCompoundExpression is due to expression
-                    // type disunity can't be resolved with current logic of
-                    // createCompoundExpression
-                    let ss = format!(r#"["{reduce_op}", ["accumulated"], ["get", "{k}"]]"#);
-                    dsl::create_expression_from_str(&ss)
+                    // ['accumulated'], ['get', key]].
+                    let reduce = serde_json::json!([reduce_op, ["accumulated"], ["get", k]]);
+                    dsl::create_expression(&Convertible::from(&reduce))
                 };
                 let Some(reduce) = reduce else {
                     error.message = "Failed to convert GeoJSON source clusterProperties reduce expression".to_owned();

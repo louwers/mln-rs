@@ -31,6 +31,9 @@ impl Converter for Filter {
 // This is a port from
 // https://github.com/mapbox/mapbox-gl-js/blob/master/src/style-spec/feature_filter/index.js
 fn is_expression(filter: &Convertible<'_>) -> bool {
+    if filter.to_bool().is_some() {
+        return true;
+    }
     if !filter.is_array() || filter.array_length() == 0 {
         return false;
     }
@@ -56,7 +59,7 @@ fn is_expression(filter: &Convertible<'_>) -> bool {
     } else if op == "any" || op == "all" {
         for i in 1..filter.array_length() {
             let f = filter.array_member(i);
-            if !is_expression(&f) && f.to_bool().is_none() {
+            if !is_expression(&f) {
                 return false;
             }
         }

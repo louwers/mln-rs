@@ -93,3 +93,16 @@ fn full_conversion() {
     assert!(converted.cluster_properties.contains_key("sum"));
     assert!(converted.cluster_properties.contains_key("has_island"));
 }
+
+/// A cluster property's key is a property name, whatever its characters.
+#[test]
+fn cluster_property_reduces_its_key() {
+    let mut error = Error::default();
+    let converted = convert_json(r#"{"clusterProperties": {"a\"b": ["+", ["get", "n"]]}}"#, &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message));
+    let (_, reduce) = &converted.cluster_properties[r#"a"b"#];
+    assert_eq!(
+        super::util::value_to_json(&reduce.serialize()),
+        serde_json::json!(["+", ["number", ["accumulated"]], ["number", ["get", r#"a"b"#]]])
+    );
+}

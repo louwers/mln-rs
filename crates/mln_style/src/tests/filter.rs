@@ -58,6 +58,13 @@ fn s(v: &str) -> Value {
 }
 
 // gtest: Filter.EqualsNull
+/// A boolean is a filter expression that takes every feature or none.
+#[test]
+fn boolean() {
+    assert!(filter("true", &[]));
+    assert!(!filter("false", &[]));
+}
+
 #[test]
 fn equals_null() {
     let f = r#"["==", "foo", null]"#;

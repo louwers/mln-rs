@@ -9,7 +9,7 @@
       [{}, {"properties": {"input": "correct", "i1": "one"}}]
     ],
     "expected": {
-      "serialized": ["slice", ["get", "input"], ["get", "i1"]],
+      "serialized": ["slice", ["get", "input"], ["number", ["get", "i1"]]],
       "compiled": {
         "result": "success",
         "isFeatureConstant": false,

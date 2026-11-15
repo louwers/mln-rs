@@ -24,7 +24,7 @@
         "isZoomConstant": true,
         "type": "number"
       },
-      "serialized": ["index-of", ["get", "needle"], ["get", "hay"], ["get", "i"]],
+      "serialized": ["index-of", ["get", "needle"], ["get", "hay"], ["number", ["get", "i"]]],
       "outputs": [
         -1,
         -1,
@@ -43,7 +43,7 @@
         2,
         -1,
         {
-          "error": "Expected third argument to be of type number, but found string instead."
+          "error": "Expected value to be of type number, but found string instead."
         }
       ]
     }

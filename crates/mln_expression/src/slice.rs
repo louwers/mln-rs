@@ -85,44 +85,33 @@ impl Slice {
         }
 
         let input = ctx.parse(&value.array_member(1), 1, None, None);
-        let from_index = ctx.parse(&value.array_member(2), 2, None, None);
-
-        let to_index = if length == 4 { ctx.parse(&value.array_member(3), 3, None, None) } else { None };
-
+        let from_index = ctx.parse(&value.array_member(2), 2, Some(Type::Number), None);
         let (Some(input), Some(from_index)) = (input, from_index) else {
             return None;
         };
+
+        let input_type = input.get_type();
+        if !(input_type.is_array() || input_type == Type::String || input_type == Type::Value) {
+            ctx.error(format!(
+                "Expected first argument to be of type array or string, but found {} instead",
+                type_::to_string(&input_type)
+            ));
+            return None;
+        }
+
+        let to_index =
+            if length == 4 { Some(ctx.parse(&value.array_member(3), 3, Some(Type::Number), None)?) } else { None };
 
         Some(Expr::new(Node::Slice(Box::new(Slice { input, from_index, to_index }))))
     }
 
     pub(crate) fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
         let evaluated_input = self.input.evaluate_ref(params)?;
-        // C++ checks `!fromIndex` (the expression, never null)
-        // instead of the result here and then dereferences a failed result
-        // (undefined behaviour); the port returns the error.
-        let evaluated_from_index = self.from_index.evaluate(params)?;
-        let Value::Number(from) = evaluated_from_index else {
-            return Err(EvaluationError::new(format!(
-                "Expected value to be of type number, but found {} instead.",
-                type_::to_string(&type_of(&evaluated_from_index))
-            )));
+        let from_index_value = static_cast_int(self.from_index.eval_num(params)?);
+        let to_index_value = match &self.to_index {
+            Some(to_index) => static_cast_int(to_index.eval_num(params)?),
+            None => i32::MAX,
         };
-
-        let from_index_value = static_cast_int(from);
-        let mut to_index_value = i32::MAX;
-
-        if let Some(to_index) = &self.to_index {
-            let evaluated_to_index = to_index.evaluate(params)?;
-            let Value::Number(to) = evaluated_to_index else {
-                // Quirk kept from the C++: reports the type of fromIndex.
-                return Err(EvaluationError::new(format!(
-                    "Expected value to be of type number, but found {} instead.",
-                    type_::to_string(&type_of(&evaluated_from_index))
-                )));
-            };
-            to_index_value = static_cast_int(to);
-        }
 
         match &*evaluated_input {
             Value::String(s) => Ok(Self::evaluate_for_string_input(s, from_index_value, to_index_value)),
