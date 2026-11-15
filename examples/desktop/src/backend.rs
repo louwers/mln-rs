@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 
-use mln_gfx::{BackendScope, FrameTarget, RendererBackend, ScopeType};
+use mln_gfx::{FrameTarget, RendererBackend};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -172,10 +172,7 @@ impl WindowTarget {
             Kind::OpenGl => {
                 let (backend, target) =
                     mln_gl::SurfaceTarget::with_backend(window(proxy)?, framebuffer_size, cap_frame_rate)?;
-                let name = {
-                    let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-                    backend.get_renderer_name()
-                };
+                let name = backend.get_renderer_name();
                 Ok(WindowTarget::OpenGl(backend, target, name))
             }
         }
@@ -298,8 +295,6 @@ impl WindowTarget {
     /// Takes the surface's next texture ahead of a frame, where the backend
     /// has it then; false when there is none to draw into right now.
     pub(crate) fn acquire_next_texture(&self) -> bool {
-        let backend = self.renderer_backend();
-        let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
         self.frames().begin_frame().is_some()
     }
 

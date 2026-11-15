@@ -19,7 +19,7 @@
 //
 // The library's display is Mesa's surfaceless platform where the library has
 // it, so that no window system is needed; elsewhere it is the default
-// display, as in C++ (platform/linux/src/headless_backend_egl.cpp). A host's
+// display. A host's
 // group is on the host's display and config.
 //
 // EGL binds a client API to each thread, and makes and releases the current

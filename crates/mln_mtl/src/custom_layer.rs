@@ -1,8 +1,16 @@
-// What a custom layer's host gets of a Metal frame (C++:
-// `style::mtl::CustomLayerRenderParameters`).
+// What a custom layer's host gets of a Metal frame.
+
+use objc2_metal::MTLPixelFormat;
 
 use crate::mtl_fwd::{MTLCommandBufferPtr, MTLRenderCommandEncoderPtr};
-use crate::render_pass::AttachmentFormats;
+
+/// The pixel formats of a pass's attachments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AttachmentFormats {
+    pub color: MTLPixelFormat,
+    pub depth: Option<MTLPixelFormat>,
+    pub stencil: Option<MTLPixelFormat>,
+}
 
 /// The frame's command buffer, with no encoder open, for a custom layer's
 /// prerender. End each encoder made on it before the call returns, and don't

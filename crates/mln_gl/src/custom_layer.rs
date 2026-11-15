@@ -1,25 +1,35 @@
-// What a custom layer's host gets of an OpenGL frame (C++: the base
-// `style::CustomLayerRenderParameters`, with the context current).
+// What a custom layer's host gets of an OpenGL frame: the context, current.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_util::size::Size;
 
-use crate::context::Context;
+use crate::state::State;
 use crate::types::{FramebufferID, Gl};
+
+/// Runs `lend`, which lends the current context to a custom layer, with
+/// vertex array 0 bound and no sampler objects, as hosts expect, and then
+/// forgets the GL state that `state` knew.
+pub(crate) fn lend_context<T>(gl: &Gl, state: &State, lend: impl FnOnce() -> T) -> T {
+    state.bind_vertex_array(gl, None);
+    state.unbind_samplers(gl);
+    let lent = lend();
+    state.set_dirty();
+    lent
+}
 
 /// The session's OpenGL context, current, outside the map's framebuffer, for
 /// a custom layer's prerender. Draw into framebuffers of your own; the map
 /// binds its own again before it draws.
 pub struct CustomLayerEncoder {
-    pub(crate) context: Rc<Context>,
+    pub(crate) gl: Arc<Gl>,
 }
 
 impl CustomLayerEncoder {
     /// The GL functions of the current context.
     #[must_use]
     pub fn gl(&self) -> &Gl {
-        self.context.gl()
+        &self.gl
     }
 }
 
@@ -34,7 +44,7 @@ impl CustomLayerEncoder {
 /// sampler objects, the pixel pack and unpack buffers and parameters, polygon
 /// offset and rasterizer discard, and doesn't clear the framebuffer.
 pub struct CustomLayerPass {
-    pub(crate) context: Rc<Context>,
+    pub(crate) gl: Arc<Gl>,
     /// The framebuffer the map draws into, none for the default one.
     pub framebuffer: Option<FramebufferID>,
     /// Its size in pixels.
@@ -45,6 +55,6 @@ impl CustomLayerPass {
     /// The GL functions of the current context.
     #[must_use]
     pub fn gl(&self) -> &Gl {
-        self.context.gl()
+        &self.gl
     }
 }

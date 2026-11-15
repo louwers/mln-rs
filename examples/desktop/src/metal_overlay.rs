@@ -185,7 +185,9 @@ impl Painter {
                 )
             };
             descriptor.setUsage(MTLTextureUsage::ShaderRead);
-            // The CPU writes it (see mln_mtl's texture2d.rs).
+            // The CPU writes it (`replaceRegion`): on Apple GPUs, writing
+            // GPU-optimized contents compresses them on the CPU, through one
+            // queue that every thread's renderer waits for.
             descriptor.setAllowGPUOptimizedContents(false);
             let (Some(texture), Some(sampler)) =
                 (device.newTextureWithDescriptor(&descriptor), new_sampler(device, delta.options))

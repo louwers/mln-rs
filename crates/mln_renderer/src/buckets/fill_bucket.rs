@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
@@ -24,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
+use crate::gfx::context::Context;
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
@@ -194,7 +194,7 @@ impl Bucket for FillBucket {
         self.sdf_patterns.get(layer_id).copied().unwrap_or(false)
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 

@@ -31,8 +31,6 @@ pub const ID_LINE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; //
 pub const ID_LINE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
 pub(crate) const LINE_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
 
-/// The clipping mask UBO, in the drawable's reserved vertex-only slot.
-pub const ID_CLIPPING_MASK_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
 /// The debug layer's UBO, the first slot after the reserved ones.
 pub const ID_DEBUG_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
 
@@ -124,8 +122,8 @@ pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
 /// `MLN_USE_FILL_EXTRUSION_INSTANCING`
 pub const ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE: usize = 2;
-/// Port-only: the next outline vertex of a wall instance, which the WebGPU
-/// and Vulkan shaders read as attributes (Metal's read the instance buffer).
+/// Port-only: the next outline vertex of a wall instance, which every
+/// backend's shaders read as attributes.
 pub const ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE: usize = 3;
 pub const ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE: usize = 4;
 // Data driven

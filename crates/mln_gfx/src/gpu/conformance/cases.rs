@@ -1,0 +1,890 @@
+//! Cases that draw a solid color with the background shader, and the calls
+//! every backend rejects.
+
+use std::any::Any;
+
+use mln_util::Color;
+use mln_util::size::Size;
+
+use super::{EXTENT, SIZE, buffer, draw, fixed, position_layout, quad, tile_matrix, whole};
+use crate::color_mode::ColorMode;
+use crate::gfx_types::{AttributeDataType, DrawModeType};
+use crate::gpu::{
+    BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, ColorAttachment, DepthState,
+    DepthStencilAttachment, Draw, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId,
+    ResourceId, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
+    TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
+};
+use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use crate::shaders::fill_extrusion_layer_ubo::{
+    FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
+};
+use crate::shaders::fill_layer_ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
+use crate::shaders::layer_ubo::ProjectionUBO;
+use crate::shaders::shader_defines::{
+    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
+    ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO,
+    ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
+    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
+    ID_PROJECTION_UBO,
+};
+use crate::shaders::shader_source::BuiltIn;
+use crate::stencil_mode::StencilMode;
+use crate::types::DepthFunctionType;
+
+const BLACK: Color = Color::black();
+const RGBA8: TargetFormats = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
+
+/// A color target of [`SIZE`], and what the background shader reads to
+/// cover it with one color.
+struct Solid {
+    target: TextureId,
+    quad: BufferId,
+    indices: BufferId,
+    shader: ShaderId,
+    /// The background shader's entries, and its bindings of them.
+    entries: Vec<BindGroupEntry>,
+    bindings: BindingsId,
+    geometry: GeometryId,
+    /// The background shader, unblended, drawing triangles into an
+    /// [`Rgba8Unorm`](TextureFormat::Rgba8Unorm) target.
+    pipeline: PipelineId,
+}
+
+/// A target of `format`, which the background shader covers with `color`,
+/// premultiplied.
+fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<Solid, GpuError> {
+    solid_at(gpu, format, color, tile_matrix(1.0))
+}
+
+/// [`solid`], drawn through `matrix` instead of over the whole target.
+fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: [f32; 16]) -> Result<Solid, GpuError> {
+    let target = target(gpu, format)?;
+    let (quad, indices) = quad(gpu)?;
+    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::BackgroundShader, []))?;
+    let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
+    let drawable = [BackgroundDrawableUnionUBO::default()];
+    let props = BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
+    let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
+    let props = bytemuck::bytes_of(&props);
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    let entries = vec![
+        whole(ID_PROJECTION_UBO, projection_buffer, projection),
+        whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
+        whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
+    ];
+    let bindings = gpu.create_bindings(&BindingsDesc { label: "background layer", shader, entries: &entries })?;
+    let geometry = background_geometry(gpu, shader, quad, indices)?;
+    let pipeline = gpu.create_pipeline(&background(shader, RGBA8))?;
+    Ok(Solid { target, quad, indices, shader, entries, bindings, geometry, pipeline })
+}
+
+/// The background shader's geometry of `vertices` and `indices`.
+fn background_geometry(
+    gpu: &mut impl Gpu,
+    shader: ShaderId,
+    vertices: BufferId,
+    indices: BufferId,
+) -> Result<GeometryId, GpuError> {
+    gpu.create_geometry(&GeometryDesc {
+        shader,
+        layouts: &[position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
+        vertex_buffers: &[(vertices, 0)],
+        index_buffer: indices,
+    })
+}
+
+/// `matrix`, moving what it maps to clip space depth `z`.
+fn at_depth(mut matrix: [f32; 16], z: f32) -> [f32; 16] {
+    matrix[14] = z;
+    matrix
+}
+
+/// A render target of [`SIZE`] and `format`, which can be read back.
+fn target(gpu: &mut (impl Gpu + ?Sized), format: TextureFormat) -> Result<TextureId, GpuError> {
+    gpu.create_texture(&TextureDesc {
+        label: "target",
+        size: SIZE,
+        format,
+        usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+    })
+}
+
+/// A pipeline of `shader`, the background shader, unblended, drawing
+/// triangles into `targets`.
+fn background(shader: ShaderId, targets: TargetFormats) -> PipelineDesc<'static> {
+    PipelineDesc {
+        shader,
+        vertex_buffers: background_layouts(),
+        state: fixed(ColorMode::unblended(), StencilState::from(&StencilMode::disabled())),
+        targets,
+    }
+}
+
+/// The background shader's layout of its vertex buffer, which every
+/// pipeline of it here reads.
+fn background_layouts() -> &'static [VertexBufferLayout] {
+    static LAYOUTS: std::sync::OnceLock<[VertexBufferLayout; 1]> = std::sync::OnceLock::new();
+    LAYOUTS.get_or_init(|| [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)])
+}
+
+impl Solid {
+    /// The pass that clears the target to opaque black.
+    fn pass(&self) -> PassDesc<'static> {
+        PassDesc {
+            label: "solid",
+            color: Some(ColorAttachment { texture: self.target, load: LoadOp::Clear(BLACK) }),
+            depth_stencil: None,
+        }
+    }
+
+    /// The draw of the quad with `pipeline`.
+    fn draw(&self, pipeline: PipelineId) -> Draw {
+        draw(pipeline, self.bindings, self.geometry, 6)
+    }
+
+    /// Draws `draws` in [`pass`](Self::pass), which ends where one fails.
+    fn frame(&self, gpu: &mut impl Gpu, draws: &[Draw]) -> Result<(), GpuError> {
+        gpu.begin_pass(&self.pass())?;
+        let drawn = draws.iter().try_for_each(|draw| gpu.draw(draw));
+        gpu.end_pass()?;
+        drawn
+    }
+}
+
+/// Whether `result` is the error of a call that breaks a rule.
+fn invalid<T>(result: &Result<T, GpuError>) -> bool {
+    matches!(result, Err(GpuError::Invalid(_)))
+}
+
+/// Checks that `gpu` rejects calls that break the rules of
+/// [`validation`](crate::gpu::validation) and the calls' own, as
+/// [`GpuError::Invalid`], and takes the same calls without the fault.
+/// Returns the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    frame.frame(gpu, &[frame.draw(frame.pipeline)])?;
+
+    // Bindings bind uniform and storage buffers, over a range inside the
+    // buffer, from an aligned offset, and everything their shader reads,
+    // once.
+    let alignment = u64::from(gpu.caps().buffer_offset_alignment.max(4));
+    let unit = (size_of::<BackgroundPropsUBO>() as u64).next_multiple_of(alignment);
+    let uniform =
+        gpu.create_buffer(&crate::gpu::BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 2 * unit })?;
+    let props =
+        |buffer, offset, size| BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer, offset, size };
+    let with = |entry: Option<BindGroupEntry>| -> Vec<BindGroupEntry> {
+        frame.entries[..2].iter().copied().chain(entry).collect()
+    };
+    let shader = frame.shader;
+    let mut bindings =
+        |entries: Vec<BindGroupEntry>| gpu.create_bindings(&BindingsDesc { label: "test", shader, entries: &entries });
+    assert!(bindings(with(Some(props(uniform, unit, unit)))).is_ok());
+    assert!(invalid(&bindings(with(Some(props(uniform, unit, unit + 4))))), "a range past the buffer");
+    assert!(invalid(&bindings(with(Some(props(uniform, unit, 0))))), "an empty range");
+    assert!(invalid(&bindings(with(Some(props(uniform, u64::MAX - unit + 1, 2 * unit))))), "past u64::MAX");
+    if alignment > 4 {
+        assert!(invalid(&bindings(with(Some(props(uniform, 4, unit))))), "an unaligned offset");
+    }
+    assert!(invalid(&bindings(with(Some(props(frame.quad, 0, 4))))), "a vertex buffer");
+    assert!(invalid(&bindings(with(Some(props(frame.indices, 0, 4))))), "an index buffer");
+    assert!(invalid(&bindings(with(None))), "a buffer the shader reads unbound");
+    let mut twice = with(Some(props(uniform, 0, unit)));
+    twice.push(props(uniform, unit, unit));
+    assert!(invalid(&bindings(twice)), "one id bound twice");
+
+    // Geometry reads vertex and index buffers of those uses, inside them, a
+    // buffer for each layout.
+    let mut geometry = |vertex_buffers: &[(BufferId, u64)], index_buffer| {
+        gpu.create_geometry(&GeometryDesc { shader, layouts: background_layouts(), vertex_buffers, index_buffer })
+    };
+    assert!(invalid(&geometry(&[(uniform, 0)], frame.indices)), "uniform buffer vertices");
+    assert!(invalid(&geometry(&[(frame.quad, 0)], frame.quad)), "vertex buffer indices");
+    assert!(invalid(&geometry(&[(frame.quad, 16)], frame.indices)), "vertices from the end of the buffer");
+    assert!(invalid(&geometry(&[], frame.indices)), "no vertex buffer for the layout");
+
+    // Draws stay inside what they name, which their pipeline was made for.
+    let with_draw = |gpu: &mut _, draw: Draw| frame.frame(gpu, &[draw]);
+    let past_indices = Draw { first_index: 1, ..frame.draw(frame.pipeline) };
+    assert!(invalid(&with_draw(gpu, past_indices)), "indices past the buffer");
+    let past_elements = Draw { global_index: 1, ..frame.draw(frame.pipeline) };
+    assert!(invalid(&with_draw(gpu, past_elements)), "a global index past the storage buffers' elements");
+    let depth_pipeline = gpu.create_pipeline(&background(
+        shader,
+        TargetFormats { depth_stencil: Some(TextureFormat::Depth24PlusStencil8), ..RGBA8 },
+    ))?;
+    assert!(invalid(&with_draw(gpu, frame.draw(depth_pipeline))), "a pipeline for a depth attachment");
+    let mask = gpu.create_shader(&ShaderKey::new(BuiltIn::ClippingMaskProgram, []))?;
+    let mask_layouts = [position_layout(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
+    let mask_geometry = gpu.create_geometry(&GeometryDesc {
+        shader: mask,
+        layouts: &mask_layouts,
+        vertex_buffers: &[(frame.quad, 0)],
+        index_buffer: frame.indices,
+    })?;
+    let other_geometry = Draw { geometry: mask_geometry, ..frame.draw(frame.pipeline) };
+    assert!(invalid(&with_draw(gpu, other_geometry)), "geometry of another shader");
+    let mask_pipeline =
+        gpu.create_pipeline(&PipelineDesc { shader: mask, vertex_buffers: &mask_layouts, ..background(mask, RGBA8) })?;
+    let other_bindings = Draw { geometry: mask_geometry, ..frame.draw(mask_pipeline) };
+    assert!(invalid(&with_draw(gpu, other_bindings)), "bindings of another shader");
+    assert!(invalid(&gpu.draw(&frame.draw(frame.pipeline))), "a draw outside a pass");
+
+    // A pipeline draws into attachments of its formats, in one pass at a
+    // time.
+    let srgb = target(gpu, TextureFormat::Rgba8UnormSrgb)?;
+    let srgb_pass =
+        PassDesc { color: Some(ColorAttachment { texture: srgb, load: LoadOp::Clear(BLACK) }), ..frame.pass() };
+    gpu.begin_pass(&srgb_pass)?;
+    assert!(invalid(&gpu.draw(&frame.draw(frame.pipeline))), "an Rgba8Unorm pipeline in an Rgba8UnormSrgb pass");
+    assert!(invalid(&gpu.begin_pass(&frame.pass())), "a pass inside a pass");
+    assert!(invalid(&gpu.flush(false)), "a flush inside a pass");
+    assert!(invalid(&gpu.read_texture(frame.target, TextureRegion::whole(SIZE))), "a readback inside a pass");
+    gpu.end_pass()?;
+    assert!(invalid(&gpu.end_pass()), "the end of no pass");
+    let no_attachments = PassDesc { color: None, ..frame.pass() };
+    assert!(invalid(&gpu.begin_pass(&no_attachments)), "a pass without attachments");
+
+    // Writes reach a sampled texture inside it, with a texel for each of the
+    // region's.
+    let sampled = gpu.create_texture(&TextureDesc {
+        label: "sampled",
+        size: Size::new(4, 4),
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+    })?;
+    let texels = [255u8; 2 * 2 * 4];
+    let region = |x, y| TextureRegion { x, y, size: Size::new(2, 2) };
+    gpu.write_texture(sampled, region(2, 2), &texels)?;
+    assert!(invalid(&gpu.write_texture(sampled, region(3, 2), &texels)), "a region past the right edge");
+    assert!(invalid(&gpu.write_texture(sampled, region(2, 3), &texels)), "a region past the bottom edge");
+    assert!(invalid(&gpu.write_texture(sampled, region(u32::MAX, 0), &texels)), "a region past u32::MAX");
+    assert!(invalid(&gpu.write_texture(sampled, region(0, 0), &texels[4..])), "a texel short");
+    assert!(invalid(&gpu.write_texture(frame.target, region(0, 0), &texels)), "a texture that isn't sampled");
+
+    // The faults drew nothing, and the frame still draws.
+    frame.frame(gpu, &[frame.draw(frame.pipeline)])?;
+    let pixels = read(gpu, frame.target)?;
+    assert_eq!(texel(&pixels, SIZE.width / 2, SIZE.height / 2), [255, 0, 0, 255]);
+    Ok(())
+}
+
+/// Checks that each of two backends takes only its own ids: every id here
+/// is of the first resource of its kind that a backend makes, which another
+/// backend's slot map would hand out alike. Returns the error of a call
+/// that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn foreign_ids<G: Gpu>(first: &mut G, second: &mut G) -> Result<(), GpuError> {
+    let theirs = solid(first, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    let ours = solid(second, TextureFormat::Rgba8Unorm, [0.0, 1.0, 0.0, 1.0])?;
+
+    let unknown = |result: Result<(), GpuError>, what| matches!(result, Err(GpuError::UnknownId(kind)) if kind == what);
+    assert!(unknown(second.write_buffer(theirs.quad, 0, &[0; 4]), "buffer"), "a write to their buffer");
+    let entries =
+        [BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer: theirs.quad, offset: 0, size: 4 }];
+    let bindings = second.create_bindings(&BindingsDesc { label: "theirs", shader: ours.shader, entries: &entries });
+    assert!(unknown(bindings.map(drop), "buffer"), "bindings of their buffer");
+    let bindings =
+        second.create_bindings(&BindingsDesc { label: "theirs", shader: theirs.shader, entries: &ours.entries });
+    assert!(unknown(bindings.map(drop), "shader"), "bindings of their shader");
+    let pipeline = second.create_pipeline(&background(theirs.shader, RGBA8));
+    assert!(unknown(pipeline.map(drop), "shader"), "a pipeline of their shader");
+    let geometry = background_geometry(second, ours.shader, theirs.quad, ours.indices);
+    assert!(unknown(geometry.map(drop), "buffer"), "geometry of their buffer");
+    let draw = |gpu: &mut G, draw: Draw| -> Result<(), GpuError> {
+        gpu.begin_pass(&ours.pass())?;
+        let drawn = gpu.draw(&draw);
+        gpu.end_pass()?;
+        drawn
+    };
+    assert!(unknown(draw(second, ours.draw(theirs.pipeline)), "pipeline"), "their pipeline");
+    assert!(unknown(draw(second, Draw { bindings: theirs.bindings, ..ours.draw(ours.pipeline) }), "bindings"));
+    assert!(unknown(draw(second, Draw { geometry: theirs.geometry, ..ours.draw(ours.pipeline) }), "geometry"));
+    let their_target =
+        PassDesc { color: Some(ColorAttachment { texture: theirs.target, load: LoadOp::Load }), ..ours.pass() };
+    assert!(unknown(second.begin_pass(&their_target), "texture"), "their target");
+
+    // Destroying their ids destroys nothing of either.
+    for id in [
+        ResourceId::Buffer(theirs.quad),
+        ResourceId::Bindings(theirs.bindings),
+        ResourceId::Geometry(theirs.geometry),
+        ResourceId::Pipeline(theirs.pipeline),
+        ResourceId::Shader(theirs.shader),
+        ResourceId::Texture(theirs.target),
+    ] {
+        second.destroy(id);
+    }
+    theirs.frame(first, &[theirs.draw(theirs.pipeline)])?;
+    ours.frame(second, &[ours.draw(ours.pipeline)])?;
+    assert_eq!(texel(&read(first, theirs.target)?, 0, 0), [255, 0, 0, 255]);
+    assert_eq!(texel(&read(second, ours.target)?, 0, 0), [0, 255, 0, 255]);
+    Ok(())
+}
+
+/// The texels of `target`, of [`SIZE`], once the work recorded so far is
+/// done.
+pub(super) fn read(gpu: &mut impl Gpu, target: TextureId) -> Result<Vec<u8>, GpuError> {
+    let pixels = read_texels(gpu, target, TextureRegion::whole(SIZE))?;
+    assert_eq!(pixels.len(), (SIZE.width * SIZE.height * 4) as usize, "a texel for each pixel");
+    Ok(pixels)
+}
+
+/// The texel at `x`, `y` of `pixels`, a read back of a target of [`SIZE`].
+pub(super) fn texel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let i = ((y * SIZE.width + x) * 4) as usize;
+    [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+}
+
+/// Checks that [`BlendFunction::Replace`](crate::color_mode::BlendFunction)
+/// writes a translucent color as it is, over opaque black. Returns the
+/// error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn transparent_replace(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 0.6])?;
+    frame.frame(gpu, &[frame.draw(frame.pipeline)])?;
+    let pixels = read(gpu, frame.target)?;
+    assert_eq!(texel(&pixels, SIZE.width / 2, SIZE.height / 2), [255, 0, 0, 153], "not blended with the black");
+    Ok(())
+}
+
+/// Checks that a backend draws a triangle strip, a triangle fan and a line
+/// loop as they are, or fails to make the pipeline with
+/// [`GpuError::Unsupported`]: the fan covers the target, as the strip
+/// does, and the loop's last segment closes it. Returns the error of a call
+/// that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn topologies(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    let e = EXTENT as i16;
+    let fan: [[i16; 2]; 4] = [[0, 0], [e, 0], [e, e], [0, e]];
+    let fan = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&fan))?;
+    // Through the centers of pixels (32, 8), (48, 16) and (32, 24), so that
+    // the closing segment lights column 32 and nothing else does.
+    let line_loop: [[i16; 2]; 3] = [[4160, 2176], [6208, 4224], [4160, 6272]];
+    let line_loop = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&line_loop))?;
+    let in_order = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 3]))?;
+    let red = [255, 0, 0, 255];
+    for (primitive, vertices, count) in [
+        (DrawModeType::TriangleStrip, frame.quad, 4),
+        (DrawModeType::TriangleFan, fan, 4),
+        (DrawModeType::LineLoop, line_loop, 3),
+    ] {
+        let mut desc = background(frame.shader, RGBA8);
+        desc.state.primitive = primitive;
+        let pipeline = match gpu.create_pipeline(&desc) {
+            Ok(pipeline) => pipeline,
+            Err(GpuError::Unsupported(_)) => continue,
+            Err(error) => return Err(error),
+        };
+        let geometry = background_geometry(gpu, frame.shader, vertices, in_order)?;
+        frame.frame(gpu, &[draw(pipeline, frame.bindings, geometry, count)])?;
+        let pixels = read(gpu, frame.target)?;
+        if primitive == DrawModeType::LineLoop {
+            assert_eq!(texel(&pixels, 32, 16), red, "the segment that closes the loop");
+            continue;
+        }
+        let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
+        for (x, y) in [(0, 0), (right, 0), (0, bottom), (right, bottom), (right / 2, bottom / 2)] {
+            assert_eq!(texel(&pixels, x, y), red, "{primitive:?} covers ({x}, {y})");
+        }
+    }
+    Ok(())
+}
+
+/// Checks that a pipeline draws into a pass with a depth attachment and no
+/// color one: a depth-only pass writes depth over the left half, nearer
+/// than the background, and a pass that loads it draws the background only
+/// where its depth test passes. Returns the error of a call that should
+/// succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn depth_only(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let depth = gpu.create_texture(&TextureDesc {
+        label: "depth",
+        size: SIZE,
+        format: TextureFormat::Depth32Float,
+        usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+    })?;
+    let frame = solid_at(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0], at_depth(tile_matrix(1.0), 0.5))?;
+    let left = solid_at(gpu, TextureFormat::Rgba8Unorm, [0.0; 4], at_depth(tile_matrix(0.0), 0.25))?;
+
+    // The left half at depth 0.25, writing no color.
+    let mut depth_desc =
+        background(left.shader, TargetFormats { color: None, depth_stencil: Some(TextureFormat::Depth32Float) });
+    depth_desc.state.color_mask = ColorMode::disabled().mask;
+    depth_desc.state.depth = DepthState { compare: DepthFunctionType::Always, write: true };
+    let depth_pipeline = gpu.create_pipeline(&depth_desc)?;
+    gpu.begin_pass(&PassDesc {
+        label: "depth only",
+        color: None,
+        depth_stencil: Some(DepthStencilAttachment {
+            texture: depth,
+            depth: LoadOp::Clear(1.0),
+            stencil: LoadOp::Clear(0),
+        }),
+    })?;
+    gpu.draw(&left.draw(depth_pipeline))?;
+    gpu.end_pass()?;
+
+    // The background at depth 0.5, where it is nearer than what the depth
+    // holds: the right half, which the depth-only pass left cleared.
+    let mut desc =
+        background(frame.shader, TargetFormats { depth_stencil: Some(TextureFormat::Depth32Float), ..RGBA8 });
+    desc.state.depth = DepthState { compare: DepthFunctionType::Less, write: false };
+    let tested = gpu.create_pipeline(&desc)?;
+    gpu.begin_pass(&PassDesc {
+        depth_stencil: Some(DepthStencilAttachment { texture: depth, depth: LoadOp::Load, stencil: LoadOp::Load }),
+        ..frame.pass()
+    })?;
+    gpu.draw(&frame.draw(tested))?;
+    gpu.end_pass()?;
+
+    let pixels = read(gpu, frame.target)?;
+    let (red, black) = ([255, 0, 0, 255], [0, 0, 0, 255]);
+    for y in [0, SIZE.height / 2, SIZE.height - 1] {
+        assert_eq!(texel(&pixels, 0, y), black, "the depth-only pass's half is nearer");
+        assert_eq!(texel(&pixels, SIZE.width / 2 - 1, y), black);
+        assert_eq!(texel(&pixels, SIZE.width / 2, y), red, "the other half keeps the cleared depth");
+        assert_eq!(texel(&pixels, SIZE.width - 1, y), red);
+    }
+    Ok(())
+}
+
+/// Checks that a pipeline reads its attributes from whichever vertex
+/// buffer slots their layouts put them in: the fill shader's position,
+/// color and opacity, each in a slot of its own, and then the position and
+/// opacity interleaved in one slot and the color in another. Both cover
+/// the target in the color. Returns the error of a call that should
+/// succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
+    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::FillShader, []))?;
+    let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
+    let mut drawable = [FillDrawableUnionUBO::default()];
+    drawable[0].set_fill(&FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() });
+    let props = FillEvaluatedPropsUBO { opacity: 1.0, ..FillEvaluatedPropsUBO::default() };
+    let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
+    let props = bytemuck::bytes_of(&props);
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    let bindings = gpu.create_bindings(&BindingsDesc {
+        label: "fill layer",
+        shader,
+        entries: &[
+            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            whole(ID_FILL_DRAWABLE_UBO, drawable_buffer, drawable),
+            whole(ID_FILL_EVALUATED_PROPS_UBO, props_buffer, props),
+        ],
+    })?;
+
+    // Opaque red twice, packed two channels a float, and full opacity
+    // twice, each pair mixed at t = 0.
+    let color = [65280.0f32, 255.0, 65280.0, 255.0];
+    let opacity = [1.0f32, 1.0];
+    let e = EXTENT as i16;
+    let positions: [[i16; 2]; 4] = [[0, 0], [e, 0], [0, e], [e, e]];
+    let colors = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&[color; 4]))?;
+    let opacities = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&[opacity; 4]))?;
+    let mut interleaved = Vec::with_capacity(4 * 12);
+    for position in positions {
+        interleaved.extend_from_slice(bytemuck::cast_slice(&position));
+        interleaved.extend_from_slice(bytemuck::cast_slice(&opacity));
+    }
+    let interleaved = buffer(gpu, BufferUsage::Vertex, &interleaved)?;
+
+    let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
+    let layout = |stride, attributes| VertexBufferLayout { stride, step: VertexStep::Vertex, attributes };
+    let pos = attribute(ID_FILL_POS_VERTEX_ATTRIBUTE, AttributeDataType::Short2, 0);
+    let color_layout = layout(16, vec![attribute(ID_FILL_COLOR_VERTEX_ATTRIBUTE, AttributeDataType::Float4, 0)]);
+    let separate = (
+        vec![
+            layout(4, vec![pos]),
+            layout(8, vec![attribute(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, AttributeDataType::Float2, 0)]),
+            color_layout.clone(),
+        ],
+        vec![(frame.quad, 0), (opacities, 0), (colors, 0)],
+    );
+    let opacity_at_4 = attribute(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, AttributeDataType::Float2, 4);
+    let interleaved = (vec![layout(12, vec![pos, opacity_at_4]), color_layout], vec![(interleaved, 0), (colors, 0)]);
+    for (layouts, buffers) in [separate, interleaved] {
+        let pipeline =
+            gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &layouts, ..background(shader, RGBA8) })?;
+        let geometry = gpu.create_geometry(&GeometryDesc {
+            shader,
+            layouts: &layouts,
+            vertex_buffers: &buffers,
+            index_buffer: frame.indices,
+        })?;
+        frame.frame(gpu, &[draw(pipeline, bindings, geometry, 6)])?;
+        let pixels = read(gpu, frame.target)?;
+        let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
+        for (x, y) in [(0, 0), (right, 0), (0, bottom), (right, bottom)] {
+            assert_eq!(texel(&pixels, x, y), [255, 0, 0, 255], "{} vertex buffers, at ({x}, {y})", layouts.len());
+        }
+    }
+    Ok(())
+}
+
+/// Checks that the instanced fill extrusion shader reads an instance's
+/// outline vertex and the next one only through the attributes of its
+/// layouts, in slots of the caller's choosing, and that a draw is checked
+/// against the instances it reads. The outline runs along the bottom of the
+/// tile, through its middle, to its right edge; the middle vertex ends a
+/// ring, so the wall from it draws nothing. The walls stand the height of
+/// the target, and the first covers the left half. The next vertex comes
+/// first, in a slot of its own, and the instance buffer holds the outline's
+/// three vertices and no more. Returns the error of a call that should
+/// succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
+    let shader = gpu.create_shader(&ShaderKey::new(
+        BuiltIn::FillExtrusionInstancedShader,
+        ["HAS_UNIFORM_u_color", "HAS_UNIFORM_u_base", "HAS_UNIFORM_u_height"].map(String::from),
+    ))?;
+    // Tile x `0..EXTENT` to clip x `-1..1`, elevation `0..1` to clip y
+    // `-1..1`, at clip depth 0.5.
+    let s = 2.0 / EXTENT;
+    let matrix = [s, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, -1.0, -1.0, 0.5, 1.0];
+    let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
+    let drawable = [FillExtrusionDrawableUBO { matrix, ..FillExtrusionDrawableUBO::default() }];
+    let tile_props = [FillExtrusionTilePropsUBO::default()];
+    // Opaque red, lit evenly.
+    let props = FillExtrusionPropsUBO {
+        color: [1.0, 0.0, 0.0, 1.0],
+        light_color: [1.0; 3],
+        light_position: [0.0, 0.0, 1.0],
+        base: 0.0,
+        height: 1.0,
+        opacity: 1.0,
+        ..FillExtrusionPropsUBO::default()
+    };
+    let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
+    let (tile_props, props) = (bytemuck::cast_slice(&tile_props), bytemuck::bytes_of(&props));
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let tile_props_buffer = buffer(gpu, BufferUsage::Storage, tile_props)?;
+    let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    let bindings = gpu.create_bindings(&BindingsDesc {
+        label: "fill extrusion layer",
+        shader,
+        entries: &[
+            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            whole(ID_FILL_EXTRUSION_DRAWABLE_UBO, drawable_buffer, drawable),
+            whole(ID_FILL_EXTRUSION_TILE_PROPS_UBO, tile_props_buffer, tile_props),
+            whole(ID_FILL_EXTRUSION_PROPS_UBO, props_buffer, props),
+        ],
+    })?;
+
+    // The wall quad: x picks the instance's vertex (0) or the next one (1),
+    // y the base (0) or the top (1).
+    let corners: [[i16; 2]; 4] = [[0, 0], [1, 0], [0, 1], [1, 1]];
+    let corners = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&corners))?;
+    // Each outline vertex is its position, then `decimals_ed`, whose x is
+    // odd where the vertex ends a ring.
+    let (e, half) = (EXTENT as i16, (EXTENT / 2.0) as i16);
+    let outline: [[i16; 4]; 3] = [[0, 0, 0, 0], [half, 0, 1, 0], [e, 0, 0, 0]];
+    let outline = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&outline))?;
+
+    let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
+    let instances = |stride, attributes| VertexBufferLayout { stride, step: VertexStep::Instance, attributes };
+    let (short2, ushort2) = (AttributeDataType::Short2, AttributeDataType::UShort2);
+    let layouts = [
+        VertexBufferLayout {
+            stride: 4,
+            step: VertexStep::Vertex,
+            attributes: vec![attribute(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, short2, 0)],
+        },
+        instances(
+            8,
+            vec![
+                attribute(ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ushort2, 4),
+                attribute(ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, short2, 0),
+            ],
+        ),
+        instances(8, vec![attribute(ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, short2, 0)]),
+        instances(8, vec![attribute(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ushort2, 4)]),
+    ];
+    let pipeline =
+        gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &layouts, ..background(shader, RGBA8) })?;
+    let geometry = gpu.create_geometry(&GeometryDesc {
+        shader,
+        layouts: &layouts,
+        vertex_buffers: &[(corners, 0), (outline, 8), (outline, 0), (outline, 0)],
+        index_buffer: frame.indices,
+    })?;
+    let walls = |instance_count| Draw { instance_count, ..draw(pipeline, bindings, geometry, 6) };
+    let past = frame.frame(gpu, &[walls(3)]);
+    assert!(invalid(&past), "a wall whose next vertex is past the instance buffer");
+    frame.frame(gpu, &[walls(2)])?;
+
+    let pixels = read(gpu, frame.target)?;
+    let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
+    for y in [0, bottom / 2, bottom] {
+        for x in [0, right / 2] {
+            let [r, _, _, a] = texel(&pixels, x, y);
+            assert_eq!([r, a], [255, 255], "the first wall covers ({x}, {y})");
+        }
+        for x in [right / 2 + 1, right] {
+            assert_eq!(texel(&pixels, x, y), [0, 0, 0, 255], "the wall that ends a ring leaves ({x}, {y})");
+        }
+    }
+    Ok(())
+}
+
+/// Checks readbacks: a region's texels come in rows from the top, a copy
+/// holds what the passes before it drew whatever later passes draw, a write
+/// before a readback reaches it, and a readback is gone once taken or
+/// destroyed. Returns the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    // Red over the top half: tile y 0..EXTENT to clip y 0..1.
+    let mut top_half = tile_matrix(1.0);
+    top_half[5] = 1.0 / EXTENT;
+    top_half[13] = 0.0;
+    let frame = solid_at(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0], top_half)?;
+    frame.frame(gpu, &[frame.draw(frame.pipeline)])?;
+    let corner = Size { width: 3, height: 2 };
+    let top_right = TextureRegion { x: SIZE.width - corner.width, y: 0, size: corner };
+    let bottom_left = TextureRegion { x: 0, y: SIZE.height - corner.height, size: corner };
+    let whole = gpu.read_texture(frame.target, TextureRegion::whole(SIZE))?;
+    let red_corner = gpu.read_texture(frame.target, top_right)?;
+    let black_corner = gpu.read_texture(frame.target, bottom_left)?;
+    // The same pass without its draw: all black.
+    frame.frame(gpu, &[])?;
+    let cleared_corner = gpu.read_texture(frame.target, top_right)?;
+
+    let take = |gpu: &mut _, readback| -> Result<Vec<u8>, GpuError> {
+        Gpu::take_readback(gpu, readback, true)?
+            .ok_or_else(|| GpuError::Invalid("a readback that was waited for has no texels".to_owned()))
+    };
+    let (red, black) = ([255, 0, 0, 255], [0, 0, 0, 255]);
+    let pixels = match gpu.take_readback(whole, false)? {
+        Some(pixels) => pixels,
+        None => take(gpu, whole)?,
+    };
+    assert_eq!(pixels.len(), (SIZE.width * SIZE.height * 4) as usize);
+    assert_eq!(texel(&pixels, 0, 0), red, "the top row first");
+    assert_eq!(texel(&pixels, SIZE.width - 1, SIZE.height / 2 - 1), red);
+    assert_eq!(texel(&pixels, 0, SIZE.height / 2), black);
+    assert_eq!(texel(&pixels, SIZE.width - 1, SIZE.height - 1), black);
+    let expect_all = |texels: Vec<u8>, color: [u8; 4], what: &str| {
+        assert_eq!(texels.len(), (corner.width * corner.height * 4) as usize, "{what}: the region's texels");
+        assert!(texels.chunks(4).all(|texel| texel == color), "{what}: {texels:?}");
+    };
+    expect_all(take(gpu, cleared_corner)?, black, "the later frame");
+    expect_all(take(gpu, red_corner)?, red, "the earlier frame, after the later one's");
+    expect_all(take(gpu, black_corner)?, black, "the bottom left");
+    assert!(matches!(gpu.take_readback(whole, true), Err(GpuError::UnknownId("readback"))), "taken already");
+
+    // Writes before a readback reach it, and those after it don't. The
+    // part written covers both rows, since a backend may read rows back in
+    // another order than it writes them.
+    let size = Size { width: 4, height: 2 };
+    let written = gpu.create_texture(&TextureDesc {
+        label: "written",
+        size,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { sampled: true, copy_src: true, ..TextureUsage::default() },
+    })?;
+    gpu.write_texture(written, TextureRegion::whole(size), &[1; 4 * 4 * 2])?;
+    let part = TextureRegion { x: 1, y: 0, size: Size { width: 2, height: 2 } };
+    gpu.write_texture(written, part, &[2; 4 * 2 * 2])?;
+    let before = gpu.read_texture(written, TextureRegion::whole(size))?;
+    gpu.write_texture(written, TextureRegion::whole(size), &[3; 4 * 4 * 2])?;
+    let row = [[1; 4], [2; 4], [2; 4], [1; 4]].concat();
+    assert_eq!(take(gpu, before)?, [row.clone(), row].concat(), "the writes before the readback, in order");
+    assert_eq!(read_texels(gpu, written, part)?, [3; 4 * 2 * 2], "the write after it");
+
+    let dropped = gpu.read_texture(written, part)?;
+    gpu.destroy(ResourceId::Readback(dropped));
+    assert!(matches!(gpu.take_readback(dropped, true), Err(GpuError::UnknownId("readback"))));
+    let depth = gpu.create_texture(&TextureDesc {
+        label: "depth",
+        size,
+        format: TextureFormat::Depth32Float,
+        usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+    })?;
+    assert!(invalid(&gpu.read_texture(depth, TextureRegion::whole(size))), "a depth texture");
+    assert!(invalid(&gpu.read_texture(written, TextureRegion { x: 1, ..TextureRegion::whole(size) })), "past it");
+    assert!(invalid(&gpu.write_texture(written, TextureRegion::whole(size), &[0; 4])), "a write of too few bytes");
+    gpu.destroy(ResourceId::Texture(written));
+    let gone = gpu.read_texture(written, part);
+    assert!(matches!(gone, Err(GpuError::UnknownId("texture"))), "a destroyed texture");
+    let gone = gpu.write_texture(written, part, &[0; 4 * 2 * 2]);
+    assert!(matches!(gone, Err(GpuError::UnknownId("texture"))), "a write to a destroyed texture");
+    Ok(())
+}
+
+/// Checks custom-layer lending: `encoder` gets what the backend lends
+/// outside a pass and `pass` what it lends inside one, each once and in
+/// order with the work around it. What the pass drew before it lent stays,
+/// a draw after it draws as the pass's first would, and the pass begins
+/// with its load operations. Returns the error of a call that should
+/// succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn custom_layers(
+    gpu: &mut impl Gpu,
+    mut encoder: impl FnMut(&mut dyn Any),
+    mut pass: impl FnMut(&mut dyn Any),
+) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    let left = solid_at(gpu, TextureFormat::Rgba8Unorm, [0.0, 1.0, 0.0, 1.0], tile_matrix(0.0))?;
+    let (mut encoders, mut passes) = (0, 0);
+    frame.frame(gpu, &[frame.draw(frame.pipeline)])?;
+    gpu.lend(&mut |lent| {
+        encoders += 1;
+        encoder(lent);
+    })?;
+    assert_eq!(encoders, 1, "the encoder is lent once");
+
+    // Green over the left half of the red frame, before the pass is lent.
+    gpu.begin_pass(&PassDesc {
+        color: Some(ColorAttachment { texture: frame.target, load: LoadOp::Load }),
+        ..frame.pass()
+    })?;
+    gpu.draw(&left.draw(left.pipeline))?;
+    gpu.lend(&mut |lent| {
+        passes += 1;
+        pass(lent);
+    })?;
+    gpu.end_pass()?;
+    assert_eq!(passes, 1, "the pass is lent once");
+    let pixels = read(gpu, frame.target)?;
+    let (red, green, black) = ([255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 0, 255]);
+    assert_eq!(texel(&pixels, 0, 0), green, "the pass's draw before it was lent");
+    assert_eq!(texel(&pixels, SIZE.width - 1, SIZE.height - 1), red, "the frame before it, loaded");
+
+    // A lent pass that clears, and a draw after the lending.
+    gpu.begin_pass(&frame.pass())?;
+    gpu.lend(&mut |lent| pass(lent))?;
+    gpu.draw(&left.draw(left.pipeline))?;
+    gpu.end_pass()?;
+    let pixels = read(gpu, frame.target)?;
+    assert_eq!(texel(&pixels, SIZE.width - 1, SIZE.height / 2), black, "the lent pass's clear");
+    assert_eq!(texel(&pixels, 0, SIZE.height / 2), green, "the draw after the lending");
+    gpu.flush(true)
+}
+
+/// Checks writes from bytes in a JS array, which `host` makes of bytes, as
+/// [`write_buffer_from_host`](Gpu::write_buffer_from_host) takes them: a
+/// write that ends inside a word writes zeros over the rest of it, and a
+/// later [`write_buffer`](Gpu::write_buffer) that ends before the host's
+/// bytes leaves them. The background shader covers the target through
+/// what the first wrote, and then its left half through what the second
+/// did. Returns the readback of the frame, whose texels
+/// [`check_host_writes`] checks once the backend has them, or the error of
+/// a call that should succeed.
+#[cfg(target_family = "wasm")]
+pub fn host_writes<G: Gpu + ?Sized>(
+    gpu: &mut G,
+    host: impl Fn(&[u8]) -> mln_util::host_bytes::HostBytes,
+) -> Result<crate::gpu::ReadbackId, GpuError> {
+    let target = target(gpu, TextureFormat::Rgba8Unorm)?;
+    let (quad, indices) = quad(gpu)?;
+    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::BackgroundShader, []))?;
+    let drawable = [BackgroundDrawableUnionUBO::default()];
+    let drawable = bytemuck::cast_slice(&drawable);
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let props = |color| BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
+    let props_size = size_of::<BackgroundPropsUBO>() as u64;
+    let props_buffer = |gpu: &mut G| {
+        gpu.create_buffer(&crate::gpu::BufferDesc { label: "props", usage: BufferUsage::Uniform, size: props_size })
+    };
+
+    // Opaque green, then red from the host up to the middle of the alpha:
+    // its low bytes, which are 0.0's. The zeros after them make the alpha
+    // 0.0, where 1.0's high bytes would leave 1.0.
+    let tail = props_buffer(gpu)?;
+    gpu.write_buffer(tail, 0, bytemuck::bytes_of(&props([0.0, 1.0, 0.0, 1.0])))?;
+    gpu.write_buffer_from_host(tail, 0, &host(&bytemuck::bytes_of(&props([1.0, 0.0, 0.0, 0.0]))[..14]))?;
+    // Opaque blue from the host, then red 1.0 in the first word.
+    let kept = props_buffer(gpu)?;
+    gpu.write_buffer_from_host(kept, 0, &host(bytemuck::bytes_of(&props([0.0, 0.0, 1.0, 1.0]))))?;
+    gpu.write_buffer(kept, 0, &1.0f32.to_le_bytes())?;
+
+    let bindings = |gpu: &mut G, props, x_max| {
+        let projection = [ProjectionUBO { matrix: tile_matrix(x_max), ..ProjectionUBO::default() }];
+        let projection = bytemuck::cast_slice(&projection);
+        let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+        gpu.create_bindings(&BindingsDesc {
+            label: "host writes",
+            shader,
+            entries: &[
+                whole(ID_PROJECTION_UBO, projection_buffer, projection),
+                whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
+                BindGroupEntry::Buffer {
+                    id: ID_BACKGROUND_PROPS_UBO as u32,
+                    buffer: props,
+                    offset: 0,
+                    size: props_size,
+                },
+            ],
+        })
+    };
+    let (whole_target, left) = (bindings(gpu, tail, 1.0)?, bindings(gpu, kept, 0.0)?);
+    let pipeline = gpu.create_pipeline(&background(shader, RGBA8))?;
+    let geometry = gpu.create_geometry(&GeometryDesc {
+        shader,
+        layouts: background_layouts(),
+        vertex_buffers: &[(quad, 0)],
+        index_buffer: indices,
+    })?;
+    gpu.begin_pass(&PassDesc {
+        label: "host writes",
+        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
+        depth_stencil: None,
+    })?;
+    gpu.draw(&draw(pipeline, whole_target, geometry, 6))?;
+    gpu.draw(&draw(pipeline, left, geometry, 6))?;
+    gpu.end_pass()?;
+    gpu.read_texture(target, TextureRegion::whole(SIZE))
+}
+
+/// Checks the texels of [`host_writes`]'s frame.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+#[cfg(target_family = "wasm")]
+pub fn check_host_writes(pixels: &[u8]) {
+    let (left, right) = (SIZE.width / 4, SIZE.width * 3 / 4);
+    let y = SIZE.height / 2;
+    assert_eq!(texel(pixels, left, y), [255, 0, 255, 255], "a write before the host's bytes left them");
+    assert_eq!(texel(pixels, right, y), [255, 0, 0, 0], "the host's write zeroed the rest of its last word");
+}

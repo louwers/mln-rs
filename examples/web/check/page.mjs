@@ -115,6 +115,40 @@ export async function load(context, view) {
 }
 
 /**
+ * Loads `view` and, once the map is loaded, runs the page's check of the
+ * map's GPU (`checkGpu`); returns how it failed, if it did.
+ */
+export async function checkGpu(context, view) {
+  const session = await context.browser.open(pageUrl(context, view));
+  try {
+    return await session.evaluate(
+      `(async () => {
+        const deadline = performance.now() + 60000;
+        while (!window.mln) {
+          if (performance.now() > deadline) throw new Error('the page did not start');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const within = (promise, what) => Promise.race([
+          promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error(what + ' after 60 s')), 60000)),
+        ]);
+        try {
+          await within(window.mln.loaded, 'not loaded');
+          await within(window.mln.checkGpu(), 'no answer');
+          return null;
+        } catch (error) {
+          return error.message;
+        }
+      })()`,
+    );
+  } catch (error) {
+    return firstLines(error.message);
+  } finally {
+    await session.close();
+  }
+}
+
+/**
  * Loads `view` with the map's instance (`where` is `"map"`) or the first
  * tile worker's (`"tile"`) panicking at its start (the page's `panic`);
  * returns how the page failed to stop and show the panic, if it did.

@@ -2,7 +2,7 @@
 // thread draws them.
 //
 // C++ buckets keep their geometry in shared gfx vectors: the drawables point
-// at them, the upload pass attaches the GPU buffers to them, and a released
+// at them, an upload attaches the GPU buffers to them, and a released
 // vector frees its CPU copy once it is in a buffer. The port's buckets are
 // shared with the worker threads, so they hold plain vectors (`GeometryVec`),
 // and the render thread keeps the gfx vectors made from them, per tile, in a

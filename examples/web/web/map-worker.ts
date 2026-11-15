@@ -372,6 +372,7 @@ async function run({
   let readPixels = 0;
   let idle = 0; // `idle` requests to answer
   let nextFrames = 0; // `nextFrame` requests to answer
+  let gpuChecks = 0; // `checkGpu` requests to answer
   let stillFrames = 0;
   let reported = 0;
   let attribution = "";
@@ -454,6 +455,9 @@ async function run({
       for (; idle > 0; idle--) post({ type: "idle", camera });
     }
     for (; nextFrames > 0; nextFrames--) post({ type: "nextFrame" });
+    if (gpuChecks > 0 && map.take_gpu_check()) {
+      for (; gpuChecks > 0; gpuChecks--) post({ type: "gpuChecked" });
+    }
     if (loaded === null && map.is_fully_loaded()) {
       loaded = {
         loadedMs: performance.now() - started,
@@ -492,6 +496,9 @@ async function run({
           break;
         case "nextFrame":
           nextFrames++;
+          break;
+        case "checkGpu":
+          if (gpuChecks++ === 0) map.start_gpu_check();
           break;
         case "resize":
           map.resize(data.width, data.height);

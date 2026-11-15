@@ -2,26 +2,21 @@
 // stays with the host, which hands over its handles and reports framebuffer
 // resizes through `resize`.
 //
-// Differences from C++:
-// - `USE_SHARED_VK_CONTEXT`, the example of an instance and a device that
-//   the application made, is not ported.
-// - Without `cap_frame_rate`, C++ asks for the immediate present mode and
-//   falls back to FIFO; the port takes mailbox before FIFO
-//   (`present_mode`).
-// - A resize rebuilds the swapchain before the next frame, where C++ waits
-//   a few frames (`requestSurfaceUpdate`'s delay): a Wayland surface has the
-//   size of its swapchain's images, so a late rebuild shows frames of the
-//   old size scaled. An empty framebuffer keeps the swapchain as it is.
-// - Port-only: no target is made on a surface whose extent is empty, as a
-//   minimized window's is (`on_surface`). Once a target's surface has such
-//   an extent, the frame whose acquire or present finds the swapchain out
-//   of date has its rebuild fail and presents nothing, and the target takes
-//   no frame until the surface has an extent again (`begin_frame`). The
-//   extent is asked for only then: on X11 the query is a round trip to the
-//   server. C++ leaves all of that to the host.
-// - Port-only: `request_readback` copies a presented frame into an image,
-//   and `set_overlay` draws over each frame before it is presented, such as
-//   an app's controls over the map.
+// - Without `cap_frame_rate`, the target takes the immediate present mode,
+//   then mailbox, then FIFO (`present_mode`).
+// - A resize rebuilds the swapchain before the next frame: a Wayland surface
+//   has the size of its swapchain's images, so a late rebuild shows frames
+//   of the old size scaled. An empty framebuffer keeps the swapchain as it
+//   is.
+// - No target is made on a surface whose extent is empty, as a minimized
+//   window's is (`on_surface`). Once a target's surface has such an extent,
+//   the frame whose acquire or present finds the swapchain out of date has
+//   its rebuild fail and presents nothing, and the target takes no frame
+//   until the surface has an extent again (`begin_frame`). The extent is
+//   asked for only then: on X11 the query is a round trip to the server.
+// - `request_readback` copies a presented frame into an image, and
+//   `set_overlay` draws over each frame before it is presented, such as an
+//   app's controls over the map.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -29,15 +24,13 @@ use std::sync::Arc;
 
 use ash::vk;
 use mln_gfx::Window;
-use mln_gfx::command_encoder::CommandEncoder;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use crate::context::Context;
 use crate::device::Device;
-use crate::draw_target::{DrawTarget, TargetResource as _};
+use crate::gpu::VulkanGpu;
 use crate::renderer_backend::{RendererBackend, SurfaceProvider};
 use crate::surface_resource::SurfaceResource;
 use crate::window::WindowSurface;
@@ -58,18 +51,17 @@ impl HostSurface {
     }
 }
 
-/// Port-only: what an overlay draws with (`SurfaceTarget::set_overlay`):
-/// the frame's command buffer, inside a render pass over the frame's image
-/// that keeps what the map drew.
+/// What an overlay draws with ([`SurfaceTarget::set_overlay`]): a command
+/// buffer of its own, inside a render pass over the frame's image that
+/// keeps what the map drew, submitted after the frame's commands.
 pub struct OverlayTarget<'a> {
-    /// The backend's context, for the overlay's buffers and textures. The
-    /// frame is in a render pass, so a texture uploaded now is uploaded
-    /// before the frame's commands run.
-    pub context: &'a Context,
+    /// The backend's `Gpu`, for the overlay's buffers and textures. What
+    /// the overlay writes to them now is written before its commands run,
+    /// and what it destroys goes once they are done
+    /// ([`VulkanGpu::destroy_later`] for its own objects).
+    pub gpu: &'a mut VulkanGpu,
     pub device: &'a ash::Device,
-    /// The frame's command buffer, which the overlay records its draws
-    /// into. What they use must live until the frame is done
-    /// (`Context::enqueue_deletion`).
+    /// The overlay's command buffer, which it records its draws into.
     pub command_buffer: vk::CommandBuffer,
     /// The render pass the command buffer is in, for the overlay's
     /// pipelines: one color attachment of the surface's format, no depth or
@@ -79,8 +71,16 @@ pub struct OverlayTarget<'a> {
     pub size: Size,
 }
 
-/// Port-only: draws over a frame (`SurfaceTarget::set_overlay`).
-pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
+/// Draws over each frame of a [`SurfaceTarget`]
+/// ([`set_overlay`](SurfaceTarget::set_overlay)).
+pub trait Overlay {
+    /// Records the overlay's draws over a frame.
+    fn draw(&mut self, target: &mut OverlayTarget<'_>);
+
+    /// Destroys what the overlay made on `gpu`, which no frame it records
+    /// will use: it is replaced, or its target goes.
+    fn destroy(&mut self, gpu: &mut VulkanGpu);
+}
 
 /// The mode a surface that has the modes `available` presents in: without
 /// tearing when the frame rate is capped, and otherwise without waiting for
@@ -103,9 +103,7 @@ pub(crate) fn present_mode(cap_frame_rate: bool, available: &[vk::PresentModeKHR
 /// `GLFWVulkanBackend`'s swapchain without the window: frames presented to
 /// a window's surface.
 pub struct SurfaceTarget {
-    backend: Rc<RendererBackend>,
-    resource: Rc<SurfaceResource>,
-    image: Rc<DrawTarget>,
+    resource: SurfaceResource,
     size: Cell<Size>,
     /// Whether the swapchain is rebuilt before the next frame.
     rebuild: Cell<bool>,
@@ -240,7 +238,6 @@ impl SurfaceTarget {
             }
             return Err(Error::invalid_state("The window is minimized or has no client area"));
         }
-        let context: &Rc<Context> = backend.vulkan_context();
         // SAFETY: the surface is the instance's, and the device presents to
         // it.
         let present_modes = unsafe {
@@ -249,12 +246,11 @@ impl SurfaceTarget {
                 .unwrap_or_default()
         };
         let resource = SurfaceResource::new(
-            context,
+            backend,
             framebuffer_size,
-            Some(surface),
+            surface,
             provider,
             present_mode(cap_frame_rate, &present_modes),
-            /*read_every_frame=*/ false,
         );
         if !resource.has_platform_surface() {
             return Err(Error::native("The window has no Vulkan surface"));
@@ -263,11 +259,8 @@ impl SurfaceTarget {
         if resource.get_image_count() == 0 && framebuffer_size.width > 0 && framebuffer_size.height > 0 {
             return Err(Error::native("Failed to create a swapchain for the window"));
         }
-        let image = Rc::new(DrawTarget::new(framebuffer_size, Rc::<SurfaceResource>::clone(&resource)));
         Ok(SurfaceTarget {
-            backend,
             resource,
-            image,
             size: Cell::new(framebuffer_size),
             rebuild: Cell::new(false),
             readback_requested: Cell::new(false),
@@ -289,7 +282,6 @@ impl SurfaceTarget {
     /// where the window system gives it one.
     pub fn resize(&self, size: Size) {
         self.size.set(size);
-        self.image.set_size(size);
         if size.width == 0 || size.height == 0 {
             return;
         }
@@ -303,27 +295,28 @@ impl SurfaceTarget {
         }
     }
 
-    /// Port-only: copy the frame being drawn, or else the next one, when it
+    /// Copies the frame being drawn, or else the next one, when it
     /// is presented (see `take_readback`).
     pub fn request_readback(&self) {
-        self.resource.queue_surface_read();
+        self.resource.request_read();
         self.readback_requested.set(true);
     }
 
-    /// Port-only: the frame copied after `request_readback`, once
+    /// The frame copied after `request_readback`, once
     /// presented, with what the overlay drew over it.
     pub fn take_readback(&self) -> Option<PremultipliedImage> {
-        if !self.readback_requested.get() || self.resource.is_surface_read_queued() {
+        if !self.readback_requested.get() || self.resource.is_read_requested() {
             return None;
         }
         self.readback_requested.set(false);
         self.resource.read_image()
     }
 
-    /// Port-only: draws `overlay` over each frame from now on, after the
-    /// map and before the frame is presented (and read back), or stops with
-    /// `None`.
-    pub fn set_overlay(&self, overlay: Option<Overlay>) {
+    /// Draws `overlay` over each frame from now on, after the map and
+    /// before the frame is presented (and read back), or stops with `None`.
+    /// The overlay it replaces destroys what it made
+    /// ([`Overlay::destroy`]).
+    pub fn set_overlay(&self, overlay: Option<Box<dyn Overlay>>) {
         self.resource.set_overlay(overlay);
     }
 }
@@ -334,12 +327,11 @@ fn is_empty(extent: vk::Extent2D) -> bool {
 }
 
 impl FrameTarget for SurfaceTarget {
-    /// The frame's image is acquired when the frame begins
-    /// (`Context::begin_frame`). No frame is drawn into an empty
+    /// Acquires the frame's image. No frame is drawn into an empty
     /// framebuffer. A swapchain that couldn't be made, as for a surface of
     /// an empty extent, such as a minimized window's, is made again before
     /// the frame, once the surface has an extent.
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
+    fn begin_frame(&self) -> Option<FrameImage> {
         let size = self.size.get();
         if size.width == 0 || size.height == 0 {
             return None;
@@ -348,23 +340,15 @@ impl FrameTarget for SurfaceTarget {
         if unbuilt && self.resource.current_extent().is_some_and(is_empty) {
             return None;
         }
-        let context = self.backend.vulkan_context();
-        context.set_surface(&self.resource);
         if self.rebuild.take() || unbuilt {
-            context.request_surface_update(false);
+            self.resource.request_surface_update(false);
         }
-        Some(Rc::<DrawTarget>::clone(&self.image))
+        self.resource.begin_frame()
     }
 
-    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
-        if self.resource.swap() { Handoff::Presented } else { Handoff::Dropped }
-    }
-}
-
-impl Drop for SurfaceTarget {
-    fn drop(&mut self) {
-        // The overlay's resources go through the context's deletion queues,
-        // and the swapchain and the surface with the resource.
-        self.set_overlay(None);
+    /// Draws the overlay over the frame, reads it back if asked, and
+    /// presents it.
+    fn end_frame(&self) -> Handoff {
+        if self.resource.end_frame() { Handoff::Presented } else { Handoff::Dropped }
     }
 }

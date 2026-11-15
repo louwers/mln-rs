@@ -1,27 +1,4 @@
-// The C++ core's WGSL, copied from the raw string literals of
-//   include/mln/shaders/webgpu/background.hpp
-//   include/mln/shaders/webgpu/circle.hpp
-//   include/mln/shaders/webgpu/clipping_mask.hpp
-//   include/mln/shaders/webgpu/collision.hpp
-//   include/mln/shaders/webgpu/color_relief.hpp
-//   include/mln/shaders/webgpu/common.hpp
-//   include/mln/shaders/webgpu/debug.hpp
-//   include/mln/shaders/webgpu/fill.hpp
-//   include/mln/shaders/webgpu/fill_extrusion.hpp
-//   include/mln/shaders/webgpu/globe_depth.hpp
-//   include/mln/shaders/webgpu/heatmap.hpp
-//   include/mln/shaders/webgpu/heatmap_texture.hpp
-//   include/mln/shaders/webgpu/hillshade.hpp
-//   include/mln/shaders/webgpu/hillshade_prepare.hpp
-//   include/mln/shaders/webgpu/line.hpp
-//   include/mln/shaders/webgpu/raster.hpp
-//   include/mln/shaders/webgpu/shader_group.hpp
-//   include/mln/shaders/webgpu/shader_program.hpp
-//   include/mln/shaders/webgpu/sky.hpp
-//   include/mln/shaders/webgpu/symbol.hpp
-//   include/mln/shaders/webgpu/wgsl_preprocessor.hpp
-//   include/mln/shaders/webgpu/widevector.hpp
-// with the port's changes.
+//! The WGSL of the built-in shaders, which started as MapLibre Native's.
 
 use super::shader_source::WgslShaderSource;
 
@@ -209,8 +186,6 @@ struct BackgroundPatternPropsUBO {
     scale_b: f32,
     mix: f32,
     opacity: f32,
-    pad1: f32,
-    pad2: f32,
 };
 
 struct GlobalIndexUBO {
@@ -272,8 +247,6 @@ struct BackgroundPatternPropsUBO {
     scale_b: f32,
     mix: f32,
     opacity: f32,
-    pad1: f32,
-    pad2: f32,
 };
 
 struct GlobalPaintParamsUBO {
@@ -623,30 +596,13 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-struct ClipUBO {
-    matrix: mat4x4<f32>,
-    stencil_ref: u32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-#ifdef PROJECTION_GLOBE
-@group(0) @binding(0) var<uniform> clip: ProjectionUBO;
-#else
-@group(0) @binding(0) var<uniform> clip: ClipUBO;
-#endif
+@group(0) @binding(4) var<uniform> projection: ProjectionUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-#ifdef PROJECTION_GLOBE
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    let clip_pos = projectTileWithPoles(pos, pos, clip);
-#else
-    let clip_pos = clip.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
-#endif
-    out.position = vec4<f32>(clip_pos.x, clip_pos.y, clip_pos.z, clip_pos.w);
+    out.position = projectTileWithPoles(pos, pos, projection);
     return out;
 }
 ",

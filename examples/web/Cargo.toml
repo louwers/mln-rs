@@ -32,7 +32,9 @@ webgl = ["dep:mln_gl"]
 js-sys.workspace = true
 mln_actor.workspace = true
 mln_gestures.workspace = true
-mln_gfx.workspace = true
+# gpu-conformance: the host writes case, which check/check.mjs runs
+# (`WebMap::start_gpu_check`).
+mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 mln_gl = { workspace = true, optional = true }
 mln_map.workspace = true
 mln_renderer.workspace = true
