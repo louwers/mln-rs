@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mln_actor::RunLoop;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -89,6 +89,11 @@ fn snapshot_reports_every_member() {
         ..Default::default()
     };
     map.jump_to(&camera);
+    // With a frame time, the ease starts and is sampled at the same instant,
+    // so the snapshot shows its start. Without one it starts at one
+    // `Instant::now()` and is sampled at a later one, which on a slow run
+    // moves the zoom off 6.
+    map.set_frame_time(Some(Instant::now()));
     map.update_camera(&CameraUpdate {
         mode: CameraUpdateMode::Ease,
         camera: CameraOptions { zoom: Some(7.0), ..Default::default() },
