@@ -263,11 +263,7 @@ impl ThroughCodec {
 /// index and atlases outside a codec's session, with every value in full.
 /// (The feature index without its data, which may no longer have its bytes.)
 fn comparable(result: &LayoutResult) -> [Vec<u8>; 3] {
-    [
-        fields::encode_buckets(result),
-        result.feature_index.encode_grid(),
-        postcard::to_allocvec(&*result.atlases).unwrap(),
-    ]
+    [fields::encode_buckets(result), result.feature_index.encode_grid(), mln_wire::to_vec(&*result.atlases).unwrap()]
 }
 
 /// Lays the tile out with `layers` and `data` through the codec, then
@@ -325,7 +321,7 @@ const EXTRUSION_PATTERN: &str = r#"{"id": "extrusion-pattern", "type": "fill-ext
 /// A worker behind the codec lays the tile out as a worker reached directly
 /// for a layer of every type that takes geometry tiles (each type of the
 /// style specification whose layers do must have a layer here, and its
-/// buckets a serde form), and the layout comes back with the map side's own
+/// buckets a wire form), and the layout comes back with the map side's own
 /// layer properties and data.
 #[test]
 fn every_geometry_layer_type_crosses() {
@@ -357,7 +353,7 @@ fn every_geometry_layer_type_crosses() {
         assert_eq!(
             takes_geometry_tiles,
             layers_of_type.iter().any(|(t, _)| *t == type_),
-            "{type_} layers need a test layer here, and their buckets a serde form"
+            "{type_} layers need a test layer here, and their buckets a wire form"
         );
     }
 
@@ -516,8 +512,8 @@ fn geojson_tiles_cross() {
         ),
     ];
 
-    let encoded = postcard::to_allocvec(&mln_tile_id::EncodedTileData::GeoJson(Arc::new(features.clone()))).unwrap();
-    let Ok(mln_tile_id::EncodedTileData::GeoJson(decoded)) = postcard::from_bytes(&encoded) else {
+    let encoded = mln_wire::to_vec(&mln_tile_id::EncodedTileData::GeoJson(Arc::new(features.clone()))).unwrap();
+    let Ok(mln_tile_id::EncodedTileData::GeoJson(decoded)) = mln_wire::from_slice(&encoded) else {
         panic!("not GeoJSON")
     };
     assert_eq!(*decoded, features);
@@ -537,7 +533,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     use std::time::Duration;
 
     use mln_style::layer_properties::get_evaluated;
-    use mln_style::layers::fill_layer_properties::{FillColor, FillLayerProperties};
+    use mln_style::layers::fill_layer_properties::FillLayerProperties;
     use mln_style::map::zoom_history::ZoomHistory;
     use mln_util::time::Instant;
 
@@ -553,7 +549,7 @@ fn properties_cross_while_a_paint_property_transitions() {
         .transition_with_impl(&TransitionParameters::new(Some(start), transition), convert(&constant).base_impl());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
-    assert!(!get_evaluated::<FillLayerProperties>(&transitioning).get::<FillColor>().is_constant());
+    assert!(!get_evaluated::<FillLayerProperties>(&transitioning).fill_color.is_constant());
 
     let mut codec = ThroughCodec::new();
     codec.send(&set_layers(std::slice::from_ref(&transitioning), 1));
@@ -649,7 +645,7 @@ fn images_are_defined_once() {
     assert!(second.len() * 20 < first.len(), "{} bytes, then {}", first.len(), second.len());
 }
 
-/// Layer properties of a type without a serde form.
+/// Layer properties of a type without a wire form.
 #[derive(Debug)]
 struct Unknown(mln_style::layer_properties::LayerPropertiesBase);
 

@@ -3,18 +3,14 @@
 // Tweakers are shared (`std::shared_ptr`) by the render layer and, weakly, by
 // its layer group: `Rc<RefCell<dyn LayerTweaker>>`.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_gfx::context::Context;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
-use mln_gfx::{Drawable, LayerGroupBase};
 use mln_map_types::{ProjectionData, TransformState};
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
@@ -22,6 +18,10 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, M2PI};
 use mln_util::mat4::{Mat4, matrix};
 
+use crate::drawable::Drawable;
+use crate::gfx::context::Context;
+use crate::gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
+use crate::layer_group::LayerGroup;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
@@ -52,14 +52,22 @@ impl LayerTweakerBase {
         &mut self,
         layer_uniforms: &mut UniformBufferArray,
         ubos: &[ProjectionUBO],
-        context: &dyn Context,
+        context: &Context,
     ) {
         let bytes: &[u8] = bytemuck::cast_slice(ubos);
-        match &self.projection_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.projection_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.projection_uniform_buffer, bytes);
         layer_uniforms.set(ID_PROJECTION_UBO, self.projection_uniform_buffer.clone());
+    }
+}
+
+/// Gives `layer_uniforms`, of a layer whose drawables draw without a
+/// projection, a projection block of zeros if they have none. GL's programs
+/// declare the block whether they read it or not, so a draw binds it all the
+/// same.
+pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, context: &Context) {
+    if layer_uniforms.get(ID_PROJECTION_UBO).is_none() {
+        layer_uniforms
+            .set(ID_PROJECTION_UBO, context.create_storage_buffer(bytemuck::bytes_of(&ProjectionUBO::default())));
     }
 }
 
@@ -68,7 +76,7 @@ pub trait LayerTweaker {
     fn base(&self) -> &LayerTweakerBase;
     fn base_mut(&mut self) -> &mut LayerTweakerBase;
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>);
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>);
 
     fn get_id(&self) -> &str {
         &self.base().id
@@ -79,13 +87,6 @@ pub trait LayerTweaker {
         base.evaluated_properties = new_props;
         base.properties_updated = true;
     }
-}
-
-/// The value for `Drawable::set_layer_tweaker` (C++
-/// `drawable->setLayerTweaker(layerTweaker)`).
-#[expect(clippy::unnecessary_wraps, reason = "the value of a `Drawable` setter, which takes an `Option`")]
-pub(crate) fn layer_tweaker_slot(tweaker: &LayerTweakerPtr) -> Option<Rc<dyn Any>> {
-    Some(Rc::new(Rc::clone(tweaker)))
 }
 
 #[expect(
@@ -99,7 +100,7 @@ pub(crate) fn get_tile_matrix(
     anchor: TranslateAnchorType,
     near_clipped: bool,
     in_viewport_pixel_units: bool,
-    drawable: &dyn Drawable,
+    drawable: &Drawable,
     aligned: bool,
 ) -> Mat4 {
     get_tile_matrix_for(
@@ -108,7 +109,7 @@ pub(crate) fn get_tile_matrix(
         parameters.transform_params,
         translation,
         anchor,
-        drawable.get_origin(),
+        drawable.origin,
         near_clipped,
         in_viewport_pixel_units,
         aligned,
@@ -128,7 +129,7 @@ pub(crate) fn get_projection_data(
     anchor: TranslateAnchorType,
     near_clipped: bool,
     in_viewport_pixel_units: bool,
-    drawable: &dyn Drawable,
+    drawable: &Drawable,
     aligned: bool,
 ) -> ProjectionData {
     let mut data = parameters.state.get_projection_data_for_matrix(

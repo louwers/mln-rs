@@ -5,7 +5,7 @@ use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 
 /// `["case", test, output, ..., otherwise]`.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub struct Case {
     type_: Type,
     branches: Box<[(Expr, Expr)]>,

@@ -5,8 +5,8 @@
 //! the same values: every tile's `setLayers` has the style's layers and
 //! their expressions, and every layout the worker sends back has buckets
 //! whose binders hold those expressions again. A `Kind` names such a value
-//! type, and the fields that hold one opt in with `serialize`/`deserialize`
-//! (`#[serde(with = ...)]`). While a codec has its `Tables` open
+//! type, and the fields that hold one opt in with `write`/`read`
+//! (`#[wire(with = ...)]`). While a codec has its `Tables` open
 //! (`Tables::open`), a value is written as follows:
 //!
 //! - On the side the value comes from (`Tables::origin`), the first time as
@@ -26,9 +26,6 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::sync::{Arc, Weak};
 
-use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 use crate::hash::HashMap;
 
 /// A type of value that crosses once, then by key.
@@ -37,10 +34,14 @@ pub trait Kind: 'static {
     type Value: ?Sized + 'static;
     /// The table's name, which the lists of keys to forget use.
     const NAME: &'static str;
+}
+
+/// How a `Kind`'s values are written in full.
+pub trait WireKind: Kind {
     /// Writes the value in full.
-    fn write<S: Serializer>(value: &Self::Value, serializer: S) -> Result<S::Ok, S::Error>;
+    fn write(value: &Self::Value, w: &mut mln_wire::Writer);
     /// Reads what `write` wrote.
-    fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<Self::Value>, D::Error>;
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Arc<Self::Value>>;
 }
 
 /// A value the side it comes from gave a key, and that key.
@@ -259,37 +260,18 @@ enum TableRef<'a, T: ?Sized> {
     Copies(&'a mut Copies<T>),
 }
 
-/// How a value is written.
-#[derive(Serialize)]
-#[serde(bound = "")]
-enum Written<'a, K: Kind> {
+/// How a value is written, as the variant index it is written with.
+enum How {
     /// The first time from the origin: the key, and the value in full.
-    Define(u64, #[serde(serialize_with = "write_value::<K, _>")] &'a K::Value),
+    Define(u64),
     /// The key either side knows the value by.
     Ref(u64),
     /// The value in full, without a key.
-    Inline(#[serde(serialize_with = "write_value::<K, _>")] &'a K::Value),
+    Inline,
 }
 
-#[derive(Deserialize)]
-#[serde(bound = "")]
-enum Read<K: Kind> {
-    Define(u64, #[serde(deserialize_with = "K::read")] Arc<K::Value>),
-    Ref(u64),
-    Inline(#[serde(deserialize_with = "K::read")] Arc<K::Value>),
-}
-
-fn write_value<K: Kind, S: Serializer>(value: &&K::Value, serializer: S) -> Result<S::Ok, S::Error> {
-    K::write(value, serializer)
-}
-
-/// Writes a value of kind `K` (`#[serde(serialize_with)]`).
-pub fn serialize<K: Kind, S: Serializer>(value: &Arc<K::Value>, serializer: S) -> Result<S::Ok, S::Error> {
-    enum How {
-        Define(u64),
-        Ref(u64),
-        Inline,
-    }
+/// How the open session writes `value`, giving it a key if it is new.
+fn how<K: Kind>(value: &Arc<K::Value>) -> How {
     let how = with_table::<K, _>(|table| match table {
         TableRef::Origin(origin) => match origin.key(value) {
             (key, true) => How::Define(key),
@@ -297,78 +279,102 @@ pub fn serialize<K: Kind, S: Serializer>(value: &Arc<K::Value>, serializer: S) -
         },
         TableRef::Copies(copies) => copies.keys.get(&address(value)).map_or(How::Inline, |key| How::Ref(*key)),
     });
-    match how.unwrap_or(How::Inline) {
-        How::Define(key) => Written::<K>::Define(key, value).serialize(serializer),
-        How::Ref(key) => Written::<K>::Ref(key).serialize(serializer),
-        How::Inline => Written::<K>::Inline(value).serialize(serializer),
+    how.unwrap_or(How::Inline)
+}
+
+/// Keeps a value the other side defined under `key`.
+fn define<K: Kind>(key: u64, value: &Arc<K::Value>) {
+    with_table::<K, _>(|table| {
+        if let TableRef::Copies(copies) = table {
+            copies.keys.insert(address(value), key);
+            copies.by_key.insert(key, Arc::clone(value));
+        }
+    });
+}
+
+/// The value either side knows by `key`.
+fn by_key<K: Kind>(key: u64) -> Option<Arc<K::Value>> {
+    with_table::<K, _>(|table| match table {
+        TableRef::Origin(origin) => origin.by_key.get(&key).and_then(Weak::upgrade),
+        TableRef::Copies(copies) => copies.by_key.get(&key).cloned(),
+    })
+    .flatten()
+}
+
+/// Writes a value of kind `K` (`#[wire(with)]`).
+pub fn write<K: WireKind>(value: &Arc<K::Value>, w: &mut mln_wire::Writer) {
+    match how::<K>(value) {
+        How::Define(key) => {
+            w.push(0);
+            mln_wire::write_varint(w, key);
+            K::write(value, w);
+        }
+        How::Ref(key) => {
+            w.push(1);
+            mln_wire::write_varint(w, key);
+        }
+        How::Inline => {
+            w.push(2);
+            K::write(value, w);
+        }
     }
 }
 
-/// Reads a value of kind `K` (`#[serde(deserialize_with)]`).
-pub fn deserialize<'de, K: Kind, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<K::Value>, D::Error> {
-    let (key, value) = read::<K, D>(deserializer)?;
-    value.ok_or_else(|| D::Error::custom(format!("no {} {}", K::NAME, key.unwrap_or_default())))
+/// Reads what `write` wrote.
+pub fn read<K: WireKind>(r: &mut mln_wire::Reader<'_>) -> Option<Arc<K::Value>> {
+    match r.byte()? {
+        0 => {
+            let key = r.varint()?;
+            let value = K::read(r)?;
+            define::<K>(key, &value);
+            Some(value)
+        }
+        1 => {
+            let key = r.varint()?;
+            by_key::<K>(key).or_else(|| r.fail("a value by a key this side doesn't know"))
+        }
+        2 => K::read(r),
+        _ => r.fail_tag(),
+    }
 }
 
-/// Reads a value of kind `K` as `deserialize` does, but a key this side
-/// doesn't know (any more) reads as `None` rather than as an error.
-pub fn deserialize_known<'de, K: Kind, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Arc<K::Value>>, D::Error> {
-    Ok(read::<K, D>(deserializer)?.1)
-}
-
-/// A value read, if any, and the key it was read by, if any.
-type KeyedRead<T> = (Option<u64>, Option<Arc<T>>);
-
-/// The value read, and the key it was read by, if any.
-fn read<'de, K: Kind, D: Deserializer<'de>>(deserializer: D) -> Result<KeyedRead<K::Value>, D::Error> {
-    Ok(match Read::<K>::deserialize(deserializer)? {
-        Read::Define(key, value) => {
-            with_table::<K, _>(|table| {
-                if let TableRef::Copies(copies) = table {
-                    copies.keys.insert(address(&value), key);
-                    copies.by_key.insert(key, Arc::clone(&value));
-                }
-            });
-            (Some(key), Some(value))
+/// Reads what `write` wrote, but a key this side doesn't know (any more)
+/// reads as `Some(None)` rather than as a failure.
+pub fn read_known<K: WireKind>(r: &mut mln_wire::Reader<'_>) -> Option<Option<Arc<K::Value>>> {
+    match r.byte()? {
+        0 => {
+            let key = r.varint()?;
+            let value = K::read(r)?;
+            define::<K>(key, &value);
+            Some(Some(value))
         }
-        Read::Ref(key) => {
-            let value = with_table::<K, _>(|table| match table {
-                TableRef::Origin(origin) => origin.by_key.get(&key).and_then(Weak::upgrade),
-                TableRef::Copies(copies) => copies.by_key.get(&key).cloned(),
-            });
-            (Some(key), value.flatten())
+        1 => {
+            let key = r.varint()?;
+            Some(by_key::<K>(key))
         }
-        Read::Inline(value) => (None, Some(value)),
-    })
+        2 => K::read(r).map(Some),
+        _ => r.fail_tag(),
+    }
 }
 
 /// Writes an `Option` of a value of kind `K`.
-pub fn serialize_option<K: Kind, S: Serializer>(
-    value: &Option<Arc<K::Value>>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    struct Some<'a, K: Kind>(&'a Arc<K::Value>);
-    impl<K: Kind> Serialize for Some<'_, K> {
-        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serialize::<K, S>(self.0, serializer)
+pub fn write_option<K: WireKind>(value: &Option<Arc<K::Value>>, w: &mut mln_wire::Writer) {
+    match value {
+        None => w.push(0),
+        Some(value) => {
+            w.push(1);
+            write::<K>(value, w);
         }
     }
-    value.as_ref().map(Some::<K>).serialize(serializer)
 }
 
-/// Reads an `Option` of a value of kind `K`.
-pub fn deserialize_option<'de, K: Kind, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Arc<K::Value>>, D::Error> {
-    struct Value<K: Kind>(Arc<K::Value>);
-    impl<'de, K: Kind> Deserialize<'de> for Value<K> {
-        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            deserialize::<K, D>(deserializer).map(Value)
-        }
+/// Reads what `write_option` wrote.
+pub fn read_option<K: WireKind>(r: &mut mln_wire::Reader<'_>) -> Option<Option<Arc<K::Value>>> {
+    match r.byte()? {
+        0 => Some(None),
+        1 => read::<K>(r).map(Some),
+        _ => r.fail("invalid option"),
     }
-    Ok(Option::<Value<K>>::deserialize(deserializer)?.map(|value| value.0))
 }
 
 #[cfg(test)]
@@ -380,25 +386,29 @@ mod tests {
     impl Kind for Text {
         type Value = str;
         const NAME: &'static str = "text";
-        fn write<S: Serializer>(value: &str, serializer: S) -> Result<S::Ok, S::Error> {
-            value.serialize(serializer)
-        }
-        fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<str>, D::Error> {
-            String::deserialize(deserializer).map(Arc::from)
-        }
     }
 
-    #[derive(Serialize, Deserialize)]
-    struct Message(
-        #[serde(serialize_with = "serialize::<Text, _>", deserialize_with = "deserialize::<Text, _>")] Arc<str>,
-    );
+    impl WireKind for Text {
+        fn write(value: &str, w: &mut mln_wire::Writer) {
+            mln_wire::write_str(w, value);
+        }
+        fn read(r: &mut mln_wire::Reader<'_>) -> Option<Arc<str>> {
+            mln_wire::read_str(r).map(Arc::from)
+        }
+    }
 
     fn encode(tables: &mut Tables, value: &Arc<str>) -> Vec<u8> {
-        tables.open(|| postcard::to_allocvec(&Message(Arc::clone(value)))).unwrap()
+        tables
+            .open(|| {
+                let mut w = mln_wire::Writer::new();
+                write::<Text>(value, &mut w);
+                w.finish()
+            })
+            .unwrap()
     }
 
-    fn decode(tables: &mut Tables, bytes: &[u8]) -> Result<Arc<str>, postcard::Error> {
-        tables.open(|| postcard::from_bytes::<Message>(bytes)).map(|message| message.0)
+    fn decode(tables: &mut Tables, bytes: &[u8]) -> Option<Arc<str>> {
+        tables.open(|| read::<Text>(&mut mln_wire::Reader::new(bytes)).ok_or(())).ok()
     }
 
     /// A value crosses in full once, then by key, both ways; the side it
@@ -440,11 +450,11 @@ mod tests {
         let dead = origin.forget_dead();
         assert_eq!(dead, vec![("text".to_owned(), vec![0])]);
         copies.forget(&dead);
-        assert!(decode(&mut copies, &reference).is_err());
+        assert!(decode(&mut copies, &reference).is_none());
 
         let unsent: Arc<str> = Arc::from("unsent");
         let failed: Result<(), ()> = origin.open(|| {
-            postcard::to_allocvec(&Message(Arc::clone(&unsent))).unwrap();
+            write::<Text>(&unsent, &mut mln_wire::Writer::new());
             Err(())
         });
         assert!(failed.is_err());

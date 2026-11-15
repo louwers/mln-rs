@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_actor::actor::PoolActorRef;
-use mln_actor::{ActorRef, Mailbox, scheduler};
+use mln_actor::{ActorRef, Mailbox};
 use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, SubscriberKey};
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
@@ -121,7 +121,7 @@ impl<D: Clone + Send + 'static> CustomTile<D> {
             loader,
         });
         // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        let mailbox = Mailbox::with_target(&scheduler::get_current(), Rc::<Link<D>>::clone(&link));
+        let mailbox = Mailbox::with_target(&parameters.scheduler, Rc::<Link<D>>::clone(&link));
         CustomTile { tile, link, mailbox, single_layer }
     }
 

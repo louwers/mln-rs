@@ -1,33 +1,26 @@
-// C++ holds the OfflineDatabase and the online FileSource by reference; here
-// they are shared (`Rc<RefCell<OfflineDatabase>>`, `Arc<dyn FileSource>`).
-// The download's state is behind `Rc` with interior mutability, because the
-// C++ code is re-entrant: the observer may call `setState`/`getStatus` from
-// inside `statusChanged`, and response callbacks queue new work. No borrow
-// is held across a call to the observer, a callback or the database.
-// Callbacks hold the download weakly (C++ captures `this`; the requests
-// that run them are owned by the download and die with it).
+// The downloads of a database's offline regions live with the database, on
+// the thread that owns both (the database's worker): `Downloads` keeps one
+// `OfflineDownload` per region, which works on the database it's handed.
+// What a download sets off comes back as a task on that thread (`Post`),
+// which names the region and the request: a request's response, or the
+// queued check of a resource the region may hold. A request dropped from the
+// download, as a pause drops them all, finds nothing when its task comes.
 //
-// `requests` is keyed by an id (C++: a `std::list` of requests, erased by
-// iterator). `RunLoop::invokeCancellable` is `invoke_cancellable` below.
+// The observer is called while the download works; it reaches the download
+// again only through a task.
 
-use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
-use std::rc::Rc;
-#[cfg(test)]
-use std::rc::Weak;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
-use feature::Value;
-use mln_actor::{LocalObject, RunLoop};
 use mln_renderer::util::tile_cover::{TileCover, covering_zoom_level, tile_count_bounds, tile_count_geometry};
-use mln_storage::file_source::MAX_CONCURRENT_REQUESTS_KEY;
 use mln_storage::offline::{
     OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
 };
-use mln_storage::offline_database::OfflineDatabase;
+use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
-use mln_storage::{AsyncRequest, FileSource, Kind, LoadingMethod, Resource, Response};
+use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
 use mln_style::parser::Parser;
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::{GeoJSONSource, TileSource};
@@ -38,7 +31,7 @@ use mln_text::glyph::{
 };
 use mln_tile_id::tile_id::CanonicalTileID;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
-use mln_util::hash::HashSet;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::i18n::glyph_range_is_entirely_locally_generated;
 use mln_util::range::Range;
 use mln_util::tileset::Tileset;
@@ -46,10 +39,6 @@ use mln_vec_map::VecMap;
 
 const K_RESOURCES_BATCH_SIZE: usize = 64;
 const K_MARK_BATCH_SIZE: usize = 200;
-
-/// Reads a downloaded style or TileJSON, and returns why it can't when it
-/// can't.
-type ResponseCallback = Rc<dyn Fn(&Response) -> Result<(), String>>;
 
 // Generic functions
 
@@ -113,217 +102,207 @@ fn tile_count(definition: &OfflineRegionDefinition, type_: SourceType, tile_size
     result
 }
 
-/// A task of [`invoke_cancellable`], until it runs or is cancelled.
-type CancellableTask = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
+/// A task for the thread that owns a database and its downloads.
+pub type DownloadTask = Box<dyn FnOnce(&mut OfflineDatabase, &mut Downloads) + Send>;
 
-/// A queued task. Dropping it cancels the task if it has not run.
-struct WorkRequest {
-    task: CancellableTask,
+/// Hands a task to the thread that owns the database and its downloads,
+/// which runs it after what it runs now. Any thread may call it.
+pub type Post = Arc<dyn Fn(DownloadTask) + Send + Sync>;
+
+/// The downloads of a database's offline regions, by region id, on the
+/// thread that owns the database.
+pub struct Downloads {
+    downloads: HashMap<i64, OfflineDownload>,
+    network: Option<Arc<dyn FileSource>>,
+    post: Post,
 }
 
-impl AsyncRequest for WorkRequest {}
+impl Downloads {
+    /// Downloads that load through `network`, and come back through `post`.
+    #[must_use]
+    pub fn new(network: Option<Arc<dyn FileSource>>, post: Post) -> Self {
+        Downloads { downloads: HashMap::default(), network, post }
+    }
 
-impl Drop for WorkRequest {
-    fn drop(&mut self) {
-        self.task.borrow_mut().take();
+    /// The download of the region `region_id`, made at its first use. Fails
+    /// without a network, and for a region that the database doesn't have.
+    pub fn download(
+        &mut self,
+        db: &mut OfflineDatabase,
+        region_id: i64,
+    ) -> Result<&mut OfflineDownload, DatabaseError> {
+        match self.downloads.entry(region_id) {
+            Entry::Occupied(download) => Ok(download.into_mut()),
+            Entry::Vacant(entry) => {
+                let Some(network) = &self.network else {
+                    return Err(DatabaseError::Runtime("Network file source unavailable.".to_owned()));
+                };
+                let definition = db.get_region(region_id)?.ok_or(DatabaseError::RegionNotFound(region_id))?.definition;
+                let download = OfflineDownload::new(region_id, definition, Arc::clone(network), Arc::clone(&self.post));
+                Ok(entry.insert(download))
+            }
+        }
+    }
+
+    /// Adds a download that was made apart, in place of the region's.
+    pub fn insert(&mut self, download: OfflineDownload) {
+        self.downloads.insert(download.id, download);
+    }
+
+    /// The download of `region_id`, if it has one.
+    pub fn get_mut(&mut self, region_id: i64) -> Option<&mut OfflineDownload> {
+        self.downloads.get_mut(&region_id)
+    }
+
+    /// Stops and forgets the download of `region_id`.
+    pub fn remove(&mut self, region_id: i64) -> Option<OfflineDownload> {
+        self.downloads.remove(&region_id)
+    }
+
+    /// A response to the request `request` of the region's download.
+    fn on_response(&mut self, db: &mut OfflineDatabase, region_id: i64, request: u64, response: Response) {
+        if let Some(download) = self.downloads.get_mut(&region_id) {
+            download.on_online_response(db, request, response);
+        }
+    }
+
+    /// The queued check of a resource that the region's download needs.
+    fn on_ensure(&mut self, db: &mut OfflineDatabase, region_id: i64, request: u64) {
+        if let Some(download) = self.downloads.get_mut(&region_id) {
+            download.ensure_resource_task(db, request);
+        }
     }
 }
 
-/// Runs `f` on the current `RunLoop` unless the returned request is dropped
-/// first. The task stays on this thread (a `LocalObject`); the loop gets a
-/// `Send` handle to it.
-fn invoke_cancellable(f: impl FnOnce() + 'static) -> Box<dyn AsyncRequest> {
-    let task: CancellableTask = Rc::new(RefCell::new(Some(Box::new(f))));
-    let handle = LocalObject::from_rc(Rc::clone(&task));
-    RunLoop::get().invoke(move || {
-        let task = handle.get().and_then(|task| task.borrow_mut().take());
-        if let Some(task) = task {
-            task();
-        }
-    });
-    Box::new(WorkRequest { task })
-}
-
-/// The default observer (`std::make_unique<OfflineRegionObserver>()`).
+/// The default observer.
 struct NullObserver;
 
 impl OfflineRegionObserver for NullObserver {}
 
-/// The members of `OfflineDownload`.
-struct Inner {
+/// What a downloaded resource lists, which the download goes on to load.
+#[derive(Clone)]
+enum Then {
+    /// Nothing: a resource that lists no others.
+    Nothing,
+    /// The style, which lists the sources, glyphs and sprites.
+    Style,
+    /// A source's TileJSON, which lists its tiles.
+    Source { url: String, type_: SourceType, tile_source: Box<TileSource> },
+}
+
+impl Then {
+    fn reads(&self) -> bool {
+        !matches!(self, Then::Nothing)
+    }
+}
+
+/// A resource the download waits for.
+enum Pending {
+    /// Its check of what the region holds is queued.
+    Queued { resource: Resource, then: Then },
+    /// It loads from the network, revalidating the stored copy, if any, with
+    /// its stored size.
+    Loading { _request: Request, resource: Resource, then: Then, stale: Option<(Response, u64)> },
+}
+
+/// The download of an offline region's resources into the database.
+pub struct OfflineDownload {
     id: i64,
     definition: OfflineRegionDefinition,
-    offline_database: Rc<RefCell<OfflineDatabase>>,
-    online_file_source: Arc<dyn FileSource>,
-    status: RefCell<OfflineRegionStatus>,
-    observer: RefCell<Rc<dyn OfflineRegionObserver>>,
-
-    requests: RefCell<VecMap<u64, Option<Box<dyn AsyncRequest>>>>,
-    next_request_id: Cell<u64>,
-    required_source_urls: RefCell<HashSet<String>>,
-    resources_remaining: RefCell<VecDeque<Resource>>,
-    resources_to_be_marked_as_used: RefCell<Vec<Resource>>,
-    buffer: RefCell<Vec<(Resource, Response)>>,
-
-    /// Counts activations and deactivations, so that work an observer
-    /// callback interrupted doesn't go on into a later traversal.
-    traversal: Cell<u64>,
-}
-
-/// The download of an offline region's resources. Not `Clone`: tests and
-/// observers hold a `WeakOfflineDownload`.
-pub struct OfflineDownload {
-    inner: Rc<Inner>,
-}
-
-/// A weak reference to an `OfflineDownload` (for observers that call back
-/// into it, as C++ observers capture the download by reference).
-#[cfg(test)]
-#[derive(Clone)]
-pub(crate) struct WeakOfflineDownload {
-    inner: Weak<Inner>,
-}
-
-#[cfg(test)]
-impl WeakOfflineDownload {
-    /// Sets the download's state, if the download still exists.
-    #[cfg(test)]
-    pub(crate) fn set_state(&self, state: OfflineRegionDownloadState) {
-        if let Some(inner) = self.inner.upgrade() {
-            inner.set_state(state);
-        }
-    }
-
-    /// The download's status, if the download still exists.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn get_status(&self) -> Option<OfflineRegionStatus> {
-        self.inner.upgrade().map(|inner| inner.get_status())
-    }
+    network: Arc<dyn FileSource>,
+    post: Post,
+    /// The most requests the download has in flight at once.
+    maximum_concurrent_requests: u32,
+    status: OfflineRegionStatus,
+    observer: Box<dyn OfflineRegionObserver>,
+    /// The resources it waits for, by request id.
+    requests: VecMap<u64, Pending>,
+    next_request_id: u64,
+    required_source_urls: HashSet<String>,
+    resources_remaining: VecDeque<Resource>,
+    resources_to_be_marked_as_used: Vec<Resource>,
+    buffer: Vec<(Resource, Response)>,
 }
 
 impl OfflineDownload {
-    pub fn new(
-        id: i64,
-        definition: OfflineRegionDefinition,
-        offline_database: Rc<RefCell<OfflineDatabase>>,
-        online_file_source: Arc<dyn FileSource>,
-    ) -> Self {
-        let inner = Rc::new(Inner {
+    /// The download of the region `id`, which loads through `network` and
+    /// comes back through `post`.
+    #[must_use]
+    pub fn new(id: i64, definition: OfflineRegionDefinition, network: Arc<dyn FileSource>, post: Post) -> Self {
+        OfflineDownload {
             id,
             definition,
-            offline_database,
-            online_file_source,
-            status: RefCell::new(OfflineRegionStatus::default()),
-            observer: RefCell::new(Rc::new(NullObserver)),
-            requests: RefCell::new(VecMap::new()),
-            next_request_id: Cell::new(0),
-            required_source_urls: RefCell::new(HashSet::default()),
-            resources_remaining: RefCell::new(VecDeque::new()),
-            resources_to_be_marked_as_used: RefCell::new(Vec::new()),
-            buffer: RefCell::new(Vec::new()),
-            traversal: Cell::new(0),
-        });
-        let download = OfflineDownload { inner };
-        download.set_observer(None);
-        download
+            network,
+            post,
+            maximum_concurrent_requests: DEFAULT_MAXIMUM_CONCURRENT_REQUESTS,
+            status: OfflineRegionStatus::default(),
+            observer: Box::new(NullObserver),
+            requests: VecMap::new(),
+            next_request_id: 0,
+            required_source_urls: HashSet::default(),
+            resources_remaining: VecDeque::new(),
+            resources_to_be_marked_as_used: Vec::new(),
+            buffer: Vec::new(),
+        }
     }
 
-    /// A weak reference, for observers that call back into the download.
-    #[cfg(test)]
+    /// The region's id.
     #[must_use]
-    pub(crate) fn downgrade(&self) -> WeakOfflineDownload {
-        WeakOfflineDownload { inner: Rc::downgrade(&self.inner) }
+    pub fn id(&self) -> i64 {
+        self.id
     }
 
-    pub fn set_observer(&self, observer: Option<Rc<dyn OfflineRegionObserver>>) {
-        *self.inner.observer.borrow_mut() = observer.unwrap_or_else(|| Rc::new(NullObserver));
+    /// Sets the most requests the download has in flight at once.
+    pub fn set_maximum_concurrent_requests(&mut self, maximum: u32) {
+        self.maximum_concurrent_requests = maximum;
     }
 
-    pub fn set_state(&self, state: OfflineRegionDownloadState) {
-        self.inner.set_state(state);
-    }
-
-    #[must_use]
-    pub(crate) fn get_status(&self) -> OfflineRegionStatus {
-        self.inner.get_status()
-    }
-}
-
-impl Drop for OfflineDownload {
-    fn drop(&mut self) {
-        // The requests' callbacks hold the download weakly; dropping the
-        // requests cancels them, as the C++ destructor does.
-        let requests = std::mem::take(&mut *self.inner.requests.borrow_mut());
-        drop(requests);
-    }
-}
-
-impl Inner {
-    fn observer(&self) -> Rc<dyn OfflineRegionObserver> {
-        self.observer.borrow().clone()
+    /// Sets the download's observer, or the default one that ignores
+    /// everything.
+    pub fn set_observer(&mut self, observer: Option<Box<dyn OfflineRegionObserver>>) {
+        self.observer = observer.unwrap_or_else(|| Box::new(NullObserver));
     }
 
     fn notify_status_changed(&self) {
-        let status = *self.status.borrow();
-        self.observer().status_changed(status);
+        self.observer.status_changed(self.status);
     }
 
-    fn insert_request(&self) -> u64 {
-        let id = self.next_request_id.get();
-        self.next_request_id.set(id + 1);
-        self.requests.borrow_mut().insert(id, None);
+    fn next_request(&mut self) -> u64 {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
         id
     }
 
-    /// `*it = request` (if the entry still exists).
-    fn set_request(&self, id: u64, request: Box<dyn AsyncRequest>) {
-        let previous = {
-            let mut requests = self.requests.borrow_mut();
-            match requests.get_mut(&id) {
-                Some(slot) => slot.replace(request),
-                None => Some(request),
-            }
-        };
-        drop(previous);
-    }
-
-    /// `requests.erase(it)`.
-    fn remove_request(&self, id: u64) {
-        let request = self.requests.borrow_mut().remove(&id);
-        drop(request);
-    }
-
-    fn set_state(self: &Rc<Self>, state: OfflineRegionDownloadState) {
-        if self.status.borrow().download_state == state {
+    /// Starts or stops the download.
+    pub fn set_state(&mut self, state: OfflineRegionDownloadState) {
+        if self.status.download_state == state {
             return;
         }
-
-        self.status.borrow_mut().download_state = state;
-
+        self.status.download_state = state;
         if state == OfflineRegionDownloadState::Active {
             self.activate_download();
         } else {
             self.deactivate_download();
         }
-
         self.notify_status_changed();
     }
 
-    fn get_status(&self) -> OfflineRegionStatus {
-        if self.status.borrow().download_state == OfflineRegionDownloadState::Active {
-            return *self.status.borrow();
+    /// The download's status: while it's active, what it found so far, else
+    /// what the region holds of what its stored style lists.
+    #[must_use]
+    pub fn get_status(&self, db: &mut OfflineDatabase) -> OfflineRegionStatus {
+        if self.status.download_state == OfflineRegionDownloadState::Active {
+            return self.status;
         }
 
-        let result = self.offline_database.borrow_mut().get_region_completed_status(self.id);
-        let Ok(mut result) = result else {
+        let Ok(mut result) = db.get_region_completed_status(self.id) else {
             // We can't find this offline region because the database is
             // unavailable, or the download does not exist.
             return OfflineRegionStatus::default();
         };
 
         result.required_resource_count += 1;
-        let style_response = self.offline_database.borrow_mut().get(&Resource::style(self.definition.style_url()));
+        let style_response = db.get(&Resource::style(self.definition.style_url()));
         let mut parser = Parser::default();
         // A download reports a style it can't read, and the count stays
         // imprecise.
@@ -345,7 +324,7 @@ impl Inner {
                     None => tile_source.inline_tileset(),
                     Some(url) => {
                         result.required_resource_count += 1;
-                        let source_response = self.offline_database.borrow_mut().get(&Resource::source(&url));
+                        let source_response = db.get(&Resource::source(&url));
                         let tileset = source_response
                             .and_then(|response| response.data)
                             .and_then(|data| tile_source.tileset_with_tilejson(&data).ok());
@@ -409,90 +388,70 @@ impl Inner {
         result
     }
 
-    fn activate_download(self: &Rc<Self>) {
-        self.traversal.set(self.traversal.get() + 1);
-        {
-            let mut status = self.status.borrow_mut();
-            *status = OfflineRegionStatus::default();
-            status.download_state = OfflineRegionDownloadState::Active;
-            status.required_resource_count += 1;
-        }
+    fn activate_download(&mut self) {
+        self.status = OfflineRegionStatus::default();
+        self.status.download_state = OfflineRegionDownloadState::Active;
+        self.status.required_resource_count += 1;
 
         let mut style_resource = Resource::style(self.definition.style_url());
         style_resource.set_priority(Priority::Low);
         style_resource.set_usage(Usage::Offline);
-
-        let weak = Rc::downgrade(self);
-        self.ensure_resource(
-            style_resource,
-            Some(Rc::new(move |style_response: &Response| match weak.upgrade() {
-                Some(this) => this.on_style_response(style_response),
-                None => Ok(()),
-            })),
-        );
+        self.ensure_resource(style_resource, Then::Style);
     }
 
-    /// The style callback of `activateDownload`.
-    fn on_style_response(self: &Rc<Self>, style_response: &Response) -> Result<(), String> {
+    /// Reads what a downloaded style or TileJSON lists, and queues it.
+    fn read(&mut self, then: &Then, response: &Response) -> Result<(), String> {
+        match then {
+            Then::Nothing => Ok(()),
+            Then::Style => self.on_style_response(response),
+            Then::Source { url, type_, tile_source } => {
+                let Some(data) = &response.data else {
+                    return Err("the TileJSON has no content".to_owned());
+                };
+                let tileset = tile_source.tileset_with_tilejson(data)?;
+                if tileset.tiles.is_empty() {
+                    return Err("the TileJSON has no tile URLs".to_owned());
+                }
+                self.queue_tiles(*type_, tile_source.get_tile_size(), &tileset);
+                if self.required_source_urls.remove(url) && self.required_source_urls.is_empty() {
+                    self.status.required_resource_count_is_precise = true;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Queues the resources that the style lists.
+    fn on_style_response(&mut self, style_response: &Response) -> Result<(), String> {
         let Some(style_data) = &style_response.data else {
             return Err("the style has no content".to_owned());
         };
         let mut parser = Parser::default();
         parser.parse(&String::from_utf8_lossy(style_data)).map_err(|error| error.to_string())?;
-        self.status.borrow_mut().required_resource_count_is_precise = true;
+        self.status.required_resource_count_is_precise = true;
 
         for source in &parser.sources {
             let type_ = source.get_type();
-
-            let handle_tiled_source = |tile_source: &TileSource| match tile_source.get_url() {
-                None => {
-                    if let Some(tileset) = tile_source.inline_tileset() {
-                        self.queue_tiles(type_, tile_source.get_tile_size(), &tileset);
-                    }
-                }
-                Some(url) => {
-                    {
-                        let mut status = self.status.borrow_mut();
-                        status.required_resource_count_is_precise = false;
-                        status.required_resource_count += 1;
-                    }
-                    self.required_source_urls.borrow_mut().insert(url.clone());
-
-                    let mut source_resource = Resource::source(&url);
-                    source_resource.set_priority(Priority::Low);
-                    source_resource.set_usage(Usage::Offline);
-
-                    let weak = Rc::downgrade(self);
-                    let tile_source = tile_source.clone();
-                    self.ensure_resource(
-                        source_resource,
-                        Some(Rc::new(move |source_response: &Response| {
-                            let Some(this) = weak.upgrade() else {
-                                return Ok(());
-                            };
-                            let Some(data) = &source_response.data else {
-                                return Err("the TileJSON has no content".to_owned());
-                            };
-                            let tileset = tile_source.tileset_with_tilejson(data)?;
-                            if tileset.tiles.is_empty() {
-                                return Err("the TileJSON has no tile URLs".to_owned());
-                            }
-                            this.queue_tiles(type_, tile_source.get_tile_size(), &tileset);
-
-                            this.required_source_urls.borrow_mut().remove(&url);
-                            if this.required_source_urls.borrow().is_empty() {
-                                this.status.borrow_mut().required_resource_count_is_precise = true;
-                            }
-                            Ok(())
-                        })),
-                    );
-                }
-            };
-
             match type_ {
                 SourceType::Vector | SourceType::Raster | SourceType::RasterDEM => {
-                    if let Some(tile_source) = source.downcast_ref::<TileSource>() {
-                        handle_tiled_source(tile_source);
+                    let Some(tile_source) = source.downcast_ref::<TileSource>() else { continue };
+                    match tile_source.get_url() {
+                        None => {
+                            if let Some(tileset) = tile_source.inline_tileset() {
+                                self.queue_tiles(type_, tile_source.get_tile_size(), &tileset);
+                            }
+                        }
+                        Some(url) => {
+                            self.status.required_resource_count_is_precise = false;
+                            self.status.required_resource_count += 1;
+                            self.required_source_urls.insert(url.clone());
+
+                            let mut source_resource = Resource::source(&url);
+                            source_resource.set_priority(Priority::Low);
+                            source_resource.set_usage(Usage::Offline);
+                            let then = Then::Source { url, type_, tile_source: Box::new(tile_source.clone()) };
+                            self.ensure_resource(source_resource, then);
+                        }
                     }
                 }
 
@@ -551,8 +510,6 @@ impl Inner {
                 self.queue_resource(Resource::sprite_json(sprite_url, 2.0));
             }
         }
-
-        self.continue_download();
         Ok(())
     }
 
@@ -573,106 +530,77 @@ impl Inner {
     // same type. For instance if a server is unreachable, all the requests
     // to that host are going to error. In that case, continuing to try
     // subsequent resources after the first few errors is fruitless anyway.
-    fn continue_download(self: &Rc<Self>) {
-        // An observer can pause the download, or restart it, from a status
-        // change.
+    fn continue_download(&mut self, db: &mut OfflineDatabase) {
         if !self.is_active() {
             return;
         }
-        let current = self.traversal.get();
 
-        if self.resources_remaining.borrow().is_empty() {
+        if self.resources_remaining.is_empty() {
             // Flush pending buffers.
-            self.flush_resources_buffer();
-            if self.interrupted(current) {
-                return;
-            }
-            if self.status.borrow().complete() {
-                self.mark_pending_used_resources();
+            self.flush_resources_buffer(db);
+            if self.status.complete() {
+                self.mark_pending_used_resources(db);
                 self.set_state(OfflineRegionDownloadState::Inactive);
                 return;
             }
         }
 
-        if self.resources_to_be_marked_as_used.borrow().len() >= K_MARK_BATCH_SIZE {
-            self.mark_pending_used_resources();
+        if self.resources_to_be_marked_as_used.len() >= K_MARK_BATCH_SIZE {
+            self.mark_pending_used_resources(db);
         }
 
-        let mut max_concurrent_requests = DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
-        if let Value::Uint(max_requests) = self.online_file_source.get_property(MAX_CONCURRENT_REQUESTS_KEY) {
-            max_concurrent_requests = max_requests as u32;
-        }
-
-        loop {
-            if self.requests.borrow().len() >= max_concurrent_requests as usize {
-                break;
-            }
-            let Some(resource) = self.resources_remaining.borrow_mut().pop_front() else {
+        while self.requests.len() < self.maximum_concurrent_requests as usize {
+            let Some(resource) = self.resources_remaining.pop_front() else {
                 break;
             };
-            self.ensure_resource(resource, None);
+            self.ensure_resource(resource, Then::Nothing);
         }
     }
 
-    fn deactivate_download(&self) {
-        self.required_source_urls.borrow_mut().clear();
-        self.resources_remaining.borrow_mut().clear();
-        let requests = std::mem::take(&mut *self.requests.borrow_mut());
-        drop(requests);
-        self.buffer.borrow_mut().clear();
-        self.traversal.set(self.traversal.get() + 1);
+    fn deactivate_download(&mut self) {
+        self.required_source_urls.clear();
+        self.resources_remaining.clear();
+        self.requests.clear();
+        self.buffer.clear();
     }
 
     fn is_active(&self) -> bool {
-        self.status.borrow().download_state == OfflineRegionDownloadState::Active
+        self.status.download_state == OfflineRegionDownloadState::Active
     }
 
-    /// Whether an observer paused or restarted the download since traversal
-    /// `current` began, which ends that traversal.
-    fn interrupted(&self, current: u64) -> bool {
-        self.traversal.get() != current || !self.is_active()
-    }
-
-    fn flush_resources_buffer(self: &Rc<Self>) {
-        if self.buffer.borrow().is_empty() {
+    fn flush_resources_buffer(&mut self, db: &mut OfflineDatabase) {
+        if self.buffer.is_empty() {
             return;
         }
-        let buffer = self.buffer.borrow().clone();
-        let mut status = *self.status.borrow();
-        self.offline_database.borrow_mut().put_region_resources(self.id, &buffer, &mut status);
-        *self.status.borrow_mut() = status;
-        self.buffer.borrow_mut().clear();
+        db.put_region_resources(self.id, &self.buffer, &mut self.status);
+        self.buffer.clear();
         self.notify_status_changed();
     }
 
-    fn queue_resource(&self, mut resource: Resource) {
+    fn queue_resource(&mut self, mut resource: Resource) {
         resource.set_priority(Priority::Low);
         resource.set_usage(Usage::Offline);
-        {
-            let mut status = self.status.borrow_mut();
-            status.required_resource_count += 1;
-            if resource.kind == Kind::Tile {
-                status.required_tile_count += 1;
-            }
+        self.status.required_resource_count += 1;
+        if resource.kind == Kind::Tile {
+            self.status.required_tile_count += 1;
         }
-        self.resources_remaining.borrow_mut().push_front(resource);
+        self.resources_remaining.push_front(resource);
     }
 
-    fn queue_tiles(&self, type_: SourceType, tile_size: u16, tileset: &Tileset) {
+    fn queue_tiles(&mut self, type_: SourceType, tile_size: u16, tileset: &Tileset) {
         // A source without tile URLs has no tiles to download.
         let Some(url_template) = tileset.tiles.first() else {
             return;
         };
+        let (status, remaining) = (&mut self.status, &mut self.resources_remaining);
+        let pixel_ratio = self.definition.pixel_ratio();
         tile_cover(&self.definition, type_, tile_size, tileset.zoom_range, |tile: CanonicalTileID| {
-            {
-                let mut status = self.status.borrow_mut();
-                status.required_resource_count += 1;
-                status.required_tile_count += 1;
-            }
+            status.required_resource_count += 1;
+            status.required_tile_count += 1;
 
             let mut tile_resource = Resource::tile(
                 url_template,
-                self.definition.pixel_ratio(),
+                pixel_ratio,
                 tile.x as i32,
                 tile.y as i32,
                 tile.z as i8,
@@ -683,74 +611,56 @@ impl Inner {
             tile_resource.set_priority(Priority::Low);
             tile_resource.set_usage(Usage::Offline);
 
-            self.resources_remaining.borrow_mut().push_back(tile_resource);
+            remaining.push_back(tile_resource);
         });
     }
 
-    fn mark_pending_used_resources(&self) {
-        let resources = self.resources_to_be_marked_as_used.borrow().clone();
-        self.offline_database.borrow_mut().mark_used_resources(self.id, &resources);
-        self.resources_to_be_marked_as_used.borrow_mut().clear();
+    fn mark_pending_used_resources(&mut self, db: &mut OfflineDatabase) {
+        db.mark_used_resources(self.id, &self.resources_to_be_marked_as_used);
+        self.resources_to_be_marked_as_used.clear();
     }
 
-    fn ensure_resource(self: &Rc<Self>, resource: Resource, callback: Option<ResponseCallback>) {
+    /// Queues the check of `resource` against what the region holds, which
+    /// loads it unless the region holds a usable copy.
+    fn ensure_resource(&mut self, resource: Resource, then: Then) {
         debug_assert_eq!(resource.priority, Priority::Low);
         debug_assert_eq!(resource.usage, Usage::Offline);
 
-        // An observer can pause or restart the download from any callback,
-        // which ends this traversal. Nothing more of this resource happens
-        // after that.
-        let current = self.traversal.get();
-        let work_request_id = self.insert_request();
-        let weak = Rc::downgrade(self);
-        let task = invoke_cancellable(move || {
-            if let Some(this) = weak.upgrade() {
-                this.ensure_resource_task(work_request_id, current, resource, callback);
-            }
-        });
-        self.set_request(work_request_id, task);
+        let request = self.next_request();
+        self.requests.insert(request, Pending::Queued { resource, then });
+        let region = self.id;
+        (self.post)(Box::new(move |db, downloads| downloads.on_ensure(db, region, request)));
     }
 
-    /// The task of `ensureResource`.
-    fn ensure_resource_task(
-        self: &Rc<Self>,
-        work_request_id: u64,
-        current: u64,
-        resource: Resource,
-        callback: Option<ResponseCallback>,
-    ) {
-        self.remove_request(work_request_id);
+    /// The queued check of `ensure_resource`.
+    fn ensure_resource_task(&mut self, db: &mut OfflineDatabase, request: u64) {
+        let Some(Pending::Queued { resource, then }) = self.requests.remove(&request) else {
+            // Its download stopped since.
+            return;
+        };
 
         // A stored resource that can't be used without revalidating it, such
         // as one invalidate_region marked, isn't complete. Keep it to
         // revalidate it with the server.
-        let stale = match &callback {
-            None => {
-                let stored = self.offline_database.borrow_mut().check_region_resource(&resource);
-                match stored {
-                    Some((size, true)) => {
-                        self.complete_stored_resource(&resource, size as u64);
-                        return;
+        let stale = if then.reads() {
+            match db.get_region_resource(&resource) {
+                Some((response, size)) if response.is_usable() => {
+                    if let Err(error) = self.read(&then, &response) {
+                        self.report_unparsable(&resource, &error);
                     }
-                    Some((_, false)) => self.offline_database.borrow_mut().get_region_resource(&resource),
-                    None => None,
+                    self.complete_stored_resource(db, &resource, size);
+                    return;
                 }
+                stale => stale,
             }
-            Some(callback) => {
-                let stored = self.offline_database.borrow_mut().get_region_resource(&resource);
-                match stored {
-                    Some((response, size)) if response.is_usable() => {
-                        if let Err(error) = callback(&response) {
-                            self.report_unparsable(&resource, &error);
-                        }
-                        if self.interrupted(current) {
-                            return;
-                        }
-                        self.complete_stored_resource(&resource, size);
-                        return;
-                    }
-                    stale => stale,
+        } else {
+            match db.check_region_resource(&resource) {
+                Some((size, true)) => {
+                    self.complete_stored_resource(db, &resource, size as u64);
+                    return;
                 }
+                Some((_, false)) => db.get_region_resource(&resource),
+                None => None,
             }
         };
 
@@ -761,152 +671,110 @@ impl Inner {
             online_resource.prior_modified = stored.modified;
         }
 
-        let file_request_id = self.insert_request();
-        let weak = Rc::downgrade(self);
-        let stale = stale.map(Rc::new);
-        let request = self.online_file_source.request(
-            &online_resource,
-            Box::new(move |online_response: Response| {
-                if let Some(this) = weak.upgrade() {
-                    let stale = stale.as_deref();
-                    this.on_online_response(
-                        file_request_id,
-                        current,
-                        &resource,
-                        callback.as_ref(),
-                        stale,
-                        online_response,
-                    );
-                }
-            }),
-        );
-        self.set_request(file_request_id, request);
+        let request = self.next_request();
+        let (region, post) = (self.id, Arc::clone(&self.post));
+        let (handle, responder) = Request::direct(move |response: Response| {
+            post(Box::new(move |db, downloads| downloads.on_response(db, region, request, response)));
+        });
+        self.requests.insert(request, Pending::Loading { _request: handle, resource, then, stale });
+        self.network.load(&online_resource, responder);
     }
 
-    /// The online request callback of `ensureResource`. `stale` is the stored
-    /// copy being revalidated, with its stored size.
-    fn on_online_response(
-        self: &Rc<Self>,
-        file_request_id: u64,
-        current: u64,
-        resource: &Resource,
-        callback: Option<&ResponseCallback>,
-        stale: Option<&(Response, u64)>,
-        online_response: Response,
-    ) {
+    /// A response to the request `request` of `ensure_resource_task`.
+    fn on_online_response(&mut self, db: &mut OfflineDatabase, request: u64, online_response: Response) {
+        let Some(Pending::Loading { resource, then, stale, .. }) = self.requests.get(&request) else {
+            return;
+        };
+        let (resource, then, stale) = (resource.clone(), then.clone(), stale.clone());
+
         if let Some(error) = &online_response.error {
-            self.observer().response_error((**error).clone());
-            if self.interrupted(current) {
-                return;
-            }
+            self.observer.response_error((**error).clone());
+            // Another error keeps the request, which retries.
             if error.reason == Reason::NotFound {
-                self.remove_request(file_request_id);
-                if let (Some(stale), Some(callback)) = (stale, callback) {
-                    self.continue_from_stored_copy(current, resource, callback, stale);
+                self.requests.remove(&request);
+                if let Some(stale) = &stale
+                    && then.reads()
+                {
+                    self.continue_from_stored_copy(db, &resource, &then, stale);
                     return;
                 }
 
                 // On error 404, we skip this request and go further.
+                assert!(self.status.required_resource_count > 0);
+                self.status.required_resource_count -= 1;
+                if resource.kind == Kind::Source
+                    && self.required_source_urls.remove(&resource.url)
+                    && self.required_source_urls.is_empty()
                 {
-                    let mut status = self.status.borrow_mut();
-                    assert!(status.required_resource_count > 0);
-                    status.required_resource_count -= 1;
-                }
-                if resource.kind == Kind::Source {
-                    let mut required_source_urls = self.required_source_urls.borrow_mut();
-                    if required_source_urls.remove(&resource.url) && required_source_urls.is_empty() {
-                        self.status.borrow_mut().required_resource_count_is_precise = true;
-                    }
+                    self.status.required_resource_count_is_precise = true;
                 }
                 self.notify_status_changed();
-                if self.interrupted(current) {
-                    return;
-                }
-                self.continue_download();
+                self.continue_download(db);
             }
             return;
         }
 
-        self.remove_request(file_request_id);
+        self.requests.remove(&request);
 
-        if let Some(callback) = callback {
+        if then.reads() {
             // A 304 response has no data, so pass on the stored copy.
-            let parsed = match stale {
-                Some((stored, _)) if online_response.not_modified => callback(stored),
-                _ => callback(&online_response),
+            let parsed = match &stale {
+                Some((stored, _)) if online_response.not_modified => self.read(&then, stored),
+                _ => self.read(&then, &online_response),
             };
             if let Err(error) = &parsed {
-                self.report_unparsable(resource, error);
+                self.report_unparsable(&resource, error);
             }
-            if self.interrupted(current) {
-                return;
-            }
-            if let (Err(_), Some(stale), false) = (&parsed, stale, online_response.not_modified) {
-                self.continue_from_stored_copy(current, resource, callback, stale);
+            if let (Err(_), Some(stale), false) = (&parsed, &stale, online_response.not_modified) {
+                self.continue_from_stored_copy(db, &resource, &then, stale);
                 return;
             }
         }
 
         // Queue up for batched insertion
-        self.buffer.borrow_mut().push((resource.clone(), online_response));
+        self.buffer.push((resource, online_response));
 
         // Flush buffer periodically.
         // Have to keep `resourcesRemaining.empty()` as the following
         // condition would fail otherwise.
-        let flush =
-            self.buffer.borrow().len() == K_RESOURCES_BATCH_SIZE || self.resources_remaining.borrow().is_empty();
-        if flush {
-            self.flush_resources_buffer();
-        }
-        if self.interrupted(current) {
-            return;
+        if self.buffer.len() == K_RESOURCES_BATCH_SIZE || self.resources_remaining.is_empty() {
+            self.flush_resources_buffer(db);
         }
 
-        self.continue_download();
+        self.continue_download(db);
     }
 
     /// A style or TileJSON lists the region's other resources. When its
     /// refresh is missing or can't be read, the download goes on from the
     /// stored copy.
     fn continue_from_stored_copy(
-        self: &Rc<Self>,
-        current: u64,
+        &mut self,
+        db: &mut OfflineDatabase,
         resource: &Resource,
-        callback: &ResponseCallback,
+        then: &Then,
         (stored, size): &(Response, u64),
     ) {
-        if let Err(error) = callback(stored) {
+        if let Err(error) = self.read(then, stored) {
             self.report_unparsable(resource, &error);
         }
-        if self.interrupted(current) {
-            return;
-        }
-        self.complete_stored_resource(resource, *size);
+        self.complete_stored_resource(db, resource, *size);
     }
 
     /// Counts a resource the region already holds as complete.
-    fn complete_stored_resource(self: &Rc<Self>, resource: &Resource, size: u64) {
-        self.resources_to_be_marked_as_used.borrow_mut().push(resource.clone());
-        {
-            let mut status = self.status.borrow_mut();
-            status.completed_resource_count += 1;
-            status.completed_resource_size = status.completed_resource_size.wrapping_add(size);
-            if resource.kind == Kind::Tile {
-                status.completed_tile_count += 1;
-                status.completed_tile_size = status.completed_tile_size.wrapping_add(size);
-            }
+    fn complete_stored_resource(&mut self, db: &mut OfflineDatabase, resource: &Resource, size: u64) {
+        self.resources_to_be_marked_as_used.push(resource.clone());
+        self.status.completed_resource_count += 1;
+        self.status.completed_resource_size = self.status.completed_resource_size.wrapping_add(size);
+        if resource.kind == Kind::Tile {
+            self.status.completed_tile_count += 1;
+            self.status.completed_tile_size = self.status.completed_tile_size.wrapping_add(size);
         }
-
-        let current = self.traversal.get();
         self.notify_status_changed();
-        if self.interrupted(current) {
-            return;
-        }
-        self.continue_download();
+        self.continue_download(db);
     }
 
     fn report_unparsable(&self, resource: &Resource, error: &str) {
         let message = format!("Can't parse {}: {error}", resource.url);
-        self.observer().response_error(ResourceError::new(Reason::Other, message));
+        self.observer.response_error(ResourceError::new(Reason::Other, message));
     }
 }

@@ -31,7 +31,6 @@ use mln_actor::{ActorRef, LocalObject, TaggedScheduler};
 use mln_map_types::MapMode;
 use mln_text::glyph::FontFaces;
 use mln_tile_id::OverscaledTileID;
-use serde::{Deserialize, Serialize};
 
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlasPtr;
 use crate::tile::geometry_tile::GeometryTileInner;
@@ -48,20 +47,20 @@ use crate::tile::raster_tile::{RasterTileInner, RasterTileMessage, RasterTileWor
 /// Serde writes them for a worker in another worker instance (`worker_codec`),
 /// without what can't cross: there, the instance's host gives the worker an
 /// `obsolete` flag and an atlas of its own, and the worker runs as an actor.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, mln_wire::Wire)]
 pub struct WorkerParameters {
     pub(crate) id: OverscaledTileID,
     /// Set by the tile when it no longer needs the worker's results.
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) obsolete: Arc<AtomicBool>,
     pub(crate) mode: MapMode,
     pub(crate) pixel_ratio: f32,
     pub(crate) show_collision_boxes: bool,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) dynamic_texture_atlas: Option<DynamicTextureAtlasPtr>,
     pub(crate) font_faces: Option<Arc<FontFaces>>,
     pub(crate) capture_rendered_features: bool,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) synchronous: bool,
 }
 

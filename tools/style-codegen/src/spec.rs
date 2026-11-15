@@ -51,23 +51,21 @@ pub(crate) struct LayerSpec {
     pub(crate) type_: String,
     /// Layout properties without `visibility`, sorted.
     pub(crate) layout_properties: Vec<Property>,
-    /// Paint properties, sorted (for `line` including the mock
-    /// `line-floor-width`).
+    /// Paint properties, sorted.
     pub(crate) paint_properties: Vec<Property>,
 }
 
 /// Parses the style spec and applies the generator's changes to it: removes
 /// or narrows the properties MapLibre Native doesn't support, and adds the
-/// internal `symbol-screen-space` and the mock `line-floor-width` properties.
+/// internal `symbol-screen-space` property.
 pub(crate) fn load(text: &str) -> Result<Value, String> {
     let mut spec: Value = serde_json::from_str(text).map_err(|e| format!("v8.json: {e}"))?;
 
     // https://github.com/maplibre/maplibre-native/issues/250
     remove(&mut spec, &["layout_symbol", "text-rotation-alignment", "values"], "viewport-glyph")?;
 
-    // https://github.com/maplibre/maplibre-native/issues/1929
+    // Without terrain, the ground and sea level are the same height.
     remove(&mut spec, &["layout_symbol"], "symbol-height-anchor")?;
-    remove(&mut spec, &["layout_symbol"], "symbol-height-offset")?;
 
     // https://github.com/maplibre/maplibre-native/issues/4298
     remove(&mut spec, &["paint_fill"], "fill-layer-opacity")?;
@@ -90,15 +88,6 @@ pub(crate) fn load(text: &str) -> Result<Value, String> {
         "default": false,
         "property-type": "data-constant",
         "doc": "Internal use only"
-    });
-
-    // generate-style-code.mjs: "Add this mock property that our SDF line
-    // shader needs so that it gets added to the list of "data driven"
-    // properties."
-    spec["paint_line"]["line-floor-width"] = json!({
-        "type": "number",
-        "default": 1,
-        "property-type": "data-driven"
     });
 
     Ok(spec)
@@ -147,7 +136,8 @@ pub(crate) fn sort_like_collator(properties: &mut [Property]) {
     properties.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
 }
 
-fn properties_of(spec: &Value, key: &str, skip_visibility: bool) -> Result<Vec<Property>, String> {
+/// The properties under `key`, in the spec's order.
+fn spec_properties(spec: &Value, key: &str, skip_visibility: bool) -> Result<Vec<Property>, String> {
     let object = spec[key].as_object().ok_or_else(|| format!("spec has no {key}"))?;
     let mut result = Vec::new();
     for (name, value) in object {
@@ -157,6 +147,11 @@ fn properties_of(spec: &Value, key: &str, skip_visibility: bool) -> Result<Vec<P
         let spec = value.as_object().ok_or_else(|| format!("{key}.{name} is not an object"))?.clone();
         result.push(Property { name: name.clone(), spec, light: false });
     }
+    Ok(result)
+}
+
+fn properties_of(spec: &Value, key: &str, skip_visibility: bool) -> Result<Vec<Property>, String> {
+    let mut result = spec_properties(spec, key, skip_visibility)?;
     sort_like_collator(&mut result);
     Ok(result)
 }
@@ -176,20 +171,16 @@ pub(crate) fn layers(spec: &Value) -> Result<Vec<LayerSpec>, String> {
     Ok(result)
 }
 
-/// The light's properties, as generate-style-code.mjs collects them.
+/// The light's properties, in the spec's order.
 pub(crate) fn light_properties(spec: &Value) -> Result<Vec<Property>, String> {
-    let mut result = properties_of(spec, "light", false)?;
+    let mut result = spec_properties(spec, "light", false)?;
     for p in &mut result {
         p.light = true;
     }
-    sort_like_collator(&mut result);
     Ok(result)
 }
 
-/// The sky's properties, as generateRootProperties('Sky', 'sky') of
-/// generate-style-code.mjs collects them.
+/// The sky's properties, in the spec's order.
 pub(crate) fn sky_properties(spec: &Value) -> Result<Vec<Property>, String> {
-    let mut result = properties_of(spec, "sky", false)?;
-    sort_like_collator(&mut result);
-    Ok(result)
+    spec_properties(spec, "sky", false)
 }

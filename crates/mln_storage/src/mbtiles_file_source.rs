@@ -1,16 +1,12 @@
-// The database work runs on the "MBTilesFileSource" thread (`util::Thread`)
-// as in C++. Needs the `sqlite` feature.
+// The database work runs on a thread pool. Needs the `sqlite` feature.
 //
 // A database that doesn't open or query and data that doesn't decompress
 // answer the request with an `Other` error carrying the message, as in
-// maplibre-native-ffi's patched C++. The resource options are kept
-// next to the thread behind a mutex (C++: in the thread object, read back
-// with a blocking `ask`).
+// maplibre-native-ffi's patched C++.
 
-use std::cell::RefCell;
 use std::sync::Arc;
 
-use mln_actor::{ActorRef, Thread};
+use mln_actor::SchedulerPtr;
 use mln_util::chrono::Timestamp;
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::MBTILES_PROTOCOL;
@@ -21,12 +17,10 @@ use rusqlite::{Connection, OpenFlags};
 use serde_json::{Map, Value, json};
 
 use crate::archive_tilejson::archive_tilejson;
-use crate::async_request::AsyncRequest;
-use crate::file_source::{Callback, FileSource};
-use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
+use crate::file_source::FileSource;
 use crate::local_file_request::path_from_utf8;
+use crate::request::Responder;
 use crate::resource::{Kind, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
 fn accepts_url(url: &str) -> bool {
@@ -75,21 +69,19 @@ fn error_response(reason: Reason, message: impl Into<String>) -> Response {
     response
 }
 
-pub(crate) struct MBTilesFileSourceThread {
-    // Multiple databases open simultaneously, to effectively support
-    // multiple .mbtiles maps
-    db_cache: RefCell<VecMap<Vec<u8>, Connection>>,
+/// The open databases, so that several `.mbtiles` maps load at once.
+#[derive(Default)]
+struct Databases {
+    db_cache: Mutex<VecMap<Vec<u8>, Connection>>,
 }
 
-impl MBTilesFileSourceThread {
-    /// Generate a tilejson resource from .mbtiles file
-    #[expect(clippy::unused_self, reason = "the file source's actor calls it on its thread's object")]
-    pub(crate) fn request_tilejson(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
-        let response = match Self::tilejson(resource) {
+impl Databases {
+    /// The TileJSON of an `.mbtiles` file.
+    fn request_tilejson(resource: &Resource) -> Response {
+        match Self::tilejson(resource) {
             Ok(response) => response,
             Err(message) => error_response(Reason::Other, message),
-        };
-        req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
+        }
     }
 
     fn tilejson(resource: &Resource) -> Result<Response, String> {
@@ -152,13 +144,12 @@ impl MBTilesFileSourceThread {
         Ok(response)
     }
 
-    /// Load data for specific tile
-    pub(crate) fn request_tile(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
-        let response = match self.tile(resource) {
+    /// A tile's data.
+    fn request_tile(&self, resource: &Resource) -> Response {
+        match self.tile(resource) {
             Ok(response) => response,
             Err(message) => error_response(Reason::Other, message),
-        };
-        req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
+        }
     }
 
     fn tile(&self, resource: &Resource) -> Result<Response, String> {
@@ -190,7 +181,7 @@ impl MBTilesFileSourceThread {
         let mut response = Response::new();
         response.no_content = true;
 
-        let mut db_cache = self.db_cache.borrow_mut();
+        let mut db_cache = self.db_cache.lock();
         if !db_cache.contains_key(&path) {
             let file = path_from_utf8(&path)?;
             db_cache.insert(path.clone(), open_read_only(&file)?);
@@ -217,35 +208,39 @@ impl MBTilesFileSourceThread {
     }
 }
 
-/// The `Mbtiles` file source: `mbtiles://` URLs with absolute paths.
+/// The `Mbtiles` file source: `mbtiles://` URLs with absolute paths, read
+/// on a thread pool.
 pub(crate) struct MBTilesFileSource {
-    thread: Thread<MBTilesFileSourceThread>,
-    resource_options: Mutex<ResourceOptions>,
+    databases: Arc<Databases>,
+    pool: SchedulerPtr,
 }
 
 impl MBTilesFileSource {
+    /// Reads the databases on `pool`.
     #[must_use]
-    pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
-        MBTilesFileSource {
-            thread: Thread::new("MBTilesFileSource", |_| MBTilesFileSourceThread {
-                db_cache: RefCell::new(VecMap::new()),
-            }),
-            resource_options: Mutex::new(resource_options.clone()),
-        }
+    pub(crate) fn new(pool: SchedulerPtr) -> Self {
+        MBTilesFileSource { databases: Arc::default(), pool }
+    }
+
+    /// Answers `responder` with `read`'s response, on the pool.
+    fn read(&self, responder: Responder, read: impl FnOnce(&Databases) -> Response + Send + 'static) {
+        let databases = Arc::clone(&self.databases);
+        self.pool.schedule(Box::new(move || {
+            if !responder.is_cancelled() {
+                responder.send(read(&databases));
+            }
+        }));
     }
 }
 
 impl FileSource for MBTilesFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let req = FileSourceRequest::new(callback);
-        let req_ref = req.actor();
-
+    fn load(&self, resource: &Resource, responder: Responder) {
+        let resource = resource.clone();
         // assume if there is a tile request, that the mbtiles file has been
         // validated
         if resource.kind == Kind::Tile {
-            let resource = resource.clone();
-            self.thread.actor().invoke(move |t: &MBTilesFileSourceThread| t.request_tile(&resource, &req_ref));
-            return Box::new(req);
+            self.read(responder, move |databases| databases.request_tile(&resource));
+            return;
         }
 
         let scheme_end = resource.url.find("://");
@@ -254,8 +249,8 @@ impl FileSource for MBTilesFileSource {
             response.no_content = true;
             response.error =
                 Some(Box::new(ResourceError::new(Reason::Other, "MBTilesFileSource only supports absolute path urls")));
-            req_ref.invoke(move |request: &FileSourceRequestState| request.set_response(response));
-            return Box::new(req);
+            responder.send(response);
+            return;
         }
 
         // file must exist
@@ -271,25 +266,15 @@ impl FileSource for MBTilesFileSource {
                 Reason::NotFound,
                 format!("path not found: {}", String::from_utf8_lossy(&path)),
             )));
-            req_ref.invoke(move |request: &FileSourceRequestState| request.set_response(response));
-            return Box::new(req);
+            responder.send(response);
+            return;
         }
 
         // return TileJSON
-        let resource = resource.clone();
-        self.thread.actor().invoke(move |t: &MBTilesFileSourceThread| t.request_tilejson(&resource, &req_ref));
-        Box::new(req)
+        self.read(responder, move |_| Databases::request_tilejson(&resource));
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
         accepts_url(&resource.url)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

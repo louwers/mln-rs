@@ -8,7 +8,7 @@ use crate::{RunLoop, Timer};
 #[test]
 fn stop() {
     let run_loop = RunLoop::new(); // RunLoop::Type::New
-    let timer = Timer::new();
+    let timer = Timer::new(&run_loop);
 
     let l = run_loop.clone();
     timer.start(Duration::ZERO, Duration::ZERO, move || l.stop());
@@ -20,7 +20,7 @@ fn stop() {
 #[test]
 fn multiple_stop() {
     let run_loop = RunLoop::new();
-    let timer = Timer::new();
+    let timer = Timer::new(&run_loop);
 
     let l = run_loop.clone();
     timer.start(Duration::ZERO, Duration::ZERO, move || {
@@ -37,7 +37,7 @@ fn multiple_stop() {
 #[test]
 fn multiple_run() {
     let run_loop = RunLoop::new();
-    let timer = Timer::new();
+    let timer = Timer::new(&run_loop);
 
     let l = run_loop.clone();
     timer.start(Duration::ZERO, Duration::ZERO, move || l.stop());

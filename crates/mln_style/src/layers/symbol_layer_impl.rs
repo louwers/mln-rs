@@ -9,20 +9,17 @@ use mln_expression::value::from_expression_value;
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
+use crate::evaluated::Evaluated;
 use crate::expression::{Dependency, Expr, Formatted, FormattedSection, Type};
 use crate::layer::{self, FontStack, ImplBase, LayerTypeInfo};
-use crate::layers::symbol_layer_properties::{
-    SymbolLayoutProperties, SymbolPaintProperties, TextColor, TextField, TextFont,
-};
+use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
+use crate::properties::OverridableSection;
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
-use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 
-/// The alternatives `hasOverride`'s `formatted.match(...)` visits; C++
-/// templates it over `PropertyValue<Formatted>` and
-/// `PossiblyEvaluatedPropertyValue<Formatted>`.
+/// The alternatives of a `PropertyValue<Formatted>` or an
+/// `Evaluated<Formatted>` that `has_override` reads.
 pub enum FormattedValue<'a> {
     Undefined,
     Constant(&'a Formatted),
@@ -43,11 +40,12 @@ impl AsFormattedValue for PropertyValue<Formatted> {
     }
 }
 
-impl AsFormattedValue for PossiblyEvaluatedPropertyValue<Formatted> {
+impl AsFormattedValue for Evaluated<Formatted> {
     fn as_formatted_value(&self) -> FormattedValue<'_> {
         match self {
-            PossiblyEvaluatedPropertyValue::Constant(c) => FormattedValue::Constant(c),
-            PossiblyEvaluatedPropertyValue::Expression(e) => FormattedValue::Expression(e),
+            Evaluated::Constant(c) => FormattedValue::Constant(c),
+            Evaluated::CrossFaded(faded) => FormattedValue::Constant(&faded.to),
+            Evaluated::PerFeature { expression, .. } => FormattedValue::Expression(expression),
         }
     }
 }
@@ -126,11 +124,8 @@ impl SymbolLayerPaintPropertyOverrides {
     /// Whether `formatted` overrides any overridable property.
     pub fn has_overrides(formatted: &dyn AsFormattedValue) -> bool {
         let mut result = false;
-        result |= Self::has_override(
-            formatted,
-            TextColor::has_override::<FormattedSection>,
-            TextColor::has_override::<FormatExpressionSection>,
-        );
+        result |=
+            Self::has_override(formatted, FormattedSection::has_text_color, FormatExpressionSection::has_text_color);
         result
     }
 
@@ -142,16 +137,12 @@ impl SymbolLayerPaintPropertyOverrides {
         evaluated: &SymbolPaintProperties::PossiblyEvaluated,
         updated: &mut SymbolPaintProperties::PossiblyEvaluated,
     ) {
-        let property = evaluated.get::<TextColor>().clone();
+        let property = evaluated.text_color.clone();
         if !property.is_constant() {
-            let has_format_section_override = match &property {
-                PossiblyEvaluatedPropertyValue::Expression(e) => {
-                    e.get_expression().as_format_section_override().is_some()
-                }
-                PossiblyEvaluatedPropertyValue::Constant(_) => false,
-            };
+            let has_format_section_override =
+                property.expression().is_some_and(|e| e.get_expression().as_format_section_override().is_some());
             if has_format_section_override {
-                *updated.get_mut::<TextColor>() = property;
+                updated.text_color = property;
             }
         }
     }
@@ -164,18 +155,18 @@ impl SymbolLayerPaintPropertyOverrides {
         rhs: &SymbolPaintProperties::Transitionable,
     ) -> bool {
         let mut result = false;
-        let (l, r) = (&lhs.get::<TextColor>().value, &rhs.get::<TextColor>().value);
+        let (l, r) = (&lhs.text_color.value, &rhs.text_color.value);
         result |= l.is_constant() && r.is_constant() && (l.as_constant() != r.as_constant());
         result
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub struct Impl {
     pub(crate) base: ImplBase,
     pub layout: SymbolLayoutProperties::Unevaluated,
     pub paint: SymbolPaintProperties::Transitionable,
-    #[serde(skip)]
+    #[wire(skip)]
     has_format_section_overrides_: OnceLock<bool>,
 }
 
@@ -193,7 +184,7 @@ impl Impl {
     fn has_format_section_overrides(&self) -> bool {
         *self
             .has_format_section_overrides_
-            .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(self.layout.get::<TextField>()))
+            .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field))
     }
 }
 
@@ -236,11 +227,11 @@ impl layer::Impl for Impl {
     }
 
     fn populate_font_stack(&self, font_stack: &mut VecSet<FontStack>) {
-        if self.layout.get::<TextField>().is_undefined() {
+        if self.layout.text_field.is_undefined() {
             return;
         }
 
-        match self.layout.get::<TextFont>() {
+        match &self.layout.text_font {
             PropertyValue::Undefined => {
                 font_stack
                     .insert(vec![LAST_RESORT_ALPHABETIC_FONT.to_owned(), LAST_RESORT_PAN_UNICODE_FONT.to_owned()]);

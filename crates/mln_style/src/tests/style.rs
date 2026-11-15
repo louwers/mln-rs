@@ -16,7 +16,6 @@ use super::util::{FixtureLog, parse_json, read_file};
 use crate::image;
 use crate::layer::Layer;
 use crate::layers::line_layer::{Impl as LineLayerImpl, LineLayer};
-use crate::layers::line_layer_properties::LineColor;
 use crate::observer::{Observer, SourceObserver};
 use crate::projection::Projection;
 use crate::property_value::PropertyValue;
@@ -28,16 +27,12 @@ use crate::transition_options::TransitionOptions;
 
 /// A style impl over a stub file source, with pixel ratio 1.
 fn stub_style() -> Impl {
-    let file_source =
-        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Asynchronous);
-    Impl::with_file_source(
-        Some(Arc::new(file_source)),
-        1.0,
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
-    )
+    let run_loop = mln_actor::RunLoop::new();
+    let file_source = mln_storage::stub_file_source::StubFileSource::new(
+        &run_loop,
+        mln_storage::stub_file_source::ResponseType::Asynchronous,
+    );
+    Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop)
 }
 
 // gtest: Style.Properties
@@ -198,20 +193,16 @@ fn layer_transition_refreshes_immutable_collection() {
 
     {
         let mut layer = style.get_layer_mut("line").unwrap();
-        let line = layer.downcast_mut::<LineLayer>().unwrap();
-        line.set_line_color_transition(&TransitionOptions::new(
-            Some(Duration::from_millis(123)),
-            Some(Duration::from_millis(45)),
-            true,
-        ));
+        let transition = serde_json::json!({"duration": 123, "delay": 45});
+        assert!(layer.set_property("line-color-transition", &Convertible::from(&transition), None).is_none());
     }
     let after = style.get_layer_impls();
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(1, after.len());
     assert!(Arc::ptr_eq(&style.get_layer("line").unwrap().base_impl(), &after[0]));
     let impl_ = after[0].downcast_ref::<LineLayerImpl>().unwrap();
-    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.get::<LineColor>().options.duration);
-    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.get::<LineColor>().options.delay);
+    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.line_color.options.duration);
+    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.line_color.options.delay);
 }
 
 #[derive(Default)]
@@ -586,20 +577,20 @@ fn sky_presence_and_replacement() {
     assert!(style.get_sky().is_none());
 
     style.load_json(r#"{"sky":{}}"#);
-    assert!(style.get_sky().expect("sky").get_sky_color().is_undefined());
+    assert!(style.get_sky().expect("sky").impl_.properties.sky_color.value.is_undefined());
 
     style.load_json(r#"{"sky":{"sky-color":"blue","atmosphere-blend":0.4}}"#);
     let sky = style.get_sky().expect("sky");
-    assert_eq!(Color::blue(), *sky.get_sky_color().as_constant());
-    assert_float_eq(0.4, *sky.get_atmosphere_blend().as_constant());
+    assert_eq!(Color::blue(), *sky.impl_.properties.sky_color.value.as_constant());
+    assert_float_eq(0.4, *sky.impl_.properties.sky_atmosphere_blend.value.as_constant());
 
     let mut replacement = Sky::new();
-    replacement.set_fog_color(PropertyValue::Constant(Color::red()));
+    assert!(replacement.set_property("fog-color", &Convertible::from(&serde_json::json!("red"))).is_none());
     style.set_sky(Some(replacement));
     let sky = style.get_sky().expect("sky");
-    assert!(sky.get_sky_color().is_undefined());
-    assert!(sky.get_atmosphere_blend().is_undefined());
-    assert_eq!(Color::red(), *sky.get_fog_color().as_constant());
+    assert!(sky.impl_.properties.sky_color.value.is_undefined());
+    assert!(sky.impl_.properties.sky_atmosphere_blend.value.is_undefined());
+    assert_eq!(Color::red(), *sky.impl_.properties.sky_fog_color.value.as_constant());
 
     style.set_sky(None);
     assert!(style.get_sky().is_none());
@@ -629,13 +620,13 @@ fn sky_projection_and_global_state_coexist() {
     }"#,
     );
 
-    assert_eq!(Color::blue(), *style.get_sky().expect("sky").get_sky_color().as_constant());
+    assert_eq!(Color::blue(), *style.get_sky().expect("sky").impl_.properties.sky_color.value.as_constant());
     assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
     assert_eq!(Value::Bool(true), style.get_global_state()["showLabels"]);
 
     style.set_global_state_property("showLabels", &Value::Bool(false));
     assert_eq!(Value::Bool(false), style.get_global_state()["showLabels"]);
-    assert_eq!(Color::blue(), *style.get_sky().expect("sky").get_sky_color().as_constant());
+    assert_eq!(Color::blue(), *style.get_sky().expect("sky").impl_.properties.sky_color.value.as_constant());
     assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
 
     style.set_sky(None);
@@ -685,16 +676,12 @@ fn remove_source_in_use() {
 // gtest: Style.PublicLoadStateDoesNotWaitForResources
 #[test]
 fn public_load_state_does_not_wait_for_resources() {
-    let file_source =
-        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Manual);
-    let mut style = Style::with_file_source(
-        Some(Arc::new(file_source)),
-        1.0,
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
+    let run_loop = mln_actor::RunLoop::new();
+    let file_source = mln_storage::stub_file_source::StubFileSource::new(
+        &run_loop,
+        mln_storage::stub_file_source::ResponseType::Manual,
     );
+    let mut style = Style::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
 
     assert!(!style.is_loaded());
 
@@ -762,17 +749,12 @@ fn stub_with_style_response(
     responder: impl Fn(&mln_storage::Resource) -> Option<mln_storage::Response> + 'static,
 ) -> (Impl, Rc<ResponseObserver>, mln_actor::RunLoop) {
     let run_loop = mln_actor::RunLoop::new();
-    let file_source =
-        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Asynchronous);
-    file_source.set_response(mln_storage::Kind::Style, responder);
-    let mut style = Impl::with_file_source(
-        Some(Arc::new(file_source)),
-        1.0,
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
+    let file_source = mln_storage::stub_file_source::StubFileSource::new(
+        &run_loop,
+        mln_storage::stub_file_source::ResponseType::Asynchronous,
     );
+    file_source.set_response(mln_storage::Kind::Style, responder);
+    let mut style = Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
     let observer = Rc::new(ResponseObserver::default());
     style.set_observer(Some(Rc::<ResponseObserver>::clone(&observer)));
     (style, observer, run_loop)
@@ -877,7 +859,9 @@ fn load_json_parse_error() {
 // gtest: Style.LoadJSONCancelsPendingLoadURL
 #[test]
 fn load_json_cancels_pending_load_url() {
+    let run_loop = mln_actor::RunLoop::new();
     let file_source = Arc::new(mln_storage::stub_file_source::StubFileSource::new(
+        &run_loop,
         mln_storage::stub_file_source::ResponseType::Manual,
     ));
     file_source.set_response(mln_storage::Kind::Style, |_| {
@@ -888,10 +872,7 @@ fn load_json_cancels_pending_load_url() {
     let mut style = Impl::with_file_source(
         Some(Arc::<mln_storage::stub_file_source::StubFileSource>::clone(&file_source)),
         1.0,
-        mln_actor::TaggedScheduler::new(
-            mln_actor::scheduler::get_background(),
-            mln_util::identity::SimpleIdentity::new(),
-        ),
+        &run_loop,
     );
 
     // Start loading a URL (this will be pending)

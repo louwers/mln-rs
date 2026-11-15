@@ -12,7 +12,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use geometry::Point;
-use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
@@ -20,10 +19,10 @@ use mln_util::image::PremultipliedImage;
 use mln_util::tileset::RasterEncoding;
 use mln_util::time::Instant;
 use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::geometry::dem_data::DEMData;
+use crate::gfx::context::Context;
 use crate::tile_mask::TileMask;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -53,16 +52,16 @@ fn full_mask() -> TileMask {
 /// DEM, border included, which is what a worker sets (`tile/worker_codec`)
 /// and the tile backfills from its neighbours; the geometry is the tile's
 /// (`set_mask`) and the render state this side's.
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub struct HillshadeBucket {
     pub(crate) base: BucketBase,
-    #[serde(skip, default = "unmasked")]
+    #[wire(skip, default = "unmasked")]
     geometry: Mutex<HillshadeBucketGeometry>,
     demdata: RwLock<DEMData>,
-    #[serde(skip)]
+    #[wire(skip)]
     prepared: AtomicBool,
     /// Incremented where C++ sets `renderTargetPrepared = false`.
-    #[serde(skip)]
+    #[wire(skip)]
     render_target_generation: AtomicU64,
 }
 
@@ -223,7 +222,7 @@ impl Bucket for HillshadeBucket {
         &mut self.base
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &Context) {
         if !self.has_data() {
             return;
         }

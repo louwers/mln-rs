@@ -1,145 +1,128 @@
-// Quirk kept: the conversion interpolates with ColorSpace::RGB; the legacy
-// "colorSpace" member is not read.
+//! Legacy functions and `{token}` strings, rewritten as the expressions the
+//! style specification defines them by. The parser then types and checks
+//! them as it does any other expression.
 
-use std::cmp::Ordering;
+use feature::{Value, ValueObject};
+use mln_conversion::Convertible;
 
-use mln_expression::Interpolator;
-use mln_expression::case::Case;
-use mln_expression::format_expression::{FormatExpression, FormatExpressionSection};
-use mln_expression::formatted::Formatted;
-use mln_expression::image_expression::ImageExpression;
-use mln_expression::match_::{Match, MatchLabel};
-use mln_style_types::{ProjectionDefinition, VariableAnchorOffsetCollection};
-use mln_util::{Color, ColorSpace, Padding};
-use mln_vec_map::VecMap;
+use super::Error;
+use crate::expression::{Expr, ParsingContext, Type};
 
-use super::{Converter, Convertible, Error, convert};
-use crate::expression::{
-    Expr, Image, ParsingContext, Step, Stops, Type, Value, ValueConverter, create_interpolate, dsl,
-};
-use crate::property_expression::PropertyExpression;
+/// The parser's errors for an expression a conversion wrote, without their
+/// positions: those are in that expression, not in the style.
+pub(crate) fn conversion_errors(ctx: &ParsingContext) -> String {
+    ctx.get_errors().into_iter().map(|e| e.message).collect::<Vec<_>>().join("\n")
+}
 
-const TOKEN_RESERVED_CHARS: &[u8] = b"{}";
+/// `[name, args...]`.
+pub(crate) fn op(name: &str, args: impl IntoIterator<Item = Value>) -> Value {
+    Value::Array(std::iter::once(Value::from(name)).chain(args).collect())
+}
+
+pub(crate) fn get(key: &str) -> Value {
+    op("get", [key.into()])
+}
+
+/// A copy of `value`.
+pub(crate) fn owned(value: &Convertible<'_>) -> Value {
+    if value.is_undefined() {
+        Value::Null
+    } else if value.is_array() {
+        Value::Array((0..value.array_length()).map(|i| owned(&value.array_member(i))).collect())
+    } else if value.is_object() {
+        let mut object = ValueObject::new();
+        value.each_member(|key, member| {
+            object.insert(key.to_owned(), owned(member));
+            None
+        });
+        Value::Object(object)
+    } else {
+        value.to_value().unwrap_or(Value::Null)
+    }
+}
+
+/// An expression that evaluates to `value`.
+pub(crate) fn literal(value: Value) -> Value {
+    match value {
+        Value::Array(_) | Value::Object(_) => op("literal", [value]),
+        value => value,
+    }
+}
+
+pub(crate) fn number(value: &Value) -> Option<f64> {
+    match *value {
+        Value::Uint(n) => Some(n as f64),
+        Value::Int(n) => Some(n as f64),
+        Value::Double(n) => Some(n),
+        _ => None,
+    }
+}
+
+/// The largest integer that `match` takes as a label, 2^53 - 1.
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+/// Whether `match` takes `labels` as they are: all strings, or all integers.
+pub(crate) fn matchable(labels: &[Value]) -> bool {
+    labels.iter().all(|label| matches!(label, Value::String(_)))
+        || labels.iter().all(|label| number(label).is_some_and(|n| n.fract() == 0.0 && n.abs() <= MAX_SAFE_INTEGER))
+}
+
+enum Piece<'a> {
+    Text(&'a str),
+    Token(&'a str),
+}
+
+/// `source` split into text and the names of its `{token}`s.
+fn pieces(source: &str) -> Vec<Piece<'_>> {
+    let bytes = source.as_bytes();
+    let end = bytes.len();
+    let mut pieces = Vec::new();
+    let mut pos = 0;
+    while pos != end {
+        let open = bytes[pos..].iter().position(|&c| c == b'{').map_or(end, |o| pos + o);
+        if pos != open {
+            pieces.push(Piece::Text(&source[pos..open]));
+        }
+        if open == end {
+            break;
+        }
+        let close = bytes[open + 1..].iter().position(|&c| c == b'{' || c == b'}').map_or(end, |o| open + 1 + o);
+        if close != end && bytes[close] == b'}' {
+            pieces.push(Piece::Token(&source[open + 1..close]));
+            pos = close + 1;
+        } else {
+            pieces.push(Piece::Text(&source[open..close]));
+            pos = close;
+        }
+    }
+    pieces
+}
 
 /// Whether `source` contains a `{token}`.
 #[must_use]
 pub(crate) fn has_tokens(source: &str) -> bool {
-    let bytes = source.as_bytes();
-    let end = bytes.len();
-    let mut pos = 0;
-
-    while pos != end {
-        let Some(offset) = bytes[pos..].iter().position(|&c| c == b'{') else {
-            return false;
-        };
-        let mut brace = pos + offset;
-        brace += 1;
-        while brace != end && !TOKEN_RESERVED_CHARS.contains(&bytes[brace]) {
-            brace += 1;
-        }
-        if brace != end && bytes[brace] == b'}' {
-            return true;
-        }
-        pos = brace;
-    }
-
-    false
+    pieces(source).iter().any(|piece| matches!(piece, Piece::Token(_)))
 }
 
+/// `source` with each `{token}` replaced by the feature's property of that
+/// name.
 #[must_use]
-pub(crate) fn convert_token_string_to_format_expression(source: &str) -> Expr {
-    let text_expression = convert_token_string_to_expression(source);
-    let sections = vec![FormatExpressionSection::new(text_expression)];
-    FormatExpression::new_expr(sections)
+pub(crate) fn token_string_expression(source: &str) -> Value {
+    let mut inputs: Vec<Value> = pieces(source)
+        .into_iter()
+        .map(|piece| match piece {
+            Piece::Text(text) => text.into(),
+            Piece::Token(key) => get(key),
+        })
+        .collect();
+    if inputs.len() == 1 { op("to-string", inputs.pop()) } else { op("concat", inputs) }
 }
 
-#[must_use]
-pub(crate) fn convert_token_string_to_image_expression(source: &str) -> Expr {
-    ImageExpression::new_expr(convert_token_string_to_expression(source))
-}
-
-#[must_use]
-pub(crate) fn convert_token_string_to_expression(source: &str) -> Expr {
-    let mut inputs: Vec<Expr> = Vec::new();
-
-    // Byte positions; '{' and '}' are ASCII, so every slice is valid UTF-8.
-    let bytes = source.as_bytes();
-    let end = bytes.len();
-    let mut pos = 0;
-
-    while pos != end {
-        let brace = bytes[pos..].iter().position(|&c| c == b'{').map_or(end, |o| pos + o);
-        if pos != brace {
-            inputs.push(dsl::literal_str(&source[pos..brace]));
-        }
-        pos = brace;
-        if pos != end {
-            let mut brace = brace + 1;
-            while brace != end && !TOKEN_RESERVED_CHARS.contains(&bytes[brace]) {
-                brace += 1;
-            }
-            if brace != end && bytes[brace] == b'}' {
-                inputs.push(dsl::get(dsl::literal_str(&source[pos + 1..brace])));
-                pos = brace + 1;
-            } else {
-                inputs.push(dsl::literal_str(&source[pos..brace]));
-                pos = brace;
-            }
-        }
-    }
-
-    match inputs.len() {
-        0 => dsl::literal_str(source),
-        1 => dsl::to_string(inputs.pop().unwrap(), None),
-        _ => dsl::concat(inputs),
-    }
-}
-
-pub(crate) fn convert_function_to_expression<T>(
-    value: &Convertible<'_>,
-    error: &mut Error,
-    convert_tokens: bool,
-) -> Option<PropertyExpression<T>>
-where
-    T: Converter + ValueConverter,
-{
-    let expression = convert_function_to_expression_for_type(&T::expression_type(), value, error, convert_tokens)?;
-
-    let mut default_value: Option<T> = None;
-
-    if let Some(default_value_value) = value.object_member("default") {
-        default_value = convert::<T>(&default_value_value, error);
-        if default_value.is_none() {
-            error.message = format!(r#"wrong type for "default": {}"#, error.message);
-            return None;
-        }
-    }
-
-    Some(PropertyExpression::from_expr(expression, default_value))
-}
-
-// Ad-hoc Converters for double and int64_t. We should replace float with double
-// wholesale, and promote the int64_t Converter to general use (and it should
-// check that the input is an integer).
-fn convert_double(value: &Convertible<'_>, error: &mut Error) -> Option<f64> {
-    let converted = convert::<f32>(value, error)?;
-    Some(f64::from(converted))
-}
-
-fn convert_int64(value: &Convertible<'_>, error: &mut Error) -> Option<i64> {
-    let converted = convert::<f32>(value, error)?;
-    // static_cast<int64_t>(float): truncation (`as` saturates where C++ is
-    // undefined).
-    Some(converted as i64)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FunctionType {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
     Interval,
     Exponential,
     Categorical,
-    Identity,
-    Invalid,
 }
 
 fn interpolatable(type_: &Type) -> bool {
@@ -149,766 +132,315 @@ fn interpolatable(type_: &Type) -> bool {
         | Type::Padding
         | Type::ProjectionDefinition
         | Type::VariableAnchorOffsetCollection => true,
-        Type::Array(array) => {
-            // Arrays are interpolatable if they have a fixed size and item type is Number,
-            // OR if the item type itself is interpolatable (e.g., Array<Color>)
-            if array.n.is_some() && array.item_type == Type::Number {
-                return true;
-            }
-            // Variable-length Number arrays (like line-dasharray) are not interpolatable
-            // because interpolating between different dasharray patterns doesn't make semantic sense
-            if array.n.is_none() && array.item_type == Type::Number {
-                return false;
-            }
-            interpolatable(&array.item_type)
-        }
+        // A fixed number of numbers, but not a dash array: its patterns
+        // don't blend.
+        Type::Array(array) if array.item_type == Type::Number => array.n.is_some(),
+        Type::Array(array) => interpolatable(&array.item_type),
         _ => false,
     }
 }
 
-/// The C++ `type.match([&](const type::Array& arr) { arr.itemType.match([&](const type::ColorType&) {...`
-/// blocks: the item type of an array-of-colors type.
-fn color_array_item_type(type_: &Type) -> Option<Type> {
-    match type_ {
-        Type::Array(array) if array.item_type == Type::Color => Some(array.item_type.clone()),
-        _ => None,
-    }
-}
-
-fn convert_literal(type_: &Type, value: &Convertible<'_>, error: &mut Error, convert_tokens: bool) -> Option<Expr> {
-    match type_ {
-        Type::Number => {
-            let result = convert::<f32>(value, error)?;
-            Some(dsl::literal(Value::Number(f64::from(result))))
-        }
-        Type::Boolean => {
-            let result = convert::<bool>(value, error)?;
-            Some(dsl::literal(Value::Bool(result)))
-        }
-        Type::String => {
-            let result = convert::<String>(value, error)?;
-            Some(if convert_tokens {
-                convert_token_string_to_expression(&result)
-            } else {
-                dsl::literal(Value::String(result))
-            })
-        }
-        Type::Color => {
-            let result = convert::<Color>(value, error)?;
-            Some(dsl::literal(Value::Color(result)))
-        }
-        Type::Padding => {
-            let result = convert::<Padding>(value, error)?;
-            Some(dsl::literal(Value::Padding(result)))
-        }
-        Type::ProjectionDefinition => {
-            let result = convert::<ProjectionDefinition>(value, error)?;
-            Some(dsl::literal(Value::ProjectionDefinition(result)))
-        }
-        Type::VariableAnchorOffsetCollection => {
-            let result = convert::<VariableAnchorOffsetCollection>(value, error)?;
-            Some(dsl::literal(Value::VariableAnchorOffsetCollection(result)))
-        }
-        Type::Array(array) => {
-            if !value.is_array() {
-                error.message = "value must be an array".to_owned();
-                return None;
-            }
-            if let Some(n) = array.n
-                && value.array_length() != n
-            {
-                error.message = format!("value must be an array of length {n}");
-                return None;
-            }
-            match &array.item_type {
-                Type::Number => {
-                    let mut result = Vec::with_capacity(value.array_length());
-                    for i in 0..value.array_length() {
-                        let Some(number) = value.array_member(i).to_number() else {
-                            error.message = "value must be an array of numbers".to_owned();
-                            return None;
-                        };
-                        result.push(Value::Number(f64::from(number)));
-                    }
-                    Some(dsl::literal(Value::Array(result)))
-                }
-                Type::String => {
-                    let mut result = Vec::with_capacity(value.array_length());
-                    for i in 0..value.array_length() {
-                        let Some(string) = value.array_member(i).to_string() else {
-                            error.message = "value must be an array of strings".to_owned();
-                            return None;
-                        };
-                        result.push(Value::String(string));
-                    }
-                    Some(dsl::literal(Value::Array(result)))
-                }
-                _ => {
-                    debug_assert!(false, "No properties use this type.");
-                    None
-                }
-            }
-        }
-        Type::Null | Type::Object | Type::Error | Type::Value | Type::Collator => {
-            debug_assert!(false, "No properties use this type.");
-            None
-        }
-        Type::Formatted => {
-            let result = convert::<String>(value, error)?;
-            Some(if convert_tokens {
-                convert_token_string_to_format_expression(&result)
-            } else {
-                dsl::literal(Value::Formatted(Formatted::from_plain(&result)))
-            })
-        }
-        Type::Image => {
-            let result = convert::<String>(value, error)?;
-            Some(if convert_tokens {
-                // Quirk kept: C++ wraps the ImageExpression in a second one.
-                ImageExpression::new_expr(convert_token_string_to_image_expression(&result))
-            } else {
-                dsl::literal(Value::Image(Image::new(result)))
-            })
-        }
-    }
-}
-
-/// Stops ordered by `<`, where `emplace` keeps the first value of a key, as
-/// C++'s function conversion builds them.
-#[derive(Default)]
-struct DoubleStops {
-    stops: Vec<(f64, Expr)>,
-}
-
-impl DoubleStops {
-    fn lower_bound(&self, key: f64) -> usize {
-        self.stops.partition_point(|(k, _)| *k < key)
-    }
-
-    fn emplace(&mut self, key: f64, value: Expr) {
-        let i = self.lower_bound(key);
-        if i < self.stops.len() && key.partial_cmp(&self.stops[i].0) != Some(Ordering::Less) {
-            return;
-        }
-        self.stops.insert(i, (key, value));
-    }
-
-    fn into_stops(self) -> Stops {
-        let mut stops = Stops::new();
-        for (k, v) in self.stops {
-            stops.emplace(k, v);
-        }
-        stops
-    }
-}
-
-fn convert_stops(
-    type_: &Type,
-    value: &Convertible<'_>,
-    error: &mut Error,
-    convert_tokens: bool,
-) -> Option<DoubleStops> {
-    let Some(stops_value) = value.object_member("stops") else {
-        error.message = "function value must specify stops".to_owned();
-        return None;
-    };
-    if !stops_value.is_array() {
-        error.message = "function stops must be an array".to_owned();
-        return None;
-    }
-    if stops_value.array_length() == 0 {
-        error.message = "function must have at least one stop".to_owned();
-        return None;
-    }
-
-    // For std::vector<Color> (hillshade color arrays), parse stops as the item type
-    // This allows zoom function interpolation of individual colors
-    // Other array types (translate, dasharray, etc) use the full type
-    let stop_type = color_array_item_type(type_).unwrap_or_else(|| type_.clone());
-
-    let mut stops = DoubleStops::default();
-    for i in 0..stops_value.array_length() {
-        let stop_value = stops_value.array_member(i);
-
-        if !stop_value.is_array() {
-            error.message = "function stop must be an array".to_owned();
-            return None;
-        }
-
-        if stop_value.array_length() != 2 {
-            error.message = "function stop must have two elements".to_owned();
-            return None;
-        }
-
-        let t = convert::<f32>(&stop_value.array_member(0), error)?;
-
-        let e = convert_literal(&stop_type, &stop_value.array_member(1), error, convert_tokens)?;
-        stops.emplace(f64::from(t), e);
-    }
-    Some(stops)
-}
-
-fn omit_first_stop(stops: &mut DoubleStops) {
-    let mut min = f64::MAX;
-    for s in &stops.stops {
-        // std::min(s.first, min)
-        min = if min < s.0 { min } else { s.0 };
-    }
-    // stops.emplace(-inf, std::move(stops[min])); stops.erase(min);
-    let i = stops.lower_bound(min);
-    if i < stops.stops.len() && min.partial_cmp(&stops.stops[i].0) != Some(Ordering::Less) {
-        let (_, value) = stops.stops.remove(i);
-        stops.emplace(f64::NEG_INFINITY, value);
-    }
-}
-
-fn convert_branches<T: Ord>(
-    type_: &Type,
-    value: &Convertible<'_>,
-    error: &mut Error,
-    convert_key: fn(&Convertible<'_>, &mut Error) -> Option<T>,
-) -> Option<VecMap<T, Expr>> {
-    let Some(stops_value) = value.object_member("stops") else {
-        error.message = "function value must specify stops".to_owned();
-        return None;
-    };
-
-    if !stops_value.is_array() {
-        error.message = "function stops must be an array".to_owned();
-        return None;
-    }
-
-    if stops_value.array_length() == 0 {
-        error.message = "function must have at least one stop".to_owned();
-        return None;
-    }
-
-    let mut stops = VecMap::new();
-    for i in 0..stops_value.array_length() {
-        let stop_value = stops_value.array_member(i);
-
-        if !stop_value.is_array() {
-            error.message = "function stop must be an array".to_owned();
-            return None;
-        }
-
-        if stop_value.array_length() != 2 {
-            error.message = "function stop must have two elements".to_owned();
-            return None;
-        }
-
-        let t = convert_key(&stop_value.array_member(0), error)?;
-
-        let e = convert_literal(type_, &stop_value.array_member(1), error, false)?;
-
-        stops.entry(t).or_insert(e);
-    }
-
-    Some(stops)
-}
-
-fn convert_base(value: &Convertible<'_>, error: &mut Error) -> Option<f64> {
-    let Some(base_value) = value.object_member("base") else {
-        return Some(1.0);
-    };
-
-    let Some(base) = base_value.to_number() else {
-        error.message = "function base must be a number".to_owned();
-        return None;
-    };
-
-    Some(f64::from(base))
-}
-
-fn step(type_: Type, input: Expr, stops: DoubleStops) -> Expr {
-    Step::new_expr(type_, input, stops.into_stops())
-}
-
-fn interpolate(type_: Type, interpolator: Interpolator, input: Expr, stops: DoubleStops) -> Expr {
-    let mut ctx = ParsingContext::new();
-    let result = create_interpolate(type_, interpolator, ColorSpace::Rgb, input, stops.into_stops(), &mut ctx);
-    // C++ asserts and returns a null expression.
-    result.expect("convertFunctionToExpression: createInterpolate failed")
-}
-
-/// A `match` on `property` over integer or string labels.
-fn categorical<T: MatchLabel>(type_: Type, property: &str, branches: VecMap<T, Expr>, def: Option<Expr>) -> Expr {
-    Match::new_expr(
-        type_,
-        dsl::get(dsl::literal_str(property)),
-        branches,
-        def.unwrap_or_else(|| dsl::error("replaced with default")),
-    )
-}
-
-fn categorical_bool(type_: Type, property: &str, mut branches: VecMap<bool, Expr>, def: Option<Expr>) -> Expr {
-    let true_case = branches.remove(&true).unwrap_or_else(|| dsl::error("replaced with default"));
-    let false_case = branches.remove(&false).unwrap_or_else(|| dsl::error("replaced with default"));
-
-    let converted_branches = vec![
-        (dsl::eq(dsl::get(dsl::literal_str(property)), dsl::literal(Value::Bool(true))), true_case),
-        (dsl::eq(dsl::get(dsl::literal_str(property)), dsl::literal(Value::Bool(false))), false_case),
-    ];
-
-    Case::new_expr(type_, converted_branches, def.unwrap_or_else(|| dsl::error("replaced with default")))
-}
-
-fn number_or_default(type_: Type, get: Expr, expr: Expr, def: Option<Expr>) -> Expr {
-    let Some(def) = def else {
-        return expr;
-    };
-
-    let branches = vec![(dsl::eq(dsl::compound("typeof", vec![get]), dsl::literal_str("number")), expr)];
-    Case::new_expr(type_, branches, def)
-}
-
-fn convert_interval_function(
-    type_: Type,
-    value: &Convertible<'_>,
-    error: &mut Error,
-    make_input: &dyn Fn(bool) -> Expr,
-    def: Option<Expr>,
-    convert_tokens: bool,
-) -> Option<Expr> {
-    let mut stops = convert_stops(&type_, value, error, convert_tokens)?;
-    omit_first_stop(&mut stops);
-
-    // For std::vector<Color> arrays, create step with item type
-    let color_item = color_array_item_type(&type_);
-    let is_color_array = color_item.is_some();
-    let expr_type = color_item.unwrap_or_else(|| type_.clone());
-
-    let expr = step(expr_type, make_input(true), stops);
-
-    // For color arrays with camera functions, return the step directly
-    if is_color_array && def.is_none() {
-        return Some(expr);
-    }
-
-    Some(number_or_default(type_, make_input(false), expr, def))
-}
-
-fn convert_exponential_function(
-    type_: Type,
-    value: &Convertible<'_>,
-    error: &mut Error,
-    make_input: &dyn Fn(bool) -> Expr,
-    def: Option<Expr>,
-    convert_tokens: bool,
-) -> Option<Expr> {
-    let stops = convert_stops(&type_, value, error, convert_tokens)?;
-    let base = convert_base(value, error)?;
-
-    // For std::vector<Color> arrays, create interpolation with item type
-    let color_item = color_array_item_type(&type_);
-    let is_color_array = color_item.is_some();
-    let expr_type = color_item.unwrap_or_else(|| type_.clone());
-
-    let expr = interpolate(expr_type, dsl::exponential(base), make_input(true), stops);
-
-    // For color arrays with camera functions, return the interpolation directly
-    if is_color_array && def.is_none() {
-        return Some(expr);
-    }
-
-    Some(number_or_default(type_, make_input(false), expr, def))
-}
-
-fn convert_categorical_function(
-    type_: Type,
-    value: &Convertible<'_>,
-    err: &mut Error,
-    property: &str,
-    def: Option<Expr>,
-) -> Option<Expr> {
-    let Some(stops_value) = value.object_member("stops") else {
-        err.message = "function value must specify stops".to_owned();
-        return None;
-    };
-
-    if !stops_value.is_array() {
-        err.message = "function stops must be an array".to_owned();
-        return None;
-    }
-
-    if stops_value.array_length() == 0 {
-        err.message = "function must have at least one stop".to_owned();
-        return None;
-    }
-
-    let first = stops_value.array_member(0);
-
-    if !first.is_array() {
-        err.message = "function stop must be an array".to_owned();
-        return None;
-    }
-
-    if first.array_length() != 2 {
-        err.message = "function stop must have two elements".to_owned();
-        return None;
-    }
-
-    if first.array_member(0).to_bool().is_some() {
-        let branches = convert_branches::<bool>(&type_, value, err, convert::<bool>)?;
-        return Some(categorical_bool(type_, property, branches, def));
-    }
-
-    if first.array_member(0).to_number().is_some() {
-        let branches = convert_branches::<i64>(&type_, value, err, convert_int64)?;
-        return Some(categorical(type_, property, branches, def));
-    }
-
-    if first.array_member(0).to_string().is_some() {
-        let branches = convert_branches::<String>(&type_, value, err, convert::<String>)?;
-        return Some(categorical(type_, property, branches, def));
-    }
-
-    err.message = "stop domain value must be a number, string, or boolean".to_owned();
+fn fail<T>(error: &mut Error, message: &str) -> Option<T> {
+    error.message = message.to_owned();
     None
 }
 
-/// The inner `std::map<T, std::unique_ptr<Expression>>` of a composite
-/// function (`emplace` keeps the first value of a key).
-trait InnerStops: Default {
-    type Key;
-    fn emplace(&mut self, key: Self::Key, value: Expr);
-}
-
-impl InnerStops for DoubleStops {
-    type Key = f64;
-    fn emplace(&mut self, key: f64, value: Expr) {
-        DoubleStops::emplace(self, key, value);
-    }
-}
-
-impl<K: Ord> InnerStops for VecMap<K, Expr> {
-    type Key = K;
-    fn emplace(&mut self, key: K, value: Expr) {
-        self.entry(key).or_insert(value);
-    }
-}
-
-type KeyConverter<'a, K> = &'a dyn Fn(&Convertible<'_>, &mut Error) -> Option<K>;
-
-fn composite<M: InnerStops>(
-    type_: Type,
-    value: &Convertible<'_>,
+/// The function's stops, each its input and the expression of its output.
+fn stops(
+    function: &Convertible<'_>,
     error: &mut Error,
-    convert_key: KeyConverter<'_, M::Key>,
-    make_inner_expression: &dyn Fn(&Type, f64, M) -> Expr,
-) -> Option<Expr> {
-    let base = convert_base(value, error)?;
+    output: &dyn Fn(Value) -> Value,
+) -> Option<Vec<(Value, Value)>> {
+    let Some(stops) = function.object_member("stops") else {
+        return fail(error, "function value must specify stops");
+    };
+    if !stops.is_array() {
+        return fail(error, "function stops must be an array");
+    }
+    if stops.array_length() == 0 {
+        return fail(error, "function must have at least one stop");
+    }
+    (0..stops.array_length())
+        .map(|i| {
+            let stop = stops.array_member(i);
+            if !stop.is_array() {
+                return fail(error, "function stop must be an array");
+            }
+            if stop.array_length() != 2 {
+                return fail(error, "function stop must have two elements");
+            }
+            Some((owned(&stop.array_member(0)), output(owned(&stop.array_member(1)))))
+        })
+        .collect()
+}
 
-    // Checked by caller.
-    let stops_value = value.object_member("stops").expect("checked by caller");
-    debug_assert!(stops_value.is_array());
-
-    // std::map<float, std::map<T, std::unique_ptr<Expression>>>
-    let mut map: Vec<(f32, M)> = Vec::new();
-
-    for i in 0..stops_value.array_length() {
-        let stop_value = stops_value.array_member(i);
-
-        if !stop_value.is_array() {
-            error.message = "function stop must be an array".to_owned();
-            return None;
-        }
-
-        if stop_value.array_length() != 2 {
-            error.message = "function stop must have two elements".to_owned();
-            return None;
-        }
-
-        let stop_input = stop_value.array_member(0);
-
-        if !stop_input.is_object() {
-            error.message = "stop input must be an object".to_owned();
-            return None;
-        }
-
-        let Some(zoom_value) = stop_input.object_member("zoom") else {
-            error.message = "stop input must specify zoom".to_owned();
-            return None;
+/// Stops with numeric inputs, in ascending order, keeping the first of
+/// equal inputs.
+fn numeric(stops: Vec<(Value, Value)>, error: &mut Error) -> Option<Vec<(f64, Value)>> {
+    let mut numeric = Vec::with_capacity(stops.len());
+    for (input, output) in stops {
+        let Some(input) = number(&input) else {
+            return fail(error, "stop domain value must be a number");
         };
+        numeric.push((input, output));
+    }
+    numeric.sort_by(|a, b| a.0.total_cmp(&b.0));
+    numeric.dedup_by(|b, a| a.0 == b.0);
+    Some(numeric)
+}
 
-        let Some(source_value) = stop_input.object_member("value") else {
-            error.message = "stop input must specify value".to_owned();
-            return None;
-        };
-
-        let z = convert::<f32>(&zoom_value, error)?;
-
-        let d = convert_key(&source_value, error)?;
-
-        let r = convert_literal(&type_, &stop_value.array_member(1), error, false)?;
-
-        // map[*z].emplace(*d, std::move(*r));
-        let index = map.partition_point(|(k, _)| *k < z);
-        if index >= map.len() || z < map[index].0 {
-            map.insert(index, (z, M::default()));
+fn step(input: Value, stops: Vec<(f64, Value)>) -> Value {
+    let mut expression = vec!["step".into(), input];
+    let base = stops[0].1.clone();
+    for (i, (label, output)) in stops.into_iter().enumerate() {
+        if i > 0 {
+            expression.push(label.into());
         }
-        map[index].1.emplace(d, r);
+        expression.push(output);
+    }
+    // "step" takes at least one stop besides its base.
+    if expression.len() == 3 {
+        expression.extend([0.0.into(), base]);
+    }
+    Value::Array(expression)
+}
+
+struct Curve {
+    operator: &'static str,
+    base: f64,
+}
+
+impl Curve {
+    fn new(function: &Convertible<'_>, type_: &Type, error: &mut Error) -> Option<Curve> {
+        let base = match function.object_member("base") {
+            None => 1.0,
+            Some(base) => match base.to_double() {
+                Some(base) => base,
+                None => return fail(error, "function base must be a number"),
+            },
+        };
+        let color_space = function.object_member("colorSpace").and_then(|c| c.to_string());
+        let operator = match color_space.as_deref() {
+            Some("lab") if *type_ == Type::Color => "interpolate-lab",
+            Some("hcl") if *type_ == Type::Color => "interpolate-hcl",
+            Some("oklch") if *type_ == Type::Color => "interpolate-oklch",
+            Some("oklab") if *type_ == Type::Color => "interpolate-oklab",
+            _ => "interpolate",
+        };
+        Some(Curve { operator, base })
     }
 
-    let mut stops = DoubleStops::default();
-
-    for (z, inner) in map {
-        stops.emplace(f64::from(z), make_inner_expression(&type_, base, inner));
-    }
-
-    if interpolatable(&type_) {
-        Some(interpolate(type_, dsl::linear(), dsl::zoom(), stops))
-    } else {
-        Some(step(type_, dsl::zoom(), stops))
+    fn interpolate(&self, input: Value, stops: Vec<(f64, Value)>) -> Value {
+        let interpolation = if self.base == 1.0 { op("linear", []) } else { op("exponential", [self.base.into()]) };
+        let mut expression = vec![self.operator.into(), interpolation, input];
+        for (label, output) in stops {
+            expression.extend([label.into(), output]);
+        }
+        Value::Array(expression)
     }
 }
 
-pub fn convert_function_to_expression_for_type(
-    type_: &Type,
-    value: &Convertible<'_>,
-    err: &mut Error,
-    convert_tokens: bool,
-) -> Option<Expr> {
-    if !value.is_object() {
-        err.message = "function must be an object".to_owned();
-        return None;
-    }
-
-    let mut function_type = FunctionType::Invalid;
-
-    match value.object_member("type") {
-        None => {
-            function_type = if interpolatable(type_) { FunctionType::Exponential } else { FunctionType::Interval };
-        }
-        Some(type_value) => {
-            if let Some(string) = type_value.to_string() {
-                if string == "interval" {
-                    function_type = FunctionType::Interval;
-                }
-                if string == "exponential" && interpolatable(type_) {
-                    function_type = FunctionType::Exponential;
-                }
-                if string == "categorical" {
-                    function_type = FunctionType::Categorical;
-                }
-                if string == "identity" {
-                    function_type = FunctionType::Identity;
-                }
-            }
+/// `expression` where `property` is a number, else `default`.
+fn number_or(property: &str, expression: Value, default: Option<&Value>) -> Value {
+    match default {
+        None => expression,
+        Some(default) => {
+            op("case", [op("==", [op("typeof", [get(property)]), "number".into()]), expression, default.clone()])
         }
     }
+}
 
-    // `defaultExpr()`: the literal "default", or none. Like the C++ lambda
-    // it can leave a message in `err` without failing.
-    let default_expr = |err: &mut Error| -> Option<Expr> {
-        let member = value.object_member("default")?;
-        convert_literal(type_, &member, err, false)
-    };
-
-    if value.object_member("property").is_none() {
-        // Camera function.
-        let zoom_input = |_: bool| dsl::zoom();
-        return match function_type {
-            FunctionType::Interval => {
-                let def = default_expr(err);
-                convert_interval_function(type_.clone(), value, err, &zoom_input, def, convert_tokens)
-            }
-            FunctionType::Exponential => {
-                let def = default_expr(err);
-                convert_exponential_function(type_.clone(), value, err, &zoom_input, def, convert_tokens)
-            }
-            _ => {
-                err.message = "unsupported function type".to_owned();
-                None
-            }
+/// The output of the stop whose input `property` equals, else `default`.
+fn categorical(
+    property: &str,
+    stops: Vec<(Value, Value)>,
+    default: Option<&Value>,
+    error: &mut Error,
+) -> Option<Value> {
+    let mut branches: Vec<(Value, Value)> = Vec::with_capacity(stops.len());
+    for (input, output) in stops {
+        let input = match input {
+            Value::String(_) | Value::Bool(_) => input,
+            _ => match number(&input) {
+                Some(n) => n.into(),
+                None => return fail(error, "stop domain value must be a number, string, or boolean"),
+            },
         };
-    }
-
-    let Some(property_value) = value.object_member("property") else {
-        err.message = "function must specify property".to_owned();
-        return None;
-    };
-
-    let Some(property) = property_value.to_string() else {
-        err.message = "function property must be a string".to_owned();
-        return None;
-    };
-
-    if function_type == FunctionType::Identity {
-        let get = || dsl::get(dsl::literal_str(&property));
-        return match type_ {
-            Type::String => Some(dsl::string(get(), default_expr(err))),
-            Type::Number => Some(dsl::number(get(), default_expr(err))),
-            Type::Boolean => Some(dsl::boolean(get(), default_expr(err))),
-            Type::Color => Some(dsl::to_color(get(), default_expr(err))),
-            Type::Padding => Some(dsl::to_padding(get(), default_expr(err))),
-            Type::ProjectionDefinition => Some(dsl::to_projection_definition(get(), default_expr(err))),
-            Type::VariableAnchorOffsetCollection => Some(dsl::to_variable_anchor_offset(get(), default_expr(err))),
-            Type::Array(_) => Some(dsl::assertion(type_.clone(), get(), default_expr(err))),
-            Type::Formatted => Some(dsl::to_formatted(get(), default_expr(err))),
-            Type::Image => Some(dsl::to_image(get(), default_expr(err))),
-            _ => {
-                debug_assert!(false, "No properties use this type.");
-                None
-            }
-        };
-    }
-
-    let Some(stops_value) = value.object_member("stops") else {
-        err.message = "function value must specify stops".to_owned();
-        return None;
-    };
-
-    if !stops_value.is_array() {
-        err.message = "function stops must be an array".to_owned();
-        return None;
-    }
-
-    if stops_value.array_length() == 0 {
-        err.message = "function must have at least one stop".to_owned();
-        return None;
-    }
-
-    let first = stops_value.array_member(0);
-
-    if !first.is_array() {
-        err.message = "function stop must be an array".to_owned();
-        return None;
-    }
-
-    if first.array_length() != 2 {
-        err.message = "function stop must have two elements".to_owned();
-        return None;
-    }
-
-    let stop = first.array_member(0);
-
-    let get_property = |coerce: bool| -> Expr {
-        if coerce {
-            dsl::number(dsl::get(dsl::literal_str(&property)), None)
-        } else {
-            dsl::get(dsl::literal_str(&property))
+        if !branches.iter().any(|(label, _)| *label == input) {
+            branches.push((input, output));
         }
-    };
-
-    if stop.is_object() {
-        // Composite function.
-        let Some(source_value) = stop.object_member("value") else {
-            err.message = "stop must specify value".to_owned();
-            return None;
-        };
-
-        // The C++ inner lambdas call defaultExpr() (writing to `err`) once
-        // per zoom stop, after every failure point of the conversion, so the
-        // messages they leave are never observable; a scratch error matches.
-        let default_for_inner = || -> Option<Expr> {
-            let mut scratch = Error::default();
-            default_expr(&mut scratch)
-        };
-
-        if source_value.to_bool().is_some() {
-            return if function_type == FunctionType::Categorical {
-                composite::<VecMap<bool, Expr>>(
-                    type_.clone(),
-                    value,
-                    err,
-                    &|v, e| convert::<bool>(v, e),
-                    &|type_inner, _, stops| categorical_bool(type_inner.clone(), &property, stops, default_for_inner()),
-                )
-            } else {
-                err.message = "unsupported function type".to_owned();
-                None
-            };
+    }
+    // Without a default, the property's default value replaces the error.
+    let fallback = default.cloned().unwrap_or_else(|| op("error", ["replaced with default".into()]));
+    let labels: Vec<Value> = branches.iter().map(|(label, _)| label.clone()).collect();
+    let mut expression = Vec::with_capacity(2 * branches.len() + 2);
+    if matchable(&labels) {
+        expression.extend(["match".into(), get(property)]);
+        for (label, output) in branches {
+            expression.extend([label, output]);
         }
-
-        if source_value.to_number().is_some() {
-            return match function_type {
-                FunctionType::Interval => {
-                    composite::<DoubleStops>(type_.clone(), value, err, &convert_double, &|type_inner, _, mut stops| {
-                        omit_first_stop(&mut stops);
-                        number_or_default(
-                            type_.clone(),
-                            get_property(false),
-                            step(type_inner.clone(), get_property(true), stops),
-                            default_for_inner(),
-                        )
-                    })
-                }
-                FunctionType::Exponential => {
-                    composite::<DoubleStops>(type_.clone(), value, err, &convert_double, &|type_inner, base, stops| {
-                        number_or_default(
-                            type_.clone(),
-                            get_property(false),
-                            interpolate(type_inner.clone(), dsl::exponential(base), get_property(true), stops),
-                            default_for_inner(),
-                        )
-                    })
-                }
-                FunctionType::Categorical => composite::<VecMap<i64, Expr>>(
-                    type_.clone(),
-                    value,
-                    err,
-                    &convert_int64,
-                    &|type_inner, _, stops| categorical(type_inner.clone(), &property, stops, default_for_inner()),
-                ),
-                _ => {
-                    err.message = "unsupported function type".to_owned();
-                    None
-                }
-            };
-        }
-
-        if source_value.to_string().is_some() {
-            return if function_type == FunctionType::Categorical {
-                composite::<VecMap<String, Expr>>(
-                    type_.clone(),
-                    value,
-                    err,
-                    &|v, e| convert::<String>(v, e),
-                    &|type_inner, _, stops| categorical(type_inner.clone(), &property, stops, default_for_inner()),
-                )
-            } else {
-                err.message = "unsupported function type".to_owned();
-                None
-            };
-        }
-
-        err.message = "stop domain value must be a number, string, or boolean".to_owned();
-        None
     } else {
-        // Source function.
-        match function_type {
-            FunctionType::Interval => {
-                let def = default_expr(err);
-                convert_interval_function(type_.clone(), value, err, &get_property, def, false)
-            }
-            FunctionType::Exponential => {
-                let def = default_expr(err);
-                convert_exponential_function(type_.clone(), value, err, &get_property, def, false)
-            }
-            FunctionType::Categorical => {
-                let def = default_expr(err);
-                convert_categorical_function(type_.clone(), value, err, &property, def)
-            }
-            _ => {
-                err.message = "unsupported function type".to_owned();
-                None
-            }
+        expression.push("case".into());
+        for (label, output) in branches {
+            expression.extend([op("==", [get(property), label]), output]);
         }
     }
+    expression.push(fallback);
+    Some(Value::Array(expression))
+}
+
+/// The feature's `property`, as `type_`.
+fn identity(type_: &Type, property: &str, default: Option<Value>) -> Value {
+    let get = get(property);
+    let Some(default) = default else {
+        // The parser asserts or coerces a value to the property's type, but
+        // it coerces to a string, which a function asserts.
+        return if *type_ == Type::String { op("string", [get]) } else { get };
+    };
+    match type_ {
+        Type::Number => op("number", [get, default]),
+        Type::String => op("string", [get, default]),
+        Type::Boolean => op("boolean", [get, default]),
+        Type::Color => op("to-color", [get, default]),
+        Type::Padding => op("to-padding", [get, default]),
+        Type::Array(array) => {
+            let item = match array.item_type {
+                Type::Number => "number",
+                Type::String => "string",
+                Type::Boolean => "boolean",
+                _ => "value",
+            };
+            let length = array.n.map_or(Value::Null, |n| Value::Uint(n as u64));
+            op("array", [item.into(), length, get, default])
+        }
+        _ => op("coalesce", [get, default]),
+    }
+}
+
+/// `function`, a legacy function, as the expression it stands for, whose
+/// output is `type_`. With `convert_tokens`, the `{token}`s of a zoom
+/// function's string outputs read the feature's properties.
+pub fn parse_function(
+    function: &Convertible<'_>,
+    type_: &Type,
+    convert_tokens: bool,
+    error: &mut Error,
+) -> Option<Expr> {
+    parse_converted(&function_expression(function, type_, convert_tokens, error)?, type_, error)
+}
+
+/// Parses `expression`, which a conversion wrote, as a property's
+/// expression whose output is `type_`.
+pub(crate) fn parse_converted(expression: &Value, type_: &Type, error: &mut Error) -> Option<Expr> {
+    let mut ctx = ParsingContext::with_expected(type_.clone());
+    let parsed = ctx.parse_layer_property_expression(&Convertible::from(expression));
+    if parsed.is_none() {
+        error.message = conversion_errors(&ctx);
+    }
+    parsed
+}
+
+fn function_expression(
+    function: &Convertible<'_>,
+    type_: &Type,
+    convert_tokens: bool,
+    error: &mut Error,
+) -> Option<Value> {
+    if !function.is_object() {
+        return fail(error, "function must be an object");
+    }
+
+    // None for an identity function.
+    let kind = match function.object_member("type").map(|t| t.to_string()) {
+        None if interpolatable(type_) => Some(Kind::Exponential),
+        None => Some(Kind::Interval),
+        Some(Some(t)) if t == "interval" => Some(Kind::Interval),
+        Some(Some(t)) if t == "exponential" && interpolatable(type_) => Some(Kind::Exponential),
+        Some(Some(t)) if t == "categorical" => Some(Kind::Categorical),
+        Some(Some(t)) if t == "identity" => None,
+        Some(_) => return fail(error, "unsupported function type"),
+    };
+    let default = function.object_member("default").map(|d| literal(owned(&d)));
+
+    let Some(property) = function.object_member("property") else {
+        let output = |output: Value| match output {
+            Value::String(s) if convert_tokens && has_tokens(&s) => token_string_expression(&s),
+            output => literal(output),
+        };
+        let stops = numeric(stops(function, error, &output)?, error)?;
+        let zoom = op("zoom", []);
+        return match kind {
+            Some(Kind::Interval) => Some(step(zoom, stops)),
+            Some(Kind::Exponential) => Some(Curve::new(function, type_, error)?.interpolate(zoom, stops)),
+            Some(Kind::Categorical) | None => fail(error, "unsupported function type"),
+        };
+    };
+    let Some(property) = property.to_string() else {
+        return fail(error, "function property must be a string");
+    };
+
+    let Some(kind) = kind else {
+        return Some(identity(type_, &property, default));
+    };
+
+    let stops = stops(function, error, &literal)?;
+    let curve = Curve::new(function, type_, error)?;
+    let input = op("number", [get(&property)]);
+    // The expression of a property function, over `stops`.
+    let by_property = |stops: Vec<(Value, Value)>, error: &mut Error| match kind {
+        Kind::Interval => Some(number_or(&property, step(input.clone(), numeric(stops, error)?), default.as_ref())),
+        Kind::Exponential => {
+            Some(number_or(&property, curve.interpolate(input.clone(), numeric(stops, error)?), default.as_ref()))
+        }
+        Kind::Categorical => categorical(&property, stops, default.as_ref(), error),
+    };
+
+    if !matches!(stops[0].0, Value::Object(_)) {
+        return by_property(stops, error);
+    }
+
+    // A zoom-and-property function: a property function at each zoom.
+    let mut zooms: Vec<(f64, Vec<(Value, Value)>)> = Vec::new();
+    for (input, output) in stops {
+        let Value::Object(input) = input else {
+            return fail(error, "stop input must be an object");
+        };
+        let Some(zoom) = input.get("zoom") else {
+            return fail(error, "stop input must specify zoom");
+        };
+        let Some(zoom) = number(zoom) else {
+            return fail(error, "stop domain value must be a number");
+        };
+        let Some(value) = input.get("value") else {
+            return fail(error, "stop input must specify value");
+        };
+        let i = zooms.partition_point(|(z, _)| *z < zoom);
+        if zooms.get(i).is_none_or(|(z, _)| *z != zoom) {
+            zooms.insert(i, (zoom, Vec::new()));
+        }
+        zooms[i].1.push((value.clone(), output));
+    }
+    let zoom_stops =
+        zooms.into_iter().map(|(zoom, stops)| Some((zoom, by_property(stops, error)?))).collect::<Option<Vec<_>>>()?;
+    let zoom = op("zoom", []);
+    Some(if interpolatable(type_) {
+        Curve { operator: curve.operator, base: 1.0 }.interpolate(zoom, zoom_stops)
+    } else {
+        step(zoom, zoom_stops)
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    // Ports TEST(StyleConversion, TokenStrings) from
-    // test/style/conversion/function.test.cpp.
     use super::*;
+
+    fn tokens(source: &str) -> String {
+        mln_conversion::value_to_json(&token_string_expression(source)).to_string()
+    }
 
     // gtest: StyleConversion.TokenStrings
     #[test]
     fn token_strings() {
-        use dsl::{concat, get, literal_str};
-
         assert!(!has_tokens(""));
         assert!(!has_tokens("{"));
         assert!(!has_tokens("{token"));
@@ -916,27 +448,11 @@ mod tests {
         assert!(has_tokens("token {token}"));
         assert!(has_tokens("{token} {token}"));
 
-        let eq = |a: Expr, b: Expr| a == b;
-        assert!(eq(convert_token_string_to_expression("{token}"), dsl::to_string(get(literal_str("token")), None)));
-        assert!(eq(
-            convert_token_string_to_expression("token {token}"),
-            concat(vec![literal_str("token "), get(literal_str("token"))])
-        ));
-        assert!(eq(
-            convert_token_string_to_expression("{token} token"),
-            concat(vec![get(literal_str("token")), literal_str(" token")])
-        ));
-        assert!(eq(
-            convert_token_string_to_expression("{token} {token}"),
-            concat(vec![get(literal_str("token")), literal_str(" "), get(literal_str("token"))])
-        ));
-        assert!(eq(
-            convert_token_string_to_expression("{token} {token"),
-            concat(vec![get(literal_str("token")), literal_str(" "), literal_str("{token")])
-        ));
-        assert!(eq(
-            convert_token_string_to_expression("{token {token}"),
-            concat(vec![literal_str("{token "), get(literal_str("token"))])
-        ));
+        assert_eq!(tokens("{token}"), r#"["to-string",["get","token"]]"#);
+        assert_eq!(tokens("token {token}"), r#"["concat","token ",["get","token"]]"#);
+        assert_eq!(tokens("{token} token"), r#"["concat",["get","token"]," token"]"#);
+        assert_eq!(tokens("{token} {token}"), r#"["concat",["get","token"]," ",["get","token"]]"#);
+        assert_eq!(tokens("{token} {token"), r#"["concat",["get","token"]," ","{token"]"#);
+        assert_eq!(tokens("{token {token}"), r#"["concat","{token ",["get","token"]]"#);
     }
 }

@@ -16,16 +16,17 @@ use mln_util::serialization::payload::Payload;
 use wasm_bindgen::prelude::*;
 
 /// A transport whose tile workers are in the Web Workers at the other end of
-/// `ports` (at least one), for the renderer of this thread's current
-/// `RunLoop`, which handles their replies (the transport's `ReplySink`).
+/// `ports` (at least one), for the renderer on `scheduler`'s `RunLoop`,
+/// which handles their replies (the transport's `ReplySink`).
 /// `on_reply(instance)` is called as each reply arrives, and
 /// `on_fatal(instance, message)` when an instance panicked.
 pub fn transport(
+    scheduler: &mln_actor::SchedulerPtr,
     ports: Vec<web_sys::MessagePort>,
     on_reply: impl Fn(usize) + 'static,
     on_fatal: impl Fn(usize, JsValue) + 'static,
 ) -> Rc<SerializingTransport> {
-    SerializingTransport::new(move |sink| {
+    SerializingTransport::new(scheduler, move |sink| {
         let reply = move |instance, reply| {
             on_reply(instance);
             sink.send(instance, reply);

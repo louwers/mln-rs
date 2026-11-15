@@ -8,11 +8,11 @@ use geojson::{Feature, Geometry};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions};
-use mln_storage::{FileSourceManager, ResourceOptions};
-use mln_style::PropertyValue;
+use mln_storage::ResourceOptions;
+use mln_style::conversion::Convertible;
+use mln_style::layer::Layer;
 use mln_style::layers::circle_layer::CircleLayer;
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
-use mln_util::Color;
 use mln_util::geo::LatLngBounds;
 use support::*;
 
@@ -26,14 +26,14 @@ struct TileLODTest {
 impl TileLODTest {
     fn new(camera_options: &CameraOptions) -> Self {
         let run_loop = RunLoop::new();
-        let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
+        let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
         let mut map = Map::with_resource_options(
             MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
-            &FileSourceManager::new(),
             &ResourceOptions {
                 asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
                 ..ResourceOptions::default()
             },
+            &run_loop,
         )
         .unwrap();
         frontend.attach(&map);
@@ -53,12 +53,13 @@ impl TileLODTest {
             })),
             ..Default::default()
         };
-        let source = CustomGeometrySource::new("custom", options).unwrap();
+        let source = CustomGeometrySource::new("custom", options, run_loop.pool()).unwrap();
         handle.set(source.handle()).unwrap();
         map.style_mut().add_source(Box::new(source)).unwrap();
 
         let mut layer = CircleLayer::new("circles", "custom");
-        layer.set_circle_color(&PropertyValue::Constant(Color::new(0.0, 0.0, 1.0, 0.0)));
+        let error = layer.set_property("circle-color", &Convertible::from(&serde_json::json!("rgba(0,0,255,0)")), None);
+        assert!(error.is_none(), "{error:?}");
         map.style_mut().add_layer(Box::new(layer), None).unwrap();
 
         TileLODTest { _run_loop: run_loop, frontend, map, tile_count }

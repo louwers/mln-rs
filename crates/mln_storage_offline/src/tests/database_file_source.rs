@@ -6,16 +6,16 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use httpmock::MockServer;
+use mln_storage::OnlineFileSource;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
-use mln_storage::{DatabaseFileSource, FileSourceManager, ResourceOptions};
 use mln_util::geo::{LatLng, LatLngBounds};
 
 use super::TempDir;
-use crate::database_file_source::DatabaseFileSourceExt;
+use crate::database_file_source::{DatabaseFileSourceExt, RegionDatabase, region_database};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -27,11 +27,8 @@ fn wait<T: Send + 'static>(operation: impl FnOnce(Box<dyn FnOnce(T) + Send>)) ->
 }
 
 /// A database file source with its database in `dir`.
-fn database_file_source(dir: &TempDir) -> DatabaseFileSource {
-    DatabaseFileSource::new(
-        &FileSourceManager::new(),
-        &ResourceOptions { cache_path: dir.path("cache.db"), ..ResourceOptions::default() },
-    )
+fn database_file_source(dir: &TempDir) -> RegionDatabase {
+    region_database(&dir.path("cache.db"), Some(std::sync::Arc::new(OnlineFileSource::new())))
 }
 
 fn definition(style_url: &str) -> OfflineRegionDefinition {
@@ -58,7 +55,7 @@ impl OfflineRegionObserver for StatusObserver {
     }
 }
 
-fn observe(source: &DatabaseFileSource, region: &OfflineRegion) -> Receiver<OfflineRegionStatus> {
+fn observe(source: &RegionDatabase, region: &OfflineRegion) -> Receiver<OfflineRegionStatus> {
     let (tx, rx) = channel();
     wait(|done| source.set_offline_region_observer(region.id, Some(Box::new(StatusObserver(tx))), done)).unwrap();
     rx

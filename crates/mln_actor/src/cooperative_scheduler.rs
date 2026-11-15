@@ -11,19 +11,21 @@
 // A host installs one at startup with `scheduler::install_cooperative`,
 // before any map or file source exists. From then on `GetBackground` and
 // `GetSequenced` return it (one thread runs everything in order, which is
-// as sequenced as it gets), and `util::Thread` keeps its object on the
-// creating thread's RunLoop (thread.rs). Nothing changes for a host that
-// doesn't install one.
+// as sequenced as it gets), and a `util::Thread` keeps its object on a
+// RunLoop that the scheduler runs on the host's thread (thread.rs). Nothing
+// changes for a host that doesn't install one.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Weak};
 
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 use parking_lot::Mutex;
 
+use crate::local_object::LocalObject;
+use crate::run_loop::RunLoop;
 use crate::scheduler::{Scheduler, Task};
 
 /// A scheduler whose tasks the host runs on its own thread.
@@ -32,6 +34,10 @@ pub struct CooperativeScheduler {
     queues: Mutex<HashMap<SimpleIdentity, Arc<Mutex<VecDeque<Task>>>>>,
     task_count: AtomicUsize,
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// The loops of the `Thread`s whose objects live on the host's thread,
+    /// which `run_until` runs, by key.
+    loops: Mutex<Vec<(u64, LocalObject<RunLoop>)>>,
+    next_loop: AtomicU64,
 }
 
 impl Default for CooperativeScheduler {
@@ -48,6 +54,8 @@ impl CooperativeScheduler {
             queues: Mutex::new(HashMap::default()),
             task_count: AtomicUsize::new(0),
             waker: Mutex::new(None),
+            loops: Mutex::new(Vec::new()),
+            next_loop: AtomicU64::new(0),
         }
     }
 
@@ -63,11 +71,59 @@ impl CooperativeScheduler {
         self.task_count.load(Ordering::SeqCst) != 0
     }
 
-    /// Runs waiting tasks on the calling thread, in rounds of one task per
-    /// tagged queue as a worker thread visits them, until none are left or
-    /// `deadline` has passed (checked after each task). Returns whether
-    /// tasks remain.
+    fn wake(&self) {
+        let waker = self.waker.lock().clone();
+        if let Some(waker) = waker {
+            waker();
+        }
+    }
+
+    /// Runs `run_loop`, which belongs to the host's thread, in each
+    /// [`run_until`](Self::run_until) until [`unhost`](Self::unhost) with the
+    /// returned key. Its work wakes the host.
+    pub(crate) fn host(self: &Arc<Self>, run_loop: &RunLoop) -> u64 {
+        let scheduler = Arc::downgrade(self);
+        run_loop.set_waker(Some(Arc::new(move || {
+            if let Some(scheduler) = Weak::upgrade(&scheduler) {
+                scheduler.wake();
+            }
+        })));
+        let key = self.next_loop.fetch_add(1, Ordering::Relaxed);
+        self.loops.lock().push((key, LocalObject::new(run_loop.clone())));
+        key
+    }
+
+    pub(crate) fn unhost(&self, key: u64) {
+        let removed: Vec<_> = {
+            let mut loops = self.loops.lock();
+            let (removed, kept) = loops.drain(..).partition(|(k, _)| *k == key);
+            *loops = kept;
+            removed
+        };
+        drop(removed);
+    }
+
+    /// Runs each hosted loop once, and returns whether any has work left.
+    fn run_loops(&self) -> bool {
+        let loops: Vec<_> = self.loops.lock().iter().filter_map(|(_, run_loop)| run_loop.get()).collect();
+        for run_loop in &loops {
+            run_loop.run_once();
+        }
+        loops.iter().any(|run_loop| run_loop.has_pending())
+    }
+
+    /// Runs the hosted loops, then waiting tasks on the calling thread, in
+    /// rounds of one task per tagged queue as a worker thread visits them,
+    /// until none are left or `deadline` has passed (checked after each
+    /// task), then the hosted loops again. Returns whether work remains.
     pub fn run_until(&self, deadline: Option<Instant>) -> bool {
+        self.run_loops();
+        self.run_tasks(deadline);
+        // The loops' messages may have queued tasks.
+        self.run_loops() || self.has_tasks()
+    }
+
+    fn run_tasks(&self, deadline: Option<Instant>) -> bool {
         while self.has_tasks() {
             // 1. Gather buckets for us to visit this iteration (dropping
             // the empty ones: a later task of the tag starts a new queue).
@@ -109,23 +165,19 @@ impl Scheduler for CooperativeScheduler {
         let queue = Arc::clone(self.queues.lock().entry(tag).or_default());
         queue.lock().push_back(task);
         if self.task_count.fetch_add(1, Ordering::SeqCst) == 0 {
-            let waker = self.waker.lock().clone();
-            if let Some(waker) = waker {
-                waker();
-            }
+            self.wake();
         }
     }
 
     fn wait_for_empty(&self) {
-        self.wait_for_empty_tagged(SimpleIdentity::EMPTY);
+        self.wait_for_empty_tagged(self.unique_id);
     }
 
     /// Runs the tag's tasks here, as there is no worker to wait for. Called
     /// from one of the tag's own tasks, it runs the ones queued after it but
     /// can't wait for itself (a `ThreadedScheduler` asserts there instead).
     fn wait_for_empty_tagged(&self, tag: SimpleIdentity) {
-        let tag_to_find = if tag.is_empty() { self.unique_id } else { tag };
-        let Some(queue) = self.queues.lock().get(&tag_to_find).cloned() else {
+        let Some(queue) = self.queues.lock().get(&tag).cloned() else {
             return;
         };
         loop {
@@ -137,8 +189,8 @@ impl Scheduler for CooperativeScheduler {
 
         // After waiting for the queue to empty, go ahead and erase it from the map.
         let mut queues = self.queues.lock();
-        if queues.get(&tag_to_find).is_some_and(|q| Arc::ptr_eq(q, &queue)) {
-            queues.remove(&tag_to_find);
+        if queues.get(&tag).is_some_and(|q| Arc::ptr_eq(q, &queue)) {
+            queues.remove(&tag);
         }
     }
 }

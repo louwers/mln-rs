@@ -8,7 +8,7 @@ use crate::value::{ObjectType, Value, from_mbgl_value, to_mbgl_value, type_of};
 
 /// A constant value, typed as the value is, or as the array type it was
 /// parsed as.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct Literal {
     type_: Type,
     value: Value,

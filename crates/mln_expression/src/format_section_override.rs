@@ -11,7 +11,7 @@ use crate::expression::{EvalResult, EvaluationContext, Expr, GlobalStateMap, Nod
 use crate::value::Value;
 
 /// The value a property takes where no section overrides it.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub enum OverrideDefault {
     Constant(Color),
     /// The property's expression, and the global state captured for it,
@@ -22,7 +22,7 @@ pub enum OverrideDefault {
     },
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub struct FormatSectionOverride {
     default_value: OverrideDefault,
     property_name: String,

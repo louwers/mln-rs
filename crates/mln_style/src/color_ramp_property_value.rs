@@ -3,11 +3,11 @@ use std::sync::Arc;
 use mln_expression::value::from_expression_value;
 use mln_util::Color;
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
+use crate::evaluated::{Evaluated, Evaluation};
 use crate::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap, collect_global_state_refs};
 use crate::properties::PropertyValueLike;
-use crate::renderer::property_evaluator::Evaluator;
+use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::serialization::shared_expression;
 
 /// Special-case implementation of (a subset of) the `PropertyValue<T>`
@@ -19,10 +19,9 @@ use crate::serialization::shared_expression;
 /// color-ramp textures. Referenced global-state keys are retained so those
 /// textures are rebuilt only when one of those keys changes.
 ///
-/// Port-only: serde writes the expression; the global-state keys are
+/// Port-only: crosses as the expression; the global-state keys are
 /// collected from it again.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(from = "ColorRampParts", into = "ColorRampParts")]
+#[derive(Clone, Debug, Default)]
 pub struct ColorRampPropertyValue {
     value: Option<Arc<Expr>>,
     global_state_refs: Option<Arc<VecSet<String>>>,
@@ -38,18 +37,13 @@ impl PartialEq for ColorRampPropertyValue {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct ColorRampParts(#[serde(with = "shared_expression::option")] Option<Arc<Expr>>);
-
-impl From<ColorRampParts> for ColorRampPropertyValue {
-    fn from(parts: ColorRampParts) -> Self {
-        ColorRampPropertyValue::new(parts.0)
+impl mln_wire::Wire for ColorRampPropertyValue {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        shared_expression::option::write(&self.value, w);
     }
-}
 
-impl From<ColorRampPropertyValue> for ColorRampParts {
-    fn from(value: ColorRampPropertyValue) -> Self {
-        ColorRampParts(value.value)
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        shared_expression::option::read(r).map(ColorRampPropertyValue::new)
     }
 }
 
@@ -114,12 +108,9 @@ impl ColorRampPropertyValue {
 impl PropertyValueLike for ColorRampPropertyValue {
     type Type = Color;
 
-    /// The batch-evaluation no-op: C++ returns `Color{}` whatever the
-    /// evaluator. `ColorRampProperty` evaluates with
-    /// `PropertyEvaluator<Color>(parameters, ColorRampProperty::defaultValue())`,
-    /// whose `undefined()` is that same `Color{}`.
-    fn evaluate<E: Evaluator<Color>>(&self, evaluator: &E) -> E::ResultType {
-        evaluator.undefined()
+    /// The default: a layer builds its ramp from the expression itself.
+    fn evaluate(&self, _: Evaluation<Color>, _: &PropertyEvaluationParameters, default: Color) -> Evaluated<Color> {
+        Evaluated::Constant(default)
     }
 
     fn is_undefined(&self) -> bool {

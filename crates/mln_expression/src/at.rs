@@ -6,7 +6,7 @@ use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 
 /// `["at", index, array]`.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct At {
     index: Expr,
     input: Expr,

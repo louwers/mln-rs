@@ -12,13 +12,31 @@ use crate::value::Value;
 /// `["collator", options]`. Collators count as feature-dependent, so the
 /// parser never folds one into a literal; one whose options are literals is
 /// made on its first evaluation and kept.
-#[derive(Clone)]
+#[derive(Clone, mln_wire::Wire)]
 pub(crate) struct CollatorExpression {
     case_sensitive: Expr,
     diacritic_sensitive: Expr,
     locale: Option<Expr>,
-    /// The collator of literal options, once made.
+    /// The collator of literal options, once made. It crosses as whether the
+    /// options are literals.
+    #[wire(with = "constant_cache")]
     constant: Option<OnceLock<EvaluationResult>>,
+}
+
+mod constant_cache {
+    use std::sync::OnceLock;
+
+    use crate::expression::EvaluationResult;
+
+    #[expect(clippy::ref_option, reason = "`#[wire(with)]` passes the field by reference")]
+    pub(super) fn write(cache: &Option<OnceLock<EvaluationResult>>, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(&cache.is_some(), w);
+    }
+
+    #[expect(clippy::option_option, reason = "a read that can fail, of an `Option`")]
+    pub(super) fn read(r: &mut mln_wire::Reader<'_>) -> Option<Option<OnceLock<EvaluationResult>>> {
+        Some(<bool as mln_wire::Wire>::read(r)?.then(OnceLock::new))
+    }
 }
 
 impl PartialEq for CollatorExpression {

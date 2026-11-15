@@ -1,27 +1,4 @@
-// The C++ core's WGSL, copied from the raw string literals of
-//   include/mln/shaders/webgpu/background.hpp
-//   include/mln/shaders/webgpu/circle.hpp
-//   include/mln/shaders/webgpu/clipping_mask.hpp
-//   include/mln/shaders/webgpu/collision.hpp
-//   include/mln/shaders/webgpu/color_relief.hpp
-//   include/mln/shaders/webgpu/common.hpp
-//   include/mln/shaders/webgpu/debug.hpp
-//   include/mln/shaders/webgpu/fill.hpp
-//   include/mln/shaders/webgpu/fill_extrusion.hpp
-//   include/mln/shaders/webgpu/globe_depth.hpp
-//   include/mln/shaders/webgpu/heatmap.hpp
-//   include/mln/shaders/webgpu/heatmap_texture.hpp
-//   include/mln/shaders/webgpu/hillshade.hpp
-//   include/mln/shaders/webgpu/hillshade_prepare.hpp
-//   include/mln/shaders/webgpu/line.hpp
-//   include/mln/shaders/webgpu/raster.hpp
-//   include/mln/shaders/webgpu/shader_group.hpp
-//   include/mln/shaders/webgpu/shader_program.hpp
-//   include/mln/shaders/webgpu/sky.hpp
-//   include/mln/shaders/webgpu/symbol.hpp
-//   include/mln/shaders/webgpu/wgsl_preprocessor.hpp
-//   include/mln/shaders/webgpu/widevector.hpp
-// with the port's changes.
+//! The WGSL of the built-in shaders, which started as MapLibre Native's.
 
 use super::shader_source::WgslShaderSource;
 
@@ -209,8 +186,6 @@ struct BackgroundPatternPropsUBO {
     scale_b: f32,
     mix: f32,
     opacity: f32,
-    pad1: f32,
-    pad2: f32,
 };
 
 struct GlobalIndexUBO {
@@ -272,8 +247,6 @@ struct BackgroundPatternPropsUBO {
     scale_b: f32,
     mix: f32,
     opacity: f32,
-    pad1: f32,
-    pad2: f32,
 };
 
 struct GlobalPaintParamsUBO {
@@ -623,30 +596,13 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-struct ClipUBO {
-    matrix: mat4x4<f32>,
-    stencil_ref: u32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-#ifdef PROJECTION_GLOBE
-@group(0) @binding(0) var<uniform> clip: ProjectionUBO;
-#else
-@group(0) @binding(0) var<uniform> clip: ClipUBO;
-#endif
+@group(0) @binding(4) var<uniform> projection: ProjectionUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-#ifdef PROJECTION_GLOBE
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    let clip_pos = projectTileWithPoles(pos, pos, clip);
-#else
-    let clip_pos = clip.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
-#endif
-    out.position = vec4<f32>(clip_pos.x, clip_pos.y, clip_pos.z, clip_pos.w);
+    out.position = projectTileWithPoles(pos, pos, projection);
     return out;
 }
 ",
@@ -673,6 +629,7 @@ struct VertexInput {
     @location(5) extrude: vec2<i32>,
     @location(6) placed: vec2<u32>,
     @location(7) shift: vec2<f32>,
+    @location(8) height_offset: f32,
 };
 
 struct VertexOutput {
@@ -713,9 +670,9 @@ fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
 #ifdef PROJECTION_GLOBE
-    let projected_point = projectTile(vec2<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y)), projection);
+    let projected_point = projectTileWithElevation(vec2<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y)), in.height_offset, projection);
 #else
-    let projected_point = drawable.matrix * vec4<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y), 0.0, 1.0);
+    let projected_point = drawable.matrix * vec4<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y), in.height_offset, 1.0);
 #endif
     let camera_to_anchor_distance = projected_point.w;
 
@@ -725,13 +682,13 @@ fn main(in: VertexInput) -> VertexOutput {
         4.0);
 
 #ifdef PROJECTION_GLOBE
-    out.position = projectTile(vec2<f32>(f32(in.position.x), f32(in.position.y)), projection);
+    out.position = projectTileWithElevation(vec2<f32>(f32(in.position.x), f32(in.position.y)), in.height_offset, projection);
     // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (out.position.z / out.position.w < 1.1) {
         out.position.z = 0.0;
     }
 #else
-    out.position = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+    out.position = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), in.height_offset, 1.0);
 #endif
     let extrude_shift = vec2<f32>(f32(in.extrude.x), f32(in.extrude.y)) + in.shift;
     out.position.x += extrude_shift.x * tile_props.extrude_scale.x * out.position.w * collision_perspective_ratio;
@@ -4977,6 +4934,7 @@ struct VertexInput {
     @location(8) opacity: f32,
 #endif
     @location(9) tex_origin: vec2<u32>,
+    @location(10) height_offset: f32,
 };
 
 struct VertexOutput {
@@ -5044,13 +5002,15 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
-    let projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
+    let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
     // its clip Z is 0, so the horizon never clips it. A pitched label's
     // vertices go through the globe projection, which clips them.
-    if (drawable.pitch_with_map == 0u && projectedPoint.z > projectedPoint.w) {
+    // A raised label is left to placement, which hides it once the planet
+    // blocks the line of sight to it.
+    if (drawable.pitch_with_map == 0u && in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -5075,7 +5035,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), 0.0, projection);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -5087,11 +5047,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, 0.0, 1.0);
+        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
-        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, 0.0, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, 0.0, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, in.height_offset, projection);
     }
     let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
 
@@ -5265,6 +5225,7 @@ struct VertexInput {
     @location(12) halo_blur: f32,
 #endif
     @location(13) tex_origin: vec2<u32>,
+    @location(14) height_offset: f32,
 };
 
 struct VertexOutput {
@@ -5339,13 +5300,15 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
-    let projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
+    let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
     // its clip Z is 0, so the horizon never clips it. A pitched label's
     // vertices go through the globe projection, which clips them.
-    if (drawable.pitch_with_map == 0u && projectedPoint.z > projectedPoint.w) {
+    // A raised label is left to placement, which hides it once the planet
+    // blocks the line of sight to it.
+    if (drawable.pitch_with_map == 0u && in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -5370,7 +5333,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), 0.0, projection);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -5382,11 +5345,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, 0.0, 1.0);
+        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
-        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, 0.0, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, 0.0, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, in.height_offset, projection);
     }
     let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
 
@@ -5633,6 +5596,7 @@ struct VertexInput {
     @location(11) halo_blur: f32,
 #endif
     @location(12) tex_origin: vec2<u32>,
+    @location(13) height_offset: f32,
 };
 
 struct VertexOutput {
@@ -5710,13 +5674,15 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
-    let projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
+    let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
     // its clip Z is 0, so the horizon never clips it. A pitched label's
     // vertices go through the globe projection, which clips them.
-    if (drawable.pitch_with_map == 0u && projectedPoint.z > projectedPoint.w) {
+    // A raised label is left to placement, which hides it once the planet
+    // blocks the line of sight to it.
+    if (drawable.pitch_with_map == 0u && in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -5740,7 +5706,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), 0.0, projection);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -5752,11 +5718,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, 0.0, 1.0);
+        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
-        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, 0.0, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, 0.0, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, in.height_offset, projection);
     }
     let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
 

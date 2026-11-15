@@ -1,20 +1,16 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::circle_layer_properties::{
-    CircleBlur, CircleColor, CircleLayerProperties, CircleOpacity, CirclePitchAlignment, CirclePitchScale,
-    CircleRadius, CircleStrokeColor, CircleStrokeOpacity, CircleStrokeWidth, CircleTranslate, CircleTranslateAnchor,
-};
-use mln_style::properties::Property;
+use mln_style::layers::circle_layer_properties::CircleLayerProperties;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 
-use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, slot_bucket};
+use super::{cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::buckets::circle_bucket::CircleBucket;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{
     LayerTweaker, LayerTweakerBase, get_projection_data, globe_extrude_scale, to_projection_ubo,
 };
@@ -38,12 +34,6 @@ impl CircleLayerTweaker {
 
 /// The constant value of paint property `$p`, or its default if it isn't
 /// constant.
-macro_rules! const_or_default {
-    ($evaluated:expr, $p:ty) => {
-        $evaluated.get::<$p>().constant_or(&<$p>::default_value())
-    };
-}
-
 impl LayerTweaker for CircleLayerTweaker {
     fn base(&self) -> &LayerTweakerBase {
         &self.base
@@ -53,7 +43,7 @@ impl LayerTweaker for CircleLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -63,25 +53,24 @@ impl LayerTweaker for CircleLayerTweaker {
         let evaluated = get_evaluated::<CircleLayerProperties>(&properties);
 
         let zoom = parameters.state.get_zoom() as f32;
-        let pitch_with_map = *evaluated.get::<CirclePitchAlignment>() == AlignmentType::Map;
-        let scale_with_map = *evaluated.get::<CirclePitchScale>() == CirclePitchScaleType::Map;
+        let pitch_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
+        let scale_with_map = *evaluated.circle_pitch_scale.uniform() == CirclePitchScaleType::Map;
 
         // Updated only with evaluated properties
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             let evaluated_props_ubo = CircleEvaluatedPropsUBO {
-                color: const_or_default!(evaluated, CircleColor).to_float_array(),
-                stroke_color: const_or_default!(evaluated, CircleStrokeColor).to_float_array(),
-                radius: const_or_default!(evaluated, CircleRadius),
-                blur: const_or_default!(evaluated, CircleBlur),
-                opacity: const_or_default!(evaluated, CircleOpacity),
-                stroke_width: const_or_default!(evaluated, CircleStrokeWidth),
-                stroke_opacity: const_or_default!(evaluated, CircleStrokeOpacity),
+                color: evaluated.circle_color.uniform().to_float_array(),
+                stroke_color: evaluated.circle_stroke_color.uniform().to_float_array(),
+                radius: *evaluated.circle_radius.uniform(),
+                blur: *evaluated.circle_blur.uniform(),
+                opacity: *evaluated.circle_opacity.uniform(),
+                stroke_width: *evaluated.circle_stroke_width.uniform(),
+                stroke_opacity: *evaluated.circle_stroke_opacity.uniform(),
                 scale_with_map: i32::from(scale_with_map),
                 pitch_with_map: i32::from(pitch_with_map),
                 pad1: 0.0,
             };
-            context
-                .emplace_or_update_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &evaluated_props_ubo);
+            context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &evaluated_props_ubo);
             self.base.properties_updated = false;
         }
         layer_group
@@ -89,16 +78,16 @@ impl LayerTweaker for CircleLayerTweaker {
             .set(ID_CIRCLE_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
         let mut i: u32 = 0;
-        let mut drawable_ubo_vector = vec![CircleDrawableUBO::default(); layer_group.get_drawable_count()];
-        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
+        let mut drawable_ubo_vector = vec![CircleDrawableUBO::default(); layer_group.drawable_count()];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
 
         let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
+        layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = false;
-            debug_assert!(drawable.get_tile_id().is_some(), "Circles only render with tiles");
-            let Some(tile_id) = drawable.get_tile_id() else {
+            debug_assert!(drawable.tile_id.is_some(), "Circles only render with tiles");
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check_tweak_drawable_ptr(drawable, self_ptr) {
@@ -106,7 +95,7 @@ impl LayerTweaker for CircleLayerTweaker {
             }
             let tile_id = tile_id.to_unwrapped();
 
-            let Some(binders_slot) = get_drawable_binders(drawable) else {
+            let Some(binders_slot) = drawable.binders.clone() else {
                 debug_assert!(false);
                 return;
             };
@@ -121,13 +110,13 @@ impl LayerTweaker for CircleLayerTweaker {
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
 
-            let translation = evaluated.get::<CircleTranslate>();
-            let anchor = *evaluated.get::<CircleTranslateAnchor>();
+            let translation = evaluated.circle_translate.uniform();
+            let anchor = &evaluated.circle_translate_anchor;
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
                 *translation,
-                anchor,
+                *anchor.uniform(),
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
                 drawable,
@@ -159,17 +148,12 @@ impl LayerTweaker for CircleLayerTweaker {
                 pad2: 0.0,
                 pad3: 0.0,
             };
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => {
-                self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true));
-            }
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         layer_group.mutable_uniform_buffers().set(ID_CIRCLE_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);

@@ -48,7 +48,7 @@ fn request_coalescing() {
 
     let count = Rc::new(Cell::new(0u32));
     let c = Rc::clone(&count);
-    let async_ = AsyncTask::new(move || c.set(c.get() + 1));
+    let async_ = AsyncTask::new(&run_loop, move || c.set(c.get() + 1));
 
     async_.send();
     async_.send();
@@ -64,11 +64,11 @@ fn request_coalescing() {
 // gtest: AsyncTask.DestroyShouldNotRunQueue
 #[test]
 fn destroy_should_not_run_queue() {
-    let _run_loop = RunLoop::new();
+    let run_loop = RunLoop::new();
     let count = Rc::new(Cell::new(0u32));
 
     let c = Rc::clone(&count);
-    let async_ = AsyncTask::new(move || c.set(c.get() + 1));
+    let async_ = AsyncTask::new(&run_loop, move || c.set(c.get() + 1));
     async_.send();
     drop(async_);
 
@@ -89,7 +89,7 @@ fn destroy_after_signaling() {
     let failed = Rc::new(Cell::new(false));
 
     let (t1, t2, f) = (Rc::clone(&task1), Rc::clone(&task2), Rc::clone(&failed));
-    *task1.borrow_mut() = Some(AsyncTask::new(move || {
+    *task1.borrow_mut() = Some(AsyncTask::new(&run_loop, move || {
         let other = t2.borrow_mut().take();
         drop(other);
         if t1.borrow().is_none() {
@@ -97,7 +97,7 @@ fn destroy_after_signaling() {
         }
     }));
     let (t1, t2, f) = (Rc::clone(&task1), Rc::clone(&task2), Rc::clone(&failed));
-    *task2.borrow_mut() = Some(AsyncTask::new(move || {
+    *task2.borrow_mut() = Some(AsyncTask::new(&run_loop, move || {
         let other = t1.borrow_mut().take();
         drop(other);
         if t2.borrow().is_none() {
@@ -122,7 +122,7 @@ fn request_coalescing_multithreaded() {
     let count = Rc::new(Cell::new(0u32));
     let num_threads = 25;
     let c = Rc::clone(&count);
-    let async_ = AsyncTask::new(move || c.set(c.get() + 1));
+    let async_ = AsyncTask::new(&run_loop, move || c.set(c.get() + 1));
 
     let retainer = TaggedScheduler::new(scheduler::get_background(), id);
     let sender = async_.sender();
@@ -153,7 +153,7 @@ fn thread_safety() {
     let completed = Arc::new(AtomicU32::new(num_threads));
 
     let c = Rc::clone(&count);
-    let async_ = AsyncTask::new(move || c.set(c.get() + 1));
+    let async_ = AsyncTask::new(&run_loop, move || c.set(c.get() + 1));
 
     let retainer = TaggedScheduler::new(scheduler::get_background(), id);
     let sender = async_.sender();
@@ -200,7 +200,7 @@ fn schedule_and_reply_value() {
     };
 
     let scheduler: SchedulerPtr = scheduler::get_background();
-    scheduler::schedule_and_reply_value(&*scheduler, SimpleIdentity::EMPTY, run_in_background, on_result);
+    scheduler::schedule_and_reply_value(&*scheduler, None, &run_loop.scheduler(), run_in_background, on_result);
     run_loop.run();
     failures.assert_none();
 }

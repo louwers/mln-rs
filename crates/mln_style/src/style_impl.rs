@@ -34,9 +34,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use feature::Value;
-use mln_actor::{TaggedScheduler, scheduler};
+use mln_actor::{RunLoop, TaggedScheduler};
 use mln_sprite::{SpriteLoader, SpriteLoaderObserver};
-use mln_storage::{AsyncRequest, FileSource, Resource, Response};
+use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
@@ -155,6 +155,7 @@ impl SpriteLoaderObserver for StyleSpriteObserver {
 struct StyleSourceObserver {
     shared: std::rc::Weak<RefCell<SpriteShared>>,
     file_source: Option<Arc<dyn FileSource>>,
+    run_loop: RunLoop,
 }
 
 impl StyleSourceObserver {
@@ -199,7 +200,7 @@ impl SourceObserver for StyleSourceObserver {
         if !source.loaded()
             && let Some(file_source) = &self.file_source
         {
-            source.load_description(&**file_source);
+            source.load_description(&**file_source, &self.run_loop);
         }
     }
 }
@@ -213,7 +214,7 @@ pub struct Impl {
     // so the sprite loader (and its requests) goes before the file source;
     // Rust drops fields in declaration order.
     sprite_loader: SpriteLoader,
-    style_request: Option<Box<dyn AsyncRequest>>,
+    style_request: Option<Request>,
     /// Responses to `style_request` waiting for `process_style_responses`.
     style_responses: Rc<RefCell<VecDeque<Response>>>,
     /// Whether a response to `style_request` has brought a style, which a
@@ -235,6 +236,8 @@ pub struct Impl {
     /// collection's impls they refresh.
     source_impls_cache: RefCell<Option<SourceImplsCache>>,
     source_observer: Rc<dyn SourceObserver>,
+    /// The loop that the style's requests and background work answer on.
+    run_loop: RunLoop,
     layers: Collection<dyn Layer>,
     transition_options: TransitionOptions,
     light: Light,
@@ -272,32 +275,35 @@ impl std::fmt::Debug for Impl {
 
 impl Impl {
     /// A style without a file source (`Impl(nullptr, pixelRatio,
-    /// threadPool)`) on the background thread pool.
+    /// threadPool)`), on `run_loop`.
     #[must_use]
-    pub(crate) fn new(pixel_ratio: f32) -> Self {
-        Self::with_file_source(
-            None,
-            pixel_ratio,
-            TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
-        )
+    pub(crate) fn new(pixel_ratio: f32, run_loop: &RunLoop) -> Self {
+        Self::with_file_source(None, pixel_ratio, run_loop)
     }
 
+    /// A style that loads its resources from `file_source`. Its responses and
+    /// background work answer on `run_loop`, and its background work runs on
+    /// the loop's pool, under a tag of the style's own.
     #[must_use]
     pub(crate) fn with_file_source(
         file_source: Option<Arc<dyn FileSource>>,
         pixel_ratio: f32,
-        thread_pool: TaggedScheduler,
+        run_loop: &RunLoop,
     ) -> Self {
+        let thread_pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
         let shared = Rc::new(RefCell::new(SpriteShared {
             images: Arc::new(Vec::new()),
             sprites_loading_status: HashMap::default(),
             last_error: None,
             observer: None,
         }));
-        let sprite_loader = SpriteLoader::new(pixel_ratio, thread_pool);
+        let sprite_loader = SpriteLoader::new(pixel_ratio, run_loop.scheduler(), thread_pool);
         sprite_loader.set_observer(Rc::new(StyleSpriteObserver { shared: Rc::downgrade(&shared) }));
-        let source_observer: Rc<dyn SourceObserver> =
-            Rc::new(StyleSourceObserver { shared: Rc::downgrade(&shared), file_source: file_source.clone() });
+        let source_observer: Rc<dyn SourceObserver> = Rc::new(StyleSourceObserver {
+            shared: Rc::downgrade(&shared),
+            file_source: file_source.clone(),
+            run_loop: run_loop.clone(),
+        });
         Impl {
             sprite_loader,
             style_request: None,
@@ -312,6 +318,7 @@ impl Impl {
             sources: CollectionWithPersistentOrder::default(),
             source_impls_cache: RefCell::new(None),
             source_observer,
+            run_loop: run_loop.clone(),
             layers: Collection::default(),
             transition_options: TransitionOptions::default(),
             light: Light::new(),
@@ -366,6 +373,7 @@ impl Impl {
         let responses = Rc::downgrade(&self.style_responses);
         let shared = Rc::downgrade(&self.shared);
         self.style_request = Some(file_source.request(
+            &self.run_loop.scheduler(),
             &Resource::style(url),
             Box::new(move |res: Response| {
                 let (Some(responses), Some(shared)) = (responses.upgrade(), shared.upgrade()) else {
@@ -642,7 +650,7 @@ impl Impl {
         source.set_observer(Some(Rc::clone(&self.source_observer)));
         let item = self.sources.add(source);
         if let Some(file_source) = &self.file_source {
-            item.load_description(&**file_source);
+            item.load_description(&**file_source, &self.run_loop);
         }
         self.observer().on_update();
         Ok(())

@@ -3,7 +3,7 @@ use mln_util::interpolate::interpolation_factor;
 
 use crate::range::Range;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub struct ExponentialInterpolator {
     pub(crate) base: f64,
 }
@@ -36,6 +36,28 @@ pub struct CubicBezierInterpolator {
     control_points: [f64; 4],
 }
 
+impl mln_wire::Wire for CubicBezierInterpolator {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.control_points.write(w);
+    }
+
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        <[f64; 4]>::read(r).map(Self::from)
+    }
+}
+
+impl From<[f64; 4]> for CubicBezierInterpolator {
+    fn from([x1, y1, x2, y2]: [f64; 4]) -> Self {
+        CubicBezierInterpolator::new(x1, y1, x2, y2)
+    }
+}
+
+impl From<CubicBezierInterpolator> for [f64; 4] {
+    fn from(interpolator: CubicBezierInterpolator) -> Self {
+        interpolator.control_points
+    }
+}
+
 impl CubicBezierInterpolator {
     #[must_use]
     pub(crate) fn new(x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
@@ -62,7 +84,7 @@ impl CubicBezierInterpolator {
 }
 
 /// `Interpolator`: `variant<ExponentialInterpolator, CubicBezierInterpolator>`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub enum Interpolator {
     Exponential(ExponentialInterpolator),
     CubicBezier(CubicBezierInterpolator),

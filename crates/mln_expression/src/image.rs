@@ -1,11 +1,10 @@
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::{Convertible, Error};
-use serde::{Deserialize, Serialize};
 
 /// An image ID plus whether it is available.
 // The C++ default constructor leaves `available` uninitialized; here it is
 // false.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, mln_wire::Wire)]
 pub struct Image {
     image_id: String,
     available: bool,
@@ -64,5 +63,12 @@ pub fn convert_image(value: &Convertible<'_>, error: &mut Error) -> Option<Image
     } else {
         error.message = "Image must be plain string or array type.".to_owned();
         None
+    }
+}
+
+/// Images don't interpolate: the result is `self`.
+impl mln_util::interpolate::Interpolate for Image {
+    fn interpolate(&self, _to: &Self, _t: f64) -> Self {
+        self.clone()
     }
 }

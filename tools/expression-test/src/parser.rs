@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use feature::{Feature, Identifier, Value, ValueObject};
 use mln_conversion::Convertible;
 use mln_expression::type_::{self, Type};
-use mln_expression::{Expr, ParsingContext, is_feature_constant, is_zoom_constant};
+use mln_expression::{Dependency, Expr, ParsingContext};
 use mln_tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
 
@@ -465,12 +465,7 @@ pub(crate) fn parse_expression(
         && let Some(expected) = &expected
     {
         let mut error = mln_conversion::Error::default();
-        parsed = mln_style::conversion::function::convert_function_to_expression_for_type(
-            expected,
-            &convertible,
-            &mut error,
-            false, /*convert tokens*/
-        );
+        parsed = mln_style::conversion::function::parse_function(&convertible, expected, false, &mut error);
         // TODO: should the error message be checked for function conversion?
     } else {
         parsed = ctx.parse_layer_property_expression(&convertible);
@@ -487,8 +482,8 @@ pub(crate) fn parse_expression(
     result.expression = json_to_value(value);
     result.compiled.success = parsed.is_some();
     if let Some(p) = &parsed {
-        result.compiled.is_feature_constant = is_feature_constant(p);
-        result.compiled.is_zoom_constant = is_zoom_constant(p);
+        result.compiled.is_feature_constant = !p.has(Dependency::FEATURE);
+        result.compiled.is_zoom_constant = !p.has(Dependency::ZOOM);
         result.compiled.serialized_type = type_::to_string(&p.get_type());
         result.serialized = Some(p.serialize());
     }

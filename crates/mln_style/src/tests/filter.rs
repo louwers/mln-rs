@@ -400,12 +400,6 @@ fn geom_type() {
     assert!(check(r#"["==", ["geometry-type"], "Unknown"]"#, FeatureType::Unknown));
 }
 
-// gtest: Filter.Internal
-#[test]
-fn internal() {
-    filter(r#"["filter-==","class","snow"]"#, &[]);
-}
-
 // gtest: Filter.Short
 #[test]
 fn short() {

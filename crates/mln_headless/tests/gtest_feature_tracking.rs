@@ -8,8 +8,8 @@ use mln_map::{CameraOptions, FeatureInfo, Map, MapDebugOptions, MapMode, MapOpti
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::PropertyValue;
-use mln_style::expression::Value as ExpressionValue;
-use mln_style::expression::dsl::{eq, format, get, interpolate, linear, literal, literal_str, zoom};
+use mln_style::conversion::Convertible;
+use mln_style::expression::dsl::{eq, get, literal_str};
 use mln_style::filter::Filter;
 use mln_style::layer::Layer;
 use mln_style::layers::background_layer::BackgroundLayer;
@@ -19,16 +19,12 @@ use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::projection::Projection;
-use mln_style::property_expression::PropertyExpression;
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_style::style_impl::LayerRefMut;
-use mln_style_types::{
-    AlignmentType, CirclePitchScaleType, ProjectionDefinition, ProjectionType, SymbolAnchorType, SymbolPlacementType,
-    VisibilityType,
-};
-use mln_util::Color;
+use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
+use serde_json::json;
 use support::*;
 
 const SOURCE_NAME: &str = "source";
@@ -62,6 +58,13 @@ fn constant<T>(value: T) -> PropertyValue<T> {
     PropertyValue::Constant(value)
 }
 
+/// Sets `layer`'s property `name` from style JSON.
+#[track_caller]
+fn set(layer: &mut dyn Layer, name: &str, value: &serde_json::Value) {
+    let error = layer.set_property(name, &Convertible::from(value), None);
+    assert!(error.is_none(), "{name}: {error:?}");
+}
+
 struct FeatureTrackingTest {
     map: Map,
     frontend: HeadlessFrontend,
@@ -75,8 +78,8 @@ impl FeatureTrackingTest {
 
     fn with_geojson(geojson: &str, camera: CameraOptions) -> Self {
         let run_loop = RunLoop::new();
-        let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response(GLYPH_PATH)));
         let mut map = Map::with_file_source(
             file_source,
@@ -86,6 +89,7 @@ impl FeatureTrackingTest {
                 capture_rendered_features: true,
                 ..Default::default()
             },
+            &run_loop,
         )
         .expect("map");
         frontend.attach(&map);
@@ -94,38 +98,35 @@ impl FeatureTrackingTest {
         source.set_geojson(geojson.parse().expect("GeoJSON")).expect("set GeoJSON");
 
         let mut background_layer = BackgroundLayer::new("background");
-        background_layer.set_background_color(&constant(Color::new(1.0, 1.0, 1.0, 1.0)));
+        set(&mut background_layer, "background-color", &json!("rgba(255,255,255,1)"));
 
         let mut fill_layer = FillLayer::new(FILL_LAYER_NAME, SOURCE_NAME);
         fill_layer.set_visibility(VisibilityType::None);
-        fill_layer.set_fill_color(&constant(Color::new(0.0, 0.0, 1.0, 1.0)));
+        set(&mut fill_layer, "fill-color", &json!("rgba(0,0,255,1)"));
 
         let mut line_layer = LineLayer::new(LINE_LAYER_NAME, SOURCE_NAME);
         line_layer.set_visibility(VisibilityType::None);
-        line_layer.set_line_color(&constant(Color::new(0.0, 0.0, 0.0, 1.0)));
-        line_layer.set_line_width(&constant(2.0));
+        set(&mut line_layer, "line-color", &json!("rgba(0,0,0,1)"));
+        set(&mut line_layer, "line-width", &json!(2.0));
 
         let mut circle_layer = CircleLayer::new(CIRCLE_LAYER_NAME, SOURCE_NAME);
         circle_layer.set_visibility(VisibilityType::None);
-        circle_layer.set_circle_color(&constant(Color::new(0.0, 0.0, 0.0, 1.0)));
-        circle_layer.set_circle_opacity(&constant(0.0));
-        circle_layer.set_circle_radius(&constant(30.0));
-        circle_layer.set_circle_stroke_color(&constant(Color::new(0.0, 0.0, 0.0, 1.0)));
-        circle_layer.set_circle_stroke_width(&constant(2.0));
+        set(&mut circle_layer, "circle-color", &json!("rgba(0,0,0,1)"));
+        set(&mut circle_layer, "circle-opacity", &json!(0.0));
+        set(&mut circle_layer, "circle-radius", &json!(30.0));
+        set(&mut circle_layer, "circle-stroke-color", &json!("rgba(0,0,0,1)"));
+        set(&mut circle_layer, "circle-stroke-width", &json!(2.0));
 
         let mut symbol_layer = SymbolLayer::new(SYMBOL_LAYER_NAME, SOURCE_NAME);
         symbol_layer.set_visibility(VisibilityType::None);
-        symbol_layer.set_icon_allow_overlap(&constant(false));
-        symbol_layer.set_symbol_placement(&constant(SymbolPlacementType::Point));
-        symbol_layer.set_icon_image(&constant(mln_style::expression::Image::new(MARKER_NAME)));
-        symbol_layer.set_text_field(&PropertyValue::Expression(PropertyExpression::from_expr(
-            format(get(literal_str("name"))),
-            None,
-        )));
-        symbol_layer.set_text_size(&constant(24.0));
-        symbol_layer.set_text_color(&constant(Color::new(0.0, 0.0, 0.0, 1.0)));
-        symbol_layer.set_text_anchor(&constant(SymbolAnchorType::Right));
-        symbol_layer.set_text_offset(&constant([1.0, 0.0]));
+        set(&mut symbol_layer, "icon-allow-overlap", &json!(false));
+        set(&mut symbol_layer, "symbol-placement", &json!("point"));
+        set(&mut symbol_layer, "icon-image", &json!(MARKER_NAME));
+        set(&mut symbol_layer, "text-field", &json!(["format", ["get", "name"], {}]));
+        set(&mut symbol_layer, "text-size", &json!(24.0));
+        set(&mut symbol_layer, "text-color", &json!("rgba(0,0,0,1)"));
+        set(&mut symbol_layer, "text-anchor", &json!("right"));
+        set(&mut symbol_layer, "text-offset", &json!([1.0, 0.0]));
 
         let image = mln_style::image::Impl::new(
             MARKER_NAME.to_owned(),
@@ -174,12 +175,12 @@ impl FeatureTrackingTest {
         f(&mut style.get_layer_mut(id).expect("layer"));
     }
 
-    fn with_symbol_layer(&mut self, f: impl FnOnce(&mut SymbolLayer)) {
-        self.with_layer(SYMBOL_LAYER_NAME, |layer| f(layer.downcast_mut::<SymbolLayer>().expect("SymbolLayer")));
+    fn with_symbol_layer(&mut self, f: impl FnOnce(&mut dyn Layer)) {
+        self.with_layer(SYMBOL_LAYER_NAME, |layer| f(&mut **layer));
     }
 
-    fn with_circle_layer(&mut self, f: impl FnOnce(&mut CircleLayer)) {
-        self.with_layer(CIRCLE_LAYER_NAME, |layer| f(layer.downcast_mut::<CircleLayer>().expect("CircleLayer")));
+    fn with_circle_layer(&mut self, f: impl FnOnce(&mut dyn Layer)) {
+        self.with_layer(CIRCLE_LAYER_NAME, |layer| f(&mut **layer));
     }
 
     fn show(&mut self, id: &str) {
@@ -273,8 +274,8 @@ fn ndc_bound_symbol_offset() {
     let mut test = FeatureTrackingTest::new(camera(10.0));
     test.show(SYMBOL_LAYER_NAME);
     test.with_symbol_layer(|layer| {
-        layer.set_icon_translate(&constant([-140.0, -80.0]));
-        layer.set_text_translate(&constant([-140.0, -80.0]));
+        set(layer, "icon-translate", &json!([-140.0, -80.0]));
+        set(layer, "text-translate", &json!([-140.0, -80.0]));
     });
     test.run(Some("NDCBoundSymbolOffset"), 0.0);
 
@@ -289,11 +290,11 @@ fn ndc_bound_symbol_offset() {
 
 /// Shows the symbol layer's pt0 label alone, at a center variable anchor
 /// pitched with the map (both translation tests).
-fn show_variable_anchor_label(layer: &mut SymbolLayer) {
+fn show_variable_anchor_label(layer: &mut dyn Layer) {
     layer.set_visibility(VisibilityType::Visible);
-    layer.set_icon_image(&PropertyValue::Undefined);
-    layer.set_text_variable_anchor(&constant(vec![SymbolAnchorType::Center]));
-    layer.set_text_pitch_alignment(&constant(AlignmentType::Map));
+    set(layer, "icon-image", &serde_json::Value::Null);
+    set(layer, "text-variable-anchor", &json!(["center"]));
+    set(layer, "text-pitch-alignment", &json!("map"));
 }
 
 /// The bottom of pt0's bound in `layer_id`.
@@ -316,7 +317,7 @@ fn ndc_bound_translated_variable_anchor() {
         let mut test = FeatureTrackingTest::new(camera(10.0));
         test.with_symbol_layer(|layer| {
             show_variable_anchor_label(layer);
-            layer.set_text_translate(&constant(translate));
+            set(layer, "text-translate", &json!(translate));
         });
         test.run(None, 0.0);
         (max_y(&test, SYMBOL_LAYER_NAME), f64::from(test.frontend.get_size().height))
@@ -337,7 +338,7 @@ fn ndc_bound_shared_bucket_at_another_translation() {
     {
         let style = test.map.style_mut();
         let mut follower = style.get_layer(SYMBOL_LAYER_NAME).expect("layer").clone_ref("follower");
-        follower.downcast_mut::<SymbolLayer>().expect("SymbolLayer").set_text_translate(&constant([0.0, -50.0]));
+        set(&mut *follower, "text-translate", &json!([0.0, -50.0]));
         style.add_layer(follower, None).expect("add layer");
     }
     test.run(None, 0.0);
@@ -351,7 +352,7 @@ fn ndc_bound_shared_bucket_at_another_translation() {
 fn ndc_bound_circle() {
     let mut test = FeatureTrackingTest::new(camera(10.0));
     test.show(CIRCLE_LAYER_NAME);
-    test.with_circle_layer(|layer| layer.set_circle_translate(&constant([-100.0, -20.0])));
+    test.with_circle_layer(|layer| set(layer, "circle-translate", &json!([-100.0, -20.0])));
     test.show(SYMBOL_LAYER_NAME);
     test.run(Some("NDCBoundCircle"), 0.0);
 
@@ -369,12 +370,12 @@ fn ndc_bound_circle() {
 
 /// The pitched circle tests: each combination of pitch options projects the
 /// vertices differently.
-fn pitched_circle_test(image: &str, alignment: AlignmentType, scale: CirclePitchScaleType) -> FeatureTrackingTest {
+fn pitched_circle_test(image: &str, alignment: &str, scale: &str) -> FeatureTrackingTest {
     let mut test = FeatureTrackingTest::new(CameraOptions { pitch: Some(60.0), ..camera(10.0) });
     test.show(CIRCLE_LAYER_NAME);
     test.with_circle_layer(|layer| {
-        layer.set_circle_pitch_alignment(&constant(alignment));
-        layer.set_circle_pitch_scale(&constant(scale));
+        set(layer, "circle-pitch-alignment", &json!(alignment));
+        set(layer, "circle-pitch-scale", &json!(scale));
     });
     test.run(Some(image), 0.05);
     assert_eq!(1, test.count(Some("pt2"), Some(CIRCLE_LAYER_NAME), None));
@@ -384,7 +385,7 @@ fn pitched_circle_test(image: &str, alignment: AlignmentType, scale: CirclePitch
 // gtest: FeatureTracking.NDCBoundCirclePitch1
 #[test]
 fn ndc_bound_circle_pitch1() {
-    let test = pitched_circle_test("NDCBoundCirclePitch1", AlignmentType::Map, CirclePitchScaleType::Map);
+    let test = pitched_circle_test("NDCBoundCirclePitch1", "map", "map");
     test.check_features(Some("pt2"), Some(CIRCLE_LAYER_NAME), None, |info| {
         assert!(info.ndc_bound.max_x < 0.9, "{info:?}");
         assert!(info.ndc_bound.min_x < 0.6, "{info:?}");
@@ -396,19 +397,19 @@ fn ndc_bound_circle_pitch1() {
 // gtest: FeatureTracking.NDCBoundCirclePitch2
 #[test]
 fn ndc_bound_circle_pitch2() {
-    pitched_circle_test("NDCBoundCirclePitch2", AlignmentType::Map, CirclePitchScaleType::Viewport);
+    pitched_circle_test("NDCBoundCirclePitch2", "map", "viewport");
 }
 
 // gtest: FeatureTracking.NDCBoundCirclePitch3
 #[test]
 fn ndc_bound_circle_pitch3() {
-    pitched_circle_test("NDCBoundCirclePitch3", AlignmentType::Viewport, CirclePitchScaleType::Map);
+    pitched_circle_test("NDCBoundCirclePitch3", "viewport", "map");
 }
 
 // gtest: FeatureTracking.NDCBoundCirclePitch4
 #[test]
 fn ndc_bound_circle_pitch4() {
-    pitched_circle_test("NDCBoundCirclePitch4", AlignmentType::Viewport, CirclePitchScaleType::Viewport);
+    pitched_circle_test("NDCBoundCirclePitch4", "viewport", "viewport");
 }
 
 // gtest: FeatureTracking.NDCBoundFill
@@ -468,8 +469,8 @@ fn overlap() {
     test.run(None, 0.0);
     assert_eq!(0, test.count(Some("pt0_overlap"), None, None));
     test.with_symbol_layer(|layer| {
-        layer.set_icon_allow_overlap(&constant(true));
-        layer.set_text_allow_overlap(&constant(true));
+        set(layer, "icon-allow-overlap", &json!(true));
+        set(layer, "text-allow-overlap", &json!(true));
     });
     test.run(Some("Overlap"), 0.01);
     assert_eq!(1, test.count(Some("pt0_overlap"), None, None));
@@ -486,8 +487,8 @@ fn zero_opacity_constant() {
 
     for (icon_opacity, text_opacity, expected) in [(0.0, 0.0, 0), (0.5, 0.0, 1), (0.0, 0.5, 1)] {
         test.with_symbol_layer(|layer| {
-            layer.set_icon_opacity(&constant(icon_opacity));
-            layer.set_text_opacity(&constant(text_opacity));
+            set(layer, "icon-opacity", &json!(icon_opacity));
+            set(layer, "text-opacity", &json!(text_opacity));
         });
         test.run(None, 0.0);
         assert_eq!(expected, test.count(Some("pt0"), None, None), "icon {icon_opacity}, text {text_opacity}");
@@ -501,23 +502,10 @@ fn zero_opacity_expression() {
     let mut test = FeatureTrackingTest::with_geojson(r#"{"type": "FeatureCollection", "features": []}"#, camera(10.0));
     test.show(SYMBOL_LAYER_NAME);
 
-    let expression = || {
-        PropertyValue::Expression(PropertyExpression::from_expr(
-            interpolate(
-                linear(),
-                zoom(),
-                vec![
-                    (9.0, literal(ExpressionValue::Number(1.0))),
-                    (10.0, literal(ExpressionValue::Number(0.0))),
-                    (11.0, literal(ExpressionValue::Number(1.0))),
-                ],
-            ),
-            None,
-        ))
-    };
+    let expression = || json!(["interpolate", ["linear"], ["zoom"], 9, 1, 10, 0, 11, 1]);
     test.with_symbol_layer(|layer| {
-        layer.set_icon_opacity(&expression());
-        layer.set_text_opacity(&expression());
+        set(layer, "icon-opacity", &expression());
+        set(layer, "text-opacity", &expression());
     });
     test.run(None, 0.0);
     assert_eq!(0, test.count(None, None, None));
@@ -530,10 +518,10 @@ fn zero_opacity_data_driven() {
     let mut test = FeatureTrackingTest::new(camera(10.0));
     test.show(SYMBOL_LAYER_NAME);
 
-    let expression = || PropertyValue::Expression(PropertyExpression::from_expr(get(literal_str("opacity")), None));
+    let expression = || json!(["get", "opacity"]);
     test.with_symbol_layer(|layer| {
-        layer.set_icon_opacity(&expression());
-        layer.set_text_opacity(&expression());
+        set(layer, "icon-opacity", &expression());
+        set(layer, "text-opacity", &expression());
     });
     test.run(None, 0.0);
     assert_eq!(1, test.count(Some("pt0"), None, None));
@@ -544,8 +532,8 @@ fn zero_opacity_data_driven() {
 fn ndc_bound_fill_extrusion() {
     let mut test = FeatureTrackingTest::new(CameraOptions { pitch: Some(45.0), ..camera(10.0) });
     let mut layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
-    layer.set_fill_extrusion_color(&constant(Color::new(0.0, 0.0, 1.0, 1.0)));
-    layer.set_fill_extrusion_height(&constant(1000.0));
+    set(&mut layer, "fill-extrusion-color", &json!("rgba(0,0,255,1)"));
+    set(&mut layer, "fill-extrusion-height", &json!(1000.0));
     test.map.style_mut().add_layer(Box::new(layer), None).expect("add layer");
     test.run(None, 0.0);
 
@@ -583,7 +571,7 @@ fn globe_test() -> FeatureTrackingTest {
         CameraOptions { center: Some(LatLng::new(0.0, 0.0).expect("LatLng")), ..camera(0.0) },
     );
     set_projection(&mut test, ProjectionDefinition::new(ProjectionType::Globe));
-    test.with_circle_layer(|layer| layer.set_circle_radius(&constant(4.0)));
+    test.with_circle_layer(|layer| set(layer, "circle-radius", &json!(4.0)));
     test
 }
 
@@ -687,9 +675,9 @@ fn globe_ndc_bound() {
 fn globe_ndc_bound_circle_pitch_alignment() {
     let mut test = globe_test();
     test.show(CIRCLE_LAYER_NAME);
-    test.with_circle_layer(|layer| layer.set_circle_pitch_alignment(&constant(AlignmentType::Map)));
-    for scale in [CirclePitchScaleType::Map, CirclePitchScaleType::Viewport] {
-        test.with_circle_layer(|layer| layer.set_circle_pitch_scale(&constant(scale)));
+    test.with_circle_layer(|layer| set(layer, "circle-pitch-alignment", &json!("map")));
+    for scale in ["map", "viewport"] {
+        test.with_circle_layer(|layer| set(layer, "circle-pitch-scale", &json!(scale)));
         test.run(None, 0.0);
         test.expect_around("near", CIRCLE_LAYER_NAME, &near(), 0.1);
         assert_eq!(0, test.count(Some("far"), Some(CIRCLE_LAYER_NAME), None), "{scale:?}");
@@ -704,7 +692,7 @@ fn globe_ndc_bound_fill_extrusion() {
     let mut test = globe_test();
     test.show(FILL_LAYER_NAME);
     let mut extrusion_layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
-    extrusion_layer.set_fill_extrusion_height(&constant(500_000.0));
+    set(&mut extrusion_layer, "fill-extrusion-height", &json!(500_000.0));
     test.map.style_mut().add_layer(Box::new(extrusion_layer), None).expect("add layer");
     test.run(None, 0.0);
 
@@ -723,8 +711,8 @@ fn globe_ndc_bound_fill_extrusion() {
 fn globe_fill_extrusion_above_horizon() {
     let mut test = globe_test();
     let mut extrusion_layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
-    extrusion_layer.set_fill_extrusion_height(&constant(500_000.0));
-    extrusion_layer.set_fill_extrusion_color(&constant(Color::new(0.0, 1.0, 0.0, 1.0)));
+    set(&mut extrusion_layer, "fill-extrusion-height", &json!(500_000.0));
+    set(&mut extrusion_layer, "fill-extrusion-color", &json!("rgba(0,255,0,1)"));
     extrusion_layer.set_filter(&name_filter("5"));
     test.map.style_mut().add_layer(Box::new(extrusion_layer), None).expect("add layer");
     let image = test.run(None, 0.0).image;
@@ -740,7 +728,7 @@ fn globe_capture_during_transition() {
     set_projection(&mut test, ProjectionDefinition::between_names("mercator", "vertical-perspective", 0.1));
     test.show(FILL_LAYER_NAME);
     test.with_layer(FILL_LAYER_NAME, |layer| {
-        layer.downcast_mut::<FillLayer>().expect("FillLayer").set_fill_color(&constant(Color::new(0.0, 1.0, 0.0, 1.0)));
+        set(&mut **layer, "fill-color", &json!("rgba(0,255,0,1)"));
     });
     for (feature_id, name) in [("nearPolygon", "2"), ("farPolygon", "5")] {
         test.with_layer(FILL_LAYER_NAME, |layer| layer.set_filter(&name_filter(name)));
@@ -761,7 +749,7 @@ fn globe_capture_close_up() {
         "geometry": {"type": "Polygon", "coordinates": [[[-40, -40], [40, -40], [40, 40], [-40, 40], [-40, -40]]]}}"#;
     source.set_geojson(large.parse().expect("GeoJSON")).expect("set GeoJSON");
     let mut fill_layer = FillLayer::new("lowZoomFill", "lowZoom");
-    fill_layer.set_fill_color(&constant(Color::new(0.0, 1.0, 0.0, 1.0)));
+    set(&mut fill_layer, "fill-color", &json!("rgba(0,255,0,1)"));
     {
         let style = test.map.style_mut();
         style.add_source(Box::new(source)).expect("add source");

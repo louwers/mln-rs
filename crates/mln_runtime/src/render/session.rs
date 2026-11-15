@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
-use mln_actor::{RunLoop, RunLoopHandle};
+use mln_actor::RunLoop;
 use mln_map::LogicalExtent;
 use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 use mln_util::error::Error;
@@ -27,7 +27,7 @@ use super::target::{
     AttachOptions, BorrowedRing, ConsumerSync, Device, DeviceLease, Driver, ExportKind, FrameTexture, GpuSync,
     RenderTarget, Surface, SyncKind, SyncKinds, Wake,
 };
-use super::worker::{self, Init, TargetInit, Worker};
+use super::worker::{self, Init, SessionQueue, TargetInit, Worker};
 use crate::completion::{Completion, Home, Resolver};
 use crate::map::{Applied, Map};
 use crate::runtime::Outbox;
@@ -264,7 +264,8 @@ pub(crate) enum Abandoner {
 pub(crate) struct SessionShared {
     pub(crate) id: SessionId,
     pub(crate) driver: Driver,
-    pub(crate) run_loop: RunLoopHandle,
+    /// The work of the thread that runs the session.
+    pub(crate) queue: SessionQueue,
     /// The thread that runs the session's work, once it is known: a core
     /// worker's from the attach, and a caller thread's from when the host
     /// takes the driver work.
@@ -336,7 +337,7 @@ impl SessionShared {
     /// The state is locked, and the session usable or failed.
     fn start_detach(&self, state: &mut SessionState) {
         state.lifecycle = RenderSessionState::Detaching;
-        worker::post(&self.run_loop, Worker::detach);
+        worker::post(&self.queue, Worker::detach);
     }
 
     /// Releases the session without waiting: it detaches, unless it is
@@ -515,10 +516,10 @@ impl SessionShared {
         match &map {
             // The map unbinds the session before another can attach.
             Some(map) => {
-                map.unbind_session_then(self.id, self.run_loop.clone(), Worker::finish);
+                map.unbind_session_then(self.id, self.queue.clone(), Worker::finish);
                 map.release_session_claim(self.id);
             }
-            None => worker::post(&self.run_loop, Worker::finish),
+            None => worker::post(&self.queue, Worker::finish),
         }
         // A core worker lets go of its graphics objects at its next task,
         // which runs before this returns: the host may destroy what they were
@@ -531,7 +532,7 @@ impl SessionShared {
             && !SENDING.with(|sending| sending.borrow().contains(&self.id));
         let torn_down = (self.driver == Driver::CoreWorker && !on_driver).then(|| {
             let (sender, receiver) = std::sync::mpsc::sync_channel::<()>(1);
-            worker::post(&self.run_loop, move |_, _| {
+            worker::post(&self.queue, move |_, _| {
                 let _ = sender.send(());
             });
             receiver
@@ -543,7 +544,7 @@ impl SessionShared {
         }
         #[cfg(target_family = "wasm")]
         if run_now {
-            worker::post(&self.run_loop, |_, _| {});
+            worker::post(&self.queue, |_, _| {});
             crate::web::run_session_now(self.id);
         }
         // Off the session's thread, the session makes no more graphics
@@ -809,13 +810,13 @@ fn attach_unlocked<R>(
     }
     let (target, lease) = target.lease();
     let presentation = matches!(target, TargetInit::Surface { .. });
-    let run_loop = RunLoopHandle::new();
+    let queue = SessionQueue::default();
     let driver_armed = Arc::new(AtomicBool::new(true));
     if options.driver == Driver::CallerThread
         && let Some(wake) = options.driver_work_wake
     {
         let armed = Arc::clone(&driver_armed);
-        run_loop.set_waker(Some(Arc::new(move || {
+        queue.set_waker(Some(Arc::new(move || {
             if armed.swap(false, Ordering::SeqCst) {
                 wake_unlocked(&wake);
             }
@@ -826,7 +827,7 @@ fn attach_unlocked<R>(
     let shared = Arc::new(SessionShared {
         id,
         driver: options.driver,
-        run_loop: run_loop.clone(),
+        queue: queue.clone(),
         thread: Arc::default(),
         runtime_thread: map.runtime_thread(),
         state: Mutex::new(SessionState {
@@ -853,6 +854,7 @@ fn attach_unlocked<R>(
                 size,
                 scale_factor,
                 glyph_cache: map.glyph_cache(),
+                font_face_engine: map.font_face_engine(),
                 tile_cache_enabled: map.tile_cache_enabled(),
                 local_font_family: map.local_font_family(),
                 failure: None,
@@ -909,7 +911,7 @@ fn attach_unlocked<R>(
         }
     }
     let session = RenderSession { handle: Arc::new(SessionHandle { shared, thread_end }) };
-    if let Err(error) = map.bind_session(id, run_loop, Arc::clone(&session.shared().awaited_command), size) {
+    if let Err(error) = map.bind_session(id, queue, Arc::clone(&session.shared().awaited_command), size) {
         // The map was released meanwhile: the session lets go of it. Its
         // drop waits for its thread, which waits for the sending lock.
         drop(held);
@@ -922,7 +924,7 @@ fn attach_unlocked<R>(
         // The first service builds the renderer, which is work that is ready
         // now: this wakes the host, unless the map's first update, posted
         // from the runtime's thread, woke it already.
-        session.shared().run_loop.invoke(|| {});
+        session.shared().queue.wake();
     }
     let attached = then(&session, completion);
     // Before the session, whose drop may wait for its thread, which waits
@@ -936,17 +938,14 @@ fn attach_unlocked<R>(
 #[cfg(not(target_family = "wasm"))]
 fn start_thread(shared: Arc<SessionShared>) -> Result<(ThreadId, Option<Joined>), Error> {
     let thread = mln_util::thread::spawn("RenderSession", move || {
-        let Some(run_loop) = RunLoop::adopt(&shared.run_loop) else { return };
-        let _current = run_loop.enter();
-        let slot = worker::Slot::default();
-        let entered = worker::enter(&slot);
-        worker::build(&shared, &slot);
+        let run_loop = RunLoop::new();
+        let queue = shared.queue.clone();
+        let mut worker = None;
+        worker::build(&shared, &mut worker, &run_loop);
         // The worker holds the session from here on.
         drop(shared);
-        run_loop.run();
-        let worker = slot.borrow_mut().take();
+        queue.run_until_stopped(&run_loop, &mut worker);
         drop(worker);
-        drop(entered);
     })
     .map_err(|error| Error::native(format!("can't start the render session's thread: {error}")))?;
     let thread_id = thread.thread().id();
@@ -964,24 +963,24 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<(ThreadId, Option<Joined>)
     let prepared = worker::prepare(&shared);
     wasm_bindgen_futures::spawn_local(async move {
         prepared.await;
-        let Some(run_loop) = RunLoop::adopt(&shared.run_loop) else { return };
-        let slot = worker::Slot::default();
-        {
-            let _current = run_loop.enter();
-            let _worker = worker::enter(&slot);
-            worker::build(&shared, &slot);
-        }
+        // The session's own loop, which the renderer's work runs on, apart
+        // from the work of the other sessions and runtimes on this thread.
+        let run_loop = RunLoop::new();
+        let queue = shared.queue.clone();
+        let mut worker = None;
+        worker::build(&shared, &mut worker, &run_loop);
         let id = shared.id;
         // The worker holds the session from here on.
         drop(shared);
-        let driven = run_loop.clone();
-        crate::web::drive_session(id, run_loop, move || {
-            let _current = driven.enter();
-            let _worker = worker::enter(&slot);
-            driven.run_once();
-            if driven.is_stopped() {
-                let worker = slot.borrow_mut().take();
-                drop(worker);
+        let worker = RefCell::new(worker);
+        crate::web::drive_session(id, &run_loop, queue.clone(), {
+            let run_loop = run_loop.clone();
+            move || {
+                run_loop.run_once();
+                queue.run_once(&mut worker.borrow_mut());
+                if queue.is_stopped() {
+                    drop(worker.borrow_mut().take());
+                }
             }
         });
     });
@@ -1000,7 +999,7 @@ fn prepare_caller_driven(shared: &Arc<SessionShared>) {
         prepared.await;
         if let Some(shared) = shared.upgrade() {
             shared.preparing.store(false, Ordering::SeqCst);
-            shared.run_loop.invoke(|| {});
+            shared.queue.wake();
         }
     });
 }
@@ -1063,7 +1062,7 @@ impl RenderSession {
             let (completion, resolver) = shared.completion();
             let work = state.register(resolver);
             let resizes = state.resizes_sent;
-            worker::post(&shared.run_loop, move |worker, outbox| {
+            worker::post(&shared.queue, move |worker, outbox| {
                 let task: worker::Task = Box::new(move |worker, outbox| {
                     let Some(resolver) = worker.take_work(work) else { return };
                     match task(worker, outbox) {
@@ -1101,10 +1100,8 @@ impl RenderSession {
         if shared.driver_work_taken.swap(true, Ordering::SeqCst) {
             return Err(Error::invalid_state("the render session's driver work was taken already"));
         }
-        let run_loop = RunLoop::adopt(&shared.run_loop)
-            .ok_or_else(|| Error::invalid_state("the render session's driver work was taken already"))?;
         let _ = shared.thread.set(std::thread::current().id());
-        Ok(DriverWork::new(Arc::clone(shared), run_loop))
+        Ok(DriverWork::new(Arc::clone(shared)))
     }
 
     /// What the session can do. Fails with
@@ -1250,7 +1247,7 @@ impl RenderSession {
             }
             let sequence = state.map.as_ref().map_or(0, Map::sent_sequence);
             state.redraw_armed = true;
-            worker::post(&shared.run_loop, move |worker, outbox| worker.demand(demand, sequence, outbox));
+            worker::post(&shared.queue, move |worker, outbox| worker.demand(demand, sequence, outbox));
             Ok(())
         })
     }
@@ -1321,9 +1318,9 @@ impl RenderSession {
             // The work sent after waits for the resize to land, which it
             // does even when the map drops it.
             state.resizes_sent += 1;
-            let landing = worker::ResizeLanding::new(shared.run_loop.clone());
+            let landing = worker::ResizeLanding::new(shared.queue.clone());
             let sent =
-                map.resize_for_session(size, scale_factor, shared.run_loop.clone(), move |worker, result, outbox| {
+                map.resize_for_session(size, scale_factor, shared.queue.clone(), move |worker, result, outbox| {
                     if let Some(resolver) = worker.take_work::<Applied>(work) {
                         match result.and_then(|applied| Ok((applied, change(worker, size, scale_factor, outbox)?))) {
                             // A replacement of a ring's textures completes
@@ -1814,7 +1811,7 @@ impl Drop for FrameView {
             state.views == 0 && std::mem::take(&mut state.viewed_teardown)
         };
         if release {
-            worker::post(&self.shared.run_loop, |worker, _| worker.release_viewed());
+            worker::post(&self.shared.queue, |worker, _| worker.release_viewed());
         }
     }
 }
@@ -1849,14 +1846,14 @@ fn give_back(shared: &Arc<SessionShared>, slot: usize, consumer: Option<Consumer
             return;
         }
         if let Some(sync) = consumer {
-            worker::post(&shared.run_loop, move |worker, outbox| worker.release_slot(slot, sync, outbox));
+            worker::post(&shared.queue, move |worker, outbox| worker.release_slot(slot, sync, outbox));
         } else {
             if let Some(entry) = state.ring.get_mut(slot) {
                 entry.acquired = false;
                 entry.quarantined = !entry.retired;
                 entry.retired = false;
             }
-            worker::post(&shared.run_loop, move |worker, outbox| worker.discard_slot(slot, outbox));
+            worker::post(&shared.queue, move |worker, outbox| worker.discard_slot(slot, outbox));
         }
     });
 }

@@ -18,7 +18,7 @@ fn static_cast_int(f: f64) -> i32 {
 }
 
 /// `["slice", input, from, to?]`, of a string or an array.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct Slice {
     input: Expr,
     from_index: Expr,

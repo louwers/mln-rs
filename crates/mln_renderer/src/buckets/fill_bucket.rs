@@ -1,14 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::fill_layer_properties::{
-    FillColor, FillLayerProperties, FillLayoutProperties, FillOpacity, FillOutlineColor, FillPaintProperties,
-    FillPattern, FillTranslate,
-};
+use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPaintProperties};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -20,10 +16,10 @@ use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
+use crate::gfx::context::Context;
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
@@ -31,10 +27,10 @@ use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
     pub struct FillBinders for FillPaintProperties::PossiblyEvaluated {
-        fill_color: FillColor => PaintPropertyBinder<Color>,
-        fill_opacity: FillOpacity => PaintPropertyBinder<f32>,
-        fill_outline_color: FillOutlineColor => PaintPropertyBinder<Color>,
-        fill_pattern: FillPattern => CrossFadedPaintPropertyBinder<Image>,
+        fill_color => PaintPropertyBinder<Color>,
+        fill_opacity => PaintPropertyBinder<f32>,
+        fill_outline_color => PaintPropertyBinder<Color>,
+        fill_pattern => CrossFadedPaintPropertyBinder<Image>,
     }
 );
 
@@ -44,7 +40,7 @@ pub(crate) struct FillLayoutVertex {
     pub(crate) a1: [i16; 2],
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub(crate) struct FillBucket {
     pub(crate) base: BucketBase,
 
@@ -60,9 +56,9 @@ pub(crate) struct FillBucket {
     /// bucket is shared.
     pub(crate) paint_property_binders: VecMap<String, RwLock<FillBinders>>,
 
-    #[serde(with = "sorted::map")]
+    #[wire(with = "sorted::map")]
     sdf_patterns: HashMap<String, bool>,
-    #[serde(with = "sorted::set")]
+    #[wire(with = "sorted::set")]
     mixed_sdf_pattern_layers: HashSet<String>,
 }
 
@@ -194,7 +190,7 @@ impl Bucket for FillBucket {
         self.sdf_patterns.get(layer_id).copied().unwrap_or(false)
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 
@@ -204,7 +200,7 @@ impl Bucket for FillBucket {
 
     fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
         let evaluated = get_evaluated::<FillLayerProperties>(&layer.base().evaluated_properties);
-        let translate = evaluated.get::<FillTranslate>();
+        let translate = evaluated.fill_translate.uniform();
         (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 

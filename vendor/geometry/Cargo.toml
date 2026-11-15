@@ -17,7 +17,7 @@ doctest = false
 
 [dependencies]
 geo-types.workspace = true
-serde.workspace = true
+mln_wire.workspace = true
 
 [lints]
 workspace = true

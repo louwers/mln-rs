@@ -28,7 +28,7 @@ geometry.workspace = true
 httpdate.workspace = true
 mln_math.workspace = true
 parking_lot.workspace = true
-serde.workspace = true
+mln_wire.workspace = true
 thiserror.workspace = true
 unicode-properties.workspace = true
 web-time.workspace = true
@@ -48,7 +48,6 @@ mln_expression = { package = "mln-rs-expression", path = "../mln_expression" }
 mln_style = { package = "mln-rs-style", path = "../mln_style" }
 mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }
-postcard.workspace = true
 serde_json.workspace = true
 
 [lints]

@@ -2,24 +2,23 @@ use std::hash::Hasher;
 use std::sync::{Arc, OnceLock};
 
 use feature::Value;
-use serde::{Deserialize, Serialize};
 
 use crate::expression::{EvaluationContext, Expr, Value as ExpressionValue, feature_property_keys};
 use crate::serialization::shared_expression;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub struct Filter {
-    #[serde(with = "shared_expression::option")]
+    #[wire(with = "shared_expression::option")]
     pub expression: Option<Arc<Expr>>,
     legacy_filter: Option<Value>,
     /// [`Filter::property_keys`], found on first use.
-    #[serde(skip)]
+    #[wire(skip)]
     property_keys: OnceLock<Option<Box<[String]>>>,
     /// [`Filter::expression_hash`], found on first use.
-    #[serde(skip)]
+    #[wire(skip)]
     expression_hash: OnceLock<u64>,
     /// The hash of [`Filter::equality`]'s operand, found on first use.
-    #[serde(skip)]
+    #[wire(skip)]
     operand_hash: OnceLock<Option<u64>>,
 }
 
@@ -100,7 +99,7 @@ impl Filter {
         if let Some(legacy_filter) = &self.legacy_filter {
             legacy_filter.clone()
         } else if let Some(expression) = &self.expression {
-            expression.serialize()
+            Expr::serialize(expression)
         } else {
             Value::Null
         }

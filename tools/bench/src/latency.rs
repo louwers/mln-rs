@@ -6,16 +6,16 @@
 //! everything on at once.
 
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mln_actor::timer::Timer;
-use mln_storage::{
-    AsyncRequest, Callback, FileSource, FileSourceManager, FileSourceType, Kind, Resource, ResourceOptions, Response,
-};
+use mln_actor::{ActorRef, RunLoop, Thread};
+use mln_storage::{FileSource, Kind, Request, Resource, Responder, Response};
 use mln_util::chrono::Timestamp;
+use mln_util::hash::HashMap;
+use parking_lot::Mutex;
 
 /// How long a tile stays fresh: a tile server's `Cache-Control: max-age`.
 const FRESH_SECONDS: i64 = 3600;
@@ -35,84 +35,101 @@ pub(crate) fn take_tile_requests() -> usize {
     TILE_REQUESTS.swap(0, Ordering::SeqCst)
 }
 
-/// Wraps the `ResourceLoader` factory of `file_sources`. Must run before
-/// the first map asks it for its file source.
-pub(crate) fn register(file_sources: &FileSourceManager) {
-    let inner =
-        file_sources.unregister_file_source_factory(FileSourceType::ResourceLoader).expect("a ResourceLoader factory");
-    file_sources.register_file_source_factory(
-        FileSourceType::ResourceLoader,
-        Arc::new(move |file_sources: &FileSourceManager, resource_options: &ResourceOptions| {
-            Arc::new(Delayed { inner: inner(file_sources, resource_options) })
-        }),
-    );
+/// `inner`, with the tile latency.
+pub(crate) fn delayed(inner: Arc<dyn FileSource>) -> Arc<dyn FileSource> {
+    let timers = Thread::new("TileLatency", |self_ref, run_loop| Timers {
+        self_ref,
+        run_loop: run_loop.clone(),
+        waiting: RefCell::default(),
+    });
+    Arc::new(Delayed { inner, timers })
 }
+
+/// Names a tile's wait.
+static NEXT_WAIT: AtomicU64 = AtomicU64::new(0);
 
 struct Delayed {
     inner: Arc<dyn FileSource>,
+    /// The thread whose timers the tiles wait out their latency on.
+    timers: Thread<Timers>,
 }
 
-/// A tile request waiting out its latency, then the inner request.
-/// Dropping it cancels either.
-struct DelayedRequest {
-    _timer: Timer,
-    _request: Rc<RefCell<Option<Box<dyn AsyncRequest>>>>,
+/// The timers of the tiles that wait, on their thread.
+struct Timers {
+    self_ref: ActorRef<Timers>,
+    run_loop: RunLoop,
+    waiting: RefCell<HashMap<u64, Timer>>,
 }
 
-impl AsyncRequest for DelayedRequest {}
+impl Timers {
+    /// Runs `then` after `delay`, unless `stop(id)` comes first.
+    fn start(&self, id: u64, delay: Duration, then: impl FnOnce() + 'static) {
+        let timer = Timer::new(&self.run_loop);
+        let (mut then, actor) = (Some(then), self.self_ref.clone());
+        timer.start(delay, Duration::ZERO, move || {
+            if let Some(then) = then.take() {
+                then();
+            }
+            actor.invoke(move |timers: &Timers| timers.stop(id));
+        });
+        self.waiting.borrow_mut().insert(id, timer);
+    }
 
-/// A request for a tile that is still fresh, which the online file source
-/// holds until it expires: within a case, never answered.
-struct Fresh;
-
-impl AsyncRequest for Fresh {}
+    fn stop(&self, id: u64) {
+        let timer = self.waiting.borrow_mut().remove(&id);
+        drop(timer);
+    }
+}
 
 impl FileSource for Delayed {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
+    fn load(&self, resource: &Resource, responder: Responder) {
         if resource.kind != Kind::Tile {
-            return self.inner.request(resource, callback);
+            return self.inner.load(resource, responder);
         }
         let latency = LATENCY_MS.load(Ordering::SeqCst);
         if latency == 0 {
             TILE_REQUESTS.fetch_add(1, Ordering::SeqCst);
-            return self.inner.request(resource, callback);
+            return self.inner.load(resource, responder);
         }
+        // A tile that is still fresh, which the online file source holds
+        // until it expires: within a case, never answered.
         let now = mln_util::chrono::now();
         if resource.prior_expires.is_some_and(|expires| expires > now) {
-            return Box::new(Fresh);
+            return;
         }
         TILE_REQUESTS.fetch_add(1, Ordering::SeqCst);
-        let request: Rc<RefCell<Option<Box<dyn AsyncRequest>>>> = Rc::default();
-        let timer = Timer::new();
-        let (inner, resource, slot) = (Arc::clone(&self.inner), resource.clone(), Rc::downgrade(&request));
-        let mut callback = Some(callback);
-        let delay = Duration::from_millis(latency);
-        timer.start(delay, Duration::ZERO, move || {
-            if let (Some(slot), Some(mut callback)) = (slot.upgrade(), callback.take()) {
-                let fresh = Box::new(move |mut response: Response| {
-                    let expires = mln_util::chrono::now().secs_since_epoch() + FRESH_SECONDS;
-                    response.expires = Some(Timestamp::from_secs(expires));
-                    callback(response);
-                });
-                *slot.borrow_mut() = Some(inner.request(&resource, fresh));
+        // The tile waits out its latency on the timers' thread, then the
+        // inner request; cancelling stops either.
+        let request: Arc<Mutex<Option<Request>>> = Arc::default();
+        let (inner, resource, slot, outer) =
+            (Arc::clone(&self.inner), resource.clone(), Arc::clone(&request), responder.clone());
+        let fire = move || {
+            if outer.is_cancelled() {
+                return;
             }
+            let answer = outer.clone();
+            let (fresh, inner_responder) = Request::direct(move |mut response: Response| {
+                let expires = mln_util::chrono::now().secs_since_epoch() + FRESH_SECONDS;
+                response.expires = Some(Timestamp::from_secs(expires));
+                answer.send(response);
+            });
+            *slot.lock() = Some(fresh);
+            inner.load(&resource, inner_responder);
+        };
+        let (id, delay, timers) =
+            (NEXT_WAIT.fetch_add(1, Ordering::Relaxed), Duration::from_millis(latency), self.timers.actor());
+        timers.invoke(move |timers: &Timers| timers.start(id, delay, fire));
+        responder.on_cancel(move || {
+            timers.invoke(move |timers: &Timers| timers.stop(id));
+            drop(request.lock().take());
         });
-        Box::new(DelayedRequest { _timer: timer, _request: request })
     }
 
-    fn supports_cache_only_requests(&self) -> bool {
-        self.inner.supports_cache_only_requests()
+    fn supports_cache_only(&self) -> bool {
+        self.inner.supports_cache_only()
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
         self.inner.can_request(resource)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        self.inner.set_resource_options(options);
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.inner.get_resource_options()
     }
 }

@@ -11,15 +11,13 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::{payload, shared};
+use mln_wire::Wire;
 use parking_lot::Mutex;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 
 use super::envelope::{self, About, Action, Encoded, MessageKind, ReplyHead, Request, TextureRelease};
 use super::fields::{SharedTexture, SharedTileDataKind};
 use crate::gfx::dynamic_texture::{DynamicTexturePtr, TextureHandle};
 use crate::gfx::dynamic_texture_atlas::TextureAtlas;
-use crate::tile::geometry_tile::LayoutAtlases;
 use crate::tile::geometry_tile_worker::{SharedTileData, TileMessage, WorkerMessage};
 use crate::tile::raster_dem_tile::{RasterDEMTileMessage, RasterDEMWorkerMessage};
 use crate::tile::raster_tile::{RasterTileMessage, RasterWorkerMessage};
@@ -94,7 +92,7 @@ impl MapCodec {
 
     /// A request: `action`, and then `message` if there is one. Fails if the
     /// message can't be encoded, which then defines nothing.
-    fn request<M: Serialize>(&mut self, action: Action, message: Option<&M>) -> Result<Vec<u8>, String> {
+    fn request<M: Wire>(&mut self, action: Action, message: Option<&M>) -> Result<Vec<u8>, String> {
         let message = match message {
             Some(message) => self.tables.open(|| {
                 let mut bytes = Vec::new();
@@ -117,7 +115,7 @@ impl MapCodec {
 
     /// A request whose encoding doesn't fail: it holds nothing a
     /// `shared::Kind` could refuse to write.
-    fn infallible_request<M: Serialize>(&mut self, action: Action, message: Option<&M>) -> Vec<u8> {
+    fn infallible_request<M: Wire>(&mut self, action: Action, message: Option<&M>) -> Vec<u8> {
         self.request(action, message).unwrap_or_else(|error| {
             Log::error(Event::General, format!("Can't encode a tile worker request: {error}"));
             Vec::new()
@@ -207,7 +205,7 @@ impl MapCodec {
 
     /// A message of a raster or raster-dem tile, which refers to nothing
     /// shared.
-    fn simple_message<M: Serialize>(&mut self, tile: u64, correlation_id: u64, message: &M) -> Vec<u8> {
+    fn simple_message<M: Wire>(&mut self, tile: u64, correlation_id: u64, message: &M) -> Vec<u8> {
         let about = About { correlation_id, kind: MessageKind::Other };
         self.infallible_request(Action::Message { tile, about }, Some(message))
     }
@@ -219,7 +217,7 @@ impl MapCodec {
     pub(crate) fn decode(&mut self, reply: Encoded) -> Result<Option<(u64, Reply)>, String> {
         let Encoded { bytes, payloads } = reply;
         payload::decode(payloads, || {
-            let (head, message): (ReplyHead<LayoutAtlases>, &[u8]) = self.tables.open(|| envelope::take(&bytes))?;
+            let (head, message) = self.tables.open(|| envelope::take_with(&bytes, ReplyHead::read))?;
             for upload in head.uploads {
                 upload.texture.queue_upload(upload.bin, upload.rect, upload.pixels);
             }
@@ -261,7 +259,7 @@ impl MapCodec {
         })
     }
 
-    fn decode_message<M: DeserializeOwned>(&mut self, bytes: &[u8]) -> Result<M, String> {
+    fn decode_message<M: Wire>(&mut self, bytes: &[u8]) -> Result<M, String> {
         self.tables.open(|| envelope::decode(bytes))
     }
 }

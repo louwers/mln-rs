@@ -147,18 +147,18 @@ impl GlyphManagerTest {
     fn with(local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>, response_type: ResponseType) -> Self {
         let run_loop = RunLoop::new();
         GlyphManagerTest {
-            run_loop,
-            file_source: Arc::new(StubFileSource::new(response_type)),
+            file_source: Arc::new(StubFileSource::new(&run_loop, response_type)),
             observer: Rc::new(StubGlyphManagerObserver::default()),
             requestor: Rc::new(StubGlyphRequestor::default()),
-            glyph_manager: GlyphManager::new(Some(local_glyph_rasterizer)),
+            glyph_manager: GlyphManager::new(Some(local_glyph_rasterizer), &run_loop),
+            run_loop,
             squelch_log: None,
         }
     }
 
     fn with_glyph_cache(local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>, glyph_cache: Arc<GlyphCache>) -> Self {
         let mut test = Self::new();
-        test.glyph_manager = GlyphManager::with_glyph_cache(Some(local_glyph_rasterizer), glyph_cache);
+        test.glyph_manager = GlyphManager::with_glyph_cache(Some(local_glyph_rasterizer), glyph_cache, &test.run_loop);
         test
     }
 
@@ -331,7 +331,7 @@ fn loading_fail_requests_the_range_again() {
     test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
 
     let answers = Rc::new(Cell::new(0));
-    let retry = Rc::new(Timer::new());
+    let retry = Rc::new(Timer::new(&test.run_loop));
     let (n, run_loop) = (Rc::clone(&answers), test.run_loop.clone());
     let glyph_manager = Rc::downgrade(&test.glyph_manager);
     let requestor = Rc::downgrade(&test.requestor);
@@ -356,7 +356,7 @@ fn loading_fail_requests_the_range_again() {
         }
     }));
 
-    let timeout = Timer::new();
+    let timeout = Timer::new(&test.run_loop);
     let run_loop = test.run_loop.clone();
     timeout.start(Duration::from_millis(1000), Duration::ZERO, move || run_loop.stop());
 
@@ -437,7 +437,7 @@ fn loading_fail_still_answers_with_the_other_ranges() {
         run_loop.stop();
     }));
 
-    let timeout = Timer::new();
+    let timeout = Timer::new(&test.run_loop);
     let run_loop = test.run_loop.clone();
     timeout.start(Duration::from_millis(1000), Duration::ZERO, move || run_loop.stop());
 
@@ -529,7 +529,7 @@ fn evict_keeps_the_font_stacks_requestors_wait_for() {
 
     test.glyph_manager.evict(&VecSet::new());
 
-    let timeout = Timer::new();
+    let timeout = Timer::new(&test.run_loop);
     let run_loop = test.run_loop.clone();
     timeout.start(Duration::from_millis(1000), Duration::ZERO, move || run_loop.stop());
     test.run_loop.run();
@@ -878,6 +878,7 @@ fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphManagerTest {
     test.glyph_manager = GlyphManager::with_font_face_engine(
         Some(Box::new(StubLocalGlyphRasterizer)),
         Arc::<DeferredEngine>::clone(engine),
+        &test.run_loop,
     );
     test.file_source.set_response(Kind::Glyphs, |resource: &Resource| {
         assert_eq!(resource.url, "test://face.ttf");

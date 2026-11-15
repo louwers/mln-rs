@@ -11,13 +11,13 @@ use std::time::{Duration, Instant};
 
 use mln_actor::{AsyncTask, RunLoop};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::{BackendScope, ScopeType};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
 use mln_renderer::UpdateReader;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::PropertyValue;
+use mln_style::conversion::Convertible;
+use mln_style::layer::Layer;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style_types::VisibilityType;
 use mln_util::geo::LatLng;
@@ -96,9 +96,10 @@ struct TimedHeadlessFrontend {
 }
 
 impl TimedHeadlessFrontend {
-    fn new() -> Self {
+    fn new(run_loop: &RunLoop) -> Self {
         TimedHeadlessFrontend {
-            frontend: HeadlessFrontend::with_options(Size::new(256, 256), 1.0, false).expect("a headless frontend"),
+            frontend: HeadlessFrontend::with_options(Size::new(256, 256), 1.0, false, run_loop)
+                .expect("a headless frontend"),
             updates: Rc::default(),
         }
     }
@@ -108,7 +109,6 @@ impl TimedHeadlessFrontend {
         let mut parameters = (*update.parameters).clone();
         parameters.time_point = Some(time);
         let parameters = Arc::new(parameters);
-        let _scope = BackendScope::new(self.frontend.get_backend(), ScopeType::Explicit);
         if let Some(frames) = self.frontend.target().frames() {
             self.frontend.with_renderer(|renderer| renderer.render(&parameters, frames));
         }
@@ -136,7 +136,7 @@ impl Frontend for TimedHeadlessFrontend {
 
 /// The rendering stats of the frontend's last frame.
 fn stats(frontend: &HeadlessFrontend) -> RenderingStats {
-    frontend.get_backend().get_context().rendering_stats().clone()
+    frontend.rendering_stats()
 }
 
 struct SymbolRenderingTest<F> {
@@ -150,7 +150,7 @@ struct SymbolRenderingTest<F> {
 impl SymbolRenderingTest<HeadlessFrontend> {
     fn new(count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
         Self::with_frontend(
-            || HeadlessFrontend::new(Size::new(256, 256), 1.0).expect("a headless frontend"),
+            |run_loop| HeadlessFrontend::new(Size::new(256, 256), 1.0, run_loop).expect("a headless frontend"),
             count,
             spacing,
             kind,
@@ -166,23 +166,23 @@ impl SymbolRenderingTest<HeadlessFrontend> {
 }
 
 impl<F: Frontend> SymbolRenderingTest<F> {
-    /// The frontend's tasks run on the test's run loop, so `frontend` makes
-    /// it after the loop exists.
+    /// `frontend` makes the frontend on the test's run loop.
     fn with_frontend(
-        frontend: impl FnOnce() -> F,
+        frontend: impl FnOnce(&RunLoop) -> F,
         count: usize,
         spacing: f64,
         kind: SymbolKind,
         mode: MapMode,
     ) -> Self {
         let run_loop = RunLoop::new();
-        let frontend = frontend();
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let frontend = frontend(&run_loop);
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
         let observer = Rc::new(StubMapObserver::default());
         let mut map = Map::with_file_source(
             file_source,
             MapOptions { map_mode: mode, size: Size::new(256, 256), ..Default::default() },
+            &run_loop,
         )
         .unwrap();
         frontend.attach(&map);
@@ -403,7 +403,8 @@ fn fully_hidden_layer_can_reappear() {
     let initial = test.render();
 
     let mut blocker = SymbolLayer::new("blocker", "points");
-    blocker.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("marker")));
+    let error = blocker.set_property("icon-image", &Convertible::from(&serde_json::json!("marker")), None);
+    assert!(error.is_none(), "{error:?}");
     test.map.borrow_mut().style_mut().add_layer(Box::new(blocker), None).unwrap();
     let hidden = test.render();
     assert_eq!(hidden.stats.num_draw_calls, 1);

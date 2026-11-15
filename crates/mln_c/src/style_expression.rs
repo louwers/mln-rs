@@ -8,9 +8,7 @@ use std::sync::Arc;
 
 use feature::{Feature, Value as JsonValue, ValueObject};
 use mln_conversion::Convertible;
-use mln_expression::{
-    EvaluationContext, Expr, ParsingContext, Type, TypeAnnotationOption, is_feature_constant, is_zoom_constant,
-};
+use mln_expression::{Dependency, EvaluationContext, Expr, ParsingContext, Type, TypeAnnotationOption};
 use mln_tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
 
@@ -185,8 +183,8 @@ pub(crate) unsafe extern "C" fn mln_style_expression_get_info(
         let expression = EXPRESSIONS.get(expression)?;
         let info = mln_style_expression_info {
             size: 0,
-            is_feature_constant: is_feature_constant(&expression),
-            is_zoom_constant: is_zoom_constant(&expression),
+            is_feature_constant: !expression.has(Dependency::FEATURE),
+            is_zoom_constant: !expression.has(Dependency::ZOOM),
         };
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_info, &info) }

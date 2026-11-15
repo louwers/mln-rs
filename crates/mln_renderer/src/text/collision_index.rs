@@ -5,9 +5,7 @@
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, TransformState};
-use mln_style::layers::symbol_layer_properties::{
-    IconAllowOverlap, IconOverlap, SymbolLayoutProperties, TextAllowOverlap, TextOverlap,
-};
+use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::IconOverlapType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
@@ -59,13 +57,13 @@ impl OverlapMode {
     /// The mode of a symbol layer's text: its `text-overlap`, or its
     /// `text-allow-overlap` when `text-overlap` isn't set.
     pub(crate) fn text(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> Self {
-        Self::new(*layout.get::<TextOverlap>(), *layout.get::<TextAllowOverlap>())
+        Self::new(*layout.text_overlap.uniform(), *layout.text_allow_overlap.uniform())
     }
 
     /// The mode of a symbol layer's icon: its `icon-overlap`, or its
     /// `icon-allow-overlap` when `icon-overlap` isn't set.
     pub(crate) fn icon(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> Self {
-        Self::new(*layout.get::<IconOverlap>(), *layout.get::<IconAllowOverlap>())
+        Self::new(*layout.icon_overlap.uniform(), *layout.icon_allow_overlap.uniform())
     }
 
     fn new(overlap: IconOverlapType, allow_overlap: bool) -> Self {
@@ -322,7 +320,9 @@ impl CollisionIndex {
             )
         } else {
             let box_ = &feature.boxes[0];
-            let projected_point = self.project_and_get_perspective_ratio(tile_projector, box_.anchor + translation);
+            let elevation = symbol.height_offset;
+            let projected_point =
+                self.project_and_get_perspective_ratio(tile_projector, box_.anchor + translation, elevation);
             let tile_to_viewport = text_pixel_ratio * projected_point.perspective_ratio;
             let collision_boundaries: CollisionBoundaries;
             let mut occluded = projected_point.occluded;
@@ -337,6 +337,7 @@ impl CollisionIndex {
                     &projected_point,
                     shift,
                     translation,
+                    elevation,
                 );
                 collision_boundaries = projected_box.boundaries;
                 occluded = if pitch_with_map { projected_box.all_points_occluded } else { projected_point.occluded };
@@ -392,7 +393,8 @@ impl CollisionIndex {
         debug_assert!(feature.along_line);
         debug_assert_eq!(projected_boxes.as_slice(), []);
         let tile_unit_anchor_point = symbol.anchor_point;
-        let anchor = self.project_and_get_perspective_ratio(tile_projector, tile_unit_anchor_point);
+        // Line labels are never raised.
+        let anchor = self.project_and_get_perspective_ratio(tile_projector, tile_unit_anchor_point, 0.0);
         if anchor.occluded {
             return PlacedFeatureResult { placed: false, offscreen: false, occluded: true };
         }
@@ -652,8 +654,17 @@ impl CollisionIndex {
         result
     }
 
-    fn project_and_get_perspective_ratio(&self, tile_projector: &TileProjector<'_>, point: Vec2) -> ProjectedAnchor {
-        self.to_viewport(&tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0))
+    /// Projects `point`, `elevation` meters above the ground, to the
+    /// viewport.
+    fn project_and_get_perspective_ratio(
+        &self,
+        tile_projector: &TileProjector<'_>,
+        point: Vec2,
+        elevation: f32,
+    ) -> ProjectedAnchor {
+        self.to_viewport(
+            &tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), f64::from(elevation)),
+        )
     }
 
     fn to_viewport(&self, projected: &ProjectedTilePoint) -> ProjectedAnchor {
@@ -735,7 +746,7 @@ impl CollisionIndex {
     /// label does.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the box, its scales, the projector and alignment flags, and the anchor, shift and translation that place it"
+        reason = "the box, its scales, the projector and alignment flags, and the anchor, shift, translation and height that place it"
     )]
     fn project_collision_box(
         &self,
@@ -748,6 +759,7 @@ impl CollisionIndex {
         projected_point: &ProjectedAnchor,
         shift: Option<Vec2>,
         translation: Vec2,
+        elevation: f32,
     ) -> ProjectedBox {
         let anchor = box_.anchor + translation;
         // These vectors hold for screen-space texts aligned with the viewport
@@ -758,7 +770,7 @@ impl CollisionIndex {
         if rotate_with_map && !pitch_with_map {
             // Screen-space texts that stay east-west aligned.
             let projected_east =
-                self.project_and_get_perspective_ratio(tile_projector, Vec2::new(anchor.x + 1.0, anchor.y));
+                self.project_and_get_perspective_ratio(tile_projector, Vec2::new(anchor.x + 1.0, anchor.y), elevation);
             let to_east_x = projected_east.point.x - projected_point.point.x;
             let to_east_y = projected_east.point.y - projected_point.point.y;
             let angle = (to_east_y / to_east_x).atan() + if to_east_x < 0.0 { std::f32::consts::PI } else { 0.0 };
@@ -822,7 +834,7 @@ impl CollisionIndex {
         for (offset_x, offset_y) in offsets {
             let mut point = base_point + vec_east * offset_x + vec_south * offset_y;
             if pitch_with_map {
-                let projected = self.project_and_get_perspective_ratio(tile_projector, point);
+                let projected = self.project_and_get_perspective_ratio(tile_projector, point, elevation);
                 any_point_visible = any_point_visible || !projected.occluded;
                 point = projected.point;
             }

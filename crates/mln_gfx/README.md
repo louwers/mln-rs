@@ -8,7 +8,7 @@
 
 Ports the backend-independent graphics abstractions of the C++ core
 (`include/mln/gfx`, `src/mln/gfx` and the backend-independent shader code),
-which the WebGPU, Metal and Vulkan backends implement.
+which the WebGPU, Metal, Vulkan and OpenGL backends implement.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

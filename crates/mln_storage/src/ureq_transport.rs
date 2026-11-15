@@ -517,7 +517,8 @@ mod tests {
         let (addr, accepted) = never_answer();
         let transport = Transport::new();
         let client = Arc::downgrade(&transport.client);
-        transport.start(TransferRequest::unanswered(Resource::style(&format!("http://{addr}/style.json"))));
+        let (transfer, _request) = TransferRequest::unanswered(Resource::style(&format!("http://{addr}/style.json")));
+        transport.start(transfer);
         accepted.recv_timeout(Duration::from_secs(10)).unwrap();
         let started = Instant::now();
         drop(transport);
@@ -536,7 +537,8 @@ mod tests {
                 FixedResolver(vec![HANGING]),
             )
         });
-        transport.start(TransferRequest::unanswered(Resource::style("http://hanging.test/style.json")));
+        let (transfer, _request) = TransferRequest::unanswered(Resource::style("http://hanging.test/style.json"));
+        transport.start(transfer);
         while ATTEMPTS.lock().is_empty() {
             std::thread::yield_now();
         }

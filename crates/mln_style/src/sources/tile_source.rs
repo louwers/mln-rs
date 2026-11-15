@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use mln_storage::{AsyncRequest, FileSource, Resource, Response};
+use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
@@ -63,7 +63,7 @@ struct Inner {
     url: Option<String>,
     /// The style's tileset members, which win over those of the TileJSON at `url`.
     style_tileset: PartialTileset,
-    req: RefCell<Option<Box<dyn AsyncRequest>>>,
+    req: RefCell<Option<Request>>,
 }
 
 /// A vector, raster or raster-dem source: the TileJSON at its URL, the tileset members the style
@@ -194,7 +194,7 @@ impl Source for TileSource {
         &self.inner.base
     }
 
-    fn load_description(&self, file_source: &dyn FileSource) {
+    fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop) {
         let Some(url) = &self.inner.url else {
             self.set_tileset(self.inner.style_tileset.clone().into());
             self.inner.base.observer().on_source_loaded(self);
@@ -204,8 +204,11 @@ impl Source for TileSource {
             return;
         }
         let weak = Rc::downgrade(&self.inner);
-        let req = file_source
-            .request(&Resource::source(url), Box::new(move |res: Response| on_description_response(&weak, &res)));
+        let req = file_source.request(
+            &run_loop.scheduler(),
+            &Resource::source(url),
+            Box::new(move |res: Response| on_description_response(&weak, &res)),
+        );
         *self.inner.req.borrow_mut() = Some(req);
     }
 

@@ -60,7 +60,7 @@ impl SourceObserver for StubStyleObserver {
 #[test]
 fn loading_fail() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Source, |resource| {
         assert_eq!("url", resource.url);
         let mut response = Response::new();
@@ -83,7 +83,7 @@ fn loading_fail() {
 
     let source = TileSource::vector("source", Some("url".to_owned()), PartialTileset::default());
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
 
     run_loop.run();
     assert!(*failed.borrow());
@@ -93,7 +93,7 @@ fn loading_fail() {
 #[test]
 fn loading_corrupt() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Source, |resource| {
         assert_eq!("url", resource.url);
         let mut response = Response::new();
@@ -115,7 +115,7 @@ fn loading_corrupt() {
 
     let source = TileSource::vector("source", Some("url".to_owned()), PartialTileset::default());
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
 
     run_loop.run();
     // C++ expects rapidjson's "Invalid value. at offset 0"; JSON syntax
@@ -128,7 +128,7 @@ fn loading_corrupt() {
 #[test]
 fn geojson_source_url_update() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Source, |resource| {
         assert_eq!("http://source-url.ext", resource.url);
         let mut response = Response::new();
@@ -155,13 +155,13 @@ fn geojson_source_url_update() {
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
 
     // Load initial, so the source state will be loaded=true
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
 
     // Schedule an update. C++ runs this from the loop (`loop.invoke`); the
     // source's callbacks only arrive while the loop runs either way.
     // Update the url
     source.set_url("http://source-url.ext");
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
 
     run_loop.run();
     assert!(*loaded.borrow());
@@ -192,7 +192,7 @@ fn geojson_source_synchronous_update_override_replaces_the_option() {
 #[test]
 fn geojson_source_keeps_the_style_attribution() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
 
     let mut error = Error::default();
     let value = parse_json(
@@ -224,7 +224,7 @@ fn geojson_source_keeps_the_style_attribution() {
         }));
     }
     source.set_url("url");
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
     run_loop.run();
     assert!(*loaded.borrow());
 }
@@ -237,7 +237,7 @@ fn geojson_points(count: usize) -> Arc<Vec<u8>> {
 }
 
 /// The number of features in tile 0/0/0 of `source`'s data.
-fn geojson_source_feature_count(source: &GeoJSONSource) -> usize {
+fn geojson_source_feature_count(source: &GeoJSONSource, run_loop: &RunLoop) -> usize {
     let count = Rc::new(RefCell::new(0));
     if let Some(data) = source.impl_().get_data().and_then(|data| data.upgrade()) {
         let count = Rc::clone(&count);
@@ -245,6 +245,7 @@ fn geojson_source_feature_count(source: &GeoJSONSource) -> usize {
             &CanonicalTileID::new(0, 0, 0),
             Box::new(move |features| *count.borrow_mut() = features.len()),
             true,
+            &run_loop.scheduler(),
         );
     }
     *count.borrow()
@@ -273,7 +274,7 @@ fn counting_loads() -> (Rc<StubStyleObserver>, Rc<RefCell<u32>>) {
 #[test]
 fn geojson_source_data_replaces_building_url_data() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Manual);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Manual);
     file_source.set_response(Kind::Source, |_| {
         let mut response = Response::new();
         response.data = Some(geojson_points(1));
@@ -284,7 +285,7 @@ fn geojson_source_data_replaces_building_url_data() {
     let source = GeoJSONSource::with_default_options("source");
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_url("url");
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
     // The URL's data arrives and starts building in the background.
     file_source.respond_to_all();
 
@@ -293,14 +294,14 @@ fn geojson_source_data_replaces_building_url_data() {
     finish_geojson_build(&run_loop);
 
     assert_eq!(0, *loads.borrow());
-    assert_eq!(2, geojson_source_feature_count(&source));
+    assert_eq!(2, geojson_source_feature_count(&source, &run_loop));
 }
 
 // gtest: Source.GeoJSONSourceURLReplacesBuildingURLData
 #[test]
 fn geojson_source_url_replaces_building_url_data() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Manual);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Manual);
     file_source.set_response(Kind::Source, |resource| {
         let mut response = Response::new();
         response.data = Some(geojson_points(if resource.url == "old" { 1 } else { 2 }));
@@ -311,7 +312,7 @@ fn geojson_source_url_replaces_building_url_data() {
     let source = GeoJSONSource::with_default_options("source");
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_url("old");
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
     // The old URL's data arrives and starts building in the background.
     file_source.respond_to_all();
 
@@ -323,18 +324,18 @@ fn geojson_source_url_replaces_building_url_data() {
 
     // Request the new URL only now, so that its response can't arrive
     // before the old build's reply runs.
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
     file_source.respond_to_all();
     finish_geojson_build(&run_loop);
 
     assert_eq!(1, *loads.borrow());
-    assert_eq!(2, geojson_source_feature_count(&source));
+    assert_eq!(2, geojson_source_feature_count(&source, &run_loop));
 }
 
 #[test]
 fn geojson_source_synchronous_update_override_publishes_a_new_impl() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Manual);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Manual);
     file_source.set_response(Kind::Source, |_| {
         let mut response = Response::new();
         response.data = Some(geojson_points(1));
@@ -351,7 +352,7 @@ fn geojson_source_synchronous_update_override_publishes_a_new_impl() {
     let source = GeoJSONSource::new("source", Arc::new(options));
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_url("url");
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
     // The URL's data arrives and starts building in the background.
     file_source.respond_to_all();
 
@@ -369,7 +370,7 @@ fn geojson_source_synchronous_update_override_publishes_a_new_impl() {
     // The build that was running keeps the override.
     finish_geojson_build(&run_loop);
     assert_eq!(1, *loads.borrow());
-    assert_eq!(1, geojson_source_feature_count(&source));
+    assert_eq!(1, geojson_source_feature_count(&source, &run_loop));
     assert!(!source.is_update_synchronous());
 }
 
@@ -381,7 +382,7 @@ fn as_tile_source(source: &dyn Source) -> &TileSource {
 #[test]
 fn vector_source_set_tiles() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
     let observer = Rc::new(StubStyleObserver::default());
     let changed = Rc::new(RefCell::new(false));
     {
@@ -396,7 +397,7 @@ fn vector_source_set_tiles() {
     let source = TileSource::vector("source", None, tileset);
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_tiles(&["unused".to_owned()]); // make sure early setTiles does not crash
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
     assert_eq!(source.get_tiles(), vec!["url".to_owned()]);
     source.set_tiles(&["new".to_owned()]);
     run_loop.run_once();
@@ -407,7 +408,7 @@ fn vector_source_set_tiles() {
 #[test]
 fn vector_source_url_set_tiles() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Source, |resource| {
         assert_eq!("url", resource.url);
         let mut response = Response::new();
@@ -437,7 +438,7 @@ fn vector_source_url_set_tiles() {
     let source = TileSource::vector("source", Some("url".to_owned()), PartialTileset::default());
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_tiles(&["unused".to_owned()]);
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
     run_loop.run();
     assert_eq!(*count.borrow(), 2);
 }
@@ -446,7 +447,7 @@ fn vector_source_url_set_tiles() {
 /// the tileset it has when it's loaded (the C++ tests read it in `sourceLoaded`).
 fn tileset_loaded_from_tilejson(source: &dyn Source) -> Tileset {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Source, |resource| {
         assert_eq!("url", resource.url);
         let mut response = Response::new();
@@ -469,7 +470,7 @@ fn tileset_loaded_from_tilejson(source: &dyn Source) -> Tileset {
     }
 
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
     run_loop.run();
     tileset.take().expect("a tileset")
 }
@@ -519,7 +520,7 @@ fn raster_dem_tile_json_zoom_kept_without_inline_override() {
 #[test]
 fn image_source_image_update() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
     file_source.set_global_response(|resource| {
         assert_eq!("http://url", resource.url);
         let mut response = Response::new();
@@ -545,7 +546,7 @@ fn image_source_image_update() {
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
 
     // Load initial, so the source state will be loaded=true
-    source.load_description(&file_source);
+    source.load_description(&file_source, &run_loop);
     let mut rgba = PremultipliedImage::new(Size::new(1, 1));
     rgba.data[0] = 255;
     rgba.data[1] = 254;
@@ -557,7 +558,7 @@ fn image_source_image_update() {
     let update = {
         let source = source.clone();
         let rgba = RefCell::new(Some(rgba));
-        mln_actor::AsyncTask::new(move || {
+        mln_actor::AsyncTask::new(&run_loop, move || {
             // Update the url
             if let Some(rgba) = rgba.borrow_mut().take() {
                 source.set_image(rgba);
@@ -587,7 +588,8 @@ fn vector_sources_take_the_style_sparse() {
     assert!(!tileset_loaded_from_tilejson(&*source).sparse);
 
     let source = converted_source(r#"{"type": "vector", "tiles": ["tiles"], "sparse": true}"#).unwrap();
-    source.load_description(&StubFileSource::new(ResponseType::Asynchronous));
+    let run_loop = RunLoop::new();
+    source.load_description(&StubFileSource::new(&run_loop, ResponseType::Asynchronous), &run_loop);
     let impl_ = source.base_impl();
     let impl_ = impl_.downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
     assert!(impl_.tileset.as_ref().unwrap().sparse);

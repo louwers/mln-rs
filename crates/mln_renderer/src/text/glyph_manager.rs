@@ -29,8 +29,8 @@ use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use mln_actor::{AsyncTask, AsyncTaskSender};
-use mln_storage::{AsyncRequest, FileSource, Resource, Response};
+use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop};
+use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
 use mln_text::HBShapeAdjust;
 use mln_text::glyph::{
     FontData, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, Glyphs, HBShapeRequests,
@@ -47,11 +47,10 @@ use mln_util::logging::{Event, Log};
 use mln_util::tiny_sdf::transform_raster_to_sdf;
 use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
-use crate::text::font_face_engine::{self, FontFaceEngine, FontFaceShaper};
+use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub struct HBShapeResult {
     pub(crate) str_: Vec<u16>,
     pub(crate) adjusts: Arc<Vec<HBShapeAdjust>>,
@@ -89,7 +88,7 @@ struct GlyphRequest {
     /// The last request failed: its requestors got the range's glyphs as
     /// missing, and the next requestor that needs the range requests it again.
     failed: bool,
-    req: Option<Box<dyn AsyncRequest>>,
+    req: Option<Request>,
     requestors: HashMap<GlyphRequestorKey, (Weak<dyn GlyphRequestor>, Rc<GlyphDependencies>)>,
     glyphs: Option<Arc<GlyphCacheRange>>,
 }
@@ -139,6 +138,8 @@ impl EngineReadiness {
 
 pub(crate) struct GlyphManager {
     self_weak: Weak<GlyphManager>,
+    /// The renderer's loop, where responses and the engine's report arrive.
+    run_loop: RunLoop,
     glyph_url: RefCell<String>,
     entries: RefCell<HashMap<FontStack, Entry>>,
     /// The requestors answered without the glyphs of a range whose request
@@ -165,38 +166,53 @@ impl GlyphManager {
     /// A manager with a glyph cache of its own.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn new(local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>) -> Rc<GlyphManager> {
-        Self::with_glyph_cache(local_glyph_rasterizer, Arc::default())
+    pub(crate) fn new(
+        local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
+        run_loop: &RunLoop,
+    ) -> Rc<GlyphManager> {
+        Self::with_glyph_cache(local_glyph_rasterizer, Arc::default(), run_loop)
     }
 
     /// A manager that uses `glyph_cache`: managers given the same cache share
     /// the glyphs they parse from glyph PBFs.
+    #[cfg(test)]
     pub(crate) fn with_glyph_cache(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         glyph_cache: Arc<GlyphCache>,
+        run_loop: &RunLoop,
     ) -> Rc<GlyphManager> {
-        Self::with_cache_and_engine(local_glyph_rasterizer, glyph_cache, font_face_engine::font_face_engine())
+        Self::with_cache_and_engine(
+            local_glyph_rasterizer,
+            glyph_cache,
+            crate::text::font_face_engine::default_engine(),
+            run_loop.clone(),
+        )
     }
 
-    /// A manager whose font faces load with `engine` instead of the one
-    /// `set_font_face_engine` set.
+    /// A manager whose font faces load with `engine` instead of the
+    /// default.
     #[cfg(test)]
     pub(crate) fn with_font_face_engine(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         engine: Arc<dyn FontFaceEngine>,
+        run_loop: &RunLoop,
     ) -> Rc<GlyphManager> {
-        Self::with_cache_and_engine(local_glyph_rasterizer, Arc::default(), engine)
+        Self::with_cache_and_engine(local_glyph_rasterizer, Arc::default(), engine, run_loop.clone())
     }
 
-    fn with_cache_and_engine(
+    /// A manager that shares `glyph_cache`, loads font faces with `engine`,
+    /// and takes its responses on `run_loop`, the renderer's.
+    pub(crate) fn with_cache_and_engine(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         glyph_cache: Arc<GlyphCache>,
         engine: Arc<dyn FontFaceEngine>,
+        run_loop: RunLoop,
     ) -> Rc<GlyphManager> {
         let local_glyph_rasterizer =
             local_glyph_rasterizer.unwrap_or_else(|| Box::new(DefaultLocalGlyphRasterizer::new(None)));
         Rc::new_cyclic(|self_weak| GlyphManager {
             self_weak: Weak::clone(self_weak),
+            run_loop,
             glyph_url: RefCell::new(String::new()),
             entries: RefCell::new(HashMap::default()),
             requestors_missing_glyphs: RefCell::new(HashMap::default()),
@@ -336,6 +352,7 @@ impl GlyphManager {
         let callback_font_stack = font_stack.clone();
         let callback_range = range;
         let req = file_source.request(
+            &self.run_loop.scheduler(),
             &resource,
             Box::new(move |response: Response| {
                 if let Some(this) = weak_self.upgrade() {
@@ -583,7 +600,7 @@ impl GlyphManager {
         let mut task = self.deferred_task.borrow_mut();
         let task = task.get_or_insert_with(|| {
             let weak_self = Weak::clone(&self.self_weak);
-            AsyncTask::new(move || {
+            AsyncTask::new(&self.run_loop, move || {
                 if let Some(this) = weak_self.upgrade() {
                     this.process_deferred_responses();
                 }

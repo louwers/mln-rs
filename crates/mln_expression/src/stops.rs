@@ -10,7 +10,7 @@ use crate::range::Range;
 
 /// The stops of a curve: outputs by input key, in key order. The keys are
 /// kept apart from the outputs, so that finding a stop reads only keys.
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq, mln_wire::Wire)]
 pub struct Stops {
     keys: Vec<f64>,
     outputs: Vec<Expr>,

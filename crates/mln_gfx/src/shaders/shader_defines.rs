@@ -31,8 +31,6 @@ pub const ID_LINE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; //
 pub const ID_LINE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
 pub(crate) const LINE_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
 
-/// The clipping mask UBO, in the drawable's reserved vertex-only slot.
-pub const ID_CLIPPING_MASK_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
 /// The debug layer's UBO, the first slot after the reserved ones.
 pub const ID_DEBUG_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
 
@@ -101,7 +99,7 @@ pub const ID_LINE_WIDTH_VERTEX_ATTRIBUTE: usize = 7;
 pub const ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE: usize = 8;
 pub const ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 9;
 pub const ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 10;
-pub const MAX_ATTRIBUTE_COUNT_PER_SHADER: usize = 11;
+pub const MAX_ATTRIBUTE_COUNT_PER_SHADER: usize = 12;
 
 // --- conformance: raster, fill-extrusion, hillshade, heatmap, color-relief
 // (WebGPU values; the packed SSBO/UBO counts above already include them) ---
@@ -124,8 +122,8 @@ pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
 /// `MLN_USE_FILL_EXTRUSION_INSTANCING`
 pub const ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE: usize = 2;
-/// Port-only: the next outline vertex of a wall instance, which the WebGPU
-/// and Vulkan shaders read as attributes (Metal's read the instance buffer).
+/// Port-only: the next outline vertex of a wall instance, which every
+/// backend's shaders read as attributes.
 pub const ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE: usize = 3;
 pub const ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE: usize = 4;
 // Data driven
@@ -197,6 +195,8 @@ pub const ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE: usize = 1;
 pub const ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE: usize = 2;
 pub const ID_COLLISION_PLACED_VERTEX_ATTRIBUTE: usize = 3;
 pub const ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE: usize = 4;
+// Port-only: the symbol's `symbol-height-offset` (`CollisionBoxLayoutVertex::a4`).
+pub const ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE: usize = 5;
 pub const ID_SYMBOL_POS_OFFSET_ATTRIBUTE: usize = 0;
 pub const ID_SYMBOL_DATA_ATTRIBUTE: usize = 1;
 pub const ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE: usize = 2;
@@ -210,3 +210,5 @@ pub const ID_SYMBOL_HALO_WIDTH_ATTRIBUTE: usize = 8;
 pub const ID_SYMBOL_HALO_BLUR_ATTRIBUTE: usize = 9;
 // Port-only: the quad's atlas origin (`SymbolLayoutVertex::a4`).
 pub const ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE: usize = 10;
+// Port-only: the symbol's `symbol-height-offset` (`SymbolLayoutVertex::a5`).
+pub const ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE: usize = 11;

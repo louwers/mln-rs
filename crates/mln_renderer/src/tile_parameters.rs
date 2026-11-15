@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::TaggedScheduler;
+use mln_actor::{SchedulerPtr, TaggedScheduler};
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
@@ -17,6 +17,8 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) debug_options: MapDebugOptions,
     pub(crate) transform_state: &'a TransformState,
     pub(crate) file_source: Option<Arc<dyn FileSource>>,
+    /// The renderer's loop: tiles take their responses and replies there.
+    pub(crate) scheduler: SchedulerPtr,
     pub(crate) mode: MapMode,
     pub(crate) prefetch_zoom_delta: u8,
     pub(crate) tile_lod_min_radius: f64,

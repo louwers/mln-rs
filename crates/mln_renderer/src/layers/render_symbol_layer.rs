@@ -5,6 +5,7 @@
 // (opacity, dynamic positions, binders) and the triangle indices of the
 // tile's existing drawables, as C++ `updateTileDrawable` does.
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -15,50 +16,46 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-    ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
-    ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
-    ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
+    ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
+    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, ID_SYMBOL_DATA_ATTRIBUTE,
+    ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE,
+    ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
+    ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
-use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableTweakerPtr,
-    LayerGroupBasePtr, ShaderRegistry,
-};
+use mln_gfx::vertex_vector::VertexVector;
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_impl::{Impl as SymbolLayerImpl, SymbolLayerPaintPropertyOverrides};
 use mln_style::layers::symbol_layer_properties::{
-    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOffset, IconOpacity, IconPitchAlignment,
-    IconRotationAlignment, IconSize, IconTextFit, IconTranslate, IconTranslateAnchor, SymbolLayerProperties,
-    SymbolLayoutProperties, SymbolPaintProperties, SymbolPlacement, SymbolScreenSpace, SymbolSortKey, TextColor,
-    TextField, TextHaloBlur, TextHaloColor, TextHaloWidth, TextOpacity, TextPitchAlignment, TextRotationAlignment,
-    TextTranslate, TextTranslateAnchor,
+    SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties,
 };
-use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType, TranslateAnchorType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::identity::SimpleIdentity;
 use mln_util::interpolate::Interpolate;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::vectors::{Vec2, Vec3, Vec4, vec2_max_scalar};
 
 use super::collision_layer_tweaker::{CollisionDrawableData, CollisionLayerTweaker};
 use super::symbol_layer_tweaker::SymbolLayerTweaker;
-use super::{TileDrawables, drawable_binders_slot, drawable_render_tile_slot, shared_vertices};
+use super::{DrawableBinders, DrawableRenderTile, TileDrawables, shared_vertices};
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
 };
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
-use crate::layer_tweaker::{LayerTweakerPtr, get_tile_matrix_for, layer_tweaker_slot};
+use crate::layer_group::{LayerGroup, LayerGroupPtr};
+use crate::layer_tweaker::{LayerTweakerPtr, get_tile_matrix_for};
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
@@ -79,7 +76,6 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &SymbolLayerImpl {
 const SYMBOL_ICON_SHADER_NAME: &str = "SymbolIconShader";
 const SYMBOL_SDF_SHADER_NAME: &str = "SymbolSDFShader";
 const SYMBOL_TEXT_AND_ICON_SHADER_NAME: &str = "SymbolTextAndIconShader";
-const POS_OFFSET_ATTRIB_NAME: &str = "a_pos_offset";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SymbolType {
@@ -137,10 +133,10 @@ pub(crate) fn icon_property_values(
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
 ) -> SymbolPropertyValues {
     SymbolPropertyValues {
-        pitch_alignment: *layout.get::<IconPitchAlignment>(),
-        rotation_alignment: *layout.get::<IconRotationAlignment>(),
-        translate: *evaluated.get::<IconTranslate>(),
-        translate_anchor: *evaluated.get::<IconTranslateAnchor>(),
+        pitch_alignment: *layout.icon_pitch_alignment.uniform(),
+        rotation_alignment: *layout.icon_rotation_alignment.uniform(),
+        translate: *evaluated.icon_translate.uniform(),
+        translate_anchor: *evaluated.icon_translate_anchor.uniform(),
     }
 }
 
@@ -150,10 +146,10 @@ pub(crate) fn text_property_values(
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
 ) -> SymbolPropertyValues {
     SymbolPropertyValues {
-        pitch_alignment: *layout.get::<TextPitchAlignment>(),
-        rotation_alignment: *layout.get::<TextRotationAlignment>(),
-        translate: *evaluated.get::<TextTranslate>(),
-        translate_anchor: *evaluated.get::<TextTranslateAnchor>(),
+        pitch_alignment: *layout.text_pitch_alignment.uniform(),
+        rotation_alignment: *layout.text_rotation_alignment.uniform(),
+        translate: *evaluated.text_translate.uniform(),
+        translate_anchor: *evaluated.text_translate_anchor.uniform(),
     }
 }
 
@@ -196,21 +192,21 @@ fn capture_rendered_features(
     let has_icon_data = !bucket_state.icon.segments.is_empty();
     let has_sdf_icon_data = !bucket_state.sdf_icon.segments.is_empty();
 
-    let icon_opacity = evaluated.get::<IconOpacity>();
-    let icon_color = evaluated.get::<IconColor>();
-    let icon_halo_color = evaluated.get::<IconHaloColor>();
-    let text_opacity = evaluated.get::<TextOpacity>();
-    let text_color = evaluated.get::<TextColor>();
-    let text_halo_color = evaluated.get::<TextHaloColor>();
+    let icon_opacity = &evaluated.icon_opacity;
+    let icon_color = &evaluated.icon_color;
+    let icon_halo_color = &evaluated.icon_halo_color;
+    let text_opacity = &evaluated.text_opacity;
+    let text_color = &evaluated.text_color;
+    let text_halo_color = &evaluated.text_halo_color;
 
     let visible_text = has_text_data
-        && text_opacity.constant_or(&TextOpacity::default_value()) > 0.0
-        && (text_color.constant_or(&TextColor::default_value()).a > 0.0
-            || text_halo_color.constant_or(&TextHaloColor::default_value()).a > 0.0);
+        && text_opacity.constant_or(&SymbolPaintProperties::Defaults::text_opacity()) > 0.0
+        && (text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
+            || text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0);
     let visible_icons = (has_icon_data || has_sdf_icon_data)
-        && icon_opacity.constant_or(&IconOpacity::default_value()) > 0.0
-        && (icon_color.constant_or(&IconColor::default_value()).a > 0.0
-            || icon_halo_color.constant_or(&IconHaloColor::default_value()).a > 0.0);
+        && icon_opacity.constant_or(&SymbolPaintProperties::Defaults::icon_opacity()) > 0.0
+        && (icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
+            || icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0);
     if !visible_text && !visible_icons {
         return;
     }
@@ -225,10 +221,10 @@ fn capture_rendered_features(
     let overscaled_tile_id = *tile.get_overscaled_tile_id();
     let tile_id = overscaled_tile_id.to_unwrapped();
 
-    let text_translation = evaluated.get::<TextTranslate>();
-    let icon_translation = evaluated.get::<IconTranslate>();
-    let text_translation_anchor = *evaluated.get::<TextTranslateAnchor>();
-    let icon_translation_anchor = *evaluated.get::<IconTranslateAnchor>();
+    let text_translation = evaluated.text_translate.uniform();
+    let icon_translation = evaluated.icon_translate.uniform();
+    let text_translation_anchor = &evaluated.text_translate_anchor;
+    let icon_translation_anchor = &evaluated.icon_translate_anchor;
     let zoom = state.get_zoom();
     let zoom_fraction = state.get_zoom_fraction();
     let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom as f32);
@@ -236,8 +232,8 @@ fn capture_rendered_features(
     let aspect_ratio = f64::from(state.get_size().aspect_ratio());
 
     let bucket_layout = &*bucket.layout;
-    let placement = *bucket_layout.get::<SymbolPlacement>();
-    let text_fit = *bucket_layout.get::<IconTextFit>();
+    let placement = &bucket_layout.symbol_placement;
+    let text_fit = &bucket_layout.icon_text_fit;
 
     let get_tile_matrix = |translation: &[f32; 2], anchor: TranslateAnchorType| {
         get_tile_matrix_for(
@@ -259,12 +255,12 @@ fn capture_rendered_features(
     let text_drawable_matrix = if is_screen_space {
         get_screen_matrix(*text_translation)
     } else {
-        get_tile_matrix(&untranslated, text_translation_anchor)
+        get_tile_matrix(&untranslated, *text_translation_anchor.uniform())
     };
     let icon_drawable_matrix = if is_screen_space {
         get_screen_matrix(*icon_translation)
     } else {
-        get_tile_matrix(&untranslated, icon_translation_anchor)
+        get_tile_matrix(&untranslated, *icon_translation_anchor.uniform())
     };
 
     // On the globe the tile's projection stands in for the tile matrix.
@@ -276,8 +272,8 @@ fn capture_rendered_features(
         let translate = RenderTile::tile_unit_translation(&tile_id, *translation, anchor, state);
         [f64::from(translate[0]), f64::from(translate[1])]
     };
-    let text_tile_translation = tile_translation(text_translation, text_translation_anchor);
-    let icon_tile_translation = tile_translation(icon_translation, icon_translation_anchor);
+    let text_tile_translation = tile_translation(text_translation, *text_translation_anchor.uniform());
+    let icon_tile_translation = tile_translation(icon_translation, *icon_translation_anchor.uniform());
 
     let mut compute_buffer_bounds = |buffer: &Buffer, is_text: bool| {
         let values = if is_text {
@@ -287,9 +283,10 @@ fn capture_rendered_features(
         };
         let pitch_with_map = values.pitch_alignment == AlignmentType::Map;
         let rotate_with_map = values.rotation_alignment == AlignmentType::Map;
-        let along_line = placement != SymbolPlacementType::Point && values.rotation_alignment == AlignmentType::Map;
+        let along_line =
+            *placement.uniform() != SymbolPlacementType::Point && values.rotation_alignment == AlignmentType::Map;
         let has_variable_placement =
-            bucket_state.has_variable_placement && (is_text || text_fit != IconTextFitType::None);
+            bucket_state.has_variable_placement && (is_text || *text_fit.uniform() != IconTextFitType::None);
 
         let size_binder = if is_text { &bucket.text_size_binder } else { &bucket.icon_size_binder };
         let evaluated_size = size_binder.evaluate_for_zoom(zoom as f32);
@@ -301,13 +298,13 @@ fn capture_rendered_features(
         // tile's projection on the globe.
         let drawable_matrix = if is_text { &text_drawable_matrix } else { &icon_drawable_matrix };
         let translation = if is_text { text_tile_translation } else { icon_tile_translation };
-        let project_tile = |tile_point: Vec2| -> Vec4 {
+        let project_tile = |tile_point: Vec2, elevation: f64| -> Vec4 {
             if let Some(projector) = &projector {
-                let projected = projector.project_as_drawn(&Point::new(tile_point[0], tile_point[1]), 0.0);
+                let projected = projector.project_as_drawn(&Point::new(tile_point[0], tile_point[1]), elevation);
                 let w = projected.signed_distance_from_camera;
                 return [projected.point.x * w, projected.point.y * w, 0.0, w];
             }
-            matrix::transform_mat4_value(&[tile_point[0], tile_point[1], 0.0, 1.0], drawable_matrix)
+            matrix::transform_mat4_value(&[tile_point[0], tile_point[1], elevation, 1.0], drawable_matrix)
         };
 
         let rotate_in_shader = rotate_with_map && !pitch_with_map && !along_line;
@@ -326,7 +323,7 @@ fn capture_rendered_features(
                     f64::from(symbol.anchor_point.x) + translation[0],
                     f64::from(symbol.anchor_point.y) + translation[1],
                 );
-                if projector.project_as_drawn(&anchor, 0.0).occluded {
+                if projector.project_as_drawn(&anchor, f64::from(symbol.height_offset)).occluded {
                     continue;
                 }
             }
@@ -373,7 +370,8 @@ fn capture_rendered_features(
                 let a_size_min = (a_size[0] / 2.0).floor();
                 let in_projected_pos = [f64::from(dynamic_vertex.a1[0]), f64::from(dynamic_vertex.a1[1])];
                 let segment_angle = -dynamic_vertex.a1[2];
-                let projected_point = project_tile([a_pos[0] + translation[0], a_pos[1] + translation[1]]);
+                let elevation = f64::from(static_vertex.a5);
+                let projected_point = project_tile([a_pos[0] + translation[0], a_pos[1] + translation[1]], elevation);
                 let camera_to_anchor_distance = projected_point[3];
 
                 let distance_ratio = if pitch_with_map {
@@ -399,7 +397,7 @@ fn capture_rendered_features(
                 let mut symbol_rotation = 0.0f32;
                 if rotate_in_shader {
                     let offset_projected_point =
-                        project_tile([a_pos[0] + translation[0] + 1.0, a_pos[1] + translation[1]]);
+                        project_tile([a_pos[0] + translation[0] + 1.0, a_pos[1] + translation[1]], elevation);
                     let a = [projected_point[0] / projected_point[3], projected_point[1] / projected_point[3]];
                     let b = [
                         offset_projected_point[0] / offset_projected_point[3],
@@ -413,13 +411,17 @@ fn capture_rendered_features(
 
                 let translated_pos = [in_projected_pos[0] + translation[0], in_projected_pos[1] + translation[1]];
                 let projected_pos = if along_line || has_variable_placement {
-                    [in_projected_pos[0], in_projected_pos[1], 0.0, 1.0]
+                    [in_projected_pos[0], in_projected_pos[1], elevation, 1.0]
                 } else if pitch_with_map {
-                    matrix::transform_mat4_value(&[translated_pos[0], translated_pos[1], 0.0, 1.0], &label_plane_matrix)
+                    matrix::transform_mat4_value(
+                        &[translated_pos[0], translated_pos[1], elevation, 1.0],
+                        &label_plane_matrix,
+                    )
                 } else {
-                    matrix::transform_mat4_value(&project_tile(translated_pos), &label_plane_matrix)
+                    matrix::transform_mat4_value(&project_tile(translated_pos, elevation), &label_plane_matrix)
                 };
                 let pos0 = [projected_pos[0] / projected_pos[3], projected_pos[1] / projected_pos[3]];
+                let z = if pitch_with_map { projected_pos[2] / projected_pos[3] } else { 0.0 };
                 let font_scales = vec2_max_scalar(&a_min_font_scale, font_scale);
                 let pos_offset = [
                     a_offset[0] * font_scales[0] / 32.0 + a_pxoffset[0] / 16.0,
@@ -435,15 +437,15 @@ fn capture_rendered_features(
                 // units, scaled for their latitude on the globe.
                 let mut projection_scaling = 1.0;
                 if let Some(projector) = projector.as_ref().filter(|_| pitch_with_map) {
-                    let anchor_tile = matrix::transform_mat4_value(&[pos0[0], pos0[1], 0.0, 1.0], &gl_coord_matrix);
+                    let anchor_tile = matrix::transform_mat4_value(&[pos0[0], pos0[1], z, 1.0], &gl_coord_matrix);
                     projection_scaling = projector.pitched_text_correction(&Point::new(anchor_tile[0], anchor_tile[1]));
                 }
                 let mut out_pos = matrix::transform_mat4_value(
-                    &[pos0[0] + rotated[0] * projection_scaling, pos0[1] + rotated[1] * projection_scaling, 0.0, 1.0],
+                    &[pos0[0] + rotated[0] * projection_scaling, pos0[1] + rotated[1] * projection_scaling, z, 1.0],
                     &gl_coord_matrix,
                 );
                 if pitch_with_map {
-                    out_pos = project_tile([out_pos[0] / out_pos[3], out_pos[1] / out_pos[3]]);
+                    out_pos = project_tile([out_pos[0] / out_pos[3], out_pos[1] / out_pos[3]], out_pos[2] / out_pos[3]);
                 }
                 Some([out_pos[0] / out_pos[3], out_pos[1] / out_pos[3], out_pos[2] / out_pos[3]])
             };
@@ -459,11 +461,11 @@ fn capture_rendered_features(
     };
 
     let icons_visible = icon_opacity.constant_or(&1.0) > 0.0
-        && (icon_color.constant_or(&IconColor::default_value()).a > 0.0
-            || icon_halo_color.constant_or(&IconHaloColor::default_value()).a > 0.0);
+        && (icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
+            || icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0);
     let text_visible = text_opacity.constant_or(&1.0) > 0.0
-        && (text_color.constant_or(&TextColor::default_value()).a > 0.0
-            || text_halo_color.constant_or(&TextHaloColor::default_value()).a > 0.0);
+        && (text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
+            || text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0);
 
     if has_icon_data && icons_visible {
         compute_buffer_bounds(&bucket_state.icon, /* is_text = */ false);
@@ -517,7 +519,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_opacity"],
-            evaluated.get::<TextOpacity>().is_constant(),
+            evaluated.text_opacity.is_constant(),
             pau,
             &mut id,
         );
@@ -527,7 +529,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_fill_color"],
-            evaluated.get::<TextColor>().is_constant(),
+            evaluated.text_color.is_constant(),
             pau,
             &mut id,
         );
@@ -537,7 +539,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_color"],
-            evaluated.get::<TextHaloColor>().is_constant(),
+            evaluated.text_halo_color.is_constant(),
             pau,
             &mut id,
         );
@@ -547,7 +549,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_width"],
-            evaluated.get::<TextHaloWidth>().is_constant(),
+            evaluated.text_halo_width.is_constant(),
             pau,
             &mut id,
         );
@@ -557,7 +559,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_blur"],
-            evaluated.get::<TextHaloBlur>().is_constant(),
+            evaluated.text_halo_blur.is_constant(),
             pau,
             &mut id,
         );
@@ -571,7 +573,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_opacity"],
-            evaluated.get::<IconOpacity>().is_constant(),
+            evaluated.icon_opacity.is_constant(),
             pau,
             &mut id,
         );
@@ -581,7 +583,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_fill_color"],
-            evaluated.get::<IconColor>().is_constant(),
+            evaluated.icon_color.is_constant(),
             pau,
             &mut id,
         );
@@ -591,7 +593,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_color"],
-            evaluated.get::<IconHaloColor>().is_constant(),
+            evaluated.icon_halo_color.is_constant(),
             pau,
             &mut id,
         );
@@ -601,7 +603,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_width"],
-            evaluated.get::<IconHaloWidth>().is_constant(),
+            evaluated.icon_halo_width.is_constant(),
             pau,
             &mut id,
         );
@@ -611,7 +613,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_blur"],
-            evaluated.get::<IconHaloBlur>().is_constant(),
+            evaluated.icon_halo_blur.is_constant(),
             pau,
             &mut id,
         );
@@ -650,34 +652,58 @@ fn set_layout_attributes(
         attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 16, 0, layout_size, AttributeDataType::Short4);
     }
     if let Some(attr) = attribs.set(ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(layout_data), 24, 0, layout_size, AttributeDataType::UShort2);
+        attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 24, 0, layout_size, AttributeDataType::UShort2);
+    }
+    if let Some(attr) = attribs.set(ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(Some(layout_data), 28, 0, layout_size, AttributeDataType::Float);
     }
 }
 
 /// Sets the dynamic layout vertices, which placement updates: the layer's
 /// own when it has them.
 fn set_projected_pos_attribute(buffer: &Buffer, layer_id: &str, attribs: &mut VertexAttributeArray) {
-    if let Some(attr) = attribs.set(ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(
-            Some(shared_vertices(buffer.dynamic_attribute_data_for(layer_id))),
-            0,
-            0,
-            size_of::<crate::buckets::symbol_bucket::SymbolDynamicLayoutVertex>() as u32,
-            AttributeDataType::Float3,
-        );
-    }
+    set_placed_attribute(
+        attribs,
+        ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
+        buffer.dynamic_attribute_data_for(layer_id),
+        AttributeDataType::Float3,
+    );
 }
 
 /// Sets the opacity vertices, which placement updates.
 fn set_fade_opacity_attribute(buffer: &Buffer, attribs: &mut VertexAttributeArray) {
-    if let Some(attr) = attribs.set(ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(
-            Some(shared_vertices(&buffer.opacity_attribute_data)),
-            0,
-            0,
-            size_of::<crate::buckets::symbol_bucket::SymbolOpacityVertex>() as u32,
-            AttributeDataType::Float,
-        );
+    set_placed_attribute(
+        attribs,
+        ID_SYMBOL_FADE_OPACITY_ATTRIBUTE,
+        &buffer.opacity_attribute_data,
+        AttributeDataType::Float,
+    );
+}
+
+/// Sets attribute `id` of `attribs` to read `vertices`, which placement
+/// updates, as `type_`: into the vertices it reads where they are as many,
+/// so that the upload writes them over their buffer, or else into vertices
+/// of their own.
+fn set_placed_attribute<V: bytemuck::Pod>(
+    attribs: &mut VertexAttributeArray,
+    id: usize,
+    vertices: &[V],
+    type_: AttributeDataType,
+) {
+    let updated = attribs
+        .get(id)
+        .and_then(|attr| attr.get_shared_raw_data())
+        .and_then(|shared| {
+            let any: &dyn Any = &**shared;
+            any.downcast_ref::<VertexVector<V>>()
+        })
+        .is_some_and(|shared| shared.update(vertices));
+    if updated {
+        return;
+    }
+    if let Some(attr) = attribs.set(id, -1, AttributeDataType::Invalid, 0) {
+        let shared = Rc::new(VertexVector::from_vec(vertices.to_vec()));
+        attr.set_shared_raw_data(Some(shared), 0, 0, size_of::<V>() as u32, type_);
     }
 }
 
@@ -698,7 +724,7 @@ impl DrawableRefresh {
 /// placement, sorting or feature state changed. Halo and fill drawables share
 /// their attribute array, which is refreshed once (`refreshed_attributes`).
 fn update_tile_drawable(
-    drawable: &mut dyn mln_gfx::Drawable,
+    drawable: &mut crate::drawable::Drawable,
     geometry: Option<&BucketGeometry>,
     bucket: &SymbolBucket,
     layer_id: &str,
@@ -706,9 +732,10 @@ fn update_tile_drawable(
     refresh: DrawableRefresh,
     refreshed_attributes: &mut Vec<*const ()>,
 ) {
-    let Some(mut draw_data) = drawable.get_data().and_then(|d| d.downcast_ref::<SymbolDrawableData>()).copied() else {
+    let Some(crate::drawable::DrawableData::Symbol(draw_data)) = &drawable.data else {
         return;
     };
+    let mut draw_data = *draw_data;
     let is_text = draw_data.symbol_type == SymbolType::Text;
     let sdf_icons = draw_data.symbol_type == SymbolType::IconSDF;
 
@@ -718,7 +745,7 @@ fn update_tile_drawable(
     // part of the layout process.
     if draw_data.bucket_variable_placement != state.has_variable_placement {
         draw_data.bucket_variable_placement = state.has_variable_placement;
-        drawable.set_data(Some(Box::new(draw_data)));
+        drawable.data = Some(crate::drawable::DrawableData::Symbol(draw_data));
     }
 
     let buffer = if is_text {
@@ -732,11 +759,11 @@ fn update_tile_drawable(
     // A drawable whose symbols are all hidden by placement draws nothing.
     // Its attributes aren't refreshed while it is disabled, so it refreshes
     // all of them when placement shows it again.
-    let was_enabled = drawable.get_enabled();
+    let was_enabled = drawable.enabled;
     if refresh.opacity || refresh.sort {
-        drawable.set_enabled(buffer.segment_has_visible_vertices(draw_data.segment));
+        drawable.enabled = buffer.segment_has_visible_vertices(draw_data.segment);
     }
-    if !drawable.get_enabled() {
+    if !drawable.enabled {
         return;
     }
     let refresh = if was_enabled { refresh } else { DrawableRefresh::ALL };
@@ -745,7 +772,7 @@ fn update_tile_drawable(
         return;
     }
 
-    if let Some(attrs) = drawable.get_vertex_attributes().cloned() {
+    if let Some(attrs) = drawable.vertex_attributes.clone() {
         let key = Rc::as_ptr(&attrs).cast::<()>();
         if !refreshed_attributes.contains(&key) {
             refreshed_attributes.push(key);
@@ -775,12 +802,12 @@ fn update_tile_drawable(
     }
 
     if refresh.sort && !buffer.triangles.is_empty() {
-        let segments: Vec<mln_gfx::drawable::UniqueDrawSegment> = match draw_data.segment {
+        let segments: Vec<crate::drawable::UniqueDrawSegment> = match draw_data.segment {
             Some(i) => buffer.segments.get(i).map(|s| vec![s]).unwrap_or_default(),
             None => buffer.segments.iter().collect(),
         }
         .into_iter()
-        .map(|segment| Box::new(mln_gfx::drawable::DrawSegment::new(DrawMode::Triangles(), segment.copy())))
+        .map(|segment| Box::new(crate::drawable::DrawSegment::new(DrawMode::Triangles(), segment.copy())))
         .collect();
         drawable.set_index_data(Some(released_indexes(&buffer.triangles)), segments);
     }
@@ -838,7 +865,7 @@ pub(crate) struct RenderSymbolLayer {
 
     collision_box_group: Option<ShaderGroupPtr>,
     collision_circle_group: Option<ShaderGroupPtr>,
-    collision_tile_layer_group: Option<LayerGroupBasePtr>,
+    collision_tile_layer_group: Option<LayerGroupPtr>,
     collision_layer_tweaker: Option<LayerTweakerPtr>,
 }
 
@@ -869,27 +896,15 @@ impl RenderSymbolLayer {
     fn remove_tile_all(&mut self, render_pass: RenderPass, tile_id: &OverscaledTileID) {
         self.remove_tile(render_pass, tile_id);
         if let Some(group) = &self.collision_tile_layer_group {
-            let mut group = group.borrow_mut();
-            if let Some(tile_group) = group.as_tile_layer_group_mut() {
-                tile_group.remove_drawables(render_pass, tile_id);
-            }
+            let mut tile_group = group.borrow_mut();
+            tile_group.remove_drawables(render_pass, tile_id);
         }
     }
 
-    fn get_collision_tile_layer_group(
-        &mut self,
-        context: &dyn Context,
-        changes: &mut UniqueChangeRequestVec,
-    ) -> Option<LayerGroupBasePtr> {
+    fn get_collision_tile_layer_group(&mut self, changes: &mut UniqueChangeRequestVec) -> Option<LayerGroupPtr> {
         if self.collision_tile_layer_group.is_none() {
-            self.collision_tile_layer_group = context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                format!("{}-collision", self.get_id()),
-            );
-            if self.collision_tile_layer_group.is_some() {
-                activate_layer_group(self.collision_tile_layer_group.as_ref(), true, changes);
-            }
+            self.collision_tile_layer_group = Some(LayerGroup::tiles(self.base.layer_index));
+            activate_layer_group(self.collision_tile_layer_group.as_ref(), true, changes);
         }
         let group = self.collision_tile_layer_group.clone()?;
         if self.collision_layer_tweaker.is_none() {
@@ -903,15 +918,10 @@ impl RenderSymbolLayer {
         Some(group)
     }
 
-    /// The `addCollisionDrawables(isText, hasCollisionBox,
-    /// hasCollisionCircle)` lambda of `update`.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the tile's bucket and paint, and the context, passes and change list that the drawables go to"
-    )]
+    /// Adds the collision box and circle drawables of the tile's text or
+    /// icons.
     fn add_collision_drawables(
         &mut self,
-        context: &dyn Context,
         changes: &mut UniqueChangeRequestVec,
         passes: RenderPass,
         tile_id: OverscaledTileID,
@@ -928,7 +938,7 @@ impl RenderSymbolLayer {
             return;
         }
 
-        let Some(collision_group) = self.get_collision_tile_layer_group(context, changes) else {
+        let Some(collision_group) = self.get_collision_tile_layer_group(changes) else {
             return;
         };
 
@@ -940,11 +950,11 @@ impl RenderSymbolLayer {
         let suffix = if is_text { "text/" } else { "icon/" };
         let layer_collision_prefix = format!("{}-collision/", self.get_id());
 
-        let mut collision_builder = context.create_drawable_builder();
+        let mut collision_builder = DrawableBuilder::boxed();
         collision_builder.set_sub_layer_index(0);
         collision_builder.set_enable_depth(false);
         collision_builder.set_render_pass(passes);
-        collision_builder.set_cull_face_mode(&CullFaceMode::disabled());
+        collision_builder.set_cull_face_mode(CullFaceMode::disabled());
         collision_builder.set_color_mode(&ColorMode::alpha_blended());
 
         let state = bucket.state();
@@ -952,17 +962,13 @@ impl RenderSymbolLayer {
             let Some(group) = group else {
                 return;
             };
-            let Some(shader) =
-                group.get_or_create_shader(context, &Default::default(), self.base.projection_variant, "")
-            else {
-                return;
-            };
+            let shader = group.shader(&Default::default(), self.base.projection_variant);
             collision_builder.set_drawable_name(format!("{layer_collision_prefix}{suffix}{name}"));
             collision_builder.set_shader(Some(shader));
             collision_builder.set_raw_vertices(Vec::new(), buffer.vertices.len(), AttributeDataType::Short2);
-            collision_builder.set_vertex_attributes(Some(get_collision_vertex_attributes(context, buffer)));
+            collision_builder.set_vertex_attributes(Some(get_collision_vertex_attributes(buffer)));
             collision_builder.set_segments_shared(mode, Some(released_indexes(&buffer.indices)), &buffer.segments);
-            collision_builder.flush(context);
+            collision_builder.flush();
         };
 
         if has_collision_box {
@@ -981,27 +987,21 @@ impl RenderSymbolLayer {
 
         // add drawables to layer group
         let tweaker = self.collision_layer_tweaker.clone();
-        let mut group = collision_group.borrow_mut();
-        let Some(tile_group) = group.as_tile_layer_group_mut() else {
-            return;
-        };
+        let mut tile_group = collision_group.borrow_mut();
         for mut drawable in collision_builder.clear_drawables() {
-            drawable.set_tile_id(tile_id);
-            drawable.set_layer_tweaker(tweaker.as_ref().and_then(layer_tweaker_slot));
-            drawable.set_data(Some(Box::new(CollisionDrawableData {
+            drawable.tile_id = Some(tile_id);
+            drawable.layer_tweaker = tweaker.clone();
+            drawable.data = Some(crate::drawable::DrawableData::Collision(CollisionDrawableData {
                 translate: values.translate,
                 translate_anchor: values.translate_anchor,
-            })));
-            tile_group.add_drawable(passes, &tile_id, drawable);
+            }));
+            tile_group.add_tile_drawable(passes, &tile_id, drawable);
         }
     }
 }
 
-fn get_collision_vertex_attributes(
-    context: &dyn Context,
-    buffer: &CollisionBuffer,
-) -> mln_gfx::vertex_attribute::VertexAttributeArrayPtr {
-    let vertex_attrs = context.create_vertex_attribute_array();
+fn get_collision_vertex_attributes(buffer: &CollisionBuffer) -> mln_gfx::vertex_attribute::VertexAttributeArrayPtr {
+    let vertex_attrs = VertexAttributeArray::new_ptr();
     {
         let mut attrs = vertex_attrs.borrow_mut();
         let layout_stride = size_of::<CollisionBoxLayoutVertex>() as u32;
@@ -1015,7 +1015,10 @@ fn get_collision_vertex_attributes(
             attr.set_shared_raw_data(Some(Rc::clone(&layout)), 4, 0, layout_stride, AttributeDataType::Short2);
         }
         if let Some(attr) = attrs.set(ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(layout), 8, 0, layout_stride, AttributeDataType::Short2);
+            attr.set_shared_raw_data(Some(Rc::clone(&layout)), 8, 0, layout_stride, AttributeDataType::Short2);
+        }
+        if let Some(attr) = attrs.set(ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+            attr.set_shared_raw_data(Some(layout), 12, 0, layout_stride, AttributeDataType::Float);
         }
         if let Some(attr) = attrs.set(ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(Some(Rc::clone(&dynamic)), 0, 0, dynamic_stride, AttributeDataType::UShort2);
@@ -1040,7 +1043,7 @@ impl RenderLayer for RenderSymbolLayer {
         let prior = std::mem::take(&mut self.unevaluated);
         self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
         self.has_format_section_overrides =
-            SymbolLayerPaintPropertyOverrides::has_overrides(impl_cast(&self.base.base_impl).layout.get::<TextField>());
+            SymbolLayerPaintPropertyOverrides::has_overrides(&impl_cast(&self.base.base_impl).layout.text_field);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
@@ -1061,14 +1064,14 @@ impl RenderLayer for RenderSymbolLayer {
         }
 
         let evaluated = &properties.evaluated;
-        let has_icon_opacity = evaluated.get::<IconColor>().constant_or(&IconColor::default_value()).a > 0.0
-            || evaluated.get::<IconHaloColor>().constant_or(&IconHaloColor::default_value()).a > 0.0;
-        let has_text_opacity = evaluated.get::<TextColor>().constant_or(&TextColor::default_value()).a > 0.0
-            || evaluated.get::<TextHaloColor>().constant_or(&TextHaloColor::default_value()).a > 0.0;
+        let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
+            || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
+        let has_text_opacity = evaluated.text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
+            || evaluated.text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0;
 
         self.base.passes =
-            if (evaluated.get::<IconOpacity>().constant_or(&1.0) > 0.0 && has_icon_opacity && self.icon_size > 0.0)
-                || (evaluated.get::<TextOpacity>().constant_or(&1.0) > 0.0 && has_text_opacity && self.text_size > 0.0)
+            if (evaluated.icon_opacity.constant_or(&1.0) > 0.0 && has_icon_opacity && self.icon_size > 0.0)
+                || (evaluated.text_opacity.constant_or(&1.0) > 0.0 && has_text_opacity && self.text_size > 0.0)
             {
                 RenderPass::Translucent
             } else {
@@ -1147,12 +1150,12 @@ impl RenderLayer for RenderSymbolLayer {
 
         let evaluated = &get_evaluated::<SymbolLayerProperties>(&self.base.evaluated_properties);
         let text_translate = SymbolTranslate {
-            offset: *evaluated.get::<TextTranslate>(),
-            anchor: *evaluated.get::<TextTranslateAnchor>(),
+            offset: *evaluated.text_translate.uniform(),
+            anchor: *evaluated.text_translate_anchor.uniform(),
         };
         let icon_translate = SymbolTranslate {
-            offset: *evaluated.get::<IconTranslate>(),
-            anchor: *evaluated.get::<IconTranslateAnchor>(),
+            offset: *evaluated.icon_translate.uniform(),
+            anchor: *evaluated.icon_translate_anchor.uniform(),
         };
 
         let Some(render_tiles) = self.base.render_tiles.clone() else {
@@ -1229,7 +1232,7 @@ impl RenderLayer for RenderSymbolLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        _context: &Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -1239,8 +1242,8 @@ impl RenderLayer for RenderSymbolLayer {
         /// The tweakers built for one tile.
         #[derive(Default)]
         struct TileInfo {
-            text_tweaker: Option<DrawableTweakerPtr>,
-            icon_tweaker: Option<DrawableTweakerPtr>,
+            text_tweaker: Option<Rc<DrawableAtlasesTweaker>>,
+            icon_tweaker: Option<Rc<DrawableAtlasesTweaker>>,
         }
 
         self.update_projection_variant(state);
@@ -1256,14 +1259,8 @@ impl RenderLayer for RenderSymbolLayer {
         }
 
         // Set up a layer group
-        if self.base.layer_group.is_none()
-            && let Some(layer_group) = context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            )
-        {
-            self.set_layer_group(Some(layer_group), changes);
+        if self.base.layer_group.is_none() {
+            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index)), changes);
         }
         let Some(layer_group) = self.base.layer_group.clone() else {
             return;
@@ -1279,60 +1276,57 @@ impl RenderLayer for RenderSymbolLayer {
         }
 
         if self.symbol_icon_group.is_none() {
-            self.symbol_icon_group = shaders.get_shader_group(SYMBOL_ICON_SHADER_NAME);
+            self.symbol_icon_group = shaders.shader_group(SYMBOL_ICON_SHADER_NAME);
         }
         if self.symbol_sdf_group.is_none() {
-            self.symbol_sdf_group = shaders.get_shader_group(SYMBOL_SDF_SHADER_NAME);
+            self.symbol_sdf_group = shaders.shader_group(SYMBOL_SDF_SHADER_NAME);
         }
         if self.symbol_text_and_icon_group.is_none() {
-            self.symbol_text_and_icon_group = shaders.get_shader_group(SYMBOL_TEXT_AND_ICON_SHADER_NAME);
+            self.symbol_text_and_icon_group = shaders.shader_group(SYMBOL_TEXT_AND_ICON_SHADER_NAME);
         }
         if self.collision_box_group.is_none() {
-            self.collision_box_group = shaders.get_shader_group("CollisionBoxShader");
+            self.collision_box_group = shaders.shader_group("CollisionBoxShader");
         }
         if self.collision_circle_group.is_none() {
-            self.collision_circle_group = shaders.get_shader_group("CollisionCircleShader");
+            self.collision_circle_group = shaders.shader_group("CollisionCircleShader");
         }
 
         // remove drawables that are dropped out of scope
         {
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("symbol layer group is a TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             let base = &self.base;
             tile_layer_group.remove_drawables_if(|drawable| {
                 // If the render pass has changed or the tile has dropped out
                 // of the cover set, remove it.
-                drawable.get_render_pass() != passes
-                    || drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                drawable.render_pass != passes
+                    || drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
         }
         if let Some(collision_group) = self.collision_tile_layer_group.clone() {
-            let mut group = collision_group.borrow_mut();
-            if let Some(tile_layer_group) = group.as_tile_layer_group_mut() {
-                let base = &self.base;
-                tile_layer_group.remove_drawables_if(|drawable| {
-                    drawable.get_render_pass() != passes
-                        || drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-                });
-            }
+            let mut tile_layer_group = collision_group.borrow_mut();
+            let base = &self.base;
+            tile_layer_group.remove_drawables_if(|drawable| {
+                drawable.render_pass != passes
+                    || drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+            });
         }
         let render_tile_ids = &self.base.render_tile_ids;
         self.tile_bucket_versions.retain(|id, _| render_tile_ids.contains_key(id));
 
         let layout = &impl_cast(&self.base.base_impl).layout;
-        let sort_features_by_key = layout.get::<SymbolSortKey>().is_expression();
-        let constant_sort_key = layout.get::<SymbolSortKey>().is_constant();
+        let sort_features_by_key = layout.symbol_sort_key.is_expression();
+        let constant_sort_key = layout.symbol_sort_key.is_constant();
         // Screen-space symbols are drawn over the view, not projected onto
         // the map.
-        let screen_space_prop = layout.get::<SymbolScreenSpace>();
+        let screen_space_prop = &layout.symbol_screen_space;
         let is_screen_space = if screen_space_prop.is_constant() {
             *screen_space_prop.as_constant()
         } else {
-            SymbolScreenSpace::default_value()
+            SymbolLayoutProperties::Defaults::symbol_screen_space()
         };
         let symbol_projection_variant =
             if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
-        let is_offset = !layout.get::<IconOffset>().is_undefined();
+        let is_offset = !layout.icon_offset.is_undefined();
 
         let current_zoom = state.get_zoom() as f32;
         let layer_prefix = format!("{}/", self.get_id());
@@ -1356,7 +1350,7 @@ impl RenderLayer for RenderSymbolLayer {
             };
 
             let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
-            if prev_bucket_id != SimpleIdentity::EMPTY && prev_bucket_id != bucket.base.bucket_id {
+            if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // This tile was previously set up from a different bucket,
                 // drop and re-create any drawables for it.
                 self.remove_tile_all(passes, &tile_id);
@@ -1402,7 +1396,7 @@ impl RenderLayer for RenderSymbolLayer {
             // If we already have drawables for this tile, update them.
             let layer_id = self.get_id().to_owned();
             let mut refreshed_attributes: Vec<*const ()> = Vec::new();
-            let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
+            let update_existing = |drawable: &mut crate::drawable::Drawable| {
                 if !super::drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
                     // This drawable was produced on a previous style/bucket,
                     // and should not be updated.
@@ -1422,13 +1416,11 @@ impl RenderLayer for RenderSymbolLayer {
             if self.update_tile(passes, &tile_id, update_existing) {
                 // re-create collision drawables
                 if let Some(group) = &self.collision_tile_layer_group {
-                    let mut group = group.borrow_mut();
-                    if let Some(tile_group) = group.as_tile_layer_group_mut() {
-                        tile_group.remove_drawables(passes, &tile_id);
-                    }
+                    let mut tile_group = group.borrow_mut();
+                    tile_group.remove_drawables(passes, &tile_id);
                 }
-                self.add_collision_drawables(context, changes, passes, tile_id, bucket, evaluated, false);
-                self.add_collision_drawables(context, changes, passes, tile_id, bucket, evaluated, true);
+                self.add_collision_drawables(changes, passes, tile_id, bucket, evaluated, false);
+                self.add_collision_drawables(changes, passes, tile_id, bucket, evaluated, true);
                 continue;
             }
 
@@ -1437,7 +1429,7 @@ impl RenderLayer for RenderSymbolLayer {
             // A bucket laid out before a layout change can still have the
             // previous sort-key expression until it is rebuilt.
             let sort_segments =
-                sort_features_by_key || (constant_sort_key && !bucket.layout.get::<SymbolSortKey>().is_constant());
+                sort_features_by_key || (constant_sort_key && !bucket.layout.symbol_sort_key.is_constant());
             let mut add_renderables = |buffer: &Buffer, type_: SymbolType| {
                 if sort_segments {
                     // Features need to be rendered in a specific order, so we
@@ -1486,8 +1478,8 @@ impl RenderLayer for RenderSymbolLayer {
             }
 
             drop(state_guard);
-            self.add_collision_drawables(context, changes, passes, tile_id, bucket, evaluated, false);
-            self.add_collision_drawables(context, changes, passes, tile_id, bucket, evaluated, true);
+            self.add_collision_drawables(changes, passes, tile_id, bucket, evaluated, false);
+            self.add_collision_drawables(changes, passes, tile_id, bucket, evaluated, true);
         }
 
         // std::multiset<SegmentGroup>: a stable sort keeps equal elements in
@@ -1506,7 +1498,7 @@ impl RenderLayer for RenderSymbolLayer {
         // out-of-order, so keep track of some things by tile ID so we don't
         // have to re-build them multiple times.
         let mut tile_cache: HashMap<UnwrappedTileID, TileInfo> = HashMap::default();
-        let mut builder: Option<mln_gfx::UniqueDrawableBuilder> = None;
+        let mut builder: Option<crate::drawable_builder::UniqueDrawableBuilder> = None;
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 
         for group in &renderable_segments {
@@ -1559,7 +1551,7 @@ impl RenderLayer for RenderSymbolLayer {
             properties_as_uniforms.0.clear();
             properties_as_uniforms.1.clear();
 
-            let vertex_attribs = context.create_vertex_attribute_array();
+            let vertex_attribs = VertexAttributeArray::new_ptr();
             update_tile_attributes(
                 tile.get_bucket_geometry(),
                 bucket,
@@ -1572,16 +1564,16 @@ impl RenderLayer for RenderSymbolLayer {
                 &mut properties_as_uniforms,
             );
 
-            let text_halo = evaluated.get::<TextHaloColor>().constant_or(&Color::black()).a > 0.0
-                && evaluated.get::<TextHaloWidth>().constant_or(&1.0) != 0.0;
-            let text_fill = evaluated.get::<TextColor>().constant_or(&Color::black()).a > 0.0;
+            let text_halo = evaluated.text_halo_color.constant_or(&Color::black()).a > 0.0
+                && evaluated.text_halo_width.constant_or(&1.0) != 0.0;
+            let text_fill = evaluated.text_color.constant_or(&Color::black()).a > 0.0;
 
-            let icon_halo = evaluated.get::<IconHaloColor>().constant_or(&Color::black()).a > 0.0
-                && evaluated.get::<IconHaloWidth>().constant_or(&1.0) != 0.0;
-            let icon_fill = evaluated.get::<IconColor>().constant_or(&Color::black()).a > 0.0;
+            let icon_halo = evaluated.icon_halo_color.constant_or(&Color::black()).a > 0.0
+                && evaluated.icon_halo_width.constant_or(&1.0) != 0.0;
+            let icon_fill = evaluated.icon_color.constant_or(&Color::black()).a > 0.0;
 
             if let Some(builder) = builder.as_mut() {
-                builder.clear_tweakers();
+                builder.set_atlases(None);
             }
 
             let mut draw = |shader_group: &Option<ShaderGroupPtr>, is_halo: bool, suffix: &str| {
@@ -1605,8 +1597,7 @@ impl RenderLayer for RenderSymbolLayer {
                     )));
                 }
                 if !is_text && tile_info.icon_tweaker.is_none() {
-                    let icon_scaled =
-                        bucket_layout.get::<IconSize>().constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
+                    let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
                     tile_info.icon_tweaker = Some(Rc::new(DrawableAtlasesTweaker::new(
                         Some(Rc::clone(atlases)),
                         Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
@@ -1620,10 +1611,10 @@ impl RenderLayer for RenderSymbolLayer {
                 }
 
                 let builder = builder.get_or_insert_with(|| {
-                    let mut builder = context.create_drawable_builder();
+                    let mut builder = DrawableBuilder::boxed();
                     builder.set_sub_layer_index(0);
                     builder.set_render_pass(passes);
-                    builder.set_cull_face_mode(&CullFaceMode::disabled());
+                    builder.set_cull_face_mode(CullFaceMode::disabled());
                     builder.set_depth_type(DepthMaskType::ReadOnly);
                     builder.set_color_mode(&if (passes.underlying_type() & RenderPass::Translucent.underlying_type())
                         != 0
@@ -1635,21 +1626,14 @@ impl RenderLayer for RenderSymbolLayer {
                     builder
                 });
 
-                let Some(shader) = shader_group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    symbol_projection_variant,
-                    POS_OFFSET_ATTRIB_NAME,
-                ) else {
-                    return;
-                };
+                let shader = shader_group.shader(&properties_as_uniforms, symbol_projection_variant);
                 builder.set_shader(Some(shader));
 
-                builder.clear_tweakers();
-                let tweaker = if is_text { tile_info.text_tweaker.clone() } else { tile_info.icon_tweaker.clone() };
-                if let Some(tweaker) = tweaker {
-                    builder.add_tweaker(tweaker);
-                }
+                builder.set_atlases(if is_text {
+                    tile_info.text_tweaker.clone()
+                } else {
+                    tile_info.icon_tweaker.clone()
+                });
                 builder.set_drawable_name(format!("{layer_prefix}{suffix}"));
                 builder.set_vertex_attributes(Some(Rc::clone(&vertex_attribs)));
 
@@ -1665,31 +1649,31 @@ impl RenderLayer for RenderSymbolLayer {
                     None => builder.set_segments_shared(DrawMode::Triangles(), triangle_indices, &buffer.segments),
                 }
 
-                builder.flush(context);
+                builder.flush();
 
                 let mut layer_group_ref = layer_group.borrow_mut();
-                let tile_layer_group = layer_group_ref.as_tile_layer_group_mut().expect("TileLayerGroup");
+                let tile_layer_group = &mut *layer_group_ref;
                 for mut drawable in builder.clear_drawables() {
-                    drawable.set_tile_id(tile_id);
-                    drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                    drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
-                    drawable.set_binders(drawable_binders_slot(&render_data.bucket, &base_impl.id));
+                    drawable.tile_id = Some(tile_id);
+                    drawable.layer_tweaker = layer_tweaker.clone();
+                    drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
+                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &base_impl.id));
 
                     let has_variable_placement = state_guard.has_variable_placement;
-                    drawable.set_data(Some(Box::new(SymbolDrawableData {
+                    drawable.data = Some(crate::drawable::DrawableData::Symbol(SymbolDrawableData {
                         is_halo,
                         bucket_variable_placement: has_variable_placement,
                         symbol_type: group.type_,
                         pitch_alignment: values.pitch_alignment,
                         rotation_alignment: values.rotation_alignment,
-                        placement: *bucket_layout.get::<SymbolPlacement>(),
-                        text_fit: *bucket_layout.get::<IconTextFit>(),
+                        placement: *bucket_layout.symbol_placement.uniform(),
+                        text_fit: *bucket_layout.icon_text_fit.uniform(),
                         is_offset,
                         segment: group.segment,
-                    })));
-                    drawable.set_enabled(visible);
+                    }));
+                    drawable.enabled = visible;
 
-                    tile_layer_group.add_drawable(passes, &tile_id, drawable);
+                    tile_layer_group.add_tile_drawable(passes, &tile_id, drawable);
                 }
             };
 

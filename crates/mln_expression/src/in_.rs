@@ -24,7 +24,7 @@ fn is_searchable_runtime_type(t: &Type) -> bool {
 }
 
 /// `["in", needle, haystack]`.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct In {
     needle: Expr,
     haystack: Expr,

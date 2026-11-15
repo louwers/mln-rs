@@ -7,10 +7,10 @@ use mln_util::size::Size;
 
 #[test]
 fn a_rendered_still_shows_in_the_snapshot() {
-    let _run_loop = RunLoop::new();
+    let run_loop = RunLoop::new();
     let size = Size::new(64, 64);
-    let mut frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
-    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }).unwrap();
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
+    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, &run_loop).unwrap();
     frontend.attach(&map);
     map.style_mut().load_json(
         r#"{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"red"}}]}"#,

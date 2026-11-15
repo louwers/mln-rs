@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Scheme {
     #[default]
@@ -8,7 +6,7 @@ pub enum Scheme {
 }
 
 /// How a raster DEM tileset encodes elevation in its pixels.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub enum RasterEncoding {
     /// Mapbox DEM
     Mapbox,

@@ -1,4 +1,4 @@
-// A file source that answers inside `request`, under a `Map` that loads a
+// A file source that answers inside `load`, under a `Map` that loads a
 // style through it. A separate test target because it needs `mln_map` and
 // `mln_headless`, which depend on `mln_storage`.
 
@@ -8,7 +8,7 @@ use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapOptions};
 use mln_storage::response::{Reason, ResourceError};
-use mln_storage::{AsyncRequest, Callback, FileSource, Resource, ResourceOptions, Response};
+use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use parking_lot::Mutex;
@@ -17,11 +17,6 @@ fn read_file(relative: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
     std::fs::read(&path).unwrap_or_else(|e| panic!("Cannot read file {}: {e}", path.display()))
 }
-
-/// A request that does nothing, for a file source that has already answered.
-struct NoRequest;
-
-impl AsyncRequest for NoRequest {}
 
 #[derive(Default)]
 struct SyncFileSource {
@@ -35,7 +30,7 @@ impl SyncFileSource {
 }
 
 impl FileSource for SyncFileSource {
-    fn request(&self, resource: &Resource, mut callback: Callback) -> Box<dyn AsyncRequest> {
+    fn load(&self, resource: &Resource, responder: Responder) {
         let mut response = Response::new();
         let data = self.assets.lock().get(&resource.url).cloned();
         match data {
@@ -45,30 +40,23 @@ impl FileSource for SyncFileSource {
             }
             Some(data) => response.data = Some(data),
         }
-        callback(response);
-        Box::new(NoRequest)
+        responder.send(response);
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_resource_options(&self, _options: ResourceOptions) {}
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        ResourceOptions::default()
     }
 }
 
 // gtest: SyncFileSource.LoadSyncRender
 #[test]
 fn load_sync_render() {
-    let _run_loop = RunLoop::new();
+    let run_loop = RunLoop::new();
     let fs = Arc::new(SyncFileSource::default());
     fs.add("maptiler://maps/streets", read_file("test/fixtures/resources/source_vector.json"));
     fs.add("maptiler://sprites/streets/sprite", read_file("test/fixtures/resources/sprite.png"));
-    let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
-    let mut map = Map::with_file_source(fs, MapOptions::default()).unwrap();
+    let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
+    let mut map = Map::with_file_source(fs, MapOptions::default(), &run_loop).unwrap();
     frontend.attach(&map);
     let style = String::from_utf8(read_file("test/fixtures/resources/style_vector.json")).unwrap();
     map.style_mut().load_json(&style);

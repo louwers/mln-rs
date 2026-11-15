@@ -6,11 +6,13 @@
 // its Web Workers (the map's or a tile worker's) or the native runner reports
 // an error, or when a view's tiles got no worker replies. The interaction
 // views drag on the map back and forth before their frame, over a slow
-// network, and also fail when the map fetches URLs again. It also makes the
-// map's wasm instance and a tile worker's panic (the page's `panic`), and
-// fails unless the page stops and shows the panic, and opens a comparison
-// with GL JS (the page's `compare`), and fails unless GL JS's map covers
-// the page's and takes the input right of the divider. CI runs it (the
+// network, and also fail when the map fetches URLs again. It also runs
+// mln_gfx's conformance case of writes from JS arrays on the map's GPU (the
+// page's `checkGpu`), makes the map's wasm instance and a tile worker's
+// panic (the page's `panic`), and fails unless the page stops and shows the
+// panic, and opens a comparison with GL JS (the page's `compare`), and
+// fails unless GL JS's map covers the page's and takes the input right of
+// the divider. CI runs it (the
 // `web` job); see ../README.md.
 //
 //   node examples/web/check/check.mjs [options]
@@ -48,6 +50,7 @@ import { refetches } from "./interactions.mjs";
 import { renderNative, writeTest } from "./native.mjs";
 import {
   checkCompare,
+  checkGpu,
   checkPanic,
   firstLines,
   load,
@@ -102,6 +105,9 @@ try {
     throw new Error(`the page's WebGPU adapter is ${gpu}, not SwiftShader`);
 
   failures = await compare();
+  const gpuCheck = await checkGpu(context, views[0]);
+  console.log(`a check of the map's GPU: ${gpuCheck ?? "passed"}`);
+  if (gpuCheck) failures.push(`a check of the map's GPU: ${gpuCheck}`);
   for (const [where, instance] of [
     ["map", "the map's instance"],
     ["tile", "a tile worker's instance"],

@@ -1,13 +1,11 @@
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
 use crate::property_expression::PropertyExpression;
-use crate::renderer::property_evaluator::Evaluator;
 
 /// A style property's value: undefined (the default), a constant or an
 /// expression.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, mln_wire::Wire)]
 pub enum PropertyValue<T> {
     #[default]
     Undefined,
@@ -16,10 +14,10 @@ pub enum PropertyValue<T> {
 }
 
 // Clone and PartialEq are written out rather than derived so that they can be
-// `#[inline(never)]`: each generated layer property's setter, `mutable_impl`
-// and transition code clone and compare these, and a derive inlined there
-// copies the match into every one of them, which costs code size (the browser
-// build's wasm most) for no speed that style mutation needs.
+// `#[inline(never)]`: a layer's impl, its property sets and the transitions
+// clone and compare one per property, and a derive inlined there copies the
+// match into every one of them, which costs code size (the browser build's
+// wasm most) for no speed that style mutation needs.
 impl<T: Clone> Clone for PropertyValue<T> {
     #[inline(never)]
     fn clone(&self) -> Self {
@@ -89,15 +87,6 @@ impl<T> PropertyValue<T> {
         match self {
             PropertyValue::Expression(e) => e,
             _ => panic!("PropertyValue::as_expression_mut on a non-expression value"),
-        }
-    }
-
-    /// `evaluate(evaluator)`: visits the alternative with the evaluator.
-    pub(crate) fn evaluate<E: Evaluator<T>>(&self, evaluator: &E) -> E::ResultType {
-        match self {
-            PropertyValue::Undefined => evaluator.undefined(),
-            PropertyValue::Constant(t) => evaluator.constant(t),
-            PropertyValue::Expression(e) => evaluator.expression(e),
         }
     }
 

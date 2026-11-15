@@ -18,7 +18,7 @@ impl RenderStaticData {
 
     /// Uploads the static data. Takes `&self` (the flag is a `Cell`): the
     /// renderer calls it while `PaintParameters` borrows the static data.
-    pub(crate) fn upload(&self, _upload_pass: &dyn mln_gfx::UploadPass) {
+    pub(crate) fn upload(&self, _context: &crate::gfx::context::Context) {
         if !self.uploaded.get() {
             // these are still used by stencil buffer rendering
             self.uploaded.set(true);

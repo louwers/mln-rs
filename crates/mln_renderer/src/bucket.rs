@@ -10,15 +10,14 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use mln_gfx::UploadPass;
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
 use mln_util::error::Error;
 use mln_util::feature::feature_id_to_string;
 use mln_util::identity::SimpleIdentity;
-use serde::{Deserialize, Serialize};
 
+use crate::gfx::context::Context;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::render_layer::RenderLayer;
 
@@ -27,7 +26,7 @@ pub(crate) type BucketPtr = Arc<dyn Bucket>;
 pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
 pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, mln_wire::Wire)]
 pub(crate) struct RetainedFeature {
     pub(crate) feature_id: String,
     pub(crate) vertex_offset: usize,
@@ -36,20 +35,20 @@ pub(crate) struct RetainedFeature {
 
 /// The data members of `Bucket`.
 ///
-/// Port-only: serde writes what a worker sets (`tile/worker_codec`); the
+/// Port-only: the codec writes what a worker sets (`tile/worker_codec`); the
 /// upload flag, the id and the version are the side's that has the bucket.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, mln_wire::Wire)]
 pub(crate) struct BucketBase {
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) uploaded: AtomicBool,
-    #[serde(skip, default = "SimpleIdentity::new")]
+    #[wire(skip, default = "SimpleIdentity::new")]
     pub(crate) bucket_id: SimpleIdentity,
     pub(crate) retain_features_by_id: bool,
     pub(crate) retained_features: Vec<RetainedFeature>,
     /// Bumped by `update` (feature state); the render layers compare it to
     /// refresh their drawables' copies of the vertex data. C++ updates the
     /// shared vertex vectors in place instead.
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) version: AtomicU64,
 }
 
@@ -123,7 +122,7 @@ pub(crate) trait Bucket: Any + Send + Sync {
     /// As long as this bucket has a Prepare render pass, this function is
     /// getting called. Typically, this only happens once when the bucket is
     /// being rendered for the first time.
-    fn upload(&self, upload_pass: &dyn UploadPass);
+    fn upload(&self, context: &Context);
 
     fn has_data(&self) -> bool;
 

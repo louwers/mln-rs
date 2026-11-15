@@ -1,8 +1,8 @@
 // The atlas is shared by the render thread and the tile workers
 // (`DynamicTextureAtlasPtr`, C++ `std::shared_ptr`), so it is `Send + Sync`
 // with its state behind a mutex, as in C++. `Context::createDynamicTexture`
-// needs no context here: the GPU texture is created in the upload pass (see
-// dynamic_texture.rs).
+// needs no context here: the GPU texture is created when the frame uploads
+// (see dynamic_texture.rs).
 
 use std::sync::Arc;
 
@@ -15,7 +15,6 @@ use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::serialization::sorted;
 use mln_util::size::Size;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 use super::dynamic_texture::{DynamicTexture, DynamicTexturePtr, TextureHandle};
 use crate::tile::worker_codec::fields;
@@ -83,30 +82,30 @@ fn padded_image(image: &PremultipliedImage, bin: RectU16, type_: ImageType) -> P
 
 /// Where a tile's glyphs are in the dynamic texture. Serde writes the
 /// texture by key, as the worker instance's (`tile/worker_codec`).
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, mln_wire::Wire)]
 pub(crate) struct GlyphAtlas {
     pub(crate) glyph_positions: GlyphPositions,
     pub(crate) texture_handles: Vec<TextureHandle>,
-    #[serde(with = "fields::texture")]
+    #[wire(with = "fields::texture")]
     pub(crate) dynamic_texture: Option<DynamicTexturePtr>,
 }
 
 /// Where a tile's icons and patterns are in the dynamic texture. Serde
 /// writes the texture by key, as the worker instance's (`tile/worker_codec`).
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, mln_wire::Wire)]
 pub(crate) struct ImageAtlas {
-    #[serde(with = "sorted::map")]
+    #[wire(with = "sorted::map")]
     pub(crate) icon_positions: ImagePositions,
-    #[serde(with = "sorted::map")]
+    #[wire(with = "sorted::map")]
     pub(crate) pattern_positions: ImagePositions,
     pub(crate) texture_handles: Vec<TextureHandle>,
-    #[serde(with = "fields::texture")]
+    #[wire(with = "fields::texture")]
     pub(crate) dynamic_texture: Option<DynamicTexturePtr>,
 }
 
 impl ImageAtlas {
     /// Copies `image` into the bin of the `type_` image with its id, where
-    /// the next upload pass puts it on the texture. False when this atlas
+    /// the frame's next upload puts it on the texture. False when this atlas
     /// has no such image at `image`'s size.
     pub(crate) fn patch_image(&self, image: &ImageImpl, type_: ImageType) -> bool {
         let positions = match type_ {

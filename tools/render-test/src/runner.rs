@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use feature::Value;
 use geometry::Point;
+use mln_actor::RunLoop;
 use mln_image::{decode_image, encode_png};
 use mln_util::feature::Feature;
 use mln_util::geo::LatLng;
@@ -255,7 +256,7 @@ pub enum QueryGeometry {
 /// .withPixelRatio(..).withCrossSourceCollisions(..), resourceOptions)`, plus
 /// `map.setBounds(BoundOptions().withMaxPitch(..))` when `maxPitch` is set.
 pub type ImplFactory =
-    Box<dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions) -> Result<Box<dyn TestRunnerImpl>, String>>;
+    Box<dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions, &RunLoop) -> Result<Box<dyn TestRunnerImpl>, String>>;
 
 /// Port-only: how the runner's options that C++ does not have set up a map.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -349,6 +350,9 @@ pub(crate) struct TestRunner {
     watchdog: Option<crate::watchdog::Watchdog>,
     /// What the factory sets up the maps with.
     impl_options: ImplOptions,
+    /// The loop of the runner's thread, which its maps run on
+    /// (`mln::util::RunLoop runLoop` in `runRenderTests`).
+    run_loop: RunLoop,
 }
 
 impl TestRunner {
@@ -369,6 +373,7 @@ impl TestRunner {
             output_path,
             watchdog: None,
             impl_options: ImplOptions::default(),
+            run_loop: RunLoop::new(),
         }
     }
 
@@ -897,7 +902,7 @@ impl TestRunner {
 
         let mut ctx = TestContext::new(metadata);
         // The per-test time limit, stopped when `run` returns.
-        let _watchdog_guard = self.watchdog.as_ref().map(crate::watchdog::Watchdog::arm);
+        let _watchdog_guard = self.watchdog.as_ref().map(|watchdog| watchdog.arm(&self.run_loop));
 
         if !ctx.metadata.ignored_test {
             for operation in get_before_operations(&self.manifest) {
@@ -930,8 +935,9 @@ impl TestRunner {
                     return;
                 };
                 let resource_options = ResourceOptions { cache_path: self.manifest.get_cache_path().to_string() };
-                let created =
-                    catch_unwind(AssertUnwindSafe(|| factory(ctx.metadata, &resource_options, &self.impl_options)));
+                let created = catch_unwind(AssertUnwindSafe(|| {
+                    factory(ctx.metadata, &resource_options, &self.impl_options, &self.run_loop)
+                }));
                 match created {
                     Ok(Ok(runner_impl)) => {
                         self.maps.insert(key.clone(), runner_impl);

@@ -13,7 +13,6 @@ use std::sync::Arc;
 
 use mln_text::HBShapeAdjust;
 use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
-use parking_lot::Mutex;
 
 /// A font file loaded for shaping: what `HBShaper` does for `GlyphManager`.
 pub trait FontFaceShaper {
@@ -38,26 +37,12 @@ pub trait FontFaceEngine: Send + Sync {
     fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>>;
 }
 
-static ENGINE: Mutex<Option<Arc<dyn FontFaceEngine>>> = Mutex::new(None);
-
-/// Sets the engine of the `GlyphManagers` created from now on, instead of the
-/// default (`mln_text`'s `HBShaper` with the `font-face-shaper` feature, else
-/// none): for a host that loads the shaper itself, such as the browser
-/// build.
-pub fn set_font_face_engine(engine: Arc<dyn FontFaceEngine>) {
-    *ENGINE.lock() = Some(engine);
-}
-
-/// The engine `set_font_face_engine` set, else the default.
-pub(crate) fn font_face_engine() -> Arc<dyn FontFaceEngine> {
-    if let Some(engine) = ENGINE.lock().clone() {
-        return engine;
-    }
-    default_engine()
-}
-
+/// The engine of a renderer that wasn't given one
+/// (`Renderer::set_font_face_engine`): `mln_text`'s `HBShaper` with the
+/// `font-face-shaper` feature, else one that loads nothing.
 #[cfg(feature = "font-face-shaper")]
-fn default_engine() -> Arc<dyn FontFaceEngine> {
+#[must_use]
+pub fn default_engine() -> Arc<dyn FontFaceEngine> {
     Arc::new(in_process::HBShaperEngine)
 }
 
@@ -65,12 +50,13 @@ fn default_engine() -> Arc<dyn FontFaceEngine> {
 /// an engine: their text is left out, as for a font file that fails to
 /// parse.
 #[cfg(not(feature = "font-face-shaper"))]
-fn default_engine() -> Arc<dyn FontFaceEngine> {
+#[must_use]
+pub fn default_engine() -> Arc<dyn FontFaceEngine> {
     struct NoEngine;
     impl FontFaceEngine for NoEngine {
         fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>) {
             ready(Err("this build has no font-face shaper (mln_renderer's font-face-shaper feature), \
-                       and no engine was set with set_font_face_engine"
+                       and the renderer was given no engine"
                 .to_owned()));
         }
 

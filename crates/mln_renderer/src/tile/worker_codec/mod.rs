@@ -7,9 +7,9 @@
 //! (`WorkerMessage` and `TileMessage`, `geometry_tile_worker.rs`), raster tiles
 //! (`RasterWorkerMessage` and `RasterTileMessage`, `raster_tile.rs`) and
 //! raster-dem tiles (`RasterDEMWorkerMessage` and `RasterDEMTileMessage`,
-//! `raster_dem_tile.rs`) derive serde, as do the types they carry, and cross
-//! encoded with postcard, inside a small envelope (envelope.rs). Three
-//! things make that work:
+//! `raster_dem_tile.rs`) derive `mln_wire::Wire`, as do the types they carry,
+//! and cross encoded inside a small envelope (envelope.rs). Three things
+//! make that work:
 //!
 //! - Large byte arrays (encoded tiles, decoded images and DEMs, vertex and
 //!   index arrays) travel beside a reply's bytes as payloads (`Encoded`,
@@ -21,7 +21,7 @@
 //!   layout refers back to (its buckets' binders hold the layers'
 //!   expressions, its render data the properties, its feature index the
 //!   data), and the textures of the instance's atlas from the other side.
-//!   Expressions cross as their style JSON (`mln_style::serialization`).
+//!   Expressions cross as their parsed node trees (`mln_style::serialization`).
 //! - Trait objects cross as the types they can be (fields.rs): layers and
 //!   their properties as their layer type's, buckets as their bucket type's,
 //!   tile data as what it is made from (`GeometryTileData::encoded`).

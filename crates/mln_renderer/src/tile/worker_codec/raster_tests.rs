@@ -8,8 +8,8 @@ use mln_storage::Data;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
+use mln_wire::Wire;
 use parking_lot::Mutex;
-use serde::Serialize;
 
 use super::envelope::{self, ReplyHead};
 use super::map_side::{MapCodec, Reply};
@@ -187,7 +187,7 @@ fn raster_dem_tiles_cross() {
             assert_eq!(through.get_image().size, direct.get_image().size);
             assert_eq!(through.get_image().data, direct.get_image().data);
         }
-        let encoded = |bucket: &HillshadeBucket| postcard::to_allocvec(bucket).unwrap();
+        let encoded = |bucket: &HillshadeBucket| mln_wire::to_vec(bucket).unwrap();
         assert_eq!(encoded(&through), encoded(&direct));
 
         // A neighbour on the left, made directly and through the codec, each
@@ -224,7 +224,7 @@ fn raster_dem_tiles_cross() {
 }
 
 /// A reply of `TILE` with `message`, as a worker instance encodes it.
-fn reply<M: Serialize>(message: &M) -> Encoded {
+fn reply<M: Wire>(message: &M) -> Encoded {
     let head = ReplyHead::<&LayoutAtlases> {
         tile: TILE,
         textures: Vec::new(),
@@ -235,7 +235,7 @@ fn reply<M: Serialize>(message: &M) -> Encoded {
     };
     let (bytes, payloads) = mln_util::serialization::payload::encode(|| {
         let mut bytes = Vec::new();
-        envelope::append(&mut bytes, &head).unwrap();
+        envelope::append_with(&mut bytes, |w| head.write(w)).unwrap();
         envelope::append(&mut bytes, message).unwrap();
         bytes
     });
@@ -244,7 +244,7 @@ fn reply<M: Serialize>(message: &M) -> Encoded {
 
 /// What a `RasterDEMTileMessage::Parsed` with a `HillshadeBucket` crosses
 /// as, with a `DEMData` of any members.
-#[derive(Serialize)]
+#[derive(Wire)]
 enum DEMParsed {
     Parsed { bucket: Option<(BucketBase, (i32, i32, RasterEncoding, PremultipliedImage))>, correlation_id: u64 },
 }

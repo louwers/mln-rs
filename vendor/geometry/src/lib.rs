@@ -6,10 +6,9 @@
 //! from its [`Coord`].
 
 use geo_types::{Coord, CoordNum};
-use serde::{Deserialize, Serialize};
 
 /// `mapbox::geometry::point<T>`
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct Point<T> {
     pub x: T,
     pub y: T,

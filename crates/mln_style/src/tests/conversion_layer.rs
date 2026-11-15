@@ -7,7 +7,6 @@ use super::util::{parse_json, value_to_json};
 use crate::conversion::{convert, convert_layer};
 use crate::filter::Filter;
 use crate::layer::Layer;
-use crate::layers::BackgroundColor;
 use crate::layers::background_layer::BackgroundLayer;
 
 fn parse_layer(src: &str) -> Option<Box<dyn Layer>> {
@@ -41,8 +40,8 @@ fn layer_transition() {
     .unwrap();
     assert_eq!("background", layer.get_type_info().type_);
     let background = (layer.as_ref()).downcast_ref::<BackgroundLayer>().unwrap();
-    assert_eq!(Some(Duration::from_millis(400)), background.impl_().paint.get::<BackgroundColor>().options.duration);
-    assert_eq!(Some(Duration::from_millis(500)), background.impl_().paint.get::<BackgroundColor>().options.delay);
+    assert_eq!(Some(Duration::from_millis(400)), background.impl_().paint.background_color.options.duration);
+    assert_eq!(Some(Duration::from_millis(500)), background.impl_().paint.background_color.options.delay);
 }
 
 // gtest: StyleConversion.SerializeDefaults

@@ -27,7 +27,7 @@ fn stoi(s: &str) -> i32 {
 #[test]
 fn prefetch_tiles() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
 
     // C++ `emergencyShutoff`: a 10 s timer that fails the test; here every
     // `runLoop.run()` below fails after 10 s (run_with_timeout).
@@ -38,10 +38,11 @@ fn prefetch_tiles() {
         observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     }
 
-    let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
+    let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
     let map = Map::with_file_source(
         Arc::<StubFileSource>::clone(&file_source),
         MapOptions { map_mode: MapMode::Continuous, size: frontend.get_size(), ..Default::default() },
+        &run_loop,
     )
     .unwrap();
     frontend.attach(&map);

@@ -1,35 +1,9 @@
-// The device and its queue are the `Device`'s, which every backend on it
-// shares. What a backend makes on the device, its command pool and its
-// allocator, is shared (`Rc<BackendImpl>`) by the backend, its context and
-// every resource: C++ reaches them through `Context& -> getBackend()`, and
-// destroys the device with the backend; here the device goes with its last
-// backend.
-//
-// What the backend draws into is a target built on it (`OffscreenTarget`,
-// `SurfaceTarget`, `BorrowedTarget`). Where C++ asks the default renderable's
-// resource for the platform's surface and extensions through virtual calls, a
-// window target passes a `SurfaceProvider`.
-//
-// Differences from C++:
-// - C++ turns the validation layer on in debug builds and logs an error when
-//   it is missing. The port turns it on in debug builds when it is there,
-//   and the environment variable MLN_VULKAN_VALIDATION overrides that: `0`
-//   for off, `1` for on, `abort` to also abort the process on a validation
-//   error, after printing where it happened, and to make no device without
-//   the layer (`Device`).
-// - Only the validation layer's warnings and errors are logged.
-// - `VK_EXT_debug_report`, the fallback for instances without
-//   `VK_EXT_debug_utils`, the RenderDoc frame capture and the Windows
-//   monitor layer are not ported.
-// - macOS's portability enumeration is left out with the platform.
-// - The device needs `VK_KHR_storage_buffer_storage_class`, for the SPIR-V
-//   naga writes (`shaders::compiler`).
-// - C++ waits for the whole device before it rebuilds a swapchain and when it
-//   tears a backend down. Another backend or the host may submit to the
-//   device's queue meanwhile, so a backend waits for its own work instead
-//   (`BackendImpl::wait_idle`), and never needs every queue at once.
+// A renderer's backend on a `Device`, which backends on any thread share:
+// the command pool and allocator it makes on the device (`BackendImpl`),
+// which its `VulkanGpu` and the targets built on it share, and the renderer's
+// context. A window target gets its surface from a `SurfaceProvider`.
 
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::ffi::CStr;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
@@ -37,22 +11,16 @@ use std::rc::Rc;
 use ash::vk;
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
-use mln_gfx::context::Context as GfxContext;
-use mln_gfx::renderer_backend::{self, RendererBackendBase};
-use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::shader_source::BuiltIn;
+use mln_gfx::gpu::Gpu;
+use mln_gfx::renderer_backend;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 
-use crate::context::Context;
 use crate::device::Device;
-use crate::shaders::shader_group::ShaderGroup;
-use crate::shaders::shader_source::shader_source;
+use crate::gpu::VulkanGpu;
 
-/// The platform's part of a backend that renders to a window: what C++'s
-/// `SurfaceResource::createPlatformSurface` and the platform's
-/// `getInstanceExtensions` do.
+/// The platform's part of a target that presents to a window: its surface,
+/// and the instance extensions it needs.
 pub(crate) trait SurfaceProvider {
     /// The instance extensions the surface needs.
     fn instance_extensions(&self) -> Vec<&'static CStr>;
@@ -61,8 +29,8 @@ pub(crate) trait SurfaceProvider {
     fn create_surface(&self, entry: &ash::Entry, instance: &ash::Instance) -> Result<vk::SurfaceKHR, Error>;
 }
 
-/// What a backend makes on its device, which the backend, its context and
-/// their resources share.
+/// What a backend makes on its device, which its `VulkanGpu` and its
+/// targets share.
 pub(crate) struct BackendImpl {
     device: Device,
     command_pool: vk::CommandPool,
@@ -72,9 +40,9 @@ pub(crate) struct BackendImpl {
 }
 
 impl BackendImpl {
-    /// `init()`'s allocator and command pool on `device`, for `max_frames`
-    /// frames in flight.
-    fn new(device: &Device, max_frames: u32) -> Result<BackendImpl, Error> {
+    /// Makes the allocator and the command pool on `device`, for
+    /// `max_frames` frames in flight.
+    pub(crate) fn new(device: &Device, max_frames: u32) -> Result<BackendImpl, Error> {
         const MB: u64 = 1024 * 1024;
         let shared = &device.shared;
         let allocator = Allocator::new(&AllocatorCreateDesc {
@@ -220,18 +188,6 @@ impl BackendImpl {
         }
     }
 
-    pub(crate) fn insert_debug_label(&self, buffer: vk::CommandBuffer, name: &str) {
-        let Some(debug_utils) = self.device.shared.debug_utils() else {
-            return;
-        };
-        let Ok(name) = std::ffi::CString::new(name) else {
-            return;
-        };
-        let label = vk::DebugUtilsLabelEXT::default().label_name(&name);
-        // SAFETY: as in `begin_debug_label`.
-        unsafe { debug_utils.cmd_insert_debug_utils_label(buffer, &label) };
-    }
-
     /// Waits for the work the backend submitted to the device's queue, by
     /// submitting an empty batch with a fence: the fence signals once
     /// everything submitted to the queue before it has finished. It never
@@ -268,54 +224,15 @@ impl Drop for BackendImpl {
     }
 }
 
-/// A renderer's instance, device and context.
+/// A renderer's device and context.
 pub struct RendererBackend {
-    base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
     /// The context, made with the backend so that failing to make it is the
     /// backend's error.
-    context: Rc<Context>,
+    /// The backend's `Gpu`, which owns the renderer's resources and
+    /// submits its frames.
+    gpu: RefCell<VulkanGpu>,
 }
-
-/// The shader types registered by `initShaders`, in the C++ order.
-/// `init_shaders` skips the ones without a Vulkan source in the port
-/// (`shader_source`): the wide vector shader.
-const REGISTERED_SHADERS: &[BuiltIn] = &[
-    BuiltIn::BackgroundShader,
-    BuiltIn::BackgroundPatternShader,
-    BuiltIn::SkyShader,
-    BuiltIn::AtmosphereShader,
-    BuiltIn::CircleShader,
-    BuiltIn::ClippingMaskProgram,
-    BuiltIn::CollisionBoxShader,
-    BuiltIn::CollisionCircleShader,
-    BuiltIn::ColorReliefShader,
-    BuiltIn::DebugShader,
-    BuiltIn::FillShader,
-    BuiltIn::FillOutlineShader,
-    BuiltIn::FillPatternShader,
-    BuiltIn::FillOutlinePatternShader,
-    BuiltIn::FillOutlineTriangulatedShader,
-    BuiltIn::FillExtrusionShader,
-    BuiltIn::FillExtrusionInstancedShader,
-    BuiltIn::FillExtrusionPatternShader,
-    BuiltIn::FillExtrusionPatternInstancedShader,
-    BuiltIn::HeatmapShader,
-    BuiltIn::HeatmapTextureShader,
-    BuiltIn::HillshadeShader,
-    BuiltIn::HillshadePrepareShader,
-    BuiltIn::LineShader,
-    BuiltIn::LineGradientShader,
-    BuiltIn::LineSDFShader,
-    BuiltIn::LineGradientSDFShader,
-    BuiltIn::LinePatternShader,
-    BuiltIn::RasterShader,
-    BuiltIn::SymbolIconShader,
-    BuiltIn::SymbolSDFShader,
-    BuiltIn::SymbolTextAndIconShader,
-    BuiltIn::WideVectorShader,
-    BuiltIn::GlobeDepthShader,
-];
 
 impl RendererBackend {
     /// A backend on `device` for offscreen and borrowed targets, with one
@@ -342,17 +259,18 @@ impl RendererBackend {
 
     fn with_frames(device: &Device, max_frames: u32) -> Result<Self, Error> {
         let impl_ = Rc::new(BackendImpl::new(device, max_frames)?);
-        let context = Context::new(Rc::clone(&impl_)).map_err(Error::native)?;
-        Ok(RendererBackend { base: RendererBackendBase::new(), impl_, context })
+        let gpu = VulkanGpu::on(Rc::clone(&impl_)).map_err(|error| Error::native(error.to_string()))?;
+        Ok(RendererBackend { impl_, gpu: RefCell::new(gpu) })
     }
 
     pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
         &self.impl_
     }
 
-    /// The backend's context.
-    pub(crate) fn vulkan_context(&self) -> &Rc<Context> {
-        &self.context
+    /// The backend's `Gpu`, which the renderer's frames are submitted
+    /// through.
+    pub(crate) fn gpu(&self) -> RefMut<'_, VulkanGpu> {
+        self.gpu.borrow_mut()
     }
 
     /// The name of the GPU.
@@ -368,56 +286,10 @@ impl RendererBackend {
     pub fn is_software_device(&self) -> bool {
         self.impl_.get_device_properties().device_type == vk::PhysicalDeviceType::CPU
     }
-
-    /// Drops the context, releasing what it holds
-    /// (`Context::destroy_resources`).
-    pub(crate) fn reset_context(&mut self) {
-        self.base.reset_context();
-        self.context.destroy_resources();
-    }
-
-    /// The context made with the backend.
-    pub(crate) fn create_context(&self) -> Rc<Context> {
-        Rc::clone(&self.context)
-    }
-
-    /// Registers one shader group per built-in shader. A duplicate
-    /// registration is an error, which C++ throws and this logs.
-    #[expect(clippy::unused_self, reason = "each backend registers its shaders through its own `init_shaders`")]
-    pub(crate) fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
-        for &shader_id in REGISTERED_SHADERS {
-            let Some(source) = shader_source(shader_id) else {
-                continue;
-            };
-            let group = Rc::new(ShaderGroup::new(shader_id, program_parameters.clone()));
-            if !registry.register_shader_group(group, source.name) {
-                Log::error(Event::Shader, format!("Failed to register {} with shader registry!", source.name));
-                debug_assert!(false, "duplicate shader group");
-            }
-        }
-    }
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
-    fn renderer_backend_base(&self) -> &RendererBackendBase {
-        &self.base
-    }
-
-    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
-        RendererBackend::init_shaders(self, registry, parameters);
-    }
-
-    fn create_context(&self) -> Rc<dyn GfxContext> {
-        RendererBackend::create_context(self)
-    }
-
-    /// Vulkan has no context to make current.
-    fn activate(&self) {}
-    fn deactivate(&self) {}
-}
-
-impl Drop for RendererBackend {
-    fn drop(&mut self) {
-        self.reset_context();
+    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
+        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
 }

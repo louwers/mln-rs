@@ -1,33 +1,10 @@
-// The C++ core's MSL, copied from the raw string literals of
-//   include/mln/shaders/mtl/background.hpp
-//   include/mln/shaders/mtl/circle.hpp
-//   include/mln/shaders/mtl/clipping_mask.hpp
-//   include/mln/shaders/mtl/collision.hpp
-//   include/mln/shaders/mtl/color_relief.hpp
-//   include/mln/shaders/mtl/common.hpp
-//   include/mln/shaders/mtl/debug.hpp
-//   include/mln/shaders/mtl/fill.hpp
-//   include/mln/shaders/mtl/fill_extrusion.hpp
-//   include/mln/shaders/mtl/globe_depth.hpp
-//   include/mln/shaders/mtl/heatmap.hpp
-//   include/mln/shaders/mtl/heatmap_texture.hpp
-//   include/mln/shaders/mtl/hillshade.hpp
-//   include/mln/shaders/mtl/hillshade_prepare.hpp
-//   include/mln/shaders/mtl/line.hpp
-//   include/mln/shaders/mtl/raster.hpp
-//   include/mln/shaders/mtl/shader_group.hpp
-//   include/mln/shaders/mtl/shader_program.hpp
-//   include/mln/shaders/mtl/shader_program_mtl.hpp
-//   include/mln/shaders/mtl/sky.hpp
-//   include/mln/shaders/mtl/symbol.hpp
-//   include/mln/shaders/mtl/widevector.hpp
-// with the port's changes, so that it reads the vertices and UBOs its
-// renderer makes.
+//! The MSL of the built-in shaders, which started as MapLibre Native's, and
+//! reads the vertices and UBOs the renderer makes.
 
 use super::shader_source::MslShaderSource;
 
 /// The start of every shader's source.
-pub const PRELUDE: &str = r#"
+pub(crate) const PRELUDE: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
 
@@ -435,8 +412,6 @@ enum {
 "#;
 
 pub(crate) const ATMOSPHERE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "AtmosphereShader",
-    name: r"AtmosphereShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -593,8 +568,6 @@ half4 fragment fragmentMain(
 };
 
 pub(crate) const BACKGROUND_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "BackgroundPatternShader",
-    name: r"BackgroundPatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -723,8 +696,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const BACKGROUND_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "BackgroundShader",
-    name: r"BackgroundShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -826,8 +797,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const CIRCLE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "CircleShader",
-    name: r"CircleShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1092,28 +1061,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
-    built_in: "ClippingMaskProgram",
-    name: r"ClippingMaskProgram",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
-    idClippingMaskUBO = idDrawableReservedVertexOnlyUBO,
     clippingMaskUBOCount = drawableReservedUBOCount
 };
 
-struct alignas(16) ClipUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ uint32_t stencil_ref;
-    /* 68 */ float pad1;
-    /* 72 */ float pad2;
-    /* 76 */ float pad3;
-    /* 80 */
-};
-static_assert(sizeof(ClipUBO) == 5 * 16, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {
@@ -1129,17 +1085,10 @@ struct FragmentResult {
     half4 color [[color(0)]];
 };
 
-#if defined(PROJECTION_GLOBE)
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const ProjectionUBO& projection [[buffer(idClippingMaskUBO)]]) {
+                                device const ProjectionUBO& projection [[buffer(idProjectionUBO)]]) {
     return { projectTile(float2(in.position.xy), float2(in.position.xy), projection) };
 }
-#else
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const ClipUBO& clipUBO [[buffer(idClippingMaskUBO)]]) {
-    return { clipUBO.matrix * float4(float2(in.position.xy), 0, 1) };
-}
-#endif
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
@@ -1148,8 +1097,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const COLLISION_BOX_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "CollisionBoxShader",
-    name: r"CollisionBoxShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1185,6 +1132,7 @@ struct VertexStage {
     short2 extrude [[attribute(2)]];
     ushort2 placed [[attribute(3)]];
     float2 shift [[attribute(4)]];
+    float height_offset [[attribute(5)]];
 };
 
 struct FragmentStage {
@@ -1200,9 +1148,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
 
 #if defined(PROJECTION_GLOBE)
-    float4 projectedPoint = projectTile(float2(vertx.anchor_pos), projection);
+    float4 projectedPoint = projectTileWithElevation(float2(vertx.anchor_pos), vertx.height_offset, projection);
 #else
-    float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), 0, 1);
+    float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), vertx.height_offset, 1);
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
@@ -1211,13 +1159,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         4.0);
 
 #if defined(PROJECTION_GLOBE)
-    float4 position = projectTile(float2(vertx.pos), projection);
+    float4 position = projectTileWithElevation(float2(vertx.pos), vertx.height_offset, projection);
     // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (position.z / position.w < 1.1) {
         position.z = 0.0;
     }
 #else
-    float4 position = drawable.matrix * float4(float2(vertx.pos), 0.0, 1.0);
+    float4 position = drawable.matrix * float4(float2(vertx.pos), vertx.height_offset, 1.0);
 #endif
     position.xy += (float2(vertx.extrude) + vertx.shift) * tileProps.extrude_scale * position.w * collision_perspective_ratio;
 
@@ -1254,8 +1202,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const COLLISION_CIRCLE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "CollisionCircleShader",
-    name: r"CollisionCircleShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1380,8 +1326,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const COLOR_RELIEF_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "ColorReliefShader",
-    name: r"ColorReliefShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1533,8 +1477,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const DEBUG_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "DebugShader",
-    name: r"DebugShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1597,8 +1539,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillExtrusionInstancedShader",
-    name: r"FillExtrusionInstancedShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1660,6 +1600,10 @@ static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
+    short2 outline_pos [[attribute(1)]];
+    ushort2 decimals_ed [[attribute(2)]];
+    short2 next_outline_pos [[attribute(6)]];
+    ushort2 next_decimals_ed [[attribute(7)]];
 
 #if !defined(HAS_UNIFORM_u_color)
     float4 color [[attribute(3)]];
@@ -1670,11 +1614,6 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_height)
     float2 height [[attribute(5)]];
 #endif
-};
-
-struct OutlineInstance {
-    short2 pos;
-    ushort2 decimals_ed;
 };
 
 struct FragmentStage {
@@ -1691,11 +1630,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
-                                uint instanceID [[ instance_id ]],
-                                device const OutlineInstance* outline [[buffer(fillExtrusionUBOCount + 1)]]) {
+                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
-    bool isDiscarded = glMod(float(outline[instanceID].decimals_ed.x), 2.0) > 0.0;
+    bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
     if (isDiscarded) {
         return {
             .position = float4(0.0),
@@ -1716,8 +1653,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
 
-    const float2 p1 = float2(outline[instanceID + 0].pos) + unpack_float(float(outline[instanceID + 0].decimals_ed.x / 2)) / 128.0;
-    const float2 p2 = float2(outline[instanceID + 1].pos) + unpack_float(float(outline[instanceID + 1].decimals_ed.x / 2)) / 128.0;
+    const float2 p1 = float2(vertx.outline_pos) + unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
+    const float2 p2 = float2(vertx.next_outline_pos) + unpack_float(float(vertx.next_decimals_ed.x / 2)) / 128.0;
     const float2 edgevector = normalize(p2 - p1);
 
     const float3 normal = float3(-edgevector.y, edgevector.x, 0.0);
@@ -1787,8 +1724,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillExtrusionPatternInstancedShader",
-    name: r"FillExtrusionPatternInstancedShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1850,6 +1785,10 @@ static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
+    short2 outline_pos [[attribute(1)]];
+    ushort2 decimals_ed [[attribute(2)]];
+    short2 next_outline_pos [[attribute(7)]];
+    ushort2 next_decimals_ed [[attribute(8)]];
 
 #if !defined(HAS_UNIFORM_u_base)
     float2 base [[attribute(3)]];
@@ -1863,11 +1802,6 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_pattern_to)
     ushort4 pattern_to [[attribute(6)]];
 #endif
-};
-
-struct OutlineInstance {
-    short2 pos;
-    ushort2 decimals_ed;
 };
 
 struct FragmentStage {
@@ -1895,11 +1829,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
-                                uint instanceID [[ instance_id ]],
-                                device const OutlineInstance* outline [[buffer(fillExtrusionUBOCount + 1)]]) {
+                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
-    bool isDiscarded = glMod(float(outline[instanceID].decimals_ed.x), 2.0) > 0.0;
+    bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
     if (isDiscarded) {
         return {
             .position       = float4(0.0),
@@ -1930,12 +1862,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
 
-    const float2 p1 = float2(outline[instanceID + 0].pos) + unpack_float(float(outline[instanceID + 0].decimals_ed.x / 2)) / 128.0;
-    const float2 p2 = float2(outline[instanceID + 1].pos) + unpack_float(float(outline[instanceID + 1].decimals_ed.x / 2)) / 128.0;
+    const float2 p1 = float2(vertx.outline_pos) + unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
+    const float2 p2 = float2(vertx.next_outline_pos) + unpack_float(float(vertx.next_decimals_ed.x / 2)) / 128.0;
     const float2 edgevector = normalize(p2 - p1);
 
     const float3 normal = float3(-edgevector.y, edgevector.x, 0.0);
-    const float edgedistance = outline[instanceID + 1 - vertx.pos.x].decimals_ed.y;
+    const float edgedistance = vertx.pos.x == 0 ? vertx.next_decimals_ed.y : vertx.decimals_ed.y;
     const float t = float(vertx.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
 
@@ -2057,8 +1989,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillExtrusionPatternShader",
-    name: r"FillExtrusionPatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2298,8 +2228,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillExtrusionShader",
-    name: r"FillExtrusionShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2471,8 +2399,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const FILL_OUTLINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillOutlinePatternShader",
-    name: r"FillOutlinePatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2780,15 +2706,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
         return half4(mix(color * sdf_alpha_a, color * sdf_alpha_b, props.fade) * alpha * opacity);
     }
     // The outline fades over a pixel from the line, as in the GL and Vulkan
-    // shaders; the C++ Metal source leaves `alpha` out here.
+    // shaders.
     return half4(mix(color1, color2, props.fade) * alpha * opacity);
 }
 ",
 };
 
 pub(crate) const FILL_OUTLINE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillOutlineShader",
-    name: r"FillOutlineShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3000,8 +2924,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillOutlineTriangulatedShader",
-    name: r"FillOutlineTriangulatedShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3218,8 +3140,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillPatternShader",
-    name: r"FillPatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3519,8 +3439,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const FILL_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "FillShader",
-    name: r"FillShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3729,8 +3647,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const GLOBE_DEPTH_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "GlobeDepthShader",
-    name: r"GlobeDepthShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -3765,8 +3681,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 pub(crate) const HEATMAP_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "HeatmapShader",
-    name: r"HeatmapShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3904,8 +3818,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const HEATMAP_TEXTURE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "HeatmapTextureShader",
-    name: r"HeatmapTextureShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3969,8 +3881,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "HillshadePrepareShader",
-    name: r"HillshadePrepareShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -4094,8 +4004,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const HILLSHADE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "HillshadeShader",
-    name: r"HillshadeShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -4341,8 +4249,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_GRADIENT_SDF_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LineGradientSDFShader",
-    name: r"LineGradientSDFShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -4736,8 +4642,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_GRADIENT_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LineGradientShader",
-    name: r"LineGradientShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -5086,8 +4990,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LinePatternShader",
-    name: r"LinePatternShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -5517,8 +5419,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_SDF_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LineSDFShader",
-    name: r"LineSDFShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -5921,8 +5821,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const LINE_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LineShader",
-    name: r"LineShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6284,8 +6182,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const RASTER_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "RasterShader",
-    name: r"RasterShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6405,8 +6301,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const SKY_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "SkyShader",
-    name: r"SkyShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -6478,8 +6372,6 @@ half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]],
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "SymbolIconShader",
-    name: r"SymbolIconShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6570,6 +6462,8 @@ struct VertexStage {
 
     // The top-left of the quad's atlas rectangle.
     ushort2 tex_origin [[attribute(6)]];
+    // The symbol's symbol-height-offset, in meters.
+    float height_offset [[attribute(7)]];
 };
 
 struct FragmentStage {
@@ -6639,9 +6533,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -6668,7 +6562,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     float symbol_rotation = 0.0;
     if (drawable.rotate_symbol) {
         // See comments in symbol_sdf.vertex
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), 0.0, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6682,11 +6576,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, 0.0, 1.0);
+        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, 0.0, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, 0.0, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -6741,8 +6635,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "SymbolSDFShader",
-    name: r"SymbolSDFShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6845,6 +6737,8 @@ struct VertexStage {
 
     // The top-left of the quad's atlas rectangle.
     ushort2 tex_origin [[attribute(10)]];
+    // The symbol's symbol-height-offset, in meters.
+    float height_offset [[attribute(11)]];
 };
 
 struct FragmentStage {
@@ -6920,9 +6814,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -6956,7 +6850,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), 0.0, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6970,11 +6864,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, 0.0, 1.0);
+        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, 0.0, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, 0.0, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -7082,8 +6976,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "SymbolTextAndIconShader",
-    name: r"SymbolTextAndIconShader",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -7188,6 +7080,8 @@ struct VertexStage {
 
     // The top-left of the quad's atlas rectangle.
     ushort2 tex_origin [[attribute(9)]];
+    // The symbol's symbol-height-offset, in meters.
+    float height_offset [[attribute(10)]];
 };
 
 struct FragmentStage {
@@ -7265,9 +7159,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -7301,7 +7195,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), 0.0, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -7316,11 +7210,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, 0.0, 1.0);
+        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, 0.0, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, 0.0, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;

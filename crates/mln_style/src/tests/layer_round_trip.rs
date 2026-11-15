@@ -1,19 +1,13 @@
-// Not a C++ gtest (port-only): a layer's `Layer::Impl` crosses through serde
-// (as a tile worker in another wasm instance gets its layers) to one that
-// encodes the same, its expressions as the JSON they serialize to
-// (serialization.rs). C++'s expression serialization doesn't
-// parse back for the legacy property functions, literal images, some
-// coercions and colors; these are the cases the port fixes, each where it
-// serializes.
-// tools/render-test's layer_round_trip test checks every layer of the
-// render and query suites.
+// A layer's `Layer::Impl` crosses (as a tile worker in another
+// wasm instance gets its layers) to one that encodes the same, and serializes
+// to style JSON that parses back. tools/render-test's layer_round_trip test
+// checks every layer of the render and query suites.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use feature::Value;
 use mln_conversion::{Convertible, Error};
-use serde::{Deserialize, Serialize};
 
 use super::util::parse_json;
 use crate::conversion::convert_layer;
@@ -26,16 +20,16 @@ fn parse(json: &serde_json::Value) -> Box<dyn Layer> {
     convert_layer(&Convertible::from(json), &mut error).unwrap_or_else(|| panic!("{json}: {}", error.message))
 }
 
-#[derive(Serialize, Deserialize)]
-struct Crossing(#[serde(with = "crate::serialization::shared_layer")] Arc<dyn Impl>);
+#[derive(mln_wire::Wire)]
+struct Crossing(#[wire(with = "crate::serialization::shared_layer")] Arc<dyn Impl>);
 
 /// The layer's serialized value, after checking that its `Impl` crosses
-/// through serde to one that encodes the same.
+/// to one that encodes the same.
 fn round_trip(layer: &dyn Layer) -> Value {
-    let encoded = postcard::to_allocvec(&Crossing(layer.base_impl())).unwrap();
+    let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
     let decoded: Crossing =
-        postcard::from_bytes(&encoded).unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
-    assert_eq!(postcard::to_allocvec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());
+        mln_wire::from_slice(&encoded).unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
+    assert_eq!(mln_wire::to_vec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());
     layer.serialize()
 }
 
@@ -121,7 +115,7 @@ fn zoom_functions_of_images() {
     );
     let runtime_constant = |layer: &dyn Layer| {
         let layer = layer.downcast_ref::<FillExtrusionLayer>().unwrap();
-        layer.get_fill_extrusion_pattern().as_expression().is_runtime_constant()
+        layer.impl_().paint.fill_extrusion_pattern.value.as_expression().is_runtime_constant()
     };
     assert!(runtime_constant(extrusion.as_ref()));
     assert!(runtime_constant(parse(&json(&serialized)).as_ref()));
@@ -209,4 +203,38 @@ fn style_parser_fixture_layers() {
         }
     }
     assert!(count > 10, "only {count} layers");
+}
+
+/// Each kind of expression node crosses to the same
+/// expression, with the same dependencies.
+#[test]
+fn expressions_cross_as_data() {
+    let polygon = r#"{"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]}"#;
+    let expressions = [
+        r#"["get", "a"]"#.to_owned(),
+        r#"["get", "a", ["literal", {"a": 1}]]"#.to_owned(),
+        r#"["feature-state", "hover"]"#.to_owned(),
+        r#"["interpolate", ["cubic-bezier", 0.1, 0, 0.9, 1], ["zoom"], 0, 1, 10, ["get", "a"]]"#.to_owned(),
+        r#"["let", "x", ["get", "a"], ["*", ["var", "x"], 2]]"#.to_owned(),
+        r#"["match", ["get", "k"], ["a", "b"], 1, "c", 2, 0]"#.to_owned(),
+        r#"["==", ["get", "s"], "x", ["collator", {"case-sensitive": false}]]"#.to_owned(),
+        r#"["format", ["get", "name"], {"font-scale": 1.2}]"#.to_owned(),
+        r#"["number-format", ["get", "n"], {"locale": "de"}]"#.to_owned(),
+        r#"["image", ["get", "icon"]]"#.to_owned(),
+        format!(r#"["within", {polygon}]"#),
+        format!(r#"["distance", {polygon}]"#),
+    ];
+    for json in expressions {
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let mut context = crate::expression::ParsingContext::new();
+        let expression = context
+            .parse_expression(&Convertible::from(&value), None)
+            .unwrap_or_else(|| panic!("{json}: {}", context.get_combined_errors()));
+        let encoded = mln_wire::to_vec(&expression).unwrap();
+        let decoded: crate::expression::Expr =
+            mln_wire::from_slice(&encoded).unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
+        assert!(decoded == expression, "{json}");
+        assert_eq!(decoded.dependencies(), expression.dependencies(), "{json}");
+        assert_eq!(decoded.serialize(), expression.serialize(), "{json}");
+    }
 }

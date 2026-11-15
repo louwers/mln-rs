@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
+use mln_gfx::gpu::ClipDepth;
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
@@ -9,21 +9,17 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_PROPS_UBO,
     ID_FILL_EXTRUSION_TILE_PROPS_UBO,
 };
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
-use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::fill_extrusion_layer_properties::{
-    FillExtrusionBase, FillExtrusionColor, FillExtrusionHeight, FillExtrusionLayerProperties, FillExtrusionOpacity,
-    FillExtrusionPattern, FillExtrusionTranslate, FillExtrusionTranslateAnchor, FillExtrusionVerticalGradient,
-};
-use mln_style::properties::Property;
-use mln_style::renderer::cross_faded_property_evaluator::Faded;
+use mln_style::layers::FillExtrusionPaintProperties;
+use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayerProperties;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::size::Size;
 
-use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
+use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::frame_projection::zero_to_one_clip_z;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -58,7 +54,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -74,54 +70,58 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         // all the drawables from the layer.
         let props_ubo = FillExtrusionPropsUBO {
             color: evaluated
-                .get::<FillExtrusionColor>()
-                .constant_or(&FillExtrusionColor::default_value())
+                .fill_extrusion_color
+                .constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_color())
                 .to_float_array(),
             light_color: FillExtrusionBucket::light_color(&parameters.evaluated_light),
             pad1: 0.0,
             light_position: FillExtrusionBucket::light_position(&parameters.evaluated_light, state),
-            base: evaluated.get::<FillExtrusionBase>().constant_or(&FillExtrusionBase::default_value()),
-            height: evaluated.get::<FillExtrusionHeight>().constant_or(&FillExtrusionHeight::default_value()),
+            base: evaluated
+                .fill_extrusion_base
+                .constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_base()),
+            height: evaluated
+                .fill_extrusion_height
+                .constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_height()),
             light_intensity: FillExtrusionBucket::light_intensity(&parameters.evaluated_light),
-            vertical_gradient: if *evaluated.get::<FillExtrusionVerticalGradient>() { 1.0 } else { 0.0 },
-            opacity: *evaluated.get::<FillExtrusionOpacity>(),
+            vertical_gradient: if *evaluated.fill_extrusion_vertical_gradient.uniform() { 1.0 } else { 0.0 },
+            opacity: *evaluated.fill_extrusion_opacity.uniform(),
             fade: crossfade.t,
             from_scale: crossfade.from_scale,
             to_scale: crossfade.to_scale,
             pad2: 0.0,
         };
-        context.emplace_or_update_uniform_buffer_pod(&mut self.props_uniform_buffer, &props_ubo);
+        context.write_uniform_buffer_pod(&mut self.props_uniform_buffer, &props_ubo);
         layer_group.mutable_uniform_buffers().set(ID_FILL_EXTRUSION_PROPS_UBO, self.props_uniform_buffer.clone());
 
         self.base.properties_updated = false;
 
         let zoom = parameters.state.get_zoom() as f32;
-        let def_pattern = Faded { from: Image::new(""), to: Image::new("") };
-        let fill_pattern_value = evaluated.get::<FillExtrusionPattern>().constant_or(&def_pattern);
-        let translation = *evaluated.get::<FillExtrusionTranslate>();
-        let anchor = *evaluated.get::<FillExtrusionTranslateAnchor>();
+        let fill_pattern_value = evaluated.fill_extrusion_pattern.faded();
+        let translation = &evaluated.fill_extrusion_translate;
+        let anchor = &evaluated.fill_extrusion_translate_anchor;
 
         let mut i: u32 = 0;
-        let count = layer_group.get_drawable_count();
+        let count = layer_group.drawable_count();
         let mut drawable_ubo_vector = vec![FillExtrusionDrawableUBO::default(); count];
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![FillExtrusionTilePropsUBO::default(); count];
 
-        // OpenGL writes the depth of Metal, Vulkan and WebGPU
-        // (`frame_projection`). The globe projects in its shaders.
-        let zero_to_one = context.backend_type() == mln_gfx::backend::Type::OpenGL && !state.is_globe_rendering();
+        // A backend whose clip depth runs from -1 writes the depth of one
+        // whose runs from 0 (`frame_projection`). The globe projects in its
+        // shaders.
+        let zero_to_one = context.caps().clip_depth == ClipDepth::NegativeOneToOne && !state.is_globe_rendering();
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
+        layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = true;
-            let Some(tile_id) = drawable.get_tile_id() else {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check_tweak_drawable_ptr(drawable, self_ptr) {
                 return;
             }
 
-            let Some(binders_slot) = get_drawable_binders(drawable) else {
+            let Some(binders_slot) = drawable.binders.clone() else {
                 debug_assert!(false);
                 return;
             };
@@ -135,7 +135,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             };
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
-            let tile = get_drawable_render_tile(drawable);
+            let tile = drawable.render_tile.as_ref().map(DrawableRenderTile::tile);
             if tile.is_none() {
                 debug_assert!(false);
                 return;
@@ -145,8 +145,8 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             let mut projection = get_projection_data(
                 &tile_id,
                 parameters,
-                translation,
-                anchor,
+                *translation.uniform(),
+                *anchor.uniform(),
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
                 drawable,
@@ -172,8 +172,8 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
             let mut texture_size = Size::new(0, 0);
-            if let Some(tex) = drawable.get_texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE) {
-                texture_size = tex.borrow().get_size();
+            if let Some(tex) = drawable.textures[ID_FILL_EXTRUSION_IMAGE_TEXTURE].as_ref() {
+                texture_size = tex.borrow().size();
             }
 
             let pattern_pos_a = tile.and_then(|t| t.get_pattern(fill_pattern_value.from.id()));
@@ -203,21 +203,15 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
                 pad2: 0.0,
             };
 
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         let bytes: &[u8] = bytemuck::cast_slice(&tile_props_ubo_vector);
-        match &self.tile_props_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => self.tile_props_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
-        }
+        context.write_storage_buffer(&mut self.tile_props_uniform_buffer, bytes);
 
         let layer_uniforms = layer_group.mutable_uniform_buffers();
         layer_uniforms.set(ID_FILL_EXTRUSION_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());

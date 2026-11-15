@@ -1,6 +1,5 @@
-// C++ builds one backend; the port can build several (WebGPU, Metal, Vulkan,
-// OpenGL), and the renderer asks a context which one it is of
-// (`Context::backend_type`).
+// The backends the port builds, which a host picks a device of. The
+// renderer reads what it needs of one from its `Gpu`'s `Caps`.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]

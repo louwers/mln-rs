@@ -1,112 +1,14 @@
-use mln_expression::formatted::Formatted;
-use mln_style_types::{
-    AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconOverlapType,
-    IconTextFitType, LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType,
-    ResamplingType, Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
-    TextTransformType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
-};
-use mln_util::{Color, Padding};
+use mln_util::Color;
 
-use super::function::{
-    convert_function_to_expression, convert_token_string_to_expression, convert_token_string_to_format_expression,
-    convert_token_string_to_image_expression, has_tokens,
-};
+use super::function::{has_tokens, parse_converted, parse_function, token_string_expression};
 use super::{Converter, Convertible, Error, convert};
-use crate::expression::{Image, ParsingContext, ValueConverter, is_expression};
+use crate::expression::{ParsingContext, Type, ValueConverter, is_expression};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
 
-/// Turns a constant with `{token}`s into an expression. Only strings,
-/// `Formatted` and `Image` values can hold tokens.
-pub trait MaybeConvertTokens: Sized {
-    fn maybe_convert_tokens(self) -> PropertyValue<Self> {
-        PropertyValue::Constant(self)
-    }
-}
-
-macro_rules! no_tokens {
-    ($($t:ty),* $(,)?) => {
-        $(impl MaybeConvertTokens for $t {})*
-    };
-}
-
-no_tokens!(
-    bool,
-    f32,
-    Color,
-    Padding,
-    Position,
-    ProjectionDefinition,
-    Rotation,
-    VariableAnchorOffsetCollection,
-    [f32; 2],
-    [f32; 4],
-    Vec<f32>,
-    Vec<String>,
-    Vec<Color>,
-    Vec<SymbolAnchorType>,
-    Vec<TextWritingModeType>,
-    AlignmentType,
-    CirclePitchScaleType,
-    HillshadeIlluminationAnchorType,
-    HillshadeMethodType,
-    IconOverlapType,
-    IconTextFitType,
-    LightAnchorType,
-    LineCapType,
-    LineJoinType,
-    RasterResamplingType,
-    ResamplingType,
-    SymbolAnchorType,
-    SymbolPlacementType,
-    SymbolZOrderType,
-    TextJustifyType,
-    TextTransformType,
-    TranslateAnchorType,
-    VisibilityType,
-);
-
-impl MaybeConvertTokens for String {
-    fn maybe_convert_tokens(self) -> PropertyValue<String> {
-        if has_tokens(&self) {
-            PropertyValue::Expression(PropertyExpression::from_expr(convert_token_string_to_expression(&self), None))
-        } else {
-            PropertyValue::Constant(self)
-        }
-    }
-}
-
-impl MaybeConvertTokens for Formatted {
-    fn maybe_convert_tokens(self) -> PropertyValue<Formatted> {
-        // This only works with a single-section `Formatted` created automatically
-        // by parsing a plain-text `text-field` property.
-        // Token conversion happens later than the initial string->Formatted conversion
-        // General purpose `format` expressions with embedded tokens are not supported
-        let first_unformatted_section = &self.sections[0].text;
-        if has_tokens(first_unformatted_section) {
-            PropertyValue::Expression(PropertyExpression::from_expr(
-                convert_token_string_to_format_expression(first_unformatted_section),
-                None,
-            ))
-        } else {
-            PropertyValue::Constant(self)
-        }
-    }
-}
-
-impl MaybeConvertTokens for Image {
-    fn maybe_convert_tokens(self) -> PropertyValue<Image> {
-        if has_tokens(self.id()) {
-            PropertyValue::Expression(PropertyExpression::from_expr(
-                convert_token_string_to_image_expression(self.id()),
-                None,
-            ))
-        } else {
-            PropertyValue::Constant(self)
-        }
-    }
-}
-
+/// Converts a property's value: a constant, an expression, or a legacy
+/// function or (with `convert_tokens`) `{token}` string, which become the
+/// expressions they stand for.
 pub fn convert_property_value<T>(
     value: &Convertible<'_>,
     error: &mut Error,
@@ -114,27 +16,40 @@ pub fn convert_property_value<T>(
     convert_tokens: bool,
 ) -> Option<PropertyValue<T>>
 where
-    T: Converter + MaybeConvertTokens + ValueConverter + Clone,
+    T: Converter + ValueConverter + Clone,
 {
     if value.is_undefined() {
         return Some(PropertyValue::Undefined);
     }
 
-    let expression: Option<PropertyExpression<T>> = if is_expression(value) {
+    let mut default_value = None;
+    let parsed = if is_expression(value) {
         let mut ctx = ParsingContext::with_expected(T::expression_type());
-        let Some(parsed) = ctx.parse_layer_property_expression(value) else {
+        let parsed = ctx.parse_layer_property_expression(value);
+        if parsed.is_none() {
             error.message = ctx.get_combined_errors();
-            return None;
-        };
-        Some(PropertyExpression::from_expr(parsed, None))
+        }
+        parsed?
     } else if value.is_object() {
-        convert_function_to_expression::<T>(value, error, convert_tokens)
+        // A function of a color array, a hillshade's, takes single colors.
+        let type_ = match T::expression_type() {
+            Type::Array(array) if array.item_type == Type::Color => Color::expression_type(),
+            type_ => type_,
+        };
+        if let Some(default) = value.object_member("default") {
+            let Some(default) = convert::<T>(&default, error) else {
+                error.message = format!(r#"wrong type for "default": {}"#, error.message);
+                return None;
+            };
+            default_value = Some(default);
+        }
+        parse_function(value, &type_, convert_tokens, error)?
+    } else if let Some(string) = value.to_string().filter(|s| convert_tokens && has_tokens(s)) {
+        parse_converted(&token_string_expression(&string), &T::expression_type(), error)?
     } else {
-        let constant = convert::<T>(value, error)?;
-        return Some(if convert_tokens { constant.maybe_convert_tokens() } else { PropertyValue::Constant(constant) });
+        return Some(PropertyValue::Constant(convert::<T>(value, error)?));
     };
-
-    let expression = expression?;
+    let expression = PropertyExpression::<T>::from_expr(parsed).with_default(default_value);
     if !allow_data_expressions && !expression.is_feature_constant() {
         error.message = "data expressions not supported".to_owned();
         None

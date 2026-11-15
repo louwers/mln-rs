@@ -9,7 +9,6 @@ use geometry::Point;
 use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
 use mln_util::serialization::payload::shared_bytes;
-use serde::{Deserialize, Serialize};
 
 /// Normalized vector tile coordinates. Each geometry coordinate represents a
 /// point in a bidimensional space, varying from -V...0...+V, where V is the
@@ -192,11 +191,11 @@ pub trait GeometryTileData {
 
 /// Port-only: what tile data is made from (`GeometryTileData::encoded`).
 /// The bytes travel beside a message (`mln_util::serialization::payload`).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub enum EncodedTileData {
-    Mvt(#[serde(with = "shared_bytes")] Arc<Vec<u8>>),
+    Mvt(#[wire(with = "shared_bytes")] Arc<Vec<u8>>),
     Mlt {
-        #[serde(with = "shared_bytes")]
+        #[wire(with = "shared_bytes")]
         data: Arc<Vec<u8>>,
         fast_pfor_enabled: bool,
     },

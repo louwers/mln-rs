@@ -75,7 +75,7 @@ impl LocalGlyphRasterizerTest {
     fn new(font_family: Option<&str>) -> Self {
         assert!(font_family.is_none(), "local font families are not ported");
         let run_loop = RunLoop::new();
-        let file_source = StubFileSource::new(ResponseType::Asynchronous);
+        let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
         file_source.set_response(Kind::Glyphs, |resource: &Resource| {
             assert_eq!(Kind::Glyphs, resource.kind);
             let mut response = Response::new();
@@ -86,11 +86,12 @@ impl LocalGlyphRasterizerTest {
 
         // `HeadlessFrontend(1, NoFlush, ContextMode::Unique, fontFamily)`:
         // the default size is 256x256.
-        let frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0).expect("a headless frontend");
+        let frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop).expect("a headless frontend");
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
         let map = Map::with_file_source(
             file_source,
             MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+            &run_loop,
         )
         .unwrap();
         frontend.attach(&map);

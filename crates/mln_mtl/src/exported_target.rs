@@ -7,9 +7,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::export::Generations;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::{
     ConsumerSync, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture,
     SyncKind, SyncKinds,
@@ -23,10 +22,11 @@ use objc2_io_surface::{
     IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow, kIOSurfaceHeight, kIOSurfacePixelFormat,
     kIOSurfaceWidth,
 };
-use objc2_metal::{MTLDevice, MTLPixelFormat, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage};
+use objc2_metal::{MTLDevice, MTLPixelFormat, MTLStorageMode, MTLTexture, MTLTextureUsage};
 
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
 use crate::device::Device;
+use crate::gpu::texture_descriptor;
 use crate::mtl_fwd::{MTLDevicePtr, MTLTexturePtr};
 use crate::renderer_backend::RendererBackend;
 
@@ -103,15 +103,7 @@ fn create_surface(size: Size) -> Result<CFRetained<IOSurfaceRef>, Error> {
 /// frames render into.
 fn surface_texture(device: &MTLDevicePtr, size: Size) -> Result<(CFRetained<IOSurfaceRef>, MTLTexturePtr), Error> {
     let surface = create_surface(size)?;
-    // SAFETY: a plain descriptor of the surface's size and format.
-    let descriptor = unsafe {
-        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-            MTLPixelFormat::BGRA8Unorm,
-            size.width as usize,
-            size.height as usize,
-            false,
-        )
-    };
+    let descriptor = texture_descriptor(MTLPixelFormat::BGRA8Unorm, size);
     // No shader writes, which would cost lossless compression on Apple GPUs.
     descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget);
     let texture = device
@@ -160,15 +152,7 @@ impl Generation {
 /// A private texture of `size` that a frame stores its depth and stencil
 /// into, for the host to sample or draw into on the device.
 fn depth_texture(device: &MTLDevicePtr, size: Size) -> Result<MTLTexturePtr, Error> {
-    // SAFETY: a plain descriptor of a non-zero size and a 2D format.
-    let descriptor = unsafe {
-        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-            MTLPixelFormat::Depth32Float_Stencil8,
-            size.width as usize,
-            size.height as usize,
-            false,
-        )
-    };
+    let descriptor = texture_descriptor(MTLPixelFormat::Depth32Float_Stencil8, size);
     descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget);
     descriptor.setStorageMode(MTLStorageMode::Private);
     device.newTextureWithDescriptor(&descriptor).ok_or_else(|| Error::native("Metal can't make a depth texture"))
@@ -285,12 +269,12 @@ impl ExportedTarget {
 }
 
 impl FrameTarget for ExportedTarget {
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
+    fn begin_frame(&self) -> Option<FrameImage> {
         self.generations.borrow().current().target.begin_frame()
     }
 
-    fn end_frame(&self, encoder: &dyn CommandEncoder) -> Handoff {
-        match self.generations.borrow().current().target.end_frame(encoder) {
+    fn end_frame(&self) -> Handoff {
+        match self.generations.borrow().current().target.end_frame() {
             Handoff::GivenBack { slot, sync } => Handoff::Queued { slot, sync },
             other => other,
         }

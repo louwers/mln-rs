@@ -1,9 +1,7 @@
 use crate::defaults::{default_value, rust_value};
 use crate::spec::{LayerSpec, Property};
-use crate::types::{
-    camelize, evaluated_type, expression_type_rust, is_color_ramp, is_data_driven, is_overridable, snake,
-};
-use crate::writer::{MAX_WIDTH, Writer, imports_for, layer_file_name};
+use crate::types::{camelize, evaluated_type, is_color_ramp, is_data_driven, snake};
+use crate::writer::{Writer, imports_for, layer_file_name};
 
 /// Layer types whose `LayerProperties` hold a `CrossfadeParameters`.
 #[must_use]
@@ -11,86 +9,54 @@ pub(crate) fn has_crossfade(type_: &str) -> bool {
     matches!(type_, "background" | "fill" | "line" | "fill-extrusion")
 }
 
-/// The doc comment of a property tag (inside the macro call, which passes it
-/// on): the property's style-spec name.
-fn tag_comment(w: &mut Writer, property: &Property, layout: bool) {
-    let kind = if layout { "layout" } else { "paint" };
-    w.line(&format!("    /// The `{}` {kind} property.", property.name));
-}
-
-fn emit_tag(w: &mut Writer, property: &Property, layout: bool) {
-    let name = camelize(&property.name);
-    let t = evaluated_type(property);
-    if layout {
-        let macro_name = if is_data_driven(property) { "data_driven_layout_property" } else { "layout_property" };
-        w.line(&format!("crate::{macro_name}!("));
-        tag_comment(w, property, true);
-        let default = rust_value(&default_value(property), &t);
-        let decl = format!("    pub struct {name}: {} = {default}, name = \"{}\"", t.rust(), property.name);
-        if decl.len() <= MAX_WIDTH {
-            w.line(&decl);
-        } else {
-            w.line(&format!("    pub struct {name}: {} = {default},", t.rust()));
-            w.line(&format!("    name = \"{}\"", property.name));
-        }
-        w.line(");");
-        w.blank();
-        return;
-    }
-
-    let macro_name = match property.property_type() {
-        Some("color-ramp") => "color_ramp_property",
-        Some("data-driven") => "data_driven_paint_property",
-        Some("cross-faded-data-driven") => "cross_faded_data_driven_paint_property",
-        Some("cross-faded") => "cross_faded_paint_property",
-        _ => "paint_property",
-    };
-    w.line(&format!("crate::{macro_name}!("));
-    tag_comment(w, property, false);
+/// The kind and type of a property in `properties!`: `data_driven Color`.
+fn kind_and_type(property: &Property, layout: bool) -> (&'static str, String) {
     if is_color_ramp(property) {
-        w.line(&format!("    pub struct {name}"));
+        return ("color_ramp", "Color".into());
+    }
+    let kind = if layout {
+        if is_data_driven(property) { "data_driven" } else { "constant" }
     } else {
-        let default = rust_value(&default_value(property), &t);
-        let mut options = String::new();
-        if property.name == "line-floor-width" {
-            options.push_str(", use_integer_zoom = true");
+        match property.property_type() {
+            Some("data-driven") => "data_driven",
+            Some("cross-faded-data-driven") => "cross_faded_data_driven",
+            Some("cross-faded") => "cross_faded",
+            _ => "constant",
         }
-        w.line(&format!("    pub struct {name}: {} = {default}{options}", t.rust()));
-    }
-    w.line(");");
-    if is_overridable(property) {
-        w.blank();
-        w.line(&format!("impl {name} {{"));
-        w.line("    /// The property's style-spec name.");
-        w.line("    #[must_use]");
-        w.line("    pub const fn name() -> &'static str {");
-        w.line(&format!("        \"{}\"", property.name));
-        w.line("    }");
-        w.blank();
-        w.line("    /// The expression type of the property's values.");
-        w.line("    #[must_use]");
-        w.line("    pub fn expression_type() -> Type {");
-        w.line(&format!("        {}", expression_type_rust(property.type_(), property.value())));
-        w.line("    }");
-        w.blank();
-        w.line("    /// Whether the section `t` overrides this property.");
-        w.line("    pub fn has_override<T: OverridableSection>(t: &T) -> bool {");
-        w.line(&format!("        t.has_{}()", snake(&property.name)));
-        w.line("    }");
-        w.line("}");
-    }
-    w.blank();
+    };
+    (kind, evaluated_type(property).rust())
 }
 
-fn emit_set(w: &mut Writer, macro_name: &str, class: &str, properties: &[Property]) {
-    w.line(&format!("crate::{macro_name}!("));
-    w.line("    /// The properties, in field order.");
+fn emit_set(w: &mut Writer, layer_type: &str, class: &str, scope: &str, properties: &[Property]) {
+    w.line("crate::properties!(");
+    w.line(&format!("    /// The {scope} properties of a {layer_type} layer."));
     w.line(&format!("    #[expect(non_snake_case, reason = \"named for the C++ `{class}` type list\")]"));
-    w.line(&format!("    pub mod {class} {{"));
+    w.line(&format!("    pub mod {class}: {scope} {{"));
     for p in properties {
-        w.line(&format!("        {}: {},", snake(&p.name), camelize(&p.name)));
+        let (kind, t) = kind_and_type(p, scope == "layout");
+        let default = if is_color_ramp(p) {
+            "Color::default()".to_owned()
+        } else {
+            rust_value(&default_value(p), &evaluated_type(p))
+        };
+        w.line(&format!("        {}: {kind} {t} = {default},", snake(&p.name)));
     }
     w.line("    }");
+    if scope == "paint" && properties.iter().any(|p| p.name == "line-width") {
+        // The line shaders also read the width at the integer zoom below.
+        w.line("    derived {");
+        w.line("        line_floor_width: integer_zoom f32 = 1.0_f32 => line_width,");
+        w.line("    }");
+    }
+    let mut imports = imports_for(properties.iter(), false);
+    if properties.iter().any(is_color_ramp) {
+        imports.push("mln_util::Color".into());
+    }
+    imports.sort();
+    imports.dedup();
+    if !imports.is_empty() {
+        w.line(&format!("    use {};", imports.join(", ")));
+    }
     w.line(");");
     w.blank();
 }
@@ -100,147 +66,55 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     let file = layer_file_name(&layer.type_);
     let crossfade = has_crossfade(&layer.type_);
     let has_layout = !layer.layout_properties.is_empty();
-    let overridable = layer.paint_properties.iter().any(is_overridable);
     let mut w = Writer::new();
 
     w.line("// This file is generated by //tools/style-codegen from the style spec");
     w.line("// (tools/style-codegen/v8.json). Do not edit.");
     w.blank();
 
-    let mut imports = imports_for(layer.layout_properties.iter().chain(&layer.paint_properties), false);
-    imports.push("crate::expression::Dependency".into());
-    if overridable {
-        imports.push("crate::expression::Type".into());
-        imports.push("crate::properties::OverridableSection".into());
+    let mut imports = vec![format!("crate::layers::{file}_layer_impl::Impl as {t}LayerImpl")];
+    imports.extend(crate::emit_table::imports());
+    let heatmap_color = layer.paint_properties.iter().find(|p| p.name == "heatmap-color");
+    if heatmap_color.is_some() {
+        imports.push("crate::color_ramp_property_value::ColorRampPropertyValue".into());
+        imports.push("crate::conversion::convert_color_ramp_property_value".into());
+        imports.push("mln_conversion::{Convertible, Error}".into());
     }
-    let mut layer_properties_import = vec!["HasEvaluated", "LayerProperties", "LayerPropertiesBase"];
-    if crossfade {
-        layer_properties_import.insert(0, "HasCrossfade");
-    }
-    imports.push(format!("crate::layer_properties::{{{}}}", layer_properties_import.join(", ")));
-    imports.push(format!("crate::layers::{file}_layer_impl::Impl as {t}LayerImpl"));
-    if crossfade {
-        imports.push("crate::renderer::property_evaluation_parameters::CrossfadeParameters".into());
-    }
-    imports.push("std::sync::Arc".into());
-    imports.push("mln_vec_map::VecSet".into());
     w.imports(imports);
     w.blank();
 
-    for p in &layer.layout_properties {
-        emit_tag(&mut w, p, true);
-    }
-    for p in &layer.paint_properties {
-        emit_tag(&mut w, p, false);
-    }
-
     if has_layout {
-        emit_set(&mut w, "layout_properties", &format!("{t}LayoutProperties"), &layer.layout_properties);
+        emit_set(&mut w, &layer.type_, &format!("{t}LayoutProperties"), "layout", &layer.layout_properties);
     }
-    emit_set(&mut w, "paint_properties", &format!("{t}PaintProperties"), &layer.paint_properties);
+    emit_set(&mut w, &layer.type_, &format!("{t}PaintProperties"), "paint", &layer.paint_properties);
 
-    let pe = format!("{t}PaintProperties::PossiblyEvaluated");
-    w.line(&format!("/// The evaluated properties of a {} layer.", layer.type_));
-    w.line("#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]");
-    w.line(&format!("pub struct {t}LayerProperties {{"));
-    w.line("    pub base: LayerPropertiesBase,");
-    w.line("    // Data members.");
-    if crossfade {
-        w.line("    pub crossfade: CrossfadeParameters,");
-    }
-    w.line(&format!("    pub evaluated: {pe},"));
-    w.line("}");
+    w.line("crate::layer_properties::layer_properties!(");
+    w.line(&format!("    /// The evaluated properties of a {} layer.", layer.type_));
+    let layout = if has_layout { format!(", layout {t}LayoutProperties") } else { String::new() };
+    let crossfade = if crossfade { ", [crossfade]" } else { "" };
+    w.line(&format!("    {t}LayerProperties for {t}LayerImpl, paint {t}PaintProperties{layout}{crossfade}"));
+    w.line(");");
     w.blank();
 
-    w.line(&format!("impl {t}LayerProperties {{"));
-    w.line(&format!("    pub fn new(impl_: Arc<{t}LayerImpl>) -> Self {{"));
-    w.line(&format!("        {t}LayerProperties {{"));
-    w.line("            base: LayerPropertiesBase::new(impl_),");
-    if crossfade {
-        w.line("            crossfade: CrossfadeParameters::default(),");
-    }
-    w.line(&format!("            evaluated: {pe}::default(),"));
-    w.line("        }");
-    w.line("    }");
-    w.blank();
-    if crossfade {
-        w.line("    pub fn with_evaluated(");
-        w.line(&format!("        impl_: Arc<{t}LayerImpl>,"));
-        w.line("        crossfade: CrossfadeParameters,");
-        w.line(&format!("        evaluated: {pe},"));
-        w.line("    ) -> Self {");
-        w.line(&format!("        {t}LayerProperties {{"));
-        w.line("            base: LayerPropertiesBase::new(impl_),");
-        w.line("            crossfade,");
-        w.line("            evaluated,");
-        w.line("        }");
-        w.line("    }");
-    } else {
-        w.line("    pub fn with_evaluated(");
-        w.line(&format!("        impl_: Arc<{t}LayerImpl>,"));
-        w.line(&format!("        evaluated: {pe},"));
-        w.line("    ) -> Self {");
-        w.line(&format!("        {t}LayerProperties {{"));
-        w.line("            base: LayerPropertiesBase::new(impl_),");
-        w.line("            evaluated,");
-        w.line("        }");
-        w.line("    }");
-    }
-    w.blank();
-    w.line("    #[must_use]");
-    w.line(&format!("    pub fn layer_impl(&self) -> &{t}LayerImpl {{"));
-    w.line("        self.base");
-    w.line("            .base_impl");
-    w.line(&format!("            .downcast_ref::<{t}LayerImpl>()"));
-    w.line(&format!("            .expect(\"{t}LayerProperties: not a {} layer impl\")", layer.type_));
-    w.line("    }");
-    w.line("}");
-    w.blank();
+    let entries = crate::emit_table::layer_entries(&layer.paint_properties, &layer.layout_properties);
+    crate::emit_table::emit(&mut w, &format!("{t}LayerImpl"), &entries);
 
-    w.line(&format!("impl LayerProperties for {t}LayerProperties {{"));
-    w.line("    fn base(&self) -> &LayerPropertiesBase {");
-    w.line("        &self.base");
-    w.line("    }");
-    w.blank();
-    w.line("    fn base_mut(&mut self) -> &mut LayerPropertiesBase {");
-    w.line("        &mut self.base");
-    w.line("    }");
-    w.blank();
-    w.line("    fn constants_mask(&self) -> u64 {");
-    w.line("        self.evaluated.constants_mask()");
-    w.line("    }");
-    w.blank();
-    w.line("    fn get_dependencies(&self) -> Dependency {");
-    if has_layout {
-        w.line("        self.layer_impl().paint.get_dependencies() | self.layer_impl().layout.get_dependencies()");
-    } else {
-        w.line("        self.layer_impl().paint.get_dependencies()");
-    }
-    w.line("    }");
-    w.blank();
-    w.line("    fn get_evaluated_dependencies(&self) -> Dependency {");
-    w.line("        self.evaluated.get_dependencies()");
-    w.line("    }");
-    w.blank();
-    w.line("    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>) {");
-    w.line("        self.evaluated.collect_global_state_refs(refs);");
-    w.line("    }");
-    w.line("}");
-    w.blank();
-
-    w.line(&format!("impl HasEvaluated for {t}LayerProperties {{"));
-    w.line(&format!("    type Evaluated = {pe};"));
-    w.blank();
-    w.line("    fn evaluated(&self) -> &Self::Evaluated {");
-    w.line("        &self.evaluated");
-    w.line("    }");
-    w.line("}");
-    if crossfade {
+    if let Some(property) = heatmap_color {
+        // The renderer falls back to this default when the style leaves the
+        // property undefined.
+        let raw = crate::json::js_stringify(property.default().expect("heatmap-color default"));
+        assert!(!raw.contains("\"#"), "raw string delimiter in {raw}");
         w.blank();
-        w.line(&format!("impl HasCrossfade for {t}LayerProperties {{"));
-        w.line("    fn crossfade(&self) -> &CrossfadeParameters {");
-        w.line("        &self.crossfade");
-        w.line("    }");
+        w.line("/// The default `heatmap-color`.");
+        w.line("#[must_use]");
+        w.line("pub fn default_heatmap_color() -> ColorRampPropertyValue {");
+        w.line("    let mut error = Error::default();");
+        w.line("    let raw_value: serde_json::Value = serde_json::from_str(");
+        w.line(&format!("        r#\"{raw}\"#,"));
+        w.line("    )");
+        w.line("    .unwrap();");
+        w.line("    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error, false, false)");
+        w.line("        .expect(\"the heatmap-color default converts\")");
         w.line("}");
     }
 

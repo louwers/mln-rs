@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::hillshade_layer_ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
@@ -8,20 +7,17 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_TILE_PROPS_UBO,
 };
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_math::deg2radf;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::hillshade_layer_properties::{
-    HillshadeAccentColor, HillshadeExaggeration, HillshadeHighlightColor, HillshadeIlluminationAltitude,
-    HillshadeIlluminationAnchor, HillshadeIlluminationDirection, HillshadeLayerProperties, HillshadeMethod,
-    HillshadePaintProperties, HillshadeShadowColor,
-};
+use mln_style::layers::hillshade_layer_properties::{HillshadeLayerProperties, HillshadePaintProperties};
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::geo::LatLng;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
+use crate::gfx::uniform_buffer::UniformBufferPtr;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -53,10 +49,10 @@ fn pad_array<T: Clone + Default>(arr: &mut Vec<T>, max_length: usize) {
 /// Convert style properties to illumination properties
 fn get_illumination_properties(evaluated: &HillshadePaintProperties::PossiblyEvaluated) -> IlluminationProperties {
     // Get the values from evaluated properties (these are now vectors)
-    let mut directions: Vec<f32> = evaluated.get::<HillshadeIlluminationDirection>().clone();
-    let mut altitudes: Vec<f32> = evaluated.get::<HillshadeIlluminationAltitude>().clone();
-    let mut highlights: Vec<Color> = evaluated.get::<HillshadeHighlightColor>().clone();
-    let mut shadows: Vec<Color> = evaluated.get::<HillshadeShadowColor>().clone();
+    let mut directions: Vec<f32> = evaluated.hillshade_illumination_direction.clone().uniform().clone();
+    let mut altitudes: Vec<f32> = evaluated.hillshade_illumination_altitude.clone().uniform().clone();
+    let mut highlights: Vec<Color> = evaluated.hillshade_highlight_color.clone().uniform().clone();
+    let mut shadows: Vec<Color> = evaluated.hillshade_shadow_color.clone().uniform().clone();
 
     // Find the maximum length to ensure all arrays are the same size
     let mut max_length = directions.len().max(altitudes.len()).max(highlights.len()).max(shadows.len());
@@ -155,7 +151,7 @@ impl LayerTweaker for HillshadeLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -167,7 +163,7 @@ impl LayerTweaker for HillshadeLayerTweaker {
         let mut illumination = get_illumination_properties(evaluated);
 
         // Adjust azimuths if anchor is viewport
-        if *evaluated.get::<HillshadeIlluminationAnchor>() == HillshadeIlluminationAnchorType::Viewport {
+        if *evaluated.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport {
             let bearing = parameters.state.get_bearing() as f32;
             for azimuth in &mut illumination.direction_radians {
                 *azimuth -= bearing;
@@ -176,9 +172,8 @@ impl LayerTweaker for HillshadeLayerTweaker {
 
         let context = parameters.context;
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
-            let evaluated_props_ubo = pack_evaluated_props(&illumination, evaluated.get::<HillshadeAccentColor>());
-            context
-                .emplace_or_update_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &evaluated_props_ubo);
+            let evaluated_props_ubo = pack_evaluated_props(&illumination, evaluated.hillshade_accent_color.uniform());
+            context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &evaluated_props_ubo);
             self.base.properties_updated = false;
         }
         layer_group
@@ -186,18 +181,18 @@ impl LayerTweaker for HillshadeLayerTweaker {
             .set(ID_HILLSHADE_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
         let mut i: u32 = 0;
-        let count = layer_group.get_drawable_count();
+        let count = layer_group.drawable_count();
         let mut drawable_ubo_vector = vec![HillshadeDrawableUBO::default(); count];
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![HillshadeTilePropsUBO::default(); count];
 
-        let exaggeration = *evaluated.get::<HillshadeExaggeration>();
-        let method = method_to_int(*evaluated.get::<HillshadeMethod>());
+        let exaggeration = &evaluated.hillshade_exaggeration;
+        let method = method_to_int(*evaluated.hillshade_method.uniform());
         let num_lights = illumination.num_sources() as i32;
 
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
-            let Some(tile_id) = drawable.get_tile_id() else {
+        layer_group.visit_drawables(|drawable| {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check_tweak_drawable_ptr(drawable, self_ptr) {
@@ -223,7 +218,7 @@ impl LayerTweaker for HillshadeLayerTweaker {
 
             tile_props_ubo_vector[i as usize] = HillshadeTilePropsUBO {
                 latrange: get_lat_range(&tile_id),
-                exaggeration,
+                exaggeration: *exaggeration.uniform(),
                 method,
                 num_lights,
                 pad0: 0.0,
@@ -231,25 +226,15 @@ impl LayerTweaker for HillshadeLayerTweaker {
                 pad2: 0.0,
             };
 
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => {
-                self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true));
-            }
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         let bytes: &[u8] = bytemuck::cast_slice(&tile_props_ubo_vector);
-        match &self.tile_props_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => {
-                self.tile_props_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true));
-            }
-        }
+        context.write_storage_buffer(&mut self.tile_props_uniform_buffer, bytes);
 
         let layer_uniforms = layer_group.mutable_uniform_buffers();
         layer_uniforms.set(ID_HILLSHADE_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());

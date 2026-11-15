@@ -11,9 +11,10 @@ fn pixel(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
 }
 
 fn render_style(style: &str, size: Size, pixel_ratio: f32) -> PremultipliedImage {
-    let _run_loop = RunLoop::new();
-    let mut frontend = HeadlessFrontend::new(size, pixel_ratio).expect("a headless frontend");
-    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }).unwrap();
+    let run_loop = RunLoop::new();
+    let mut frontend = HeadlessFrontend::new(size, pixel_ratio, &run_loop).expect("a headless frontend");
+    let mut map =
+        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }, &run_loop).unwrap();
     frontend.attach(&map);
     map.style_mut().load_json(style);
     frontend.render(&mut map).expect("render").image
@@ -29,10 +30,10 @@ fn render_still_returns_image_of_physical_size() {
 
 #[test]
 fn render_still_in_continuous_mode_is_an_error() {
-    let _run_loop = RunLoop::new();
+    let run_loop = RunLoop::new();
     let size = Size::new(16, 16);
-    let mut frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
-    let mut map = Map::new(MapOptions { size, ..Default::default() }).unwrap();
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
+    let mut map = Map::new(MapOptions { size, ..Default::default() }, &run_loop).unwrap();
     frontend.attach(&map);
     let error = frontend.render(&mut map).err().expect("error");
     assert_eq!(error, Error::invalid_state("Map is not in static or tile image render modes"));
@@ -54,8 +55,8 @@ fn frames(map: &mut Map) -> usize {
 fn draws_each_update_of_the_attached_map_on_the_run_loop() {
     let run_loop = RunLoop::new();
     let size = Size::new(16, 16);
-    let frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
-    let mut map = Map::new(MapOptions { size, ..Default::default() }).unwrap();
+    let frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
+    let mut map = Map::new(MapOptions { size, ..Default::default() }, &run_loop).unwrap();
     map.style_mut().load_json(&background_style("red"));
     map.drain_events();
     // The map published before the frontend attached: the frontend draws the
@@ -75,9 +76,9 @@ fn draws_each_update_of_the_attached_map_on_the_run_loop() {
 fn attaching_another_map_renders_that_map() {
     let run_loop = RunLoop::new();
     let size = Size::new(16, 16);
-    let frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
-    let mut first = Map::new(MapOptions { size, ..Default::default() }).unwrap();
-    let mut second = Map::new(MapOptions { size, ..Default::default() }).unwrap();
+    let frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
+    let mut first = Map::new(MapOptions { size, ..Default::default() }, &run_loop).unwrap();
+    let mut second = Map::new(MapOptions { size, ..Default::default() }, &run_loop).unwrap();
     first.style_mut().load_json(&background_style("red"));
     second.style_mut().load_json(&background_style("blue"));
     first.drain_events();

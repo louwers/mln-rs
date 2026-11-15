@@ -12,7 +12,7 @@ use crate::type_::Type;
 use crate::value::{Value, from_expression_value, to_string, type_of};
 
 /// A section of a `format` expression: its content and text options.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub struct FormatExpressionSection {
     /// Content can be expression that evaluates to String or Image.
     pub(crate) content: Expr,
@@ -48,7 +48,7 @@ impl FormatExpressionSection {
 }
 
 /// `["format", content, options, ...]`.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub struct FormatExpression {
     sections: Vec<FormatExpressionSection>,
 }

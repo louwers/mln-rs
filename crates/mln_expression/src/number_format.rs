@@ -38,7 +38,7 @@ fn format_number(
 }
 
 /// `["number-format", number, options]`.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct NumberFormat {
     number: Expr,
     locale: Option<Expr>,

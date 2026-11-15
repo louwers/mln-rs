@@ -19,7 +19,7 @@ doctest = false
 geo-types.workspace = true
 geojson.workspace = true
 mln_vec_map.workspace = true
-serde.workspace = true
+mln_wire = { workspace = true, features = ["geo-types"] }
 serde_json.workspace = true
 
 [lints]

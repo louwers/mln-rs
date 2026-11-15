@@ -8,23 +8,22 @@
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use glam::Vec2;
-use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_style::expression::EvaluationContext;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{
-    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOpacity, IconSize, SymbolLayerProperties,
-    SymbolLayoutProperties, SymbolPaintProperties, TextColor, TextField, TextHaloBlur, TextHaloColor, TextHaloWidth,
-    TextOpacity, TextSize, TextVariableAnchor, TextVariableAnchorOffset,
+    SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties,
 };
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
+use mln_style_types::TextWritingModeType;
 use mln_style_types::image::ImagePositions;
-use mln_style_types::{TextWritingModeType, VariableAnchorOffsetCollection};
 use mln_text::glyph::WritingModeType;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature, GeometryTileLayer};
 use mln_util::Color;
@@ -32,36 +31,36 @@ use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
 use mln_vec_map::VecMap;
 use parking_lot::{Mutex, MutexGuard, RwLock};
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates};
 use crate::bucket_geometry::GeometryVec;
+use crate::gfx::context::Context;
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::paint_property_binder::PaintPropertyBinder;
 
 crate::paint_property_binders!(
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
-        icon_opacity: IconOpacity => PaintPropertyBinder<f32>,
-        icon_color: IconColor => PaintPropertyBinder<Color>,
-        icon_halo_color: IconHaloColor => PaintPropertyBinder<Color>,
-        icon_halo_width: IconHaloWidth => PaintPropertyBinder<f32>,
-        icon_halo_blur: IconHaloBlur => PaintPropertyBinder<f32>,
+        icon_opacity => PaintPropertyBinder<f32>,
+        icon_color => PaintPropertyBinder<Color>,
+        icon_halo_color => PaintPropertyBinder<Color>,
+        icon_halo_width => PaintPropertyBinder<f32>,
+        icon_halo_blur => PaintPropertyBinder<f32>,
     }
 );
 
 crate::paint_property_binders!(
     pub struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
-        text_opacity: TextOpacity => PaintPropertyBinder<f32>,
-        text_color: TextColor => PaintPropertyBinder<Color>,
-        text_halo_color: TextHaloColor => PaintPropertyBinder<Color>,
-        text_halo_width: TextHaloWidth => PaintPropertyBinder<f32>,
-        text_halo_blur: TextHaloBlur => PaintPropertyBinder<f32>,
+        text_opacity => PaintPropertyBinder<f32>,
+        text_color => PaintPropertyBinder<Color>,
+        text_halo_color => PaintPropertyBinder<Color>,
+        text_halo_width => PaintPropertyBinder<f32>,
+        text_halo_blur => PaintPropertyBinder<f32>,
     }
 );
 
 /// The layout attributes of a symbol quad's vertex, and the quad's atlas
 /// origin.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub(crate) struct SymbolLayoutVertex {
     pub(crate) a1: [i16; 4],
@@ -74,6 +73,8 @@ pub(crate) struct SymbolLayoutVertex {
     /// and which tile reserves an image first, and so its position, varies
     /// from run to run.
     pub(crate) a4: [u16; 2],
+    /// The symbol's `symbol-height-offset`, in meters.
+    pub(crate) a5: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -88,12 +89,14 @@ pub(crate) struct SymbolOpacityVertex {
     pub(crate) a1: [f32; 1],
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub(crate) struct CollisionBoxLayoutVertex {
     pub(crate) a1: [i16; 2],
     pub(crate) a2: [i16; 2],
     pub(crate) a3: [i16; 2],
+    /// The symbol's `symbol-height-offset`, in meters.
+    pub(crate) a4: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -107,7 +110,7 @@ pub(crate) const MAX_GLYPH_ICON_SIZE: u16 = 255;
 pub(crate) const SIZE_PACK_FACTOR: u16 = 128;
 pub(crate) const MAX_PACKED_SIZE: u16 = MAX_GLYPH_ICON_SIZE * SIZE_PACK_FACTOR;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct SortKeyRange {
     pub(crate) sort_key: f32,
     pub(crate) start: usize,
@@ -125,7 +128,7 @@ pub(crate) struct ZoomEvaluatedSize {
 
 /// Evaluates a symbol's `text-size` or `icon-size`: a constant, a source
 /// function or a composite function.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, mln_wire::Wire)]
 pub(crate) enum SymbolSizeBinder {
     Constant {
         layout_size: f32,
@@ -159,7 +162,7 @@ impl SymbolSizeBinder {
         }
         let expression = size_property.as_expression().clone();
         if expression.is_feature_constant() {
-            let layout_size = expression.evaluate_zoom(tile_zoom + 1.0);
+            let layout_size = expression.evaluate(&EvaluationContext::new(tile_zoom + 1.0), 0.0);
             // A feature-constant expression without a zoom dependency (e.g.
             // one that only depends on the global state) has no zoom curve.
             let covering_ranges = if expression.is_zoom_constant() {
@@ -169,8 +172,8 @@ impl SymbolSizeBinder {
                 Some((
                     zoom_levels,
                     Range {
-                        min: expression.evaluate_zoom(zoom_levels.min),
-                        max: expression.evaluate_zoom(zoom_levels.max),
+                        min: expression.evaluate(&EvaluationContext::new(zoom_levels.min), 0.0),
+                        max: expression.evaluate(&EvaluationContext::new(zoom_levels.max), 0.0),
                     },
                 ))
             };
@@ -192,12 +195,18 @@ impl SymbolSizeBinder {
         match self {
             SymbolSizeBinder::Constant { .. } => Range { min: 0.0, max: 0.0 },
             SymbolSizeBinder::SourceFunction { expression, default_value } => {
-                let size = expression.evaluate_feature(feature, *default_value);
+                let size = expression.evaluate(&EvaluationContext::from_feature(Some(feature)), *default_value);
                 Range { min: size, max: size }
             }
             SymbolSizeBinder::CompositeFunction { expression, default_value, covering_zoom_stops, .. } => Range {
-                min: expression.evaluate_zoom_feature(covering_zoom_stops.min, feature, *default_value),
-                max: expression.evaluate_zoom_feature(covering_zoom_stops.max, feature, *default_value),
+                min: expression.evaluate(
+                    &EvaluationContext::with_zoom_feature(covering_zoom_stops.min, Some(feature)),
+                    *default_value,
+                ),
+                max: expression.evaluate(
+                    &EvaluationContext::with_zoom_feature(covering_zoom_stops.max, Some(feature)),
+                    *default_value,
+                ),
             },
         }
     }
@@ -220,7 +229,7 @@ impl SymbolSizeBinder {
                     let t = mln_math::clamp_f32(expression.interpolation_factor(*zoom_levels, current_zoom), 0.0, 1.0);
                     size = size_levels.min + t * (size_levels.max - size_levels.min);
                 } else if let Some(expression) = expression {
-                    size = expression.evaluate_zoom(current_zoom);
+                    size = expression.evaluate(&EvaluationContext::new(current_zoom), 0.0);
                 }
                 ZoomEvaluatedSize {
                     is_zoom_constant,
@@ -252,7 +261,7 @@ impl SymbolSizeBinder {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct PlacedSymbol {
     pub(crate) anchor_point: Vec2,
     pub(crate) segment: usize,
@@ -267,7 +276,7 @@ pub(crate) struct PlacedSymbol {
     pub(crate) start_index: usize,
     /// The crossTileID is only filled/used on the foreground for variable
     /// text anchors
-    pub(crate) cross_tile_id: u32,
+    pub(crate) cross_tile_id: Option<NonZeroU32>,
     /// The placedOrientation is only used when symbol layer's property is
     /// set to support placement for orientation variants.
     pub(crate) placed_orientation: Option<TextWritingModeType>,
@@ -275,6 +284,8 @@ pub(crate) struct PlacedSymbol {
     /// Reference to placed icon, only applicable for text symbols.
     pub(crate) placed_icon_index: Option<usize>,
     pub(crate) feature_id: Option<String>,
+    /// The symbol's `symbol-height-offset`, in meters above the ground.
+    pub(crate) height_offset: f32,
 }
 
 impl PlacedSymbol {
@@ -304,31 +315,32 @@ impl PlacedSymbol {
             glyph_offsets: Vec::new(),
             hidden: false,
             start_index: 0,
-            cross_tile_id: 0,
+            cross_tile_id: None,
             placed_orientation: None,
             angle: 0.0,
             placed_icon_index,
             feature_id,
+            height_offset: 0.0,
         }
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, mln_wire::Wire)]
 pub(crate) struct Buffer {
     pub(crate) attribute_data: GeometryVec<SymbolLayoutVertex>,
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) dynamic_attribute_data: Vec<SymbolDynamicLayoutVertex>,
     /// Positions for each layer that shares the bucket at another
     /// translation than its leader's. A layer keeps them for the bucket's
     /// life: drawables moved back to the shared positions would keep
     /// bindings to these. Placement makes them once the bucket is on the
     /// map side, so they don't cross with it from a worker.
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) opacity_attribute_data: Vec<SymbolOpacityVertex>,
     /// Three indices per triangle.
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) triangles: Vec<u16>,
     pub(crate) segments: Vec<SegmentBase>,
     pub(crate) placed_symbols: Vec<PlacedSymbol>,
@@ -386,21 +398,21 @@ impl Buffer {
 }
 
 /// The vertices and indices of a symbol bucket's collision boxes or circles.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, mln_wire::Wire)]
 pub(crate) struct CollisionBuffer {
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) vertices: Vec<CollisionBoxLayoutVertex>,
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) dynamic_vertices: Vec<CollisionBoxDynamicVertex>,
     pub(crate) segments: Vec<SegmentBase>,
     /// `lines` (box buffers: 2 per line) or `triangles` (circle buffers: 3
     /// per triangle).
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) indices: Vec<u16>,
 }
 
 /// The paint property binders of one layer (`SymbolBucket::PaintProperties`).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, mln_wire::Wire)]
 pub(crate) struct PaintProperties {
     pub(crate) icon_binders: SymbolIconBinders,
     pub(crate) text_binders: SymbolTextBinders,
@@ -408,7 +420,7 @@ pub(crate) struct PaintProperties {
 
 /// The state of a `SymbolBucket` that placement and sorting change after the
 /// bucket is shared.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, mln_wire::Wire)]
 pub(crate) struct SymbolBucketState {
     pub(crate) sorted_angle: f32,
     // Set and used by placement.
@@ -448,7 +460,7 @@ fn next_bucket_instance_id() -> u32 {
     MAX_BUCKET_INSTANCE_ID.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub(crate) struct SymbolBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
@@ -467,30 +479,32 @@ pub(crate) struct SymbolBucket {
     pub(crate) icon_size_binder: SymbolSizeBinder,
 
     pub(crate) tile_pixel_ratio: f32,
+    /// The highest `symbol-height-offset` of the bucket's symbols, in meters.
+    pub(crate) max_height_offset: f32,
     /// Port-only: a bucket another side made gets an id of this side's.
-    #[serde(skip, default = "next_bucket_instance_id")]
+    #[wire(skip, default = "next_bucket_instance_id")]
     pub(crate) bucket_instance_id: u32,
     pub(crate) allow_vertical_placement: bool,
     pub(crate) placement_modes: Vec<TextWritingModeType>,
-    #[serde(skip)]
+    #[wire(skip)]
     has_format_section_overrides: OnceLock<bool>,
 
     /// Bumped whenever the vertex data changes after the bucket is shared
     /// (placement, sorting), so drawables can refresh their attributes.
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) version: AtomicU32,
     /// What changed (the C++ shared vectors' `updateModified`): the
     /// opacity vertices (placement), the dynamic vertices (line labels,
     /// variable anchors), the triangle order (sortFeatures) and the paint
     /// property binders (feature state). `RenderSymbolLayer` refreshes only
     /// those in its drawables.
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) opacity_version: AtomicU32,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) dynamic_version: AtomicU32,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) sort_version: AtomicU32,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) binder_version: AtomicU32,
 
     state: Mutex<SymbolBucketState>,
@@ -536,6 +550,7 @@ impl SymbolBucket {
                 })
             });
         }
+        let max_height_offset = symbol_instances.iter().map(SymbolInstance::height_offset).fold(0.0, f32::max);
         SymbolBucket {
             base: BucketBase::default(),
             layout,
@@ -545,9 +560,10 @@ impl SymbolBucket {
             icons_in_text,
             sort_key_ranges,
             paint_properties: binders,
-            text_size_binder: SymbolSizeBinder::create(zoom, text_size, TextSize::default_value_f32()),
-            icon_size_binder: SymbolSizeBinder::create(zoom, icon_size, IconSize::default_value_f32()),
+            text_size_binder: SymbolSizeBinder::create(zoom, text_size, SymbolLayoutProperties::Defaults::text_size()),
+            icon_size_binder: SymbolSizeBinder::create(zoom, icon_size, SymbolLayoutProperties::Defaults::icon_size()),
             tile_pixel_ratio,
+            max_height_offset,
             bucket_instance_id: next_bucket_instance_id(),
             allow_vertical_placement,
             placement_modes,
@@ -600,18 +616,14 @@ impl SymbolBucket {
     pub(crate) fn has_format_section_overrides(&self) -> bool {
         *self
             .has_format_section_overrides
-            .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(self.layout.get::<TextField>()))
+            .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field))
     }
 
     pub(crate) fn has_variable_text_anchors(&self) -> bool {
-        let tvao = self.layout.get::<TextVariableAnchorOffset>();
-        let has_text_variable_anchor_offset = if tvao.is_constant() {
-            tvao.constant().is_some_and(|c: VariableAnchorOffsetCollection| !c.is_empty())
-        } else {
-            // C++ `isExpression()`: a PossiblyEvaluatedPropertyValue is either.
-            true
-        };
-        has_text_variable_anchor_offset || !self.layout.get::<TextVariableAnchor>().is_empty()
+        // A value that differs by feature may have offsets for some.
+        let has_text_variable_anchor_offset =
+            self.layout.text_variable_anchor_offset.constant().is_none_or(|offsets| !offsets.is_empty());
+        has_text_variable_anchor_offset || !self.layout.text_variable_anchor.uniform().is_empty()
     }
 
     pub(crate) fn sort_features(&self, angle: f32) {
@@ -728,6 +740,7 @@ impl SymbolBucket {
         is_sdf: bool,
         pixel_offset: Vec2,
         min_font_scale: Vec2,
+        height_offset: f32,
     ) -> SymbolLayoutVertex {
         let a_size_min = (MAX_PACKED_SIZE.min((size_data.min * f32::from(SIZE_PACK_FACTOR)) as u16) << 1)
             .wrapping_add(u16::from(is_sdf));
@@ -749,6 +762,7 @@ impl SymbolBucket {
                 (min_font_scale.y * 256.0) as i16,
             ],
             a4: tex_origin,
+            a5: height_offset,
         }
     }
 
@@ -763,11 +777,17 @@ impl SymbolBucket {
     }
 
     #[must_use]
-    pub(crate) fn collision_layout_vertex(a: Vec2, anchor: Vec2, o: Vec2) -> CollisionBoxLayoutVertex {
+    pub(crate) fn collision_layout_vertex(
+        a: Vec2,
+        anchor: Vec2,
+        o: Vec2,
+        height_offset: f32,
+    ) -> CollisionBoxLayoutVertex {
         CollisionBoxLayoutVertex {
             a1: [a.x as i16, a.y as i16],
             a2: [anchor.x as i16, anchor.y as i16],
             a3: [o.x.round() as i16, o.y.round() as i16],
+            a4: height_offset,
         }
     }
 
@@ -812,7 +832,7 @@ impl Bucket for SymbolBucket {
         &mut self.base
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 
@@ -842,23 +862,6 @@ impl Bucket for SymbolBucket {
             self.binder_version.fetch_add(1, Ordering::SeqCst);
             self.bump_version();
         }
-    }
-}
-
-/// The default `text-size` or `icon-size`, as `f32`.
-trait DefaultValueF32 {
-    fn default_value_f32() -> f32;
-}
-
-impl DefaultValueF32 for TextSize {
-    fn default_value_f32() -> f32 {
-        <TextSize as mln_style::properties::Property>::default_value()
-    }
-}
-
-impl DefaultValueF32 for IconSize {
-    fn default_value_f32() -> f32 {
-        <IconSize as mln_style::properties::Property>::default_value()
     }
 }
 

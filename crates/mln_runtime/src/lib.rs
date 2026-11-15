@@ -38,6 +38,7 @@ mod offline;
 #[cfg(target_family = "wasm")]
 #[path = "offline_web.rs"]
 mod offline;
+mod queue;
 mod render;
 mod resources;
 mod runtime;

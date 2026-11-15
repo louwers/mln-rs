@@ -2,9 +2,6 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use mln_actor::ActorRef;
-
-use crate::file_source_request::FileSourceRequestState;
 use crate::response::{Reason, ResourceError, Response};
 
 /// The path bytes as they are (POSIX paths are bytes; on other platforms
@@ -55,7 +52,9 @@ pub(crate) fn read_range(mut file: impl Read + Seek, data_range: Option<(u64, u6
     }
 }
 
-pub(crate) fn request_local_file(path: &[u8], req: &ActorRef<FileSourceRequestState>, data_range: Option<(u64, u64)>) {
+/// The file at `path`, or `data_range`'s bytes of it, or the error that
+/// reading it ran into.
+pub(crate) fn local_file_response(path: &[u8], data_range: Option<(u64, u64)>) -> Response {
     let mut response = Response::new();
     let path_display = String::from_utf8_lossy(path).into_owned();
     let path = match path_from_utf8(path) {
@@ -63,8 +62,7 @@ pub(crate) fn request_local_file(path: &[u8], req: &ActorRef<FileSourceRequestSt
         Err(message) => {
             // `catch (const std::filesystem::filesystem_error& exception)`.
             response.error = Some(Box::new(ResourceError::new(Reason::Other, message)));
-            req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
-            return;
+            return response;
         }
     };
 
@@ -89,6 +87,5 @@ pub(crate) fn request_local_file(path: &[u8], req: &ActorRef<FileSourceRequestSt
             Some(data) => response.data = Some(Arc::new(data)),
         }
     }
-
-    req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
+    response
 }

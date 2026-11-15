@@ -5,12 +5,11 @@ use std::time::Duration;
 
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::expression::GlobalStateMap;
 use crate::map::zoom_history::ZoomHistory;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct CrossfadeParameters {
     pub from_scale: f32,
     pub to_scale: f32,

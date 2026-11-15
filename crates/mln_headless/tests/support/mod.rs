@@ -29,7 +29,7 @@ use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
+use mln_storage::{FileSource, Kind, Resource, Responder, Response};
 use mln_style::custom_tile_loader::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
@@ -281,10 +281,11 @@ impl StubMapObserver {
     /// Dispatches `map`'s events from the run loop whenever the map has
     /// some, while the returned task lives.
     pub(crate) fn observe(self: &Rc<Self>, map: &Rc<RefCell<Map>>) -> AsyncTask {
+        let run_loop = map.borrow().run_loop().clone();
         let task = {
             let observer = Rc::downgrade(self);
             let map = Rc::downgrade(map);
-            AsyncTask::new(move || {
+            AsyncTask::new(&run_loop, move || {
                 if let (Some(observer), Some(map)) = (observer.upgrade(), map.upgrade()) {
                     observer.dispatch_events(&map);
                 }
@@ -299,49 +300,27 @@ impl StubMapObserver {
 // MARK: - FakeFileSource (test/include/mln/test/fake_file_source.hpp)
 
 struct FakeRequestEntry {
-    id: u64,
     resource: Resource,
-    callback: Rc<RefCell<Callback>>,
+    responder: Responder,
 }
 
 type FakeRequests = RefCell<Vec<FakeRequestEntry>>;
 
-/// A request of a [`FakeFileSource`]: removes itself from the list when
-/// dropped.
-struct FakeFileRequest {
-    id: u64,
-    list: Weak<FakeRequests>,
-}
-
-impl AsyncRequest for FakeFileRequest {}
-
-impl Drop for FakeFileRequest {
-    fn drop(&mut self) {
-        if let Some(list) = self.list.upgrade() {
-            list.borrow_mut().retain(|entry| entry.id != self.id);
-        }
-    }
-}
-
 /// Records the requests made; the test responds to them.
 pub(crate) struct FakeFileSource {
     requests: LocalObject<FakeRequests>,
-    next_id: Mutex<u64>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl FakeFileSource {
-    /// A file source with the default resource options.
     pub(crate) fn new() -> Self {
-        FakeFileSource {
-            requests: LocalObject::new(RefCell::new(Vec::new())),
-            next_id: Mutex::new(0),
-            resource_options: Mutex::new(ResourceOptions::default()),
-        }
+        FakeFileSource { requests: LocalObject::new(RefCell::new(Vec::new())) }
     }
 
+    /// The requests that weren't cancelled.
     fn list(&self) -> Rc<FakeRequests> {
-        self.requests.get().expect("FakeFileSource used from another thread")
+        let list = self.requests.get().expect("FakeFileSource used from another thread");
+        list.borrow_mut().retain(|entry| !entry.responder.is_cancelled());
+        list
     }
 
     pub(crate) fn requests_len(&self) -> usize {
@@ -351,15 +330,14 @@ impl FakeFileSource {
     /// `respond(kind, response)`: answers the first pending request of that
     /// kind; returns whether there was one.
     pub(crate) fn respond(&self, kind: Kind, response: &Response) -> bool {
-        let callback = {
+        let responder = {
             let list = self.list();
             let list = list.borrow();
-            list.iter().find(|entry| entry.resource.kind == kind).map(|entry| Rc::clone(&entry.callback))
+            list.iter().find(|entry| entry.resource.kind == kind).map(|entry| entry.responder.clone())
         };
-        match callback {
-            // Copy the callback, in case calling it deallocates the AsyncRequest.
-            Some(callback) => {
-                (callback.borrow_mut())(response.clone());
+        match responder {
+            Some(responder) => {
+                responder.send_now(response.clone());
                 true
             }
             None => false,
@@ -374,31 +352,12 @@ impl Default for FakeFileSource {
 }
 
 impl FileSource for FakeFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let id = {
-            let mut next = self.next_id.lock();
-            *next += 1;
-            *next
-        };
-        let list = self.list();
-        list.borrow_mut().push(FakeRequestEntry {
-            id,
-            resource: resource.clone(),
-            callback: Rc::new(RefCell::new(callback)),
-        });
-        Box::new(FakeFileRequest { id, list: Rc::downgrade(&list) })
+    fn load(&self, resource: &Resource, responder: Responder) {
+        self.list().borrow_mut().push(FakeRequestEntry { resource: resource.clone(), responder });
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }
 
@@ -476,7 +435,7 @@ impl Drop for FixtureLog {
 #[track_caller]
 pub(crate) fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
     let timed_out = Rc::new(Cell::new(false));
-    let timer = Timer::new();
+    let timer = Timer::new(run_loop);
     {
         let timed_out = Rc::clone(&timed_out);
         let run_loop = run_loop.clone();
@@ -518,7 +477,7 @@ impl MapTest<StubFileSource> {
 
     pub(crate) fn with_mode(pixel_ratio: f32, mode: MapMode) -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         Self::create(run_loop, file_source, pixel_ratio, mode)
     }
 }
@@ -537,9 +496,9 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     /// .withSize(frontend.getSize()).withPixelRatio(pixelRatio))`.
     pub(crate) fn create(run_loop: RunLoop, file_source: Arc<FS>, pixel_ratio: f32, mode: MapMode) -> Self {
         let observer = Rc::new(StubMapObserver::default());
-        let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio).expect("a headless frontend");
+        let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio, &run_loop).expect("a headless frontend");
         let options = MapOptions { map_mode: mode, size: frontend.get_size(), pixel_ratio, ..Default::default() };
-        let map = Map::with_file_source(Arc::<FS>::clone(&file_source), options).unwrap();
+        let map = Map::with_file_source(Arc::<FS>::clone(&file_source), options, &run_loop).unwrap();
         frontend.attach(&map);
         let map = Rc::new(RefCell::new(map));
         let events = observer.observe(&map);

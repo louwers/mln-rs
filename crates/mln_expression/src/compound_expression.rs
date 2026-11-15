@@ -10,6 +10,7 @@ use feature::{Identifier as FeatureIdentifier, Value as MbglValue};
 use mln_conversion::Convertible;
 use mln_math::{fmax, fmin};
 use mln_util::geometry::FeatureType;
+use mln_util::hash::HashMap;
 use mln_util::{Color, i18n};
 
 use crate::check_subtype::check_subtype;
@@ -31,7 +32,7 @@ pub(crate) enum Params {
 }
 
 /// The operator of a compound expression signature.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, mln_wire::Wire)]
 pub(crate) enum Op {
     E,
     Pi,
@@ -86,22 +87,6 @@ pub(crate) enum Op {
     Error,
     FeatureState,
     GlobalState,
-    FilterEq,
-    FilterIdEq,
-    FilterTypeEq,
-    FilterLt,
-    FilterIdLt,
-    FilterGt,
-    FilterIdGt,
-    FilterLe,
-    FilterIdLe,
-    FilterGe,
-    FilterIdGe,
-    FilterHas,
-    FilterHasId,
-    FilterTypeIn,
-    FilterIdIn,
-    FilterIn,
 }
 
 pub(crate) struct SignatureBase {
@@ -130,7 +115,6 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
     let num1 = || fixed(std::slice::from_ref(&T::Number));
     let num2 = || fixed(&[T::Number, T::Number]);
     let str1 = || fixed(std::slice::from_ref(&T::String));
-    let key_value = || fixed(&[T::String, T::Value]);
     let mut registry = vec![
         sig("e", n.clone(), none(), D::NONE, Op::E),
         sig("pi", n.clone(), none(), D::NONE, Op::Pi),
@@ -140,14 +124,14 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("rgba", T::Color, fixed(&[n.clone(), n.clone(), n.clone(), n.clone()]), D::NONE, Op::Rgba),
         sig("rgb", T::Color, fixed(&[n.clone(), n.clone(), n.clone()]), D::NONE, Op::Rgb),
         sig("zoom", n.clone(), none(), D::ZOOM, Op::Zoom),
-        sig("heatmap-density", n.clone(), none(), D::NONE, Op::HeatmapDensity),
+        sig("heatmap-density", n.clone(), none(), D::PROPERTY_INPUT, Op::HeatmapDensity),
         sig("elevation", n.clone(), none(), D::ELEVATION, Op::Elevation),
-        sig("line-progress", n.clone(), none(), D::NONE, Op::LineProgress),
-        sig("accumulated", T::Value, none(), D::NONE, Op::Accumulated),
+        sig("line-progress", n.clone(), none(), D::PROPERTY_INPUT, Op::LineProgress),
+        sig("accumulated", T::Value, none(), D::PROPERTY_INPUT, Op::Accumulated),
         sig("has", b.clone(), str1(), D::FEATURE, Op::Has),
-        sig("has", b.clone(), fixed(&[s.clone(), T::Object]), D::FEATURE, Op::HasObject),
+        sig("has", b.clone(), fixed(&[s.clone(), T::Object]), D::NONE, Op::HasObject),
         sig("get", T::Value, str1(), D::FEATURE, Op::Get),
-        sig("get", T::Value, fixed(&[s.clone(), T::Object]), D::FEATURE, Op::GetObject),
+        sig("get", T::Value, fixed(&[s.clone(), T::Object]), D::NONE, Op::GetObject),
         sig("properties", T::Object, none(), D::FEATURE, Op::Properties),
         sig("geometry-type", s.clone(), none(), D::FEATURE, Op::GeometryType),
         sig("id", T::Value, none(), D::FEATURE, Op::Id),
@@ -189,32 +173,32 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("join", s.clone(), fixed(&[T::array(s.clone()), s.clone()]), D::NONE, Op::Join),
         sig("resolved-locale", s.clone(), fixed(&[T::Collator]), D::NONE, Op::ResolvedLocale),
         sig("error", T::Error, str1(), D::NONE, Op::Error),
-        sig("feature-state", T::Value, str1(), D::FEATURE, Op::FeatureState),
+        sig("feature-state", T::Value, str1(), D::FEATURE | D::FEATURE_STATE, Op::FeatureState),
         sig("global-state", T::Value, str1(), D::GLOBAL_STATE, Op::GlobalState),
-        // Legacy filters
-        sig("filter-==", b.clone(), key_value(), D::FEATURE, Op::FilterEq),
-        sig("filter-id-==", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdEq),
-        sig("filter-type-==", b.clone(), str1(), D::FEATURE, Op::FilterTypeEq),
-        sig("filter-<", b.clone(), key_value(), D::FEATURE, Op::FilterLt),
-        sig("filter-id-<", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdLt),
-        sig("filter->", b.clone(), key_value(), D::FEATURE, Op::FilterGt),
-        sig("filter-id->", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdGt),
-        sig("filter-<=", b.clone(), key_value(), D::FEATURE, Op::FilterLe),
-        sig("filter-id-<=", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdLe),
-        sig("filter->=", b.clone(), key_value(), D::FEATURE, Op::FilterGe),
-        sig("filter-id->=", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdGe),
-        sig("filter-has", b.clone(), str1(), D::FEATURE, Op::FilterHas),
-        sig("filter-has-id", b.clone(), none(), D::FEATURE, Op::FilterHasId),
-        sig("filter-type-in", b.clone(), Params::Varargs(s.clone()), D::FEATURE, Op::FilterTypeIn),
-        sig("filter-id-in", b.clone(), Params::Varargs(T::Value), D::FEATURE, Op::FilterIdIn),
-        sig("filter-in", b, Params::Varargs(T::Value), D::FEATURE, Op::FilterIn),
     ]);
     registry
 });
 
+/// The signatures of each name, in definition order.
+static BY_NAME: LazyLock<HashMap<&'static str, Vec<&'static SignatureBase>>> = LazyLock::new(|| {
+    let mut by_name: HashMap<&'static str, Vec<&'static SignatureBase>> = HashMap::default();
+    for signature in REGISTRY.iter() {
+        by_name.entry(signature.name).or_default().push(signature);
+    }
+    by_name
+});
+
+/// The signature of each op.
+static BY_OP: LazyLock<HashMap<Op, &'static SignatureBase>> = LazyLock::new(|| {
+    let by_op: HashMap<Op, &'static SignatureBase> =
+        REGISTRY.iter().map(|signature| (signature.op, signature)).collect();
+    debug_assert_eq!(by_op.len(), REGISTRY.len(), "two signatures share an op");
+    by_op
+});
+
 /// The signatures registered under `name`, in definition order.
-fn definitions(name: &str) -> Vec<&'static SignatureBase> {
-    REGISTRY.iter().filter(|s| s.name == name).collect()
+fn definitions(name: &str) -> &'static [&'static SignatureBase] {
+    BY_NAME.get(name).map_or(&[], Vec::as_slice)
 }
 
 pub(crate) fn feature_unavailable() -> EvaluationError {
@@ -251,43 +235,28 @@ fn feature_type_as_string(t: FeatureType) -> &'static str {
     }
 }
 
-fn mbgl_as_double(value: &MbglValue) -> Option<f64> {
-    match *value {
-        MbglValue::Double(v) => Some(v),
-        MbglValue::Uint(v) => Some(v as f64),
-        MbglValue::Int(v) => Some(v as f64),
-        _ => None,
-    }
-}
-
-fn id_as_double(id: &FeatureIdentifier) -> Option<f64> {
-    match *id {
-        FeatureIdentifier::Double(v) => Some(v),
-        FeatureIdentifier::Uint(v) => Some(v as f64),
-        FeatureIdentifier::Int(v) => Some(v as f64),
-        _ => None,
-    }
-}
-
-/// The comparison of a legacy ordering filter.
-fn ordering_holds(op: Op, ordering: Option<std::cmp::Ordering>) -> bool {
-    let Some(ordering) = ordering else {
-        return false;
-    };
-    match op {
-        Op::FilterLt | Op::FilterIdLt => ordering.is_lt(),
-        Op::FilterGt | Op::FilterIdGt => ordering.is_gt(),
-        Op::FilterLe | Op::FilterIdLe => ordering.is_le(),
-        Op::FilterGe | Op::FilterIdGe => ordering.is_ge(),
-        _ => unreachable!("not an ordering filter: {op:?}"),
-    }
-}
-
 /// An operator with a name and typed arguments.
-#[derive(Clone)]
+#[derive(Clone, mln_wire::Wire)]
 pub(crate) struct CompoundExpression {
+    #[wire(with = "signature_by_op")]
     signature: &'static SignatureBase,
     args: Box<[Expr]>,
+}
+
+/// A signature crosses as its op, which only it has.
+mod signature_by_op {
+
+    use super::{BY_OP, Op, SignatureBase};
+
+    #[expect(clippy::trivially_copy_pass_by_ref, reason = "`#[wire(with)]` passes the field by reference")]
+    pub(super) fn write(signature: &&'static SignatureBase, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(&signature.op, w);
+    }
+
+    pub(super) fn read(r: &mut mln_wire::Reader<'_>) -> Option<&'static SignatureBase> {
+        let op = <Op as mln_wire::Wire>::read(r)?;
+        BY_OP.get(&op).copied().or_else(|| r.fail("no signature for an op"))
+    }
 }
 
 impl PartialEq for CompoundExpression {
@@ -297,14 +266,6 @@ impl PartialEq for CompoundExpression {
 }
 
 impl CompoundExpression {
-    #[must_use]
-    pub(crate) fn get_parameter_count(&self) -> Option<usize> {
-        match &self.signature.params {
-            Params::Varargs(_) => None,
-            Params::Fixed(p) => Some(p.len()),
-        }
-    }
-
     /// The signature the arguments matched.
     #[must_use]
     pub(crate) fn signature(&self) -> &'static SignatureBase {
@@ -317,7 +278,7 @@ impl CompoundExpression {
     }
 
     pub(crate) fn exists(name: &str) -> bool {
-        REGISTRY.iter().any(|s| s.name == name)
+        BY_NAME.contains_key(name)
     }
 
     pub(crate) fn serialize(&self) -> MbglValue {
@@ -453,86 +414,6 @@ impl CompoundExpression {
                 object.contains_key(&*key)
             }
             Op::IsSupportedScript => is_supported_script(params, &a[0].eval_str(params)?),
-            Op::FilterEq => {
-                let key = a[0].eval_str(params)?;
-                let value = a[1].evaluate_ref(params)?;
-                let feature = params.feature.expect("feature");
-                feature.get_value(&key).is_some_and(|rhs| *value == from_mbgl_value_owned(rhs))
-            }
-            Op::FilterIdEq => {
-                let value = a[0].evaluate_ref(params)?;
-                let feature = params.feature.expect("feature");
-                *value == identifier_to_expression_value(feature.get_id())
-            }
-            Op::FilterTypeEq => {
-                let type_ = a[0].eval_str(params)?;
-                params.feature.is_some_and(|feature| feature_type_as_string(feature.get_type()) == type_)
-            }
-            Op::FilterLt | Op::FilterGt | Op::FilterLe | Op::FilterGe => {
-                // A legacy comparison filter compares a number to a numeric
-                // feature value and a string to a string one.
-                let key = a[0].eval_str(params)?;
-                let value = a[1].evaluate_ref(params)?;
-                let feature = params.feature.expect("feature");
-                match &*value {
-                    Value::Number(value) => feature
-                        .get_value(&key)
-                        .and_then(|v| mbgl_as_double(&v))
-                        .is_some_and(|rhs| ordering_holds(op, rhs.partial_cmp(value))),
-                    Value::String(value) => match feature.get_value(&key) {
-                        Some(MbglValue::String(rhs)) => ordering_holds(op, Some(rhs.as_str().cmp(value))),
-                        _ => false,
-                    },
-                    _ => false,
-                }
-            }
-            Op::FilterIdLt | Op::FilterIdGt | Op::FilterIdLe | Op::FilterIdGe => {
-                let value = a[0].evaluate_ref(params)?;
-                let id = params.feature.expect("feature").get_id();
-                match &*value {
-                    Value::Number(value) => {
-                        id_as_double(&id).is_some_and(|rhs| ordering_holds(op, rhs.partial_cmp(value)))
-                    }
-                    Value::String(value) => match id {
-                        FeatureIdentifier::String(rhs) => ordering_holds(op, Some(rhs.as_str().cmp(value))),
-                        _ => false,
-                    },
-                    _ => false,
-                }
-            }
-            Op::FilterHas => {
-                let key = a[0].eval_str(params)?;
-                params.feature.expect("feature").get_value(&key).is_some()
-            }
-            Op::FilterHasId => !matches!(params.feature.expect("feature").get_id(), FeatureIdentifier::Null),
-            Op::FilterTypeIn => {
-                let t = feature_type_as_string(params.feature.expect("feature").get_type());
-                let mut found = false;
-                for arg in a {
-                    found |= arg.eval_str(params)? == t;
-                }
-                found
-            }
-            Op::FilterIdIn => {
-                let mut values = Vec::with_capacity(a.len());
-                for arg in a {
-                    values.push(arg.evaluate_ref(params)?);
-                }
-                let id = identifier_to_expression_value(params.feature.expect("feature").get_id());
-                values.iter().any(|v| **v == id)
-            }
-            Op::FilterIn => {
-                let mut values = Vec::with_capacity(a.len());
-                for arg in a {
-                    values.push(arg.evaluate_ref(params)?);
-                }
-                if values.len() < 2 {
-                    return Ok(false);
-                }
-                let Value::String(key) = &*values[0] else { unreachable!("string key") };
-                let value = params.feature.expect("feature").get_value(key).map(from_mbgl_value_owned);
-                value.is_some_and(|value| values[1..].iter().any(|v| **v == value))
-            }
             Op::Error => return Err(self.error(params)),
             _ => return bool::from_value(self.evaluate(params)?),
         })
@@ -783,7 +664,7 @@ pub(crate) fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx
     // Each failed overload parses its arguments, so two overloads of one arity
     // would make parsing a nested chain of them exponential in its depth.
     let mut overload_matched_arity = false;
-    for signature in &definitions {
+    for signature in definitions {
         let matches = match &signature.params {
             Params::Varargs(_) => true,
             Params::Fixed(p) => p.len() == length - 1,
@@ -813,7 +694,7 @@ pub(crate) fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx
             // When the args couldn't be coerced to this overload's expected
             // types, move on to the next one.
             if !arg_parse_failed {
-                let parse_with_args = create_compound_expression_from(&definitions, args, ctx);
+                let parse_with_args = create_compound_expression_from(definitions, args, ctx);
                 if parse_with_args.is_some() {
                     return parse_with_args;
                 }
@@ -836,11 +717,11 @@ pub(crate) fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx
         args.push(parsed);
     }
 
-    ctx.error(expected_types_error(&definitions, &args));
+    ctx.error(expected_types_error(definitions, &args));
 
     None
 }
 
 pub fn create_compound_expression(name: &str, args: Vec<Expr>, ctx: &mut ParsingContext) -> ParseResult {
-    create_compound_expression_from(&definitions(name), args, ctx)
+    create_compound_expression_from(definitions(name), args, ctx)
 }

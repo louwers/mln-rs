@@ -7,7 +7,6 @@ use mln_map::{CameraOptions, MapMode};
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::PropertyValue;
 use mln_style::conversion::{Convertible, Error, convert};
 use mln_style::expression::Value as ExpressionValue;
 use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
@@ -20,9 +19,10 @@ use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_util::ErrorKind;
 use mln_util::feature::Feature;
 use mln_util::geo::{LatLng, ScreenCoordinate};
+use serde_json::json;
 
-use crate::style_image;
 use crate::support::*;
+use crate::{set, style_image};
 
 /// The `QueryTest` fixture: a static 256x256 map with
 /// `test/fixtures/api/query_style.json` and the "test-icon" image, rendered
@@ -32,7 +32,7 @@ struct QueryTest(MapTest);
 impl QueryTest {
     fn new() -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         let test = QueryTest(MapTest::create(run_loop, file_source, 1.0, MapMode::Static));
         test.map().style_mut().load_json(&read_file("test/fixtures/api/query_style.json"));
         test.map().style_mut().add_image(style_image(
@@ -564,11 +564,11 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     let options = GeoJSONOptions { cluster: true, ..GeoJSONOptions::default() };
     let source = GeoJSONSource::new("cluster_source", Arc::new(options));
     source.set_url("http://url");
-    source.load_description(&*test.0.file_source);
+    source.load_description(&*test.0.file_source, &test.0.run_loop);
 
     let mut cluster_layer = SymbolLayer::new("cluster_layer", "cluster_source");
-    cluster_layer.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("test-icon")));
-    cluster_layer.set_icon_size(&PropertyValue::Constant(12.0));
+    set(&mut cluster_layer, "icon-image", &json!("test-icon"));
+    set(&mut cluster_layer, "icon-size", &json!(12.0));
 
     test.map().jump_to(&CameraOptions { center: Some(coordinate), zoom: Some(0.0), ..Default::default() });
     test.map().style_mut().add_source(Box::new(source)).unwrap();

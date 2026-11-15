@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 /// Color blending equation type
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -101,17 +99,8 @@ pub enum CullFaceWindingType {
     CounterClockwise,
 }
 
-/// Buffer usage type
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum BufferUsageType {
-    StreamDraw,
-    StaticDraw,
-    DynamicDraw,
-}
-
 /// Texture pixel type
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, mln_wire::Wire)]
 #[repr(u8)]
 pub enum TexturePixelType {
     RGBA,

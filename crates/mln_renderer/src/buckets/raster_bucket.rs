@@ -12,16 +12,15 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use geometry::Point;
-use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::image::PremultipliedImage;
 use mln_util::time::Instant;
 use parking_lot::{Mutex, MutexGuard};
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
+use crate::gfx::context::Context;
 use crate::tile_mask::TileMask;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -62,11 +61,11 @@ fn full_mask() -> TileMask {
 /// A raster tile's image and the geometry that draws it. Serde writes the
 /// image, which is what a worker sets (`tile/worker_codec`); the geometry is
 /// the tile's (`set_mask`).
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub struct RasterBucket {
     pub(crate) base: BucketBase,
     pub(crate) image: Option<Arc<PremultipliedImage>>,
-    #[serde(skip, default = "unmasked")]
+    #[wire(skip, default = "unmasked")]
     geometry: Mutex<RasterBucketGeometry>,
 }
 
@@ -213,7 +212,7 @@ impl Bucket for RasterBucket {
         &mut self.base
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &Context) {
         if !self.has_data() {
             return;
         }

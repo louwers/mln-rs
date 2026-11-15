@@ -11,10 +11,8 @@ use std::sync::{Arc, OnceLock};
 use jni::errors::Error as JniError;
 use jni::objects::{Global, JObject};
 use jni::{EnvUnowned, JavaVM, Outcome, jni_sig, jni_str};
-use mln_actor::ActorRef;
 use mln_util::error::Error;
 
-use crate::file_source_request::FileSourceRequestState;
 use crate::local_file_request::read_range;
 use crate::response::{Reason, ResourceError, Response};
 
@@ -164,10 +162,9 @@ mod libc_seek {
     pub(super) const END: c_int = 2;
 }
 
-/// Answers `req` with the app's asset `name`, a path in its `assets`
-/// directory, or `data_range`'s bytes of it, as `request_local_file` answers
-/// with a file.
-pub(crate) fn request_asset(name: &[u8], req: &ActorRef<FileSourceRequestState>, data_range: Option<(u64, u64)>) {
+/// The app's asset `name`, a path in its `assets` directory, or
+/// `data_range`'s bytes of it, as `local_file_response` reads a file.
+pub(crate) fn asset_response(name: &[u8], data_range: Option<(u64, u64)>) -> Response {
     let display = String::from_utf8_lossy(name).into_owned();
     let mut response = Response::new();
     let error = |reason, message: String| Some(Box::new(ResourceError::new(reason, message)));
@@ -191,5 +188,5 @@ pub(crate) fn request_asset(name: &[u8], req: &ActorRef<FileSourceRequestState>,
             }
         }
     }
-    req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
+    response
 }

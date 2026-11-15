@@ -9,9 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
+use mln_gfx::ShaderRegistry;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
-use mln_gfx::{Context, LayerGroupBasePtr, ShaderRegistry};
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::expression::Dependency;
 use mln_style::layer::layer_type_info;
@@ -29,6 +29,8 @@ use mln_util::vectors::{Vec2, Vec3, Vec4};
 
 use crate::bucket::BucketPtr;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::gfx::context::Context;
+use crate::layer_group::LayerGroupPtr;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
@@ -447,7 +449,7 @@ pub struct RenderLayerBase {
     pub(crate) base_impl: Arc<dyn layer::Impl>,
 
     pub(crate) passes: RenderPass,
-    pub(crate) layer_group: Option<LayerGroupBasePtr>,
+    pub(crate) layer_group: Option<LayerGroupPtr>,
     pub(crate) layer_tweaker: Option<LayerTweakerPtr>,
     pub(crate) layer_index: i32,
     pub(crate) style_dependencies: Dependency,
@@ -462,7 +464,7 @@ pub struct RenderLayerBase {
     /// The tile IDs in `render_tiles`, along with the identity of the
     /// bucket from which they were built (C++ `TinyUnorderedMap`; only
     /// looked up).
-    pub(crate) render_tile_ids: HashMap<OverscaledTileID, SimpleIdentity>,
+    pub(crate) render_tile_ids: HashMap<OverscaledTileID, Option<SimpleIdentity>>,
     // symbols: `placementData`.
     pub(crate) placement_data: LayerPlacementData,
     // symbols: `followerData`.
@@ -543,7 +545,7 @@ pub trait RenderLayer {
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
-        _context: &dyn Context,
+        _context: &Context,
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -554,7 +556,7 @@ pub trait RenderLayer {
 
     /// Runs a custom layer's prerender, after the layer groups upload and
     /// before the frame's first pass, which draws into `target`.
-    fn prerender(&mut self, _parameters: &PaintParameters<'_>, _target: &dyn mln_gfx::DrawTarget) {}
+    fn prerender(&mut self, _parameters: &PaintParameters<'_>) {}
 
     /// Tells a custom layer's host that the renderer's graphics objects are
     /// lost, and lets go of it.
@@ -648,7 +650,7 @@ pub trait RenderLayer {
             return;
         };
 
-        let new_render_tile_ids: HashMap<OverscaledTileID, SimpleIdentity> = render_tiles
+        let new_render_tile_ids: HashMap<OverscaledTileID, Option<SimpleIdentity>> = render_tiles
             .iter()
             .map(|tile| {
                 let tile_id = *tile.get_overscaled_tile_id();
@@ -666,7 +668,7 @@ pub trait RenderLayer {
     /// in a tile's `RenderData` will only be replaced when the asynchronous
     /// load for the tile is complete, at which point the drawable for the
     /// tile may need to be updated or replaced.
-    fn get_render_tile_bucket_id(&self, tile_id: &OverscaledTileID) -> SimpleIdentity {
+    fn get_render_tile_bucket_id(&self, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
         get_render_tile_bucket_id(self.base(), tile_id)
     }
 
@@ -675,8 +677,8 @@ pub trait RenderLayer {
     /// be rendered or the ID is unchanged.
     fn set_render_tile_bucket_id(&mut self, tile_id: &OverscaledTileID, bucket_id: SimpleIdentity) -> bool {
         match self.base_mut().render_tile_ids.get_mut(tile_id) {
-            Some(id) if *id != bucket_id => {
-                *id = bucket_id;
+            Some(id) if *id != Some(bucket_id) => {
+                *id = Some(bucket_id);
                 true
             }
             _ => false,
@@ -757,7 +759,7 @@ pub trait RenderLayer {
         false
     }
 
-    fn set_layer_group(&mut self, layer_group: Option<LayerGroupBasePtr>, changes: &mut UniqueChangeRequestVec) {
+    fn set_layer_group(&mut self, layer_group: Option<LayerGroupPtr>, changes: &mut UniqueChangeRequestVec) {
         // Remove the active layer group, if any, before replacing it.
         let old = self.base().layer_group.clone();
         activate_layer_group(old.as_ref(), false, changes);
@@ -824,15 +826,14 @@ pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &
     layer.update_render_tile_ids();
 }
 
-/// The bucket id of the render tile `tile_id`, or `SimpleIdentity::EMPTY` if
-/// there is none.
-fn get_render_tile_bucket_id(base: &RenderLayerBase, tile_id: &OverscaledTileID) -> SimpleIdentity {
-    base.render_tile_ids.get(tile_id).copied().unwrap_or(SimpleIdentity::EMPTY)
+/// The bucket id of the render tile `tile_id`, or `None` if there is none.
+fn get_render_tile_bucket_id(base: &RenderLayerBase, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
+    base.render_tile_ids.get(tile_id).copied().flatten()
 }
 
 /// (Un-)Register the layer group with the orchestrator.
 pub(crate) fn activate_layer_group(
-    layer_group: Option<&LayerGroupBasePtr>,
+    layer_group: Option<&LayerGroupPtr>,
     activate: bool,
     changes: &mut UniqueChangeRequestVec,
 ) {
@@ -848,13 +849,9 @@ pub(crate) fn activate_layer_group(
     }
 }
 
-pub(crate) fn change_layer_index(
-    group: Option<&LayerGroupBasePtr>,
-    new_index: i32,
-    changes: &mut UniqueChangeRequestVec,
-) {
+pub(crate) fn change_layer_index(group: Option<&LayerGroupPtr>, new_index: i32, changes: &mut UniqueChangeRequestVec) {
     if let Some(group) = group
-        && group.borrow().get_layer_index() != new_index
+        && group.borrow().layer_index != new_index
     {
         changes.push(ChangeRequest::UpdateLayerGroupIndex(Rc::clone(group), new_index));
     }

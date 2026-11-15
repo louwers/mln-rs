@@ -1,22 +1,19 @@
 // The asynchronous mode polls the pending requests from an AsyncTask on the
-// current RunLoop, re-armed every millisecond while requests are pending
-// (C++: a 1 ms repeating `util::Timer`). The
-// stub lives on the thread that created it; requests must come from that
-// thread.
+// stub's RunLoop, re-armed every millisecond while requests are pending.
+// The stub lives on the thread that created it; requests must come from that
+// thread, and it answers them with `Responder::send_now`. A cancelled request
+// leaves `pending` at the next poll.
 
 use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
-use feature::Value;
-use mln_actor::{AsyncTask, LocalObject};
+use mln_actor::{AsyncTask, LocalObject, RunLoop};
 use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
-use parking_lot::Mutex;
 
-use crate::async_request::AsyncRequest;
-use crate::file_source::{Callback, FileSource};
+use crate::file_source::FileSource;
+use crate::request::Responder;
 use crate::resource::{Kind, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::Response;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,40 +24,22 @@ pub enum ResponseType {
     Manual,
 }
 
-/// A responder: `std::function<std::optional<Response>(const Resource&)>`.
-pub(crate) type Responder = Rc<dyn Fn(&Resource) -> Option<Response>>;
+/// What answers a request: its response, or `None` to answer it later.
+pub(crate) type Answer = Rc<dyn Fn(&Resource) -> Option<Response>>;
 
 #[derive(Default)]
 struct State {
-    pending: VecMap<u64, (Resource, Responder, Rc<RefCell<Callback>>)>,
+    pending: VecMap<u64, (Resource, Answer, Responder)>,
     next_id: u64,
     timer: Option<AsyncTask>,
-    responders: HashMap<Kind, Responder>,
-    // gtests-core: the C++ `response` member (the responder for every kind;
-    // by default `defaultResponse`, which dispatches to the per-kind ones).
-    response: Option<Responder>,
-    properties: HashMap<String, Value>,
+    responders: HashMap<Kind, Answer>,
+    /// The answer for every kind; by default the per-kind ones.
+    response: Option<Answer>,
 }
 
 pub struct StubFileSource {
     type_: ResponseType,
     state: LocalObject<RefCell<State>>,
-    resource_options: Mutex<ResourceOptions>,
-}
-
-struct StubFileRequest {
-    id: u64,
-    state: Weak<RefCell<State>>,
-}
-
-impl AsyncRequest for StubFileRequest {}
-
-impl Drop for StubFileRequest {
-    fn drop(&mut self) {
-        if let Some(state) = self.state.upgrade() {
-            state.borrow_mut().pending.remove(&self.id);
-        }
-    }
 }
 
 fn unexpected(resource: &Resource) -> Option<Response> {
@@ -69,23 +48,20 @@ fn unexpected(resource: &Resource) -> Option<Response> {
 }
 
 impl StubFileSource {
+    /// A stub on `run_loop`, which polls the asynchronous one's requests.
     #[must_use]
-    pub fn new(type_: ResponseType) -> Self {
+    pub fn new(run_loop: &RunLoop, type_: ResponseType) -> Self {
         let state = Rc::new(RefCell::new(State::default()));
         if type_ == ResponseType::Asynchronous {
             let weak = Rc::downgrade(&state);
-            let timer = AsyncTask::new(move || {
+            let timer = AsyncTask::new(run_loop, move || {
                 if let Some(state) = weak.upgrade() {
                     Self::poll(&state);
                 }
             });
             state.borrow_mut().timer = Some(timer);
         }
-        StubFileSource {
-            type_,
-            state: LocalObject::from_rc(state),
-            resource_options: Mutex::new(ResourceOptions::default()),
-        }
+        StubFileSource { type_, state: LocalObject::from_rc(state) }
     }
 
     fn state(&self) -> Rc<RefCell<State>> {
@@ -109,7 +85,7 @@ impl StubFileSource {
     /// one was set, else `defaultResponse`, which dispatches to the per-kind
     /// responder current when it is called (so a responder replaced while a
     /// request is pending, e.g. after an error response, answers the retry).
-    fn response(&self) -> Responder {
+    fn response(&self) -> Answer {
         let state = self.state();
         if let Some(response) = state.borrow().response.clone() {
             return response;
@@ -132,11 +108,14 @@ impl StubFileSource {
         for id in ids {
             // A callback can cancel or start requests, so take each one out
             // of `pending` before calling it.
-            let Some((resource, responder, callback)) = state.borrow_mut().pending.remove(&id) else {
+            let Some((resource, answer, responder)) = state.borrow_mut().pending.remove(&id) else {
                 continue;
             };
-            if let Some(res) = responder(&resource) {
-                (callback.borrow_mut())(res);
+            if responder.is_cancelled() {
+                continue;
+            }
+            if let Some(res) = answer(&resource) {
+                responder.send_now(res);
             }
         }
     }
@@ -149,31 +128,27 @@ impl StubFileSource {
 
     /// The timer callback.
     fn poll(state: &Rc<RefCell<State>>) {
-        // Explicit copy to avoid iterator invalidation if ~StubFileRequest
-        // gets called within the loop.
-        let pending: Vec<(u64, Resource, Responder, Rc<RefCell<Callback>>)> = state
+        state.borrow_mut().pending.retain(|_, (_, _, responder)| !responder.is_cancelled());
+        // A copy: an answer may start or cancel requests.
+        let pending: Vec<(u64, Resource, Answer, Responder)> = state
             .borrow()
             .pending
             .iter()
-            .map(|(id, (resource, responder, callback))| {
-                (*id, resource.clone(), Rc::clone(responder), Rc::clone(callback))
-            })
+            .map(|(id, (resource, answer, responder))| (*id, resource.clone(), Rc::clone(answer), responder.clone()))
             .collect();
-        for (id, resource, responder, callback) in pending {
-            if !state.borrow().pending.contains_key(&id) {
+        for (id, resource, answer, responder) in pending {
+            if responder.is_cancelled() {
                 continue;
             }
-            if let Some(res) = responder(&resource) {
-                // This must be before calling the callback, because it's
-                // possible that the callback could deallocate the
-                // AsyncRequest itself.
+            if let Some(res) = answer(&resource) {
+                // A request that failed is retried at the next poll.
                 if res.error.is_none() {
                     state.borrow_mut().pending.remove(&id);
                 }
-
-                (callback.borrow_mut())(res);
+                responder.send_now(res);
             }
         }
+        state.borrow_mut().pending.retain(|_, (_, _, responder)| !responder.is_cancelled());
         if !state.borrow().pending.is_empty() {
             // The next timer tick.
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -183,46 +158,28 @@ impl StubFileSource {
 }
 
 impl FileSource for StubFileSource {
-    fn request(&self, resource: &Resource, mut callback: Callback) -> Box<dyn AsyncRequest> {
+    fn load(&self, resource: &Resource, responder: Responder) {
         let state = self.state();
         let id = {
             let mut s = state.borrow_mut();
             s.next_id += 1;
             s.next_id
         };
-        let req = StubFileRequest { id, state: Rc::downgrade(&state) };
-        let responder = self.response();
+        let answer = self.response();
         match self.type_ {
             ResponseType::Synchronous => {
-                if let Some(res) = responder(resource) {
-                    callback(res);
+                if let Some(res) = answer(resource) {
+                    responder.send_now(res);
                 }
             }
             ResponseType::Asynchronous | ResponseType::Manual => {
-                state.borrow_mut().pending.insert(id, (resource.clone(), responder, Rc::new(RefCell::new(callback))));
+                state.borrow_mut().pending.insert(id, (resource.clone(), answer, responder));
                 Self::schedule_poll(&state);
             }
         }
-        Box::new(req)
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_property(&self, key: &str, value: &Value) {
-        self.state().borrow_mut().properties.insert(key.to_owned(), value.clone());
-    }
-
-    fn get_property(&self, key: &str) -> Value {
-        self.state().borrow().properties.get(key).cloned().unwrap_or(Value::Null)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

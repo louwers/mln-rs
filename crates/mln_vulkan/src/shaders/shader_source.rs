@@ -1,8 +1,6 @@
-// The tables describe the vertex layout the port's renderer produces, which
-// is C++'s with MLN_USE_FILL_EXTRUSION_INSTANCING on and
-// MLN_USE_SYMBOL_INSTANCING off: the symbol tables are the non-instanced ones,
-// plus the attribute the port adds (`tex_origin`), and the instanced fill
-// extrusions' have the next outline vertex as instance attributes of its own.
+// The tables describe the vertex layout the renderer produces: symbols
+// aren't instanced and have a `tex_origin` attribute, and the instanced fill
+// extrusions have the next outline vertex as instance attributes of its own.
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::shader_defines::{
@@ -11,28 +9,29 @@ use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
     ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
     ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE,
-    ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, ID_COLLISION_POS_VERTEX_ATTRIBUTE,
-    ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
-    ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
-    ID_DEBUG_OVERLAY_TEXTURE, ID_DEBUG_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
-    ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_COLOR_RAMP_TEXTURE,
-    ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE,
-    ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE,
-    ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE,
-    ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE,
-    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE, ID_RASTER_IMAGE0_TEXTURE,
-    ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-    ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE,
-    ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE,
+    ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE,
+    ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
+    ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_IMAGE_TEXTURE,
+    ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_DEBUG_OVERLAY_TEXTURE,
+    ID_DEBUG_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE,
+    ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE,
+    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_IMAGE_TEXTURE,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE,
+    ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE,
+    ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE,
+    ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE,
+    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+    ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, ID_HILLSHADE_IMAGE_TEXTURE,
+    ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_LINE_BLUR_VERTEX_ATTRIBUTE,
+    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE,
+    ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE,
+    ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE,
+    ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SYMBOL_COLOR_ATTRIBUTE,
+    ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE,
+    ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
     ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
     ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
@@ -41,8 +40,7 @@ use mln_gfx::shaders::shader_source::BuiltIn;
 
 use super::glsl_sources;
 
-/// The GLSL members of a `ShaderSource<BuiltIn::X, gfx::Backend::Type::Vulkan>`
-/// specialisation.
+/// A program's GLSL.
 ///
 /// A stage compiles from the stage's prelude (`glsl_sources::PRELUDE_VERTEX`
 /// or `PRELUDE_FRAGMENT`), `prelude` and the stage's source
@@ -61,12 +59,13 @@ pub(crate) struct GlslShaderSource {
 }
 
 /// The vertex or instance attribute `id` is the input at
-/// `layout(location = index)`. C++'s `ubo`, the storage buffer an instanced
-/// attribute is also read through, has no counterpart: every attribute is a
+/// `layout(location = index)`. Every attribute, instanced or not, is a
 /// vertex input.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AttributeInfo {
     pub(crate) index: usize,
+    /// The format of the input, which the tests check the GLSL against.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests check the GLSL's inputs against it"))]
     pub(crate) data_type: AttributeDataType,
     pub(crate) id: usize,
 }
@@ -80,8 +79,7 @@ pub(crate) struct TextureInfo {
     pub(crate) id: usize,
 }
 
-/// A complete specialisation: GLSL plus the `attributes`,
-/// `instanceAttributes` and `textures` tables.
+/// A program's GLSL, and the tables of its attributes and textures.
 #[derive(Debug)]
 pub(crate) struct ShaderSource {
     pub(crate) glsl: &'static GlslShaderSource,
@@ -116,7 +114,6 @@ macro_rules! shader_source {
     };
 }
 
-// src/mln/shaders/vulkan/background.cpp
 const BACKGROUND_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
 shader_source!(BACKGROUND_SHADER, "BackgroundShader", BACKGROUND_ATTRIBUTES, &[]);
 shader_source!(
@@ -126,7 +123,6 @@ shader_source!(
     &[tex(0, ID_BACKGROUND_IMAGE_TEXTURE)]
 );
 
-// src/mln/shaders/vulkan/circle.cpp
 const CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
     // Data driven
@@ -140,13 +136,9 @@ const CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
 ];
 shader_source!(CIRCLE_SHADER, "CircleShader", CIRCLE_ATTRIBUTES, &[]);
 
-// src/mln/shaders/vulkan/clipping_mask.cpp. The globe variant also reads
-// the tile's projection vectors at the locations 1 to 3, which the context
-// binds as instance attributes itself.
 const CLIPPING_MASK_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
 shader_source!(CLIPPING_MASK_PROGRAM, "ClippingMaskProgram", CLIPPING_MASK_ATTRIBUTES, &[]);
 
-// src/mln/shaders/vulkan/collision.cpp
 const COLLISION_BOX_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
@@ -154,6 +146,8 @@ const COLLISION_BOX_ATTRIBUTES: &[AttributeInfo] = &[
     // Dynamic
     attr(3, UShort2, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE),
     attr(4, Float2, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE),
+    // Layout
+    attr(5, Float, ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE),
 ];
 const COLLISION_CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
@@ -165,8 +159,8 @@ const COLLISION_CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
 shader_source!(COLLISION_BOX_SHADER, "CollisionBoxShader", COLLISION_BOX_ATTRIBUTES, &[]);
 shader_source!(COLLISION_CIRCLE_SHADER, "CollisionCircleShader", COLLISION_CIRCLE_ATTRIBUTES, &[]);
 
-// src/mln/shaders/vulkan/color_relief.cpp. The GLSL works the texture
-// position out from the position, and has no input for it.
+// The color relief GLSL works the texture position out from the position,
+// and has no input for it.
 const COLOR_RELIEF_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
@@ -178,11 +172,9 @@ const COLOR_RELIEF_TEXTURES: &[TextureInfo] = &[
 ];
 shader_source!(COLOR_RELIEF_SHADER, "ColorReliefShader", COLOR_RELIEF_ATTRIBUTES, COLOR_RELIEF_TEXTURES);
 
-// src/mln/shaders/vulkan/debug.cpp
 const DEBUG_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_DEBUG_POS_VERTEX_ATTRIBUTE)];
 shader_source!(DEBUG_SHADER, "DebugShader", DEBUG_ATTRIBUTES, &[tex(0, ID_DEBUG_OVERLAY_TEXTURE)]);
 
-// src/mln/shaders/vulkan/fill.cpp
 const FILL_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
@@ -217,9 +209,8 @@ shader_source!(
     &[]
 );
 
-// src/mln/shaders/vulkan/fill_extrusion.cpp. An instance of the instanced
-// shaders is an outline vertex; the port adds the vertex after it, which C++
-// reads from the instances' storage buffer.
+// An instance of the instanced fill extrusion shaders is an outline vertex
+// and the vertex after it.
 const FILL_EXTRUSION_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
     attr(1, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
@@ -285,11 +276,9 @@ shader_source!(
     FILL_EXTRUSION_PATTERN_TEXTURES
 );
 
-// src/mln/shaders/vulkan/globe_depth.cpp
 const GLOBE_DEPTH_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE)];
 shader_source!(GLOBE_DEPTH_SHADER, "GlobeDepthShader", GLOBE_DEPTH_ATTRIBUTES, &[]);
 
-// src/mln/shaders/vulkan/heatmap.cpp
 const HEATMAP_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
     // Data driven
@@ -298,7 +287,6 @@ const HEATMAP_ATTRIBUTES: &[AttributeInfo] = &[
 ];
 shader_source!(HEATMAP_SHADER, "HeatmapShader", HEATMAP_ATTRIBUTES, &[]);
 
-// src/mln/shaders/vulkan/heatmap_texture.cpp
 const HEATMAP_TEXTURE_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
 shader_source!(
     HEATMAP_TEXTURE_SHADER,
@@ -307,7 +295,6 @@ shader_source!(
     &[tex(0, ID_HEATMAP_IMAGE_TEXTURE), tex(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)]
 );
 
-// src/mln/shaders/vulkan/hillshade.cpp, hillshade_prepare.cpp
 const HILLSHADE_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
 const HILLSHADE_PREPARE_ATTRIBUTES: &[AttributeInfo] =
@@ -316,7 +303,6 @@ const HILLSHADE_TEXTURES: &[TextureInfo] = &[tex(0, ID_HILLSHADE_IMAGE_TEXTURE)]
 shader_source!(HILLSHADE_SHADER, "HillshadeShader", HILLSHADE_ATTRIBUTES, HILLSHADE_TEXTURES);
 shader_source!(HILLSHADE_PREPARE_SHADER, "HillshadePrepareShader", HILLSHADE_PREPARE_ATTRIBUTES, HILLSHADE_TEXTURES);
 
-// src/mln/shaders/vulkan/line.cpp
 const LINE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
     attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
@@ -385,7 +371,6 @@ shader_source!(
     &[tex(0, ID_LINE_IMAGE_TEXTURE), tex(1, ID_LINE_DASH_TEXTURE)]
 );
 
-// src/mln/shaders/vulkan/raster.cpp
 const RASTER_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, ID_RASTER_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE)];
 shader_source!(
@@ -395,17 +380,14 @@ shader_source!(
     &[tex(0, ID_RASTER_IMAGE0_TEXTURE), tex(1, ID_RASTER_IMAGE1_TEXTURE)]
 );
 
-// src/mln/shaders/vulkan/sky.cpp
 const SKY_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_SKY_POS_VERTEX_ATTRIBUTE)];
 const ATMOSPHERE_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE)];
 shader_source!(SKY_SHADER, "SkyShader", SKY_ATTRIBUTES, &[]);
 shader_source!(ATMOSPHERE_SHADER, "AtmosphereShader", ATMOSPHERE_ATTRIBUTES, &[]);
 
-// src/mln/shaders/vulkan/symbol.cpp before the symbol instancing
-// (`!MLN_USE_SYMBOL_INSTANCING`): the layout vertex (`SymbolLayoutVertex`,
-// with the port's `tex_origin`), the dynamic vertex (`projected_pos`), the
-// opacity vertex (`fade_opacity`) and the interleaved data-driven vertex, in
-// four buffers.
+// Symbols: the layout vertex (`SymbolLayoutVertex`, with `tex_origin`), the
+// dynamic vertex (`projected_pos`), the opacity vertex (`fade_opacity`) and
+// the interleaved data-driven vertex, in four buffers.
 const SYMBOL_ICON_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short4, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
     attr(1, UShort4, ID_SYMBOL_DATA_ATTRIBUTE),
@@ -418,6 +400,7 @@ const SYMBOL_ICON_ATTRIBUTES: &[AttributeInfo] = &[
     attr(5, Float2, ID_SYMBOL_OPACITY_ATTRIBUTE),
     // Layout
     attr(6, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
+    attr(7, Float, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
 ];
 const SYMBOL_SDF_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short4, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
@@ -435,6 +418,7 @@ const SYMBOL_SDF_ATTRIBUTES: &[AttributeInfo] = &[
     attr(9, Float2, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     // Layout
     attr(10, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
+    attr(11, Float, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
 ];
 const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short4, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
@@ -451,6 +435,7 @@ const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[AttributeInfo] = &[
     attr(8, Float2, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     // Layout
     attr(9, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
+    attr(10, Float, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
 ];
 const SYMBOL_TEXTURES: &[TextureInfo] = &[tex(0, ID_SYMBOL_IMAGE_TEXTURE)];
 shader_source!(SYMBOL_ICON_SHADER, "SymbolIconShader", SYMBOL_ICON_ATTRIBUTES, SYMBOL_TEXTURES);

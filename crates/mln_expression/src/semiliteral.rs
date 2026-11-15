@@ -8,7 +8,7 @@ use crate::type_::{self, Type};
 use crate::value::Value;
 
 /// `["semiliteral", [...]]`: an array whose elements are expressions.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct Semiliteral {
     elements: Box<[Expr]>,
 }

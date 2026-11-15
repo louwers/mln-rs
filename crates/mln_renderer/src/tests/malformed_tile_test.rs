@@ -99,7 +99,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     transform.resize(Size::new(512, 512)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(0.0), ..Default::default() });
 
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
     let tile = Arc::new(tile);
     file_source.set_response(Kind::Tile, move |_resource| {
         let mut response = Response::new();
@@ -110,7 +110,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     let observer = Rc::new(Observer::default());
     let handle = run_loop.handle();
     *observer.end.borrow_mut() = Some(Box::new(move || handle.stop()));
-    let timeout = Timer::new();
+    let timeout = Timer::new(&run_loop);
     {
         let observer = Rc::clone(&observer);
         timeout.start(Duration::from_secs(30), Duration::ZERO, move || {
@@ -119,7 +119,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     }
 
     let source = TileSource::vector("source", None, tileset);
-    mln_style::source::Source::load_description(&source, &*file_source);
+    mln_style::source::Source::load_description(&source, &*file_source, &run_loop);
     let base_impl = mln_style::source::Source::base_impl(&source);
     let mut render_source = render_source::create(&base_impl);
     render_source.set_observer(Rc::<Observer>::clone(&observer));
@@ -128,9 +128,9 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     // The observer answers missing icons as Map::Impl does, and the timer
     // stands in for the RenderOrchestrator updates that then notify the
     // tile.
-    let image_manager = crate::image_manager::ImageManager::create();
+    let image_manager = crate::image_manager::ImageManager::on(Some(run_loop.scheduler()));
     image_manager.set_observer(Some(Rc::new(AnswerMissingImages)));
-    let frame = Timer::new();
+    let frame = Timer::new(&run_loop);
     {
         let image_manager = Rc::clone(&image_manager);
         frame.start(Duration::from_millis(10), Duration::from_millis(10), move || {
@@ -153,6 +153,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: transform.get_state(),
             file_source: Some(file_source),
+            scheduler: run_loop.scheduler(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -165,7 +166,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             is_update_synchronous: false,
             capture_rendered_features: false,
             image_manager: Rc::clone(&image_manager),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
+            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &run_loop),
             dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
             tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
                 thread_pool.clone(),

@@ -13,14 +13,9 @@
 
 use std::borrow::Borrow;
 use std::fmt;
-use std::marker::PhantomData;
 use std::ops::Index;
 #[cfg(test)]
 use std::ops::{Bound, RangeBounds};
-
-use serde::de::{MapAccess, SeqAccess, Visitor};
-use serde::ser::{SerializeMap, SerializeSeq};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The position of `key` in the sorted `keys`, or where it would go.
 fn search<K: Borrow<Q>, Q: Ord + ?Sized>(keys: &[K], key: &Q) -> Result<usize, usize> {
@@ -371,37 +366,23 @@ impl<K: Ord + Borrow<Q>, Q: Ord + ?Sized, V> Index<&Q> for VecMap<K, V> {
     }
 }
 
-impl<K: Serialize, V: Serialize> Serialize for VecMap<K, V> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(self.len()))?;
+impl<K: mln_wire::Wire + Ord, V: mln_wire::Wire> mln_wire::Wire for VecMap<K, V> {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.len().write(w);
         for (k, v) in self {
-            map.serialize_entry(k, v)?;
+            k.write(w);
+            v.write(w);
         }
-        map.end()
     }
-}
 
-impl<'de, K: Deserialize<'de> + Ord, V: Deserialize<'de>> Deserialize<'de> for VecMap<K, V> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct MapVisitor<K, V>(PhantomData<(K, V)>);
-
-        impl<'de, K: Deserialize<'de> + Ord, V: Deserialize<'de>> Visitor<'de> for MapVisitor<K, V> {
-            type Value = VecMap<K, V>;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a map")
-            }
-
-            fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
-                let mut map = VecMap::new();
-                while let Some((k, v)) = access.next_entry()? {
-                    map.insert(k, v);
-                }
-                Ok(map)
-            }
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        let len = r.length()?;
+        let mut map = VecMap::new();
+        for _ in 0..len {
+            let k = K::read(r)?;
+            map.insert(k, V::read(r)?);
         }
-
-        deserializer.deserialize_map(MapVisitor(PhantomData))
+        Some(map)
     }
 }
 
@@ -567,37 +548,13 @@ impl<'a, T> IntoIterator for &'a VecSet<T> {
     }
 }
 
-impl<T: Serialize> Serialize for VecSet<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut seq = serializer.serialize_seq(Some(self.len()))?;
-        for item in self {
-            seq.serialize_element(item)?;
-        }
-        seq.end()
+impl<T: mln_wire::Wire + Ord> mln_wire::Wire for VecSet<T> {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        mln_wire::write_seq(w, &self.items);
     }
-}
 
-impl<'de, T: Deserialize<'de> + Ord> Deserialize<'de> for VecSet<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct SetVisitor<T>(PhantomData<T>);
-
-        impl<'de, T: Deserialize<'de> + Ord> Visitor<'de> for SetVisitor<T> {
-            type Value = VecSet<T>;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a sequence")
-            }
-
-            fn visit_seq<A: SeqAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
-                let mut set = VecSet::new();
-                while let Some(item) = access.next_element()? {
-                    set.insert(item);
-                }
-                Ok(set)
-            }
-        }
-
-        deserializer.deserialize_seq(SetVisitor(PhantomData))
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        Some(mln_wire::read_seq::<T>(r)?.into_iter().collect())
     }
 }
 

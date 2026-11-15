@@ -19,7 +19,7 @@ fn is_comparable_type(op: &str, t: &Type) -> bool {
 }
 
 /// A comparison operator.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, mln_wire::Wire)]
 pub(crate) enum CmpOp {
     Eq,
     Ne,
@@ -71,7 +71,7 @@ impl CmpOp {
 }
 
 /// How a comparison reads its operands, from their static types.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, mln_wire::Wire)]
 enum Operands {
     Numbers,
     Strings,
@@ -84,7 +84,7 @@ enum Operands {
 }
 
 /// `["==", a, b]` and the other comparisons, with an optional collator.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct Comparison {
     op: CmpOp,
     operands: Operands,

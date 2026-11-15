@@ -32,13 +32,12 @@ use std::time::{Duration, Instant};
 
 use mln_actor::{RunLoop, Timer};
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
-use mln_gfx::{BackendScope, ScopeType};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapDebugOptions,
     MapEvent, MapOptions, UpdateReader,
 };
 use mln_renderer::Renderer;
-use mln_storage::{DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_storage::{DatabaseFileSource, FileSource, Loader, OnlineFileSource, ResourceOptions};
 use mln_style::PropertyValue;
 use mln_style::projection::Projection;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
@@ -111,28 +110,27 @@ pub(crate) fn run(launch: Launch) {
     let cache_db = args.cache.clone().unwrap_or_else(|| "/tmp/mbgl-cache.db".to_owned());
     let resource_options = ResourceOptions { cache_path: cache_db, ..ResourceOptions::default() };
 
-    let file_sources = FileSourceManager::new();
-    let database_file_source = file_sources.get_file_source(FileSourceType::Database, &resource_options);
+    let online = Arc::new(OnlineFileSource::new());
     if !settings.online {
-        match file_sources.get_file_source(FileSourceType::Network, &resource_options) {
-            Some(online) => {
-                online.set_property("online-status", &feature::Value::Bool(false));
-                Log::warning(Event::Setup, "Application is offline.");
-            }
-            None => Log::warning(
-                Event::Setup,
-                "Network resource provider is not available, only local requests are supported.",
-            ),
-        }
+        online.set_online(false);
+        Log::warning(Event::Setup, "Application is offline.");
     }
+    let network: Arc<dyn FileSource> = online;
+    let database_file_source =
+        Arc::new(DatabaseFileSource::new(&resource_options.cache_path, Some(Arc::clone(&network))));
+    let loader = Loader::builder()
+        .asset_path(&resource_options.asset_path)
+        .network(network)
+        .database(Arc::<DatabaseFileSource>::clone(&database_file_source))
+        .build();
 
-    let mut renderer = Renderer::new(backend.renderer_backend(), pixel_ratio as f32, None);
+    let mut renderer = Renderer::new(backend.renderer_backend(), pixel_ratio as f32, None, &run_loop);
     let map_size = logical_size(size, pixel_ratio);
 
-    let mut map = match Map::with_resource_options(
+    let mut map = match Map::with_file_source(
+        Arc::new(loader),
         MapOptions { size: map_size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
-        &file_sources,
-        &resource_options,
+        &run_loop,
     ) {
         Ok(map) => map,
         Err(e) => {
@@ -165,9 +163,10 @@ pub(crate) fn run(launch: Launch) {
         None => std::env::var("MLN_STYLE_URL").unwrap_or_else(|_| DEFAULT_STYLE.to_owned()),
     };
 
+    let wake = Timer::new(&run_loop);
     let mut view = View {
         run_loop,
-        wake: Timer::new(),
+        wake,
         inbox,
         proxy,
         start,
@@ -302,7 +301,7 @@ struct View {
     /// The controls' last frame, to tell whether a frame changed them.
     ui_shapes: Vec<egui::epaint::ClippedShape>,
     paint: Rc<RefCell<Paint>>,
-    database_file_source: Option<Arc<dyn FileSource>>,
+    database_file_source: Arc<DatabaseFileSource>,
     styles: Vec<Style>,
     style: Style,
     adapter: String,
@@ -675,7 +674,7 @@ impl View {
                 return;
             }
         };
-        let mut renderer = Renderer::new(backend.renderer_backend(), self.pixel_ratio as f32, None);
+        let mut renderer = Renderer::new(backend.renderer_backend(), self.pixel_ratio as f32, None, &self.run_loop);
         renderer.set_event_queue(Some(self.map.renderer_events()));
         self.gfx = Some(Gfx { renderer, backend });
         // The new renderer draws the map's last update again.
@@ -691,12 +690,7 @@ impl View {
 
     /// Empties the cache database.
     fn reset_cache(&self) {
-        let database = self.database_file_source.as_deref();
-        let Some(database) = database.and_then(|source| source.downcast_ref::<DatabaseFileSource>()) else {
-            Log::warning(Event::Database, "There is no cache database to reset");
-            return;
-        };
-        database.reset_database(|result| match result {
+        self.database_file_source.reset_database(|result| match result {
             Ok(()) => Log::info(Event::Database, "Reset the cache"),
             Err(e) => Log::error(Event::Database, format!("Failed to reset cache: {e}")),
         });
@@ -716,9 +710,6 @@ impl View {
             let Some(Gfx { renderer, backend: target }) = self.gfx.as_mut() else {
                 return;
             };
-            let backend = target.renderer_backend();
-            let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-            let _frame = BackendScope::new(&*backend, ScopeType::Implicit);
             renderer.render(&update.parameters, target.frames());
         }
         self.report((1000.0 * started.elapsed().as_secs_f64()) as f32);

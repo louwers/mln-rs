@@ -16,6 +16,7 @@ use crate::filter::Filter;
 use crate::layer::layer_type_info;
 use crate::light::Light;
 use crate::projection::Projection;
+use crate::property_table::{Properties, defined_properties};
 use crate::sky::Sky;
 use crate::style::Style;
 use crate::style_property::{Kind, StyleProperty};
@@ -313,11 +314,8 @@ impl Style {
     pub fn root_property_json(&self, name: &str) -> Result<Option<String>, Error> {
         require_root_property(name)?;
         let value = match name {
-            "light" => {
-                let light = self.get_light();
-                properties_json(LIGHT_PROPERTIES, |name| light.get_property(name))
-            }
-            "sky" => self.get_sky().and_then(|sky| properties_json(SKY_PROPERTIES, |name| sky.get_property(name))),
+            "light" => defined_properties_json(&*self.get_light().impl_),
+            "sky" => self.get_sky().and_then(|sky| defined_properties_json(&*sky.impl_)),
             "projection" => {
                 let projection = self.get_projection();
                 properties_json(&["type"], |name| projection.get_property(name))
@@ -423,42 +421,22 @@ const ROOT_PROPERTIES: &[&str] = &[
     "transition",
 ];
 
-/// The light's properties, in the style spec's order.
-const LIGHT_PROPERTIES: &[&str] = &[
-    "anchor",
-    "position",
-    "color",
-    "intensity",
-    "anchor-transition",
-    "position-transition",
-    "color-transition",
-    "intensity-transition",
-];
-
-/// The sky's properties, in the style spec's order.
-const SKY_PROPERTIES: &[&str] = &[
-    "sky-color",
-    "horizon-color",
-    "fog-color",
-    "fog-ground-blend",
-    "horizon-fog-blend",
-    "sky-horizon-blend",
-    "atmosphere-blend",
-    "sky-color-transition",
-    "horizon-color-transition",
-    "fog-color-transition",
-    "fog-ground-blend-transition",
-    "horizon-fog-blend-transition",
-    "sky-horizon-blend-transition",
-    "atmosphere-blend-transition",
-];
-
 fn require_root_property(name: &str) -> Result<(), Error> {
     if ROOT_PROPERTIES.contains(&name) {
         Ok(())
     } else {
         Err(Error::invalid_argument(format!("{} is not a style root property that this call takes", quote(name))))
     }
+}
+
+/// An object of the properties of `owner` that are set, or `None` when none
+/// is.
+fn defined_properties_json<S: Properties>(owner: &S) -> Option<serde_json::Value> {
+    let members = defined_properties(owner)
+        .into_iter()
+        .map(|(name, _, property)| (name, value_to_json(property.get_value())))
+        .collect::<serde_json::Map<_, _>>();
+    (!members.is_empty()).then_some(serde_json::Value::Object(members))
 }
 
 /// An object of the properties that are set, or `None` when none is.

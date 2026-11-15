@@ -2,7 +2,6 @@
 
 use std::path::Path;
 
-use mln_actor::RunLoopHandle;
 use mln_storage::ResourceError;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
@@ -13,7 +12,7 @@ use mln_util::error::Error;
 
 use crate::completion::Completion;
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
-use crate::runtime::{Runtime, post, reply_on};
+use crate::runtime::{CoreQueue, Runtime, post, reply_on};
 
 /// The offline regions in a runtime's cache database, from
 /// [`Runtime::offline`]. Each call is a command of the runtime, and the
@@ -36,21 +35,21 @@ impl<'a> Offline<'a> {
         metadata: OfflineRegionMetadata,
     ) -> Result<Completion<OfflineRegion>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
-            database.create_offline_region(&definition, &metadata, reply_on(core.run_loop.clone(), resolver));
+            database.create_offline_region(&definition, &metadata, reply_on(core.queue.clone(), resolver));
         })
     }
 
     /// The region `region_id`, or `None` when the database has none.
     pub fn region(&self, region_id: i64) -> Result<Completion<Option<OfflineRegion>>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
-            database.get_offline_region(region_id, reply_on(core.run_loop.clone(), resolver));
+            database.get_offline_region(region_id, reply_on(core.queue.clone(), resolver));
         })
     }
 
     /// Every region in the database.
     pub fn regions(&self) -> Result<Completion<Vec<OfflineRegion>>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
-            database.list_offline_regions(reply_on(core.run_loop.clone(), resolver));
+            database.list_offline_regions(reply_on(core.queue.clone(), resolver));
         })
     }
 
@@ -68,7 +67,7 @@ impl<'a> Offline<'a> {
         let side_database_path = side_database_path.into();
         check_side_database(&side_database_path)?;
         self.runtime.offline_command(move |database, core, resolver| {
-            database.merge_offline_regions(&side_database_path, reply_on(core.run_loop.clone(), resolver));
+            database.merge_offline_regions(&side_database_path, reply_on(core.queue.clone(), resolver));
         })
     }
 
@@ -79,14 +78,14 @@ impl<'a> Offline<'a> {
         metadata: OfflineRegionMetadata,
     ) -> Result<Completion<OfflineRegion>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
-            database.update_offline_metadata(region_id, &metadata, reply_on(core.run_loop.clone(), resolver));
+            database.update_offline_metadata(region_id, &metadata, reply_on(core.queue.clone(), resolver));
         })
     }
 
     /// A region's download progress.
     pub fn region_status(&self, region_id: i64) -> Result<Completion<OfflineRegionStatus>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
-            database.get_offline_region_status(region_id, reply_on(core.run_loop.clone(), resolver));
+            database.get_offline_region_status(region_id, reply_on(core.queue.clone(), resolver));
         })
     }
 
@@ -102,9 +101,9 @@ impl<'a> Offline<'a> {
         }
         self.runtime.offline_command(move |database, core, resolver| {
             let observer = (events != EventMask::NONE).then(|| -> Box<dyn OfflineRegionObserver + Send> {
-                Box::new(RegionObserver { region_id, events, run_loop: core.run_loop.clone() })
+                Box::new(RegionObserver { region_id, events, queue: core.queue.clone() })
             });
-            database.set_offline_region_observer(region_id, observer, reply_on(core.run_loop.clone(), resolver));
+            database.set_offline_region_observer(region_id, observer, reply_on(core.queue.clone(), resolver));
         })
     }
 
@@ -115,7 +114,7 @@ impl<'a> Offline<'a> {
         state: OfflineRegionDownloadState,
     ) -> Result<Completion<()>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
-            database.set_offline_region_download_state(region_id, state, reply_on(core.run_loop.clone(), resolver));
+            database.set_offline_region_download_state(region_id, state, reply_on(core.queue.clone(), resolver));
         })
     }
 
@@ -123,14 +122,14 @@ impl<'a> Offline<'a> {
     /// they use it. The region keeps its resources.
     pub fn invalidate_region(&self, region_id: i64) -> Result<Completion<()>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
-            database.invalidate_offline_region(region_id, reply_on(core.run_loop.clone(), resolver));
+            database.invalidate_offline_region(region_id, reply_on(core.queue.clone(), resolver));
         })
     }
 
     /// Deletes a region, with the resources that no other region uses.
     pub fn delete_region(&self, region_id: i64) -> Result<Completion<()>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
-            database.delete_offline_region(region_id, reply_on(core.run_loop.clone(), resolver));
+            database.delete_offline_region(region_id, reply_on(core.queue.clone(), resolver));
         })
     }
 }
@@ -150,7 +149,7 @@ fn check_side_database(path: &str) -> Result<(), Error> {
 struct RegionObserver {
     region_id: i64,
     events: EventMask,
-    run_loop: RunLoopHandle,
+    queue: CoreQueue,
 }
 
 impl RegionObserver {
@@ -159,7 +158,7 @@ impl RegionObserver {
             return;
         }
         let event = RuntimeEvent { source: EventSource::Runtime, kind };
-        post(&self.run_loop, move |core, outbox| core.send_events(vec![event], outbox));
+        post(&self.queue, move |core, outbox| core.send_events(vec![event], outbox));
     }
 }
 

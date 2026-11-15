@@ -1,6 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, mln_wire::Wire)]
 pub struct SegmentBase {
     pub vertex_offset: usize,
     pub index_offset: usize,

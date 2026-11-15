@@ -38,23 +38,20 @@ impl GeometryTileFeature for StubGeometryTileFeature {
 fn interpolate_expression() {
     // Use DLS methods to create an expression
     {
-        let expr = PropertyExpression::<Padding>::new(
-            Arc::from(interpolate(
-                linear(),
-                zoom(),
-                vec![(0.0, literal(Padding::uniform(0.0).into())), (1.0, literal(Padding::uniform(8.0).into()))],
-            )),
-            None,
-        );
-        let result = expr.evaluate_zoom(0.5);
+        let expr = PropertyExpression::<Padding>::new(Arc::from(interpolate(
+            linear(),
+            zoom(),
+            vec![(0.0, literal(Padding::uniform(0.0).into())), (1.0, literal(Padding::uniform(8.0).into()))],
+        )));
+        let result = expr.evaluate(&EvaluationContext::new(0.5), Padding::default());
         assert_eq!(Padding::uniform(4.0), result);
     }
 
     // Parse expression from JSON, verify that expansion from number/array is handled correctly.
     {
         let json = r#"["interpolate", ["linear"], ["zoom"], 0, ["to-padding", 0], 1, ["to-padding", ["literal",[8, 16, -32]]]]"#;
-        let expr = PropertyExpression::<Padding>::new(Arc::from(create_expression_from_str(json).unwrap()), None);
-        let result = expr.evaluate_zoom(0.5);
+        let expr = PropertyExpression::<Padding>::new(Arc::from(create_expression_from_str(json).unwrap()));
+        let result = expr.evaluate(&EvaluationContext::new(0.5), Padding::default());
         assert_eq!(Padding::new(4.0, 8.0, -16.0, 8.0), result);
     }
 }
@@ -82,16 +79,16 @@ fn function() {
     // exponential
     {
         let expr = from_function(r#"{"type": "exponential", "stops": [[1, 2], [11, [2, 5, 2, 7]]]}"#);
-        assert_eq!(Padding::new(2.0, 2.0, 2.0, 2.0), expr.evaluate_zoom(0.0));
-        assert_eq!(Padding::new(2.0, 3.2, 2.0, 4.0), expr.evaluate_zoom(5.0));
-        assert_eq!(Padding::new(2.0, 5.0, 2.0, 7.0), expr.evaluate_zoom(11.0));
+        assert_eq!(Padding::new(2.0, 2.0, 2.0, 2.0), expr.evaluate(&EvaluationContext::new(0.0), Padding::default()));
+        assert_eq!(Padding::new(2.0, 3.2, 2.0, 4.0), expr.evaluate(&EvaluationContext::new(5.0), Padding::default()));
+        assert_eq!(Padding::new(2.0, 5.0, 2.0, 7.0), expr.evaluate(&EvaluationContext::new(11.0), Padding::default()));
     }
     // interval
     {
         let expr = from_function(r#"{"type": "interval", "stops": [[1, 2], [11, 4]]}"#);
-        assert_eq!(Padding::uniform(2.0), expr.evaluate_zoom(0.0));
-        assert_eq!(Padding::uniform(2.0), expr.evaluate_zoom(10.0));
-        assert_eq!(Padding::uniform(4.0), expr.evaluate_zoom(11.0));
+        assert_eq!(Padding::uniform(2.0), expr.evaluate(&EvaluationContext::new(0.0), Padding::default()));
+        assert_eq!(Padding::uniform(2.0), expr.evaluate(&EvaluationContext::new(10.0), Padding::default()));
+        assert_eq!(Padding::uniform(4.0), expr.evaluate(&EvaluationContext::new(11.0), Padding::default()));
     }
     // categorical
     {

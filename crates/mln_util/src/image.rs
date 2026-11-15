@@ -7,7 +7,6 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use geometry::Point;
-use serde::{Deserialize, Serialize};
 
 use crate::size::Size;
 
@@ -62,23 +61,30 @@ pub enum ImageError {
 /// moved-from image). C++ images are move-only with an explicit `clone()`;
 /// here `Clone` is that `clone()`.
 ///
-/// Serde writes the pixels as a payload (serialization/payload.rs)
-/// and reads back only images whose pixels fill their size.
-#[derive(Serialize, Deserialize)]
-#[serde(bound = "", try_from = "ImageParts")]
+/// An image crosses with its pixels as a payload (serialization/payload.rs),
+/// and only images whose pixels fill their size read back.
 pub struct Image<M: AlphaMode> {
     pub size: Size,
-    #[serde(with = "crate::serialization::payload::bytes")]
     pub data: Vec<u8>,
-    #[serde(skip)]
     _mode: PhantomData<M>,
 }
 
+impl<M: AlphaMode> mln_wire::Wire for Image<M> {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.size.write(w);
+        crate::serialization::payload::bytes::write(&self.data, w);
+    }
+
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        let size = Size::read(r)?;
+        let data = crate::serialization::payload::bytes::read(r)?;
+        Image::try_from(ImageParts { size, data }).ok().or_else(|| r.fail("pixels that don't fill their image"))
+    }
+}
+
 /// What `Image` is read from.
-#[derive(Deserialize)]
 struct ImageParts {
     size: Size,
-    #[serde(with = "crate::serialization::payload::bytes")]
     data: Vec<u8>,
 }
 

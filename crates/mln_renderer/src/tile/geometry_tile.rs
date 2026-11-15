@@ -25,8 +25,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_actor::{ActorRef, LocalObject, Mailbox, TaggedScheduler, scheduler};
-use mln_gfx::UploadPass;
+use mln_actor::{ActorRef, LocalObject, Mailbox, TaggedScheduler};
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
@@ -43,11 +42,11 @@ use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::bucket_geometry::BucketGeometry;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{GlyphAtlas, ImageAtlas, ImageVersionMap, TextureAtlas};
 use crate::image_manager::{ImageManager, ImageRequestPair, ImageRequestor, ImageRequestorBase, requestor_key};
 use crate::render_layer::LayerRenderData;
@@ -65,17 +64,17 @@ use crate::tile_render_data::{TileAtlasTextures, TileRenderData};
 /// their bins (C++ `~LayoutResult`). Shared, so that copies of a
 /// `LayoutResult` release them once.
 ///
-/// Port-only: serde writes the atlases without the atlas they release their
+/// Port-only: the codec writes the atlases without the atlas they release their
 /// bins to, which is the side's that gets them (`tile/worker_codec`).
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, mln_wire::Wire)]
 pub(crate) struct LayoutAtlases {
     pub(crate) glyph_atlas: GlyphAtlas,
     pub(crate) image_atlas: ImageAtlas,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
     /// The image versions that `update_images` last saw, where they differ
     /// from the layout's.
-    #[serde(skip)]
+    #[wire(skip)]
     seen_image_versions: Mutex<SeenImageVersions>,
 }
 
@@ -226,14 +225,14 @@ impl TileRenderData for GeometryTileRenderData {
         Some(&self.bucket_geometry)
     }
 
-    fn upload(&self, upload_pass: &dyn UploadPass) {
+    fn upload(&self, context: &Context) {
         let Some(layout_result) = &self.layout_result else {
             return;
         };
 
         for entry in layout_result.layer_render_data.values() {
             if entry.bucket.needs_upload() {
-                entry.bucket.upload(upload_pass);
+                entry.bucket.upload(context);
             }
         }
 
@@ -242,7 +241,6 @@ impl TileRenderData for GeometryTileRenderData {
             return;
         };
 
-        let context = upload_pass.get_context();
         if let Some(glyph_dynamic_texture) = &layout_result.glyph_atlas().dynamic_texture {
             glyph_dynamic_texture.upload_deferred_images(context);
             *atlas_textures.glyph.borrow_mut() = glyph_dynamic_texture.get_texture();
@@ -601,7 +599,7 @@ impl GeometryTile {
             }
         });
         // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        mailbox.open(&scheduler::get_current(), Rc::<GeometryTileInner>::clone(&inner));
+        mailbox.open(&parameters.scheduler, Rc::<GeometryTileInner>::clone(&inner));
         GeometryTile { inner }
     }
 
@@ -1029,7 +1027,7 @@ mod tests {
     /// workers and releases its atlases on the render thread.
     #[test]
     fn a_layout_frees_its_data_on_the_workers_and_its_atlases_here() {
-        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+        let thread_pool = TaggedScheduler::new(mln_actor::scheduler::get_background(), SimpleIdentity::new());
         let (data_drops, atlas_releases) = (Threads::default(), Threads::default());
         let result = LayoutResult::new(
             HashMap::default(),

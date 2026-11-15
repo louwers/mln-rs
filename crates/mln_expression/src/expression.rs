@@ -213,6 +213,11 @@ impl Dependency {
     pub const ELEVATION: Dependency = Dependency(1 << 7);
     /// Global state ("global-state")
     pub const GLOBAL_STATE: Dependency = Dependency(1 << 8);
+    /// Feature state ("feature-state"). Always set along with `FEATURE`.
+    pub const FEATURE_STATE: Dependency = Dependency(1 << 9);
+    /// Inputs that only some properties provide while they evaluate:
+    /// "heatmap-density", "line-progress" and "accumulated".
+    pub const PROPERTY_INPUT: Dependency = Dependency(1 << 10);
 
     /// Whether the two sets share an input.
     #[must_use]
@@ -250,6 +255,8 @@ impl fmt::Display for Dependency {
             (Dependency::OVERRIDE, "Override"),
             (Dependency::ELEVATION, "Elevation"),
             (Dependency::GLOBAL_STATE, "GlobalState"),
+            (Dependency::FEATURE_STATE, "FeatureState"),
+            (Dependency::PROPERTY_INPUT, "PropertyInput"),
         ] {
             if self.intersects(dep) {
                 if any {
@@ -270,7 +277,7 @@ impl fmt::Debug for Dependency {
 }
 
 /// The kinds of expression node. Each holds its own operands.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) enum Node {
     Literal(Box<Literal>),
     Compound(Box<CompoundExpression>),
@@ -307,6 +314,17 @@ pub struct Expr {
     node: Node,
     /// The inputs of the node and its operands.
     deps: Dependency,
+}
+
+/// An expression crosses as its node tree; its dependencies follow from it.
+impl mln_wire::Wire for Expr {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.node.write(w);
+    }
+
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        Node::read(r).map(Expr::new)
+    }
 }
 
 impl PartialEq for Expr {
