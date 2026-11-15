@@ -606,7 +606,9 @@ impl GestureRecognizer {
             return;
         }
         self.begun = true;
-        self.caught_glide = self.release_end.take();
+        // Only a glide still running can be caught: one that has ended, as
+        // when a command cancelled it, carries nothing.
+        self.caught_glide = self.release_end.take().and_then(|mut end| end.take().is_none().then_some(end));
         let phase = if self.options.interrupt_animations {
             GesturePhase::Begin
         } else {

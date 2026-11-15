@@ -812,6 +812,13 @@ fn a_flick_that_catches_a_glide_carries_its_speed() {
     let compounded = rig.fling(300.0, 10.0);
     assert!(compounded > again && compounded <= glide(10_000.0) + 0.01, "{compounded}");
 
+    // A glide that a command stopped before the press carries nothing.
+    let mut rig = Rig::new();
+    fling_and_glide(&mut rig, 100.0, 1.0, 6);
+    rig.camera.cancel_transitions_with_id(GestureOptions::DEFAULT.transition_id);
+    let after_cancel = rig.fling(300.0, 10.0);
+    assert!((after_cancel - alone).abs() < 0.01, "{after_cancel} vs {alone}");
+
     // Off, each release glides at its own speed, as ffi's demo and GL JS do.
     let mut rig = Rig::with(&GestureOptions { carry_caught_glide: false, ..GestureOptions::DEFAULT });
     fling_and_glide(&mut rig, 100.0, 1.0, 6);
