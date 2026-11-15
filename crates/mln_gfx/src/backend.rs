@@ -8,4 +8,5 @@ pub enum Type {
     Metal,
     Vulkan,
     WebGPU,
+    D3D12,
 }

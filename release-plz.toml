@@ -50,6 +50,7 @@ changelog_update = true
 changelog_include = [
   "mln-rs-actor",
   "mln-rs-conversion",
+  "mln-rs-d3d12",
   "mln-rs-expression",
   "mln-rs-feature",
   "mln-rs-geojson-vt",

@@ -9,8 +9,6 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
-# Published once mln-rs depends on it.
-publish = false
 
 [lib]
 name = "mln_d3d12"
@@ -23,10 +21,16 @@ doctest = false
 mln_gfx.workspace = true
 mln_glsl.workspace = true
 naga = { workspace = true, features = ["hlsl-out"] }
-windows = { workspace = true, features = ["Win32_Graphics_Direct3D_Dxc"] }
+mln_util.workspace = true
+windows = { workspace = true, features = [
+  "Win32_Graphics_Direct3D12",
+  "Win32_Graphics_Direct3D_Dxc",
+] }
 
-# The sets of defines the tests compile the programs with.
+# The conformance suite that `D3d12Gpu`'s tests run, and the sets of defines
+# they compile the programs with.
 [target.'cfg(windows)'.dev-dependencies]
+mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 mln_glsl = { workspace = true, features = ["variants"] }
 
 [lints]

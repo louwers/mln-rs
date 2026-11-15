@@ -720,6 +720,9 @@ pub enum Device {
     /// A Vulkan GPU.
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     Vulkan(mln_vulkan::Device),
+    /// A D3D12 device and its direct queue.
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12(mln_d3d12::Device),
     /// An OpenGL share group, or the one context that its sessions take
     /// turns in.
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
@@ -958,6 +961,8 @@ impl Device {
             Device::Metal(_) => false,
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Device::Vulkan(_) => false,
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(_) => false,
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             Device::Gl(_) => true,
             #[cfg(all(feature = "gl", target_family = "wasm"))]
@@ -1009,7 +1014,7 @@ impl Device {
     /// a WebGPU device asynchronously (`Device::request_web_gpu`).
     pub fn with_backend(backend: BackendType, options: DeviceOptions) -> Result<Device, Error> {
         let DeviceOptions { adapter, gl_api, gl_single_context } = options;
-        // Only Vulkan names its GPUs by ID here.
+        // Only Vulkan names its GPUs by ID here, and D3D12 by LUID.
         let index = |adapter: Option<Adapter>| match adapter {
             None => Ok(None),
             Some(Adapter::Index(index)) => Ok(Some(index)),
@@ -1027,6 +1032,12 @@ impl Device {
                 _ => mln_vulkan::Device::new(index(adapter)?),
             }
             .map(Device::Vulkan),
+            #[cfg(all(feature = "d3d12", windows))]
+            BackendType::D3D12 => match adapter {
+                Some(Adapter::Luid(luid)) => mln_d3d12::Device::with_luid(luid),
+                _ => mln_d3d12::Device::new(index(adapter)?),
+            }
+            .map(Device::D3d12),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             BackendType::OpenGL => {
                 // An OpenGL device renders on the one GPU of its display, so
@@ -1101,6 +1112,8 @@ impl Device {
         match *self {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Device::Vulkan(ref device) => device.depth_stencil_formats(),
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(_) => DepthStencilFormats::NONE,
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(_) => mln_mtl::BorrowedTextures::depth_stencil_formats(),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
@@ -1284,6 +1297,8 @@ impl Device {
             Device::Metal(_) => BackendType::Metal,
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Device::Vulkan(_) => BackendType::Vulkan,
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(_) => BackendType::D3D12,
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             Device::Gl(_) => BackendType::OpenGL,
             #[cfg(all(feature = "gl", target_family = "wasm"))]

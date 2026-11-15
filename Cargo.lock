@@ -2566,6 +2566,7 @@ version = "0.0.12"
 dependencies = [
  "mln-rs-gfx",
  "mln-rs-glsl",
+ "mln-rs-util",
  "naga",
  "windows",
 ]
@@ -2948,6 +2949,7 @@ dependencies = [
  "libc",
  "mln-rs-actor",
  "mln-rs-conversion",
+ "mln-rs-d3d12",
  "mln-rs-feature",
  "mln-rs-gestures",
  "mln-rs-gfx",

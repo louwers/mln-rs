@@ -49,6 +49,7 @@ geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=
 kdbush = { package = "mln-rs-kdbush", path = "vendor/kdbush", version = "=0.0.12" }
 mln_actor = { package = "mln-rs-actor", path = "crates/mln_actor", version = "=0.0.12" }
 mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.12" }
+mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.12" }
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.12" }
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.12" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.12" }

@@ -16,15 +16,16 @@ name = "mln_runtime"
 doctest = false
 
 # The backends that sessions render with, each where its platform has it:
-# Metal on Apple's, Vulkan elsewhere but in the browser, OpenGL ES natively
-# and the browser's WebGL2, and WebGPU (wgpu, and in the browser the
-# browser's) everywhere. A browser build turns on one of `webgpu` and `gl`,
-# so that it carries one backend and its shaders.
+# Metal on Apple's, Vulkan elsewhere but in the browser, D3D12 on Windows,
+# OpenGL ES natively and the browser's WebGL2, and WebGPU (wgpu, and in the
+# browser the browser's) everywhere. A browser build turns on one of `webgpu`
+# and `gl`, so that it carries one backend and its shaders.
 [features]
-default = ["webgpu", "metal", "vulkan", "gl"]
+default = ["webgpu", "metal", "vulkan", "d3d12", "gl"]
 webgpu = ["dep:mln_webgpu", "dep:wgpu"]
 metal = ["dep:mln_mtl"]
 vulkan = ["dep:mln_vulkan"]
+d3d12 = ["dep:mln_d3d12"]
 gl = ["dep:mln_gl"]
 
 [dependencies]
@@ -81,6 +82,9 @@ mln_mtl = { workspace = true, optional = true }
 
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
 mln_vulkan = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+mln_d3d12 = { workspace = true, optional = true }
 
 [dev-dependencies]
 # Serves the styles of the resource tests.

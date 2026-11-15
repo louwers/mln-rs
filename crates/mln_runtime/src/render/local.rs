@@ -214,6 +214,8 @@ offscreen!(mln_mtl::OffscreenTarget);
 presenting!(mln_mtl::SurfaceTarget);
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
 offscreen!(mln_vulkan::OffscreenTarget);
+#[cfg(all(feature = "d3d12", windows))]
+offscreen!(mln_d3d12::OffscreenTarget);
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
 presenting!(mln_vulkan::SurfaceTarget);
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
@@ -272,6 +274,8 @@ enum Backend {
     Metal(Rc<mln_mtl::RendererBackend>),
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     Vulkan(Rc<mln_vulkan::RendererBackend>),
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12(Rc<mln_d3d12::RendererBackend>),
     #[cfg(feature = "gl")]
     Gl(Rc<mln_gl::RendererBackend>),
 }
@@ -285,6 +289,8 @@ impl Backend {
             Backend::Metal(ref backend) => Rc::<mln_mtl::RendererBackend>::clone(backend),
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Backend::Vulkan(ref backend) => Rc::<mln_vulkan::RendererBackend>::clone(backend),
+            #[cfg(all(feature = "d3d12", windows))]
+            Backend::D3d12(ref backend) => Rc::<mln_d3d12::RendererBackend>::clone(backend),
             #[cfg(feature = "gl")]
             Backend::Gl(ref backend) => Rc::<mln_gl::RendererBackend>::clone(backend),
         }
@@ -293,8 +299,12 @@ impl Backend {
     /// A backend on `device`, for offscreen targets and the surfaces that
     /// the device's backend makes on it.
     #[cfg_attr(
-        not(any(feature = "gl", all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))),
-        expect(clippy::unnecessary_wraps, reason = "only Vulkan and OpenGL backends can fail to start")
+        not(any(
+            feature = "gl",
+            all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
+            all(feature = "d3d12", windows)
+        )),
+        expect(clippy::unnecessary_wraps, reason = "only Vulkan, D3D12 and OpenGL backends can fail to start")
     )]
     fn new(device: &Device) -> Result<Backend, Error> {
         match *device {
@@ -304,6 +314,10 @@ impl Backend {
             Device::Metal(ref device) => Ok(Backend::Metal(Rc::new(mln_mtl::RendererBackend::new(device)))),
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Device::Vulkan(ref device) => Ok(Backend::Vulkan(Rc::new(mln_vulkan::RendererBackend::new(device)?))),
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(ref device) => Ok(Backend::D3d12(Rc::new(
+                mln_d3d12::RendererBackend::new(device).map_err(|error| Error::native(error.to_string()))?,
+            ))),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             Device::Gl(ref device) => Ok(Backend::Gl(Rc::new(mln_gl::RendererBackend::new(device)?))),
             #[cfg(all(feature = "gl", target_family = "wasm"))]
@@ -395,6 +409,8 @@ impl Backend {
             Backend::Metal(ref backend) => Box::new(mln_mtl::OffscreenTarget::new(Rc::clone(backend), size)),
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Backend::Vulkan(ref backend) => Box::new(mln_vulkan::OffscreenTarget::new(Rc::clone(backend), size)),
+            #[cfg(all(feature = "d3d12", windows))]
+            Backend::D3d12(ref backend) => Box::new(mln_d3d12::OffscreenTarget::new(Rc::clone(backend), size)),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             Backend::Gl(ref backend) => Box::new(mln_gl::OffscreenTarget::new(Rc::clone(backend), size)),
         })

@@ -5,7 +5,7 @@
 // C++ renders with the one backend it was built with. The frontend renders
 // on the device it is given, or on WebGPU, or on the backend the
 // environment variable MLN_RENDER_BACKEND names for the test harness:
-// `webgpu`, `metal`, `vulkan` or `gl`.
+// `webgpu`, `metal`, `vulkan`, `d3d12` or `gl`.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -64,6 +64,7 @@ pub fn harness_device() -> Result<Device, Error> {
     let backend = match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
         Ok("metal") => BackendType::Metal,
         Ok("vulkan") => BackendType::Vulkan,
+        Ok("d3d12") => BackendType::D3D12,
         Ok("gl") => BackendType::OpenGL,
         Ok("gl-desktop") => {
             options.gl_api = GlApi::Gl;
