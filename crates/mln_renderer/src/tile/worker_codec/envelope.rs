@@ -8,6 +8,8 @@
 // failed, and the map side still takes a layout's atlases, whose bins would
 // otherwise stay reserved in the instance's atlas.
 
+use std::num::NonZeroU32;
+
 use mln_style_types::image::RectU16;
 use mln_util::serialization::payload::{self, Payload};
 use mln_util::serialization::shared;
@@ -130,7 +132,7 @@ pub(crate) struct TextureUpload {
     #[serde(serialize_with = "shared::serialize::<fields::SharedTexture, _>")]
     #[serde(deserialize_with = "shared::deserialize::<fields::SharedTexture, _>")]
     pub(crate) texture: DynamicTexturePtr,
-    pub(crate) bin: i32,
+    pub(crate) bin: NonZeroU32,
     pub(crate) rect: RectU16,
     #[serde(with = "payload::bytes")]
     pub(crate) pixels: Vec<u8>,

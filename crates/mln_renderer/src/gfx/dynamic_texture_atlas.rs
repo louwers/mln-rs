@@ -4,6 +4,7 @@
 // needs no context here: the GPU texture is created when the frame uploads
 // (see dynamic_texture.rs).
 
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -152,7 +153,7 @@ struct ImageAllocation {
     // Keeps the revision alive so its address can't be reused by another
     // image while the bin exists.
     _image: Arc<ImageImpl>,
-    bin_id: i32,
+    bin_id: NonZeroU32,
 }
 
 /// Identifies a glyph's allocation: (dynamic texture, glyph). The font stacks
@@ -170,13 +171,13 @@ struct GlyphAllocation {
     // Keeps the glyph alive so its address can't be reused by another glyph
     // while the bin exists.
     _glyph: Arc<Glyph>,
-    bin_id: i32,
+    bin_id: NonZeroU32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct BinKey {
     dynamic_texture: usize,
-    bin_id: i32,
+    bin_id: NonZeroU32,
 }
 
 #[derive(Default)]
