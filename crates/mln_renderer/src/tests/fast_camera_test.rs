@@ -275,6 +275,7 @@ impl Scene {
             glyph_manager: Rc::clone(&self.glyph_manager),
             dynamic_texture_atlas: Arc::clone(&self.texture_atlas),
             tile_worker_transport: Rc::<InProcessTransport>::clone(&self.transport),
+            thread_pool: self.thread_pool.clone(),
         };
         // The first frame lays the tiles out.
         let relayout = !self.laid_out;

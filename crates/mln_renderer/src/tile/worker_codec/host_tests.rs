@@ -7,13 +7,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mln_actor::RunLoop;
+use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
+use mln_util::identity::SimpleIdentity;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::envelope::{self, Action, MessageKind, Request};
@@ -103,6 +104,7 @@ impl Test {
             glyph_manager: GlyphManager::new(None),
             dynamic_texture_atlas: Arc::new(DynamicTextureAtlas::new()),
             tile_worker_transport: transport,
+            thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
         };
         let errors = Rc::new(Errors::default());
         let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));

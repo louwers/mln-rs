@@ -241,6 +241,11 @@ pub(crate) struct RenderOrchestrator {
 
     /// The features the layers rendered in the last `update_layers`.
     frame_rendered_features: FrameRenderedFeaturesMap,
+
+    /// Last, so that it drops after the fields above: the render layers,
+    /// layer groups and placement hold render tiles, whose layouts free
+    /// their data on the thread pool (`drop_on_workers`).
+    _wait_for_thread_pool: WaitOnDrop,
 }
 
 impl RenderOrchestrator {
@@ -291,6 +296,7 @@ impl RenderOrchestrator {
             remake_render_layers: false,
             filtered_layers_for_source: Vec::new(),
             tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
+            _wait_for_thread_pool: WaitOnDrop(thread_pool.clone()),
             thread_pool,
             global_state: None,
             layer_groups_by_layer_index: VecMap::new(),
@@ -412,6 +418,7 @@ impl RenderOrchestrator {
             glyph_manager: Rc::clone(&self.glyph_manager),
             dynamic_texture_atlas: Arc::clone(&self.dynamic_texture_atlas),
             tile_worker_transport: Rc::clone(&self.tile_worker_transport),
+            thread_pool: self.thread_pool.clone(),
         };
 
         self.glyph_manager.set_url(&update_parameters.glyph_url);
@@ -1579,8 +1586,14 @@ impl RenderOrchestrator {
     /// Drops `value` on the renderer's workers instead of this thread. The
     /// orchestrator's drop waits for it.
     pub(crate) fn drop_on_workers<T: Send + 'static>(&self, value: T) {
-        self.thread_pool.schedule(Box::new(move || drop(value)));
+        drop_on_workers(&self.thread_pool, value);
     }
+}
+
+/// Drops `value` on `thread_pool`, the orchestrator's workers, instead of
+/// this thread. The orchestrator's drop waits for it.
+pub(crate) fn drop_on_workers<T: Send + 'static>(thread_pool: &TaggedScheduler, value: T) {
+    thread_pool.schedule(Box::new(move || drop(value)));
 }
 
 /// A value that [`RenderOrchestrator::drop_on_workers`] drops once this
@@ -1599,8 +1612,17 @@ impl<T: Send + 'static> DropOnWorkers<T> {
 impl<T: Send + 'static> Drop for DropOnWorkers<T> {
     fn drop(&mut self) {
         if let Some(value) = self.value.take() {
-            self.thread_pool.schedule(Box::new(move || drop(value)));
+            drop_on_workers(&self.thread_pool, value);
         }
+    }
+}
+
+/// Waits for its thread pool's tasks when it drops.
+struct WaitOnDrop(TaggedScheduler);
+
+impl Drop for WaitOnDrop {
+    fn drop(&mut self) {
+        self.0.wait_for_empty();
     }
 }
 

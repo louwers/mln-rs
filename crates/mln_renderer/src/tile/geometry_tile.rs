@@ -25,7 +25,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_actor::{ActorRef, LocalObject, Mailbox, scheduler};
+use mln_actor::{ActorRef, LocalObject, Mailbox, TaggedScheduler, scheduler};
 use mln_gfx::UploadPass;
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
@@ -51,6 +51,7 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::dynamic_texture_atlas::{GlyphAtlas, ImageAtlas, ImageVersionMap, TextureAtlas};
 use crate::image_manager::{ImageManager, ImageRequestPair, ImageRequestor, ImageRequestorBase, requestor_key};
 use crate::render_layer::LayerRenderData;
+use crate::render_orchestrator::drop_on_workers;
 use crate::render_source::SourcePrepareParameters;
 use crate::text::glyph_manager::{GlyphManager, GlyphRequestor, HBShapeResults, glyph_requestor_key};
 use crate::tile::geometry_tile_worker::{SharedTileData, TileMessage, WorkerMessage};
@@ -172,10 +173,31 @@ impl LayoutResult {
     }
 }
 
+/// Port-only: lets go of a tile's layout result. The last reference frees
+/// the buckets and the feature index on the orchestrator's workers, since a
+/// view that drops many tiles would otherwise spend frames freeing them.
+/// The atlases drop here, on the render thread, where their dynamic
+/// textures must be released.
+fn release_layout(layout_result: Rc<LayoutResult>, thread_pool: &TaggedScheduler) {
+    if let Some(LayoutResult { layer_render_data, feature_index, atlases }) = Rc::into_inner(layout_result) {
+        drop_on_workers(thread_pool, (layer_render_data, feature_index));
+        drop(atlases);
+    }
+}
+
 struct GeometryTileRenderData {
     atlas_textures: Option<Rc<TileAtlasTextures>>,
     layout_result: Option<Rc<LayoutResult>>,
     bucket_geometry: Rc<BucketGeometry>,
+    thread_pool: TaggedScheduler,
+}
+
+impl Drop for GeometryTileRenderData {
+    fn drop(&mut self) {
+        if let Some(layout_result) = self.layout_result.take() {
+            release_layout(layout_result, &self.thread_pool);
+        }
+    }
 }
 
 impl TileRenderData for GeometryTileRenderData {
@@ -274,6 +296,8 @@ pub(crate) struct GeometryTileInner {
     pub(crate) missing: Cell<bool>,
 
     layout_result: RefCell<Option<Rc<LayoutResult>>>,
+    /// Where the layout result's data is freed (`release_layout`).
+    thread_pool: TaggedScheduler,
     /// The render thread's copies of the layout result's bucket geometry.
     bucket_geometry: RefCell<Rc<BucketGeometry>>,
     atlas_textures: RefCell<Option<Rc<TileAtlasTextures>>>,
@@ -566,6 +590,7 @@ impl GeometryTile {
                 has_data: Cell::new(false),
                 missing: Cell::new(false),
                 layout_result: RefCell::new(None),
+                thread_pool: parameters.thread_pool.clone(),
                 bucket_geometry: RefCell::default(),
                 atlas_textures: RefCell::new(None),
                 mode: parameters.mode,
@@ -623,7 +648,7 @@ impl Drop for GeometryTile {
         let layout_result = self.inner.layout_result.borrow_mut().take();
         if let Some(layout_result) = layout_result {
             let atlas = layout_result.atlases.dynamic_texture_atlas.clone();
-            drop(layout_result);
+            release_layout(layout_result, &self.inner.thread_pool);
             if let Some(atlas) = atlas {
                 atlas.remove_unused_dynamic_textures();
             }
@@ -641,6 +666,7 @@ impl Tile for GeometryTile {
             atlas_textures: self.inner.atlas_textures.borrow().clone(),
             layout_result: self.inner.layout_result.borrow().clone(),
             bucket_geometry: self.inner.bucket_geometry.borrow().clone(),
+            thread_pool: self.inner.thread_pool.clone(),
         })
     }
 
@@ -943,4 +969,86 @@ pub(crate) fn query_layer_source_features(
         result.push(Feature::from(converted));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::thread::ThreadId;
+
+    use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileLayer};
+    use mln_util::identity::SimpleIdentity;
+
+    use super::*;
+    use crate::gfx::dynamic_texture::{DynamicTexturePtr, TextureHandle};
+
+    /// Records the thread a value drops or is released on.
+    #[derive(Clone, Default)]
+    struct Threads(Arc<Mutex<Vec<ThreadId>>>);
+
+    impl Threads {
+        fn record(&self) {
+            self.0.lock().push(std::thread::current().id());
+        }
+
+        fn get(&self) -> Vec<ThreadId> {
+            self.0.lock().clone()
+        }
+    }
+
+    /// Tile data that records the thread it drops on.
+    struct TileData(Threads);
+
+    impl GeometryTileData for TileData {
+        fn clone_data(&self) -> Box<dyn GeometryTileData> {
+            unreachable!()
+        }
+
+        fn get_layer(&self, _name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, Error> {
+            Ok(None)
+        }
+    }
+
+    impl Drop for TileData {
+        fn drop(&mut self) {
+            self.0.record();
+        }
+    }
+
+    /// An atlas that records the threads its textures are released on.
+    struct Atlas(Threads);
+
+    impl TextureAtlas for Atlas {
+        fn remove_textures(&self, _texture_handles: &[TextureHandle], _dynamic_texture: Option<&DynamicTexturePtr>) {
+            self.0.record();
+        }
+
+        fn remove_unused_dynamic_textures(&self) {}
+    }
+
+    /// The last reference to a layout frees its feature index on the
+    /// workers and releases its atlases on the render thread.
+    #[test]
+    fn a_layout_frees_its_data_on_the_workers_and_its_atlases_here() {
+        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+        let (data_drops, atlas_releases) = (Threads::default(), Threads::default());
+        let result = LayoutResult::new(
+            HashMap::default(),
+            Arc::new(FeatureIndex::new(Some(Arc::new(TileData(data_drops.clone()))))),
+            GlyphAtlas::default(),
+            ImageAtlas::default(),
+            Some(Arc::new(Atlas(atlas_releases.clone()))),
+        );
+        let layout = Rc::new(result);
+        let render_data = Rc::clone(&layout);
+
+        release_layout(layout, &thread_pool);
+        assert!(atlas_releases.get().is_empty(), "the render data still holds the layout");
+        release_layout(render_data, &thread_pool);
+        let here = std::thread::current().id();
+        assert_eq!(atlas_releases.get(), [here, here], "both atlases release here");
+        thread_pool.wait_for_empty();
+        let dropped_on = data_drops.get();
+        assert_eq!(dropped_on.len(), 1);
+        assert_ne!(dropped_on[0], here);
+    }
 }
