@@ -6,10 +6,8 @@
 //! case by case have their own types instead, such as a style's load error or
 //! a resource request's error.
 
-use serde::{Deserialize, Serialize};
-
 /// What went wrong, as a caller would react to it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, mln_wire::Wire)]
 pub enum ErrorKind {
     /// An argument is invalid, such as malformed JSON or a value out of range.
     InvalidArgument,
@@ -34,7 +32,7 @@ pub enum ErrorKind {
 }
 
 /// A failed call: its [`ErrorKind`] and a message that says what failed.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, thiserror::Error, mln_wire::Wire)]
 #[error("{message}")]
 pub struct Error {
     pub kind: ErrorKind,

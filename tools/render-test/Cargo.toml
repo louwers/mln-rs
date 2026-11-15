@@ -46,7 +46,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-postcard.workspace = true
+mln_wire.workspace = true
 tempfile.workspace = true
 
 # Each test's report and actual/diff images go to target/tmp/<test name>.
@@ -62,7 +62,7 @@ path = "tests/self_check.rs"
 name = "render_tests"
 path = "tests/render_tests.rs"
 
-# Every test style's layers cross through serde as they went in.
+# Every test style's layers cross to the worker codec as they went in.
 [[test]]
 name = "layer_round_trip"
 path = "tests/layer_round_trip.rs"

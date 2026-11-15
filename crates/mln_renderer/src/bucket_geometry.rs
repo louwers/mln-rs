@@ -28,7 +28,6 @@ use mln_util::host_bytes::HostBytes;
 use mln_util::identity::SimpleIdentity;
 use mln_util::serialization::payload::{Payload, pod};
 use parking_lot::{Mutex, MutexGuard};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::bucket::Bucket;
 
@@ -181,18 +180,16 @@ impl<T> From<Vec<T>> for GeometryVec<T> {
 }
 
 /// As the plain values' bytes (`payload::pod`). Workers send buckets before
-/// the render thread moves anything out.
-impl<T: bytemuck::Pod> Serialize for GeometryVec<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+/// the render thread moves anything out. A payload the host kept in JS
+/// stays there (`mln_util::host_bytes`).
+impl<T: bytemuck::Pod> mln_wire::Wire for GeometryVec<T> {
+    fn write(&self, w: &mut mln_wire::Writer) {
         debug_assert!(!self.is_moved());
-        pod::serialize(&self.data(), serializer)
+        pod::write(&self.data(), w);
     }
-}
 
-/// A payload the host kept in JS stays there (`mln_util::host_bytes`).
-impl<'de, T: bytemuck::Pod> Deserialize<'de> for GeometryVec<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(match pod::deserialize_payload::<T, D>(deserializer)? {
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        Some(match pod::read_payload::<T>(r)? {
             Payload::Bytes(bytes) => GeometryVec::new(bytemuck::pod_collect_to_vec(&bytes)),
             #[cfg(target_family = "wasm")]
             Payload::Host(bytes) => {

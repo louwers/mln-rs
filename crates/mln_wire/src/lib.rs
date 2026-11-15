@@ -15,8 +15,9 @@
 
 extern crate self as mln_wire;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
+use std::hash::{BuildHasher, Hash};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -38,6 +39,12 @@ impl Writer {
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Writer { bytes: Vec::with_capacity(capacity), error: None }
+    }
+
+    /// A writer that appends to `bytes`.
+    #[must_use]
+    pub fn from_vec(bytes: Vec<u8>) -> Self {
+        Writer { bytes, error: None }
     }
 
     #[inline]
@@ -299,6 +306,22 @@ macro_rules! signed {
 }
 signed!(i16: i64::from, i32: i64::from, i64: std::convert::identity, isize: |value: isize| value as i64);
 
+macro_rules! non_zero {
+    ($($t:ty),+) => {$(
+        /// As the integer, which can't be zero.
+        impl Wire for std::num::NonZero<$t> {
+            fn write(&self, w: &mut Writer) {
+                self.get().write(w);
+            }
+            fn read(r: &mut Reader<'_>) -> Option<Self> {
+                let value = <$t>::read(r)?;
+                Self::new(value).or_else(|| r.fail("zero for a non-zero integer"))
+            }
+        }
+    )+};
+}
+non_zero!(u8, u16, u32, u64, usize);
+
 impl Wire for f32 {
     fn write(&self, w: &mut Writer) {
         w.extend_from_slice(&self.to_le_bytes());
@@ -427,8 +450,8 @@ impl<T: Wire> Wire for Box<T> {
     }
 }
 
-/// In full, as serde's `rc` feature writes it: values that cross once and
-/// then by key opt in with `mln_util::serialization::shared`.
+/// In full: values that cross once and then by key opt in with
+/// `mln_util::serialization::shared`.
 impl<T: Wire> Wire for Arc<T> {
     fn write(&self, w: &mut Writer) {
         (**self).write(w);
@@ -508,6 +531,62 @@ impl<K: Wire + Ord, V: Wire> Wire for BTreeMap<K, V> {
     }
 }
 
+/// In iteration order, which differs between maps of the same entries:
+/// `mln_util::serialization::sorted` writes one in key order.
+impl<K: Wire + Eq + Hash, V: Wire, S: BuildHasher + Default> Wire for HashMap<K, V, S> {
+    fn write(&self, w: &mut Writer) {
+        write_len(w, self.len());
+        for (key, value) in self {
+            key.write(w);
+            value.write(w);
+        }
+    }
+    fn read(r: &mut Reader<'_>) -> Option<Self> {
+        let len = r.length()?;
+        let mut map = HashMap::with_capacity_and_hasher(len.min(r.rest().len()), S::default());
+        for _ in 0..len {
+            let key = K::read(r)?;
+            map.insert(key, V::read(r)?);
+        }
+        Some(map)
+    }
+}
+
+/// In iteration order, as `HashMap`.
+impl<T: Wire + Eq + Hash, S: BuildHasher + Default> Wire for HashSet<T, S> {
+    fn write(&self, w: &mut Writer) {
+        write_len(w, self.len());
+        for value in self {
+            value.write(w);
+        }
+    }
+    fn read(r: &mut Reader<'_>) -> Option<Self> {
+        let len = r.length()?;
+        let mut set = HashSet::with_capacity_and_hasher(len.min(r.rest().len()), S::default());
+        for _ in 0..len {
+            set.insert(T::read(r)?);
+        }
+        Some(set)
+    }
+}
+
+impl<T: Wire + Ord> Wire for BTreeSet<T> {
+    fn write(&self, w: &mut Writer) {
+        write_len(w, self.len());
+        for value in self {
+            value.write(w);
+        }
+    }
+    fn read(r: &mut Reader<'_>) -> Option<Self> {
+        let len = r.length()?;
+        let mut set = BTreeSet::new();
+        for _ in 0..len {
+            set.insert(T::read(r)?);
+        }
+        Some(set)
+    }
+}
+
 impl Wire for Duration {
     fn write(&self, w: &mut Writer) {
         self.as_secs().write(w);
@@ -523,56 +602,165 @@ impl Wire for Duration {
     }
 }
 
-/// serde through a [`Wire`] value's encoding, written as serde bytes: for a
-/// `#[serde(with)]` field of a serde type, or a serde impl that delegates.
-/// Reading borrows the bytes, which postcard reading a slice allows.
-pub mod serde {
-    use serde::de::Error as _;
-    use serde::ser::Error as _;
-    use serde::{Deserialize, Deserializer, Serializer};
+#[cfg(feature = "glam")]
+impl Wire for glam::Vec2 {
+    fn write(&self, w: &mut Writer) {
+        self.x.write(w);
+        self.y.write(w);
+    }
+    fn read(r: &mut Reader<'_>) -> Option<Self> {
+        let x = f32::read(r)?;
+        Some(glam::Vec2::new(x, f32::read(r)?))
+    }
+}
 
-    use super::Wire;
+/// The value behind the lock, which writing locks.
+#[cfg(feature = "parking_lot")]
+impl<T: Wire> Wire for parking_lot::RwLock<T> {
+    fn write(&self, w: &mut Writer) {
+        self.read().write(w);
+    }
+    fn read(r: &mut Reader<'_>) -> Option<Self> {
+        T::read(r).map(parking_lot::RwLock::new)
+    }
+}
 
-    pub fn serialize<T: Wire, S: Serializer>(value: &T, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(&super::to_vec(value).map_err(S::Error::custom)?)
+/// The value behind the lock, which writing locks.
+#[cfg(feature = "parking_lot")]
+impl<T: Wire> Wire for parking_lot::Mutex<T> {
+    fn write(&self, w: &mut Writer) {
+        self.lock().write(w);
+    }
+    fn read(r: &mut Reader<'_>) -> Option<Self> {
+        T::read(r).map(parking_lot::Mutex::new)
+    }
+}
+
+/// `geo_types`' geometries, field by field.
+#[cfg(feature = "geo-types")]
+mod geo {
+    use geo_types::{
+        Coord, CoordNum, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint, MultiPolygon,
+        Point, Polygon, Rect, Triangle,
+    };
+
+    use super::{Reader, Wire, Writer, write_tag};
+
+    impl<T: CoordNum + Wire> Wire for Coord<T> {
+        fn write(&self, w: &mut Writer) {
+            self.x.write(w);
+            self.y.write(w);
+        }
+        fn read(r: &mut Reader<'_>) -> Option<Self> {
+            let x = T::read(r)?;
+            Some(Coord { x, y: T::read(r)? })
+        }
     }
 
-    pub fn deserialize<'de, T: Wire, D: Deserializer<'de>>(deserializer: D) -> Result<T, D::Error> {
-        let bytes = <&'de [u8]>::deserialize(deserializer)?;
-        super::from_slice(bytes).map_err(D::Error::custom)
+    impl<T: CoordNum + Wire> Wire for Point<T> {
+        fn write(&self, w: &mut Writer) {
+            self.0.write(w);
+        }
+        fn read(r: &mut Reader<'_>) -> Option<Self> {
+            Coord::read(r).map(Point)
+        }
     }
 
-    /// Implements `Serialize` and `Deserialize` for a [`Wire`] type
-    /// through [`serialize`] and [`deserialize`]: `serde_via_wire!(Type)`,
-    /// or `serde_via_wire!(for<T: Wire> Type<T>)`.
-    #[macro_export]
-    macro_rules! serde_via_wire {
-        (for<$($generic:ident: $bound:path),+> $t:ty) => {
-            impl<$($generic: $bound),+> ::serde::Serialize for $t {
-                fn serialize<S: ::serde::Serializer>(&self, serializer: S) -> ::core::result::Result<S::Ok, S::Error> {
-                    $crate::serde::serialize(self, serializer)
-                }
-            }
+    impl<T: CoordNum + Wire> Wire for LineString<T> {
+        fn write(&self, w: &mut Writer) {
+            self.0.write(w);
+        }
+        fn read(r: &mut Reader<'_>) -> Option<Self> {
+            Vec::read(r).map(LineString)
+        }
+    }
 
-            impl<'de, $($generic: $bound),+> ::serde::Deserialize<'de> for $t {
-                fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> ::core::result::Result<Self, D::Error> {
-                    $crate::serde::deserialize(deserializer)
-                }
-            }
-        };
-        ($t:ty) => {
-            impl ::serde::Serialize for $t {
-                fn serialize<S: ::serde::Serializer>(&self, serializer: S) -> ::core::result::Result<S::Ok, S::Error> {
-                    $crate::serde::serialize(self, serializer)
-                }
-            }
+    impl<T: CoordNum + Wire> Wire for Polygon<T> {
+        fn write(&self, w: &mut Writer) {
+            self.exterior().write(w);
+            super::write_seq(w, self.interiors());
+        }
+        fn read(r: &mut Reader<'_>) -> Option<Self> {
+            let exterior = LineString::read(r)?;
+            Some(Polygon::new(exterior, Vec::read(r)?))
+        }
+    }
 
-            impl<'de> ::serde::Deserialize<'de> for $t {
-                fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> ::core::result::Result<Self, D::Error> {
-                    $crate::serde::deserialize(deserializer)
+    impl<T: CoordNum + Wire> Wire for Geometry<T> {
+        fn write(&self, w: &mut Writer) {
+            match self {
+                Geometry::Point(point) => {
+                    write_tag(w, 0);
+                    point.write(w);
+                }
+                Geometry::Line(line) => {
+                    write_tag(w, 1);
+                    line.start.write(w);
+                    line.end.write(w);
+                }
+                Geometry::LineString(line) => {
+                    write_tag(w, 2);
+                    line.write(w);
+                }
+                Geometry::Polygon(polygon) => {
+                    write_tag(w, 3);
+                    polygon.write(w);
+                }
+                Geometry::MultiPoint(points) => {
+                    write_tag(w, 4);
+                    points.0.write(w);
+                }
+                Geometry::MultiLineString(lines) => {
+                    write_tag(w, 5);
+                    lines.0.write(w);
+                }
+                Geometry::MultiPolygon(polygons) => {
+                    write_tag(w, 6);
+                    polygons.0.write(w);
+                }
+                Geometry::GeometryCollection(geometries) => {
+                    write_tag(w, 7);
+                    geometries.0.write(w);
+                }
+                Geometry::Rect(rect) => {
+                    write_tag(w, 8);
+                    rect.min().write(w);
+                    rect.max().write(w);
+                }
+                Geometry::Triangle(triangle) => {
+                    write_tag(w, 9);
+                    triangle.v1().write(w);
+                    triangle.v2().write(w);
+                    triangle.v3().write(w);
                 }
             }
-        };
+        }
+        fn read(r: &mut Reader<'_>) -> Option<Self> {
+            Some(match r.tag()? {
+                0 => Geometry::Point(Point::read(r)?),
+                1 => {
+                    let start = Coord::read(r)?;
+                    Geometry::Line(Line::new(start, Coord::read(r)?))
+                }
+                2 => Geometry::LineString(LineString::read(r)?),
+                3 => Geometry::Polygon(Polygon::read(r)?),
+                4 => Geometry::MultiPoint(MultiPoint(Vec::read(r)?)),
+                5 => Geometry::MultiLineString(MultiLineString(Vec::read(r)?)),
+                6 => Geometry::MultiPolygon(MultiPolygon(Vec::read(r)?)),
+                7 => Geometry::GeometryCollection(GeometryCollection(Vec::read(r)?)),
+                8 => {
+                    let min = Coord::read(r)?;
+                    Geometry::Rect(Rect::new(min, Coord::read(r)?))
+                }
+                9 => {
+                    let a = Coord::read(r)?;
+                    let b = Coord::read(r)?;
+                    // As written: the writer's winding.
+                    Geometry::Triangle(Triangle::unchecked_winding(a, b, Coord::read(r)?))
+                }
+                _ => return r.fail_tag(),
+            })
+        }
     }
 }
 

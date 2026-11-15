@@ -198,9 +198,6 @@ pub struct PropertyExpression<T> {
     default_value: Option<T>,
 }
 
-// The renderer's serde types (paint property binders) hold expressions.
-mln_wire::serde_via_wire!(for<T: mln_wire::Wire> PropertyExpression<T>);
-
 impl<T> std::ops::Deref for PropertyExpression<T> {
     type Target = PropertyExpressionBase;
     fn deref(&self) -> &PropertyExpressionBase {

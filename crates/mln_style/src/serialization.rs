@@ -18,9 +18,6 @@ use std::sync::Arc;
 
 use mln_util::serialization::shared::{self, Kind, WireKind};
 use mln_wire::{Reader, Wire, Writer};
-use serde::de::Error as _;
-use serde::ser::Error as _;
-use serde::{Deserialize, Deserializer, Serializer};
 
 use crate::expression::Expr;
 use crate::layer_impl::Impl;
@@ -165,55 +162,29 @@ impl WireKind for SharedExpression {
     }
 }
 
-/// serde through the `mln_wire` encoding of a value of a `WireKind`, as
-/// bytes: for serde types that hold one.
-fn serialize_shared<K: WireKind, S: Serializer>(value: &Arc<K::Value>, serializer: S) -> Result<S::Ok, S::Error> {
-    let mut w = Writer::with_capacity(1024);
-    shared::write::<K>(value, &mut w);
-    serializer.serialize_bytes(&w.finish().map_err(S::Error::custom)?)
-}
-
-fn deserialize_shared<'de, K: WireKind, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<K::Value>, D::Error> {
-    let bytes = <&'de [u8]>::deserialize(deserializer)?;
-    let mut r = Reader::new(bytes);
-    let value = shared::read_wire::<K>(&mut r).ok_or_else(|| D::Error::custom(r.error()))?;
-    if !r.rest().is_empty() {
-        return Err(D::Error::custom("bytes after a value"));
-    }
-    Ok(value)
-}
-
-/// `#[serde(with)]` and `#[wire(with)]` for an `Arc<dyn layer::Impl>`.
+/// `#[wire(with)]` for an `Arc<dyn layer::Impl>`.
 pub mod shared_layer {
-    use super::{Arc, Deserializer, Impl, Reader, Serializer, SharedLayer, Writer, shared};
-
-    pub fn serialize<S: Serializer>(impl_: &Arc<dyn Impl>, serializer: S) -> Result<S::Ok, S::Error> {
-        super::serialize_shared::<SharedLayer, S>(impl_, serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<dyn Impl>, D::Error> {
-        super::deserialize_shared::<SharedLayer, D>(deserializer)
-    }
+    use super::{Arc, Impl, Reader, SharedLayer, Writer, shared};
 
     pub fn write(impl_: &Arc<dyn Impl>, w: &mut Writer) {
         shared::write::<SharedLayer>(impl_, w);
     }
 
     pub fn read(r: &mut Reader<'_>) -> Option<Arc<dyn Impl>> {
-        shared::read_wire::<SharedLayer>(r)
+        shared::read::<SharedLayer>(r)
     }
 }
 
-/// `#[serde(with)]` for an `Arc<dyn LayerProperties>`.
+/// `#[wire(with)]` for an `Arc<dyn LayerProperties>`.
 pub mod shared_layer_properties {
-    use super::{Arc, Deserializer, LayerProperties, Serializer, SharedLayerProperties};
+    use super::{Arc, LayerProperties, Reader, SharedLayerProperties, Writer, shared};
 
-    pub fn serialize<S: Serializer>(properties: &Arc<dyn LayerProperties>, serializer: S) -> Result<S::Ok, S::Error> {
-        super::serialize_shared::<SharedLayerProperties, S>(properties, serializer)
+    pub fn write(properties: &Arc<dyn LayerProperties>, w: &mut Writer) {
+        shared::write::<SharedLayerProperties>(properties, w);
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<dyn LayerProperties>, D::Error> {
-        super::deserialize_shared::<SharedLayerProperties, D>(deserializer)
+    pub fn read(r: &mut Reader<'_>) -> Option<Arc<dyn LayerProperties>> {
+        shared::read::<SharedLayerProperties>(r)
     }
 }
 
@@ -226,7 +197,7 @@ pub(crate) mod shared_expression {
     }
 
     pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<Expr>> {
-        shared::read_wire::<SharedExpression>(r)
+        shared::read::<SharedExpression>(r)
     }
 
     /// `#[wire(with)]` for an `Option<Arc<Expr>>`.

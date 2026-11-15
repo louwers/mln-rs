@@ -1,4 +1,4 @@
-// A layer's `Layer::Impl` crosses through serde (as a tile worker in another
+// A layer's `Layer::Impl` crosses (as a tile worker in another
 // wasm instance gets its layers) to one that encodes the same, and serializes
 // to style JSON that parses back. tools/render-test's layer_round_trip test
 // checks every layer of the render and query suites.
@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use feature::Value;
 use mln_conversion::{Convertible, Error};
-use serde::{Deserialize, Serialize};
 
 use super::util::parse_json;
 use crate::conversion::convert_layer;
@@ -21,16 +20,16 @@ fn parse(json: &serde_json::Value) -> Box<dyn Layer> {
     convert_layer(&Convertible::from(json), &mut error).unwrap_or_else(|| panic!("{json}: {}", error.message))
 }
 
-#[derive(Serialize, Deserialize)]
-struct Crossing(#[serde(with = "crate::serialization::shared_layer")] Arc<dyn Impl>);
+#[derive(mln_wire::Wire)]
+struct Crossing(#[wire(with = "crate::serialization::shared_layer")] Arc<dyn Impl>);
 
 /// The layer's serialized value, after checking that its `Impl` crosses
-/// through serde to one that encodes the same.
+/// to one that encodes the same.
 fn round_trip(layer: &dyn Layer) -> Value {
-    let encoded = postcard::to_allocvec(&Crossing(layer.base_impl())).unwrap();
+    let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
     let decoded: Crossing =
-        postcard::from_bytes(&encoded).unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
-    assert_eq!(postcard::to_allocvec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());
+        mln_wire::from_slice(&encoded).unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
+    assert_eq!(mln_wire::to_vec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());
     layer.serialize()
 }
 
@@ -206,7 +205,7 @@ fn style_parser_fixture_layers() {
     assert!(count > 10, "only {count} layers");
 }
 
-/// Each kind of expression node crosses through serde to the same
+/// Each kind of expression node crosses to the same
 /// expression, with the same dependencies.
 #[test]
 fn expressions_cross_as_data() {

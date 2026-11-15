@@ -1,10 +1,9 @@
 // The `Interpolate` impl for `Padding` is in interpolate.rs.
 
 use feature::Value;
-use serde::{Deserialize, Serialize};
 
 /// A set of four numbers representing padding around a box.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, mln_wire::Wire)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct Padding {
     pub top: f32,
     pub right: f32,

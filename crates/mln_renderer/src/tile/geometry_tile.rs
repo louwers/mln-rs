@@ -42,7 +42,6 @@ use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::bucket_geometry::BucketGeometry;
@@ -65,17 +64,17 @@ use crate::tile_render_data::{TileAtlasTextures, TileRenderData};
 /// their bins (C++ `~LayoutResult`). Shared, so that copies of a
 /// `LayoutResult` release them once.
 ///
-/// Port-only: serde writes the atlases without the atlas they release their
+/// Port-only: the codec writes the atlases without the atlas they release their
 /// bins to, which is the side's that gets them (`tile/worker_codec`).
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, mln_wire::Wire)]
 pub(crate) struct LayoutAtlases {
     pub(crate) glyph_atlas: GlyphAtlas,
     pub(crate) image_atlas: ImageAtlas,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
     /// The image versions that `update_images` last saw, where they differ
     /// from the layout's.
-    #[serde(skip)]
+    #[wire(skip)]
     seen_image_versions: Mutex<SeenImageVersions>,
 }
 

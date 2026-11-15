@@ -1,11 +1,9 @@
-use serde::{Deserialize, Serialize};
-
 use crate::face::FreeTypeLibrary;
 use crate::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 use crate::harfbuzz_impl::Impl;
 
 /// The HarfBuzz position of a glyph in pixels at 24 px.
-#[derive(Clone, Copy, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, mln_wire::Wire)]
 pub struct HBShapeAdjust {
     pub x_offset: f32,
     pub y_offset: f32,

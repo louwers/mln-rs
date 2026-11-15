@@ -36,7 +36,6 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::bucket_parameters::BucketParameters;
@@ -70,19 +69,19 @@ enum State {
 }
 
 /// The messages a `GeometryTile` sends its `GeometryTileWorker`: the
-/// worker's public member functions. Port-only: serde writes them for a
-/// worker in another wasm instance (`tile/worker_codec`).
-#[derive(Serialize, Deserialize)]
+/// worker's public member functions. Port-only: the codec writes them for
+/// a worker in another wasm instance (`tile/worker_codec`).
+#[derive(mln_wire::Wire)]
 pub enum WorkerMessage {
     SetData {
-        #[serde(with = "fields::tile_data")]
+        #[wire(with = "fields::tile_data")]
         data: Option<SharedTileData>,
         available_images: Arc<VecSet<String>>,
         correlation_id: u64,
     },
     /// Sets the layers, with the pixel ratio to lay them out for.
     SetLayers {
-        #[serde(with = "fields::layers")]
+        #[wire(with = "fields::layers")]
         layers: Vec<Arc<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
         available_images: Arc<VecSet<String>>,
@@ -112,9 +111,9 @@ pub enum WorkerMessage {
         results: HBShapeResults,
     },
     ImagesAvailable {
-        #[serde(with = "shared_image_map")]
+        #[wire(with = "shared_image_map")]
         icon_map: ImageMap,
-        #[serde(with = "shared_image_map")]
+        #[wire(with = "shared_image_map")]
         pattern_map: ImageMap,
         version_map: ImageVersionMap,
         image_correlation_id: u64,
@@ -139,9 +138,9 @@ impl WorkerMessage {
 }
 
 /// The messages a `GeometryTileWorker` sends its `GeometryTile`: the tile's
-/// member functions the worker calls. Port-only: serde writes them for a
-/// worker in another wasm instance (`tile/worker_codec`).
-#[derive(Serialize, Deserialize)]
+/// member functions the worker calls. Port-only: the codec writes them for
+/// a worker in another wasm instance (`tile/worker_codec`).
+#[derive(mln_wire::Wire)]
 pub enum TileMessage {
     Layout { result: LayoutResult, correlation_id: u64 },
     Error { error: Error, correlation_id: u64 },

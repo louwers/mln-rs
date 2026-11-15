@@ -7,13 +7,12 @@ use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::image::AlphaImage;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 use crate::tagged_string::FontStackHash;
 
 /// Where a glyph comes from: glyph PBFs, or a HarfBuzz-shaped font face with a
 /// type generated at runtime (`gen_new_glyph_id_type`).
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, mln_wire::Wire)]
 pub enum GlyphIDType {
     #[default]
     FontPBF,
@@ -74,7 +73,7 @@ impl Ord for GlyphRange {
 /// A glyph: `code` (UTF-16 code unit or font glyph index) and `type`; `hash`
 /// is the two read as one little-endian `char32_t`, which is what C++
 /// compares.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, mln_wire::Wire)]
 pub struct GlyphID {
     pub code: u16,
     pub type_: GlyphIDType,
@@ -131,7 +130,7 @@ pub fn get_glyph_range(glyph: GlyphID) -> GlyphRange {
     GlyphRange::new(start, end, glyph.type_)
 }
 
-#[derive(Clone, Copy, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, mln_wire::Wire)]
 pub struct GlyphMetrics {
     pub width: u32,
     pub height: u32,
@@ -144,7 +143,7 @@ pub struct GlyphMetrics {
 }
 
 /// `Glyph`.
-#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Default, mln_wire::Wire)]
 pub struct Glyph {
     pub id: GlyphID,
     /// A signed distance field of the glyph with a border (see `BORDER_SIZE`).
@@ -197,7 +196,7 @@ impl PositionedGlyph {
 }
 
 /// A bitmask of writing modes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, mln_wire::Wire)]
 pub struct WritingModeType(pub u8);
 
 #[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
@@ -340,7 +339,7 @@ impl PartialEq for FontData {
 
 /// A font face that the style defines. A face without a name is a fallback,
 /// which every font stack uses after the faces that name one of its fonts.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct FontFace {
     /// an unique glyph id
     pub type_: GlyphIDType,
@@ -353,7 +352,7 @@ pub struct FontFace {
     /// The font file itself, which the map then uses instead of fetching
     /// `url`. Left out of the faces that workers get, which don't read
     /// font files.
-    #[serde(skip)]
+    #[wire(skip)]
     pub data: Option<FontData>,
 }
 
@@ -389,13 +388,13 @@ pub type FontFaces = Vec<FontFace>;
 
 pub type HBShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<u16>>>>;
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct GlyphDependencies {
     pub glyphs: VecMap<FontStack, GlyphIDs>,
     pub shapes: HBShapeRequests,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct GlyphPosition {
     pub rect: RectU16,
     pub metrics: GlyphMetrics,

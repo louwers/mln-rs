@@ -13,13 +13,12 @@
 use std::fmt;
 
 use mln_util::constants;
-use serde::{Deserialize, Serialize};
 
 /// Has integer z/x/y coordinates. All tiles must be derived from 0/0/0 (no
 /// tiles outside of the main tile pyramid). Used for requesting data;
 /// represents data tiles that exist out there. z is never larger than the
 /// source's maxzoom.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, mln_wire::Wire)]
 pub struct CanonicalTileID {
     pub z: u8,
     pub x: u32,
@@ -82,7 +81,7 @@ impl fmt::Display for CanonicalTileID {
 /// Has integer z/x/y coordinates. `overscaled_z` describes the zoom level
 /// this tile is intended to represent, e.g. when parsing data. z is never
 /// larger than the source's maxzoom.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, mln_wire::Wire)]
 pub struct OverscaledTileID {
     pub overscaled_z: u8,
     pub wrap: i16,

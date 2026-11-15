@@ -511,9 +511,6 @@ macro_rules! properties {
                 $(pub $field: $crate::evaluated::Evaluated<$t>,)+
             }
 
-            // The renderer's buckets hold layout properties.
-            ::mln_wire::serde_via_wire!(PossiblyEvaluated);
-
             /// The value of each property for one feature.
             #[derive(Clone, Debug, Default)]
             pub struct Values {

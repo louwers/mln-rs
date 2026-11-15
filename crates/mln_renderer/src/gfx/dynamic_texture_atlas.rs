@@ -15,7 +15,6 @@ use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::serialization::sorted;
 use mln_util::size::Size;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 use super::dynamic_texture::{DynamicTexture, DynamicTexturePtr, TextureHandle};
 use crate::tile::worker_codec::fields;
@@ -83,24 +82,24 @@ fn padded_image(image: &PremultipliedImage, bin: RectU16, type_: ImageType) -> P
 
 /// Where a tile's glyphs are in the dynamic texture. Serde writes the
 /// texture by key, as the worker instance's (`tile/worker_codec`).
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, mln_wire::Wire)]
 pub(crate) struct GlyphAtlas {
     pub(crate) glyph_positions: GlyphPositions,
     pub(crate) texture_handles: Vec<TextureHandle>,
-    #[serde(with = "fields::texture")]
+    #[wire(with = "fields::texture")]
     pub(crate) dynamic_texture: Option<DynamicTexturePtr>,
 }
 
 /// Where a tile's icons and patterns are in the dynamic texture. Serde
 /// writes the texture by key, as the worker instance's (`tile/worker_codec`).
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, mln_wire::Wire)]
 pub(crate) struct ImageAtlas {
-    #[serde(with = "sorted::map")]
+    #[wire(with = "sorted::map")]
     pub(crate) icon_positions: ImagePositions,
-    #[serde(with = "sorted::map")]
+    #[wire(with = "sorted::map")]
     pub(crate) pattern_positions: ImagePositions,
     pub(crate) texture_handles: Vec<TextureHandle>,
-    #[serde(with = "fields::texture")]
+    #[wire(with = "fields::texture")]
     pub(crate) dynamic_texture: Option<DynamicTexturePtr>,
 }
 

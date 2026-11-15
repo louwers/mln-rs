@@ -5,7 +5,6 @@
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
-use serde::{Deserialize, Serialize};
 
 /// <https://www.mapbox.com/help/access-elevation-data/#mapbox-terrain-rgb>
 const UNPACK_MAPBOX: [f32; 4] = [6553.6, 25.6, 0.1, 10000.0];
@@ -25,9 +24,8 @@ pub(crate) fn get_unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
     }
 }
 
-/// Port-only: serde reads back only what `new` can make (`from_parts`).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(try_from = "DEMDataParts")]
+/// Port-only: only what `new` can make reads back (`from_parts`).
+#[derive(Clone, Debug)]
 pub(crate) struct DEMData {
     pub(crate) dim: i32,
     pub(crate) stride: i32,
@@ -35,20 +33,20 @@ pub(crate) struct DEMData {
     image: PremultipliedImage,
 }
 
-/// What `DEMData` is read from.
-#[derive(Deserialize)]
-struct DEMDataParts {
-    dim: i32,
-    stride: i32,
-    encoding: RasterEncoding,
-    image: PremultipliedImage,
-}
+impl mln_wire::Wire for DEMData {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.dim.write(w);
+        self.stride.write(w);
+        self.encoding.write(w);
+        self.image.write(w);
+    }
 
-impl TryFrom<DEMDataParts> for DEMData {
-    type Error = String;
-
-    fn try_from(parts: DEMDataParts) -> Result<Self, String> {
-        DEMData::from_parts(parts.dim, parts.stride, parts.encoding, parts.image)
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        let dim = i32::read(r)?;
+        let stride = i32::read(r)?;
+        let encoding = RasterEncoding::read(r)?;
+        let image = PremultipliedImage::read(r)?;
+        DEMData::from_parts(dim, stride, encoding, image).ok().or_else(|| r.fail("DEM data that `new` can't make"))
     }
 }
 
@@ -108,8 +106,8 @@ impl DEMData {
         Ok(DEMData { dim, stride, encoding, image: out })
     }
 
-    /// Port-only: a DEM as another `DEMData` was (its members), as serde
-    /// reads it. Fails unless the image is `stride` by `stride` pixels with
+    /// Port-only: a DEM as another `DEMData` was (its members), as it
+    /// reads back. Fails unless the image is `stride` by `stride` pixels with
     /// `stride == dim + 2` and `dim >= 0`, as `new` makes them. The sizes are
     /// checked without overflow: on wasm32 `Image::bytes` would wrap for a
     /// large stride.

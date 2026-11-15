@@ -1,7 +1,5 @@
-use serde::{Deserialize, Serialize};
-
 /// A width/height pair in (logical or physical) pixels.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 pub struct Size {
     pub width: u32,
     pub height: u32,

@@ -12,19 +12,18 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::serialization::shared;
 use mln_util::size::Size;
-use serde::{Deserialize, Serialize};
 
 pub type ImageStretch = (f32, f32);
 pub type ImageStretches = Vec<ImageStretch>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, mln_wire::Wire)]
 pub enum TextFit {
     StretchOrShrink,
     StretchOnly,
     Proportional,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct ImageContent {
     pub left: f32,
     pub top: f32,
@@ -32,7 +31,7 @@ pub struct ImageContent {
     pub bottom: f32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub struct Impl {
     pub id: String,
     pub image: PremultipliedImage,
@@ -54,7 +53,6 @@ pub struct Impl {
     pub text_fit_height: Option<TextFit>,
     /// Whether the image stays in its style once no layer uses it, whatever
     /// the map's policy for unused images says.
-    #[serde(default)]
     pub keep_unused: bool,
 }
 
@@ -204,7 +202,7 @@ impl Image {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, mln_wire::Wire)]
 pub enum ImageType {
     Icon,
     Pattern,
@@ -219,7 +217,7 @@ pub enum ImageType {
 pub type ImageMap = mln_vec_map::VecMap<String, Arc<Impl>>;
 pub type ImageDependencies = mln_util::hash::HashMap<String, ImageType>;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 pub struct RectU16 {
     pub x: u16,
     pub y: u16,
@@ -228,7 +226,7 @@ pub struct RectU16 {
 }
 
 /// An image's place in an atlas.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
 pub struct ImagePosition {
     pub padded_rect: RectU16,
     pub pixel_ratio: f32,
@@ -306,37 +304,37 @@ impl shared::Kind for SharedImage {
     const NAME: &'static str = "image";
 }
 
-impl shared::SerdeKind for SharedImage {
-    fn write<S: serde::Serializer>(image: &Impl, serializer: S) -> Result<S::Ok, S::Error> {
-        image.serialize(serializer)
+impl shared::WireKind for SharedImage {
+    fn write(image: &Impl, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(image, w);
     }
 
-    fn read<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Arc<Impl>, D::Error> {
-        Impl::deserialize(deserializer).map(Arc::new)
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Arc<Impl>> {
+        <Impl as mln_wire::Wire>::read(r).map(Arc::new)
     }
 }
 
-/// Port-only: `#[serde(with)]` for an `ImageMap`: its images (keyed by their
+/// Port-only: `#[wire(with)]` for an `ImageMap`: its images (keyed by their
 /// ids), in id order.
 pub mod shared_image_map {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
     use super::{Arc, ImageMap, Impl, SharedImage, shared};
 
-    #[derive(Serialize, Deserialize)]
-    struct Image(
-        #[serde(serialize_with = "shared::serialize::<SharedImage, _>")]
-        #[serde(deserialize_with = "shared::deserialize::<SharedImage, _>")]
-        Arc<Impl>,
-    );
-
-    pub fn serialize<S: Serializer>(images: &ImageMap, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut images: Vec<_> = images.values().cloned().map(Image).collect();
-        images.sort_by(|a, b| a.0.id.cmp(&b.0.id));
-        images.serialize(serializer)
+    pub fn write(images: &ImageMap, w: &mut mln_wire::Writer) {
+        let mut images: Vec<&Arc<Impl>> = images.values().collect();
+        images.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+        mln_wire::Wire::write(&images.len(), w);
+        for image in images {
+            shared::write::<SharedImage>(image, w);
+        }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ImageMap, D::Error> {
-        Ok(Vec::<Image>::deserialize(deserializer)?.into_iter().map(|image| (image.0.id.clone(), image.0)).collect())
+    pub fn read(r: &mut mln_wire::Reader<'_>) -> Option<ImageMap> {
+        let len = r.length()?;
+        let mut images = ImageMap::new();
+        for _ in 0..len {
+            let image = shared::read::<SharedImage>(r)?;
+            images.insert(image.id.clone(), image);
+        }
+        Some(images)
     }
 }

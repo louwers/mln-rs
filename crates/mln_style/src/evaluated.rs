@@ -17,9 +17,6 @@ pub struct Faded<T> {
     pub to: T,
 }
 
-// The renderer's serde types (paint property binders) hold these.
-mln_wire::serde_via_wire!(for<T: mln_wire::Wire> Faded<T>);
-
 /// How a property's value evaluates for a frame, with a default for an
 /// undefined value or an expression that gives no value: one of
 /// [`Evaluated::plain`], [`Evaluated::integer_zoom`],

@@ -27,14 +27,13 @@ use mln_tile_id::geometry_tile_data::{GeometryTileFeature, GeometryTileLayer};
 use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
 use mln_vec_map::VecMap;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket_geometry::GeometryVec;
 use crate::layout::pattern_layout::PatternDependency;
 use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 
 /// Maps vertex range to feature index.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, mln_wire::Wire)]
 pub(crate) struct FeatureVertexRange {
     pub(crate) feature_index: usize,
     pub(crate) start: usize,
@@ -46,7 +45,7 @@ pub(crate) type FeatureVertexRangeMap = VecMap<String, Vec<FeatureVertexRange>>;
 /// The data-driven attribute values of all the binders of one
 /// `paint_property_binders!` struct, one interleaved vertex per layout
 /// vertex.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub(crate) struct InterleavedVertexBuffer {
     pub(crate) stride: usize,
     pub(crate) vertex_count: usize,
@@ -136,8 +135,7 @@ fn floats_to_bytes(values: &[f32]) -> Vec<u8> {
 }
 
 /// The data of a `PaintPropertyBinder` subclass.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: Serialize + mln_wire::Wire", deserialize = "T: Deserialize<'de> + mln_wire::Wire"))]
+#[derive(Debug, mln_wire::Wire)]
 pub(crate) enum PaintPropertyBinderKind<T> {
     Constant {
         constant: T,
@@ -202,8 +200,7 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: Serialize + mln_wire::Wire", deserialize = "T: Deserialize<'de> + mln_wire::Wire"))]
+#[derive(Debug, mln_wire::Wire)]
 pub(crate) struct PaintPropertyBinder<T> {
     pub(crate) kind: PaintPropertyBinderKind<T>,
     pub(crate) statistics: PaintPropertyStatistics<T>,
@@ -446,8 +443,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
 }
 
 /// The data of a cross-faded `PaintPropertyBinder` subclass.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: Serialize + mln_wire::Wire", deserialize = "T: Deserialize<'de> + mln_wire::Wire"))]
+#[derive(Debug, mln_wire::Wire)]
 pub(crate) enum CrossFadedPaintPropertyBinderKind<T> {
     Constant {
         constant: Faded<T>,
@@ -459,15 +455,14 @@ pub(crate) enum CrossFadedPaintPropertyBinderKind<T> {
         /// The number of vertices `populate_vertex_vector` has written. It
         /// lags the buffer's count when a feature's patterns are missing,
         /// so the next feature's pattern also covers those vertices.
-        #[serde(skip)]
+        #[wire(skip)]
         populated_count: usize,
     },
 }
 
 /// The binder of a `*-pattern` property, whose two attributes are four `u16`s
 /// each.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: Serialize + mln_wire::Wire", deserialize = "T: Deserialize<'de> + mln_wire::Wire"))]
+#[derive(Debug, mln_wire::Wire)]
 pub(crate) struct CrossFadedPaintPropertyBinder<T> {
     pub(crate) kind: CrossFadedPaintPropertyBinderKind<T>,
     pub(crate) has_interleaved_buffer: bool,
@@ -758,7 +753,7 @@ macro_rules! paint_property_binders {
         $($(#[$update_meta:meta])+ fn update_vertex_vectors;)?
     ) => {
         $(#[$meta])*
-        #[derive(Debug, ::serde::Serialize, ::serde::Deserialize)]
+        #[derive(Debug, mln_wire::Wire)]
         pub(crate) struct $name {
             pub interleaved_vertex_buffer: $crate::paint_property_binder::InterleavedVertexBuffer,
             $(pub $field: $binder,)+

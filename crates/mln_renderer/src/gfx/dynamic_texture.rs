@@ -20,13 +20,12 @@ use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 
 /// A bin of a dynamic texture.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, mln_wire::Wire)]
 pub(crate) struct TextureHandle {
     id: i32,
     rectangle: RectU16,

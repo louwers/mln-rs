@@ -31,7 +31,6 @@ use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
 use mln_vec_map::VecMap;
 use parking_lot::{Mutex, MutexGuard, RwLock};
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates};
 use crate::bucket_geometry::GeometryVec;
@@ -107,7 +106,7 @@ pub(crate) const MAX_GLYPH_ICON_SIZE: u16 = 255;
 pub(crate) const SIZE_PACK_FACTOR: u16 = 128;
 pub(crate) const MAX_PACKED_SIZE: u16 = MAX_GLYPH_ICON_SIZE * SIZE_PACK_FACTOR;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct SortKeyRange {
     pub(crate) sort_key: f32,
     pub(crate) start: usize,
@@ -125,7 +124,7 @@ pub(crate) struct ZoomEvaluatedSize {
 
 /// Evaluates a symbol's `text-size` or `icon-size`: a constant, a source
 /// function or a composite function.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, mln_wire::Wire)]
 pub(crate) enum SymbolSizeBinder {
     Constant {
         layout_size: f32,
@@ -258,7 +257,7 @@ impl SymbolSizeBinder {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct PlacedSymbol {
     pub(crate) anchor_point: Vec2,
     pub(crate) segment: usize,
@@ -319,22 +318,22 @@ impl PlacedSymbol {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, mln_wire::Wire)]
 pub(crate) struct Buffer {
     pub(crate) attribute_data: GeometryVec<SymbolLayoutVertex>,
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) dynamic_attribute_data: Vec<SymbolDynamicLayoutVertex>,
     /// Positions for each layer that shares the bucket at another
     /// translation than its leader's. A layer keeps them for the bucket's
     /// life: drawables moved back to the shared positions would keep
     /// bindings to these. Placement makes them once the bucket is on the
     /// map side, so they don't cross with it from a worker.
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) opacity_attribute_data: Vec<SymbolOpacityVertex>,
     /// Three indices per triangle.
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) triangles: Vec<u16>,
     pub(crate) segments: Vec<SegmentBase>,
     pub(crate) placed_symbols: Vec<PlacedSymbol>,
@@ -392,21 +391,21 @@ impl Buffer {
 }
 
 /// The vertices and indices of a symbol bucket's collision boxes or circles.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, mln_wire::Wire)]
 pub(crate) struct CollisionBuffer {
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) vertices: Vec<CollisionBoxLayoutVertex>,
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) dynamic_vertices: Vec<CollisionBoxDynamicVertex>,
     pub(crate) segments: Vec<SegmentBase>,
     /// `lines` (box buffers: 2 per line) or `triangles` (circle buffers: 3
     /// per triangle).
-    #[serde(with = "pod")]
+    #[wire(with = "pod")]
     pub(crate) indices: Vec<u16>,
 }
 
 /// The paint property binders of one layer (`SymbolBucket::PaintProperties`).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, mln_wire::Wire)]
 pub(crate) struct PaintProperties {
     pub(crate) icon_binders: SymbolIconBinders,
     pub(crate) text_binders: SymbolTextBinders,
@@ -414,7 +413,7 @@ pub(crate) struct PaintProperties {
 
 /// The state of a `SymbolBucket` that placement and sorting change after the
 /// bucket is shared.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, mln_wire::Wire)]
 pub(crate) struct SymbolBucketState {
     pub(crate) sorted_angle: f32,
     // Set and used by placement.
@@ -454,7 +453,7 @@ fn next_bucket_instance_id() -> u32 {
     MAX_BUCKET_INSTANCE_ID.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub(crate) struct SymbolBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
@@ -474,29 +473,29 @@ pub(crate) struct SymbolBucket {
 
     pub(crate) tile_pixel_ratio: f32,
     /// Port-only: a bucket another side made gets an id of this side's.
-    #[serde(skip, default = "next_bucket_instance_id")]
+    #[wire(skip, default = "next_bucket_instance_id")]
     pub(crate) bucket_instance_id: u32,
     pub(crate) allow_vertical_placement: bool,
     pub(crate) placement_modes: Vec<TextWritingModeType>,
-    #[serde(skip)]
+    #[wire(skip)]
     has_format_section_overrides: OnceLock<bool>,
 
     /// Bumped whenever the vertex data changes after the bucket is shared
     /// (placement, sorting), so drawables can refresh their attributes.
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) version: AtomicU32,
     /// What changed (the C++ shared vectors' `updateModified`): the
     /// opacity vertices (placement), the dynamic vertices (line labels,
     /// variable anchors), the triangle order (sortFeatures) and the paint
     /// property binders (feature state). `RenderSymbolLayer` refreshes only
     /// those in its drawables.
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) opacity_version: AtomicU32,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) dynamic_version: AtomicU32,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) sort_version: AtomicU32,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) binder_version: AtomicU32,
 
     state: Mutex<SymbolBucketState>,

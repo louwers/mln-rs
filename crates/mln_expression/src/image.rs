@@ -10,9 +10,6 @@ pub struct Image {
     available: bool,
 }
 
-// The renderer's serde types (pattern binders) hold images.
-mln_wire::serde_via_wire!(Image);
-
 impl Image {
     pub fn new(image_id: impl Into<String>) -> Self {
         Image::with_available(image_id, false)

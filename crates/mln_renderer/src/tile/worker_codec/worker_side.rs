@@ -8,8 +8,7 @@ use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerPropert
 use mln_style_types::image::SharedImage;
 use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use mln_wire::Wire;
 
 use super::envelope::{self, About, Action, Encoded, ReplyHead, Request, TextureUpload};
 use super::fields::{SharedTexture, SharedTileDataKind};
@@ -111,7 +110,7 @@ impl WorkerCodec {
     }
 
     /// Decodes the message of a `WorkerAction::Message` as an `M`.
-    pub(crate) fn decode_message<M: DeserializeOwned>(&mut self, message: &[u8]) -> Result<M, String> {
+    pub(crate) fn decode_message<M: Wire>(&mut self, message: &[u8]) -> Result<M, String> {
         self.tables.open(|| envelope::decode(message))
     }
 
@@ -158,7 +157,7 @@ impl WorkerCodec {
     /// for them, and then `message`, or the `error` of what failed to
     /// encode (the head keeps a layout's atlases, which the map side then
     /// releases).
-    fn encode_reply<M: Serialize>(
+    fn encode_reply<M: Wire>(
         &mut self,
         tile: u64,
         correlation_id: u64,
@@ -177,7 +176,7 @@ impl WorkerCodec {
         let head = ReplyHead { tile, textures, uploads, forget, atlases, correlation_id };
         let encode = |message: &M| {
             let mut bytes = Vec::new();
-            envelope::append(&mut bytes, &head)?;
+            envelope::append_with(&mut bytes, |w| head.write(w))?;
             envelope::append(&mut bytes, message)?;
             Ok::<_, String>(bytes)
         };

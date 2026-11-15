@@ -3,13 +3,12 @@
 // include/mln/util/feature.hpp.
 
 use geo_types::{CoordNum, Geometry};
-use serde::{Deserialize, Serialize};
 
 use crate::value::ValueObject;
 
 /// `mapbox::feature::identifier`:
 /// `variant<null, uint64_t, int64_t, double, string>`.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub enum Identifier {
     #[default]
     Null,
@@ -29,7 +28,7 @@ pub type PropertyMap = ValueObject;
 /// `P` holds the properties. Features that share one property map, as the
 /// features a GeoJSON source's tiles cut from one source feature do, hold it
 /// as an [`Arc<PropertyMap>`](std::sync::Arc).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
 pub struct Feature<T: CoordNum = f64, P = PropertyMap> {
     pub geometry: Option<Geometry<T>>,
     pub properties: P,

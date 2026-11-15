@@ -11,7 +11,8 @@
 //!   for a struct of many fields compiles to much more code.
 //! - `#[wire(with = "path")]` on a field writes it with `path::write(&field,
 //!   writer)` and reads it with `path::read(reader)`.
-//! - `#[wire(skip)]` on a field leaves it out; it reads as its `Default`.
+//! - `#[wire(skip)]` on a field leaves it out; it reads as its `Default`, or
+//!   with `#[wire(skip, default = "path")]` as what `path()` returns.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -31,6 +32,7 @@ pub fn derive_wire(input: TokenStream) -> TokenStream {
 struct FieldAttrs {
     with: Option<Path>,
     skip: bool,
+    default: Option<Path>,
 }
 
 fn field_attrs(attrs: &[syn::Attribute]) -> syn::Result<FieldAttrs> {
@@ -44,8 +46,12 @@ fn field_attrs(attrs: &[syn::Attribute]) -> syn::Result<FieldAttrs> {
             } else if meta.path.is_ident("skip") {
                 result.skip = true;
                 Ok(())
+            } else if meta.path.is_ident("default") {
+                let path: LitStr = meta.value()?.parse()?;
+                result.default = Some(path.parse()?);
+                Ok(())
             } else {
-                Err(meta.error("expected `with` or `skip`"))
+                Err(meta.error("expected `with`, `skip` or `default`"))
             }
         })?;
     }
@@ -100,7 +106,11 @@ fn write_field(attrs: &FieldAttrs, field: &TokenStream2) -> TokenStream2 {
 /// How a field is read: an expression of its value.
 fn read_field(attrs: &FieldAttrs) -> TokenStream2 {
     if attrs.skip {
-        return quote! { ::core::default::Default::default() };
+        return if let Some(default) = &attrs.default {
+            quote! { #default() }
+        } else {
+            quote! { ::core::default::Default::default() }
+        };
     }
     if let Some(path) = &attrs.with {
         quote! { #path::read(r)? }

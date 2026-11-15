@@ -47,11 +47,10 @@ use mln_util::logging::{Event, Log};
 use mln_util::tiny_sdf::transform_raster_to_sdf;
 use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 use crate::text::font_face_engine::{self, FontFaceEngine, FontFaceShaper};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub struct HBShapeResult {
     pub(crate) str_: Vec<u16>,
     pub(crate) adjusts: Arc<Vec<HBShapeAdjust>>,

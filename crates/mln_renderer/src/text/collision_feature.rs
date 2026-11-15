@@ -12,7 +12,6 @@ use mln_text::glyph::Shaping;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates};
 use mln_util::Padding;
 use mln_util::grid_index::{BBox, BCircle};
-use serde::{Deserialize, Serialize};
 
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::IndexedSubfeature;
@@ -121,7 +120,7 @@ impl ProjectedCollisionBox {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct CollisionBox {
     /// the box is centered around the anchor point
     pub(crate) anchor: Vec2,
@@ -146,7 +145,7 @@ impl CollisionBox {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct CollisionFeature {
     pub(crate) boxes: Vec<CollisionBox>,
     pub(crate) indexed_feature: IndexedSubfeature,

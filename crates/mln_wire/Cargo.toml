@@ -14,8 +14,10 @@ include.workspace = true
 name = "mln_wire"
 
 [dependencies]
+geo-types = { workspace = true, optional = true }
+glam = { workspace = true, optional = true }
 mln_wire_derive.workspace = true
-serde.workspace = true
+parking_lot = { workspace = true, optional = true }
 
 [lints]
 workspace = true

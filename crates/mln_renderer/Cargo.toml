@@ -53,9 +53,7 @@ mln_util.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
 polylabel.workspace = true
-postcard.workspace = true
-mln_wire.workspace = true
-serde.workspace = true
+mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 
 [dev-dependencies]
 geojson.workspace = true

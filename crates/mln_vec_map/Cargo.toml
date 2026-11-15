@@ -15,7 +15,6 @@ name = "mln_vec_map"
 
 [dependencies]
 mln_wire.workspace = true
-serde.workspace = true
 
 [lints]
 workspace = true

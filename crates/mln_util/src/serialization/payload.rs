@@ -4,21 +4,15 @@
 //! bytes is not written into the message: it is moved to the session's
 //! payloads, and the message refers to it by index. `decode` gives the
 //! payloads back to the arrays that refer to them, as they are. Fields opt
-//! in with `#[serde(with = "...")]`: `bytes` for a `Vec<u8>`, `shared_bytes`
+//! in with `#[wire(with = "...")]`: `bytes` for a `Vec<u8>`, `shared_bytes`
 //! for an `Arc<Vec<u8>>` and `pod` for a `Vec` of plain values (vertices,
-//! indices). Outside a session the arrays are written in the message, as
-//! serde bytes, which postcard writes in one piece (serde writes a `Vec<u8>`
-//! byte by byte).
+//! indices). Outside a session the arrays are written in the message.
 //!
 //! On wasm a host can hand `decode` its payloads as the JS arrays they
 //! arrived in (`Payload::Host`). Each field copies its array into wasm
-//! memory, but for `pod::deserialize_payload`, whose caller can keep it in
-//! JS.
+//! memory, but for `pod::read_payload`, whose caller can keep it in JS.
 
 use std::cell::RefCell;
-
-use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[cfg(target_family = "wasm")]
 use crate::host_bytes::HostBytes;
@@ -88,46 +82,9 @@ pub fn decode<R>(payloads: Vec<Payload>, decode: impl FnOnce() -> R) -> R {
     result
 }
 
-/// How an array is written: in the message, or as the payload at an index.
-#[derive(Serialize)]
-enum Written<'a> {
-    Inline(#[serde(with = "inline")] &'a [u8]),
-    Payload(u32),
-}
-
-#[derive(Deserialize)]
-enum Read {
-    Inline(#[serde(with = "inline")] Vec<u8>),
-    Payload(u32),
-}
-
-/// serde bytes, both ways.
-mod inline {
-    use serde::{Deserializer, Serializer};
-
-    pub(crate) fn serialize<S: Serializer>(bytes: &&[u8], serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(bytes)
-    }
-
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
-        struct Visitor;
-        impl serde::de::Visitor<'_> for Visitor {
-            type Value = Vec<u8>;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("bytes")
-            }
-            fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Vec<u8>, E> {
-                Ok(v.to_vec())
-            }
-            fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Vec<u8>, E> {
-                Ok(v)
-            }
-        }
-        deserializer.deserialize_byte_buf(Visitor)
-    }
-}
-
-fn write<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+/// Writes an array: 0 and the bytes in the message, or 1 and the index of
+/// the payload it moved to.
+fn write(bytes: &[u8], w: &mut mln_wire::Writer) {
     let index = if bytes.len() >= PAYLOAD_MIN {
         ENCODING.with(|session| {
             session.borrow_mut().as_mut().map(|payloads| {
@@ -138,38 +95,47 @@ fn write<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> 
     } else {
         None
     };
-    match index {
-        Some(index) => {
-            let index = u32::try_from(index).map_err(|_| serde::ser::Error::custom("too many payloads"))?;
-            Written::Payload(index).serialize(serializer)
+    if let Some(index) = index {
+        w.push(1);
+        mln_wire::write_varint(w, index as u64);
+    } else {
+        w.push(0);
+        mln_wire::write_varint(w, bytes.len() as u64);
+        w.extend_from_slice(bytes);
+    }
+}
+
+/// Reads what `write` wrote.
+fn read_payload(r: &mut mln_wire::Reader<'_>) -> Option<Payload> {
+    match r.byte()? {
+        0 => {
+            let len = r.length()?;
+            Some(Payload::Bytes(r.take(len)?.to_vec()))
         }
-        None => Written::Inline(bytes).serialize(serializer),
+        1 => {
+            let index = r.varint()?;
+            let payload = DECODING.with(|session| {
+                let mut session = session.borrow_mut();
+                session.as_mut()?.get_mut(usize::try_from(index).ok()?)?.take()
+            });
+            payload.or_else(|| r.fail("a payload the message doesn't have"))
+        }
+        _ => r.fail_tag(),
     }
 }
 
-fn read_payload<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Payload, D::Error> {
-    match Read::deserialize(deserializer)? {
-        Read::Inline(bytes) => Ok(Payload::Bytes(bytes)),
-        Read::Payload(index) => DECODING
-            .with(|session| session.borrow_mut().as_mut().and_then(|payloads| payloads.get_mut(index as usize)?.take()))
-            .ok_or_else(|| D::Error::custom(format!("no payload {index}"))),
-    }
-}
-
-fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
-    read_payload(deserializer).map(Payload::into_vec)
+fn read(r: &mut mln_wire::Reader<'_>) -> Option<Vec<u8>> {
+    read_payload(r).map(Payload::into_vec)
 }
 
 /// A `Vec<u8>`.
 pub mod bytes {
-    use serde::{Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
-        super::write(bytes, serializer)
+    pub fn write(bytes: &[u8], w: &mut mln_wire::Writer) {
+        super::write(bytes, w);
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
-        super::read(deserializer)
+    pub fn read(r: &mut mln_wire::Reader<'_>) -> Option<Vec<u8>> {
+        super::read(r)
     }
 }
 
@@ -177,48 +143,48 @@ pub mod bytes {
 pub mod shared_bytes {
     use std::sync::Arc;
 
-    use serde::{Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(bytes: &Arc<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error> {
-        super::write(bytes, serializer)
+    pub fn write(bytes: &Arc<Vec<u8>>, w: &mut mln_wire::Writer) {
+        super::write(bytes, w);
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<Vec<u8>>, D::Error> {
-        super::read(deserializer).map(Arc::new)
+    pub fn read(r: &mut mln_wire::Reader<'_>) -> Option<Arc<Vec<u8>>> {
+        super::read(r).map(Arc::new)
     }
 
     /// An `Option<Arc<Vec<u8>>>`.
     pub mod option {
         use std::sync::Arc;
 
-        use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-        #[derive(Serialize, Deserialize)]
-        struct Bytes(#[serde(with = "super")] Arc<Vec<u8>>);
-
-        pub fn serialize<S: Serializer>(bytes: &Option<Arc<Vec<u8>>>, serializer: S) -> Result<S::Ok, S::Error> {
-            bytes.clone().map(Bytes).serialize(serializer)
+        pub fn write(bytes: &Option<Arc<Vec<u8>>>, w: &mut mln_wire::Writer) {
+            match bytes {
+                None => w.push(0),
+                Some(bytes) => {
+                    w.push(1);
+                    super::write(bytes, w);
+                }
+            }
         }
 
-        pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Arc<Vec<u8>>>, D::Error> {
-            Ok(Option::<Bytes>::deserialize(deserializer)?.map(|bytes| bytes.0))
+        pub fn read(r: &mut mln_wire::Reader<'_>) -> Option<Option<Arc<Vec<u8>>>> {
+            match r.byte()? {
+                0 => Some(None),
+                1 => super::read(r).map(Some),
+                _ => r.fail("invalid option"),
+            }
         }
     }
 }
 
 /// A `Vec` of plain values, as their bytes.
 pub mod pod {
-    use serde::de::Error as _;
-    use serde::{Deserializer, Serializer};
-
     use super::Payload;
 
-    pub fn serialize<T: bytemuck::Pod, S: Serializer>(values: &[T], serializer: S) -> Result<S::Ok, S::Error> {
-        super::write(bytemuck::cast_slice(values), serializer)
+    pub fn write<T: bytemuck::Pod>(values: &[T], w: &mut mln_wire::Writer) {
+        super::write(bytemuck::cast_slice(values), w);
     }
 
-    pub fn deserialize<'de, T: bytemuck::Pod, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<T>, D::Error> {
-        Ok(match deserialize_payload::<T, D>(deserializer)? {
+    pub fn read<T: bytemuck::Pod>(r: &mut mln_wire::Reader<'_>) -> Option<Vec<T>> {
+        Some(match read_payload::<T>(r)? {
             Payload::Bytes(bytes) => bytemuck::pod_collect_to_vec(&bytes),
             #[cfg(target_family = "wasm")]
             Payload::Host(bytes) => bytes.to_pod_vec(),
@@ -226,34 +192,26 @@ pub mod pod {
     }
 
     /// The values' bytes as they arrived, a whole number of `T`s.
-    pub fn deserialize_payload<'de, T: bytemuck::Pod, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Payload, D::Error> {
-        let bytes = super::read_payload(deserializer)?;
+    pub fn read_payload<T: bytemuck::Pod>(r: &mut mln_wire::Reader<'_>) -> Option<Payload> {
+        let bytes = super::read_payload(r)?;
         if !bytes.len().is_multiple_of(size_of::<T>()) {
-            let size = size_of::<T>();
-            return Err(D::Error::custom(format!(
-                "{} bytes are not a whole number of {size}-byte values",
-                bytes.len()
-            )));
+            return r.fail("bytes that are not a whole number of values");
         }
-        Ok(bytes)
+        Some(bytes)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use serde::{Deserialize, Serialize};
-
     use super::*;
 
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[derive(Debug, PartialEq, mln_wire::Wire)]
     struct Message {
-        #[serde(with = "bytes")]
+        #[wire(with = "bytes")]
         small: Vec<u8>,
-        #[serde(with = "bytes")]
+        #[wire(with = "bytes")]
         large: Vec<u8>,
-        #[serde(with = "pod")]
+        #[wire(with = "pod")]
         values: Vec<[u16; 2]>,
     }
 
@@ -265,21 +223,21 @@ mod tests {
     /// one, everything is in it.
     #[test]
     fn large_arrays_travel_beside_the_message() {
-        let (bytes, payloads) = encode(|| postcard::to_allocvec(&message()).unwrap());
+        let (bytes, payloads) = encode(|| mln_wire::to_vec(&message()).unwrap());
         assert_eq!(payloads.len(), 2);
         assert!(bytes.len() < 32);
-        let decoded: Message = decode(payloads, || postcard::from_bytes(&bytes).unwrap());
+        let decoded: Message = decode(payloads, || mln_wire::from_slice(&bytes).unwrap());
         assert_eq!(decoded, message());
 
-        let inline = postcard::to_allocvec(&message()).unwrap();
+        let inline = mln_wire::to_vec(&message()).unwrap();
         assert!(inline.len() > 5 * PAYLOAD_MIN);
-        assert_eq!(postcard::from_bytes::<Message>(&inline).unwrap(), message());
+        assert_eq!(mln_wire::from_slice::<Message>(&inline).unwrap(), message());
     }
 
     /// A message that refers to a payload it doesn't have is malformed.
     #[test]
     fn missing_payloads_are_errors() {
-        let (bytes, _) = encode(|| postcard::to_allocvec(&message()).unwrap());
-        assert!(decode(Vec::new(), || postcard::from_bytes::<Message>(&bytes)).is_err());
+        let (bytes, _) = encode(|| mln_wire::to_vec(&message()).unwrap());
+        assert!(decode(Vec::new(), || mln_wire::from_slice::<Message>(&bytes)).is_err());
     }
 }
