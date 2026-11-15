@@ -1959,8 +1959,9 @@ impl Layout for SymbolLayout {
 
 #[cfg(test)]
 mod tests {
-    use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
     use std::num::NonZeroU16;
+
+    use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
 
     use super::GlyphTypeTable;
 

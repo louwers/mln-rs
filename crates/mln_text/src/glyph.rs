@@ -416,8 +416,7 @@ struct GlyphTypes {
     types: VecMap<String, VecMap<String, VecMap<usize, NonZeroU16>>>,
 }
 
-static GLYPH_TYPES: Mutex<GlyphTypes> =
-    Mutex::new(GlyphTypes { counter: 0, types: VecMap::new() });
+static GLYPH_TYPES: Mutex<GlyphTypes> = Mutex::new(GlyphTypes { counter: 0, types: VecMap::new() });
 
 /// Boost's `hash_combine`, with libstdc++'s identity `std::hash<uint32_t>`.
 fn hash_combine(seed: &mut usize, v: u32) {

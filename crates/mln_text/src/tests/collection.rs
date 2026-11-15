@@ -38,7 +38,11 @@ fn each_face_of_a_collection_draws_its_own_glyphs() {
 fn a_single_font_has_only_face_zero() {
     let khmer = include_bytes!("../../tests/fixtures/khmer.ttf").to_vec();
     let face = |index| {
-        HBShaper::new(GlyphIDType::face(NonZeroU16::MIN), FontData::from(khmer.clone()).with_face_index(index), &FreeTypeLibrary::new())
+        HBShaper::new(
+            GlyphIDType::face(NonZeroU16::MIN),
+            FontData::from(khmer.clone()).with_face_index(index),
+            &FreeTypeLibrary::new(),
+        )
     };
     assert!(face(0).valid());
     assert!(!face(1).valid());
