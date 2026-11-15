@@ -700,6 +700,21 @@ impl Runtime {
         })
     }
 
+    /// Sets where the browser's fetch looks for a response that the host
+    /// fetched ahead before it fetches a whole resource: `take(url)` returns
+    /// a promise of the `Response` fetched for exactly `url`, at most once
+    /// for each, or undefined. A promise that rejects is fetched again.
+    /// `None` stops looking. Call it on the thread that runs the runtime.
+    #[cfg(target_family = "wasm")]
+    pub fn set_fetch_preloads(&self, take: Option<js_sys::Function>) -> Result<Completion<()>, Error> {
+        let take = take.map(mln_actor::LocalObject::new);
+        self.apply(move |core| {
+            let take = take.as_ref().and_then(mln_actor::LocalObject::get).map(|take| (*take).clone());
+            core.online().set_fetch_preloads(take);
+            Ok(())
+        })
+    }
+
     /// Runs a maintenance action on the cache database.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) in the

@@ -34,11 +34,16 @@ use crate::js_error;
 
 /// Hands this instance's fetches the responses its Web Worker fetched ahead
 /// (web/map-worker.ts): `take(url)` returns a promise of the response
-/// fetched for exactly `url`, once, or undefined (`mln_storage`'s
-/// `set_fetch_preloads`).
+/// fetched for exactly `url`, once, or undefined
+/// (`Runtime::set_fetch_preloads`).
 #[wasm_bindgen]
 pub fn set_preloads(take: js_sys::Function) {
-    mln_storage::set_fetch_preloads(Some(take));
+    PRELOADS.with(|preloads| *preloads.borrow_mut() = Some(take));
+}
+
+thread_local! {
+    /// What `set_preloads` set, for the runtimes made after.
+    static PRELOADS: std::cell::RefCell<Option<js_sys::Function>> = const { std::cell::RefCell::new(None) };
 }
 
 /// How many phases `WebMap::frame_timings` reports.
@@ -152,6 +157,7 @@ impl WebMap {
     ) -> Result<WebMap, JsValue> {
         shaper::set_loader(load_shaper);
         let runtime = Runtime::new(&RuntimeOptions::default()).map_err(js_error)?;
+        sent(runtime.set_fetch_preloads(PRELOADS.with(|preloads| preloads.borrow().clone())));
         let reports = Arc::new(Mutex::new(Reports::default()));
         let handler_reports = Arc::clone(&reports);
         sent(runtime.set_event_handler(move |events| handler_reports.lock().handle(events)));

@@ -9,7 +9,7 @@ use std::future::Future;
 use std::rc::Rc;
 
 use mln_gfx::RendererBackend;
-use mln_gfx::gpu::{ReadbackId, conformance};
+use mln_gfx::gpu::{ReadbackId, ResourceId, conformance};
 use mln_util::error::Error;
 
 /// Where the check is.
@@ -79,7 +79,7 @@ impl GpuCheck {
 
     fn drop_readback(&self) {
         if let State::Running { backend, readback } = std::mem::take(&mut *self.0.borrow_mut()) {
-            backend.gpu().destroy_readback(readback);
+            backend.gpu().destroy(ResourceId::Readback(readback));
         }
     }
 }
