@@ -26,7 +26,7 @@ use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 
 /// Identifies a bin within a dynamic texture.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, mln_wire::Wire)]
 pub(crate) struct DynamicTextureBinId(NonZeroU32);
 
 impl DynamicTextureBinId {
