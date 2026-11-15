@@ -287,6 +287,7 @@ mod tests {
         schedule_and_reply_value(
             &pool,
             Some(SimpleIdentity::new()),
+            &run_loop.scheduler(),
             move || {
                 assert_ne!(std::thread::current().id(), main);
                 6 * 7

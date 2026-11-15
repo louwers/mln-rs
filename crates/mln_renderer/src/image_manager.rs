@@ -10,8 +10,6 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_actor::SchedulerPtr;
-#[cfg(test)]
-use mln_actor::scheduler;
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::hash::RandomState;
@@ -110,13 +108,6 @@ pub(crate) struct ImageManager {
 }
 
 impl ImageManager {
-    /// A manager whose callbacks run on this thread's loop, if it has one.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn create() -> Rc<ImageManager> {
-        Self::on(scheduler::try_get_current())
-    }
-
     /// A manager whose callbacks run on `scheduler`'s loop.
     #[must_use]
     pub(crate) fn on(scheduler: Option<SchedulerPtr>) -> Rc<ImageManager> {
@@ -508,8 +499,8 @@ impl ImageManager {
     }
 }
 
-/// Wraps `f` in a callable that runs it on the current thread's scheduler
-/// (the render thread's run loop).
+/// Wraps `f` in a callable that runs it on `scheduler`, the render thread's
+/// loop, or at once without one.
 fn bind_once_local(scheduler: Option<&SchedulerPtr>, f: impl FnOnce() + 'static) -> Box<dyn FnOnce()> {
     type Slot = RefCell<Option<Box<dyn FnOnce()>>>;
     let slot: Rc<Slot> = Rc::new(RefCell::new(Some(Box::new(f))));

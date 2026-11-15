@@ -8,19 +8,23 @@
 // the holder handle).
 //
 // The task queues live in a `Send + Sync` core (`RunLoopHandle`), which is
-// also the loop's `Scheduler` for mailboxes and `Scheduler::get_current()`:
-// other threads post to it, as they post through a C++ `RunLoop*`. The async
-// handles stay on the loop's thread.
+// also the loop's `Scheduler` for mailboxes: other threads post to it, as
+// they post through a C++ `RunLoop*`. The async handles stay on the loop's
+// thread.
+//
+// Unlike C++, a thread has no current loop: what runs on a loop is given the
+// loop, or its scheduler, by whoever made it.
 //
 // Timers (`util::Timer`, timer.rs) run first in `run_once`, as `uv_run` runs
 // due timers before the poll phase; a blocking `run()` sleeps until the next
 // timer is due. Timers do not keep `run()` alive (libuv unrefs them).
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::ThreadId;
 
 use parking_lot::{Condvar, Mutex};
 
@@ -47,6 +51,8 @@ pub(crate) struct Core {
     /// Told about every wake-up, for a loop that a host drives
     /// with `run_once` instead of `run` (see `RunLoop::set_waker`).
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// The thread that runs the loop.
+    owner: ThreadId,
 }
 
 impl Core {
@@ -59,6 +65,7 @@ impl Core {
             condvar: Condvar::new(),
             stopped: AtomicBool::new(false),
             waker: Mutex::new(None),
+            owner: std::thread::current().id(),
         }
     }
 
@@ -140,13 +147,13 @@ struct Inner {
     /// passes so that a pass doesn't allocate.
     sending: Cell<Vec<Rc<AsyncHandle>>>,
     timers: Rc<Timers>,
+    /// Where the loop's background work runs, taken at its first use.
+    pool: OnceCell<scheduler::SchedulerPtr>,
 }
 
-thread_local! {
-    static CURRENT: RefCell<Option<Rc<Inner>>> = const { RefCell::new(None) };
-}
-
-/// A thread's event loop. Cheap to clone: clones refer to the same loop.
+/// A thread's event loop: its tasks, async tasks and timers, and the pool
+/// that the work of its objects goes to in the background. Cheap to clone:
+/// clones refer to the same loop.
 #[derive(Clone)]
 pub struct RunLoop {
     inner: Rc<Inner>,
@@ -161,16 +168,11 @@ pub struct RunLoopHandle {
 }
 
 impl RunLoop {
-    /// Creates a loop and makes it the current scheduler of this thread.
+    /// A loop for this thread, whose background work goes to the process's
+    /// pool ([`scheduler::get_background`]).
     #[must_use]
     pub fn new() -> Self {
-        let run_loop = RunLoop::over(Arc::new(Core::new()));
-        CURRENT.with(|c| *c.borrow_mut() = Some(Rc::clone(&run_loop.inner)));
-        scheduler::set_current(Some(run_loop.scheduler()));
-        run_loop
-    }
-
-    fn over(core: Arc<Core>) -> Self {
+        let core = Arc::new(Core::new());
         let scheduler = Arc::new(RunLoopHandle { core: Arc::clone(&core) });
         RunLoop {
             inner: Rc::new(Inner {
@@ -179,8 +181,23 @@ impl RunLoop {
                 handles: RefCell::new(Vec::new()),
                 sending: Cell::new(Vec::new()),
                 timers: Rc::default(),
+                pool: OnceCell::new(),
             }),
         }
+    }
+
+    /// A loop for this thread, whose background work goes to `pool`.
+    #[must_use]
+    pub fn with_pool(pool: scheduler::SchedulerPtr) -> Self {
+        let run_loop = RunLoop::new();
+        let _ = run_loop.inner.pool.set(pool);
+        run_loop
+    }
+
+    /// The pool that the loop's objects run their background work on.
+    #[must_use]
+    pub fn pool(&self) -> scheduler::SchedulerPtr {
+        Arc::clone(self.inner.pool.get_or_init(scheduler::get_background))
     }
 
     /// The loop's scheduler: mailboxes and requests that run their work on
@@ -188,32 +205,6 @@ impl RunLoop {
     #[must_use]
     pub fn scheduler(&self) -> scheduler::SchedulerPtr {
         Arc::clone(&self.inner.scheduler)
-    }
-
-    /// A loop that isn't the current loop of its thread, for a thread that
-    /// runs several in turn: what runs on it takes its scheduler and the loop
-    /// itself explicitly (`scheduler`, `AsyncTask::on`).
-    #[must_use]
-    pub fn detached() -> Self {
-        RunLoop::over(Arc::new(Core::new()))
-    }
-
-    /// Returns this thread's current `RunLoop`, creating one on first use.
-    /// C++ asserts that the thread has one; creating it is what the C++ test
-    /// harnesses do first thing (and what `get_current` does).
-    #[must_use]
-    pub fn get() -> RunLoop {
-        let existing = CURRENT.with(|c| c.borrow().clone());
-        match existing {
-            Some(inner) => RunLoop { inner },
-            None => RunLoop::new(),
-        }
-    }
-
-    /// The current thread's loop, if it has one.
-    #[must_use]
-    pub(crate) fn try_get() -> Option<RunLoop> {
-        CURRENT.with(|c| c.borrow().clone()).map(|inner| RunLoop { inner })
     }
 
     /// A handle other threads can post to.
@@ -401,13 +392,11 @@ impl Scheduler for RunLoopHandle {
         self.core.push(task);
     }
 
-    /// Must be called on the loop's own thread (as in C++, where it calls
+    /// On the loop's own thread, it runs the queued tasks (as C++ calls
     /// `runOnce`); elsewhere it waits for the queue to drain.
     fn wait_for_empty(&self) {
-        if let Some(run_loop) = RunLoop::try_get()
-            && Arc::ptr_eq(&run_loop.inner.core, &self.core)
-        {
-            run_loop.wait_for_empty();
+        if self.core.owner == std::thread::current().id() {
+            self.core.process();
             return;
         }
         while self.core.remaining() != 0 {
@@ -430,7 +419,7 @@ mod tests {
         assert!(run_loop.has_pending());
         run_loop.run_once();
         assert!(!run_loop.has_pending());
-        let task = crate::async_task::AsyncTask::new(|| {});
+        let task = crate::async_task::AsyncTask::new(&run_loop, || {});
         task.sender().send();
         assert!(run_loop.has_pending());
         run_loop.run_once();
@@ -442,10 +431,10 @@ mod tests {
         let run_loop = RunLoop::new();
         let ran = Rc::new(Cell::new(0));
         let created = Rc::new(RefCell::new(None));
-        let (counter, slot) = (Rc::clone(&ran), Rc::clone(&created));
-        let first = crate::AsyncTask::new(move || {
+        let (counter, slot, inner_loop) = (Rc::clone(&ran), Rc::clone(&created), run_loop.clone());
+        let first = crate::AsyncTask::new(&run_loop, move || {
             let counter = Rc::clone(&counter);
-            let task = crate::AsyncTask::new(move || counter.set(counter.get() + 1));
+            let task = crate::AsyncTask::new(&inner_loop, move || counter.set(counter.get() + 1));
             task.send();
             *slot.borrow_mut() = Some(task);
         });
@@ -482,14 +471,12 @@ mod tests {
     }
 
     #[test]
-    fn a_detached_loop_runs_what_its_scheduler_gets_and_isnt_current() {
-        let outer = RunLoop::new();
-        let detached = RunLoop::detached();
-        let current = || RunLoop::try_get().map(|run_loop| Arc::as_ptr(&run_loop.inner.core));
-        assert_eq!(Some(Arc::as_ptr(&outer.inner.core)), current());
+    fn a_loop_runs_only_what_its_own_scheduler_gets() {
+        let first = RunLoop::new();
+        let second = RunLoop::new();
         let mailbox = crate::mailbox::Mailbox::new();
         let received = Rc::new(Cell::new(false));
-        mailbox.open(&detached.scheduler(), Rc::<Cell<bool>>::clone(&received));
+        mailbox.open(&second.scheduler(), Rc::<Cell<bool>>::clone(&received));
         let sender = Arc::clone(&mailbox);
         std::thread::spawn(move || {
             sender.push(Box::new(|target: &dyn std::any::Any| {
@@ -500,11 +487,10 @@ mod tests {
         })
         .join()
         .unwrap();
-        assert!(!outer.run_once());
+        assert!(!first.run_once());
         assert!(!received.get());
-        while detached.run_once() {}
+        while second.run_once() {}
         assert!(received.get());
-        assert_eq!(Some(Arc::as_ptr(&outer.inner.core)), current());
         mailbox.close();
     }
 

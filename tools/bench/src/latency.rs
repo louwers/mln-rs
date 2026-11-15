@@ -5,14 +5,16 @@
 //! counts the tile requests that reach the files. Without a delay it passes
 //! everything on at once.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use mln_actor::LocalObject;
 use mln_actor::timer::Timer;
+use mln_actor::{ActorRef, RunLoop, Thread};
 use mln_storage::{FileSource, Kind, Request, Resource, Responder, Response};
 use mln_util::chrono::Timestamp;
+use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
 /// How long a tile stays fresh: a tile server's `Cache-Control: max-age`.
@@ -35,11 +37,48 @@ pub(crate) fn take_tile_requests() -> usize {
 
 /// `inner`, with the tile latency.
 pub(crate) fn delayed(inner: Arc<dyn FileSource>) -> Arc<dyn FileSource> {
-    Arc::new(Delayed { inner })
+    let timers = Thread::new("TileLatency", |self_ref, run_loop| Timers {
+        self_ref,
+        run_loop: run_loop.clone(),
+        waiting: RefCell::default(),
+    });
+    Arc::new(Delayed { inner, timers })
 }
+
+/// Names a tile's wait.
+static NEXT_WAIT: AtomicU64 = AtomicU64::new(0);
 
 struct Delayed {
     inner: Arc<dyn FileSource>,
+    /// The thread whose timers the tiles wait out their latency on.
+    timers: Thread<Timers>,
+}
+
+/// The timers of the tiles that wait, on their thread.
+struct Timers {
+    self_ref: ActorRef<Timers>,
+    run_loop: RunLoop,
+    waiting: RefCell<HashMap<u64, Timer>>,
+}
+
+impl Timers {
+    /// Runs `then` after `delay`, unless `stop(id)` comes first.
+    fn start(&self, id: u64, delay: Duration, then: impl FnOnce() + 'static) {
+        let timer = Timer::new(&self.run_loop);
+        let (mut then, actor) = (Some(then), self.self_ref.clone());
+        timer.start(delay, Duration::ZERO, move || {
+            if let Some(then) = then.take() {
+                then();
+            }
+            actor.invoke(move |timers: &Timers| timers.stop(id));
+        });
+        self.waiting.borrow_mut().insert(id, timer);
+    }
+
+    fn stop(&self, id: u64) {
+        let timer = self.waiting.borrow_mut().remove(&id);
+        drop(timer);
+    }
 }
 
 impl FileSource for Delayed {
@@ -59,13 +98,12 @@ impl FileSource for Delayed {
             return;
         }
         TILE_REQUESTS.fetch_add(1, Ordering::SeqCst);
-        // The tile waits out its latency on the requesting thread's timer,
-        // then the inner request; cancelling stops either.
+        // The tile waits out its latency on the timers' thread, then the
+        // inner request; cancelling stops either.
         let request: Arc<Mutex<Option<Request>>> = Arc::default();
-        let timer = Timer::new();
         let (inner, resource, slot, outer) =
             (Arc::clone(&self.inner), resource.clone(), Arc::clone(&request), responder.clone());
-        timer.start(Duration::from_millis(latency), Duration::ZERO, move || {
+        let fire = move || {
             if outer.is_cancelled() {
                 return;
             }
@@ -77,10 +115,12 @@ impl FileSource for Delayed {
             });
             *slot.lock() = Some(fresh);
             inner.load(&resource, inner_responder);
-        });
-        let timer = LocalObject::new(timer);
+        };
+        let (id, delay, timers) =
+            (NEXT_WAIT.fetch_add(1, Ordering::Relaxed), Duration::from_millis(latency), self.timers.actor());
+        timers.invoke(move |timers: &Timers| timers.start(id, delay, fire));
         responder.on_cancel(move || {
-            drop(timer.take());
+            timers.invoke(move |timers: &Timers| timers.stop(id));
             drop(request.lock().take());
         });
     }

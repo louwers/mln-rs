@@ -243,7 +243,8 @@ fn fixture(path: &str) -> String {
 #[test]
 fn duplicate_layer() {
     // Setup style
-    let mut style = StyleImpl::new(1.0);
+    let run_loop = mln_actor::RunLoop::new();
+    let mut style = StyleImpl::new(1.0, &run_loop);
     style.load_json(&fixture("test/fixtures/resources/style-unused-sources.json"));
 
     // Add initial layer
@@ -261,7 +262,8 @@ fn duplicate_layer() {
 #[test]
 fn incompatible_layer() {
     // Setup style
-    let mut style = StyleImpl::new(1.0);
+    let run_loop = mln_actor::RunLoop::new();
+    let mut style = StyleImpl::new(1.0, &run_loop);
     style.load_json(&fixture("test/fixtures/resources/style-unused-sources.json"));
 
     // Try to add duplicate

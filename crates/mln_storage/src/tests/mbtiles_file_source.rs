@@ -26,6 +26,7 @@ fn request(fs: &MBTilesFileSource, resource: &Resource) -> Response {
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();

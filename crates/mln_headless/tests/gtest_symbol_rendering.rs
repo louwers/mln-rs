@@ -96,9 +96,10 @@ struct TimedHeadlessFrontend {
 }
 
 impl TimedHeadlessFrontend {
-    fn new() -> Self {
+    fn new(run_loop: &RunLoop) -> Self {
         TimedHeadlessFrontend {
-            frontend: HeadlessFrontend::with_options(Size::new(256, 256), 1.0, false).expect("a headless frontend"),
+            frontend: HeadlessFrontend::with_options(Size::new(256, 256), 1.0, false, run_loop)
+                .expect("a headless frontend"),
             updates: Rc::default(),
         }
     }
@@ -149,7 +150,7 @@ struct SymbolRenderingTest<F> {
 impl SymbolRenderingTest<HeadlessFrontend> {
     fn new(count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
         Self::with_frontend(
-            || HeadlessFrontend::new(Size::new(256, 256), 1.0).expect("a headless frontend"),
+            |run_loop| HeadlessFrontend::new(Size::new(256, 256), 1.0, run_loop).expect("a headless frontend"),
             count,
             spacing,
             kind,
@@ -165,23 +166,23 @@ impl SymbolRenderingTest<HeadlessFrontend> {
 }
 
 impl<F: Frontend> SymbolRenderingTest<F> {
-    /// The frontend's tasks run on the test's run loop, so `frontend` makes
-    /// it after the loop exists.
+    /// `frontend` makes the frontend on the test's run loop.
     fn with_frontend(
-        frontend: impl FnOnce() -> F,
+        frontend: impl FnOnce(&RunLoop) -> F,
         count: usize,
         spacing: f64,
         kind: SymbolKind,
         mode: MapMode,
     ) -> Self {
         let run_loop = RunLoop::new();
-        let frontend = frontend();
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let frontend = frontend(&run_loop);
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
         let observer = Rc::new(StubMapObserver::default());
         let mut map = Map::with_file_source(
             file_source,
             MapOptions { map_mode: mode, size: Size::new(256, 256), ..Default::default() },
+            &run_loop,
         )
         .unwrap();
         frontend.attach(&map);

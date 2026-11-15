@@ -6,6 +6,7 @@ use std::sync::{Arc, OnceLock};
 
 use feature::Feature;
 use geojson::GeoJson;
+use mln_actor::RunLoop;
 use mln_actor::scheduler::{self, SchedulerPtr};
 use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
 use mln_tile_id::CanonicalTileID;
@@ -155,9 +156,6 @@ struct Inner {
     req: RefCell<Option<Request>>,
     request_generation: Cell<u64>,
     sequenced_scheduler: SchedulerPtr,
-    /// Keeps `Scheduler::GetBackground()` alive while a description loads
-    /// (the C++ background pool lives as long as any of its users).
-    background: SchedulerPtr,
 }
 
 #[derive(Clone)]
@@ -184,7 +182,6 @@ impl GeoJSONSource {
                 req: RefCell::new(None),
                 request_generation: Cell::new(0),
                 sequenced_scheduler: scheduler::get_sequenced(),
-                background: scheduler::get_background(),
             }),
         }
     }
@@ -284,8 +281,8 @@ impl GeoJSONSource {
 }
 
 /// The part of `loadDescription`'s response handler that runs on the
-/// requesting thread.
-fn on_description_response(weak: &Weak<Inner>, res: &Response) {
+/// requesting thread, `run_loop`'s, which parses the data on its pool.
+fn on_description_response(weak: &Weak<Inner>, res: &Response, run_loop: &RunLoop) {
     let Some(inner) = weak.upgrade() else {
         return;
     };
@@ -307,8 +304,9 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
         this.inner.request_generation.set(generation);
         let weak = Rc::downgrade(&this.inner);
         scheduler::schedule_and_reply_value(
-            &*this.inner.background,
+            &*run_loop.pool(),
             None,
+            &run_loop.scheduler(),
             /* makeImplInBackground */
             move || -> Option<Arc<dyn GeoJSONData>> {
                 let data = data.expect("response data");
@@ -354,7 +352,7 @@ impl Source for GeoJSONSource {
         &self.inner.base
     }
 
-    fn load_description(&self, file_source: &dyn FileSource) {
+    fn load_description(&self, file_source: &dyn FileSource, run_loop: &RunLoop) {
         let url = self.inner.url.borrow().clone();
         let Some(url) = url else {
             self.inner.base.set_loaded(true);
@@ -365,9 +363,12 @@ impl Source for GeoJSONSource {
             return;
         }
 
-        let weak = Rc::downgrade(&self.inner);
-        let req = file_source
-            .request(&Resource::source(&url), Box::new(move |res: Response| on_description_response(&weak, &res)));
+        let (weak, callback_loop) = (Rc::downgrade(&self.inner), run_loop.clone());
+        let req = file_source.request(
+            &run_loop.scheduler(),
+            &Resource::source(&url),
+            Box::new(move |res: Response| on_description_response(&weak, &res, &callback_loop)),
+        );
         *self.inner.req.borrow_mut() = Some(req);
     }
 

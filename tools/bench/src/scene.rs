@@ -247,6 +247,8 @@ pub struct Scene {
     frontend: HeadlessFrontend,
     map: Map,
     observer: Observer,
+    /// The loop of the scene's thread, which its map and frontend run on.
+    run_loop: RunLoop,
 }
 
 impl Scene {
@@ -267,15 +269,15 @@ impl Scene {
         );
         let resource_options =
             ResourceOptions { cache_path: cache.display().to_string(), ..ResourceOptions::default() };
-        let frontend = HeadlessFrontend::with_glyph_cache(size, 1.0, mode != Mode::OnDemand, glyph_cache)
+        let run_loop = RunLoop::new();
+        let frontend = HeadlessFrontend::with_glyph_cache(size, 1.0, mode != Mode::OnDemand, glyph_cache, &run_loop)
             .expect("a headless frontend");
         let file_source = shared_file_source(&resource_options);
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
-        let map =
-            Map::with_file_source(file_source, MapOptions { map_mode, size, pixel_ratio: 1.0, ..Default::default() })
-                .expect("the map");
+        let options = MapOptions { map_mode, size, pixel_ratio: 1.0, ..Default::default() };
+        let map = Map::with_file_source(file_source, options, &run_loop).expect("the map");
         frontend.attach(&map);
-        Scene { frontend, map, observer: Observer::default() }
+        Scene { frontend, map, observer: Observer::default(), run_loop }
     }
 
     /// Starts loading a style; it loads while the scene renders.
@@ -362,7 +364,7 @@ impl Scene {
 
     /// Delivers what the map's workers have finished, without waiting.
     pub(crate) fn pump(&mut self) {
-        RunLoop::get().run_once();
+        self.run_loop.run_once();
         self.observe();
     }
 
@@ -370,7 +372,7 @@ impl Scene {
     /// sleeps until there is work, rather than polling it, so the wait
     /// costs no CPU time.
     fn run_until(&mut self, done: impl Fn() -> bool) {
-        let run_loop = RunLoop::get();
+        let run_loop = self.run_loop.clone();
         loop {
             self.observe();
             if done() {
@@ -462,7 +464,7 @@ impl Scene {
     /// Lets the run loop work for `duration`, drawing as the map asks
     /// (`Mode::Driven`).
     pub(crate) fn run_for(&mut self, duration: Duration) {
-        let timer = Timer::new();
+        let timer = Timer::new(&self.run_loop);
         let elapsed = Rc::new(Cell::new(false));
         let done = Rc::clone(&elapsed);
         timer.start(duration, Duration::ZERO, move || done.set(true));

@@ -3,7 +3,7 @@
 # in the change that needs it.
 
 [panic]
-"crates/mln_actor/src/scheduler.rs" = 2
+"crates/mln_actor/src/scheduler.rs" = 1
 "crates/mln_actor/src/thread.rs" = 2
 "crates/mln_actor/src/thread_pool.rs" = 1
 "crates/mln_conversion/src/get_json_type.rs" = 1
@@ -115,8 +115,8 @@
 
 [borrow]
 "crates/mln_actor/src/local_object.rs" = 3
-"crates/mln_actor/src/run_loop.rs" = 9
-"crates/mln_actor/src/scheduler.rs" = 3
+"crates/mln_actor/src/run_loop.rs" = 3
+"crates/mln_actor/src/scheduler.rs" = 1
 "crates/mln_actor/src/timer.rs" = 4
 "crates/mln_c/src/render_session.rs" = 3
 "crates/mln_c/src/web.rs" = 5

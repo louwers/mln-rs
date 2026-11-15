@@ -298,7 +298,7 @@ fn a_sourceless_style_loaded_after_the_camera_renders() {
     );
 
     let loaded = Rc::new(Cell::new(false));
-    let timeout = Timer::new();
+    let timeout = Timer::new(&test.run_loop);
     {
         let run_loop = test.run_loop.clone();
         timeout.start(Duration::from_secs(5), Duration::ZERO, move || run_loop.stop());
@@ -327,7 +327,7 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
     test.load_json(r#"{"version": 8, "sources": {}, "layers": [{"id": "bg", "type": "background"}]}"#);
     let run_until_idle = || {
         let idle = Rc::new(Cell::new(false));
-        let timeout = Timer::new();
+        let timeout = Timer::new(&test.run_loop);
         {
             let run_loop = test.run_loop.clone();
             timeout.start(Duration::from_secs(5), Duration::ZERO, move || run_loop.stop());
@@ -1073,7 +1073,7 @@ fn style_not_found() {
 
     test.map().style_mut().load_url(&server.url("/style-fail-once-404"));
 
-    let timer = Rc::new(Timer::new());
+    let timer = Rc::new(Timer::new(&test.run_loop));
 
     // Not found errors should not trigger a retry like other errors.
     test.observer.did_finish_loading_style_callback.set(|()| panic!("Should not retry on not found!"));
@@ -1247,7 +1247,7 @@ fn continuous_rendering() {
     let run_loop = RunLoop::new();
 
     let did_not_stop = Rc::new(Cell::new(false));
-    let emergency_shutoff = Timer::new();
+    let emergency_shutoff = Timer::new(&run_loop);
     {
         let run_loop = run_loop.clone();
         let did_not_stop = Rc::clone(&did_not_stop);
@@ -1257,9 +1257,9 @@ fn continuous_rendering() {
         });
     }
 
-    let timer = Rc::new(Timer::new());
+    let timer = Rc::new(Timer::new(&run_loop));
 
-    let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
 
     let observer = Rc::new(StubMapObserver::default());
     {
@@ -1283,6 +1283,7 @@ fn continuous_rendering() {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
+        &run_loop,
     )
     .unwrap();
     frontend.attach(&map);
@@ -2079,7 +2080,10 @@ fn prefetch_delta_override() {
     }
 
     // Custom source
-    test.map().style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
+    test.map()
+        .style_mut()
+        .add_source(Box::new(counted_custom_source(&requested_tiles, Some(0), &test.run_loop)))
+        .unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     {
@@ -2106,8 +2110,12 @@ fn prefetch_delta_override() {
 }
 
 /// A custom geometry source "custom" that counts its fetches in
-/// `requested_tiles` and answers each with empty data.
-fn counted_custom_source(requested_tiles: &Arc<AtomicI32>, prefetch_zoom_delta: Option<u8>) -> CustomGeometrySource {
+/// `requested_tiles` and answers each with empty data, on `run_loop`'s pool.
+fn counted_custom_source(
+    requested_tiles: &Arc<AtomicI32>,
+    prefetch_zoom_delta: Option<u8>,
+    run_loop: &RunLoop,
+) -> CustomGeometrySource {
     let handle = Arc::new(OnceLock::<CustomGeometrySourceHandle>::new());
     let fetch: TileFunction = {
         let handle = Arc::clone(&handle);
@@ -2124,7 +2132,7 @@ fn counted_custom_source(requested_tiles: &Arc<AtomicI32>, prefetch_zoom_delta: 
         cancel_tile_function: Some(Arc::new(|_: &CanonicalTileID| {})),
         ..Default::default()
     };
-    let custom = CustomGeometrySource::new("custom", options).unwrap();
+    let custom = CustomGeometrySource::new("custom", options, run_loop.pool()).unwrap();
     handle.set(custom.handle()).unwrap();
     if prefetch_zoom_delta.is_some() {
         source::set_prefetch_zoom_delta(&custom, prefetch_zoom_delta);
@@ -2271,7 +2279,10 @@ fn prefetch_delta_override_custom_source() {
 
     let requested_tiles = Arc::new(AtomicI32::new(0));
 
-    test.map().style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
+    test.map()
+        .style_mut()
+        .add_source(Box::new(counted_custom_source(&requested_tiles, Some(0), &test.run_loop)))
+        .unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     {
@@ -2290,7 +2301,7 @@ fn prefetch_delta_override_custom_source() {
         let layer = style.remove_layer("custom").unwrap();
         style.remove_source("custom");
         style.add_layer(layer, None).unwrap();
-        style.add_source(Box::new(counted_custom_source(&requested_tiles, None))).unwrap();
+        style.add_source(Box::new(counted_custom_source(&requested_tiles, None, &test.run_loop))).unwrap();
     }
     test.run_loop.run();
 
@@ -2313,10 +2324,10 @@ fn expired_sprite_sheet() {
     let run_loop = RunLoop::new();
     let (file_source, dbfs) = loader_with_database(":memory:", ".");
     let observer = Rc::new(StubMapObserver::default());
-    let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
     let options =
         MapOptions { map_mode: MapMode::Continuous, size: frontend.get_size(), pixel_ratio: 1.0, ..Default::default() };
-    let map = Map::with_file_source(file_source, options).unwrap();
+    let map = Map::with_file_source(file_source, options, &run_loop).unwrap();
     frontend.attach(&map);
     let updates = map.update_reader();
     let map = Rc::new(RefCell::new(map));
@@ -2507,7 +2518,7 @@ fn disabled_placed_symbol_data() {
     }
 
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
     let test = MapTest::create(run_loop, file_source, 1.0, MapMode::Tile);
     let requests_count = Rc::new(Cell::new(0));
 
@@ -2838,7 +2849,7 @@ fn still_image_after_tile_error() {
             run_loop.stop();
         }));
     }
-    let timeout = Timer::new();
+    let timeout = Timer::new(&test.run_loop);
     {
         let run_loop = test.run_loop.clone();
         timeout.start(Duration::from_secs(5), Duration::ZERO, move || run_loop.stop());
@@ -2894,7 +2905,7 @@ fn stencil_overflow() {
     };
     let mut options = CustomGeometrySourceOptions { fetch_tile_function: Some(fetch), ..Default::default() };
     options.tile_options.tile_size = mln_util::constants::TILE_SIZE_I / 32;
-    let custom = CustomGeometrySource::new("custom", options).unwrap();
+    let custom = CustomGeometrySource::new("custom", options, test.run_loop.pool()).unwrap();
     handle.set(custom.handle()).unwrap();
 
     test.map().style_mut().add_source(Box::new(custom)).unwrap();
@@ -2955,8 +2966,9 @@ fn invalid_utf8_in_tile() {
 fn continuous_map_finishes_loading_when_its_tiles_fail() {
     let _log = FixtureLog::new();
 
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
-    let test = MapTest::create(RunLoop::new(), file_source, 1.0, MapMode::Continuous);
+    let run_loop = RunLoop::new();
+    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
+    let test = MapTest::create(run_loop, file_source, 1.0, MapMode::Continuous);
     test.file_source
         .set_response(Kind::Tile, |_| Some(file_response("test/fixtures/map/invalid_utf8/invalidutf8feature.mvt")));
 
@@ -3003,7 +3015,7 @@ fn continuous_map_finishes_loading_when_its_tiles_fail() {
 fn observe_tile_lifecycle() {
     use TileOperation::*;
 
-    let _run_loop = RunLoop::new();
+    let run_loop = RunLoop::new();
 
     let tile_ops: Rc<RefCell<Vec<(OverscaledTileID, TileOperation)>>> = Rc::default();
     // We expect to see a valid lifecycle for every tile in this list.
@@ -3025,13 +3037,14 @@ fn observe_tile_lifecycle() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
     let mut map = Map::with_resource_options(
         MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
+        &run_loop,
     )
     .unwrap();
     frontend.attach(&map);
@@ -3247,7 +3260,7 @@ fn style_update_zoom_dependency() {
 #[test]
 fn globe_hand_off_keeps_tiles() {
     // Crossing the globe's Mercator hand-off must not re-parse the tiles already on screen.
-    let _run_loop = RunLoop::new();
+    let run_loop = RunLoop::new();
     // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
     let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
     let observer = Rc::new(StubMapObserver::default());
@@ -3261,7 +3274,7 @@ fn globe_hand_off_keeps_tiles() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(
@@ -3270,6 +3283,7 @@ fn globe_hand_off_keeps_tiles() {
             ..ResourceOptions::default()
         })),
         MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+        &run_loop,
     )
     .unwrap();
 
@@ -3537,7 +3551,7 @@ fn set_bounds_lifts_the_zoom_to_a_minimum_above_the_maximum() {
 fn globe_bounded_source_loads_finer_tiles() {
     // Just below an integer zoom the globe cover asks for the next zoom's tiles nearest the camera; a source with
     // bounds must create them.
-    let _run_loop = RunLoop::new();
+    let run_loop = RunLoop::new();
     // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
     let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
     let observer = Rc::new(StubMapObserver::default());
@@ -3551,7 +3565,7 @@ fn globe_bounded_source_loads_finer_tiles() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(
@@ -3560,6 +3574,7 @@ fn globe_bounded_source_loads_finer_tiles() {
             ..ResourceOptions::default()
         })),
         MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+        &run_loop,
     )
     .unwrap();
 
@@ -4335,10 +4350,11 @@ fn tile_selection_options_publish_updates() {
         assert!(Arc::ptr_eq(&after, &parameters()));
     }
 
-    let _loop = RunLoop::new();
+    let run_loop = RunLoop::new();
     let mut map = Map::with_file_source(
-        Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
+        Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
         MapOptions { map_mode: MapMode::Continuous, ..Default::default() },
+        &run_loop,
     )
     .unwrap();
     let updates = map.update_reader();
@@ -4594,11 +4610,12 @@ fn color_ramp_renders_current_state_after_unrelated_state_change_color_relief() 
 // returns the error.
 #[test]
 fn empty_size_is_an_error() {
-    let _loop = RunLoop::new();
+    let run_loop = RunLoop::new();
     for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
         let result = Map::with_file_source(
-            Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
+            Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
             MapOptions { size, ..Default::default() },
+            &run_loop,
         );
         assert_eq!(
             result.err().map(|e| (e.kind, e.message)),

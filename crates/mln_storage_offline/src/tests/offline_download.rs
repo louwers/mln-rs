@@ -152,7 +152,7 @@ impl OfflineTest {
 
     fn with_path(path: &str) -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         // The downloads' tasks run on the test's loop, with the host.
         let slot: Arc<std::sync::OnceLock<LocalObject<RefCell<Host>>>> = Arc::default();
         let (tasks, handle) = (Arc::clone(&slot), run_loop.handle());
@@ -915,8 +915,9 @@ fn interrupt_and_resume() {
             if !interrupted.get() && status.completed_resource_count > 0 {
                 interrupted.set(true);
                 assert!(!status.complete());
+                let run_loop = stop.clone();
                 let (stop, weak) = (stop.clone(), weak.clone());
-                let task = AsyncTask::new(move || {
+                let task = AsyncTask::new(&run_loop, move || {
                     weak.set_state(OfflineRegionDownloadState::Inactive);
                     stop.stop();
                 });

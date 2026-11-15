@@ -198,7 +198,7 @@ mod tests {
         let run_loop = RunLoop::new();
         let ran = Rc::new(Cell::new(false));
         let callback_ran = Rc::clone(&ran);
-        let (request, responder) = Request::new(&mln_actor::scheduler::get_current(), move |_| callback_ran.set(true));
+        let (request, responder) = Request::new(&run_loop.scheduler(), move |_| callback_ran.set(true));
         responder.send(Response::new());
         std::thread::spawn(move || drop(request)).join().unwrap();
         while run_loop.run_once() {}

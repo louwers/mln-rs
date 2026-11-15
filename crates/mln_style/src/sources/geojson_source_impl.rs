@@ -54,7 +54,7 @@ impl GeoJSONData for GeoJSONVTData {
         } else {
             let id = *id;
             let geojsonvt_impl = Arc::clone(&self.impl_);
-            scheduler::schedule_and_reply_value_on(
+            scheduler::schedule_and_reply_value(
                 &*self.sequenced_scheduler,
                 None,
                 reply_to,

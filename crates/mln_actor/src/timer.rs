@@ -1,7 +1,7 @@
-// A timer belongs to the RunLoop of the thread that created it and fires in
-// that loop's `run_once` (timers run first, as in `uv_run`). Like the C++
-// timer, the durations are truncated to milliseconds, and a timer does not
-// keep `RunLoop::run()` alive on its own.
+// A timer belongs to the RunLoop it was made for and fires in that loop's
+// `run_once` (timers run first, as in `uv_run`). Like the C++ timer, the
+// durations are truncated to milliseconds, and a timer does not keep
+// `RunLoop::run()` alive on its own.
 //
 // The loop keeps its running timers in a heap ordered by due time. Starting,
 // stopping or rearming a timer leaves its old entry behind, which the loop
@@ -20,7 +20,8 @@ use crate::run_loop::RunLoop;
 /// The running timers of a loop.
 #[derive(Default)]
 pub(crate) struct Timers {
-    heap: RefCell<BinaryHeap<Reverse<Entry>>>,
+    /// Taken out while it's in use: no timer's callback runs meanwhile.
+    heap: Cell<BinaryHeap<Reverse<Entry>>>,
     /// libuv orders timers with the same due time by start order.
     next_start_id: Cell<u64>,
     /// The heap's size after it last dropped its stale entries.
@@ -80,18 +81,19 @@ impl Timers {
         let armed = timer.armed.get().wrapping_add(1);
         timer.armed.set(armed);
         let Some(due) = due else { return };
-        let mut heap = self.heap.borrow_mut();
+        let mut heap = self.heap.take();
         heap.push(Reverse(Entry { due, start_id: timer.start_id.get(), armed, timer: Rc::downgrade(timer) }));
         // Timers that restart before they fire leave an entry each.
         if heap.len() > 64 && heap.len() > 2 * self.compacted_len.get() {
             heap.retain(|Reverse(entry)| entry.live().is_some());
             self.compacted_len.set(heap.len());
         }
+        self.heap.set(heap);
     }
 
     /// Takes the timers due at `now`, earliest first (ties in start order).
     pub(crate) fn take_due(&self, now: Instant) -> Vec<(Rc<TimerHandle>, u64)> {
-        let mut heap = self.heap.borrow_mut();
+        let mut heap = self.heap.take();
         let mut due = Vec::new();
         while let Some(Reverse(entry)) = heap.peek() {
             if entry.due > now {
@@ -102,19 +104,23 @@ impl Timers {
                 due.push((timer, entry.armed));
             }
         }
+        self.heap.set(heap);
         due
     }
 
     /// The earliest due time of the running timers.
     pub(crate) fn next_due(&self) -> Option<Instant> {
-        let mut heap = self.heap.borrow_mut();
+        let mut heap = self.heap.take();
+        let mut next = None;
         while let Some(Reverse(entry)) = heap.peek() {
             if entry.live().is_some() {
-                return Some(entry.due);
+                next = Some(entry.due);
+                break;
             }
             heap.pop();
         }
-        None
+        self.heap.set(heap);
+        next
     }
 }
 
@@ -172,15 +178,9 @@ pub struct Timer {
 }
 
 impl Timer {
-    /// Creates a timer on the current thread's `RunLoop`.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::on(&RunLoop::get())
-    }
-
     /// Creates a timer that fires in `run_loop`, which runs on this thread.
     #[must_use]
-    pub fn on(run_loop: &RunLoop) -> Self {
+    pub fn new(run_loop: &RunLoop) -> Self {
         let handle = Rc::new(TimerHandle {
             timers: Rc::downgrade(run_loop.timers()),
             repeat_ms: Cell::new(0),
@@ -211,12 +211,6 @@ impl Timer {
     }
 }
 
-impl Default for Timer {
-    fn default() -> Self {
-        Timer::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,7 +220,7 @@ mod tests {
     fn fires_once_after_timeout() {
         let run_loop = RunLoop::new();
         let count = Rc::new(Cell::new(0));
-        let timer = Timer::new();
+        let timer = Timer::new(&run_loop);
         let c = Rc::clone(&count);
         let handle = run_loop.handle();
         timer.start(Duration::from_millis(20), Duration::ZERO, move || {
@@ -245,7 +239,7 @@ mod tests {
     fn repeats_until_stopped() {
         let run_loop = RunLoop::new();
         let count = Rc::new(Cell::new(0));
-        let timer = Rc::new(Timer::new());
+        let timer = Rc::new(Timer::new(&run_loop));
         let (c, t) = (Rc::clone(&count), Rc::downgrade(&timer));
         let handle = run_loop.handle();
         timer.start(Duration::from_millis(5), Duration::from_millis(5), move || {
@@ -265,7 +259,7 @@ mod tests {
     fn dropped_timer_does_not_fire() {
         let run_loop = RunLoop::new();
         let fired = Rc::new(Cell::new(false));
-        let timer = Timer::new();
+        let timer = Timer::new(&run_loop);
         let f = Rc::clone(&fired);
         timer.start(Duration::ZERO, Duration::ZERO, move || f.set(true));
         drop(timer);
@@ -276,11 +270,13 @@ mod tests {
     #[test]
     fn a_timer_restarted_before_it_fires_leaves_few_stale_entries() {
         let run_loop = RunLoop::new();
-        let timer = Timer::on(&run_loop);
+        let timer = Timer::new(&run_loop);
         for _ in 0..10_000 {
             timer.start(Duration::from_secs(3600), Duration::ZERO, || {});
         }
-        assert!(run_loop.timers().heap.borrow().len() <= 128);
+        let entries = run_loop.timers().heap.take();
+        assert!(entries.len() <= 128);
+        run_loop.timers().heap.set(entries);
         assert!(run_loop.timers().next_due().is_some());
         timer.stop();
         assert_eq!(run_loop.timers().next_due(), None);
@@ -290,7 +286,7 @@ mod tests {
     fn zero_timeout_fires_on_next_run_once() {
         let run_loop = RunLoop::new();
         let fired = Rc::new(Cell::new(0));
-        let timer = Timer::new();
+        let timer = Timer::new(&run_loop);
         let f = Rc::clone(&fired);
         timer.start(Duration::ZERO, Duration::ZERO, move || f.set(f.get() + 1));
         run_loop.run_once();

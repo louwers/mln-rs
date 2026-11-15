@@ -60,7 +60,7 @@ impl RenderingStatsView {
 
     /// `create(style)`: adds the source and the layer, if the style lacks
     /// them.
-    pub(crate) fn create(&self, style: &mut Style) {
+    pub(crate) fn create(&self, style: &mut Style, run_loop: &mln_actor::RunLoop) {
         if style.get_source(RENDERING_STATS_SOURCE_ID).is_none() {
             let handle: Arc<OnceLock<CustomGeometrySourceHandle>> = Arc::new(OnceLock::new());
             let fetch_handle = Arc::clone(&handle);
@@ -75,7 +75,7 @@ impl RenderingStatsView {
                 ..Default::default()
             };
             // The default tile options are valid, so this always succeeds.
-            if let Ok(source) = CustomGeometrySource::new(RENDERING_STATS_SOURCE_ID, options) {
+            if let Ok(source) = CustomGeometrySource::new(RENDERING_STATS_SOURCE_ID, options, run_loop.pool()) {
                 let _ = handle.set(source.handle());
                 let _ = style.add_source(Box::new(source));
             }
@@ -118,9 +118,9 @@ impl RenderingStatsView {
     /// `update(style, stats)`: counts a frame, and shows the stats of the
     /// frame and the mean times since the last update once the update
     /// interval has passed. Adds the layer back if the style lost it.
-    pub(crate) fn update(&mut self, style: &mut Style, stats: &RenderingStats) {
+    pub(crate) fn update(&mut self, style: &mut Style, run_loop: &mln_actor::RunLoop, stats: &RenderingStats) {
         if style.get_layer(RENDERING_STATS_LAYER_ID).is_none() {
-            self.create(style);
+            self.create(style, run_loop);
         }
 
         self.frame_count += 1;

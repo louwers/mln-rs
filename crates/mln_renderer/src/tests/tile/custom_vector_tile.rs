@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_actor::actor::{Actor, PoolActorRef};
-use mln_actor::scheduler;
 use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, TileFunction};
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
@@ -23,8 +22,12 @@ use crate::tile::custom_tile::CustomVectorTile;
 use crate::tile::tile::{Tile, TileNecessity};
 
 /// The loader actor, on the test's run loop.
-fn loader(fetch: Option<TileFunction>, cancel: Option<TileFunction>) -> Actor<CustomVectorTileLoader> {
-    Actor::new(scheduler::get_current(), |_| CustomTileLoader::new(fetch, cancel))
+fn loader(
+    run_loop: &mln_actor::RunLoop,
+    fetch: Option<TileFunction>,
+    cancel: Option<TileFunction>,
+) -> Actor<CustomVectorTileLoader> {
+    Actor::new(run_loop.scheduler(), |_| CustomTileLoader::new(fetch, cancel))
 }
 
 /// A tile function that counts its calls.
@@ -64,7 +67,7 @@ impl CustomTileSubscriber<CustomVectorTileData> for NullSubscriber {
 fn invalidate_failed_tile() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(Some(fetch), None);
+    let loader = loader(&test.run_loop, Some(fetch), None);
 
     let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref());
     tile.set_necessity(TileNecessity::Required);
@@ -89,7 +92,7 @@ fn invalidate_failed_tile() {
 fn fetch_failed_tile_again() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(Some(fetch), None);
+    let loader = loader(&test.run_loop, Some(fetch), None);
 
     let id = OverscaledTileID::from_zxy(0, 0, 0);
     loader.self_ref().invoke(move |loader| loader.fetch_tile(&id, 0, Box::new(NullSubscriber)));
@@ -110,7 +113,7 @@ fn cancel_one_copy() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
     let (cancels, cancel) = counter();
-    let loader = loader(Some(fetch), Some(cancel));
+    let loader = loader(&test.run_loop, Some(fetch), Some(cancel));
 
     // Two copies of one tile in neighboring worlds share its data.
     let first = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref());
@@ -143,7 +146,7 @@ fn invalidate_region() {
     let test = RasterTileTest::new();
     let (fetched, fetch) = recorder();
     let (cancelled, cancel) = recorder();
-    let loader = loader(Some(fetch), Some(cancel));
+    let loader = loader(&test.run_loop, Some(fetch), Some(cancel));
 
     // The root tile, every tile at zoom 1, and two tiles at zoom 2.
     let mut tile_ids = vec![
@@ -199,7 +202,7 @@ fn invalidate_region() {
 #[test]
 fn set_mlt_tile_data() {
     let test = RasterTileTest::new();
-    let loader = loader(None, None);
+    let loader = loader(&test.run_loop, None, None);
     let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref());
 
     let mut layer = FillLayer::new("water", "source");

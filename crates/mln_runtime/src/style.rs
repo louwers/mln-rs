@@ -669,7 +669,7 @@ impl Map {
         let (source_id, callbacks) = (source_id.into(), Arc::new(callbacks));
         self.send(
             move |entry, outbox| {
-                add_callback_source(entry, outbox, source_id, callbacks, |id, callbacks| {
+                add_callback_source(entry, outbox, source_id, callbacks, |id, callbacks, pool| {
                     let (fetch_tile_function, cancel_tile_function) = tile_functions(callbacks);
                     let options = custom_geometry_source::Options {
                         fetch_tile_function,
@@ -677,7 +677,7 @@ impl Map {
                         zoom_range,
                         tile_options,
                     };
-                    let source = CustomGeometrySource::new(id, options)
+                    let source = CustomGeometrySource::new(id, options, pool)
                         .map_err(|error| Error::invalid_argument(error.to_string()))?;
                     Ok(Box::new(source))
                 })
@@ -698,11 +698,11 @@ impl Map {
         let (source_id, callbacks) = (source_id.into(), Arc::new(callbacks));
         self.send(
             move |entry, outbox| {
-                add_callback_source(entry, outbox, source_id, callbacks, |id, callbacks| {
+                add_callback_source(entry, outbox, source_id, callbacks, |id, callbacks, pool| {
                     let (fetch_tile_function, cancel_tile_function) = tile_functions(callbacks);
                     let options =
                         custom_vector_source::Options { fetch_tile_function, cancel_tile_function, zoom_range };
-                    Ok(Box::new(CustomVectorSource::new(id, options)))
+                    Ok(Box::new(CustomVectorSource::new(id, options, pool)))
                 })
             },
             |(), entry| entry.applied(),
@@ -985,11 +985,12 @@ fn add_callback_source(
     outbox: &mut Outbox,
     id: String,
     callbacks: Arc<CustomSourceCallbacks>,
-    make: impl FnOnce(String, &Arc<CustomSourceCallbacks>) -> Result<Box<dyn Source>, Error>,
+    make: impl FnOnce(String, &Arc<CustomSourceCallbacks>, mln_actor::SchedulerPtr) -> Result<Box<dyn Source>, Error>,
 ) -> Result<(), Error> {
+    let pool = entry.core.run_loop().pool();
     let style = entry.core.style_mut();
     let added = require_new_source(style, &id).and_then(|()| {
-        let source = make(id.clone(), &callbacks)?;
+        let source = make(id.clone(), &callbacks, pool)?;
         // The style takes a handle of the source, and the map keeps another
         // to know it by.
         let held = clone_source(&*source)?;

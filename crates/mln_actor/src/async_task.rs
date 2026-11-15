@@ -10,14 +10,9 @@ pub struct AsyncTask {
 }
 
 impl AsyncTask {
-    /// Creates a task that runs `task` on the current thread's `RunLoop`.
-    pub fn new(task: impl FnMut() + 'static) -> Self {
-        Self::on(&RunLoop::get(), task)
-    }
-
     /// Creates a task that runs `task` on `run_loop`, which runs on this
     /// thread.
-    pub fn on(run_loop: &RunLoop, task: impl FnMut() + 'static) -> Self {
+    pub fn new(run_loop: &RunLoop, task: impl FnMut() + 'static) -> Self {
         let handle = Rc::new(AsyncHandle {
             pending: Arc::new(AtomicBool::new(false)),
             closed: Cell::new(false),
@@ -91,7 +86,7 @@ mod tests {
         let run_loop = RunLoop::new();
         let count = Rc::new(Cell::new(0));
         let c = Rc::clone(&count);
-        let task = AsyncTask::new(move || c.set(c.get() + 1));
+        let task = AsyncTask::new(&run_loop, move || c.set(c.get() + 1));
         task.send();
         task.send();
         run_loop.run_once();
@@ -110,7 +105,7 @@ mod tests {
         let run_loop = RunLoop::new();
         let count = Rc::new(Cell::new(0));
         let c = Rc::clone(&count);
-        let task = AsyncTask::new(move || c.set(c.get() + 1));
+        let task = AsyncTask::new(&run_loop, move || c.set(c.get() + 1));
         task.send();
         assert!(task.is_pending());
         task.cancel();

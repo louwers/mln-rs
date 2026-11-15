@@ -8,7 +8,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{RunLoop, SchedulerPtr, TaggedScheduler, scheduler};
+use mln_actor::{RunLoop, SchedulerPtr, TaggedScheduler};
 use mln_gfx::ShaderRegistry;
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_map_types::{MapMode, TransformState};
@@ -275,7 +275,7 @@ impl RenderOrchestrator {
             run_loop.clone(),
         );
         glyph_manager.set_observer(Some(Rc::new(OrchestratorGlyphObserver { events: events.clone() })));
-        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+        let thread_pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
         RenderOrchestrator {
             scheduler: run_loop.scheduler(),
             events: events.clone(),

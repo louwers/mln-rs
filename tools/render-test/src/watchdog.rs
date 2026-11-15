@@ -75,17 +75,17 @@ impl Watchdog {
         Watchdog { shared, thread: Some(thread), limit }
     }
 
-    /// Starts the limit for the test about to run on this thread; the
-    /// returned guard stops it.
+    /// Starts the limit for the test about to run on `run_loop`, this
+    /// thread's; the returned guard stops it.
     #[must_use]
-    pub(crate) fn arm(&self) -> WatchdogGuard<'_> {
+    pub(crate) fn arm(&self, run_loop: &RunLoop) -> WatchdogGuard<'_> {
         let generation = self.shared.current.fetch_add(1, Ordering::SeqCst) + 1;
         let mut state = self.shared.state.lock();
         state.armed = Some(Armed {
             deadline: Instant::now() + self.limit,
             generation,
             limit: self.limit,
-            run_loop: RunLoop::get().handle(),
+            run_loop: run_loop.handle(),
         });
         self.shared.wakeup.notify_all();
         WatchdogGuard { watchdog: self }

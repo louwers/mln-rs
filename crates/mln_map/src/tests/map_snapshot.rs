@@ -20,8 +20,9 @@ use crate::{
     NorthOrientation, ProjectionMode, TileLodMode, UpdateReader, ViewportMode,
 };
 
-fn map(options: MapOptions) -> Map {
-    Map::with_file_source(Arc::new(StubFileSource::new(ResponseType::Asynchronous)), options).expect("map")
+fn map(options: MapOptions, run_loop: &RunLoop) -> Map {
+    Map::with_file_source(Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)), options, run_loop)
+        .expect("map")
 }
 
 fn ll(lat: f64, lon: f64) -> LatLng {
@@ -38,13 +39,16 @@ fn assert_near(actual: f64, expected: f64) {
 
 #[test]
 fn snapshot_reports_every_member() {
-    let _loop = RunLoop::new();
-    let mut map = map(MapOptions {
-        size: Size::new(512, 256),
-        pixel_ratio: 2.0,
-        constrain_mode: ConstrainMode::WidthAndHeight,
-        ..Default::default()
-    });
+    let run_loop = RunLoop::new();
+    let mut map = map(
+        MapOptions {
+            size: Size::new(512, 256),
+            pixel_ratio: 2.0,
+            constrain_mode: ConstrainMode::WidthAndHeight,
+            ..Default::default()
+        },
+        &run_loop,
+    );
 
     let snapshot = map.snapshot();
     assert_eq!(snapshot.debug, MapDebugOptions::NO_DEBUG);
@@ -156,8 +160,8 @@ fn snapshot_reports_every_member() {
 
 #[test]
 fn generation_grows_with_each_change() {
-    let _loop = RunLoop::new();
-    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() });
+    let run_loop = RunLoop::new();
+    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
 
     let mut last = map.generation();
     let mut assert_changed = |map: &Map, changed: bool, what: &str| {
@@ -202,8 +206,8 @@ fn generation_grows_with_each_change() {
 /// style's report.
 #[test]
 fn a_source_that_reloads_its_description_changes_the_generation() {
-    let _loop = RunLoop::new();
-    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() });
+    let run_loop = RunLoop::new();
+    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     map.style_mut().load_json(
         r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
     );
@@ -231,8 +235,8 @@ fn count_wakes(map: &Map) -> (UpdateReader, Arc<AtomicU64>) {
 
 #[test]
 fn update_generation_counts_the_updates_published() {
-    let _loop = RunLoop::new();
-    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() });
+    let run_loop = RunLoop::new();
+    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     let before = map.update_generation();
     let (_reader, wakes) = count_wakes(&map);
 
@@ -249,8 +253,9 @@ fn update_generation_counts_the_updates_published() {
 
 #[test]
 fn a_static_map_changes_without_publishing_updates() {
-    let _loop = RunLoop::new();
-    let mut map = map(MapOptions { size: Size::new(256, 256), map_mode: MapMode::Static, ..Default::default() });
+    let run_loop = RunLoop::new();
+    let mut map =
+        map(MapOptions { size: Size::new(256, 256), map_mode: MapMode::Static, ..Default::default() }, &run_loop);
     let (_reader, wakes) = count_wakes(&map);
 
     let before = map.snapshot();
@@ -265,8 +270,8 @@ fn a_static_map_changes_without_publishing_updates() {
 
 #[test]
 fn projection_from_a_view_matches_the_map() {
-    let _loop = RunLoop::new();
-    let mut map = map(MapOptions { size: Size::new(400, 300), pixel_ratio: 1.5, ..Default::default() });
+    let run_loop = RunLoop::new();
+    let mut map = map(MapOptions { size: Size::new(400, 300), pixel_ratio: 1.5, ..Default::default() }, &run_loop);
     // Bounds past the antimeridian keep the center's copy of the world, which
     // the view keeps too.
     map.set_bounds(&BoundOptions {
@@ -309,8 +314,8 @@ fn projection_from_a_view_matches_the_map() {
 
 #[test]
 fn projection_from_a_view_rejects_views_no_map_shows() {
-    let _loop = RunLoop::new();
-    let map = map(MapOptions { size: Size::new(256, 256), ..Default::default() });
+    let run_loop = RunLoop::new();
+    let map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     let view = map.snapshot().view;
     assert!(MapProjection::from_view(&view).is_ok());
 
@@ -335,8 +340,8 @@ fn projection_from_a_view_rejects_views_no_map_shows() {
 
 #[test]
 fn projection_from_a_globe_view_matches_the_map() {
-    let _loop = RunLoop::new();
-    let mut map = map(MapOptions { size: Size::new(400, 300), ..Default::default() });
+    let run_loop = RunLoop::new();
+    let mut map = map(MapOptions { size: Size::new(400, 300), ..Default::default() }, &run_loop);
     map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"globe"}}"#);
     // The globe lets the zoom fall below 0 toward a pole, and the center past
     // Mercator's latitudes.

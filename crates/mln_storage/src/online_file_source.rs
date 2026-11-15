@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
-use mln_actor::{ActorRef, AsyncTask, Mailbox, SchedulerPtr, Thread, Timer, scheduler};
+use mln_actor::{ActorRef, AsyncTask, Mailbox, RunLoop, SchedulerPtr, Thread, Timer};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::{
     ASSET_PROTOCOL, CLOCK_SKEW_RETRY_TIMEOUT, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL,
@@ -42,6 +42,8 @@ struct OnlineFileRequest {
     /// The transfer in flight.
     request: RefCell<Option<Request>>,
     timer: Timer,
+    /// The source's thread's queue, where the resource transform answers.
+    queue: SchedulerPtr,
     responder: Responder,
 
     /// Counts the number of times a response was already expired when
@@ -153,7 +155,8 @@ struct ThreadState {
     online: Cell<bool>,
     maximum_concurrent_requests: Cell<u32>,
     http_file_source: HTTPFileSource,
-    /// This thread's queue, which the transfers answer on.
+    /// This thread's loop, which the transfers answer on.
+    run_loop: RunLoop,
     queue: SchedulerPtr,
     resource_transform: RefCell<Option<ResourceTransform>>,
     tasks: RefCell<VecMap<u64, Rc<OnlineFileRequest>>>,
@@ -355,7 +358,7 @@ impl OnlineFileRequest {
         // ResourceTransform is not used by many apps.
         let mailbox = mailbox.get_or_insert_with(|| {
             let target = Rc::new(OnlineFileRequestRef { state: Weak::clone(&self.state), id: self.id });
-            Mailbox::with_target(&scheduler::get_current(), target)
+            Mailbox::with_target(&self.queue, target)
         });
         ActorRef::new(mailbox)
     }
@@ -503,7 +506,7 @@ impl OnlineFileRequest {
 }
 
 impl OnlineFileSourceThread {
-    fn new() -> Self {
+    fn new(run_loop: &RunLoop) -> Self {
         let http_file_source = HTTPFileSource::new();
         let state = Rc::new(ThreadState {
             all_requests: RefCell::new(VecSet::new()),
@@ -512,14 +515,15 @@ impl OnlineFileSourceThread {
             online: Cell::new(true),
             maximum_concurrent_requests: Cell::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
             http_file_source,
-            queue: scheduler::get_current(),
+            run_loop: run_loop.clone(),
+            queue: run_loop.scheduler(),
             resource_transform: RefCell::new(None),
             tasks: RefCell::new(VecMap::new()),
             #[cfg(test)]
             connection_backoff: Cell::new(None),
         });
         let weak = Rc::downgrade(&state);
-        let reachability = AsyncTask::new(move || {
+        let reachability = AsyncTask::new(run_loop, move || {
             if let Some(state) = weak.upgrade() {
                 state.network_is_reachable_again();
             }
@@ -534,7 +538,8 @@ impl OnlineFileSourceThread {
             state: Rc::downgrade(&self.state),
             resource: RefCell::new(resource),
             request: RefCell::new(None),
-            timer: Timer::new(),
+            timer: Timer::new(&self.state.run_loop),
+            queue: SchedulerPtr::clone(&self.state.queue),
             responder,
             expired_requests: Cell::new(0),
             failed_requests: Cell::new(0),
@@ -602,7 +607,7 @@ impl Default for OnlineFileSource {
 impl OnlineFileSource {
     #[must_use]
     pub fn new() -> Self {
-        let thread = Thread::new("OnlineFileSource", move |_| OnlineFileSourceThread::new());
+        let thread = Thread::new("OnlineFileSource", |_, run_loop| OnlineFileSourceThread::new(run_loop));
         OnlineFileSource { maximum_concurrent_requests: AtomicU32::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS), thread }
     }
 

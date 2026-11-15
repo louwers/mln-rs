@@ -180,8 +180,8 @@ impl Scene {
         };
         let vector = TileSource::vector("vector", None, tileset("vector/{z}/{x}/{y}", 14));
         let raster = TileSource::raster("raster", None, tileset("raster/{z}/{x}/{y}", 6), 256);
-        vector.load_description(&*file_source);
-        raster.load_description(&*file_source);
+        vector.load_description(&*file_source, &run_loop);
+        raster.load_description(&*file_source, &run_loop);
 
         let mut fill = FillLayer::new("water", "vector");
         fill.set_source_layer("water");
@@ -195,6 +195,8 @@ impl Scene {
             Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(size).unwrap();
 
+        let image_manager = ImageManager::on(Some(run_loop.scheduler()));
+        let glyph_manager = GlyphManager::new(None, &run_loop);
         Scene {
             vector_render_source: RenderVectorSource::new(source::downcast_arc(&vector.base_impl())),
             raster_render_source: RenderRasterSource::new(source::downcast_arc(&raster.base_impl())),
@@ -207,8 +209,8 @@ impl Scene {
             raster,
             fill_layers,
             raster_layers,
-            image_manager: ImageManager::create(),
-            glyph_manager: GlyphManager::new(None),
+            image_manager,
+            glyph_manager,
             texture_atlas: Arc::new(DynamicTextureAtlas::new()),
             laid_out: false,
         }
@@ -233,7 +235,7 @@ impl Scene {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: self.transform.get_state(),
             file_source: Some(file_source),
-            scheduler: scheduler::get_current(),
+            scheduler: self.run_loop.scheduler(),
             mode: MapMode::Continuous,
             // The map's default.
             prefetch_zoom_delta: 4,

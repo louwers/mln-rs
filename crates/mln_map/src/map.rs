@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geo_types::Geometry;
-use mln_actor::{TaggedScheduler, scheduler};
+use mln_actor::RunLoop;
 use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, ConstrainMode,
     MapDebugOptions, MapMode, MapView, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
@@ -27,7 +27,6 @@ use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::geometry::for_each_point;
-use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::Mat4;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -179,38 +178,52 @@ pub struct Map {
 
     /// Declared after `style`, so the style and its requests go first.
     file_source: Option<Arc<dyn FileSource>>,
+    /// The loop that the map's responses and background work answer on.
+    run_loop: RunLoop,
 }
 
 impl Map {
     /// A map with a [`Loader`] of its own for the default
-    /// `ResourceOptions`.
+    /// `ResourceOptions`, on `run_loop`, which runs on this thread: the map's
+    /// responses and background work answer there, and its background work
+    /// runs on the loop's pool.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
-    pub fn new(map_options: MapOptions) -> Result<Map, Error> {
-        Self::with_resource_options(map_options, &ResourceOptions::default())
+    pub fn new(map_options: MapOptions, run_loop: &RunLoop) -> Result<Map, Error> {
+        Self::with_resource_options(map_options, &ResourceOptions::default(), run_loop)
     }
 
-    /// A map with a [`Loader`] of its own for `resource_options`.
-    pub fn with_resource_options(map_options: MapOptions, resource_options: &ResourceOptions) -> Result<Map, Error> {
-        Self::create(Some(Arc::new(Loader::new(resource_options))), &map_options)
+    /// A map with a [`Loader`] of its own for `resource_options`, on
+    /// `run_loop`.
+    pub fn with_resource_options(
+        map_options: MapOptions,
+        resource_options: &ResourceOptions,
+        run_loop: &RunLoop,
+    ) -> Result<Map, Error> {
+        Self::create(Some(Arc::new(Loader::new(resource_options))), &map_options, run_loop)
     }
 
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
     // map_adapter.hpp): a map over a given file source.
-    /// A map whose resources come from `file_source`.
-    pub fn with_file_source(file_source: Arc<dyn FileSource>, map_options: MapOptions) -> Result<Map, Error> {
-        Self::create(Some(file_source), &map_options)
+    /// A map whose resources come from `file_source`, on `run_loop`.
+    pub fn with_file_source(
+        file_source: Arc<dyn FileSource>,
+        map_options: MapOptions,
+        run_loop: &RunLoop,
+    ) -> Result<Map, Error> {
+        Self::create(Some(file_source), &map_options, run_loop)
     }
 
-    fn create(file_source: Option<Arc<dyn FileSource>>, map_options: &MapOptions) -> Result<Map, Error> {
+    fn create(
+        file_source: Option<Arc<dyn FileSource>>,
+        map_options: &MapOptions,
+        run_loop: &RunLoop,
+    ) -> Result<Map, Error> {
         let events = EventQueue::new();
         let style_events = EventQueue::new();
         let renderer_events = RendererEvents::new();
         let pixel_ratio = map_options.pixel_ratio;
-        // The style's sources work on the background pool, under a tag of
-        // their own.
-        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
-        let mut style = Style::with_file_source(file_source.clone(), pixel_ratio, thread_pool);
+        let mut style = Style::with_file_source(file_source.clone(), pixel_ratio, run_loop);
         style.impl_.set_observer(Some(Rc::new(StyleEvents(style_events.clone()))));
         let mut transform = Transform::new(
             Rc::new(CameraEvents(events.clone())),
@@ -249,10 +262,17 @@ impl Map {
             renderer_events,
             events,
             file_source,
+            run_loop: run_loop.clone(),
         };
         map.share_projection_with_transform();
         map.transform.resize(map_options.size)?;
         Ok(map)
+    }
+
+    /// The loop that the map's responses and background work answer on.
+    #[must_use]
+    pub fn run_loop(&self) -> &RunLoop {
+        &self.run_loop
     }
 
     // MARK: - Renderer
@@ -497,7 +517,7 @@ impl Map {
         }
 
         if let Some(view) = self.rendering_stats_view.as_mut() {
-            view.update(&mut self.style, &stats);
+            view.update(&mut self.style, &self.run_loop, &stats);
         }
 
         if self.mode == MapMode::Continuous {
@@ -1346,7 +1366,7 @@ impl Map {
                 return;
             }
             let view = RenderingStatsView::new(RenderingStatsViewOptions::default());
-            view.create(&mut self.style);
+            view.create(&mut self.style, &self.run_loop);
             self.rendering_stats_view = Some(view);
         } else if let Some(view) = self.rendering_stats_view.take() {
             view.destroy(&mut self.style);

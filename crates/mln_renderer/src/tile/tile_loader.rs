@@ -306,7 +306,7 @@ fn load_from_cache(state_rc: &Rc<RefCell<State>>) {
         state.resource.clone()
     };
     let weak = Rc::downgrade(state_rc);
-    let request = file_source.request_on(
+    let request = file_source.request(
         &scheduler,
         &resource,
         Box::new(move |res: Response| {
@@ -431,7 +431,7 @@ fn load_from_network(state_rc: &Rc<RefCell<State>>) {
         state.resource.clone()
     };
     let weak = Rc::downgrade(state_rc);
-    let request = file_source.request_on(
+    let request = file_source.request(
         &scheduler,
         &resource,
         Box::new(move |res: Response| {

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use mln_actor::{ActorRef, Thread, Timer};
+use mln_actor::{ActorRef, RunLoop, Thread, Timer};
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 
 use crate::file_source::FileSource;
@@ -50,6 +50,7 @@ type MakeExtension<E> = Box<dyn FnOnce(ActorRef<DatabaseWorker<E>>, Option<Arc<d
 impl<E: 'static> DatabaseWorker<E> {
     fn new(
         self_ref: ActorRef<DatabaseWorker<E>>,
+        run_loop: &RunLoop,
         network: Option<Arc<dyn FileSource>>,
         cache_path: &str,
         read_only: bool,
@@ -71,7 +72,7 @@ impl<E: 'static> DatabaseWorker<E> {
             state: RefCell::new(DatabaseState { db, extension }),
             network,
             self_ref,
-            accessed_flush_timer: Timer::new(),
+            accessed_flush_timer: Timer::new(run_loop),
             accessed_flush_scheduled,
         }
     }
@@ -173,8 +174,8 @@ impl<E: 'static> DatabaseFileSource<E> {
     ) -> Self {
         let cache_path = cache_path.to_owned();
         let make: MakeExtension<E> = Box::new(make);
-        let thread = Thread::new("DatabaseFileSource", move |self_ref| {
-            DatabaseWorker::new(self_ref, network, &cache_path, read_only, make)
+        let thread = Thread::new("DatabaseFileSource", move |self_ref, run_loop| {
+            DatabaseWorker::new(self_ref, run_loop, network, &cache_path, read_only, make)
         });
         DatabaseFileSource { thread }
     }
@@ -198,10 +199,16 @@ impl<E: 'static> DatabaseFileSource<E> {
         });
     }
 
-    /// Stores a response to `resource`, then runs `then` on this thread.
+    /// Stores a response to `resource`, then runs `then` on `queue`.
     #[cfg(test)]
-    pub(crate) fn put_then(&self, resource: &Resource, response: &Response, then: Box<dyn FnOnce() + Send>) {
-        let mut then = mln_actor::scheduler::bind_once(&mln_actor::scheduler::get_current(), then);
+    pub(crate) fn put_then(
+        &self,
+        resource: &Resource,
+        response: &Response,
+        queue: &mln_actor::SchedulerPtr,
+        then: Box<dyn FnOnce() + Send>,
+    ) {
+        let mut then = mln_actor::scheduler::bind_once(queue, then);
         let resource = resource.clone();
         let response = response.clone();
         self.invoke(move |t| {

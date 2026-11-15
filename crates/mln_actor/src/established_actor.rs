@@ -66,7 +66,6 @@ mod tests {
 
     use super::*;
     use crate::run_loop::RunLoop;
-    use crate::scheduler;
 
     // gtest: Actor.TwoPhaseConstruction
     #[test]
@@ -77,6 +76,7 @@ mod tests {
         // thread to be up and running.
         struct TestActor {
             destroyed: Arc<AtomicBool>,
+            run_loop: crate::RunLoopHandle,
         }
         impl Drop for TestActor {
             fn drop(&mut self) {
@@ -87,8 +87,8 @@ mod tests {
             fn call_me(p: &mpsc::Sender<()>) {
                 p.send(()).unwrap();
             }
-            fn stop() {
-                RunLoop::get().stop();
+            fn stop(&self) {
+                self.run_loop.stop();
             }
         }
 
@@ -99,15 +99,16 @@ mod tests {
         let (queue_executed, queue_executed_future) = mpsc::channel();
 
         parent.self_ref().invoke(move |_: &TestActor| TestActor::call_me(&queue_executed));
-        parent.self_ref().invoke(|_: &TestActor| TestActor::stop());
+        parent.self_ref().invoke(TestActor::stop);
 
         std::thread::scope(|s| {
             let captured = Arc::clone(&destroyed);
             let parent = &parent;
             let thread = s.spawn(move || {
                 let run_loop = RunLoop::new();
-                let _test = EstablishedActor::new(&scheduler::get_current(), parent, move |_| TestActor {
+                let _test = EstablishedActor::new(&run_loop.scheduler(), parent, |_| TestActor {
                     destroyed: captured,
+                    run_loop: run_loop.handle(),
                 });
                 run_loop.run();
             });
