@@ -2561,6 +2561,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-d3d12"
+version = "0.0.11"
+dependencies = [
+ "mln-rs-gfx",
+ "mln-rs-glsl",
+ "naga",
+ "windows",
+]
+
+[[package]]
 name = "mln-rs-desktop"
 version = "0.0.11"
 dependencies = [
@@ -2722,6 +2732,14 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mln-rs-glsl"
+version = "0.0.11"
+dependencies = [
+ "mln-rs-gfx",
+ "naga",
 ]
 
 [[package]]
@@ -3212,6 +3230,7 @@ dependencies = [
  "gpu-allocator",
  "libc",
  "mln-rs-gfx",
+ "mln-rs-glsl",
  "mln-rs-tile-id",
  "mln-rs-util",
  "naga",

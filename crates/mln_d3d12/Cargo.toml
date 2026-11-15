@@ -1,0 +1,33 @@
+[package]
+name = "mln-rs-d3d12"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+# Published once mln-rs depends on it.
+publish = false
+
+[lib]
+name = "mln_d3d12"
+# The doc comments have no examples to run.
+doctest = false
+
+# The crate is empty except on Windows. DXC, which compiles its HLSL, loads at
+# run time.
+[target.'cfg(windows)'.dependencies]
+mln_gfx.workspace = true
+mln_glsl.workspace = true
+naga = { workspace = true, features = ["hlsl-out"] }
+windows = { workspace = true, features = ["Win32_Graphics_Direct3D_Dxc"] }
+
+# The sets of defines the tests compile the programs with.
+[target.'cfg(windows)'.dev-dependencies]
+mln_glsl = { workspace = true, features = ["variants"] }
+
+[lints]
+workspace = true

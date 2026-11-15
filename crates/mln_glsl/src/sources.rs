@@ -40,8 +40,10 @@
 //   `int` for the `bool` members of buffers, no sampler parameters, `flat` on
 //   an integer output, and an `#else` after the overdraw inspector's early
 //   return where a function call follows it.
+// - Clip space is y-up, as in OpenGL, Metal, D3D and naga's IR: no stage
+//   flips Y (`applySurfaceTransform`), the SPIR-V back end does for Vulkan.
 
-use super::shader_source::GlslShaderSource;
+use crate::program::GlslShaderSource;
 
 /// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::Vulkan>::vertex`
 /// (common.hpp): the start of every vertex stage.
@@ -302,10 +304,6 @@ float projectLineThickness(float tileY, ProjectionUBO projection) {
 
 #endif
 
-void applySurfaceTransform() {
-    gl_Position.y *= -1.0;
-}
-
 "#;
 
 /// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::Vulkan>::fragment`
@@ -398,7 +396,6 @@ void main() {
     const BackgroundDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 }
 ",
     fragment: r"
@@ -484,7 +481,6 @@ void main() {
                                  in_position);
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 }
 ",
     fragment: r"
@@ -717,8 +713,6 @@ void main() {
         gl_Position.xy += scaled_extrude * (radius + stroke_width) * factor;
     }
 
-    applySurfaceTransform();
-
     // This is a minimum blur distance that serves as a faux-antialiasing for
     // the circle. since blur is a ratio of the circle's size and the intent is
     // to keep the blur at roughly 1px, the two are inversely related.
@@ -870,7 +864,6 @@ pub(crate) const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
 
         void main() {
             gl_Position = projectTile(vec2(position), vec2(position), clip.projection);
-            gl_Position.y *= -1.0;
         }
     ",
     fragment: r"
@@ -943,7 +936,6 @@ void main() {
     gl_Position = drawable.matrix * vec4(in_position, in_height_offset, 1.0);
 #endif
     gl_Position.xy += (in_extrude + in_shift) * tileProps.extrude_scale * gl_Position.w * collision_perspective_ratio;
-    applySurfaceTransform();
 
     frag_placed = in_placed.x;
     frag_notUsed = in_placed.y;
@@ -1033,7 +1025,6 @@ void main() {
     gl_Position = drawable.matrix * vec4(in_position, 0.0, 1.0);
 #endif
     gl_Position.xy += in_extrude * tileProps.extrude_scale * padding_factor * gl_Position.w * collision_perspective_ratio;
-    applySurfaceTransform();
 
     frag_placed = in_placed.x;
     frag_notUsed = in_placed.y;
@@ -1138,7 +1129,6 @@ void main() {
     const ColorReliefTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
     vec2 epsilon = 1.0 / tileProps.dimension;
     float scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
@@ -1278,7 +1268,6 @@ layout(location = 0) out vec2 frag_uv;
 void main() {
 
     gl_Position = projectTile(in_position * debug.overlay_scale, projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
     // This vertex shader expects a EXTENT x EXTENT quad,
     // The UV coordinates for the overlay texture can be calculated using that knowledge
@@ -1375,7 +1364,6 @@ void main() {
 #endif
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 }
 ",
     fragment: r"
@@ -1479,9 +1467,9 @@ void main() {
 #endif
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
-    frag_position = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
+    // From the top left, as gl_FragCoord is.
+    frag_position = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
 }
 ",
     fragment: r"
@@ -1665,7 +1653,6 @@ void main() {
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, in_position),
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 }
 ",
     fragment: r"
@@ -1911,11 +1898,11 @@ void main() {
 
     const vec2 position2 = in_position.xy;
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, position2),
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, position2),
-    frag_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
+    // From the top left, as gl_FragCoord is.
+    frag_pos = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
 }
 ",
     fragment: r"
@@ -2035,7 +2022,7 @@ void main() {
 };
 
 /// `outline_corner`, the corner of an instanced outline's quad, in OpenGL's
-/// clip space, before `applySurfaceTransform`.
+/// clip space.
 macro_rules! outline_corner {
     () => {
         r"
@@ -2164,9 +2151,8 @@ void main() {
     vec2 pos;
     float t;
     gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), vec2(in_position), pos, t);
-    applySurfaceTransform();
 
-    // From the top left, as applySurfaceTransform flips gl_Position.
+    // From the top left, as gl_FragCoord is.
     frag_position = vec2(pos.x, paintParams.world_size.y - pos.y);
 }
 "
@@ -2307,12 +2293,11 @@ void main() {
     vec2 pos;
     float t;
     gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), vec2(in_position), pos, t);
-    applySurfaceTransform();
 
     const vec2 position = mix(start, end, t);
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, props.from_scale * display_size_a, drawable.tile_ratio, position);
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, props.to_scale * display_size_b, drawable.tile_ratio, position);
-    // From the top left, as applySurfaceTransform flips gl_Position.
+    // From the top left, as gl_FragCoord is.
     frag_pos = vec2(pos.x, paintParams.world_size.y - pos.y);
 }
 "
@@ -2384,7 +2369,6 @@ void main() {
 
     vec4 projected_extrude = projectionVector.projection_ubo[constant.ubo_index].fallback_matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
     gl_Position = projectTile(pos, pos, projectionVector.projection_ubo[constant.ubo_index]) + projected_extrude;
-    applySurfaceTransform();
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
@@ -2530,7 +2514,6 @@ void main() {
     const vec2 decimals = unpack_float(floor(in_decimals_ed.x / 2)) / 128.0;
 
     gl_Position = projectTileFor3D(vec2(in_position) + decimals, z, projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
@@ -2699,7 +2682,6 @@ void main() {
     const float z = t > 0.0 ? height : base;
 
     gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
@@ -2867,7 +2849,6 @@ void main() {
     const vec2 decimals = unpack_float(floor(in_decimals_ed.x / 2)) / 128.0;
 
     gl_Position = projectTileFor3D(vec2(in_position) + decimals, z, projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -3162,7 +3143,6 @@ void main() {
     const float z = t > 0.0 ? height : base;
 
     gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -3357,7 +3337,6 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
 
 void main() {
     gl_Position = projectTileFor3D(vec2(in_position), 0.0, projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 }
 ",
     fragment: r"
@@ -3479,7 +3458,6 @@ void main() {
 #else
     gl_Position = drawable.matrix * vec4(floor(in_position * 0.5) + scaled_extrude, 0, 1);
 #endif
-    gl_Position.y *= -1.0;
 
     frag_weight = weight;
     frag_extrude = extrude;
@@ -3541,7 +3519,6 @@ layout(location = 0) out vec2 frag_position;
 void main() {
 
     gl_Position = props.matrix * vec4(in_position * paintParams.world_size, 0, 1);
-    applySurfaceTransform();
 
     frag_position = in_position;
 }
@@ -3617,7 +3594,6 @@ void main() {
     const HillshadeDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
     frag_position = vec2(in_texture_position) / 8192.0;
     frag_position.y = 1.0 - frag_position.y;
@@ -3856,7 +3832,6 @@ layout(location = 0) out vec2 frag_position;
 void main() {
 
     gl_Position = drawable.matrix * vec4(in_position, 0.0, 1.0);
-    gl_Position.y *= -1.0;
 
     const vec2 epsilon = vec2(1.0) / tileProps.dimension;
     const float scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
@@ -4122,7 +4097,6 @@ void main() {
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
     gl_Position = drawable.matrix * vec4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
 #endif
-    applySurfaceTransform();
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
@@ -4371,7 +4345,6 @@ void main() {
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
     gl_Position = drawable.matrix * vec4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
 #endif
-    applySurfaceTransform();
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
@@ -4651,7 +4624,6 @@ void main() {
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
     gl_Position = drawable.matrix * vec4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
 #endif
-    applySurfaceTransform();
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
@@ -5002,7 +4974,6 @@ void main() {
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
     gl_Position = drawable.matrix * vec4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
 #endif
-    applySurfaceTransform();
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
@@ -5316,7 +5287,6 @@ void main() {
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
     gl_Position = drawable.matrix * vec4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
 #endif
-    applySurfaceTransform();
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
@@ -5498,7 +5468,6 @@ void main() {
     const RasterDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-    applySurfaceTransform();
 
     // We are using Int16 for texture position coordinates to give us enough precision for
     // fractional coordinates. We use 8192 to scale the texture coordinates in the buffer
@@ -5596,7 +5565,6 @@ layout(location = 0) out vec2 frag_pos;
 void main() {
     frag_pos = vec2(in_position);
     gl_Position = vec4(frag_pos, 1.0, 1.0);
-    applySurfaceTransform();
 }
 ",
     fragment: r"
@@ -5651,7 +5619,6 @@ void main() {
     // Vulkan uses a zero-to-one NDC depth range, so 0.5 matches WebGL's
     // framebuffer depth for clip-space z=0.
     gl_Position = vec4(pos, 0.5, 1.0);
-    applySurfaceTransform();
 }
 ",
     fragment: r"
@@ -5924,7 +5891,6 @@ void main() {
     if (drawable.pitch_with_map != 0) {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z, projection);
     }
-    applySurfaceTransform();
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
@@ -6213,7 +6179,6 @@ void main() {
     if (drawable.pitch_with_map != 0) {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z, projection);
     }
-    applySurfaceTransform();
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
@@ -6580,7 +6545,6 @@ void main() {
     if (drawable.pitch_with_map != 0) {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z, projection);
     }
-    applySurfaceTransform();
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;

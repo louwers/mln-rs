@@ -31,12 +31,12 @@ use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass};
 use crate::descriptor_set::{DescriptorPoolGrowable, build_descriptor_set_layout, build_pipeline_layout};
 use crate::device::Device;
 use crate::renderer_backend::BackendImpl;
-use crate::shaders::compiler::{self, Stage};
-use crate::shaders::layout::{
+use crate::shaders;
+use mln_glsl::layout::{
     DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
     image_sampler_binding, image_texture_binding,
 };
-use crate::shaders::shader_source::{AttributeInfo, TextureInfo, shader_source};
+use mln_glsl::{AttributeInfo, ResourceUse, Stage, TextureInfo, shader_source};
 use crate::vk_state;
 
 /// The sets each descriptor pool starts with room for.
@@ -422,7 +422,7 @@ impl OpenPass {
 /// use it have finished, and nothing holds it.
 ///
 /// Bindings are a descriptor set for each set of the shared pipeline layout
-/// that their shader uses (`shaders::layout`), shared by bindings of the
+/// that their shader uses (`mln_glsl::layout`), shared by bindings of the
 /// same resources. `globalIndex` is a push constant.
 pub struct VulkanGpu {
     backend: Rc<BackendImpl>,
@@ -534,7 +534,7 @@ fn clear_color(color: mln_util::Color) -> vk::ClearValue {
 }
 
 /// The resource of `binding` in `set` of the shared layout, by the shaders'
-/// ids: the inverse of `shaders::layout`'s `*_binding` functions.
+/// ids: the inverse of `mln_glsl::layout`'s `*_binding` functions.
 fn binding_of(
     name: &str,
     textures: &[TextureInfo],
@@ -1097,12 +1097,12 @@ impl VulkanGpu {
                 }
             }
         };
-        for (stage, stage_source) in [(Stage::Vertex, source.glsl.vertex), (Stage::Fragment, source.glsl.fragment)] {
-            let composed = compiler::compose(stage, &defines, source.glsl.prelude, stage_source);
-            let result = compiler::compile_reflected(stage, &composed)
+        for stage in [Stage::Vertex, Stage::Fragment] {
+            let composed = source.compose(stage, &defines);
+            let result = shaders::compile_program(stage, &composed)
                 .map_err(|error| GpuError::Invalid(format!("{}: {error}", source.name)))
                 .and_then(|compiled| {
-                    for (set, binding, size) in compiled.bindings {
+                    for ResourceUse { set, binding, size } in compiled.resources {
                         let (type_, resource) = binding_of(source.name, source.textures, set, binding)?;
                         let set_bindings = &mut bindings[type_ as usize];
                         if !set_bindings.contains(&(binding, resource)) {

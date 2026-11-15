@@ -1,14 +1,14 @@
-//! The descriptor set layouts of `shaders::layout`, the pipeline layout
+//! The descriptor set layouts of `mln_glsl::layout`, the pipeline layout
 //! made of them, and the pools the sets are allocated from.
 
 use ash::vk;
 use mln_gfx::shaders::shader_defines::{ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
-
-use crate::renderer_backend::BackendImpl;
-use crate::shaders::layout::{
+use mln_glsl::layout::{
     DRAWABLE_UNIFORM_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT,
     LAYER_UNIFORM_COUNT, image_sampler_binding, image_texture_binding, layer_storage_binding,
 };
+
+use crate::renderer_backend::BackendImpl;
 
 /// The most buffers a set has.
 const MAX_BUFFER_BINDINGS: usize = 8;
@@ -18,41 +18,19 @@ const _: () = assert!(
         && DRAWABLE_UNIFORM_COUNT <= MAX_BUFFER_BINDINGS
 );
 
-/// The descriptors of a buffer set: `storage` storage buffers from binding
-/// 0, then `uniform` uniform buffers.
-#[derive(Clone, Copy)]
-pub(crate) struct BufferSetShape {
-    pub(crate) storage: usize,
-    pub(crate) uniform: usize,
-}
-
-impl DescriptorSetType {
-    /// The buffers of the type's sets; none for the image set.
-    #[must_use]
-    pub(crate) fn buffer_shape(self) -> BufferSetShape {
-        match self {
-            DescriptorSetType::Global => BufferSetShape { storage: 0, uniform: GLOBAL_UNIFORM_COUNT },
-            DescriptorSetType::Layer => BufferSetShape { storage: LAYER_STORAGE_COUNT, uniform: LAYER_UNIFORM_COUNT },
-            DescriptorSetType::DrawableUniform => BufferSetShape { storage: 0, uniform: DRAWABLE_UNIFORM_COUNT },
-            DescriptorSetType::DrawableImage => BufferSetShape { storage: 0, uniform: 0 },
+/// The stages that read the buffer at `binding` of a set of `type_`: all
+/// but the fragment stage for a layer's vertex-only buffer, and all but the
+/// vertex stage for its fragment-only one.
+fn buffer_stages(type_: DescriptorSetType, binding: u32) -> vk::ShaderStageFlags {
+    let mut stages = vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT;
+    if type_ == DescriptorSetType::Layer {
+        if layer_storage_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO) == Some(binding) {
+            stages = vk::ShaderStageFlags::VERTEX;
+        } else if layer_storage_binding(ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO) == Some(binding) {
+            stages = vk::ShaderStageFlags::FRAGMENT;
         }
     }
-
-    /// The stages that read the buffer at `binding`: all but the fragment
-    /// stage for a layer's vertex-only buffer, and all but the vertex stage
-    /// for its fragment-only one.
-    #[must_use]
-    pub(crate) fn buffer_stages(self, binding: u32) -> vk::ShaderStageFlags {
-        let mut stages = vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT;
-        if self == DescriptorSetType::Layer {
-            if layer_storage_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO) == Some(binding) {
-                stages = vk::ShaderStageFlags::VERTEX;
-            } else if layer_storage_binding(ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO) == Some(binding) {
-                stages = vk::ShaderStageFlags::FRAGMENT;
-            }
-        }
-        stages
-    }
+    stages
 }
 
 pub(crate) struct PoolInfo {
@@ -187,7 +165,7 @@ pub(crate) fn build_descriptor_set_layout(
             bindings.push(
                 vk::DescriptorSetLayoutBinding::default()
                     .binding(binding)
-                    .stage_flags(type_.buffer_stages(binding))
+                    .stage_flags(buffer_stages(type_, binding))
                     .descriptor_type(descriptor_type)
                     .descriptor_count(1),
             );

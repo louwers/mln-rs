@@ -2,8 +2,8 @@
 //! the `ash` bindings, with its shaders and the targets the renderer draws
 //! frames into.
 //!
-//! It allocates memory with gpu-allocator and compiles its GLSL
-//! (`shaders::glsl_sources`) to SPIR-V with naga.
+//! It allocates memory with gpu-allocator and compiles `mln_glsl`'s GLSL to
+//! SPIR-V with naga.
 //!
 //! A `RendererBackend` renders on a `Device`, which backends on any thread
 //! share, into an `OffscreenTarget`, a `SurfaceTarget`, a `BorrowedTarget` or
@@ -41,7 +41,8 @@ pub use gpu::{ImportedImage, VulkanGpu};
 /// Frames drawn into textures of the library's and read back.
 pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
 pub use renderer_backend::RendererBackend;
-pub use shaders::compiler::{Stage as ShaderStage, compile as compile_glsl};
+pub use mln_glsl::Stage as ShaderStage;
+pub use shaders::compile as compile_glsl;
 pub use surface_target::{HostSurface, Overlay, OverlayTarget, SurfaceTarget};
 
 #[cfg(test)]

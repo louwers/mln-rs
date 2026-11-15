@@ -1,21 +1,18 @@
-#![cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
-//! Compiles every GLSL source `shader_source()` returns to SPIR-V with naga,
-//! the way `vulkan::ShaderProgram` does: `#version 450`, the `ProgramParameters`
-//! defines, a `HAS_UNIFORM_u_<name>` define per property passed as a uniform,
+//! Parses and validates every program's GLSL with naga, as the backends
+//! compose it: `#version 450`, the `ProgramParameters` defines, a
+//! `HAS_UNIFORM_u_<name>` define per property passed as a uniform,
 //! `PROJECTION_GLOBE` for the globe variant, then the stage's prelude, the
 //! shader's prelude and the stage's source. Also checks that the buffers,
 //! textures, samplers and vertex inputs the GLSL declares are the ones the
 //! descriptor set layouts and the attribute and texture tables describe, that
 //! the buffers have the sizes of what the renderer binds there, and that the
 //! stages of a shader agree on what passes between them, in both projection
-//! variants. It needs no GPU.
+//! variants.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write;
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shader_group::GLOBE_DEFINE;
 use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUnionUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO,
 };
@@ -35,173 +32,51 @@ use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::*;
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
-use crate::shaders::compiler::{Stage, compile, compose, parse};
-use crate::shaders::glsl_sources;
-use crate::shaders::layout::{
+use crate::front_end::parse;
+use crate::layout::{
     DRAWABLE_UNIFORM_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT,
     LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE, drawable_uniform_binding,
     global_uniform_binding, image_sampler_binding, image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
-use crate::shaders::shader_source::{AttributeInfo, ShaderSource, shader_source};
+use crate::sources;
+use crate::variants::variants;
+use crate::{AttributeInfo, PROGRAMS, ShaderSource, Stage};
 
-pub(super) const ALL_BUILT_INS: &[BuiltIn] = &[
-    BuiltIn::ClippingMaskProgram,
-    BuiltIn::BackgroundShader,
-    BuiltIn::BackgroundPatternShader,
-    BuiltIn::SkyShader,
-    BuiltIn::AtmosphereShader,
-    BuiltIn::CircleShader,
-    BuiltIn::CollisionBoxShader,
-    BuiltIn::CollisionCircleShader,
-    BuiltIn::DebugShader,
-    BuiltIn::FillShader,
-    BuiltIn::FillOutlineShader,
-    BuiltIn::FillPatternShader,
-    BuiltIn::FillOutlinePatternShader,
-    BuiltIn::FillOutlineInstancedShader,
-    BuiltIn::FillOutlinePatternInstancedShader,
-    BuiltIn::FillOutlineTriangulatedShader,
-    BuiltIn::FillExtrusionShader,
-    BuiltIn::FillExtrusionInstancedShader,
-    BuiltIn::FillExtrusionWallShader,
-    BuiltIn::FillExtrusionPatternShader,
-    BuiltIn::FillExtrusionPatternInstancedShader,
-    BuiltIn::FillExtrusionPatternWallShader,
-    BuiltIn::HeatmapShader,
-    BuiltIn::HeatmapTextureShader,
-    BuiltIn::HillshadePrepareShader,
-    BuiltIn::ColorReliefShader,
-    BuiltIn::HillshadeShader,
-    BuiltIn::LineShader,
-    BuiltIn::LineGradientShader,
-    BuiltIn::LinePatternShader,
-    BuiltIn::LineSDFShader,
-    BuiltIn::LineGradientSDFShader,
-    BuiltIn::RasterShader,
-    BuiltIn::SymbolIconShader,
-    BuiltIn::SymbolSDFShader,
-    BuiltIn::SymbolTextAndIconShader,
-    BuiltIn::WideVectorShader,
-    BuiltIn::GlobeDepthShader,
-];
-
-fn sources() -> impl Iterator<Item = &'static ShaderSource> {
-    ALL_BUILT_INS.iter().filter_map(|&id| shader_source(id))
+fn programs() -> impl Iterator<Item = &'static ShaderSource> {
+    PROGRAMS.iter().map(|&(_, source)| source)
 }
-
-/// The projection variants a shader group builds: its name, and whether it
-/// defines `PROJECTION_GLOBE`.
-const PROJECTIONS: [(&str, bool); 2] = [("Mercator", false), ("globe", true)];
 
 const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
 
-/// The first word of a SPIR-V module.
-const SPIRV_MAGIC: u32 = 0x0723_0203;
-
-fn stage_source(source: &ShaderSource, stage: Stage) -> &'static str {
-    match stage {
-        Stage::Vertex => source.glsl.vertex,
-        Stage::Fragment => source.glsl.fragment,
-    }
-}
-
-/// The `<name>`s of the `HAS_UNIFORM_u_<name>` the shader tests: its
-/// data-driven properties.
-pub(super) fn uniform_properties(source: &ShaderSource) -> BTreeSet<String> {
-    const PREFIX: &str = "HAS_UNIFORM_u_";
-    let mut names = BTreeSet::new();
-    for text in [source.glsl.vertex, source.glsl.fragment] {
-        let mut rest = text;
-        while let Some(start) = rest.find(PREFIX) {
-            rest = &rest[start + PREFIX.len()..];
-            let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(rest.len());
-            names.insert(rest[..end].to_owned());
-            rest = &rest[end..];
-        }
-    }
-    names
-}
-
-/// The `#define` lines of ProgramParameters(1.0, overdraw), the globe define
-/// if `globe`, and a uniform define per name.
-fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &'a String>) -> String {
-    let mut defines = "#define DEVICE_PIXEL_RATIO 1.0\n".to_owned();
-    if overdraw {
-        defines.push_str("#define OVERDRAW_INSPECTOR\n");
-    }
-    if globe {
-        let _ = writeln!(defines, "#define {GLOBE_DEFINE}");
-    }
-    for name in uniforms {
-        let _ = writeln!(defines, "#define HAS_UNIFORM_u_{name}");
-    }
-    defines
-}
-
-/// A set of defines a shader compiles with.
-struct Variant {
-    name: String,
-    /// No property is a uniform: the vertex stage reads every attribute.
-    per_vertex: bool,
-    defines: String,
-}
-
-/// In both projections: every property per vertex and every property as a
-/// uniform; with `all`, also these two with the overdraw inspector, and each
-/// property alone as a uniform.
-fn variants(source: &ShaderSource, all: bool) -> Vec<Variant> {
-    let properties = uniform_properties(source);
-    let mut variants = Vec::new();
-    for (projection, globe) in PROJECTIONS {
-        let mut push = |name: &str, per_vertex: bool, defines: String| {
-            variants.push(Variant { name: format!("{projection}, {name}"), per_vertex, defines });
-        };
-        push("no uniforms", true, defines(false, globe, []));
-        push("all uniforms", false, defines(false, globe, &properties));
-        if all {
-            push("overdraw inspector", true, defines(true, globe, []));
-            push("overdraw inspector, all uniforms", false, defines(true, globe, &properties));
-            for name in &properties {
-                push(&format!("uniform {name}"), false, defines(false, globe, [name]));
-            }
-        }
-    }
-    variants
-}
-
-/// The module of a stage of `source` with `defines`.
+/// The module of a stage of `source` with `defines`, unvalidated.
 fn module(source: &ShaderSource, stage: Stage, defines: &str) -> Module {
-    let composed = compose(stage, defines, source.glsl.prelude, stage_source(source, stage));
-    parse(stage, &composed).unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", source.name))
+    parse(stage, &source.compose(stage, defines)).unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", source.name))
 }
 
-// Every stage compiles to a SPIR-V module, with every property per vertex,
-// every property as a uniform, each property alone as a uniform, and with
-// the overdraw inspector, in both projections.
+// Every stage parses and validates, with every property per vertex, every
+// property as a uniform, each property alone as a uniform, and with the
+// overdraw inspector, in both projections.
 #[test]
-fn every_shader_source_compiles() {
+fn every_stage_validates() {
     let mut failures = Vec::new();
-    let mut compiled = 0;
-    for source in sources() {
+    let mut validated = 0;
+    for source in programs() {
         for variant in variants(source, true) {
             for stage in STAGES {
-                let composed = compose(stage, &variant.defines, source.glsl.prelude, stage_source(source, stage));
-                match compile(stage, &composed) {
-                    Ok(words) if words.first() == Some(&SPIRV_MAGIC) => compiled += 1,
-                    Ok(_) => failures.push(format!("{} ({}, {stage:?}): no SPIR-V", source.name, variant.name)),
+                match crate::Module::parse(stage, &source.compose(stage, &variant.defines)) {
+                    Ok(_) => validated += 1,
                     Err(error) => failures.push(format!("{} ({}, {stage:?}):\n{error}", source.name, variant.name)),
                 }
             }
         }
     }
-    assert!(failures.is_empty(), "{} of {} stages failed:\n{}", failures.len(), compiled + failures.len(), {
+    assert!(failures.is_empty(), "{} of {} stages failed:\n{}", failures.len(), validated + failures.len(), {
         failures.join("\n\n")
     });
 }
@@ -435,7 +310,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
     assert_eq!(DescriptorSetType::DrawableImage.set_index(), 3);
 
     let mut failures = Vec::new();
-    for source in sources() {
+    for source in programs() {
         for variant in variants(source, false) {
             for stage in STAGES {
                 let mut fail = |message: String| {
@@ -500,7 +375,7 @@ fn buffers_are_the_renderers() {
     assert_eq!(size_of::<GlobalPaintParamsUBO>(), 48);
 
     let mut failures = Vec::new();
-    for source in sources() {
+    for source in programs() {
         let expected: BTreeMap<(u32, u32), (Buffer, Resource)> = buffers(source)
             .into_iter()
             .map(|(buffer, size)| {
@@ -622,7 +497,7 @@ const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
 #[test]
 fn vertex_inputs_are_the_attribute_tables() {
     let mut failures = Vec::new();
-    for source in sources() {
+    for source in programs() {
         let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
         assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", source.name);
         for variant in variants(source, true) {
@@ -653,7 +528,7 @@ fn vertex_inputs_are_the_attribute_tables() {
 // outline vertex, a vertex further on: the two have the same formats.
 #[test]
 fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
-    let instanced: Vec<&ShaderSource> = sources()
+    let instanced: Vec<&ShaderSource> = programs()
         .filter(|source| source.name.starts_with("FillExtrusion") && !source.instance_attributes.is_empty())
         .collect();
     assert_eq!(instanced.len(), 2);
@@ -678,7 +553,7 @@ fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
 #[test]
 fn stages_agree_on_what_passes_between_them() {
     let mut failures = Vec::new();
-    for source in sources() {
+    for source in programs() {
         for variant in variants(source, true) {
             let at = format!("{} ({})", source.name, variant.name);
             let outputs = stage_outputs(&module(source, Stage::Vertex, &variant.defines));
@@ -750,19 +625,20 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(image_sampler_binding(0), 3);
 }
 
-// The tables and `glsl_sources::ALL` list the same shaders, under their
+// The tables and `sources::ALL` list the same shaders, under their
 // `BuiltIn` names, and no table has more attributes and textures than a
 // shader can have. Only the fill extrusion walls and the instanced fill
 // outlines have instance attributes.
 #[test]
 fn tables_and_sources_are_the_same_shaders() {
-    let names: Vec<&str> = sources().map(|source| source.name).collect();
-    assert_eq!(names.len(), glsl_sources::ALL.len());
-    for glsl in glsl_sources::ALL {
+    let names: Vec<&str> = programs().map(|source| source.name).collect();
+    assert_eq!(names.len(), sources::ALL.len());
+    for glsl in sources::ALL {
         assert_eq!(glsl.built_in, glsl.name);
         assert_eq!(names.iter().filter(|&&name| name == glsl.name).count(), 1, "{}", glsl.name);
     }
-    for source in sources() {
+    for &(id, source) in PROGRAMS {
+        assert_eq!(format!("{id:?}"), source.name);
         assert_eq!(source.name, source.glsl.name);
         assert!(all_attributes(source).count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", source.name);
         assert!(source.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER, "{}", source.name);
@@ -782,4 +658,16 @@ fn tables_and_sources_are_the_same_shaders() {
         assert_eq!(textures.len(), source.textures.len(), "{}: texture indices repeat", source.name);
         assert!(textures.iter().all(|&index| index < IMAGE_TEXTURE_COUNT), "{}", source.name);
     }
+}
+
+// Clip space is y-up: no vertex stage flips Y, which the back end for a
+// y-down clip space does.
+#[test]
+fn no_stage_flips_y() {
+    for glsl in sources::ALL {
+        let text: String = glsl.vertex.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(!text.contains("gl_Position.y*=-1"), "{}", glsl.name);
+        assert!(!text.contains("applySurfaceTransform"), "{}", glsl.name);
+    }
+    assert!(!sources::PRELUDE_VERTEX.contains("applySurfaceTransform"));
 }

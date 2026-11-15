@@ -23,7 +23,8 @@ gpu-allocator.workspace = true
 mln_gfx.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
-naga.workspace = true
+mln_glsl.workspace = true
+naga = { workspace = true, features = ["spv-out"] }
 parking_lot.workspace = true
 
 # The NT handles of D3D12 fences, and the D3D11 textures of exported rings.
@@ -34,9 +35,11 @@ windows.workspace = true
 [target.'cfg(all(unix, not(any(target_vendor = "apple", target_family = "wasm"))))'.dependencies]
 libc.workspace = true
 
-# The conformance suite that `VulkanGpu`'s tests run.
+# The conformance suite that `VulkanGpu`'s tests run, and the sets of defines
+# they compile the programs with.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
 mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+mln_glsl = { workspace = true, features = ["variants"] }
 
 [lints]
 workspace = true

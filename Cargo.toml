@@ -53,6 +53,7 @@ mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression"
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.11" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.11" }
 mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.11" }
+mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.11" }
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.11" }
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.11" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.11" }
@@ -382,9 +383,7 @@ wgpu = { version = "30.0.1", default-features = false, features = [
 ] }
 # The Vulkan backend (crates/mln_vulkan), where the C++ one uses vulkan-hpp,
 # VulkanMemoryAllocator and glslang: the bindings and the allocator that
-# wgpu's own Vulkan backend uses, and naga's GLSL front end and SPIR-V back
-# end, at wgpu's versions. naga's GLSL front end needs a module that only
-# `wgsl-in` or `spv-in` builds.
+# wgpu's own Vulkan backend uses, and naga, at wgpu's versions.
 ash = { version = "0.38.0" }
 # The Vulkan backend on Windows: its D3D12 fences, and the D3D11 textures of
 # its exported rings on the DXGI adapter of the Vulkan GPU, at wgpu's version.
@@ -403,7 +402,11 @@ gpu-allocator = { version = "0.28.0", default-features = false, features = [
   "std",
   "vulkan",
 ] }
-naga = { version = "30.0.1", features = ["glsl-in", "spv-out", "wgsl-in"] }
+# The GLSL front end of the Vulkan and D3D12 backends' shaders
+# (crates/mln_glsl), whose back ends turn on their own features: SPIR-V for
+# Vulkan and HLSL for D3D12. The GLSL front end needs a module that only
+# `wgsl-in` or `spv-in` builds.
+naga = { version = "30.0.1", features = ["glsl-in", "wgsl-in"] }
 # examples/desktop: the CAMetalLayer of the window's view on macOS.
 raw-window-metal = { version = "1.1.0" }
 # examples/desktop's window and input. On Linux it loads the X11 and Wayland

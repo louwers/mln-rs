@@ -14,8 +14,7 @@ use mln_gfx::shader_group::GLOBE_DEFINE;
 use mln_util::Color;
 use mln_util::size::Size;
 
-use super::glsl_compile_test::{ALL_BUILT_INS, uniform_properties};
-use crate::shaders::shader_source::shader_source;
+use mln_glsl::PROGRAMS;
 use crate::{Device, ImportedImage, VulkanGpu};
 
 #[test]
@@ -109,12 +108,9 @@ fn destroy_later_waits_for_the_next_submit() {
 fn every_program_compiles_for_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
-    for &program in ALL_BUILT_INS {
-        let Some(source) = shader_source(program) else {
-            continue;
-        };
+    for &(program, source) in PROGRAMS {
         let uniforms: Vec<String> =
-            uniform_properties(source).into_iter().map(|name| format!("HAS_UNIFORM_u_{name}")).collect();
+            source.uniform_properties().into_iter().map(|name| format!("HAS_UNIFORM_u_{name}")).collect();
         for globe in [false, true] {
             let projection = globe.then(|| GLOBE_DEFINE.to_owned());
             for defines in [Vec::new(), uniforms.clone()] {

@@ -38,13 +38,16 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::shader_source::BuiltIn;
 
-use super::glsl_sources;
+use std::collections::BTreeSet;
+
+use crate::front_end::Stage;
+use crate::sources;
 
 /// A program's GLSL.
 ///
-/// A stage compiles from the stage's prelude (`glsl_sources::PRELUDE_VERTEX`
-/// or `PRELUDE_FRAGMENT`), `prelude` and the stage's source
-/// (`compiler::compose`).
+/// A stage compiles from the stage's prelude (`sources::PRELUDE_VERTEX` or
+/// `PRELUDE_FRAGMENT`), `prelude` and the stage's source
+/// (`ShaderSource::compose`).
 #[derive(Debug)]
 pub(crate) struct GlslShaderSource {
     /// The `BuiltIn` enumerator name.
@@ -62,31 +65,62 @@ pub(crate) struct GlslShaderSource {
 /// `layout(location = index)`. Every attribute, instanced or not, is a
 /// vertex input.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct AttributeInfo {
-    pub(crate) index: usize,
-    /// The format of the input, which the tests check the GLSL against.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the tests check the GLSL's inputs against it"))]
-    pub(crate) data_type: AttributeDataType,
-    pub(crate) id: usize,
+pub struct AttributeInfo {
+    pub index: usize,
+    /// The format of the input.
+    pub data_type: AttributeDataType,
+    pub id: usize,
 }
 
 /// Texture `id` binds in the image set at
 /// `layout::image_texture_binding(index)`, and its sampler at
 /// `layout::image_sampler_binding(index)`.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TextureInfo {
-    pub(crate) index: usize,
-    pub(crate) id: usize,
+pub struct TextureInfo {
+    pub index: usize,
+    pub id: usize,
 }
 
 /// A program's GLSL, and the tables of its attributes and textures.
 #[derive(Debug)]
-pub(crate) struct ShaderSource {
+pub struct ShaderSource {
     pub(crate) glsl: &'static GlslShaderSource,
-    pub(crate) name: &'static str,
-    pub(crate) attributes: &'static [AttributeInfo],
-    pub(crate) instance_attributes: &'static [AttributeInfo],
-    pub(crate) textures: &'static [TextureInfo],
+    pub name: &'static str,
+    pub attributes: &'static [AttributeInfo],
+    pub instance_attributes: &'static [AttributeInfo],
+    pub textures: &'static [TextureInfo],
+}
+
+impl ShaderSource {
+    /// The source of `stage` for naga's GLSL front end, with `defines`
+    /// (`#define` lines): the version, the defines, the stage's prelude, and
+    /// the program's own prelude and stage.
+    #[must_use]
+    pub fn compose(&self, stage: Stage, defines: &str) -> String {
+        let source = match stage {
+            Stage::Vertex => self.glsl.vertex,
+            Stage::Fragment => self.glsl.fragment,
+        };
+        crate::front_end::compose(stage, defines, self.glsl.prelude, source)
+    }
+
+    /// The `<name>`s of the `HAS_UNIFORM_u_<name>` defines the program
+    /// tests: its data-driven properties.
+    #[must_use]
+    pub fn uniform_properties(&self) -> BTreeSet<&'static str> {
+        const PREFIX: &str = "HAS_UNIFORM_u_";
+        let mut names = BTreeSet::new();
+        for text in [self.glsl.vertex, self.glsl.fragment] {
+            let mut rest = text;
+            while let Some(start) = rest.find(PREFIX) {
+                rest = &rest[start + PREFIX.len()..];
+                let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(rest.len());
+                names.insert(&rest[..end]);
+                rest = &rest[end..];
+            }
+        }
+        names
+    }
 }
 
 const fn attr(index: usize, data_type: AttributeDataType, id: usize) -> AttributeInfo {
@@ -105,7 +139,7 @@ macro_rules! shader_source {
     };
     ($name:ident, $str:literal, $attrs:expr, $instance_attrs:expr, $textures:expr) => {
         static $name: ShaderSource = ShaderSource {
-            glsl: &glsl_sources::$name,
+            glsl: &sources::$name,
             name: $str,
             attributes: $attrs,
             instance_attributes: $instance_attrs,
@@ -517,48 +551,51 @@ shader_source!(
     &[tex(0, ID_SYMBOL_IMAGE_TEXTURE), tex(1, ID_SYMBOL_IMAGE_ICON_TEXTURE)]
 );
 
-/// The Vulkan source of `shader_id`, or `None` for the shaders the renderer
+/// Every program that has GLSL: those the renderer draws with, which leaves
+/// out the wide vector.
+pub static PROGRAMS: &[(BuiltIn, &ShaderSource)] = &[
+    (BuiltIn::BackgroundShader, &BACKGROUND_SHADER),
+    (BuiltIn::BackgroundPatternShader, &BACKGROUND_PATTERN_SHADER),
+    (BuiltIn::CircleShader, &CIRCLE_SHADER),
+    (BuiltIn::ClippingMaskProgram, &CLIPPING_MASK_PROGRAM),
+    (BuiltIn::CollisionBoxShader, &COLLISION_BOX_SHADER),
+    (BuiltIn::CollisionCircleShader, &COLLISION_CIRCLE_SHADER),
+    (BuiltIn::ColorReliefShader, &COLOR_RELIEF_SHADER),
+    (BuiltIn::DebugShader, &DEBUG_SHADER),
+    (BuiltIn::FillShader, &FILL_SHADER),
+    (BuiltIn::FillOutlineShader, &FILL_OUTLINE_SHADER),
+    (BuiltIn::FillPatternShader, &FILL_PATTERN_SHADER),
+    (BuiltIn::FillOutlinePatternShader, &FILL_OUTLINE_PATTERN_SHADER),
+    (BuiltIn::FillOutlineInstancedShader, &FILL_OUTLINE_INSTANCED_SHADER),
+    (BuiltIn::FillOutlinePatternInstancedShader, &FILL_OUTLINE_PATTERN_INSTANCED_SHADER),
+    (BuiltIn::FillOutlineTriangulatedShader, &FILL_OUTLINE_TRIANGULATED_SHADER),
+    (BuiltIn::FillExtrusionShader, &FILL_EXTRUSION_SHADER),
+    (BuiltIn::FillExtrusionInstancedShader, &FILL_EXTRUSION_INSTANCED_SHADER),
+    (BuiltIn::FillExtrusionWallShader, &FILL_EXTRUSION_WALL_SHADER),
+    (BuiltIn::FillExtrusionPatternShader, &FILL_EXTRUSION_PATTERN_SHADER),
+    (BuiltIn::FillExtrusionPatternInstancedShader, &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
+    (BuiltIn::FillExtrusionPatternWallShader, &FILL_EXTRUSION_PATTERN_WALL_SHADER),
+    (BuiltIn::HeatmapShader, &HEATMAP_SHADER),
+    (BuiltIn::HeatmapTextureShader, &HEATMAP_TEXTURE_SHADER),
+    (BuiltIn::HillshadeShader, &HILLSHADE_SHADER),
+    (BuiltIn::HillshadePrepareShader, &HILLSHADE_PREPARE_SHADER),
+    (BuiltIn::LineShader, &LINE_SHADER),
+    (BuiltIn::LineGradientShader, &LINE_GRADIENT_SHADER),
+    (BuiltIn::LinePatternShader, &LINE_PATTERN_SHADER),
+    (BuiltIn::LineSDFShader, &LINE_SDF_SHADER),
+    (BuiltIn::LineGradientSDFShader, &LINE_GRADIENT_SDF_SHADER),
+    (BuiltIn::RasterShader, &RASTER_SHADER),
+    (BuiltIn::SymbolIconShader, &SYMBOL_ICON_SHADER),
+    (BuiltIn::SymbolSDFShader, &SYMBOL_SDF_SHADER),
+    (BuiltIn::SymbolTextAndIconShader, &SYMBOL_TEXT_AND_ICON_SHADER),
+    (BuiltIn::SkyShader, &SKY_SHADER),
+    (BuiltIn::AtmosphereShader, &ATMOSPHERE_SHADER),
+    (BuiltIn::GlobeDepthShader, &GLOBE_DEPTH_SHADER),
+];
+
+/// The GLSL of `shader_id`, or `None` for the shaders the renderer
 /// doesn't draw with: the wide vector.
 #[must_use]
-pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
-    match shader_id {
-        BuiltIn::BackgroundShader => Some(&BACKGROUND_SHADER),
-        BuiltIn::BackgroundPatternShader => Some(&BACKGROUND_PATTERN_SHADER),
-        BuiltIn::CircleShader => Some(&CIRCLE_SHADER),
-        BuiltIn::ClippingMaskProgram => Some(&CLIPPING_MASK_PROGRAM),
-        BuiltIn::CollisionBoxShader => Some(&COLLISION_BOX_SHADER),
-        BuiltIn::CollisionCircleShader => Some(&COLLISION_CIRCLE_SHADER),
-        BuiltIn::ColorReliefShader => Some(&COLOR_RELIEF_SHADER),
-        BuiltIn::DebugShader => Some(&DEBUG_SHADER),
-        BuiltIn::FillShader => Some(&FILL_SHADER),
-        BuiltIn::FillOutlineShader => Some(&FILL_OUTLINE_SHADER),
-        BuiltIn::FillPatternShader => Some(&FILL_PATTERN_SHADER),
-        BuiltIn::FillOutlinePatternShader => Some(&FILL_OUTLINE_PATTERN_SHADER),
-        BuiltIn::FillOutlineInstancedShader => Some(&FILL_OUTLINE_INSTANCED_SHADER),
-        BuiltIn::FillOutlinePatternInstancedShader => Some(&FILL_OUTLINE_PATTERN_INSTANCED_SHADER),
-        BuiltIn::FillOutlineTriangulatedShader => Some(&FILL_OUTLINE_TRIANGULATED_SHADER),
-        BuiltIn::FillExtrusionShader => Some(&FILL_EXTRUSION_SHADER),
-        BuiltIn::FillExtrusionInstancedShader => Some(&FILL_EXTRUSION_INSTANCED_SHADER),
-        BuiltIn::FillExtrusionWallShader => Some(&FILL_EXTRUSION_WALL_SHADER),
-        BuiltIn::FillExtrusionPatternShader => Some(&FILL_EXTRUSION_PATTERN_SHADER),
-        BuiltIn::FillExtrusionPatternInstancedShader => Some(&FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
-        BuiltIn::FillExtrusionPatternWallShader => Some(&FILL_EXTRUSION_PATTERN_WALL_SHADER),
-        BuiltIn::HeatmapShader => Some(&HEATMAP_SHADER),
-        BuiltIn::HeatmapTextureShader => Some(&HEATMAP_TEXTURE_SHADER),
-        BuiltIn::HillshadeShader => Some(&HILLSHADE_SHADER),
-        BuiltIn::HillshadePrepareShader => Some(&HILLSHADE_PREPARE_SHADER),
-        BuiltIn::LineShader => Some(&LINE_SHADER),
-        BuiltIn::LineGradientShader => Some(&LINE_GRADIENT_SHADER),
-        BuiltIn::LinePatternShader => Some(&LINE_PATTERN_SHADER),
-        BuiltIn::LineSDFShader => Some(&LINE_SDF_SHADER),
-        BuiltIn::LineGradientSDFShader => Some(&LINE_GRADIENT_SDF_SHADER),
-        BuiltIn::RasterShader => Some(&RASTER_SHADER),
-        BuiltIn::SymbolIconShader => Some(&SYMBOL_ICON_SHADER),
-        BuiltIn::SymbolSDFShader => Some(&SYMBOL_SDF_SHADER),
-        BuiltIn::SymbolTextAndIconShader => Some(&SYMBOL_TEXT_AND_ICON_SHADER),
-        BuiltIn::SkyShader => Some(&SKY_SHADER),
-        BuiltIn::AtmosphereShader => Some(&ATMOSPHERE_SHADER),
-        BuiltIn::GlobeDepthShader => Some(&GLOBE_DEPTH_SHADER),
-        _ => None,
-    }
+pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
+    PROGRAMS.iter().find(|&&(id, _)| id == shader_id).map(|&(_, source)| source)
 }
