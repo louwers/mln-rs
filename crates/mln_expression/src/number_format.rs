@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+    #[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
     fn icu4x_unit_names_take_the_plural_form() {
         assert_eq!(format_unit(1.0, "en-US", "day", None, None), "1 day");
         assert_eq!(format_unit(2.0, "en-US", "day", None, None), "2 days");
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+    #[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
     fn units_icu4x_lacks_fail() {
         assert!(format_number(1.0, "en-US", "", "celsius", None, None).is_err());
         assert!(format_number(1.0, "en-US", "", "kilobyte", None, None).is_err());

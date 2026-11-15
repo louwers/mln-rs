@@ -4,6 +4,7 @@
 //!
 //! - Apple platforms: Foundation's localized string comparison,
 //!   `NSNumberFormatter`, `NSMeasurementFormatter` and `NSLocale`.
+//! - Android: the framework's ICU (`android.icu`), through JNI.
 //! - wasm (the browser build): the browser's `Intl.Collator` and
 //!   `Intl.NumberFormat`.
 //! - Everywhere else: ICU4X, with the CLDR data it compiles into the library.
@@ -25,19 +26,23 @@
 //!   unless the limits override them. With a unit, it takes the locale's
 //!   short pattern for the unit, as `Intl.NumberFormat` does by default.
 
+#[cfg(target_os = "android")]
+mod android;
 #[cfg(target_vendor = "apple")]
 mod apple;
-#[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+#[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
 mod icu4x;
-#[cfg(any(target_family = "wasm", target_vendor = "apple", test))]
+#[cfg(any(target_family = "wasm", target_vendor = "apple", target_os = "android", test))]
 mod keywords;
 mod unit;
 #[cfg(target_family = "wasm")]
 mod web;
 
+#[cfg(target_os = "android")]
+pub(crate) use android::{Collator, format_number};
 #[cfg(target_vendor = "apple")]
 pub(crate) use apple::{Collator, format_number};
-#[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+#[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
 pub(crate) use icu4x::{Collator, format_number};
 pub(crate) use unit::Unit;
 #[cfg(target_family = "wasm")]

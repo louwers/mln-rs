@@ -10,9 +10,10 @@ use crate::error::Error;
 use crate::generated::types::{mln_diagnostic, mln_status};
 
 /// `mln_android_init()`: what the library needs of the app is the Java VM,
-/// whose `HttpURLConnection` fetches HTTP(S), the context's assets, which
-/// `asset://` URLs load when the runtime has no asset path, and the app's
-/// languages, which the system fonts are looked up for.
+/// whose `HttpURLConnection` fetches HTTP(S) and whose `android.icu` formats
+/// numbers and compares strings for the locale-sensitive expressions, the
+/// context's assets, which `asset://` URLs load when the runtime has no asset
+/// path, and the app's languages, which the system fonts are looked up for.
 ///
 /// # Safety
 ///
