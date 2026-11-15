@@ -20,7 +20,6 @@ use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_util::Color;
-use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::vectors::{Vec2, Vec3, vec2_gl_fmod};
 
@@ -597,7 +596,7 @@ impl RenderLayer for RenderCircleLayer {
             };
 
             let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
-            if prev_bucket_id != SimpleIdentity::EMPTY && prev_bucket_id != bucket.base.bucket_id {
+            if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // This tile was previously set up from a different bucket,
                 // drop and re-create any drawables for it.
                 self.remove_tile(render_pass, &tile_id);

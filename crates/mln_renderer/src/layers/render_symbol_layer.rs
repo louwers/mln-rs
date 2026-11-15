@@ -43,7 +43,6 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::identity::SimpleIdentity;
 use mln_util::interpolate::Interpolate;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::vectors::{Vec2, Vec3, Vec4, vec2_max_scalar};
@@ -1356,7 +1355,7 @@ impl RenderLayer for RenderSymbolLayer {
             };
 
             let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
-            if prev_bucket_id != SimpleIdentity::EMPTY && prev_bucket_id != bucket.base.bucket_id {
+            if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // This tile was previously set up from a different bucket,
                 // drop and re-create any drawables for it.
                 self.remove_tile_all(passes, &tile_id);

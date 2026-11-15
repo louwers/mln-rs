@@ -163,7 +163,7 @@ pub fn bind_once(scheduler: &SchedulerPtr, task: Task) -> impl FnMut() + Send + 
 /// handed back to it.
 pub fn schedule_and_reply_value<R, TaskFn, ReplyFn>(
     scheduler: &dyn Scheduler,
-    tag: SimpleIdentity,
+    tag: Option<SimpleIdentity>,
     task: TaskFn,
     reply: ReplyFn,
 ) where
@@ -184,7 +184,7 @@ pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
 /// scheduler. A `Respond` dropped without a call drops the reply.
 pub(crate) fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
     scheduler: &dyn Scheduler,
-    tag: SimpleIdentity,
+    tag: Option<SimpleIdentity>,
     task: TaskFn,
     reply: ReplyFn,
 ) where
@@ -194,12 +194,14 @@ pub(crate) fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
 {
     let reply_scheduler = Arc::downgrade(&get_current());
     let reply = LocalObject::new(RefCell::new(Some(reply)));
-    scheduler.schedule_tagged(
+    schedule_under(
+        scheduler,
         tag,
         Box::new(move || {
             if let Some(reply_scheduler) = reply_scheduler.upgrade() {
                 task(Box::new(move |result| {
-                    reply_scheduler.schedule_tagged(
+                    schedule_under(
+                        &*reply_scheduler,
                         tag,
                         Box::new(move || {
                             if let Some(reply) = reply.take()
@@ -213,6 +215,14 @@ pub(crate) fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
             }
         }),
     );
+}
+
+/// Queues `task` under `tag`, or in the scheduler's default queue without one.
+fn schedule_under(scheduler: &dyn Scheduler, tag: Option<SimpleIdentity>, task: Task) {
+    match tag {
+        Some(tag) => scheduler.schedule_tagged(tag, task),
+        None => scheduler.schedule(task),
+    }
 }
 
 /// A scheduler plus the tag its tasks are queued under.
@@ -249,6 +259,6 @@ impl TaggedScheduler {
         TaskFn: FnOnce(Respond<R>) + Send + 'static,
         ReplyFn: FnOnce(R) + 'static,
     {
-        schedule_and_reply_later(&*self.scheduler, self.tag, task, reply);
+        schedule_and_reply_later(&*self.scheduler, Some(self.tag), task, reply);
     }
 }

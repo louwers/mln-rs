@@ -137,7 +137,7 @@ impl Scheduler for ThreadedScheduler {
     }
 
     fn wait_for_empty(&self) {
-        self.wait_for_empty_tagged(SimpleIdentity::EMPTY);
+        self.wait_for_empty_tagged(self.shared.unique_id);
     }
 
     fn wait_for_empty_tagged(&self, tag: SimpleIdentity) {
@@ -146,10 +146,9 @@ impl Scheduler for ThreadedScheduler {
         if self.this_thread_is_owned() {
             return;
         }
-        let tag_to_find = if tag.is_empty() { self.shared.unique_id } else { tag };
         let q = {
             let tagged_queue = self.shared.tagged_queue.lock();
-            match tagged_queue.get(&tag_to_find) {
+            match tagged_queue.get(&tag) {
                 Some(q) => Arc::clone(q),
                 None => return,
             }
@@ -162,7 +161,7 @@ impl Scheduler for ThreadedScheduler {
         drop(queue);
 
         // After waiting for the queue to empty, go ahead and erase it from the map.
-        self.shared.tagged_queue.lock().remove(&tag_to_find);
+        self.shared.tagged_queue.lock().remove(&tag);
     }
 }
 
@@ -280,7 +279,7 @@ mod tests {
         let main = std::thread::current().id();
         schedule_and_reply_value(
             &pool,
-            SimpleIdentity::new(),
+            Some(SimpleIdentity::new()),
             move || {
                 assert_ne!(std::thread::current().id(), main);
                 6 * 7

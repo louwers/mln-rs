@@ -7,7 +7,6 @@ use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use parking_lot::Mutex;
@@ -51,7 +50,7 @@ impl GeoJSONData for GeoJSONVTData {
             let geojsonvt_impl = Arc::clone(&self.impl_);
             scheduler::schedule_and_reply_value(
                 &*self.sequenced_scheduler,
-                SimpleIdentity::EMPTY,
+                None,
                 move || -> TileFeatures { geojsonvt_tile_features(&geojsonvt_impl, &id) },
                 callback,
             );

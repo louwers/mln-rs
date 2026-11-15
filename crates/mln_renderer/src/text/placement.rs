@@ -20,6 +20,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -542,7 +543,7 @@ struct Intersection {
 #[derive(Default)]
 struct TilePlacementState {
     tile_borders: Option<CollisionBoundaries>,
-    seen_cross_tile_ids: BTreeSet<u32>,
+    seen_cross_tile_ids: BTreeSet<NonZeroU32>,
     placed_symbols_data: Vec<PlacedSymbolData>,
     intersections: Vec<Intersection>,
     populate_intersections: bool,
@@ -588,10 +589,10 @@ pub(crate) struct Placement {
     placement_zoom: f32,
     prev_zoom_adjustment: f32,
 
-    placements: HashMap<u32, JointPlacement>,
-    opacities: HashMap<u32, JointOpacityState>,
-    variable_offsets: HashMap<u32, VariableOffset>,
-    placed_orientations: HashMap<u32, TextWritingModeType>,
+    placements: HashMap<NonZeroU32, JointPlacement>,
+    opacities: HashMap<NonZeroU32, JointOpacityState>,
+    variable_offsets: HashMap<NonZeroU32, VariableOffset>,
+    placed_orientations: HashMap<NonZeroU32, TextWritingModeType>,
 
     retained_query_data: HashMap<u32, RetainedQueryData>,
     collision_groups: CollisionGroups,
@@ -739,10 +740,10 @@ fn mark_used_justification(
             debug_assert!(text.placed_symbols.len() > index);
             if auto_index.is_some_and(|auto_index| index != auto_index) {
                 // There are multiple justifications and this one isn't it: shift offscreen
-                text.placed_symbols[index].cross_tile_id = 0;
+                text.placed_symbols[index].cross_tile_id = None;
             } else {
                 // Either this is the chosen justification or the justification is hardwired: use this one
-                text.placed_symbols[index].cross_tile_id = symbol_instance.get_cross_tile_id();
+                text.placed_symbols[index].cross_tile_id = symbol_instance.cross_tile_id();
             }
         }
     }
@@ -925,14 +926,14 @@ impl Placement {
         self.commit();
     }
 
-    fn place_layer(&mut self, layer: &dyn RenderLayer, seen_cross_tile_ids: &mut BTreeSet<u32>) {
+    fn place_layer(&mut self, layer: &dyn RenderLayer, seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>) {
         for data in layer.get_placement_data() {
             place_bucket(&*data.bucket, self, data, seen_cross_tile_ids);
         }
     }
 
     /// The virtual `placeSymbolBucket(params, seenCrossTileIDs)`.
-    fn place_symbol_bucket(&mut self, params: &BucketPlacementData, seen_cross_tile_ids: &mut BTreeSet<u32>) {
+    fn place_symbol_bucket(&mut self, params: &BucketPlacementData, seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>) {
         if matches!(self.kind, PlacementKind::Tile(_)) {
             self.tile_place_symbol_bucket(params, seen_cross_tile_ids);
         } else {
@@ -940,7 +941,11 @@ impl Placement {
         }
     }
 
-    fn base_place_symbol_bucket(&mut self, params: &BucketPlacementData, seen_cross_tile_ids: &mut BTreeSet<u32>) {
+    fn base_place_symbol_bucket(
+        &mut self,
+        params: &BucketPlacementData,
+        seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
+    ) {
         debug_assert!(self.update_parameters.is_some());
         let Some(symbol_bucket) = symbol_bucket(&params.bucket) else {
             return;
@@ -960,16 +965,16 @@ impl Placement {
         let mut state = symbol_bucket.state();
         for symbol_index in self.get_sorted_symbols(params, symbol_bucket, &state, ctx.pixel_ratio) {
             let symbol = &state.symbol_instances[symbol_index];
-            if seen_cross_tile_ids.contains(&symbol.get_cross_tile_id()) {
+            if symbol.cross_tile_id().is_some_and(|id| seen_cross_tile_ids.contains(&id)) {
                 continue;
             }
             self.place_symbol(symbol_index, symbol, &state, &ctx, &projectors);
 
             // Prevent a flickering issue while zooming out.
-            if symbol.get_cross_tile_id() != SymbolInstance::INVALID_CROSS_TILE_ID
+            if let Some(id) = symbol.cross_tile_id()
                 && !ctx.get_render_tile().hold_for_fade()
             {
-                seen_cross_tile_ids.insert(symbol.get_cross_tile_id());
+                seen_cross_tile_ids.insert(id);
             }
         }
 
@@ -999,9 +1004,9 @@ impl Placement {
         projectors: &PlacementProjectors<'_>,
     ) -> JointPlacement {
         let k_unplaced = JointPlacement::new(false, false, false);
-        if symbol_instance.get_cross_tile_id() == SymbolInstance::INVALID_CROSS_TILE_ID {
+        let Some(cross_tile_id) = symbol_instance.cross_tile_id() else {
             return k_unplaced;
-        }
+        };
 
         if ctx.get_render_tile().hold_for_fade() {
             // Mark all symbols from this tile as "not placed", but don't add to
@@ -1027,7 +1032,6 @@ impl Placement {
         if let Some(horizontal_text_index) = symbol_instance.get_default_horizontal_placed_text_index() {
             let placed_symbol: &PlacedSymbol = &state.text.placed_symbols[horizontal_text_index];
             let font_size = evaluate_size_for_feature(&ctx.partially_evaluated_text_size, placed_symbol);
-            let cross_tile_id = symbol_instance.get_cross_tile_id();
 
             let update_previous_orientation_if_not_placed = |this: &mut Placement, is_placed: bool| {
                 if bucket.allow_vertical_placement
@@ -1302,15 +1306,9 @@ impl Placement {
             self.collision_circles.insert((bucket.bucket_instance_id, symbol_index, true), self.text_boxes.clone());
         }
 
-        if symbol_instance.get_cross_tile_id() != 0 {
-            // If there's a previous placement with this ID, it comes from a tile that's fading out
-            // Erase it so that the placement result from the non-fading tile supersedes it
-            self.placements.remove(&symbol_instance.get_cross_tile_id());
-        } else {
-            debug_assert!(false);
-            // We skipped some setup, don't use this one or we might run into inconsistencies
-            return k_unplaced;
-        }
+        // If there's a previous placement with this ID, it comes from a tile that's fading out
+        // Erase it so that the placement result from the non-fading tile supersedes it
+        self.placements.remove(&cross_tile_id);
 
         // Symbols behind the planet's horizon stay hidden even when overlap is
         // allowed.
@@ -1319,7 +1317,7 @@ impl Placement {
             (place_icon || ctx.always_show_icon) && !icon_occluded,
             offscreen || state.just_reloaded,
         );
-        self.placements.entry(symbol_instance.get_cross_tile_id()).or_insert(result);
+        self.placements.entry(cross_tile_id).or_insert(result);
         let text_boxes = std::mem::take(&mut self.text_boxes);
         let icon_boxes = std::mem::take(&mut self.icon_boxes);
         self.new_symbol_placed(symbol_instance, ctx, result, ctx.placement_type, &text_boxes, &icon_boxes);
@@ -1443,9 +1441,9 @@ impl Placement {
                 }
             }
 
-            if placed_feature.placed {
-                let cross_tile_id = symbol_instance.get_cross_tile_id();
-                debug_assert!(cross_tile_id != 0);
+            if placed_feature.placed
+                && let Some(cross_tile_id) = symbol_instance.cross_tile_id()
+            {
                 let mut prev_anchor: Option<SymbolAnchorType> = None;
 
                 // If this label was placed in the previous
@@ -1594,7 +1592,7 @@ impl Placement {
     }
 
     pub(crate) fn update_layer_buckets(&self, layer: &dyn RenderLayer, state: &TransformState, update_opacities: bool) {
-        let mut seen_cross_tile_ids: BTreeSet<u32> = BTreeSet::new();
+        let mut seen_cross_tile_ids: BTreeSet<NonZeroU32> = BTreeSet::new();
         for item in layer.get_placement_data() {
             // `sortKeyRange->isFirstRange()`: `start == 0u`.
             if item.sort_key_range.is_none_or(|range| range.start == 0) {
@@ -1751,9 +1749,9 @@ impl Placement {
                 let mut variable_offset: Option<VariableOffset> = None;
                 let skip_orientation = bucket.allow_vertical_placement && symbol.placed_orientation.is_none();
                 if !symbol.hidden
-                    && symbol.cross_tile_id != 0
                     && !skip_orientation
-                    && let Some(offset) = self.variable_offsets.get(&symbol.cross_tile_id)
+                    && let Some(cross_tile_id) = symbol.cross_tile_id
+                    && let Some(offset) = self.variable_offsets.get(&cross_tile_id)
                 {
                     has_variable_placement = true;
                     variable_offset = Some(*offset);
@@ -1899,7 +1897,7 @@ impl Placement {
         &self,
         bucket: &SymbolBucket,
         state: &TransformState,
-        seen_cross_tile_ids: &mut BTreeSet<u32>,
+        seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
     ) {
         let layout = &*bucket.layout;
         let variable_placement = bucket.has_variable_text_anchors();
@@ -1973,17 +1971,15 @@ impl Placement {
         } = bs;
 
         for (symbol_index, symbol_instance) in symbol_instances.iter().enumerate() {
-            let cross_tile_id = symbol_instance.get_cross_tile_id();
-            let is_duplicate = seen_cross_tile_ids.contains(&cross_tile_id);
+            let cross_tile_id = symbol_instance.cross_tile_id();
+            let is_duplicate = cross_tile_id.is_none_or(|id| !seen_cross_tile_ids.insert(id));
 
             let mut opacity_state = default_opacity_state;
             if is_duplicate {
                 opacity_state = duplicate_opacity_state;
-            } else if let Some(opacity) = self.opacities.get(&cross_tile_id) {
+            } else if let Some(opacity) = cross_tile_id.and_then(|id| self.opacities.get(&id)) {
                 opacity_state = *opacity;
             }
-
-            seen_cross_tile_ids.insert(cross_tile_id);
 
             let count = 4;
             if symbol_instance.has_text() {
@@ -2015,13 +2011,13 @@ impl Placement {
 
                 let mut previous_orientation = TextWritingModeType::Horizontal;
                 if bucket.allow_vertical_placement
-                    && let Some(prev_orientation) = self.placed_orientations.get(&cross_tile_id)
+                    && let Some(prev_orientation) = cross_tile_id.and_then(|id| self.placed_orientations.get(&id))
                 {
                     previous_orientation = *prev_orientation;
                     mark_used_orientation(text, icon, sdf_icon, *prev_orientation, symbol_instance);
                 }
 
-                if let Some(prev_offset) = self.variable_offsets.get(&cross_tile_id) {
+                if let Some(prev_offset) = cross_tile_id.and_then(|id| self.variable_offsets.get(&id)) {
                     mark_used_justification(text, prev_offset.anchor, symbol_instance, previous_orientation);
                 }
             }
@@ -2071,7 +2067,7 @@ impl Placement {
                     }
                     let mut used = true;
                     if variable_placement {
-                        if let Some(variable_offset) = self.variable_offsets.get(&cross_tile_id) {
+                        if let Some(variable_offset) = cross_tile_id.and_then(|id| self.variable_offsets.get(&id)) {
                             // This will show either the currently placed position or
                             // the last successfully placed position (so you can
                             // visualize what collision just made the symbol disappear,
@@ -2218,8 +2214,7 @@ impl Placement {
     }
 
     pub(crate) fn get_symbol_placement(&self, symbol: &SymbolInstance) -> Option<&JointPlacement> {
-        debug_assert!(symbol.get_cross_tile_id() != 0);
-        self.placements.get(&symbol.get_cross_tile_id())
+        self.placements.get(&symbol.cross_tile_id()?)
     }
 
     pub(crate) fn get_update_period(&self, zoom: f32) -> Duration {
@@ -2436,7 +2431,7 @@ impl Placement {
             let bucket = ctx.get_bucket();
             let state = bucket.state();
             let symbol = &state.symbol_instances[intersection.symbol_index];
-            if seen_cross_tile_ids.contains(&symbol.get_cross_tile_id()) {
+            if symbol.cross_tile_id().is_some_and(|id| seen_cross_tile_ids.contains(&id)) {
                 continue;
             }
             let projectors = ctx.projectors(&transform_state);
@@ -2444,7 +2439,9 @@ impl Placement {
             if self.should_retry_placement(placement, ctx) {
                 continue;
             }
-            seen_cross_tile_ids.insert(symbol.get_cross_tile_id());
+            if let Some(id) = symbol.cross_tile_id() {
+                seen_cross_tile_ids.insert(id);
+            }
         }
         self.tile_state().intersections = intersections;
         // Place the rest labels.
@@ -2456,7 +2453,7 @@ impl Placement {
         self.commit();
     }
 
-    fn tile_place_symbol_bucket(&mut self, params: &BucketPlacementData, seen: &mut BTreeSet<u32>) {
+    fn tile_place_symbol_bucket(&mut self, params: &BucketPlacementData, seen: &mut BTreeSet<NonZeroU32>) {
         /// Keeps the data necessary to find a feature location according to a tile.
         struct NeighborTileData {
             shift: Vec2,
@@ -2659,7 +2656,7 @@ pub(crate) fn place_bucket(
     bucket: &dyn Bucket,
     placement: &mut Placement,
     data: &BucketPlacementData,
-    seen_ids: &mut BTreeSet<u32>,
+    seen_ids: &mut BTreeSet<NonZeroU32>,
 ) {
     if let Some(symbol_bucket) = bucket.downcast_ref::<SymbolBucket>() {
         symbol_bucket.place(placement, data, seen_ids);
@@ -2674,7 +2671,7 @@ pub(crate) fn update_vertices(
     update_opacities: bool,
     state: &TransformState,
     data: &BucketPlacementData,
-    seen_ids: &mut BTreeSet<u32>,
+    seen_ids: &mut BTreeSet<NonZeroU32>,
 ) {
     if let Some(symbol_bucket) = bucket.downcast_ref::<SymbolBucket>() {
         symbol_bucket.update_vertices(placement, update_opacities, state, data, seen_ids);
@@ -2683,7 +2680,12 @@ pub(crate) fn update_vertices(
 
 impl SymbolBucket {
     #[expect(clippy::unused_self, reason = "a bucket places its symbols, as the C++ `Placement` asks each bucket")]
-    pub(crate) fn place(&self, placement: &mut Placement, data: &BucketPlacementData, seen_ids: &mut BTreeSet<u32>) {
+    pub(crate) fn place(
+        &self,
+        placement: &mut Placement,
+        data: &BucketPlacementData,
+        seen_ids: &mut BTreeSet<NonZeroU32>,
+    ) {
         placement.place_symbol_bucket(data, seen_ids);
     }
 
@@ -2693,7 +2695,7 @@ impl SymbolBucket {
         update_opacities: bool,
         state: &TransformState,
         data: &BucketPlacementData,
-        seen_ids: &mut BTreeSet<u32>,
+        seen_ids: &mut BTreeSet<NonZeroU32>,
     ) {
         if update_opacities {
             placement.update_bucket_opacities(self, state, seen_ids);

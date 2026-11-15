@@ -1,35 +1,30 @@
 use std::fmt;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::num::NonZeroU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // This is not in the type declaration to minimize include dependencies (C++).
-static NEXT_ID: AtomicI64 = AtomicI64::new(1);
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// A simple unique identifier.
 ///
-/// `new` takes the next value of a process-wide counter starting at 1;
-/// `EMPTY` is 0. Ordering and equality compare the id.
+/// `new` takes the next value of a process-wide counter starting at 1.
+/// Ordering and equality compare the id. Use `Option<SimpleIdentity>` for an
+/// identity that may be absent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SimpleIdentity {
-    unique_id: i64,
+    unique_id: NonZeroU64,
 }
 
 impl SimpleIdentity {
-    const EMPTY_ID: i64 = 0;
-
-    pub const EMPTY: SimpleIdentity = SimpleIdentity { unique_id: Self::EMPTY_ID };
-
     /// Returns a new unique identity.
     #[expect(
         clippy::new_without_default,
         reason = "each `new` is a fresh identity, which `Default` would make implicit"
     )]
     pub fn new() -> Self {
-        SimpleIdentity { unique_id: NEXT_ID.fetch_add(1, Ordering::Relaxed) }
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.unique_id == Self::EMPTY_ID
+        SimpleIdentity {
+            unique_id: NonZeroU64::new(NEXT_ID.fetch_add(1, Ordering::Relaxed)).unwrap_or(NonZeroU64::MIN),
+        }
     }
 }
 
@@ -50,8 +45,6 @@ mod tests {
         let b = SimpleIdentity::new();
         assert!(a < b);
         assert_ne!(a, b);
-        assert!(!a.is_empty());
-        assert!(SimpleIdentity::EMPTY.is_empty());
-        assert_eq!(SimpleIdentity::EMPTY.to_string(), "{0}");
+        assert_eq!(a.to_string(), format!("{{{}}}", a.unique_id));
     }
 }

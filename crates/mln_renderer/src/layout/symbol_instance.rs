@@ -2,6 +2,7 @@
 // checkIndex, forceFail): they detect C++ memory corruption, which safe
 // Rust cannot have.
 
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
@@ -209,12 +210,11 @@ pub(crate) struct SymbolInstance {
     text_box_scale: f32,
     text_variable_anchor_offset: Option<VariableAnchorOffsetCollection>,
     single_line: bool,
-    cross_tile_id: u32,
+    /// `None` until the cross-tile index assigns one, and for symbols it skips.
+    cross_tile_id: Option<NonZeroU32>,
 }
 
 impl SymbolInstance {
-    pub(crate) const INVALID_CROSS_TILE_ID: u32 = u32::MAX;
-
     #[expect(
         clippy::too_many_arguments,
         reason = "the anchor, shapings, boxes, offsets, rotations and feature indexes that make up a symbol instance"
@@ -347,7 +347,7 @@ impl SymbolInstance {
             text_box_scale,
             text_variable_anchor_offset: text_variable_anchor_offset.cloned(),
             single_line: shaped_text_orientations.single_line,
-            cross_tile_id: 0,
+            cross_tile_id: None,
         }
     }
 
@@ -491,10 +491,10 @@ impl SymbolInstance {
         self.single_line
     }
     #[must_use]
-    pub(crate) fn get_cross_tile_id(&self) -> u32 {
+    pub(crate) fn cross_tile_id(&self) -> Option<NonZeroU32> {
         self.cross_tile_id
     }
-    pub(crate) fn set_cross_tile_id(&mut self, x: u32) {
+    pub(crate) fn set_cross_tile_id(&mut self, x: Option<NonZeroU32>) {
         self.cross_tile_id = x;
     }
 }

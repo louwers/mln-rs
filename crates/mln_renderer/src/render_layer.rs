@@ -462,7 +462,7 @@ pub struct RenderLayerBase {
     /// The tile IDs in `render_tiles`, along with the identity of the
     /// bucket from which they were built (C++ `TinyUnorderedMap`; only
     /// looked up).
-    pub(crate) render_tile_ids: HashMap<OverscaledTileID, SimpleIdentity>,
+    pub(crate) render_tile_ids: HashMap<OverscaledTileID, Option<SimpleIdentity>>,
     // symbols: `placementData`.
     pub(crate) placement_data: LayerPlacementData,
     // symbols: `followerData`.
@@ -648,7 +648,7 @@ pub trait RenderLayer {
             return;
         };
 
-        let new_render_tile_ids: HashMap<OverscaledTileID, SimpleIdentity> = render_tiles
+        let new_render_tile_ids: HashMap<OverscaledTileID, Option<SimpleIdentity>> = render_tiles
             .iter()
             .map(|tile| {
                 let tile_id = *tile.get_overscaled_tile_id();
@@ -666,7 +666,7 @@ pub trait RenderLayer {
     /// in a tile's `RenderData` will only be replaced when the asynchronous
     /// load for the tile is complete, at which point the drawable for the
     /// tile may need to be updated or replaced.
-    fn get_render_tile_bucket_id(&self, tile_id: &OverscaledTileID) -> SimpleIdentity {
+    fn get_render_tile_bucket_id(&self, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
         get_render_tile_bucket_id(self.base(), tile_id)
     }
 
@@ -675,8 +675,8 @@ pub trait RenderLayer {
     /// be rendered or the ID is unchanged.
     fn set_render_tile_bucket_id(&mut self, tile_id: &OverscaledTileID, bucket_id: SimpleIdentity) -> bool {
         match self.base_mut().render_tile_ids.get_mut(tile_id) {
-            Some(id) if *id != bucket_id => {
-                *id = bucket_id;
+            Some(id) if *id != Some(bucket_id) => {
+                *id = Some(bucket_id);
                 true
             }
             _ => false,
@@ -824,10 +824,9 @@ pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &
     layer.update_render_tile_ids();
 }
 
-/// The bucket id of the render tile `tile_id`, or `SimpleIdentity::EMPTY` if
-/// there is none.
-fn get_render_tile_bucket_id(base: &RenderLayerBase, tile_id: &OverscaledTileID) -> SimpleIdentity {
-    base.render_tile_ids.get(tile_id).copied().unwrap_or(SimpleIdentity::EMPTY)
+/// The bucket id of the render tile `tile_id`, or `None` if there is none.
+fn get_render_tile_bucket_id(base: &RenderLayerBase, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
+    base.render_tile_ids.get(tile_id).copied().flatten()
 }
 
 /// (Un-)Register the layer group with the orchestrator.

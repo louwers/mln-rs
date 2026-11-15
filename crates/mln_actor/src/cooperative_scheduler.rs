@@ -117,15 +117,14 @@ impl Scheduler for CooperativeScheduler {
     }
 
     fn wait_for_empty(&self) {
-        self.wait_for_empty_tagged(SimpleIdentity::EMPTY);
+        self.wait_for_empty_tagged(self.unique_id);
     }
 
     /// Runs the tag's tasks here, as there is no worker to wait for. Called
     /// from one of the tag's own tasks, it runs the ones queued after it but
     /// can't wait for itself (a `ThreadedScheduler` asserts there instead).
     fn wait_for_empty_tagged(&self, tag: SimpleIdentity) {
-        let tag_to_find = if tag.is_empty() { self.unique_id } else { tag };
-        let Some(queue) = self.queues.lock().get(&tag_to_find).cloned() else {
+        let Some(queue) = self.queues.lock().get(&tag).cloned() else {
             return;
         };
         loop {
@@ -137,8 +136,8 @@ impl Scheduler for CooperativeScheduler {
 
         // After waiting for the queue to empty, go ahead and erase it from the map.
         let mut queues = self.queues.lock();
-        if queues.get(&tag_to_find).is_some_and(|q| Arc::ptr_eq(q, &queue)) {
-            queues.remove(&tag_to_find);
+        if queues.get(&tag).is_some_and(|q| Arc::ptr_eq(q, &queue)) {
+            queues.remove(&tag);
         }
     }
 }

@@ -200,7 +200,7 @@ fn schedule_and_reply_value() {
     };
 
     let scheduler: SchedulerPtr = scheduler::get_background();
-    scheduler::schedule_and_reply_value(&*scheduler, SimpleIdentity::EMPTY, run_in_background, on_result);
+    scheduler::schedule_and_reply_value(&*scheduler, None, run_in_background, on_result);
     run_loop.run();
     failures.assert_none();
 }

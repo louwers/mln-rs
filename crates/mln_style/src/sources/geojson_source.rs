@@ -10,7 +10,6 @@ use mln_actor::scheduler::{self, SchedulerPtr};
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecMap;
 
@@ -303,7 +302,7 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
         let weak = Rc::downgrade(&this.inner);
         scheduler::schedule_and_reply_value(
             &*this.inner.background,
-            SimpleIdentity::EMPTY,
+            None,
             /* makeImplInBackground */
             move || -> Option<Arc<dyn GeoJSONData>> {
                 let data = data.expect("response data");

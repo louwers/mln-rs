@@ -7,6 +7,7 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU32;
 use std::rc::Rc;
 
 use geometry::Point;
@@ -25,13 +26,13 @@ use crate::render_tile::RenderTile;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct IndexedSymbolInstance {
-    pub(crate) cross_tile_id: u32,
+    pub(crate) cross_tile_id: NonZeroU32,
     pub(crate) coord: Point<i64>,
 }
 
 impl IndexedSymbolInstance {
     #[must_use]
-    pub(crate) fn new(cross_tile_id: u32, coord: Point<i64>) -> Self {
+    pub(crate) fn new(cross_tile_id: NonZeroU32, coord: Point<i64>) -> Self {
         IndexedSymbolInstance { cross_tile_id, coord }
     }
 }
@@ -55,15 +56,15 @@ impl TileLayerIndex {
         let mut index =
             TileLayerIndex { coord, bucket_instance_id, bucket_leader_id, indexed_symbol_instances: BTreeMap::new() };
         for symbol_instance in symbol_instances {
-            if symbol_instance.get_cross_tile_id() == SymbolInstance::INVALID_CROSS_TILE_ID {
+            let Some(cross_tile_id) = symbol_instance.cross_tile_id() else {
                 continue;
-            }
+            };
             let scaled = index.get_scaled_coordinates(symbol_instance, &coord);
             index
                 .indexed_symbol_instances
                 .entry(symbol_instance.get_key().to_vec())
                 .or_default()
-                .push(IndexedSymbolInstance::new(symbol_instance.get_cross_tile_id(), scaled));
+                .push(IndexedSymbolInstance::new(cross_tile_id, scaled));
         }
         index
     }
@@ -89,9 +90,10 @@ impl TileLayerIndex {
     pub(crate) fn find_matches(
         &self,
         symbol_instances: &mut [SymbolInstance],
+        pending: &mut [bool],
         bucket_leader_id: &str,
         new_coord: &OverscaledTileID,
-        zoom_cross_tile_ids: &mut BTreeSet<u32>,
+        zoom_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
     ) {
         let tolerance: f32 = if self.coord.canonical.z < new_coord.canonical.z {
             1.0
@@ -103,9 +105,9 @@ impl TileLayerIndex {
             return;
         }
 
-        for symbol_instance in symbol_instances.iter_mut() {
-            if symbol_instance.get_cross_tile_id() != 0 {
-                // already has a match, skip
+        for (symbol_instance, pending) in symbol_instances.iter_mut().zip(pending.iter_mut()) {
+            if !*pending {
+                // already has a match, or is skipped
                 continue;
             }
 
@@ -127,7 +129,8 @@ impl TileLayerIndex {
                     // symbol, don't let any other symbols at the same zoom level
                     // duplicate against the same parent (see issue #10844)
                     zoom_cross_tile_ids.insert(this_tile_symbol.cross_tile_id);
-                    symbol_instance.set_cross_tile_id(this_tile_symbol.cross_tile_id);
+                    symbol_instance.set_cross_tile_id(Some(this_tile_symbol.cross_tile_id));
+                    *pending = false;
                     break;
                 }
             }
@@ -149,7 +152,7 @@ fn is_in_viewport(projector: &TileProjector<'_>, point: Vec2) -> bool {
 /// over the used-ID sets so callers can pass an index that is still borrowed
 /// from `CrossTileSymbolLayerIndex::indexes`.
 fn remove_bucket_cross_tile_ids(
-    used_cross_tile_ids: &mut VecMap<u8, BTreeSet<u32>>,
+    used_cross_tile_ids: &mut VecMap<u8, BTreeSet<NonZeroU32>>,
     zoom: u8,
     removed_bucket: &TileLayerIndex,
 ) {
@@ -163,7 +166,7 @@ fn remove_bucket_cross_tile_ids(
 #[derive(Debug)]
 pub(crate) struct CrossTileSymbolLayerIndex {
     indexes: VecMap<u8, VecMap<OverscaledTileID, TileLayerIndex>>,
-    used_cross_tile_ids: VecMap<u8, BTreeSet<u32>>,
+    used_cross_tile_ids: VecMap<u8, BTreeSet<NonZeroU32>>,
     lng: f32,
     max_cross_tile_id: Rc<Cell<u32>>,
 }
@@ -241,21 +244,22 @@ impl CrossTileSymbolLayerIndex {
 
         state.has_uninitialized_symbols = false;
 
+        // Symbols that still need an id; skipped ones keep `None`.
+        let mut pending: Vec<bool> = Vec::with_capacity(state.symbol_instances.len());
         if tile_id.overscale_factor() > 1 {
             // For overscaled tiles the viewport might be showing only a small part of the tile,
             // so we filter out the off-screen symbols to improve the performance.
             for symbol_instance in &mut state.symbol_instances {
-                if is_in_viewport(projector, symbol_instance.get_anchor().point) {
-                    symbol_instance.set_cross_tile_id(0);
-                } else {
-                    symbol_instance.set_cross_tile_id(SymbolInstance::INVALID_CROSS_TILE_ID);
-                    state.has_uninitialized_symbols = true;
-                }
+                symbol_instance.set_cross_tile_id(None);
+                let in_viewport = is_in_viewport(projector, symbol_instance.get_anchor().point);
+                pending.push(in_viewport);
+                state.has_uninitialized_symbols |= !in_viewport;
             }
         } else {
             for symbol_instance in &mut state.symbol_instances {
-                symbol_instance.set_cross_tile_id(0);
+                symbol_instance.set_cross_tile_id(None);
             }
+            pending.resize(state.symbol_instances.len(), true);
         }
 
         let this_zoom_used_cross_tile_ids = self.used_cross_tile_ids.entry(tile_id.overscaled_z).or_default();
@@ -266,6 +270,7 @@ impl CrossTileSymbolLayerIndex {
                     if child_index.coord.is_child_of(tile_id) {
                         child_index.find_matches(
                             &mut state.symbol_instances,
+                            &mut pending,
                             &bucket.bucket_leader_id,
                             tile_id,
                             this_zoom_used_cross_tile_ids,
@@ -277,6 +282,7 @@ impl CrossTileSymbolLayerIndex {
                 if let Some(parent_index) = zoom_indexes.get(&parent_tile_id) {
                     parent_index.find_matches(
                         &mut state.symbol_instances,
+                        &mut pending,
                         &bucket.bucket_leader_id,
                         tile_id,
                         this_zoom_used_cross_tile_ids,
@@ -285,12 +291,17 @@ impl CrossTileSymbolLayerIndex {
             }
         }
 
-        for symbol_instance in &mut state.symbol_instances {
-            if symbol_instance.get_cross_tile_id() == 0 {
+        for (symbol_instance, pending) in state.symbol_instances.iter_mut().zip(&pending) {
+            if *pending {
                 // symbol did not match any known symbol, assign a new id
-                self.max_cross_tile_id.set(self.max_cross_tile_id.get().wrapping_add(1));
-                symbol_instance.set_cross_tile_id(self.max_cross_tile_id.get());
-                this_zoom_used_cross_tile_ids.insert(symbol_instance.get_cross_tile_id());
+                let id = loop {
+                    self.max_cross_tile_id.set(self.max_cross_tile_id.get().wrapping_add(1));
+                    if let Some(id) = NonZeroU32::new(self.max_cross_tile_id.get()) {
+                        break id;
+                    }
+                };
+                symbol_instance.set_cross_tile_id(Some(id));
+                this_zoom_used_cross_tile_ids.insert(id);
             }
         }
 
@@ -530,8 +541,8 @@ mod tests {
         bucket
     }
 
-    fn cross_tile_id(bucket: &SymbolBucket, i: usize) -> u32 {
-        bucket.state().symbol_instances[i].get_cross_tile_id()
+    fn cross_tile_id(bucket: &SymbolBucket, i: usize) -> Option<u32> {
+        bucket.state().symbol_instances[i].cross_tile_id().map(NonZeroU32::get)
     }
 
     fn camera_at(lat: f64, lon: f64, zoom: f64, globe: bool) -> TransformState {
@@ -566,8 +577,8 @@ mod tests {
         index.add_bucket(&main_id, &TileProjector::new(&any_camera, &main_id.to_unwrapped()), &main_bucket);
 
         // Assigned new IDs
-        assert_eq!(cross_tile_id(&main_bucket, 0), 1);
-        assert_eq!(cross_tile_id(&main_bucket, 1), 2);
+        assert_eq!(cross_tile_id(&main_bucket, 0), Some(1));
+        assert_eq!(cross_tile_id(&main_bucket, 1), Some(2));
 
         let child_id = OverscaledTileID::with_zxy(7, 0, 7, 16, 16);
         max_bucket_instance_id += 1;
@@ -583,13 +594,13 @@ mod tests {
         index.add_bucket(&child_id, &TileProjector::new(&any_camera, &child_id.to_unwrapped()), &child_bucket);
 
         // matched parent tile
-        assert_eq!(cross_tile_id(&child_bucket, 0), 1);
+        assert_eq!(cross_tile_id(&child_bucket, 0), Some(1));
         // does not match because of different key
-        assert_eq!(cross_tile_id(&child_bucket, 1), 3);
+        assert_eq!(cross_tile_id(&child_bucket, 1), Some(3));
         // does not match because of different location
-        assert_eq!(cross_tile_id(&child_bucket, 2), 4);
+        assert_eq!(cross_tile_id(&child_bucket, 2), Some(4));
         // matches with a slightly different location
-        assert_eq!(cross_tile_id(&child_bucket, 3), 2);
+        assert_eq!(cross_tile_id(&child_bucket, 3), Some(2));
 
         let parent_id = OverscaledTileID::with_zxy(5, 0, 5, 4, 4);
         max_bucket_instance_id += 1;
@@ -597,7 +608,7 @@ mod tests {
         index.add_bucket(&parent_id, &TileProjector::new(&any_camera, &parent_id.to_unwrapped()), &parent_bucket);
 
         // matched child tile
-        assert_eq!(cross_tile_id(&parent_bucket, 0), 1);
+        assert_eq!(cross_tile_id(&parent_bucket, 0), Some(1));
 
         let mut current_ids: HashSet<u32> = HashSet::default();
         current_ids.insert(main_bucket.bucket_instance_id);
@@ -617,9 +628,9 @@ mod tests {
         );
 
         // Matches the symbol in `mainBucket`
-        assert_eq!(cross_tile_id(&grandchild_bucket, 0), 1);
+        assert_eq!(cross_tile_id(&grandchild_bucket, 0), Some(1));
         // Does not match the previous value for Windsor because that tile was removed
-        assert_eq!(cross_tile_id(&grandchild_bucket, 1), 5);
+        assert_eq!(cross_tile_id(&grandchild_bucket, 1), Some(5));
     }
 
     // gtest: CrossTileSymbolLayerIndex.tileMovedToAnotherWrapKeepsItsSymbols
@@ -637,13 +648,13 @@ mod tests {
 
         let id = OverscaledTileID::with_zxy(0, 0, 0, 0, 0);
         assert!(index.add_bucket(&id, &TileProjector::new(&any_camera, &id.to_unwrapped()), &bucket));
-        assert_eq!(cross_tile_id(&bucket, 0), 1);
-        assert_eq!(cross_tile_id(&bucket, 1), 2);
+        assert_eq!(cross_tile_id(&bucket, 0), Some(1));
+        assert_eq!(cross_tile_id(&bucket, 1), Some(2));
 
         let moved = id.unwrap_to(1);
         assert!(!index.add_bucket(&moved, &TileProjector::new(&any_camera, &moved.to_unwrapped()), &bucket));
-        assert_eq!(cross_tile_id(&bucket, 0), 1);
-        assert_eq!(cross_tile_id(&bucket, 1), 2);
+        assert_eq!(cross_tile_id(&bucket, 0), Some(1));
+        assert_eq!(cross_tile_id(&bucket, 1), Some(2));
         let current_ids: HashSet<u32> = [1].into_iter().collect();
         assert!(!index.remove_stale_buckets(&current_ids));
     }
@@ -662,7 +673,7 @@ mod tests {
 
         // assigns a new id
         index.add_bucket(&main_id, &TileProjector::new(&any_camera, &main_id.to_unwrapped()), &main_bucket);
-        assert_eq!(cross_tile_id(&main_bucket, 0), 1);
+        assert_eq!(cross_tile_id(&main_bucket, 0), Some(1));
 
         // removes the tile
         let current_ids: HashSet<u32> = HashSet::default();
@@ -670,11 +681,11 @@ mod tests {
 
         // assigns a new id
         index.add_bucket(&child_id, &TileProjector::new(&any_camera, &child_id.to_unwrapped()), &child_bucket);
-        assert_eq!(cross_tile_id(&child_bucket, 0), 2);
+        assert_eq!(cross_tile_id(&child_bucket, 0), Some(2));
 
         // overwrites the old id to match the already-added tile
         index.add_bucket(&main_id, &TileProjector::new(&any_camera, &main_id.to_unwrapped()), &main_bucket);
-        assert_eq!(cross_tile_id(&main_bucket, 0), 2);
+        assert_eq!(cross_tile_id(&main_bucket, 0), Some(2));
     }
 
     // gtest: CrossTileSymbolLayerIndex.noDuplicatesWithinZoomLevel
@@ -704,14 +715,14 @@ mod tests {
 
         // assigns new ids
         index.add_bucket(&main_id, &TileProjector::new(&any_camera, &main_id.to_unwrapped()), &main_bucket);
-        assert_eq!(cross_tile_id(&main_bucket, 0), 1);
-        assert_eq!(cross_tile_id(&main_bucket, 1), 2);
+        assert_eq!(cross_tile_id(&main_bucket, 0), Some(1));
+        assert_eq!(cross_tile_id(&main_bucket, 1), Some(2));
 
         // copies parent ids without duplicate ids in this tile
         index.add_bucket(&child_id, &TileProjector::new(&any_camera, &child_id.to_unwrapped()), &child_bucket);
-        assert_eq!(cross_tile_id(&child_bucket, 0), 1); // A' copies from A
-        assert_eq!(cross_tile_id(&child_bucket, 1), 2); // B' copies from B
-        assert_eq!(cross_tile_id(&child_bucket, 2), 3); // C' gets new ID
+        assert_eq!(cross_tile_id(&child_bucket, 0), Some(1)); // A' copies from A
+        assert_eq!(cross_tile_id(&child_bucket, 1), Some(2)); // B' copies from B
+        assert_eq!(cross_tile_id(&child_bucket, 2), Some(3)); // C' gets new ID
     }
 
     // gtest: CrossTileSymbolLayerIndex.bucketReplacement
@@ -740,14 +751,14 @@ mod tests {
 
         // assigns new ids
         index.add_bucket(&tile_id, &TileProjector::new(&any_camera, &tile_id.to_unwrapped()), &first_bucket);
-        assert_eq!(cross_tile_id(&first_bucket, 0), 1);
-        assert_eq!(cross_tile_id(&first_bucket, 1), 2);
+        assert_eq!(cross_tile_id(&first_bucket, 0), Some(1));
+        assert_eq!(cross_tile_id(&first_bucket, 1), Some(2));
 
         // copies parent ids without duplicate ids in this tile
         index.add_bucket(&tile_id, &TileProjector::new(&any_camera, &tile_id.to_unwrapped()), &second_bucket);
-        assert_eq!(cross_tile_id(&second_bucket, 0), 1); // A' copies from A
-        assert_eq!(cross_tile_id(&second_bucket, 1), 2); // B' copies from B
-        assert_eq!(cross_tile_id(&second_bucket, 2), 3); // C' gets new ID
+        assert_eq!(cross_tile_id(&second_bucket, 0), Some(1)); // A' copies from A
+        assert_eq!(cross_tile_id(&second_bucket, 1), Some(2)); // B' copies from B
+        assert_eq!(cross_tile_id(&second_bucket, 2), Some(3)); // C' gets new ID
     }
 
     fn expect_offscreen_symbols_skipped(globe: bool) {
@@ -761,14 +772,14 @@ mod tests {
         let away = camera_at(60.0, 25.0, 7.0, globe);
         index.add_bucket(&tile_id, &TileProjector::new(&away, &tile_id.to_unwrapped()), &symbol_bucket);
 
-        assert_eq!(cross_tile_id(&symbol_bucket, 0), SymbolInstance::INVALID_CROSS_TILE_ID);
-        assert_eq!(cross_tile_id(&symbol_bucket, 1), SymbolInstance::INVALID_CROSS_TILE_ID);
+        assert_eq!(cross_tile_id(&symbol_bucket, 0), None);
+        assert_eq!(cross_tile_id(&symbol_bucket, 1), None);
 
         let over = camera_at(39.0, -76.0, 7.0, globe);
         index.add_bucket(&tile_id, &TileProjector::new(&over, &tile_id.to_unwrapped()), &symbol_bucket);
 
-        assert_eq!(cross_tile_id(&symbol_bucket, 0), 1);
-        assert_eq!(cross_tile_id(&symbol_bucket, 1), 2);
+        assert_eq!(cross_tile_id(&symbol_bucket, 0), Some(1));
+        assert_eq!(cross_tile_id(&symbol_bucket, 1), Some(2));
     }
 
     // gtest: CrossTileSymbolLayerIndex.offscreenSymbols

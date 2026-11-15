@@ -359,7 +359,7 @@ impl RenderLayer for RenderHillshadeLayer {
             let bucket_id = bucket.base.bucket_id;
 
             let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
-            if prev_bucket_id != SimpleIdentity::EMPTY && prev_bucket_id != bucket_id {
+            if prev_bucket_id.is_some_and(|prev| prev != bucket_id) {
                 // This tile was previously set up from a different bucket,
                 // drop and re-create any drawables for it.
                 self.remove_tile(render_pass, &tile_id);

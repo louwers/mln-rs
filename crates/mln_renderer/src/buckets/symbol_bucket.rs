@@ -8,6 +8,7 @@
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -267,7 +268,7 @@ pub(crate) struct PlacedSymbol {
     pub(crate) start_index: usize,
     /// The crossTileID is only filled/used on the foreground for variable
     /// text anchors
-    pub(crate) cross_tile_id: u32,
+    pub(crate) cross_tile_id: Option<NonZeroU32>,
     /// The placedOrientation is only used when symbol layer's property is
     /// set to support placement for orientation variants.
     pub(crate) placed_orientation: Option<TextWritingModeType>,
@@ -304,7 +305,7 @@ impl PlacedSymbol {
             glyph_offsets: Vec::new(),
             hidden: false,
             start_index: 0,
-            cross_tile_id: 0,
+            cross_tile_id: None,
             placed_orientation: None,
             angle: 0.0,
             placed_icon_index,
