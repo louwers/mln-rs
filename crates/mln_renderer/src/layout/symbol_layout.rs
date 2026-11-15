@@ -124,7 +124,7 @@ impl GlyphTypeTable {
             };
             match spans.last_mut() {
                 Some(span) if span.type_ == face.type_ && u32::from(span.range.last) + 1 == unit => {
-                    span.range = (span.range.start..=last).into()
+                    span.range = (span.range.start..=last).into();
                 }
                 _ => spans.push(GlyphTypeSpan { range: (first..=last).into(), type_: face.type_ }),
             }
