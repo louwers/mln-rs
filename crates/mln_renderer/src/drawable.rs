@@ -486,16 +486,11 @@ impl Drawable {
             // over the frame's.
             let buffer = self
                 .uniform_buffers
-                .get(id)
-                .or_else(|| layer.and_then(|layer| layer.get(id)))
-                .or_else(|| global.get(id));
-            if let Some(buffer) = buffer {
-                entries.push(BindGroupEntry::Buffer {
-                    id: id as u32,
-                    buffer: buffer.id(),
-                    offset: 0,
-                    size: buffer.size() as u64,
-                });
+                .binding(id)
+                .or_else(|| layer.and_then(|layer| layer.binding(id)))
+                .or_else(|| global.binding(id));
+            if let Some((buffer, offset, size)) = buffer {
+                entries.push(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size });
             }
         }
         drop(global);

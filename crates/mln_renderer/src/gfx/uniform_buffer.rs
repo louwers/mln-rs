@@ -14,6 +14,9 @@ pub(crate) type UniformBufferPtr = BufferPtr;
 #[derive(Clone)]
 pub(crate) struct UniformBufferArray {
     uniform_buffer_vector: [Option<UniformBufferPtr>; MAX_UBO_COUNT_PER_SHADER],
+    /// The offset and size of the part of each buffer bound, `None` for all
+    /// of it.
+    ranges: [Option<(u64, u64)>; MAX_UBO_COUNT_PER_SHADER],
     epoch: u64,
 }
 
@@ -28,7 +31,11 @@ fn next_epoch() -> u64 {
 
 impl Default for UniformBufferArray {
     fn default() -> Self {
-        UniformBufferArray { uniform_buffer_vector: Default::default(), epoch: next_epoch() }
+        UniformBufferArray {
+            uniform_buffer_vector: Default::default(),
+            ranges: Default::default(),
+            epoch: next_epoch(),
+        }
     }
 }
 
@@ -51,6 +58,24 @@ impl UniformBufferArray {
         self.uniform_buffer_vector.get(id).and_then(Option::as_ref)
     }
 
+    /// The buffer `id` and the offset and size of the part of it bound.
+    pub(crate) fn binding(&self, id: usize) -> Option<(&UniformBufferPtr, u64, u64)> {
+        let buffer = self.get(id)?;
+        let (offset, size) = self.ranges[id].unwrap_or((0, buffer.size() as u64));
+        Some((buffer, offset, size))
+    }
+
+    /// Binds `size` bytes of `buffer` from `offset` as `id`.
+    pub(crate) fn set_range(&mut self, id: usize, buffer: &UniformBufferPtr, offset: u64, size: u64) {
+        let slot = &mut self.uniform_buffer_vector[id];
+        let range = Some((offset, size));
+        if !same_buffer(slot.as_ref(), Some(buffer)) || self.ranges[id] != range {
+            *slot = Some(Rc::clone(buffer));
+            self.ranges[id] = range;
+            self.epoch = next_epoch();
+        }
+    }
+
     /// Set a new uniform buffer element or replace the existing one.
     pub(crate) fn set(&mut self, id: usize, uniform_buffer: Option<UniformBufferPtr>) -> Option<&UniformBufferPtr> {
         debug_assert!(id < self.uniform_buffer_vector.len());
@@ -58,8 +83,9 @@ impl UniformBufferArray {
             return None;
         }
         let slot = &mut self.uniform_buffer_vector[id];
-        if !same_buffer(slot.as_ref(), uniform_buffer.as_ref()) {
+        if !same_buffer(slot.as_ref(), uniform_buffer.as_ref()) || self.ranges[id].is_some() {
             *slot = uniform_buffer;
+            self.ranges[id] = None;
             self.epoch = next_epoch();
         }
         slot.as_ref()
@@ -71,7 +97,7 @@ impl UniformBufferArray {
         let slot = &mut self.uniform_buffer_vector[id];
         let before = slot.as_ref().map(Rc::as_ptr);
         context.write_uniform_buffer(slot, bytemuck::bytes_of(data));
-        if slot.as_ref().map(Rc::as_ptr) != before {
+        if slot.as_ref().map(Rc::as_ptr) != before || self.ranges[id].take().is_some() {
             self.epoch = next_epoch();
         }
     }

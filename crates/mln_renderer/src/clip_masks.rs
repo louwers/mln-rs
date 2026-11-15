@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mln_gfx::gpu::Gpu;
@@ -15,6 +15,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::drawable::UniqueDrawable;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
 use crate::paint_parameters::PaintParameters;
 use crate::render_static_data::RenderStaticData;
@@ -30,21 +31,24 @@ pub(crate) struct ClipMasks {
     /// The drawables of each tile's mask: on the globe the tile's mesh with
     /// a border and then without, elsewhere its square.
     masks: BTreeMap<UnwrappedTileID, Vec<UniqueDrawable>>,
+    /// The masks' projections, each at an offset the GPU can bind, in the
+    /// order of their tiles: one write a frame.
+    projections: Option<UniformBufferPtr>,
     /// The globe's meshes, by zoom, whether the tile is on the top or the
     /// bottom row (with a pole cap) and whether it has a border.
     globe_meshes: BTreeMap<(u8, bool, bool, bool), RawGlobeTileMesh>,
 }
 
 impl ClipMasks {
-    /// Makes and uploads the masks of `tiles` that `projection` projects,
-    /// and drops the others. Each mask is drawn over the area that
+    /// Makes and uploads the masks of `tiles`, sorted and without repeats,
+    /// that `projection` projects, and drops the others. Each mask is drawn over the area that
     /// `projection` gives its tile.
     pub(crate) fn update(
         &mut self,
         context: &Context,
         shaders: &ShaderRegistry,
         globe: bool,
-        tiles: &BTreeSet<UnwrappedTileID>,
+        tiles: &[UnwrappedTileID],
         projection: impl Fn(&UnwrappedTileID) -> ProjectionUBO,
     ) {
         if globe != self.globe {
@@ -54,11 +58,14 @@ impl ClipMasks {
             let variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
             self.shader = shaders.shader("ClippingMaskProgram", variant);
         }
-        let ClipMasks { shader: Some(shader), masks, globe_meshes, .. } = self else {
+        let ClipMasks { shader: Some(shader), masks, globe_meshes, projections, .. } = self else {
             return;
         };
+        let size = size_of::<ProjectionUBO>();
+        let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
+        let mut bytes = vec![0; tiles.len() * stride];
 
-        masks.retain(|tile, _| tiles.contains(tile));
+        masks.retain(|tile, _| tiles.binary_search(tile).is_ok());
         let mut builder = DrawableBuilder::boxed();
         builder.set_shader(Some(Rc::clone(shader)));
         builder.set_color_mode(&ColorMode::disabled());
@@ -68,8 +75,8 @@ impl ClipMasks {
         // overwrites the tile in front.
         builder.set_cull_face_mode(if globe { CullFaceMode::back_ccw() } else { CullFaceMode::disabled() });
 
-        for tile in tiles {
-            let drawables = masks.entry(*tile).or_insert_with(|| {
+        for (slot, tile) in tiles.iter().enumerate() {
+            masks.entry(*tile).or_insert_with(|| {
                 if globe {
                     [true, false]
                         .into_iter()
@@ -104,9 +111,20 @@ impl ClipMasks {
                     builder.clear_drawables()
                 }
             });
-            let ubo = projection(tile);
+            bytes[slot * stride..][..size].copy_from_slice(bytemuck::bytes_of(&projection(tile)));
+        }
+        if tiles.is_empty() {
+            return;
+        }
+        context.write_uniform_buffer(projections, &bytes);
+        let Some(buffer) = projections else {
+            return;
+        };
+        // The masks are those of `tiles`, in the same order.
+        for (slot, drawables) in masks.values_mut().enumerate() {
             for drawable in drawables {
-                drawable.mutable_uniform_buffers().create_or_update_pod(ID_PROJECTION_UBO, &ubo, context);
+                let offset = (slot * stride) as u64;
+                drawable.mutable_uniform_buffers().set_range(ID_PROJECTION_UBO, buffer, offset, size as u64);
                 drawable.upload(context);
             }
         }

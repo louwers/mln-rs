@@ -76,6 +76,10 @@ struct Bindings {
 struct Geometry {
     vertex_buffers: Vec<(wgpu::Buffer, u64)>,
     index_buffer: (wgpu::Buffer, u64),
+    /// The ids and offsets of the vertex buffers and of the index buffer,
+    /// which a draw compares with what the pass has bound.
+    vertex_ids: Vec<(BufferId, u64)>,
+    index_id: (BufferId, u64),
     tags: GeometryTags,
 }
 
@@ -107,6 +111,11 @@ struct OpenPass {
     bindings: Option<BindingsId>,
     global_index: Option<u32>,
     geometry: Option<GeometryId>,
+    /// The vertex buffers bound, by slot, and the index buffer, as
+    /// [`Geometry::vertex_ids`]: geometries of other indices or attributes often
+    /// share vertex buffers.
+    vertex_buffers: Vec<(BufferId, u64)>,
+    index_buffer: Option<(BufferId, u64)>,
     dynamic: Option<DynamicState>,
 }
 
@@ -117,6 +126,8 @@ impl OpenPass {
         self.bindings = None;
         self.global_index = None;
         self.geometry = None;
+        self.vertex_buffers.clear();
+        self.index_buffer = None;
         self.dynamic = None;
     }
 }
@@ -749,7 +760,13 @@ impl Gpu for WebGpu {
             desc.vertex_buffers.iter().map(|&(id, offset)| native(id, offset)).collect::<Result<Vec<_>, _>>()?;
         let index_buffer = native(desc.index_buffer, 0)?;
         let tags = GeometryTags { layout: self.layout_tags.tag(desc.shader, desc.layouts), ranges };
-        Ok(self.geometries.insert(Geometry { vertex_buffers, index_buffer, tags }))
+        Ok(self.geometries.insert(Geometry {
+            vertex_buffers,
+            index_buffer,
+            vertex_ids: desc.vertex_buffers.to_vec(),
+            index_id: (desc.index_buffer, 0),
+            tags,
+        }))
     }
 
     /// Drops this backend's references: wgpu keeps a resource while
@@ -785,6 +802,8 @@ impl Gpu for WebGpu {
             bindings: None,
             global_index: None,
             geometry: None,
+            vertex_buffers: Vec::new(),
+            index_buffer: None,
             dynamic: Some(DynamicState {
                 depth_range: (0.0, 1.0),
                 scissor: Scissor { x: 0, y: 0, width: target.size.width, height: target.size.height },
@@ -826,11 +845,20 @@ impl Gpu for WebGpu {
             open.global_index = Some(draw.global_index);
         }
         if open.geometry != Some(draw.geometry) {
-            for (slot, (buffer, offset)) in geometry.vertex_buffers.iter().enumerate() {
-                pass.set_vertex_buffer(slot as u32, buffer.slice(*offset..));
+            for (slot, ((buffer, offset), id)) in geometry.vertex_buffers.iter().zip(&geometry.vertex_ids).enumerate() {
+                if open.vertex_buffers.get(slot) != Some(id) {
+                    pass.set_vertex_buffer(slot as u32, buffer.slice(*offset..));
+                    match open.vertex_buffers.get_mut(slot) {
+                        Some(bound) => *bound = *id,
+                        None => open.vertex_buffers.push(*id),
+                    }
+                }
             }
-            let (buffer, offset) = &geometry.index_buffer;
-            pass.set_index_buffer(buffer.slice(*offset..), wgpu::IndexFormat::Uint16);
+            if open.index_buffer != Some(geometry.index_id) {
+                let (buffer, offset) = &geometry.index_buffer;
+                pass.set_index_buffer(buffer.slice(*offset..), wgpu::IndexFormat::Uint16);
+                open.index_buffer = Some(geometry.index_id);
+            }
             open.geometry = Some(draw.geometry);
         }
         let dynamic = draw.dynamic;

@@ -1,7 +1,6 @@
 // C++ keeps a `gfx::RendererBackend&`; the frontend owns the backend, so the
 // renderer shares it through an `Rc`.
 
-use std::collections::BTreeSet;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -16,6 +15,7 @@ use mln_gfx::{FrameTarget, Handoff, RendererBackend, ScissorRect, ShaderRegistry
 use mln_map_types::{MapDebugOptions, MapView};
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
+use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
@@ -492,12 +492,23 @@ impl Renderer {
 
         // The masks of the tiles the layer groups clip to and, when any
         // of them uses the stencil buffer, of the tile that clears it.
-        let mut clip_tiles = BTreeSet::new();
+        // Layer groups of one source clip to the same tiles, which are added
+        // once.
+        let mut clip_tiles = Vec::new();
+        let mut last: Option<Rc<Vec<UnwrappedTileID>>> = None;
         orchestrator.visit_layer_groups(|layer_group| {
-            if let Some(tiles) = &layer_group.stencil_tiles {
-                clip_tiles.extend(tiles.iter().copied().chain(parameters.stencil_clear_tile()));
+            if let Some(tiles) = &layer_group.stencil_tiles
+                && last.as_ref().is_none_or(|last| last != tiles)
+            {
+                clip_tiles.extend(tiles.iter().copied());
+                last = Some(Rc::clone(tiles));
             }
         });
+        if last.is_some() {
+            clip_tiles.extend(parameters.stencil_clear_tile());
+        }
+        clip_tiles.sort_unstable();
+        clip_tiles.dedup();
         self.clip_masks.update(
             context,
             &static_data.shaders,

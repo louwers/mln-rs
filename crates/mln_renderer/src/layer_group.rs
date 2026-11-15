@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use mln_gfx::depth_mode::DepthMode;
@@ -28,10 +29,26 @@ pub(crate) enum LayerGroupKind {
     Custom(CustomLayerDraw),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TileKey {
     render_pass: RenderPass,
     tile_id: OverscaledTileID,
+}
+
+/// The fields packed into one word: each layer looks up each of its tiles
+/// every frame, and a hasher takes one write in a step, where it takes the
+/// derived hash's six one at a time.
+impl Hash for TileKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let id = &self.tile_id;
+        let packed = u128::from(self.render_pass.underlying_type())
+            | u128::from(id.overscaled_z) << 8
+            | u128::from(id.wrap as u16) << 16
+            | u128::from(id.canonical.z) << 32
+            | u128::from(id.canonical.x) << 40
+            | u128::from(id.canonical.y) << 72;
+        state.write_u128(packed);
+    }
 }
 
 /// The order drawables draw in: by draw priority, then by id.
