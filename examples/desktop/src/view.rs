@@ -121,7 +121,7 @@ pub(crate) fn run(launch: Launch) {
     let loader = Loader::builder()
         .asset_path(&resource_options.asset_path)
         .network(network)
-        .database(Arc::clone(&database_file_source))
+        .database(Arc::<DatabaseFileSource>::clone(&database_file_source))
         .build();
 
     let mut renderer = Renderer::new(backend.renderer_backend(), pixel_ratio as f32, None);

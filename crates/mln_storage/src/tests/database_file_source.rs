@@ -7,7 +7,7 @@ use mln_actor::RunLoop;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
 use super::{local_callback, req, temp_path};
-use crate::database_file_source::DatabaseFileSource;
+use crate::database_file_source::{Cache, DatabaseFileSource};
 use crate::file_source::{FileSource, FileSourceExt};
 use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};

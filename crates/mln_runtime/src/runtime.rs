@@ -12,12 +12,12 @@ use std::thread::ThreadId;
 use mln_actor::RunLoop;
 use mln_actor::{AsyncTask, SchedulerPtr, scheduler};
 use mln_renderer::text::font_face_engine::FontFaceEngine;
-#[cfg(not(target_family = "wasm"))]
-use mln_storage::DatabaseFileSource;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use mln_storage::resource::Kind;
 use mln_storage::resource_transform::{FinishedCallback, ResourceTransform};
 use mln_storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
+#[cfg(not(target_family = "wasm"))]
+use mln_storage_offline::RegionDatabase;
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::thread::Joined;
@@ -300,7 +300,7 @@ pub(crate) struct RuntimeCore {
     /// threads.
     loader: OnceCell<Arc<dyn FileSource>>,
     #[cfg(not(target_family = "wasm"))]
-    database: OnceCell<Arc<DatabaseFileSource>>,
+    database: OnceCell<Arc<RegionDatabase>>,
     /// The library's own network loading, behind the host's provider.
     online: OnceCell<Arc<OnlineFileSource>>,
     network: OnceCell<Arc<dyn FileSource>>,
@@ -383,7 +383,7 @@ impl RuntimeCore {
                 .network(Arc::clone(self.network()))
                 .pool(Arc::clone(self.pool()));
             #[cfg(not(target_family = "wasm"))]
-            let builder = builder.database(Arc::clone(self.database()));
+            let builder = builder.database(Arc::<RegionDatabase>::clone(self.database()));
             Arc::new(builder.build())
         })
     }
@@ -421,9 +421,12 @@ impl RuntimeCore {
 
     /// The cache database, which every runtime but the browser build's has.
     #[cfg(not(target_family = "wasm"))]
-    pub(crate) fn database(&self) -> &Arc<DatabaseFileSource> {
+    pub(crate) fn database(&self) -> &Arc<RegionDatabase> {
         self.database.get_or_init(|| {
-            Arc::new(DatabaseFileSource::new(&self.resource_options.cache_path, Some(Arc::clone(self.network()))))
+            Arc::new(mln_storage_offline::region_database(
+                &self.resource_options.cache_path,
+                Some(Arc::clone(self.network())),
+            ))
         })
     }
 }
@@ -801,7 +804,7 @@ impl Runtime {
     #[cfg(not(target_family = "wasm"))]
     pub(crate) fn offline_command<T: Send + 'static>(
         &self,
-        command: impl FnOnce(&DatabaseFileSource, &RuntimeCore, Resolver<T>) + Send + 'static,
+        command: impl FnOnce(&RegionDatabase, &RuntimeCore, Resolver<T>) + Send + 'static,
     ) -> Result<Completion<T>, Error> {
         self.command(move |core, _, resolver| command(core.database(), core, resolver))
     }

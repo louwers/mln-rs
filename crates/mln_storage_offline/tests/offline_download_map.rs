@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::RunLoop;
+use mln_actor::{LocalObject, RunLoop};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_storage::offline::{
@@ -17,8 +17,8 @@ use mln_storage::offline::{
 use mln_storage::offline_database::OfflineDatabase;
 use mln_storage::resource::{Priority, Usage};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{Kind, Resource, Response};
-use mln_storage_offline::OfflineDownload;
+use mln_storage::{FileSource, Kind, Resource, Response};
+use mln_storage_offline::{Downloads, OfflineDownload, Post};
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
 
@@ -56,25 +56,50 @@ fn resource_offline_usage_unset() {
     // A database of this run's own, which goes when the test ends.
     let dir = tempfile::tempdir().unwrap();
     let filename = dir.path().join("offline_download.db").to_string_lossy().into_owned();
-    let db = Rc::new(RefCell::new(OfflineDatabase::new(filename.as_str())));
+    // The database and its downloads, which this thread owns as a
+    // database's worker does; the downloads' tasks run on this thread's loop.
+    let host: Rc<RefCell<Option<(OfflineDatabase, Downloads)>>> = Rc::default();
+    let slot = Arc::new(LocalObject::from_rc(Rc::clone(&host)));
+    let handle = run_loop.handle();
+    let post: Post = Arc::new(move |task| {
+        let slot = Arc::clone(&slot);
+        handle.invoke(move || {
+            if let Some(host) = slot.get()
+                && let Some((db, downloads)) = &mut *host.borrow_mut()
+            {
+                task(db, downloads);
+            }
+        });
+    });
+    let network: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
+    *host.borrow_mut() =
+        Some((OfflineDatabase::new(filename.as_str()), Downloads::new(Some(network), Arc::clone(&post))));
+    let with = |f: &mut dyn FnMut(&mut OfflineDatabase, &mut Downloads)| {
+        let mut host = host.borrow_mut();
+        let (db, downloads) = host.as_mut().expect("the host");
+        f(db, downloads);
+    };
     let size = Rc::new(Cell::new(0u64));
 
-    let region = db
-        .borrow_mut()
-        .create_region(
-            &OfflineTilePyramidRegionDefinition::new(
-                "",
-                LatLngBounds::hull(LatLng::new(1.0, 2.0).unwrap(), LatLng::new(3.0, 4.0).unwrap()),
-                5.0,
-                6.0,
-                1.0,
-                true,
-            )
-            .unwrap()
-            .into(),
-            &OfflineRegionMetadata::new(),
-        )
-        .expect("region");
+    let mut region = None;
+    with(&mut |db, _| {
+        region = Some(
+            db.create_region(
+                &OfflineTilePyramidRegionDefinition::new(
+                    "",
+                    LatLngBounds::hull(LatLng::new(1.0, 2.0).unwrap(), LatLng::new(3.0, 4.0).unwrap()),
+                    5.0,
+                    6.0,
+                    1.0,
+                    true,
+                )
+                .unwrap()
+                .into(),
+                &OfflineRegionMetadata::new(),
+            ),
+        );
+    });
+    let region = region.expect("a region").expect("region");
 
     let download = OfflineDownload::new(
         region.id,
@@ -88,8 +113,8 @@ fn resource_offline_usage_unset() {
         )
         .unwrap()
         .into(),
-        Rc::clone(&db),
         Arc::<StubFileSource>::clone(&file_source),
+        Arc::clone(&post),
     );
 
     let s = Rc::clone(&size);
@@ -106,17 +131,21 @@ fn resource_offline_usage_unset() {
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 
-    let (stop, db2, region_id) = (run_loop.clone(), Rc::clone(&db), region.id);
-    download.set_observer(Some(Rc::new(StatusObserver(move |status: OfflineRegionStatus| {
+    let stop = run_loop.clone();
+    let mut download = download;
+    download.set_observer(Some(Box::new(StatusObserver(move |status: OfflineRegionStatus| {
         if status.complete() {
-            // Once download completes, invalidate region and try rendering
-            // map. Resource requests must not have Offline usage tag.
-            assert!(db2.borrow_mut().invalidate_region(region_id).is_none());
             stop.stop();
         }
     }))));
     download.set_state(OfflineRegionDownloadState::Active);
+    let region_id = region.id;
+    let mut download = Some(download);
+    with(&mut |_, downloads| downloads.insert(download.take().expect("the download")));
     run_loop.run();
+    // Once download completes, invalidate region and try rendering map.
+    // Resource requests must not have Offline usage tag.
+    with(&mut |db, _| assert!(db.invalidate_region(region_id).is_none()));
 
     let stubfile_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
     let s = Rc::clone(&size);

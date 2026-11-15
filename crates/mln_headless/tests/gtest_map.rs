@@ -26,8 +26,8 @@ use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
-    DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource, ResourceOptions, Response,
-    StoragePolicy,
+    Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource, ResourceOptions,
+    Response, StoragePolicy,
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
@@ -616,25 +616,31 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
     }
 }
 
-/// A map test that loads through a `Loader` with these cache and asset
-/// paths.
-fn main_resource_loader_test(cache_path: &str, asset_path: &str) -> MapTest<Loader> {
-    let run_loop = RunLoop::new();
-    let file_source = Arc::new(Loader::new(&ResourceOptions {
-        cache_path: cache_path.to_owned(),
-        asset_path: asset_path.to_owned(),
-    }));
-    MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
+/// A loader over an online file source and a cache database at
+/// `cache_path`, with assets at `asset_path`, and the database.
+fn loader_with_database(cache_path: &str, asset_path: &str) -> (Arc<Loader>, Arc<DatabaseFileSource>) {
+    let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new());
+    let database = Arc::new(DatabaseFileSource::new(cache_path, Some(Arc::clone(&network))));
+    let loader = Loader::builder()
+        .asset_path(asset_path)
+        .network(network)
+        .database(Arc::<DatabaseFileSource>::clone(&database))
+        .build();
+    (Arc::new(loader), database)
 }
 
-fn database_file_source(loader: &Loader) -> Arc<DatabaseFileSource> {
-    Arc::clone(loader.database().expect("a database file source"))
+/// A map test that loads through a `Loader` with these cache and asset
+/// paths, and the loader's database.
+fn main_resource_loader_test(cache_path: &str, asset_path: &str) -> (MapTest<Loader>, Arc<DatabaseFileSource>) {
+    let run_loop = RunLoop::new();
+    let (file_source, database) = loader_with_database(cache_path, asset_path);
+    (MapTest::create(run_loop, file_source, 1.0, MapMode::Static), database)
 }
 
 // gtest: Map.Offline
 #[test]
 fn offline() {
-    let test = main_resource_loader_test(":memory:", ".");
+    let (test, dbfs) = main_resource_loader_test(":memory:", ".");
 
     // C++ CI leaves this test out on the macOS runners
     // (.github/workflows/macos-ci.yml, --gtest_filter=-...:Map.Offline, for
@@ -661,7 +667,6 @@ fn offline() {
 
     NetworkStatus::set(NetworkStatusType::Offline);
     let prefix = "http://127.0.0.1:3000/";
-    let dbfs = database_file_source(&test.file_source);
     dbfs.put(&Resource::style(&format!("{prefix}style.json")), &expired_item("style.json"));
     dbfs.put(&Resource::source(&format!("{prefix}streets.json")), &expired_item("streets.json"));
     dbfs.put(&Resource::sprite_json(&format!("{prefix}sprite"), 1.0), &expired_item("sprite.json"));
@@ -1292,13 +1297,12 @@ fn continuous_rendering() {
 // gtest: Map.NoContentTiles
 #[test]
 fn no_content_tiles() {
-    let test = main_resource_loader_test(":memory:", ".");
+    let (test, dbfs) = main_resource_loader_test(":memory:", ".");
 
     // Insert a 204 No Content response for the 0/0/0 tile
     let mut response = Response::new();
     response.no_content = true;
     response.expires = Some(hours_from_now(1));
-    let dbfs = database_file_source(&test.file_source);
     // C++ loads the style in the callback (inside render's run loop); see
     // Map.Offline for why the port waits for it first.
     let handle = test.run_loop.handle();
@@ -2307,8 +2311,7 @@ fn expired_sprite_sheet() {
     // test{":memory:", ".", 1, MapMode::Continuous}`: the frontend's
     // check runs on the update each frame draws.
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(Loader::new(&ResourceOptions::default()));
-    let dbfs = database_file_source(&file_source);
+    let (file_source, dbfs) = loader_with_database(":memory:", ".");
     let observer = Rc::new(StubMapObserver::default());
     let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
     let options =

@@ -5,7 +5,7 @@ use parking_lot::Mutex;
 
 use crate::asset_file_source::AssetFileSource;
 #[cfg(feature = "sqlite")]
-use crate::database_file_source::DatabaseFileSource;
+use crate::database_file_source::{Cache, DatabaseFileSource};
 use crate::file_source::FileSource;
 use crate::local_file_source::LocalFileSource;
 #[cfg(feature = "sqlite")]
@@ -28,7 +28,7 @@ struct Sources {
     mbtiles: Arc<dyn FileSource>,
     pmtiles: Option<Arc<dyn FileSource>>,
     #[cfg(feature = "sqlite")]
-    database: Option<Arc<DatabaseFileSource>>,
+    database: Option<Arc<dyn Cache>>,
     network: Option<Arc<dyn FileSource>>,
 }
 
@@ -50,7 +50,7 @@ impl Sources {
     }
 
     #[cfg(feature = "sqlite")]
-    fn database_for(&self, resource: &Resource) -> Option<&Arc<DatabaseFileSource>> {
+    fn database_for(&self, resource: &Resource) -> Option<&Arc<dyn Cache>> {
         self.database.as_ref().filter(|database| database.can_request(resource))
     }
 
@@ -122,7 +122,7 @@ impl Sources {
     /// cached response goes to the requester at once, and the network
     /// revalidates it, or loads it when the cache has none.
     #[cfg(feature = "sqlite")]
-    fn request_cached(self: &Arc<Self>, database: &DatabaseFileSource, resource: &Resource, responder: Responder) {
+    fn request_cached(self: &Arc<Self>, database: &dyn Cache, resource: &Resource, responder: Responder) {
         let task: Task = Arc::default();
         let cancelled = Arc::clone(&task);
         responder.on_cancel(move || drop(cancelled.lock().take()));
@@ -193,13 +193,6 @@ impl Loader {
             pool: None,
         }
     }
-
-    /// The cache database, if the loader has one.
-    #[cfg(feature = "sqlite")]
-    #[must_use]
-    pub fn database(&self) -> Option<&Arc<DatabaseFileSource>> {
-        self.sources.database.as_ref()
-    }
 }
 
 /// Builds a [`Loader`] from the file sources it's given.
@@ -207,7 +200,7 @@ impl Loader {
 pub struct LoaderBuilder {
     asset_path: String,
     #[cfg(feature = "sqlite")]
-    database: Option<Arc<DatabaseFileSource>>,
+    database: Option<Arc<dyn Cache>>,
     network: Option<Arc<dyn FileSource>>,
     pool: Option<SchedulerPtr>,
 }
@@ -223,7 +216,7 @@ impl LoaderBuilder {
     /// Caches responses in `database`, and answers cache-only requests from
     /// it.
     #[cfg(feature = "sqlite")]
-    pub fn database(mut self, database: Arc<DatabaseFileSource>) -> Self {
+    pub fn database(mut self, database: Arc<dyn Cache>) -> Self {
         self.database = Some(database);
         self
     }
@@ -275,7 +268,7 @@ impl FileSource for Loader {
                 database.load(resource, responder);
             } else {
                 #[cfg(feature = "sqlite")]
-                sources.request_cached(database, resource, responder);
+                sources.request_cached(&**database, resource, responder);
             }
         } else if sources.network_for(resource).is_some() {
             let task: Task = Arc::default();

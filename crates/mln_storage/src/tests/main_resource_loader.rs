@@ -11,7 +11,7 @@ use mln_test_server::HttpServer;
 use mln_util::chrono::{Timestamp, now};
 
 use super::{local_callback, req, serial, temp_path};
-use crate::database_file_source::DatabaseFileSource;
+use crate::database_file_source::{Cache, DatabaseFileSource};
 use crate::file_source::FileSourceExt;
 use crate::loader::Loader;
 use crate::network_status::{NetworkStatus, Status};
@@ -33,8 +33,10 @@ impl TestSources {
     fn new() -> Self {
         let online = Arc::new(OnlineFileSource::new());
         let database = Arc::new(DatabaseFileSource::new(":memory:", Some(Arc::<OnlineFileSource>::clone(&online))));
-        let loader =
-            Loader::builder().network(Arc::<OnlineFileSource>::clone(&online)).database(Arc::clone(&database)).build();
+        let loader = Loader::builder()
+            .network(Arc::<OnlineFileSource>::clone(&online))
+            .database(Arc::<DatabaseFileSource>::clone(&database))
+            .build();
         TestSources { loader: Rc::new(loader), database, online }
     }
 }
