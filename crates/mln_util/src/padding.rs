@@ -4,7 +4,7 @@ use feature::Value;
 use serde::{Deserialize, Serialize};
 
 /// A set of four numbers representing padding around a box.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, mln_wire::Wire)]
 pub struct Padding {
     pub top: f32,
     pub right: f32,

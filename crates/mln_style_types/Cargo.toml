@@ -20,6 +20,7 @@ feature.workspace = true
 mln_math.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
+mln_wire.workspace = true
 serde.workspace = true
 
 [lints]

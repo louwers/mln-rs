@@ -12,7 +12,7 @@ use crate::value::{Value, type_of};
 
 /// `["number", ...]` and the other type assertions: the first input whose
 /// value has the type, or an error.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct Assertion {
     type_: Type,
     inputs: Box<[Expr]>,

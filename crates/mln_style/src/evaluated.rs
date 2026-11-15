@@ -3,7 +3,6 @@
 
 use mln_util::interpolate::Interpolate;
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, EvaluationContext, ValueConverter};
 use crate::property_expression::PropertyExpression;
@@ -12,11 +11,14 @@ use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameter
 
 /// A value that fades from one image or dash array to the next while the
 /// zoom crosses an integer.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct Faded<T> {
     pub from: T,
     pub to: T,
 }
+
+// The renderer's serde types (paint property binders) hold these.
+mln_wire::serde_via_wire!(for<T: mln_wire::Wire> Faded<T>);
 
 /// How a property's value evaluates for a frame, with a default for an
 /// undefined value or an expression that gives no value: one of
@@ -28,7 +30,7 @@ pub struct Faded<T> {
 pub type Evaluation<T> = fn(&PropertyValue<T>, &PropertyEvaluationParameters, T) -> Evaluated<T>;
 
 /// A property's value for a frame.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
 pub enum Evaluated<T> {
     /// The same for every feature.
     Constant(T),

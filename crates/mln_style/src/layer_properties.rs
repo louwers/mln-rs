@@ -6,15 +6,14 @@ use std::any::Any;
 use std::sync::Arc;
 
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
 use crate::layer::Impl;
 
 /// The data members of `LayerProperties`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub struct LayerPropertiesBase {
-    #[serde(with = "crate::serialization::shared_layer")]
+    #[wire(with = "crate::serialization::shared_layer")]
     pub base_impl: Arc<dyn Impl>,
     /// Contains render passes used by the renderer, see `mln::RenderPass`.
     pub render_passes: u8,
@@ -116,7 +115,7 @@ impl std::fmt::Debug for dyn LayerProperties {
 macro_rules! layer_properties {
     ($(#[$meta:meta])* $name:ident for $impl_:ty, paint $paint:ident $(, layout $layout:ident)? $(, [$crossfade:ident])?) => {
         $(#[$meta])*
-        #[derive(Clone, Debug, ::serde::Serialize, ::serde::Deserialize)]
+        #[derive(Clone, Debug, ::mln_wire::Wire)]
         pub struct $name {
             pub base: $crate::layer_properties::LayerPropertiesBase,
             $(pub $crossfade: $crate::renderer::property_evaluation_parameters::CrossfadeParameters,)?

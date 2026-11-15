@@ -11,7 +11,7 @@ pub type ValueObject = mln_vec_map::VecMap<String, Value>;
 
 /// `mapbox::base::Value`:
 /// `variant<null, bool, uint64_t, int64_t, double, string, vector, map>`.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, mln_wire::Wire)]
 pub enum Value {
     #[default]
     Null,

@@ -405,6 +405,26 @@ impl<'de, K: Deserialize<'de> + Ord, V: Deserialize<'de>> Deserialize<'de> for V
     }
 }
 
+impl<K: mln_wire::Wire + Ord, V: mln_wire::Wire> mln_wire::Wire for VecMap<K, V> {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.len().write(w);
+        for (k, v) in self {
+            k.write(w);
+            v.write(w);
+        }
+    }
+
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        let len = r.length()?;
+        let mut map = VecMap::new();
+        for _ in 0..len {
+            let k = K::read(r)?;
+            map.insert(k, V::read(r)?);
+        }
+        Some(map)
+    }
+}
+
 /// An ordered set kept as a sorted vector (module docs).
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VecSet<T> {
@@ -598,6 +618,16 @@ impl<'de, T: Deserialize<'de> + Ord> Deserialize<'de> for VecSet<T> {
         }
 
         deserializer.deserialize_seq(SetVisitor(PhantomData))
+    }
+}
+
+impl<T: mln_wire::Wire + Ord> mln_wire::Wire for VecSet<T> {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        mln_wire::write_seq(w, &self.items);
+    }
+
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        Some(mln_wire::read_seq::<T>(r)?.into_iter().collect())
     }
 }
 

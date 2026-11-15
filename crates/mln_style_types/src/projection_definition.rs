@@ -2,7 +2,7 @@ use feature::Value;
 use mln_util::interpolate::{Interpolate, interpolate};
 
 /// The names the style's `projection.type` accepts.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, mln_wire::Wire)]
 #[repr(u8)]
 pub enum ProjectionType {
     #[default]
@@ -43,7 +43,7 @@ fn type_from_name_or_mercator(name: &str) -> ProjectionType {
 
 /// The value of the style's `projection.type`: a single projection, or a
 /// transition between two.
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize, mln_wire::Wire)]
 pub struct ProjectionDefinition {
     pub from: ProjectionType,
     pub to: ProjectionType,

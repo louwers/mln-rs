@@ -76,7 +76,7 @@ impl MatchLabel for i64 {
 }
 
 /// The index of each label's output, by label.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 #[doc(hidden)]
 pub enum Labels {
     Int(VecMap<i64, usize>),
@@ -84,7 +84,7 @@ pub enum Labels {
 }
 
 /// `["match", input, label, output, ..., otherwise]`.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub struct Match {
     type_: Type,
     input: Expr,

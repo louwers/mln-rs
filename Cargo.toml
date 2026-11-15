@@ -80,6 +80,8 @@ mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version
 mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.11" }
 mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.11" }
 mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.11" }
+mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.11" }
+mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_derive", version = "=0.0.11" }
 mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.11" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.11" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.11" }

@@ -16,7 +16,7 @@ use crate::string::to_string_double;
 /// The space a color interpolation runs in: RGB blends the premultiplied
 /// channels, LAB and HCL the straight color, OKLCH the premultiplied lightness
 /// and chroma, and OKLAB the premultiplied lightness, a and b.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, mln_wire::Wire)]
 pub enum ColorSpace {
     Rgb,
     Lab,
@@ -26,7 +26,7 @@ pub enum ColorSpace {
 }
 
 /// Stores a premultiplied color, with all four channels ranging from 0..1.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, mln_wire::Wire)]
 pub struct Color {
     pub r: f32,
     pub g: f32,

@@ -277,7 +277,7 @@ impl fmt::Debug for Dependency {
 }
 
 /// The kinds of expression node. Each holds its own operands.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) enum Node {
     Literal(Box<Literal>),
     Compound(Box<CompoundExpression>),
@@ -317,15 +317,13 @@ pub struct Expr {
 }
 
 /// An expression crosses as its node tree; its dependencies follow from it.
-impl serde::Serialize for Expr {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.node.serialize(serializer)
+impl mln_wire::Wire for Expr {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.node.write(w);
     }
-}
 
-impl<'de> serde::Deserialize<'de> for Expr {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Node::deserialize(deserializer).map(Expr::new)
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        Node::read(r).map(Expr::new)
     }
 }
 

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// A spherical position (radial, azimuthal, polar) with its cached cartesian
 /// form.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, mln_wire::Wire)]
 pub struct Position {
     radial: f32,
     azimuthal: f32,

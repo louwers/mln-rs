@@ -13,7 +13,6 @@ use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::interpolate::Interpolate;
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::evaluated::{Evaluated, Evaluation};
 use crate::expression::{Dependency, Image, ValueConverter, global_state_refs_intersect};
@@ -249,7 +248,7 @@ impl<V: PropertyValueLike> Transitioning<V> {
 }
 
 /// A value as the style sets it, and how it transitions.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct Transitionable<V> {
     pub value: V,
     pub(crate) options: TransitionOptions,
@@ -363,7 +362,8 @@ macro_rules! properties {
                 })+)?
             }
 
-            #[derive(Clone, Debug, Default, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Clone, Debug, Default, PartialEq, ::mln_wire::Wire)]
+            #[wire(default)]
             pub struct Transitionable {
                 $(pub $field: $crate::properties::Transitionable<$crate::__property_value!($kind, $t)>,)+
             }
@@ -374,7 +374,8 @@ macro_rules! properties {
                 $($(pub $dfield: $crate::properties::Transitioning<$crate::__property_value!($dkind, $dt)>,)+)?
             }
 
-            #[derive(Clone, Debug, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Clone, Debug, Default, ::mln_wire::Wire)]
+            #[wire(default)]
             pub struct PossiblyEvaluated {
                 $(pub $field: $crate::evaluated::Evaluated<$t>,)+
                 $($(pub $dfield: $crate::evaluated::Evaluated<$dt>,)+)?
@@ -498,15 +499,20 @@ macro_rules! properties {
                 })+
             }
 
-            #[derive(Clone, Debug, Default, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Clone, Debug, Default, PartialEq, ::mln_wire::Wire)]
+            #[wire(default)]
             pub struct Unevaluated {
                 $(pub $field: $crate::__property_value!($kind, $t),)+
             }
 
-            #[derive(Clone, Debug, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Clone, Debug, Default, ::mln_wire::Wire)]
+            #[wire(default)]
             pub struct PossiblyEvaluated {
                 $(pub $field: $crate::evaluated::Evaluated<$t>,)+
             }
+
+            // The renderer's buckets hold layout properties.
+            ::mln_wire::serde_via_wire!(PossiblyEvaluated);
 
             /// The value of each property for one feature.
             #[derive(Clone, Debug, Default)]

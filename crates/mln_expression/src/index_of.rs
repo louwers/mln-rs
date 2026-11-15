@@ -8,7 +8,7 @@ use crate::utf8_op_helpers::{get_unicode_character_offset_on_validated_utf8, uni
 use crate::value::{Value, type_of};
 
 /// `["index-of", keyword, input, from_index?]`.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct IndexOf {
     keyword: Expr,
     input: Expr,

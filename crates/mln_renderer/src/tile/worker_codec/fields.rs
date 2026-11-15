@@ -8,7 +8,7 @@ use std::sync::Arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::shared_layer_properties;
 use mln_tile_id::EncodedTileData;
-use mln_util::serialization::shared::{self, Kind};
+use mln_util::serialization::shared::{self, Kind, SerdeKind};
 use serde::ser::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -34,7 +34,9 @@ pub(crate) struct SharedTileDataKind;
 impl Kind for SharedTileDataKind {
     type Value = dyn mln_tile_id::GeometryTileData + Send + Sync;
     const NAME: &'static str = "tile data";
+}
 
+impl SerdeKind for SharedTileDataKind {
     fn write<S: Serializer>(data: &Self::Value, serializer: S) -> Result<S::Ok, S::Error> {
         data.encoded()
             .ok_or_else(|| S::Error::custom("tile data that no longer has its bytes can't cross"))?
@@ -74,7 +76,9 @@ pub(crate) struct SharedTexture;
 impl Kind for SharedTexture {
     type Value = DynamicTexture;
     const NAME: &'static str = "texture";
+}
 
+impl SerdeKind for SharedTexture {
     fn write<S: Serializer>(texture: &DynamicTexture, serializer: S) -> Result<S::Ok, S::Error> {
         (texture.get_size(), texture.get_pixel_format()).serialize(serializer)
     }

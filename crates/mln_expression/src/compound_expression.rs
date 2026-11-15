@@ -32,7 +32,7 @@ pub(crate) enum Params {
 }
 
 /// The operator of a compound expression signature.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, mln_wire::Wire)]
 pub(crate) enum Op {
     E,
     Pi,
@@ -302,31 +302,26 @@ fn ordering_holds(op: Op, ordering: Option<std::cmp::Ordering>) -> bool {
 }
 
 /// An operator with a name and typed arguments.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, mln_wire::Wire)]
 pub(crate) struct CompoundExpression {
-    #[serde(with = "signature_by_op")]
+    #[wire(with = "signature_by_op")]
     signature: &'static SignatureBase,
     args: Box<[Expr]>,
 }
 
 /// A signature crosses as its op, which only it has.
 mod signature_by_op {
-    use serde::de::Error as _;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     use super::{BY_OP, Op, SignatureBase};
 
-    #[expect(clippy::trivially_copy_pass_by_ref, reason = "`#[serde(with)]` passes the field by reference")]
-    pub(super) fn serialize<S: Serializer>(
-        signature: &&'static SignatureBase,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        signature.op.serialize(serializer)
+    #[expect(clippy::trivially_copy_pass_by_ref, reason = "`#[wire(with)]` passes the field by reference")]
+    pub(super) fn write(signature: &&'static SignatureBase, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(&signature.op, w);
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<&'static SignatureBase, D::Error> {
-        let op = Op::deserialize(deserializer)?;
-        BY_OP.get(&op).copied().ok_or_else(|| D::Error::custom(format!("no signature for {op:?}")))
+    pub(super) fn read(r: &mut mln_wire::Reader<'_>) -> Option<&'static SignatureBase> {
+        let op = <Op as mln_wire::Wire>::read(r)?;
+        BY_OP.get(&op).copied().or_else(|| r.fail("no signature for an op"))
     }
 }
 

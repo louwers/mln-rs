@@ -231,9 +231,9 @@ fn expressions_cross_as_data() {
         let expression = context
             .parse_expression(&Convertible::from(&value), None)
             .unwrap_or_else(|| panic!("{json}: {}", context.get_combined_errors()));
-        let encoded = postcard::to_allocvec(&expression).unwrap();
+        let encoded = mln_wire::to_vec(&expression).unwrap();
         let decoded: crate::expression::Expr =
-            postcard::from_bytes(&encoded).unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
+            mln_wire::from_slice(&encoded).unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
         assert!(decoded == expression, "{json}");
         assert_eq!(decoded.dependencies(), expression.dependencies(), "{json}");
         assert_eq!(decoded.serialize(), expression.serialize(), "{json}");

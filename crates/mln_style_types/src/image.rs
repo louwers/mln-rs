@@ -304,7 +304,9 @@ pub struct SharedImage;
 impl shared::Kind for SharedImage {
     type Value = Impl;
     const NAME: &'static str = "image";
+}
 
+impl shared::SerdeKind for SharedImage {
     fn write<S: serde::Serializer>(image: &Impl, serializer: S) -> Result<S::Ok, S::Error> {
         image.serialize(serializer)
     }

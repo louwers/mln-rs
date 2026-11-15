@@ -54,6 +54,7 @@ mln_vec_map.workspace = true
 parking_lot.workspace = true
 polylabel.workspace = true
 postcard.workspace = true
+mln_wire.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

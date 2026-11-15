@@ -2647,6 +2647,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "mln-rs-wire",
  "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
@@ -2681,6 +2682,7 @@ dependencies = [
  "geo-types",
  "geojson",
  "mln-rs-vec-map",
+ "mln-rs-wire",
  "serde",
  "serde_json",
 ]
@@ -2936,6 +2938,7 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-webgpu",
+ "mln-rs-wire",
  "mlt-core",
  "parking_lot",
  "postcard",
@@ -3078,6 +3081,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "mln-rs-wire",
  "parking_lot",
  "postcard",
  "serde",
@@ -3102,6 +3106,7 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "mln-rs-wire",
  "serde",
 ]
 
@@ -3216,6 +3221,7 @@ dependencies = [
  "mln-rs-style",
  "mln-rs-style-types",
  "mln-rs-tile-id",
+ "mln-rs-wire",
  "parking_lot",
  "postcard",
  "serde",
@@ -3229,6 +3235,7 @@ dependencies = [
 name = "mln-rs-vec-map"
 version = "0.0.11"
 dependencies = [
+ "mln-rs-wire",
  "serde",
 ]
 
@@ -3313,6 +3320,23 @@ dependencies = [
  "parking_lot",
  "pollster",
  "wgpu",
+]
+
+[[package]]
+name = "mln-rs-wire"
+version = "0.0.11"
+dependencies = [
+ "mln-rs-wire-derive",
+ "serde",
+]
+
+[[package]]
+name = "mln-rs-wire-derive"
+version = "0.0.11"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

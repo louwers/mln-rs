@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::SymbolAnchorType;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, mln_wire::Wire)]
 pub struct AnchorOffsetPair {
     pub anchor_type: SymbolAnchorType,
     pub offset: [f32; 2],
@@ -17,7 +17,7 @@ impl AnchorOffsetPair {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, mln_wire::Wire)]
 pub struct VariableAnchorOffsetCollection {
     anchor_offsets: Vec<AnchorOffsetPair>,
 }

@@ -137,6 +137,7 @@ fn floats_to_bytes(values: &[f32]) -> Vec<u8> {
 
 /// The data of a `PaintPropertyBinder` subclass.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(bound(serialize = "T: Serialize + mln_wire::Wire", deserialize = "T: Deserialize<'de> + mln_wire::Wire"))]
 pub(crate) enum PaintPropertyBinderKind<T> {
     Constant {
         constant: T,
@@ -202,6 +203,7 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(bound(serialize = "T: Serialize + mln_wire::Wire", deserialize = "T: Deserialize<'de> + mln_wire::Wire"))]
 pub(crate) struct PaintPropertyBinder<T> {
     pub(crate) kind: PaintPropertyBinderKind<T>,
     pub(crate) statistics: PaintPropertyStatistics<T>,
@@ -445,6 +447,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
 
 /// The data of a cross-faded `PaintPropertyBinder` subclass.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(bound(serialize = "T: Serialize + mln_wire::Wire", deserialize = "T: Deserialize<'de> + mln_wire::Wire"))]
 pub(crate) enum CrossFadedPaintPropertyBinderKind<T> {
     Constant {
         constant: Faded<T>,
@@ -464,6 +467,7 @@ pub(crate) enum CrossFadedPaintPropertyBinderKind<T> {
 /// The binder of a `*-pattern` property, whose two attributes are four `u16`s
 /// each.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(bound(serialize = "T: Serialize + mln_wire::Wire", deserialize = "T: Deserialize<'de> + mln_wire::Wire"))]
 pub(crate) struct CrossFadedPaintPropertyBinder<T> {
     pub(crate) kind: CrossFadedPaintPropertyBinderKind<T>,
     pub(crate) has_interleaved_buffer: bool,

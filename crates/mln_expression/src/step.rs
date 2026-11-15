@@ -9,7 +9,7 @@ use crate::stops::{Stops, get_covering_stops};
 use crate::type_::Type;
 
 /// `["step", input, output, label, output, ...]`.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub struct Step {
     type_: Type,
     input: Expr,

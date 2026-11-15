@@ -236,7 +236,7 @@ fn get_coerce_function(t: &Type) -> CoerceFunction {
 
 /// `["to-number", ...]` and the other coercions, explicit or inserted by
 /// the parser: the first input that converts, or the last one's error.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct Coercion {
     type_: Type,
     inputs: Box<[Expr]>,

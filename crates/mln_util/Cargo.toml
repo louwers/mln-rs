@@ -28,6 +28,7 @@ geometry.workspace = true
 httpdate.workspace = true
 mln_math.workspace = true
 parking_lot.workspace = true
+mln_wire.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 unicode-properties.workspace = true
