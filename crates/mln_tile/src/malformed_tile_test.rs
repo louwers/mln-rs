@@ -1,13 +1,13 @@
-// Port-only tests: malformed MVT and MLT tiles give an error through the
-// GeometryTile* traits, and never panic.
+// Port-only tests: malformed MVT and MLT tiles give an error where they are
+// read, and never panic.
 
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
-use mln_tile_id::GeometryTileData;
+use mln_tile_id::GeometryTileFeature;
 use proptest::prelude::*;
 
-use crate::{VectorMLTTileData, VectorMVTTileData};
+use crate::{MltTile, MvtTile, TileData};
 
 fn read_file(path: &str) -> Vec<u8> {
     std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(path)).unwrap()
@@ -23,10 +23,10 @@ const LAYERS: [&str; 2] = ["admin", "water"];
 
 /// Calls every accessor of every feature of the layers, as the tile worker
 /// and the queries do, and returns the first error.
-fn read_all(data: &dyn GeometryTileData) -> Option<String> {
+fn read_all(data: &TileData) -> Option<String> {
     let mut first = None;
     for name in LAYERS {
-        let layer = match data.get_layer(name) {
+        let layer = match data.layer(name) {
             Ok(Some(layer)) => layer,
             Ok(None) => continue,
             Err(error) => {
@@ -34,9 +34,9 @@ fn read_all(data: &dyn GeometryTileData) -> Option<String> {
                 continue;
             }
         };
-        layer.get_name();
-        for i in 0..layer.feature_count() {
-            let feature = match layer.get_feature(i) {
+        let _ = layer.name();
+        for i in 0..layer.len() {
+            let feature = match layer.feature(i) {
                 Ok(feature) => feature,
                 Err(error) => {
                     first.get_or_insert(error.to_string());
@@ -47,8 +47,7 @@ fn read_all(data: &dyn GeometryTileData) -> Option<String> {
             feature.get_id();
             feature.get_value("name");
             feature.get_properties();
-            feature.get_geometries();
-            if let Err(error) = feature.check() {
+            if let Err(error) = feature.geometry() {
                 first.get_or_insert(error.to_string());
             }
         }
@@ -108,60 +107,55 @@ fn tile_with_tags(tags: &[u64]) -> Vec<u8> {
 // C++ test/style/source.test.cpp, Source.VectorTileCorrupt: the bytes
 // "CORRUPTED" throw out of getLayer.
 #[test]
-fn corrupt_mvt_tile_is_a_get_layer_error() {
-    let data = VectorMVTTileData::new(Arc::new(b"CORRUPTED".to_vec()));
+fn corrupt_mvt_tile_is_a_layer_error() {
+    let tile = MvtTile::new(Arc::new(b"CORRUPTED".to_vec()));
     let message = "protobuf decode error: invalid wire type: 7";
-    assert_eq!(data.get_layer("water").err().unwrap().to_string(), message);
-    assert_eq!(data.layer_names().unwrap_err().to_string(), message);
+    assert_eq!(tile.layer_names().unwrap_err().to_string(), message);
+    let data = TileData::Mvt(tile);
+    assert_eq!(data.layer("water").err().unwrap().to_string(), message);
+    assert_eq!(data.has_layer("water").unwrap_err().to_string(), message);
 }
 
 #[test]
-fn truncated_mvt_tile_is_a_get_layer_error() {
-    let data = VectorMVTTileData::new(Arc::new(MVT[..MVT.len() / 2].to_vec()));
-    assert_eq!(data.get_layer("water").err().unwrap().to_string(), "protobuf decode error: unexpected end of buffer");
+fn truncated_mvt_tile_is_a_layer_error() {
+    let data = TileData::Mvt(MvtTile::new(Arc::new(MVT[..MVT.len() / 2].to_vec())));
+    assert_eq!(data.layer("water").err().unwrap().to_string(), "protobuf decode error: unexpected end of buffer");
 }
 
 #[test]
-fn malformed_value_is_the_feature_error() {
-    let tile = tile_with_tags(&[0, 0]);
-    let data = VectorMVTTileData::new(Arc::new(tile));
-    let layer = data.get_layer("l").unwrap().unwrap();
-    let feature = layer.get_feature(0).unwrap();
+fn malformed_tags_are_the_feature_error() {
+    let data = TileData::Mvt(MvtTile::new(Arc::new(tile_with_tags(&[0, 0]))));
+    let layer = data.layer("l").unwrap().unwrap();
+    let feature = layer.feature(0).unwrap();
     assert_eq!(feature.get_value("k"), Some(feature::Value::String("v".to_owned())));
-    assert!(feature.check().is_ok());
 
-    // The value index is past the end of the layer's values: getValue and
-    // getProperties fail.
-    let tile = tile_with_tags(&[0, 7]);
-    let data = VectorMVTTileData::new(Arc::new(tile));
-    let layer = data.get_layer("l").unwrap().unwrap();
-    let feature = layer.get_feature(0).unwrap();
-    assert!(feature.check().is_ok());
-    assert_eq!(feature.get_value("k"), None);
-    let message = "invalid value index 7";
-    assert_eq!(feature.check().unwrap_err().to_string(), message);
-    assert!(feature.get_properties().is_empty());
-    // The geometry is fine, and the first exception is kept.
-    assert_eq!(feature.get_geometries().len(), 1);
-    assert_eq!(feature.error().unwrap().to_string(), message);
+    // A value index past the end of the layer's values, and a key without a
+    // value: the feature can't be read, whatever reads it.
+    for (tags, message) in [(&[0, 7][..], "invalid value index 7"), (&[0][..], "invalid feature tags length: 1")] {
+        let data = TileData::Mvt(MvtTile::new(Arc::new(tile_with_tags(tags))));
+        let layer = data.layer("l").unwrap().unwrap();
+        assert_eq!(layer.feature(0).err().unwrap().to_string(), message);
+    }
 }
 
 #[test]
 fn repeated_key_keeps_its_first_value() {
-    let data = VectorMVTTileData::new(Arc::new(tile_with_tags(&[0, 1, 0, 0])));
-    let layer = data.get_layer("l").unwrap().unwrap();
-    let feature = layer.get_feature(0).unwrap();
+    let data = TileData::Mvt(MvtTile::new(Arc::new(tile_with_tags(&[0, 1, 0, 0]))));
+    let layer = data.layer("l").unwrap().unwrap();
+    let feature = layer.feature(0).unwrap();
     let first = feature::Value::String("w".to_owned());
-    assert_eq!(feature.to_properties().into_iter().collect::<Vec<_>>(), [("k".to_owned(), first.clone())]);
-    assert_eq!(feature.get_properties().get("k"), Some(&first));
+    assert_eq!(
+        feature.get_properties().into_owned().into_iter().collect::<Vec<_>>(),
+        [("k".to_owned(), first.clone())]
+    );
     assert_eq!(feature.get_value("k"), Some(first));
 }
 
 #[test]
 fn fixtures_read_without_errors() {
-    assert_eq!(read_all(&VectorMVTTileData::new(Arc::new(MVT.clone()))), None);
-    assert_eq!(read_all(&VectorMLTTileData::new(Arc::new(MLT.clone()), false)), None);
-    assert_eq!(read_all(&VectorMLTTileData::new(Arc::new(MLT_FAST_PFOR.clone()), true)), None);
+    assert_eq!(read_all(&TileData::Mvt(MvtTile::new(Arc::new(MVT.clone())))), None);
+    assert_eq!(read_all(&TileData::Mlt(MltTile::new(Arc::new(MLT.clone()), false))), None);
+    assert_eq!(read_all(&TileData::Mlt(MltTile::new(Arc::new(MLT_FAST_PFOR.clone()), true))), None);
 }
 
 /// A truncation or some overwritten bytes of a fixture.
@@ -197,16 +191,16 @@ proptest! {
 
     #[test]
     fn mutated_mvt_tiles_do_not_panic(mutation in mutation()) {
-        let data = VectorMVTTileData::new(Arc::new(mutate(&MVT, &mutation)));
-        let _ = data.layer_names();
-        read_all(&data);
+        let tile = MvtTile::new(Arc::new(mutate(&MVT, &mutation)));
+        let _ = tile.layer_names();
+        read_all(&TileData::Mvt(tile));
     }
 
     #[test]
     fn mutated_mlt_tiles_do_not_panic(mutation in mutation(), fast_pfor in any::<bool>()) {
         let fixture: &[u8] = if fast_pfor { &MLT_FAST_PFOR } else { &MLT };
-        let data = VectorMLTTileData::new(Arc::new(mutate(fixture, &mutation)), fast_pfor);
-        data.layer_names();
-        read_all(&data);
+        let tile = MltTile::new(Arc::new(mutate(fixture, &mutation)), fast_pfor);
+        tile.layer_names();
+        read_all(&TileData::Mlt(tile));
     }
 }

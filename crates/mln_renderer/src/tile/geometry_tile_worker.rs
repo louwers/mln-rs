@@ -30,8 +30,9 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, ImageType, shared_image_map};
 use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
 use mln_text::tagged_string::font_stack_hash;
+use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileFeature};
+use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -40,6 +41,7 @@ use mln_vec_map::VecSet;
 use crate::bucket::BucketPtr;
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;
+pub(crate) use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlasPtr, GlyphAtlas, ImageAtlas, TextureAtlas};
 use crate::group_by_layout::group_layers;
 use crate::image_manager::ImageRequestPair;
@@ -52,13 +54,6 @@ use crate::text::glyph_manager::HBShapeResults;
 use crate::tile::geometry_tile::LayoutResult;
 use crate::tile::tile_worker_transport::TileEndpoint;
 use crate::tile::worker_codec::fields;
-
-/// The tile data the worker parses (C++ `std::unique_ptr<const
-/// GeometryTileData>`, shared here with the feature index instead of
-/// cloned).
-pub(crate) type SharedTileData = Arc<dyn GeometryTileData + Send + Sync>;
-
-pub(crate) use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum State {
@@ -74,8 +69,7 @@ enum State {
 #[derive(mln_wire::Wire)]
 pub enum WorkerMessage {
     SetData {
-        #[wire(with = "fields::tile_data")]
-        data: Option<SharedTileData>,
+        data: Option<TileData>,
         available_images: Arc<VecSet<String>>,
         correlation_id: u64,
     },
@@ -157,7 +151,7 @@ enum ReceivedData {
     /// No `set_data` since the worker was created or reset.
     Pending,
     /// The tile's data; `None` when the tile has no data.
-    Received(Option<SharedTileData>),
+    Received(Option<TileData>),
 }
 
 pub(crate) struct GeometryTileWorker {
@@ -327,7 +321,7 @@ impl GeometryTileWorker {
 
     pub(crate) fn set_data(
         &mut self,
-        data: Option<SharedTileData>,
+        data: Option<TileData>,
         available_images: Arc<VecSet<String>>,
         correlation_id: u64,
     ) {
@@ -702,7 +696,7 @@ impl GeometryTileWorker {
                         available_images: &self.available_images,
                         filter_groups: &mut filter_groups,
                     },
-                    SourceLayer::new(Arc::clone(data), leader_impl.source_layer.clone()),
+                    SourceLayer::new(data.clone(), leader_impl.source_layer.clone()),
                     group,
                 )?;
                 let Some(mut layout) = layout else {
@@ -726,12 +720,12 @@ impl GeometryTileWorker {
                 let Some(mut bucket) = layermanager::create_bucket(&parameters, group) else {
                     continue;
                 };
-                let Some(geometry_layer) = data.get_layer(source_layer_id)? else {
+                let Some(geometry_layer) = data.layer(source_layer_id)? else {
                     continue;
                 };
 
                 bucket.set_retain_features_by_id(self.capture_rendered_features);
-                bucket.reserve_features(geometry_layer.feature_count());
+                bucket.reserve_features(geometry_layer.len());
 
                 let effective_z = f32::from(self.id.overscaled_z);
                 let context = EvaluationContext::new(effective_z)
@@ -740,36 +734,30 @@ impl GeometryTileWorker {
                 let passes = |feature: &dyn GeometryTileFeature| {
                     filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
                 };
-                let selected = filter_groups.select(source_layer_id, &*geometry_layer, filter, &context, passes);
+                let selected = filter_groups.select(source_layer_id, &geometry_layer, filter, &context, passes);
 
                 let mut i = 0;
-                while !self.obsolete.load(Ordering::SeqCst) && i < geometry_layer.feature_count() {
+                while !self.obsolete.load(Ordering::SeqCst) && i < geometry_layer.len() {
                     if selected.as_ref().is_some_and(|selected| !selected[i]) {
                         i += 1;
                         continue;
                     }
-                    let feature = geometry_layer.get_feature(i)?;
-                    if selected.is_none() {
-                        let passes = passes(&*feature);
-                        feature.check()?;
-                        if !passes {
-                            i += 1;
-                            continue;
-                        }
+                    let feature = geometry_layer.feature(i)?;
+                    if selected.is_none() && !passes(&feature) {
+                        i += 1;
+                        continue;
                     }
 
-                    let geometries = feature.get_geometries();
-                    feature.check()?;
+                    let geometries = feature.geometry()?;
                     bucket.add_feature(
-                        &*feature,
-                        geometries,
+                        &feature,
+                        &geometries,
                         &ImagePositions::default(),
                         &PatternLayerMap::default(),
                         i,
                         &self.id.canonical,
                     )?;
-                    feature.check()?;
-                    feature_index.insert(geometries, i, source_layer_id, &leader_impl.id);
+                    feature_index.insert(&geometries, i, source_layer_id, &leader_impl.id);
                     i += 1;
                 }
 

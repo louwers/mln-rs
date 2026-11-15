@@ -7,6 +7,7 @@ use std::sync::Arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_style_types::image::SharedImage;
+use mln_tile::TileData;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
@@ -15,10 +16,10 @@ use mln_wire::Wire;
 use parking_lot::Mutex;
 
 use super::envelope::{self, About, Action, Encoded, MessageKind, ReplyHead, Request, TextureRelease};
-use super::fields::{SharedTexture, SharedTileDataKind};
+use super::fields::SharedTexture;
 use crate::gfx::dynamic_texture::{DynamicTexturePtr, TextureHandle};
 use crate::gfx::dynamic_texture_atlas::TextureAtlas;
-use crate::tile::geometry_tile_worker::{SharedTileData, TileMessage, WorkerMessage};
+use crate::tile::geometry_tile_worker::{TileMessage, WorkerMessage};
 use crate::tile::raster_dem_tile::{RasterDEMTileMessage, RasterDEMWorkerMessage};
 use crate::tile::raster_tile::{RasterTileMessage, RasterWorkerMessage};
 use crate::tile::tile_worker_transport::WorkerParameters;
@@ -57,7 +58,7 @@ pub(crate) struct MapCodec {
 struct TileState {
     worker_type: WorkerType,
     layers: Vec<(u64, Vec<Arc<dyn LayerProperties>>)>,
-    data: Vec<(u64, Option<SharedTileData>)>,
+    data: Vec<(u64, Option<TileData>)>,
 }
 
 /// Drops the entries a layout for `correlation_id` makes stale: all but the
@@ -77,7 +78,8 @@ impl Default for MapCodec {
                 .origin::<SharedLayerProperties>()
                 .origin::<SharedExpression>()
                 .origin::<SharedImage>()
-                .origin::<SharedTileDataKind>()
+                .origin::<mln_tile::TileBytes>()
+                .origin::<mln_tile::TileFeatures>()
                 .copies::<SharedTexture>(),
             atlas: Arc::default(),
             tiles: HashMap::default(),

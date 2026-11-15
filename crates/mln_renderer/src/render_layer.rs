@@ -750,6 +750,7 @@ pub trait RenderLayer {
         &self,
         _query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        _geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         _zoom: f32,
         _transform_state: &TransformState,
         _pixels_to_tile_units: f32,

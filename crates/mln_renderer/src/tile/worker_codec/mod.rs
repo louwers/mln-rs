@@ -17,14 +17,15 @@
 //!   instance rather than copies.
 //! - What many messages share crosses once per instance, then by key
 //!   (`mln_util::serialization::shared)`: layers, their evaluated properties
-//!   and their expressions, images and tile data from the map side, which a
-//!   layout refers back to (its buckets' binders hold the layers'
-//!   expressions, its render data the properties, its feature index the
-//!   data), and the textures of the instance's atlas from the other side.
-//!   Expressions cross as their parsed node trees (`mln_style::serialization`).
+//!   and their expressions, images and the bytes or features of tile data
+//!   from the map side, which a layout refers back to (its buckets' binders
+//!   hold the layers' expressions, its render data the properties, its
+//!   feature index the data), and the textures of the instance's atlas from
+//!   the other side. Expressions cross as their parsed node trees
+//!   (`mln_style::serialization`), and tile data as what it is made from
+//!   (`mln_tile::TileData`).
 //! - Trait objects cross as the types they can be (fields.rs): layers and
-//!   their properties as their layer type's, buckets as their bucket type's,
-//!   tile data as what it is made from (`GeometryTileData::encoded`).
+//!   their properties as their layer type's, buckets as their bucket type's.
 //!
 //! The worker instance has its own `DynamicTextureAtlas`. The map side keeps
 //! a copy of each of its textures, which uploads the pixels the instance

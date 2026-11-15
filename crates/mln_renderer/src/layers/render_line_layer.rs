@@ -437,6 +437,7 @@ impl RenderLayer for RenderLineLayer {
         &self,
         query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         zoom: f32,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
@@ -465,19 +466,15 @@ impl RenderLayer for RenderLineLayer {
             * f64::from(pixels_to_tile_units)) as f32;
 
         // Apply offset to geometry
-        if offset != 0.0 && !feature.get_geometries().is_empty() {
+        if offset != 0.0 && !geometry.is_empty() {
             return mln_util::intersection_tests::polygon_intersects_buffered_multi_line(
                 query,
-                &offset_line(feature.get_geometries(), f64::from(offset)),
+                &offset_line(geometry, f64::from(offset)),
                 half_width,
             );
         }
 
-        mln_util::intersection_tests::polygon_intersects_buffered_multi_line(
-            query,
-            feature.get_geometries(),
-            half_width,
-        )
+        mln_util::intersection_tests::polygon_intersects_buffered_multi_line(query, geometry, half_width)
     }
 
     fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {

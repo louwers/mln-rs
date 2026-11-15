@@ -25,7 +25,8 @@ use mln_style::property_value::PropertyValue;
 use mln_style_types::TextWritingModeType;
 use mln_style_types::image::ImagePositions;
 use mln_text::glyph::WritingModeType;
-use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature, GeometryTileLayer};
+use mln_tile::TileLayer;
+use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
@@ -847,13 +848,7 @@ impl Bucket for SymbolBucket {
     }
 
     /// Re-evaluates the feature-state dependent attribute values.
-    fn update(
-        &self,
-        states: &FeatureStates,
-        layer: &dyn GeometryTileLayer,
-        layer_id: &str,
-        image_positions: &ImagePositions,
-    ) {
+    fn update(&self, states: &FeatureStates, layer: &TileLayer<'_>, layer_id: &str, image_positions: &ImagePositions) {
         if let Some(binders) = self.paint_properties.get(layer_id) {
             let mut binders = binders.write();
             binders.icon_binders.update_vertex_vectors(states, layer, image_positions);

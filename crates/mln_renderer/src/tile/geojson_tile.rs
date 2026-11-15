@@ -13,7 +13,6 @@ use mln_style::sources::geojson_source::{GeoJSONData, TileFeatures};
 use mln_tile_id::OverscaledTileID;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::tile::geojson_tile_data::GeoJSONTileData;
 use crate::tile::geometry_tile::GeometryTile;
 use crate::tile::tile::{Tile, TileBase};
 use crate::tile::tile_observer::TileObserver;
@@ -68,7 +67,7 @@ impl GeoJSONTile {
                 };
                 let same_data = current.borrow().as_ref().is_some_and(|current| data_address(current) == captured_data);
                 if same_data {
-                    tile.set_data(Some(Arc::new(GeoJSONTileData::new(features))));
+                    tile.set_data(Some(mln_tile::TileData::Features(Arc::new(features))));
                 }
             }),
             run_synchronously,
@@ -179,10 +178,10 @@ impl Tile for GeoJSONTile {
         // Ignore the sourceLayer, there is only one
         if let Some(feature_index) = self.tile.get_feature_index()
             && let Some(tile_data) = feature_index.get_data()
-            && let Some(layer) = tile_data.get_layer("")?
+            && let Some(layer) = tile_data.layer("")?
         {
             crate::tile::geometry_tile::query_layer_source_features(
-                &*layer,
+                &layer,
                 result,
                 options,
                 global_state,

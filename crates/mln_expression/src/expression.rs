@@ -943,8 +943,8 @@ impl GeometryTileFeature for GeoJSONFeature<'_> {
         to_feature_type(self.feature.geometry.as_ref())
     }
 
-    fn get_properties(&self) -> &ValueObject {
-        &self.feature.properties
+    fn get_properties(&self) -> Cow<'_, ValueObject> {
+        Cow::Borrowed(&self.feature.properties)
     }
 
     fn get_id(&self) -> FeatureIdentifier {
@@ -955,8 +955,8 @@ impl GeometryTileFeature for GeoJSONFeature<'_> {
         self.feature.properties.get(key).cloned()
     }
 
-    fn get_geometries(&self) -> &GeometryCollection {
-        &self.geometry
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+        Ok(Cow::Borrowed(&self.geometry))
     }
 }
 

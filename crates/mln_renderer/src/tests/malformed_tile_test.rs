@@ -1,5 +1,5 @@
 // Port-only tests: a malformed vector tile reaches the tile as its error
-// (`onTileError`), only where C++ throws, and never panics the tile worker.
+// (`onTileError`), and never panics the tile worker.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -317,21 +317,16 @@ fn truncated_tile_is_a_tile_error() {
     assert_eq!(outcome, Outcome::Error("protobuf decode error: unexpected end of buffer".to_owned()));
 }
 
-// C++ throws from getValue inside the filter evaluation.
+// A feature's tags are checked when the feature is read, so a malformed one
+// fails the tile whether or not anything reads its values.
 #[test]
-fn bad_value_read_by_a_filter_is_a_tile_error() {
+fn bad_value_is_a_tile_error() {
     let mut json = json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" });
     json["filter"] = json!(["==", ["get", "k"], "v"]);
-    let outcome = load(tile_with_bad_value(), &[layer(&json)]);
-    assert_eq!(outcome, Outcome::Error("invalid value index 7".to_owned()));
-}
-
-// C++ reads the values lazily: the fill path reads none, so the tile loads.
-// (A line layer would fail: LineBucket::addFeature reads
-// "mapbox_clip_start", and getValue walks every tag.)
-#[test]
-fn bad_value_nothing_reads_is_not_an_error() {
-    assert_eq!(load(tile_with_bad_value(), &[fill_layer()]), Outcome::Loaded);
+    for layer in [layer(&json), fill_layer()] {
+        let outcome = load(tile_with_bad_value(), &[layer]);
+        assert_eq!(outcome, Outcome::Error("invalid value index 7".to_owned()));
+    }
 }
 
 /// A truncation or some overwritten bytes.
@@ -374,16 +369,14 @@ proptest! {
     }
 }
 
-// C++ throws out of querySourceFeatures for a value it can't read
-// (convertFeature reads the properties); the port returns the error.
+// querySourceFeatures returns the error of a feature it can't read.
 #[test]
 fn query_of_a_bad_value_is_an_error() {
-    use mln_tile_id::GeometryTileData;
-    let data = mln_tile::VectorMVTTileData::new(Arc::new(tile_with_bad_value()));
-    let layer = data.get_layer("l").unwrap().unwrap();
+    let data = mln_tile::TileData::Mvt(mln_tile::MvtTile::new(Arc::new(tile_with_bad_value())));
+    let layer = data.layer("l").unwrap().unwrap();
     let mut result = Vec::new();
     let error = crate::tile::geometry_tile::query_layer_source_features(
-        &*layer,
+        &layer,
         &mut result,
         &crate::query::SourceQueryOptions::default(),
         None,

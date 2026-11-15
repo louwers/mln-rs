@@ -4,7 +4,8 @@
 
 use mln_style::expression::{EvaluationContext, Expr, Value};
 use mln_style::filter::Filter;
-use mln_tile_id::geometry_tile_data::{FeatureGroups, GeometryTileFeature, GeometryTileLayer};
+use mln_tile::{FeatureGroups, TileLayer};
+use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::hash::HashMap;
 
 /// A scalar value that an equality filter compares, as a key that equal
@@ -67,7 +68,7 @@ struct Index {
     features: Option<HashMap<Key, Vec<u32>>>,
 }
 
-/// A tile's feature groups ([`GeometryTileLayer::group_features`]) and
+/// A tile's feature groups ([`TileLayer::group_features`]) and
 /// equality indexes, made on first use and shared by the filters over the
 /// same source layer that read the same keys or compare the same operand.
 #[derive(Default)]
@@ -92,7 +93,7 @@ impl FilterGroups {
     pub(crate) fn select(
         &mut self,
         name: &str,
-        layer: &dyn GeometryTileLayer,
+        layer: &TileLayer<'_>,
         filter: &Filter,
         context: &EvaluationContext<'_>,
         passes: impl Fn(&dyn GeometryTileFeature) -> bool,
@@ -119,7 +120,7 @@ impl FilterGroups {
                 self.indexes.len() - 1
             };
             let features = self.indexes[at].features.as_ref()?;
-            let mut selected = vec![false; layer.feature_count()];
+            let mut selected = vec![false; layer.len()];
             for &i in features.get(&key).map_or(&[][..], Vec::as_slice) {
                 selected[i as usize] = true;
             }
@@ -136,11 +137,8 @@ impl FilterGroups {
         let groups = self.sets[at].2.as_ref()?;
         let mut group_passes = Vec::with_capacity(groups.first.len());
         for &first in &groups.first {
-            let feature = layer.get_feature(first).ok()?;
-            group_passes.push(passes(&*feature));
-            if feature.error().is_some() {
-                return None;
-            }
+            let feature = layer.feature(first).ok()?;
+            group_passes.push(passes(&feature));
         }
         Some(groups.of_feature.iter().map(|&group| group_passes[group as usize]).collect())
     }
@@ -149,18 +147,11 @@ impl FilterGroups {
 /// The features of `layer` by the value `operand` gives each; a feature
 /// whose operand fails, or gives a value no literal equals, is in none.
 /// `None` if a feature is malformed.
-fn index(
-    layer: &dyn GeometryTileLayer,
-    operand: &Expr,
-    context: &EvaluationContext<'_>,
-) -> Option<HashMap<Key, Vec<u32>>> {
+fn index(layer: &TileLayer<'_>, operand: &Expr, context: &EvaluationContext<'_>) -> Option<HashMap<Key, Vec<u32>>> {
     let mut features: HashMap<Key, Vec<u32>> = HashMap::default();
-    for i in 0..layer.feature_count() {
-        let feature = layer.get_feature(i).ok()?;
-        let value = operand.evaluate(&EvaluationContext { feature: Some(&*feature), ..*context });
-        if feature.error().is_some() {
-            return None;
-        }
+    for i in 0..layer.len() {
+        let feature = layer.feature(i).ok()?;
+        let value = operand.evaluate(&EvaluationContext { feature: Some(&feature), ..*context });
         if let Some(key) = value.ok().as_ref().and_then(Key::of) {
             features.entry(key).or_default().push(i as u32);
         }
@@ -175,9 +166,8 @@ mod tests {
     use feature::Value;
     use mln_style::conversion::{Convertible, Error, convert};
     use mln_style::expression::{EvaluationContext, GlobalStateMap};
-    use mln_tile::{VectorMLTTileData, VectorMVTTileData};
+    use mln_tile::{MltTile, MvtTile, TileData};
     use mln_tile_id::CanonicalTileID;
-    use mln_tile_id::geometry_tile_data::GeometryTileData;
     use mln_util::hash::HashMap;
     use mlt_core::encoder::{EncoderConfig, Network, Profile};
     use mlt_core::geo_types::Coord;
@@ -313,12 +303,7 @@ mod tests {
     /// `grouped` ones in groups or by index, the `per_feature` ones (which
     /// read more of a feature) by index if they are equalities, and one by
     /// one otherwise. Returns the groups.
-    fn check_selection(
-        name: &str,
-        layer: &dyn GeometryTileLayer,
-        grouped: &[&str],
-        per_feature: &[&str],
-    ) -> FilterGroups {
+    fn check_selection(name: &str, layer: &TileLayer<'_>, grouped: &[&str], per_feature: &[&str]) -> FilterGroups {
         let mut global_state = GlobalStateMap::new();
         global_state.insert("class".to_owned(), Value::String("primary".into()));
         let canonical = CanonicalTileID::new(0, 0, 0);
@@ -333,8 +318,7 @@ mod tests {
                             .with_global_state(Some(&global_state)),
                     )
                 };
-                let one_by_one: Vec<bool> =
-                    (0..layer.feature_count()).map(|i| passes(&*layer.get_feature(i).unwrap())).collect();
+                let one_by_one: Vec<bool> = (0..layer.len()).map(|i| passes(&layer.feature(i).unwrap())).collect();
                 let selects_none = ["nothing", "within", "zoom"].iter().any(|t| text.contains(t));
                 assert!(one_by_one.contains(&true) || selects_none, "{text}");
                 let context = EvaluationContext::new(zoom)
@@ -363,8 +347,8 @@ mod tests {
     /// one; those that read more of a feature evaluate each feature.
     #[test]
     fn grouped_selection_matches_each_feature() {
-        let data = VectorMVTTileData::new(Arc::new(roads()));
-        let layer = data.get_layer("roads").unwrap().unwrap();
+        let data = TileData::Mvt(MvtTile::new(Arc::new(roads())));
+        let layer = data.layer("roads").unwrap().unwrap();
         let grouped = [
             r#"["==", ["get", "class"], "motorway"]"#,
             r#"["==", ["get", "class"], "ferry"]"#,
@@ -397,7 +381,7 @@ mod tests {
             r#"["<", ["get", "name"], "road 7"]"#,
             r#"["==", ["%", ["number", ["id"]], 7], 3]"#,
         ];
-        let groups = check_selection("roads", &*layer, &grouped, &per_feature);
+        let groups = check_selection("roads", &layer, &grouped, &per_feature);
         // 400 roads in about 4 classes by 4 geometry types, plus the few
         // values at a second index.
         let classes = group_count(&groups, &["class"]);
@@ -410,8 +394,8 @@ mod tests {
     /// layouts of one tile evaluate with different ones.
     #[test]
     fn equality_index_is_per_context() {
-        let data = VectorMVTTileData::new(Arc::new(roads()));
-        let layer = data.get_layer("roads").unwrap().unwrap();
+        let data = TileData::Mvt(MvtTile::new(Arc::new(roads())));
+        let layer = data.layer("roads").unwrap().unwrap();
         let filter = parse_filter(r#"["==", ["concat", ["get", "class"], ["global-state", "suffix"]], "minor-a"]"#);
         let state = |suffix: &str| GlobalStateMap::from([("suffix".to_owned(), Value::String(suffix.into()))]);
         let (a, b) = (state("-a"), state("-b"));
@@ -424,9 +408,8 @@ mod tests {
             let passes = |feature: &dyn GeometryTileFeature| {
                 filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
             };
-            let one_by_one: Vec<bool> =
-                (0..layer.feature_count()).map(|i| passes(&*layer.get_feature(i).unwrap())).collect();
-            assert_eq!(groups.select("roads", &*layer, &filter, &context, passes), Some(one_by_one));
+            let one_by_one: Vec<bool> = (0..layer.len()).map(|i| passes(&layer.feature(i).unwrap())).collect();
+            assert_eq!(groups.select("roads", &layer, &filter, &context, passes), Some(one_by_one));
         }
         assert_eq!(groups.indexes.len(), 2);
     }
@@ -496,8 +479,8 @@ mod tests {
     /// one; those that read more of a feature evaluate each feature.
     #[test]
     fn grouped_mlt_selection_matches_each_feature() {
-        let data = VectorMLTTileData::new(Arc::new(roads_mlt()), true);
-        let layer = data.get_layer("roads").unwrap().unwrap();
+        let data = TileData::Mlt(MltTile::new(Arc::new(roads_mlt()), true));
+        let layer = data.layer("roads").unwrap().unwrap();
         let grouped = [
             r#"["==", ["get", "class"], "motorway"]"#,
             r#"["!has", "class"]"#,
@@ -531,7 +514,7 @@ mod tests {
             r#"["<", ["get", "name"], "road 7"]"#,
             r#"["==", ["%", ["number", ["id"]], 7], 3]"#,
         ];
-        let groups = check_selection("roads", &*layer, &grouped, &per_feature);
+        let groups = check_selection("roads", &layer, &grouped, &per_feature);
         // 400 roads in 4 classes or none, by 3 geometry types.
         assert_eq!(group_count(&groups, &["class"]), Some(15));
         // A key unique to each feature gives no groups.

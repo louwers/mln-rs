@@ -12,6 +12,7 @@ use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
@@ -24,7 +25,6 @@ use crate::image_manager::{ImageManager, ImageRequestor};
 use crate::layermanager;
 use crate::text::glyph_manager::GlyphManager;
 use crate::tile::geometry_tile::GeometryTile;
-use crate::tile::geometry_tile_worker::SharedTileData;
 use crate::tile::tile::{Tile, TileBase};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile_parameters::TileParameters;
@@ -143,14 +143,14 @@ impl Test {
     }
 }
 
-fn tile_data() -> SharedTileData {
+fn tile_data() -> TileData {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/map/issue12432/0-0-0.mvt");
-    Arc::new(mln_tile::VectorMVTTileData::new(Arc::new(std::fs::read(path).unwrap())))
+    TileData::Mvt(mln_tile::MvtTile::new(Arc::new(std::fs::read(path).unwrap())))
 }
 
 /// Tile data that isn't a vector tile.
-fn garbage() -> SharedTileData {
-    Arc::new(mln_tile::VectorMVTTileData::new(Arc::new(vec![0xff; 16])))
+fn garbage() -> TileData {
+    TileData::Mvt(mln_tile::MvtTile::new(Arc::new(vec![0xff; 16])))
 }
 
 /// A layer of the fixture's "water" source layer, evaluated as the

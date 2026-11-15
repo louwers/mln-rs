@@ -10,7 +10,6 @@ use mln_style::layers::{CircleLayerProperties, FillLayerProperties, LineLayerPro
 use mln_style_types::image::{ImageDependencies, ImageMap, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
 use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileData;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -29,7 +28,6 @@ use crate::layermanager;
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::render_layer::LayerRenderData;
-use crate::tile::geojson_tile_data::GeoJSONTileData;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SortKeyType {
@@ -109,7 +107,7 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
             }
         })
         .collect();
-    let data: Arc<dyn GeometryTileData + Send + Sync> = Arc::new(GeoJSONTileData::new(features));
+    let data = mln_tile::TileData::Features(Arc::new(features));
     let bucket_parameters = BucketParameters {
         tile_id: OverscaledTileID::from_zxy(0, 0, 0),
         mode: MapMode::Continuous,
@@ -132,7 +130,7 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
             available_images: &available_images,
             filter_groups: &mut FilterGroups::default(),
         },
-        SourceLayer::new(Arc::clone(&data), ""),
+        SourceLayer::new(data.clone(), ""),
         &[properties],
     )
     .unwrap()

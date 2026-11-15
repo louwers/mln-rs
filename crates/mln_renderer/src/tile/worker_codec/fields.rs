@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::shared_layer_properties;
-use mln_tile_id::EncodedTileData;
 use mln_util::serialization::shared::{self, Kind, WireKind};
 use mln_wire::{Reader, Wire, Writer};
 
@@ -21,53 +20,7 @@ use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::dynamic_texture::DynamicTexture;
 use crate::render_layer::LayerRenderData;
-use crate::tile::geojson_tile_data::GeoJSONTileData;
 use crate::tile::geometry_tile::{LayoutAtlases, LayoutResult};
-use crate::tile::geometry_tile_worker::SharedTileData;
-
-/// The `shared::Kind` of tile data: what it is made from
-/// (`GeometryTileData::encoded`), which the other side makes it from again.
-/// A layout's feature index refers to the data it indexes by key.
-pub(crate) struct SharedTileDataKind;
-
-impl Kind for SharedTileDataKind {
-    type Value = dyn mln_tile_id::GeometryTileData + Send + Sync;
-    const NAME: &'static str = "tile data";
-}
-
-impl WireKind for SharedTileDataKind {
-    fn write(data: &Self::Value, w: &mut Writer) {
-        match data.encoded() {
-            Some(encoded) => encoded.write(w),
-            None => w.fail("tile data that no longer has its bytes can't cross".to_owned()),
-        }
-    }
-
-    fn read(r: &mut Reader<'_>) -> Option<SharedTileData> {
-        Some(match EncodedTileData::read(r)? {
-            EncodedTileData::Mvt(bytes) => Arc::new(mln_tile::VectorMVTTileData::new(bytes)),
-            EncodedTileData::Mlt { data, fast_pfor_enabled } => {
-                Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled))
-            }
-            EncodedTileData::GeoJson(features) => Arc::new(GeoJSONTileData::new(Arc::unwrap_or_clone(features))),
-        })
-    }
-}
-
-/// `#[wire(with)]` for an `Option<SharedTileData>`.
-pub(crate) mod tile_data {
-    use super::{Reader, SharedTileData, SharedTileDataKind, Writer, shared};
-
-    #[expect(clippy::ref_option, reason = "`#[wire(with)]` passes the field by reference")]
-    pub(crate) fn write(data: &Option<SharedTileData>, w: &mut Writer) {
-        shared::write_option::<SharedTileDataKind>(data, w);
-    }
-
-    #[expect(clippy::option_option, reason = "a read that can fail, of an `Option`")]
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Option<SharedTileData>> {
-        shared::read_option::<SharedTileDataKind>(r)
-    }
-}
 
 /// The `shared::Kind` of the textures of a worker instance's atlas, which
 /// come from the instance: the map side keeps a copy of each

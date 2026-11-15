@@ -11,12 +11,12 @@ use std::time::Duration;
 use mln_actor::SchedulerPtr;
 use mln_storage::response::Reason;
 use mln_storage::{Data, FileSource, FileSourceExt, LoadingMethod, Request, Resource, Response, StoragePolicy};
+use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::tileset::Tileset;
 
 use crate::tile::geometry_tile::GeometryTileInner;
-use crate::tile::geometry_tile_worker::SharedTileData;
 use crate::tile::tile::{TileLoadOrder, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile_parameters::TileParameters;
 
@@ -87,11 +87,11 @@ impl LoaderTile for GeometryTileInner {
     fn set_data(&self, data: Option<Data>, encoding: VectorTileEncoding) {
         if !self.is_obsolete() {
             self.missing.set(false);
-            let data = data.map(|data| -> SharedTileData {
+            let data = data.map(|data| -> TileData {
                 match encoding {
-                    VectorTileEncoding::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)),
+                    VectorTileEncoding::Mvt => TileData::Mvt(mln_tile::MvtTile::new(data)),
                     VectorTileEncoding::Mlt { fast_pfor_enabled } => {
-                        Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled))
+                        TileData::Mlt(mln_tile::MltTile::new(data, fast_pfor_enabled))
                     }
                 }
             });

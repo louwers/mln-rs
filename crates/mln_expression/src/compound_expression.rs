@@ -495,7 +495,7 @@ impl CompoundExpression {
             }
             Op::Properties => {
                 let mut result = ObjectType::new();
-                for (k, v) in Self::feature(params)?.get_properties() {
+                for (k, v) in Self::feature(params)?.get_properties().iter() {
                     result.insert(k.clone(), mbgl_to_expression_value(v));
                 }
                 Ok(Value::Object(result))

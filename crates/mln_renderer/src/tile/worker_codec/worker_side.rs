@@ -11,7 +11,7 @@ use mln_util::serialization::{payload, shared};
 use mln_wire::Wire;
 
 use super::envelope::{self, About, Action, Encoded, ReplyHead, Request, TextureUpload};
-use super::fields::{SharedTexture, SharedTileDataKind};
+use super::fields::SharedTexture;
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, DynamicTextureAtlasPtr};
 use crate::tile::geometry_tile::{LayoutAtlases, LayoutResult};
 use crate::tile::geometry_tile_worker::TileMessage;
@@ -65,7 +65,8 @@ impl WorkerCodec {
             .copies::<SharedLayerProperties>()
             .copies::<SharedExpression>()
             .copies::<SharedImage>()
-            .copies::<SharedTileDataKind>()
+            .copies::<mln_tile::TileBytes>()
+            .copies::<mln_tile::TileFeatures>()
             .origin::<SharedTexture>();
         WorkerCodec { tables, atlas }
     }

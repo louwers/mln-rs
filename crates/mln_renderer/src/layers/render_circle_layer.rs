@@ -404,6 +404,7 @@ impl RenderLayer for RenderCircleLayer {
         &self,
         query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         zoom: f32,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
@@ -463,7 +464,6 @@ impl RenderLayer for RenderCircleLayer {
             *evaluated.circle_translate_anchor.uniform(),
             transform_state,
         );
-        let geometry = feature.get_geometries();
         for ring in geometry.iter() {
             for point in ring {
                 if transform_state.is_globe_rendering()

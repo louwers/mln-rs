@@ -15,6 +15,7 @@ use mln_style_types::image::{ImageMap, ImageType};
 use mln_text::glyph::{GlyphIDType, GlyphMap, GlyphRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
+use mln_tile::{MltTile, MvtTile, TileData};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
@@ -28,7 +29,7 @@ use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, ImageVersionMap};
 use crate::layermanager;
 use crate::text::glyph_manager::HBShapeResults;
 use crate::tile::geometry_tile::LayoutResult;
-use crate::tile::geometry_tile_worker::{GeometryTileWorker, SharedTileData, TileMessage, WorkerMessage};
+use crate::tile::geometry_tile_worker::{GeometryTileWorker, TileMessage, WorkerMessage};
 use crate::tile::tile_worker_transport::{TileEndpoint, WorkerParameters};
 
 const TILE: u64 = 7;
@@ -54,8 +55,18 @@ fn fixture(path: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-fn tile_data() -> SharedTileData {
-    Arc::new(mln_tile::VectorMVTTileData::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mvt"))))
+fn tile_data() -> TileData {
+    TileData::Mvt(MvtTile::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mvt"))))
+}
+
+/// Whether `a` and `b` share what they are made from.
+fn shares(a: &TileData, b: &TileData) -> bool {
+    match (a, b) {
+        (TileData::Mvt(a), TileData::Mvt(b)) => Arc::ptr_eq(a.bytes(), b.bytes()),
+        (TileData::Mlt(a), TileData::Mlt(b)) => Arc::ptr_eq(a.bytes(), b.bytes()),
+        (TileData::Features(a), TileData::Features(b)) => Arc::ptr_eq(a, b),
+        _ => false,
+    }
 }
 
 fn convert(json: &str) -> Box<dyn Layer> {
@@ -102,8 +113,8 @@ fn set_layers(layers: &[Arc<dyn LayerProperties>], correlation_id: u64) -> Worke
     }
 }
 
-fn set_data(data: &SharedTileData, correlation_id: u64) -> WorkerMessage {
-    WorkerMessage::SetData { data: Some(Arc::clone(data)), available_images: Arc::new(VecSet::new()), correlation_id }
+fn set_data(data: &TileData, correlation_id: u64) -> WorkerMessage {
+    WorkerMessage::SetData { data: Some(data.clone()), available_images: Arc::new(VecSet::new()), correlation_id }
 }
 
 /// What the tile answers a worker's glyph and image requests with: the
@@ -270,7 +281,7 @@ fn comparable(result: &LayoutResult) -> [Vec<u8>; 3] {
 /// directly (in that order: decoding MLT data drops its bytes, and a tile
 /// sends its data before anything decodes it), checks that both layouts
 /// are the same, and returns the one that crossed, with its codec.
-fn cross(layers: &[Arc<dyn LayerProperties>], data: &SharedTileData) -> (ThroughCodec, LayoutResult) {
+fn cross(layers: &[Arc<dyn LayerProperties>], data: &TileData) -> (ThroughCodec, LayoutResult) {
     let messages = || vec![set_layers(layers, 1), set_data(data, 2)];
     let mut codec = ThroughCodec::new();
     let result = codec.layout(messages());
@@ -365,7 +376,7 @@ fn every_geometry_layer_type_crosses() {
         assert!(Arc::ptr_eq(&render_data.layer_properties, sent));
         assert!(render_data.bucket.has_data());
     }
-    assert!(std::ptr::addr_eq(result.feature_index.get_data().unwrap(), Arc::as_ptr(&data)));
+    assert!(shares(result.feature_index.get_data().unwrap(), &data));
 }
 
 /// Symbol layers cross too: the worker's glyph and image requests reach
@@ -423,9 +434,9 @@ fn format_section_overrides_cross() {
 /// MLT tile data crosses as its bytes too.
 #[test]
 fn mlt_tiles_cross() {
-    let data: SharedTileData =
-        Arc::new(mln_tile::VectorMLTTileData::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mlt")), false));
-    cross(&layers(&[FILL, LINE]), &data);
+    let data = TileData::Mlt(MltTile::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mlt")), false));
+    let (_, result) = cross(&layers(&[FILL, LINE]), &data);
+    assert!(shares(result.feature_index.get_data().unwrap(), &data));
 }
 
 /// Pattern layers cross with their images: the worker's image request
@@ -512,16 +523,17 @@ fn geojson_tiles_cross() {
         ),
     ];
 
-    let encoded = mln_wire::to_vec(&mln_tile_id::EncodedTileData::GeoJson(Arc::new(features.clone()))).unwrap();
-    let Ok(mln_tile_id::EncodedTileData::GeoJson(decoded)) = mln_wire::from_slice(&encoded) else {
-        panic!("not GeoJSON")
+    // Outside a codec, the features are written in full.
+    let data = TileData::Features(Arc::new(features));
+    let Ok(TileData::Features(decoded)) = mln_wire::from_slice(&mln_wire::to_vec(&data).unwrap()) else {
+        panic!("not features")
     };
-    assert_eq!(*decoded, features);
+    let TileData::Features(features) = &data else { unreachable!() };
+    assert_eq!(decoded, *features);
 
     // A GeoJSON tile's one layer is every source layer.
-    let data: SharedTileData = Arc::new(crate::tile::geojson_tile_data::GeoJSONTileData::new(features));
     let (_, result) = cross(&layers(&[FILL, LINE, CIRCLE]), &data);
-    assert!(std::ptr::addr_eq(result.feature_index.get_data().unwrap(), Arc::as_ptr(&data)));
+    assert!(shares(result.feature_index.get_data().unwrap(), &data));
 }
 
 /// A fill layer whose color the tile's render layer is transitioning from

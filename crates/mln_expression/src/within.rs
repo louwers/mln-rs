@@ -282,7 +282,10 @@ fn feature_within_polygons(
     if polygons.is_empty() {
         return false;
     }
-    let geometries = feature.get_geometries();
+    // A geometry that can't be decoded is within nothing.
+    let Ok(geometries) = feature.get_geometries() else {
+        return false;
+    };
     match feature.get_type() {
         FeatureType::Point => {
             // C++ asserts a geometry and reads `geometries.at(0)` (which
@@ -300,7 +303,7 @@ fn feature_within_polygons(
         }
         FeatureType::LineString => {
             let mut line_bbox = DEFAULT_WITHIN_BBOX;
-            let multi_line_string = get_tile_lines(geometries, canonical, &mut line_bbox, &poly_bbox);
+            let multi_line_string = get_tile_lines(&geometries, canonical, &mut line_bbox, &poly_bbox);
             if !box_within_box(&line_bbox, &poly_bbox) {
                 return false;
             }
@@ -476,6 +479,8 @@ impl Within {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
     use crate::value::Value;
 
@@ -499,8 +504,10 @@ mod tests {
             None
         }
 
-        fn get_geometries(&self) -> &mln_tile_id::geometry_tile_data::GeometryCollection {
-            &self.0
+        fn get_geometries(
+            &self,
+        ) -> Result<Cow<'_, mln_tile_id::geometry_tile_data::GeometryCollection>, mln_util::error::Error> {
+            Ok(Cow::Borrowed(&self.0))
         }
     }
 

@@ -1,6 +1,4 @@
-// Polygon fixup runs on i_overlay, where C++ uses wagyu. The feature
-// interfaces (`GeometryTileFeature` and the rest) are in
-// `mln_tile_id::geometry_tile_data`.
+// Polygon fixup runs on i_overlay, where C++ uses wagyu.
 
 use std::f64::consts::PI;
 
@@ -16,7 +14,7 @@ use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::math::{angle_between, cross_product, dist_f64, normal, perp};
 
-use crate::Error;
+use crate::TileError;
 
 /// Twice the signed area of `ring`. The products are C++ `int` arithmetic,
 /// which can overflow for coordinates near the int16 limits; x86-64 wraps,
@@ -116,15 +114,16 @@ pub fn limit_holes(polygon: &mut GeometryCollection, max_holes: u32) {
     }
 }
 
-/// Converts the geometry of a feature of `tile_id` from tile coordinates to
-/// longitude/latitude. Fails with `Error::OutOfRange` for a point feature
-/// without rings, where C++ throws from `geometries.at(0)`. A feature of
+/// Converts `geometries`, the geometry of a feature of type `feature_type`
+/// in `tile_id`, from tile coordinates to longitude/latitude. Fails with
+/// [`TileError::OutOfRange`] for a point feature without rings. A feature of
 /// `FeatureType::Unknown` fails a debug assertion and otherwise converts to
-/// `Point(NaN, NaN)`, as in C++.
+/// `Point(NaN, NaN)`.
 pub fn convert_geometry(
-    geometry_tile_feature: &dyn GeometryTileFeature,
+    feature_type: FeatureType,
+    geometries: &GeometryCollection,
     tile_id: &CanonicalTileID,
-) -> Result<Geometry<f64>, Error> {
+) -> Result<Geometry<f64>, TileError> {
     let size = f64::from(EXTENT) * 2f64.powi(i32::from(tile_id.z));
     let x0 = f64::from(EXTENT) * f64::from(tile_id.x);
     let y0 = f64::from(EXTENT) * f64::from(tile_id.y);
@@ -135,16 +134,14 @@ pub fn convert_geometry(
     };
     let line_string = |points: &[Point<i16>]| LineString(points.iter().map(tile_coordinates_to_lat_lng).collect());
 
-    let geometries = geometry_tile_feature.get_geometries();
-
-    match geometry_tile_feature.get_type() {
+    match feature_type {
         FeatureType::Unknown => {
             debug_assert!(false, "convertGeometry of a feature of unknown type");
             Ok(Geometry::Point(geo_types::Point::new(f64::NAN, f64::NAN)))
         }
 
         FeatureType::Point => {
-            let first = geometries.first().ok_or_else(|| Error::vector_range_check(0, geometries.len()))?;
+            let first = geometries.first().ok_or_else(|| TileError::vector_range_check(0, geometries.len()))?;
             if let [p] = first.as_slice() {
                 Ok(Geometry::Point(tile_coordinates_to_lat_lng(p).into()))
             } else {
@@ -236,16 +233,18 @@ fn geometry_rings<T: CoordNum, U>(geometry: &Geometry<T>, point: impl Fn(Coord<T
     }
 }
 
-/// Converts a tile feature to a `Feature` in longitude/latitude, with its
-/// properties and id. Fails as [`convert_geometry`] does.
+/// Converts a feature of `tile_id` whose geometry is `geometries` to a
+/// `Feature` in longitude/latitude, with its properties and id. Fails as
+/// [`convert_geometry`] does.
 pub fn convert_feature(
-    geometry_tile_feature: &dyn GeometryTileFeature,
+    feature: &dyn GeometryTileFeature,
+    geometries: &GeometryCollection,
     tile_id: &CanonicalTileID,
-) -> Result<Feature<f64>, Error> {
-    let mut feature = Feature::new(convert_geometry(geometry_tile_feature, tile_id)?);
-    feature.properties = geometry_tile_feature.get_properties().clone();
-    feature.id = geometry_tile_feature.get_id();
-    Ok(feature)
+) -> Result<Feature<f64>, TileError> {
+    let mut converted = Feature::new(convert_geometry(feature.get_type(), geometries, tile_id)?);
+    converted.properties = feature.get_properties().into_owned();
+    converted.id = feature.get_id();
+    Ok(converted)
 }
 
 /// The lines or rings of a tile feature's geometry; a null geometry has

@@ -431,7 +431,7 @@ impl SymbolLayout {
         // Determine glyph dependencies
         let source_layer = this.source_layer.clone();
         let geometry_layer = source_layer.layer()?;
-        let feature_count = geometry_layer.feature_count();
+        let feature_count = geometry_layer.len();
         let canonical_id = this.canonical_id;
         let context = EvaluationContext::new(this.zoom)
             .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
@@ -442,7 +442,7 @@ impl SymbolLayout {
         };
         let selected = layout_parameters.filter_groups.select(
             &source_layer.name,
-            &*geometry_layer,
+            &geometry_layer,
             &leader.filter,
             &context,
             passes,
@@ -452,21 +452,12 @@ impl SymbolLayout {
             if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;
             }
-            let feature = geometry_layer.get_feature(i)?;
-            if selected.is_none() {
-                let passes = passes(&*feature);
-                feature.check()?;
-                if !passes {
-                    continue;
-                }
+            let feature = geometry_layer.feature(i)?;
+            if selected.is_none() && !passes(&feature) {
+                continue;
             }
 
-            // C++ keeps the feature and reads its values lazily; the copy
-            // reads all of them, so a malformed one is an error here even if
-            // nothing reads it.
-            let mut ft = SymbolFeature::new(&*feature);
-            feature.check()?;
-            drop(feature);
+            let mut ft = SymbolFeature::new(&feature, feature.geometry()?);
 
             ft.index = i;
 

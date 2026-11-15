@@ -17,19 +17,18 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
 use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVectorTileLoader, TileDataFormat};
 use mln_style::sources::geojson_source::TileFeatures;
+use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 
-use crate::tile::geojson_tile_data::GeoJSONTileData;
 use crate::tile::geometry_tile::{GeometryTile, GeometryTileInner};
-use crate::tile::geometry_tile_worker::SharedTileData;
 use crate::tile::tile::{Tile, TileBase, TileNecessity};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::TileRenderData;
 
 /// Turns the data a loader hands a tile into the tile's data.
-type DataConverter<D> = Box<dyn Fn(D) -> Option<SharedTileData>>;
+type DataConverter<D> = Box<dyn Fn(D) -> Option<TileData>>;
 
 /// A key no other custom tile has.
 fn next_subscriber_key() -> SubscriberKey {
@@ -153,7 +152,7 @@ impl CustomGeometryTile {
             parameters,
             loader,
             observer,
-            Box::new(|features: Arc<TileFeatures>| Some(Arc::new(GeoJSONTileData::from_shared(features)))),
+            Box::new(|features: Arc<TileFeatures>| Some(TileData::Features(features))),
             true,
         )
     }
@@ -178,10 +177,10 @@ impl CustomVectorTile {
             loader,
             observer,
             Box::new(move |(data, format): CustomVectorTileData| {
-                data.map(|data| -> SharedTileData {
+                data.map(|data| -> TileData {
                     match format {
-                        TileDataFormat::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)),
-                        TileDataFormat::Mlt => Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled)),
+                        TileDataFormat::Mvt => TileData::Mvt(mln_tile::MvtTile::new(data)),
+                        TileDataFormat::Mlt => TileData::Mlt(mln_tile::MltTile::new(data, fast_pfor_enabled)),
                     }
                 })
             }),
@@ -315,10 +314,10 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         // Ignore the sourceLayer, there is only one
         if let Some(feature_index) = self.tile.get_feature_index()
             && let Some(tile_data) = feature_index.get_data()
-            && let Some(layer) = tile_data.get_layer("")?
+            && let Some(layer) = tile_data.layer("")?
         {
             crate::tile::geometry_tile::query_layer_source_features(
-                &*layer,
+                &layer,
                 result,
                 options,
                 global_state,

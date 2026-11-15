@@ -5,10 +5,9 @@
 // sort key) are one type with a `sorted` flag, chosen as the C++ factories
 // choose the instantiation.
 //
-// A Rust `GeometryTileLayer` borrows its tile data, so the layout keeps the
+// A `TileLayer` borrows its tile data, so the layout keeps the
 // feature *indices* it accepted (`PatternFeature::i`) and gets the features
 // again in `create_bucket` (C++ keeps the `unique_ptr<GeometryTileFeature>`).
-// Getting a feature twice yields the same feature.
 
 use std::sync::Arc;
 
@@ -19,8 +18,9 @@ use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties};
 use mln_style::layers::line_layer_properties::{LineLayerProperties, LineLayoutProperties};
 use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
+use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -114,7 +114,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     pub(crate) fn new(
         parameters: &BucketParameters,
         group: &[Arc<dyn LayerProperties>],
-        source_layer: &dyn GeometryTileLayer,
+        source_layer: &TileLayer<'_>,
         image_dependencies: &mut ImageDependencies,
         available_images: &VecSet<String>,
         filter_groups: &mut FilterGroups,
@@ -151,7 +151,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
 
         let constant_sort_key = if sorted { S::constant_sort_key(&layout) } else { None };
         let mut features: Vec<PatternFeature> = Vec::new();
-        let feature_count = source_layer.feature_count();
+        let feature_count = source_layer.len();
         let context = EvaluationContext::new(zoom)
             .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
             .with_global_state(parameters.global_state.as_deref());
@@ -163,13 +163,9 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;
             }
-            let feature = source_layer.get_feature(i)?;
-            if selected.is_none() {
-                let passes = passes(&*feature);
-                feature.check()?;
-                if !passes {
-                    continue;
-                }
+            let feature = source_layer.feature(i)?;
+            if selected.is_none() && !passes(&feature) {
+                continue;
             }
 
             let mut pattern_dependency_map = PatternLayerMap::default();
@@ -184,17 +180,17 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                             // the patterns to the dependency vector
                             let canonical = &parameters.tile_id.canonical;
                             let min = pattern_property.evaluate_faded(
-                                &EvaluationContext::with_zoom_feature(zoom - 1.0, Some(&*feature))
+                                &EvaluationContext::with_zoom_feature(zoom - 1.0, Some(&feature))
                                     .with_available_images(Some(available_images))
                                     .with_canonical_tile_id(Some(canonical)),
                             );
                             let mid = pattern_property.evaluate_faded(
-                                &EvaluationContext::with_zoom_feature(zoom, Some(&*feature))
+                                &EvaluationContext::with_zoom_feature(zoom, Some(&feature))
                                     .with_available_images(Some(available_images))
                                     .with_canonical_tile_id(Some(canonical)),
                             );
                             let max = pattern_property.evaluate_faded(
-                                &EvaluationContext::with_zoom_feature(zoom + 1.0, Some(&*feature))
+                                &EvaluationContext::with_zoom_feature(zoom + 1.0, Some(&feature))
                                     .with_available_images(Some(available_images))
                                     .with_canonical_tile_id(Some(canonical)),
                             );
@@ -216,14 +212,11 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                 }
             }
 
-            feature.check()?;
-
             if let Some(sort_key) = constant_sort_key {
                 features.push(PatternFeature { i, sort_key, patterns: pattern_dependency_map });
             } else if sorted {
                 // PatternFeatureInserter<SortKeyPropertyType>::insert
-                let sort_key = S::sort_key(&layout, &*feature, zoom, &parameters.tile_id.canonical);
-                feature.check()?;
+                let sort_key = S::sort_key(&layout, &feature, zoom, &parameters.tile_id.canonical);
                 let pattern_feature = PatternFeature { i, sort_key, patterns: pattern_dependency_map };
                 // std::lower_bound: the first feature whose key is not less.
                 let lower_bound = features.partition_point(|f| f.sort_key < sort_key);
@@ -265,7 +258,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         let mut layout = PatternLayout::new(
             parameters.bucket_parameters,
             group,
-            &*source_layer.layer()?,
+            &source_layer.layer()?,
             parameters.image_dependencies,
             parameters.available_images,
             parameters.filter_groups,
@@ -284,7 +277,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     /// index.
     pub(crate) fn create_bucket_with(
         &mut self,
-        source_layer: &dyn GeometryTileLayer,
+        source_layer: &TileLayer<'_>,
         pattern_positions: &ImagePositions,
         insert_feature: &mut dyn FnMut(&GeometryCollection, usize, &str, &str),
         render_data: &mut HashMap<String, LayerRenderData>,
@@ -312,10 +305,9 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
 
         for pattern_feature in &self.features {
             let i = pattern_feature.i;
-            let feature = source_layer.get_feature(i)?;
+            let feature = source_layer.feature(i)?;
             let patterns = pattern_feature.get_patterns();
-            let geometries = feature.get_geometries();
-            feature.check()?;
+            let geometries = feature.geometry()?;
 
             for (layer_id, pattern) in patterns {
                 record_sdf_pattern(&mut bucket, layer_id, &pattern.min);
@@ -323,9 +315,8 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                 record_sdf_pattern(&mut bucket, layer_id, &pattern.max);
             }
 
-            insert_feature(geometries, i, &self.source_layer_id, &self.bucket_leader_id);
-            bucket.add_feature(&*feature, geometries, pattern_positions, patterns, i, canonical)?;
-            feature.check()?;
+            insert_feature(&geometries, i, &self.source_layer_id, &self.bucket_leader_id);
+            bucket.add_feature(&feature, &geometries, pattern_positions, patterns, i, canonical)?;
         }
         if bucket.has_data() {
             let bucket: BucketPtr = Arc::new(bucket);
@@ -453,7 +444,7 @@ impl<S: PatternLayoutSpec> Layout for PatternLayout<S> {
         let source_layer = self.source_layer.clone().expect("PatternLayout: source layer");
         let layer = source_layer.layer()?;
         self.create_bucket_with(
-            &*layer,
+            &layer,
             pattern_positions,
             &mut |geometries, i, source_layer_id, bucket_leader_id| {
                 feature_index.insert(geometries, i, source_layer_id, bucket_leader_id);

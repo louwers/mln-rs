@@ -353,7 +353,7 @@ impl Bucket for FillExtrusionBucket {
     fn update(
         &self,
         states: &crate::bucket::FeatureStates,
-        layer: &dyn mln_tile_id::geometry_tile_data::GeometryTileLayer,
+        layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,
     ) {

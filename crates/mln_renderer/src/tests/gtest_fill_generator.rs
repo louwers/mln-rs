@@ -269,8 +269,7 @@ fn carried_triangles(tile: &[u8]) -> Vec<Vec<Triangle>> {
 #[test]
 fn mlt_polygons_fill_with_the_triangles_the_tile_carries() {
     use geo_types::{Geometry, LineString, MultiPolygon, Polygon};
-    use mln_tile::VectorMLTTileData;
-    use mln_tile_id::geometry_tile_data::GeometryTileData as _;
+    use mln_tile::{MltTile, TileData};
 
     let ring =
         |coords: &[(i32, i32)]| LineString::from(coords.iter().map(|&(x, y)| (x * 20, y * 20)).collect::<Vec<_>>());
@@ -289,15 +288,14 @@ fn mlt_polygons_fill_with_the_triangles_the_tile_carries() {
     ];
     let tile = tessellated_mlt(&geometries);
     let carried = carried_triangles(&tile);
-    let data = VectorMLTTileData::new(Arc::new(tile), false);
-    let layer = data.get_layer("polygons").expect("layer").expect("the polygons layer");
+    let data = TileData::Mlt(MltTile::new(Arc::new(tile), false));
+    let layer = data.layer("polygons").expect("layer").expect("the polygons layer");
     let canonical = CanonicalTileID::new(14, 0, 0);
     for (i, carried) in carried.iter().enumerate() {
-        let feature = layer.get_feature(i).expect("feature");
-        let geometry = feature.get_geometries();
+        let geometry = layer.feature(i).expect("feature").geometry().expect("geometry");
         assert!(!geometry.get_triangles().is_empty(), "feature {i}");
 
-        let tessellated = generate(geometry, &canonical, 1);
+        let tessellated = generate(&geometry, &canonical, 1);
         let earcut = generate(&GeometryCollection::from(geometry.to_vec()), &canonical, 1);
         let (triangles, lines) = drawn(&tessellated);
         let (earcut_triangles, earcut_lines) = drawn(&earcut);

@@ -268,7 +268,8 @@ impl RenderLayer for RenderFillLayer {
     fn query_intersects_feature(
         &self,
         query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         _zoom: f32,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
@@ -286,7 +287,7 @@ impl RenderLayer for RenderFillLayer {
 
         mln_util::intersection_tests::polygon_intersects_multi_polygon(
             translated_query_geometry.as_ref().unwrap_or(query_geometry),
-            feature.get_geometries(),
+            geometry,
         )
     }
 

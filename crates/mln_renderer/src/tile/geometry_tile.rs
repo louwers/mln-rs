@@ -36,6 +36,7 @@ use mln_style_types::VisibilityType;
 use mln_style_types::image::{ImageMap, ImagePosition, ImageType};
 use mln_text::BiDi;
 use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
+use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
@@ -53,7 +54,7 @@ use crate::render_layer::LayerRenderData;
 use crate::render_orchestrator::drop_on_workers;
 use crate::render_source::SourcePrepareParameters;
 use crate::text::glyph_manager::{GlyphManager, GlyphRequestor, HBShapeResults, glyph_requestor_key};
-use crate::tile::geometry_tile_worker::{SharedTileData, TileMessage, WorkerMessage};
+use crate::tile::geometry_tile_worker::{TileMessage, WorkerMessage};
 use crate::tile::tile::{Kind, Tile, TileBase, TileOperation};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile::tile_worker_transport::{SynchronousTile, TileEndpoint, WorkerEndpoint, WorkerParameters};
@@ -335,7 +336,7 @@ impl GeometryTileInner {
         self.base.observer().on_tile_error(&self.base, err);
     }
 
-    pub(crate) fn set_data(&self, data: Option<SharedTileData>) {
+    pub(crate) fn set_data(&self, data: Option<TileData>) {
         if self.obsolete.load(Ordering::SeqCst) {
             return;
         }
@@ -614,7 +615,7 @@ impl GeometryTile {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_data(&self, data: Option<SharedTileData>) {
+    pub(crate) fn set_data(&self, data: Option<TileData>) {
         self.inner.set_data(data);
     }
 
@@ -753,7 +754,7 @@ impl Tile for GeometryTile {
         for (layer_id, render_data) in &layout_result.layer_render_data {
             let source_layer_id = &render_data.layer_properties.base_impl.source_layer;
             // The worker got the layer from the same data.
-            if let Ok(Some(source_layer)) = layers.get_layer(source_layer_id) {
+            if let Ok(Some(source_layer)) = layers.layer(source_layer_id) {
                 let Some(feature_states) = states.get(source_layer_id) else {
                     continue;
                 };
@@ -763,7 +764,7 @@ impl Tile for GeometryTile {
                 if render_data.bucket.has_data() {
                     render_data.bucket.update(
                         feature_states,
-                        &*source_layer,
+                        &source_layer,
                         layer_id,
                         &layout_result.image_atlas().pattern_positions,
                     );
@@ -912,9 +913,9 @@ impl Tile for GeometryTile {
         for source_layer in source_layers {
             // Go through all sourceLayers, if any
             // to gather all the features
-            if let Some(layer) = data.get_layer(source_layer)? {
+            if let Some(layer) = data.layer(source_layer)? {
                 let start = result.len();
-                query_layer_source_features(&*layer, result, options, global_state, &id)?;
+                query_layer_source_features(&layer, result, options, global_state, &id)?;
                 for feature in &mut result[start..] {
                     feature.source_layer.clone_from(source_layer);
                 }
@@ -935,35 +936,26 @@ use crate::source_state::SourceFeatureState;
 /// The feature loop of `GeometryTile::querySourceFeatures` and
 /// `GeoJSONTile::querySourceFeatures`.
 pub(crate) fn query_layer_source_features(
-    layer: &dyn mln_tile_id::geometry_tile_data::GeometryTileLayer,
+    layer: &mln_tile::TileLayer<'_>,
     result: &mut Vec<Feature>,
     options: &SourceQueryOptions,
     global_state: Option<&GlobalStateMap>,
     id: &OverscaledTileID,
 ) -> Result<(), Error> {
-    let feature_count = layer.feature_count();
-    for i in 0..feature_count {
-        let feature = layer.get_feature(i)?;
+    for i in 0..layer.len() {
+        let feature = layer.feature(i)?;
 
         // Apply filter, if any
         if let Some(filter) = &options.filter {
-            let context = mln_style::expression::EvaluationContext::with_zoom_feature(
-                f32::from(id.overscaled_z),
-                Some(&*feature),
-            )
-            .with_global_state(global_state);
-            let passes = filter.evaluate(&context);
-            feature.check()?;
-            if !passes {
+            let context =
+                mln_style::expression::EvaluationContext::with_zoom_feature(f32::from(id.overscaled_z), Some(&feature))
+                    .with_global_state(global_state);
+            if !filter.evaluate(&context) {
                 continue;
             }
         }
 
-        // C++ throws out of the query for a malformed geometry (from
-        // `convertFeature`) or value.
-        let converted = mln_tile::geometry_tile_data::convert_feature(&*feature, &id.canonical)
-            .map_err(|e| Error::native(e.to_string()))?;
-        feature.check()?;
+        let converted = mln_tile::convert_feature(&feature, &feature.geometry()?, &id.canonical)?;
         result.push(Feature::from(converted));
     }
     Ok(())
@@ -973,80 +965,70 @@ pub(crate) fn query_layer_source_features(
 mod tests {
     use std::thread::ThreadId;
 
-    use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileLayer};
+    use mln_actor::scheduler::{Scheduler, Task};
     use mln_util::identity::SimpleIdentity;
 
     use super::*;
     use crate::gfx::dynamic_texture::{DynamicTexturePtr, TextureHandle};
 
-    /// Records the thread a value drops or is released on.
-    #[derive(Clone, Default)]
-    struct Threads(Arc<Mutex<Vec<ThreadId>>>);
+    /// A scheduler that runs its tasks only when it is waited for.
+    #[derive(Default)]
+    struct Held(Mutex<Vec<Task>>);
 
-    impl Threads {
-        fn record(&self) {
-            self.0.lock().push(std::thread::current().id());
+    impl Scheduler for Held {
+        fn schedule(&self, task: Task) {
+            self.0.lock().push(task);
         }
 
-        fn get(&self) -> Vec<ThreadId> {
-            self.0.lock().clone()
-        }
-    }
-
-    /// Tile data that records the thread it drops on.
-    struct TileData(Threads);
-
-    impl GeometryTileData for TileData {
-        fn clone_data(&self) -> Box<dyn GeometryTileData> {
-            unreachable!()
-        }
-
-        fn get_layer(&self, _name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, Error> {
-            Ok(None)
-        }
-    }
-
-    impl Drop for TileData {
-        fn drop(&mut self) {
-            self.0.record();
+        fn wait_for_empty(&self) {
+            let tasks = std::mem::take(&mut *self.0.lock());
+            for task in tasks {
+                task();
+            }
         }
     }
 
     /// An atlas that records the threads its textures are released on.
-    struct Atlas(Threads);
+    #[derive(Default)]
+    struct Atlas(Mutex<Vec<ThreadId>>);
 
     impl TextureAtlas for Atlas {
         fn remove_textures(&self, _texture_handles: &[TextureHandle], _dynamic_texture: Option<&DynamicTexturePtr>) {
-            self.0.record();
+            self.0.lock().push(std::thread::current().id());
         }
 
         fn remove_unused_dynamic_textures(&self) {}
     }
 
-    /// The last reference to a layout frees its feature index on the
-    /// workers and releases its atlases on the render thread.
+    /// The last reference to a layout frees its feature index, and the tile
+    /// data in it, on the workers, and releases its atlases on the render
+    /// thread.
     #[test]
     fn a_layout_frees_its_data_on_the_workers_and_its_atlases_here() {
-        let thread_pool = TaggedScheduler::new(mln_actor::scheduler::get_background(), SimpleIdentity::new());
-        let (data_drops, atlas_releases) = (Threads::default(), Threads::default());
+        let workers = Arc::new(Held::default());
+        let scheduler: mln_actor::scheduler::SchedulerPtr = Arc::<Held>::clone(&workers);
+        let thread_pool = TaggedScheduler::new(scheduler, SimpleIdentity::new());
+        let features = Arc::new(Vec::new());
+        let data = Arc::downgrade(&features);
+        let atlas = Arc::new(Atlas::default());
+        let texture_atlas: Arc<dyn TextureAtlas> = Arc::<Atlas>::clone(&atlas);
         let result = LayoutResult::new(
             HashMap::default(),
-            Arc::new(FeatureIndex::new(Some(Arc::new(TileData(data_drops.clone()))))),
+            Arc::new(FeatureIndex::new(Some(TileData::Features(features)))),
             GlyphAtlas::default(),
             ImageAtlas::default(),
-            Some(Arc::new(Atlas(atlas_releases.clone()))),
+            Some(texture_atlas),
         );
         let layout = Rc::new(result);
         let render_data = Rc::clone(&layout);
 
         release_layout(layout, &thread_pool);
-        assert!(atlas_releases.get().is_empty(), "the render data still holds the layout");
+        assert!(atlas.0.lock().is_empty(), "the render data still holds the layout");
         release_layout(render_data, &thread_pool);
         let here = std::thread::current().id();
-        assert_eq!(atlas_releases.get(), [here, here], "both atlases release here");
-        thread_pool.wait_for_empty();
-        let dropped_on = data_drops.get();
-        assert_eq!(dropped_on.len(), 1);
-        assert_ne!(dropped_on[0], here);
+        assert_eq!(*atlas.0.lock(), [here, here], "both atlases release here");
+        assert!(data.upgrade().is_some(), "the data waits for the workers");
+        workers.wait_for_empty();
+        assert!(data.upgrade().is_none(), "the workers freed the data");
     }
 }

@@ -9,7 +9,6 @@ pub(crate) mod tile;
 
 pub(crate) mod custom_tile;
 pub(crate) mod geojson_tile;
-pub(crate) mod geojson_tile_data;
 pub(crate) mod geometry_tile;
 pub(crate) mod geometry_tile_worker;
 pub(crate) mod ordered_replies;

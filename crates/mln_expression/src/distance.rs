@@ -924,14 +924,16 @@ fn polygon_to_geometry_distance(polygon: &Polygon<f64>, geo_set: &Geometry<f64>)
 }
 
 /// The distance from the feature to `geo_set`; NaN when either geometry is
-/// invalid. Fails with the error of `convert_geometry` for a point feature
-/// without rings.
+/// invalid. Fails for a feature geometry that can't be decoded, and with the
+/// error of `convert_geometry` for a point feature without rings.
 fn calculate_distance(
     feature: &dyn GeometryTileFeature,
     canonical: &CanonicalTileID,
     geo_set: &Geometry<f64>,
 ) -> Result<f64, EvaluationError> {
-    let geometry = convert_geometry(feature, canonical).map_err(|e| EvaluationError::new(e.to_string()))?;
+    let geometries = feature.get_geometries().map_err(|e| EvaluationError::new(e.to_string()))?;
+    let geometry = convert_geometry(feature.get_type(), &geometries, canonical)
+        .map_err(|e| EvaluationError::new(e.to_string()))?;
     Ok(match &Geometry::from_geo(&geometry) {
         Geometry::Point(point) => points_to_geometry_distance(&vec![*point], geo_set),
         Geometry::MultiPoint(points) => points_to_geometry_distance(points, geo_set),
@@ -1132,6 +1134,8 @@ impl Distance {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use feature::{Identifier, Value as MbglValue};
     use mln_tile::geometry_tile_data::convert_geometry_to_tile;
     use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
@@ -1159,8 +1163,8 @@ mod tests {
             Identifier::Null
         }
 
-        fn get_geometries(&self) -> &GeometryCollection {
-            &self.geometry
+        fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+            Ok(Cow::Borrowed(&self.geometry))
         }
     }
 

@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use mln_actor::TaggedScheduler;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
+use mln_tile::TileData;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
@@ -34,7 +35,7 @@ use parking_lot::Mutex;
 
 use super::envelope::{About, Encoded, MessageKind};
 use super::worker_side::{WorkerAction, WorkerCodec};
-use crate::tile::geometry_tile_worker::{SharedTileData, TileMessage, WorkerMessage};
+use crate::tile::geometry_tile_worker::{TileMessage, WorkerMessage};
 use crate::tile::raster_dem_tile::{RasterDEMTileMessage, RasterDEMWorkerMessage};
 use crate::tile::raster_tile::{RasterTileMessage, RasterWorkerMessage};
 use crate::tile::tile_worker_transport::{InProcessTransport, TileEndpoint, TileWorkerTransport, WorkerEndpoint};
@@ -87,7 +88,7 @@ type SentLayers = (
 /// What a geometry tile's worker has of its tile's data and of its layers.
 #[derive(Default)]
 struct Sent {
-    data: Kept<(Option<SharedTileData>, Arc<VecSet<String>>)>,
+    data: Kept<(Option<TileData>, Arc<VecSet<String>>)>,
     layers: Kept<SentLayers>,
 }
 
