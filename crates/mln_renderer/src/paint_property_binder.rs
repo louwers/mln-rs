@@ -218,8 +218,8 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
 pub(crate) struct PaintPropertyBinder<T> {
     pub(crate) kind: PaintPropertyBinderKind<T>,
     pub(crate) statistics: PaintPropertyStatistics<T>,
-    /// The binder's offset in the interleaved vertex; `None` until
-    /// `set_interleaved_buffer` gives the binder vertex data.
+    /// The binder's offset in the interleaved vertex
+    /// `None` until `set_interleaved_buffer` gives the binder vertex data.
     pub(crate) vertex_offset: Option<usize>,
 }
 
