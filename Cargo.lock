@@ -3020,7 +3020,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "ureq",
- "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

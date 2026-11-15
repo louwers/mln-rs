@@ -31,7 +31,6 @@ pmtiles.workspace = true
 rusqlite = { workspace = true, optional = true }
 serde_json.workspace = true
 thiserror.workspace = true
-url.workspace = true
 
 [features]
 default = ["sqlite"]

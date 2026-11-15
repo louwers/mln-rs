@@ -8,8 +8,6 @@ use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::string::to_string_double;
 use mln_util::tileset::Scheme;
 use mln_util::token::replace_tokens;
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
-use url::{Position, Url};
 
 use crate::response::Data;
 
@@ -150,8 +148,28 @@ fn get_tile_bbox(x: i32, y: i32, z: i8) -> String {
         + &to_string_double(max.1)
 }
 
-/// Everything but the RFC 3986 unreserved characters.
-const FONT_STACK_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
+fn sprite_url(base: &str, pixel_ratio: f32, extension: &str) -> String {
+    let fragment = base.find('#').unwrap_or(base.len());
+    let query = base.find('?').filter(|&query| query < fragment);
+    let path_end = query.unwrap_or(fragment);
+    let suffix = if pixel_ratio > 1.0 { "@2x" } else { "" };
+    format!("{}{suffix}{extension}{}", &base[..path_end], query.map_or("", |query| &base[query..fragment]))
+}
+
+fn encode_font_stack(font_stack: &FontStack) -> String {
+    let hex = b"0123456789abcdef";
+    let mut encoded = String::new();
+    for byte in font_stack_to_string(font_stack).bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push(hex[(byte >> 4) as usize] as char);
+            encoded.push(hex[(byte & 0x0f) as usize] as char);
+        }
+    }
+    encoded
+}
 
 impl Resource {
     pub(crate) fn new(kind: Kind, url: impl Into<String>) -> Self {
@@ -212,32 +230,12 @@ impl Resource {
 
     #[must_use]
     pub fn sprite_image(base: &str, pixel_ratio: f32) -> Resource {
-        let suffix = if pixel_ratio > 1.0 { "@2x" } else { "" };
-        // The fragment is dropped; an unparseable base is taken as a bare path.
-        let url = match Url::parse(base) {
-            Ok(url) => format!(
-                "{}{suffix}.png{}",
-                &url[..Position::AfterPath],
-                &url[Position::BeforeQuery..Position::AfterQuery]
-            ),
-            Err(_) => format!("{base}{suffix}.png"),
-        };
-        Resource::new(Kind::SpriteImage, url)
+        Resource::new(Kind::SpriteImage, sprite_url(base, pixel_ratio, ".png"))
     }
 
     #[must_use]
     pub fn sprite_json(base: &str, pixel_ratio: f32) -> Resource {
-        let suffix = if pixel_ratio > 1.0 { "@2x" } else { "" };
-        // The fragment is dropped; an unparseable base is taken as a bare path.
-        let url = match Url::parse(base) {
-            Ok(url) => format!(
-                "{}{suffix}.json{}",
-                &url[..Position::AfterPath],
-                &url[Position::BeforeQuery..Position::AfterQuery]
-            ),
-            Err(_) => format!("{base}{suffix}.json"),
-        };
-        Resource::new(Kind::SpriteJSON, url)
+        Resource::new(Kind::SpriteJSON, sprite_url(base, pixel_ratio, ".json"))
     }
 
     #[must_use]
@@ -246,7 +244,7 @@ impl Resource {
             Kind::Glyphs,
             replace_tokens(url_template, |token: &str| -> Option<String> {
                 if token == "fontstack" {
-                    Some(utf8_percent_encode(&font_stack_to_string(font_stack), FONT_STACK_ENCODE_SET).to_string())
+                    Some(encode_font_stack(font_stack))
                 } else if token == "range" {
                     Some(glyph_range.0.to_string() + "-" + &glyph_range.1.to_string())
                 } else {
@@ -404,6 +402,13 @@ mod tests {
         let resource = Resource::glyphs("http://example.com/{fontstack}/{range}", &vec!["stack".to_owned()], (0, 255));
         assert_eq!(Kind::Glyphs, resource.kind);
         assert_eq!("http://example.com/stack/0-255", resource.url);
+
+        let resource = Resource::glyphs(
+            "http://example.com/{fontstack}/{range}",
+            &vec!["Open Sans".to_owned(), "cø".to_owned()],
+            (0, 255),
+        );
+        assert_eq!("http://example.com/Open%20Sans%2cc%c3%b8/0-255", resource.url);
     }
 
     // gtest: Resource.SpriteImage
@@ -416,6 +421,9 @@ mod tests {
         let param_resource = Resource::sprite_image("http://example.com/sprite?query=true", 2.0);
         assert_eq!(Kind::SpriteImage, param_resource.kind);
         assert_eq!("http://example.com/sprite@2x.png?query=true", param_resource.url);
+
+        let fragment_resource = Resource::sprite_image("http://example.com/sprite?query=true#fragment", 2.0);
+        assert_eq!("http://example.com/sprite@2x.png?query=true", fragment_resource.url);
     }
 
     // gtest: Resource.Image
@@ -436,5 +444,8 @@ mod tests {
         let param_resource = Resource::sprite_json("http://example.com/sprite?query=true", 2.0);
         assert_eq!(Kind::SpriteJSON, param_resource.kind);
         assert_eq!("http://example.com/sprite@2x.json?query=true", param_resource.url);
+
+        let fragment_resource = Resource::sprite_json("http://example.com/sprite#fragment?ignored=true", 2.0);
+        assert_eq!("http://example.com/sprite@2x.json", fragment_resource.url);
     }
 }

@@ -285,7 +285,7 @@ function firstFontStacks(
   return stacks;
 }
 
-// mln_util's `percent_encode`: every UTF-8 byte but the unreserved ones, as
+// Match Resource::glyphs: percent-encode every non-unreserved UTF-8 byte with
 // lowercase hex.
 function percentEncode(text: string): string {
   let encoded = "";
