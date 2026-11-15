@@ -225,7 +225,7 @@ impl DynamicTextureAtlas {
                     let mut dummy_image = AlphaImage::new(DUMMY_SIZE);
                     dummy_image.fill(0);
                     let texture = Arc::new(DynamicTexture::new(DUMMY_SIZE, TexturePixelType::Alpha));
-                    texture.add_image(&dummy_image.data, DUMMY_SIZE, -1);
+                    texture.add_image(&dummy_image.data, DUMMY_SIZE, None);
                     texture
                 }),
             );
@@ -324,7 +324,7 @@ impl DynamicTextureAtlas {
                     let mut dummy_image = PremultipliedImage::new(DUMMY_SIZE);
                     dummy_image.fill(0);
                     let texture = Arc::new(DynamicTexture::new(DUMMY_SIZE, TexturePixelType::RGBA));
-                    texture.add_image(&dummy_image.data, DUMMY_SIZE, -1);
+                    texture.add_image(&dummy_image.data, DUMMY_SIZE, None);
                     texture
                 }),
             );
@@ -439,7 +439,7 @@ impl DynamicTextureAtlas {
         // Reuse the bin of this exact revision; otherwise let the shelf pack
         // assign a fresh id.
         let existing = state.image_allocations.get(&key).map(|a| a.bin_id);
-        let tex_handle = dynamic_texture.reserve_size(size, existing.unwrap_or(-1));
+        let tex_handle = dynamic_texture.reserve_size(size, existing);
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {
@@ -467,7 +467,7 @@ impl DynamicTextureAtlas {
         // Reuse the bin of this exact glyph; otherwise let the shelf pack
         // assign a fresh id.
         let existing = state.glyph_allocations.get(&key).map(|a| a.bin_id);
-        let tex_handle = dynamic_texture.reserve_size(size, existing.unwrap_or(-1));
+        let tex_handle = dynamic_texture.reserve_size(size, existing);
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {

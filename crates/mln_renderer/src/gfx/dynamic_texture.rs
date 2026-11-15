@@ -146,19 +146,21 @@ impl DynamicTexture {
         self.inner.lock().bins.is_empty()
     }
 
-    /// Reserves a bin of `size`, or another reference to the bin with id
-    /// `unique_id` if it has one. A `unique_id` of -1 asks for a new bin with
-    /// a fresh id. The handle needs an upload when its bin is new.
-    pub(crate) fn reserve_size(&self, size: Size, unique_id: i32) -> Option<TextureHandle> {
+    /// Reserves a bin of `size`, or another reference to the bin with `id` if
+    /// it has one. `None` asks for a new bin with a fresh id. The handle needs
+    /// an upload when its bin is new.
+    pub(crate) fn reserve_size(&self, size: Size, id: Option<i32>) -> Option<TextureHandle> {
         let mut inner = self.inner.lock();
-        if let Some(bin) = inner.bins.get_mut(&unique_id) {
+        if let Some(id) = id
+            && let Some(bin) = inner.bins.get_mut(&id)
+        {
             bin.refcount += 1;
-            return Some(TextureHandle { id: unique_id, rectangle: bin.rectangle, needs_upload: false });
+            return Some(TextureHandle { id, rectangle: bin.rectangle, needs_upload: false });
         }
         let width = u16::try_from(size.width).ok()?;
         let height = u16::try_from(size.height).ok()?;
         let allocation = inner.allocator.allocate(size2(i32::from(width), i32::from(height)))?;
-        let id = if unique_id == -1 { inner.max_id + 1 } else { unique_id };
+        let id = id.unwrap_or_else(|| inner.max_id + 1);
         inner.max_id = inner.max_id.max(id);
         // The allocation can be taller than asked for; the bin is the size
         // asked for, at its corner.
@@ -168,8 +170,8 @@ impl DynamicTexture {
         Some(TextureHandle { id, rectangle, needs_upload: true })
     }
 
-    pub(crate) fn add_image(&self, pixel_data: &[u8], image_size: Size, unique_id: i32) -> Option<TextureHandle> {
-        let mut tex_handle = self.reserve_size(image_size, unique_id)?;
+    pub(crate) fn add_image(&self, pixel_data: &[u8], image_size: Size, id: Option<i32>) -> Option<TextureHandle> {
+        let mut tex_handle = self.reserve_size(image_size, id)?;
         if tex_handle.is_upload_needed() {
             self.upload_image(pixel_data, &mut tex_handle);
         }
@@ -283,6 +285,21 @@ impl DynamicTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reserve_size_allocates_fresh_ids_and_reuses_explicit_ids() {
+        let texture = DynamicTexture::new(Size::new(64, 64), TexturePixelType::Alpha);
+        let size = Size::new(8, 8);
+        let first = texture.reserve_size(size, None).expect("first bin");
+        let second = texture.reserve_size(size, None).expect("second bin");
+        let reused = texture.reserve_size(size, Some(first.get_id())).expect("existing bin");
+
+        assert_eq!(first.get_id(), 1);
+        assert_eq!(second.get_id(), 2);
+        assert_eq!(reused.get_id(), first.get_id());
+        assert!(!reused.is_upload_needed());
+        assert_eq!(reused.get_rectangle(), first.get_rectangle());
+    }
 
     /// Pixels queued for a bin of a mirrored texture replace those still
     /// queued for a freed bin in the same space.
