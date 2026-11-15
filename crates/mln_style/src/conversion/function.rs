@@ -223,6 +223,8 @@ impl Curve {
         let operator = match color_space.as_deref() {
             Some("lab") if *type_ == Type::Color => "interpolate-lab",
             Some("hcl") if *type_ == Type::Color => "interpolate-hcl",
+            Some("oklch") if *type_ == Type::Color => "interpolate-oklch",
+            Some("oklab") if *type_ == Type::Color => "interpolate-oklab",
             _ => "interpolate",
         };
         Some(Curve { operator, base })

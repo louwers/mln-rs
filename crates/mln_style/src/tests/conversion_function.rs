@@ -120,3 +120,23 @@ fn identity_function_default_for_unconvertible_values() {
     .expect("identity function");
     assert_eq!(offsets.as_expression().evaluate(&context, VariableAnchorOffsetCollection::default()), default);
 }
+
+/// A legacy color function's `colorSpace` picks the interpolation operator.
+#[test]
+fn function_color_space() {
+    for (color_space, operator) in [
+        ("rgb", "interpolate"),
+        ("lab", "interpolate-lab"),
+        ("hcl", "interpolate-hcl"),
+        ("oklch", "interpolate-oklch"),
+        ("oklab", "interpolate-oklab"),
+    ] {
+        let json = format!(r#"{{"stops": [[0, "red"], [1, "blue"]], "colorSpace": "{color_space}"}}"#);
+        let mut error = Error::default();
+        let function = convert_json::<mln_util::Color>(&json, &mut error, false).expect("color function");
+        let feature::Value::Array(serialized) = function.as_expression().get_expression().serialize() else {
+            panic!("{color_space}: not an expression array");
+        };
+        assert_eq!(serialized[0], feature::Value::String(operator.to_owned()), "{color_space}");
+    }
+}

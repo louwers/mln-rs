@@ -87,7 +87,7 @@ fn parses_our_manifest() {
 
     // Every render and query test is found.
     let test_paths = manifest.get_test_paths();
-    assert_eq!(test_paths.len(), 1466 + 152);
+    assert_eq!(test_paths.len(), 1469 + 152);
     let default = test_paths
         .iter()
         .find(|t| t.style_path.ends_with("/render-tests/background-color/default/style.json"))
@@ -165,7 +165,7 @@ fn parses_the_cpp_linux_manifest() {
     assert_eq!(manifest.get_cache_path(), "testdata/metrics/cache-style.db");
     assert_eq!(manifest.get_probes().iter().collect::<Vec<_>>(), vec!["probeNetwork"]);
     assert_eq!(manifest.get_ignores().len(), 124 + 38 + 1);
-    assert_eq!(manifest.get_test_paths().len(), 6);
+    assert_eq!(manifest.get_test_paths().len(), 7);
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn manifest_errors() {
     assert_eq!(manifest.get_result_path(), generic(&dir));
     let path = dir.join("filter.json");
     let manifest = ManifestParser::parse_manifest(path.to_str().unwrap(), "background-color/".to_string()).unwrap();
-    assert_eq!(manifest.get_test_paths().len(), 6);
+    assert_eq!(manifest.get_test_paths().len(), 7);
 }
 
 // --- parser: metadata ---
