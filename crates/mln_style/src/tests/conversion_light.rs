@@ -87,7 +87,7 @@ fn light() {
         let light = parse_light(r#"{"intensity":{"stops":[[15,"red"],[17,"blue"]]}}"#, &mut error);
 
         assert!(light.is_none());
-        assert_eq!("value must be a number", error.message);
+        assert_eq!("Expected number but found string instead.", error.message);
     }
 
     {

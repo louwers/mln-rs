@@ -14,7 +14,7 @@
 "crates/mln_expression/src/coercion.rs" = 8
 "crates/mln_expression/src/collator_expression.rs" = 3
 "crates/mln_expression/src/comparison.rs" = 4
-"crates/mln_expression/src/compound_expression.rs" = 17
+"crates/mln_expression/src/compound_expression.rs" = 6
 "crates/mln_expression/src/dsl.rs" = 3
 "crates/mln_expression/src/find_zoom_curve.rs" = 1
 "crates/mln_expression/src/format_expression.rs" = 3
@@ -86,7 +86,6 @@
 "crates/mln_storage/src/stub_file_source.rs" = 2
 "crates/mln_storage/src/ureq_transport.rs" = 1
 "crates/mln_style/src/color_ramp_property_value.rs" = 2
-"crates/mln_style/src/conversion/function.rs" = 3
 "crates/mln_style/src/layer_impl.rs" = 1
 "crates/mln_style/src/layer_properties.rs" = 2
 "crates/mln_style/src/layers/circle_layer_impl.rs" = 1

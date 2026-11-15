@@ -38,14 +38,11 @@ impl GeometryTileFeature for StubGeometryTileFeature {
 fn interpolate_expression() {
     // Use DLS methods to create an expression
     {
-        let expr = PropertyExpression::<Padding>::new(
-            Arc::from(interpolate(
-                linear(),
-                zoom(),
-                vec![(0.0, literal(Padding::uniform(0.0).into())), (1.0, literal(Padding::uniform(8.0).into()))],
-            )),
-            None,
-        );
+        let expr = PropertyExpression::<Padding>::new(Arc::from(interpolate(
+            linear(),
+            zoom(),
+            vec![(0.0, literal(Padding::uniform(0.0).into())), (1.0, literal(Padding::uniform(8.0).into()))],
+        )));
         let result = expr.evaluate(&EvaluationContext::new(0.5), Padding::default());
         assert_eq!(Padding::uniform(4.0), result);
     }
@@ -53,7 +50,7 @@ fn interpolate_expression() {
     // Parse expression from JSON, verify that expansion from number/array is handled correctly.
     {
         let json = r#"["interpolate", ["linear"], ["zoom"], 0, ["to-padding", 0], 1, ["to-padding", ["literal",[8, 16, -32]]]]"#;
-        let expr = PropertyExpression::<Padding>::new(Arc::from(create_expression_from_str(json).unwrap()), None);
+        let expr = PropertyExpression::<Padding>::new(Arc::from(create_expression_from_str(json).unwrap()));
         let result = expr.evaluate(&EvaluationContext::new(0.5), Padding::default());
         assert_eq!(Padding::new(4.0, 8.0, -16.0, 8.0), result);
     }

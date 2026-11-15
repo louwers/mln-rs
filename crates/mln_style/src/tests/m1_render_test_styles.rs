@@ -106,13 +106,6 @@ fn evaluate_static(style: &Impl, id: &str) -> BackgroundPaintProperties::Possibl
     evaluated
 }
 
-/// Interpolates colors with a double t, as the interpolate expression does:
-/// per channel `float(a * (1.0 - t) + b * t)`.
-fn lerp_color_f64(a: Color, b: Color, t: f64) -> Color {
-    let lerp = |a: f32, b: f32| (f64::from(a) * (1.0 - t) + f64::from(b) * t) as f32;
-    Color::new_unchecked(lerp(a.r, b.r), lerp(a.g, b.g), lerp(a.b, b.b), lerp(a.a, b.a))
-}
-
 /// Interpolates colors with a float t, as transitions do.
 fn lerp_color_f32(a: Color, b: Color, t: f32) -> Color {
     let lerp = |a: f32, b: f32| a * (1.0 - t) + b * t;
@@ -150,16 +143,14 @@ fn background_color_function() {
     assert_background(&evaluated, Color::parse("blue").unwrap(), 1.0);
 }
 
-/// The RGB midpoint at zoom 5, which both colorSpace tests evaluate to: legacy
-/// functions ignore "colorSpace" and interpolate in RGB, as in C++.
-/// (render-tests/background-color/colorSpace-hcl is in
-/// metrics/ignores/platform-all.json for that reason.)
-fn color_space_expected() -> Color {
-    let lower = Color::parse("rgb(118,0,118)").unwrap();
-    let upper = Color::parse("rgb(255,155,0)").unwrap();
-    // interpolationFactor(base 1, {0, 10}, 5) = 5 / 10 in float.
-    let t = (5.0_f32 - 0.0) / (10.0_f32 - 0.0);
-    lerp_color_f64(lower, upper, f64::from(t))
+/// The colorSpace tests' stops, interpolated by `operator` at their zoom, 5.
+fn color_space_expected(operator: &str) -> Color {
+    let expression = crate::expression::dsl::create_expression_from_str(&format!(
+        r#"["{operator}", ["linear"], ["zoom"], 0, "rgb(118,0,118)", 10, "rgb(255,155,0)"]"#
+    ))
+    .unwrap();
+    crate::property_expression::PropertyExpression::<Color>::from_expr(expression)
+        .evaluate(&crate::expression::EvaluationContext::new(5.0), Color::black())
 }
 
 #[test]
@@ -167,7 +158,7 @@ fn background_color_color_space_hcl() {
     let style = load("background-color/colorSpace-hcl");
     assert_eq!(style.get_default_camera().zoom, Some(5.0));
     let evaluated = evaluate_static(&style, "background");
-    assert_background(&evaluated, color_space_expected(), 1.0);
+    assert_background(&evaluated, color_space_expected("interpolate-hcl"), 1.0);
 }
 
 #[test]
@@ -175,7 +166,7 @@ fn background_color_color_space_lab() {
     let style = load("background-color/colorSpace-lab");
     assert_eq!(style.get_default_camera().zoom, Some(5.0));
     let evaluated = evaluate_static(&style, "background");
-    assert_background(&evaluated, color_space_expected(), 1.0);
+    assert_background(&evaluated, color_space_expected("interpolate-lab"), 1.0);
 }
 
 #[test]

@@ -164,7 +164,7 @@ fn parses_the_cpp_linux_manifest() {
     assert_eq!(manifest.get_test_root_path(), INTEGRATION);
     assert_eq!(manifest.get_cache_path(), "testdata/metrics/cache-style.db");
     assert_eq!(manifest.get_probes().iter().collect::<Vec<_>>(), vec!["probeNetwork"]);
-    assert_eq!(manifest.get_ignores().len(), 125 + 38 + 1);
+    assert_eq!(manifest.get_ignores().len(), 124 + 38 + 1);
     assert_eq!(manifest.get_test_paths().len(), 6);
 }
 

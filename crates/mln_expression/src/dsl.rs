@@ -1,6 +1,6 @@
 // This convenience API does little to no expression validation or
 // type-checking, and is intended for use only by test and other non-production
-// code (and the legacy function conversion).
+// code.
 
 use mln_conversion::Convertible;
 use mln_util::ColorSpace;
@@ -43,10 +43,6 @@ pub fn create_expression(expr: &Convertible<'_>) -> Option<Expr> {
 }
 
 /// `["error", message]`.
-pub fn error(message: impl Into<String>) -> Expr {
-    compound("error", vec![literal(Value::String(message.into()))])
-}
-
 #[must_use]
 pub fn literal_str(value: &str) -> Expr {
     literal(Value::String(value.to_owned()))
@@ -92,16 +88,6 @@ fn coercion(type_: Type, value: Expr, def: Option<Expr>) -> Expr {
 #[must_use]
 pub fn to_color(value: Expr, def: Option<Expr>) -> Expr {
     coercion(Type::Color, value, def)
-}
-
-#[must_use]
-pub fn to_padding(value: Expr, def: Option<Expr>) -> Expr {
-    coercion(Type::Padding, value, def)
-}
-
-#[must_use]
-pub fn to_projection_definition(value: Expr, def: Option<Expr>) -> Expr {
-    coercion(Type::ProjectionDefinition, value, def)
 }
 
 #[must_use]
@@ -179,11 +165,6 @@ pub fn linear() -> Interpolator {
     ExponentialInterpolator::new(1.0).into()
 }
 
-#[must_use]
-pub fn exponential(base: f64) -> Interpolator {
-    ExponentialInterpolator::new(base).into()
-}
-
 /// The `dsl::interpolate` overloads: stops as (input, output) pairs.
 #[must_use]
 pub fn interpolate(interpolator: Interpolator, input: Expr, stops_in: Vec<(f64, Expr)>) -> Expr {
@@ -195,11 +176,6 @@ pub fn interpolate(interpolator: Interpolator, input: Expr, stops_in: Vec<(f64, 
     let mut ctx = ParsingContext::new();
     let result = create_interpolate(type_, interpolator, ColorSpace::Rgb, input, stops, &mut ctx);
     result.expect("dsl::interpolate")
-}
-
-#[must_use]
-pub fn concat(inputs: Vec<Expr>) -> Expr {
-    compound("concat", inputs)
 }
 
 #[must_use]

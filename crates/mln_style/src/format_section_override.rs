@@ -50,7 +50,7 @@ pub fn set_overrides(
     }
     let override_ = format_section_override(std::mem::take(value), "text-color".to_owned());
     *value = Evaluated::PerFeature {
-        expression: PropertyExpression::new(Arc::new(override_), None),
+        expression: PropertyExpression::new(Arc::new(override_)),
         default: SymbolPaintProperties::Defaults::text_color(),
     };
 }
