@@ -1,10 +1,9 @@
 use mln_util::interpolate::Interpolate;
-use serde::{Deserialize, Serialize};
 
 // Could be made a template class if needed
 // template <size_t Period>
 // size_t period() const noexcept { return Period; }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct Rotation {
     angle: f64,
 }

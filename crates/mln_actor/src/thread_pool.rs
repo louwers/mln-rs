@@ -166,11 +166,18 @@ impl Scheduler for ThreadedScheduler {
 }
 
 impl Drop for ThreadedScheduler {
+    /// Stops the workers and waits for them. Dropped by one of its own
+    /// workers' tasks, as the last of a task's owners may be, it waits for
+    /// none of them: another may wait for something that task holds. They
+    /// end once their tasks return.
     fn drop(&mut self) {
-        assert!(!self.this_thread_is_owned());
         // terminate(): wake up all threads so that they shut down
         *self.shared.worker_mutex.lock() = true;
         self.shared.cv_available.notify_all();
+        if self.this_thread_is_owned() {
+            self.threads.clear();
+            return;
+        }
         for thread in self.threads.drain(..) {
             let _ = thread.join();
         }
@@ -280,6 +287,7 @@ mod tests {
         schedule_and_reply_value(
             &pool,
             Some(SimpleIdentity::new()),
+            &run_loop.scheduler(),
             move || {
                 assert_ne!(std::thread::current().id(), main);
                 6 * 7
@@ -294,5 +302,28 @@ mod tests {
             std::thread::yield_now();
         }
         assert_eq!(*result.borrow(), Some(42));
+    }
+}
+
+#[cfg(test)]
+mod drop_tests {
+    use std::sync::mpsc;
+
+    use super::*;
+
+    /// The last owner of a pool may be one of its own tasks.
+    #[test]
+    fn a_pool_dropped_by_its_own_task_stops() {
+        let pool = Arc::new(Mutex::new(Some(Arc::new(ThreadPool::new()))));
+        let (done, dropped) = mpsc::channel();
+        let owner = Arc::clone(&pool);
+        let scheduler = Arc::clone(pool.lock().as_ref().unwrap());
+        drop(pool);
+        scheduler.schedule(Box::new(move || {
+            drop(owner.lock().take());
+            done.send(()).unwrap();
+        }));
+        drop(scheduler);
+        dropped.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
     }
 }

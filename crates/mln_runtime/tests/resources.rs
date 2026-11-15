@@ -52,6 +52,33 @@ fn a_provider_answers_later_from_another_thread() {
     wait(map.set_style_url("custom://late"));
 }
 
+/// Answers inside its call, then stays in the call a while before it marks
+/// the call done.
+struct AnswersInline {
+    returned: Arc<AtomicBool>,
+}
+
+impl ResourceProvider for AnswersInline {
+    fn request(&self, request: ResourceRequest) {
+        request.respond(style_response()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        self.returned.store(true, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn an_answer_inside_the_providers_call_arrives_after_the_call_returns() {
+    let runtime = runtime();
+    let returned = Arc::new(AtomicBool::new(false));
+    wait(runtime.set_resource_provider(AnswersInline { returned: Arc::clone(&returned) }));
+    let map = map(&runtime);
+    wait(map.set_style_url("custom://inline"));
+    // A host that answers in its callback, then records something, finds
+    // the record there once the map has the answer.
+    assert_eq!(EMPTY_STYLE, wait(map.loaded_style_json()));
+    assert!(returned.load(Ordering::SeqCst));
+}
+
 /// Hands each request to the test, then stays in the call a while, as a
 /// provider thread that the system preempts there does.
 struct Lingering {

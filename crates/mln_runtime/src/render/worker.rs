@@ -7,16 +7,17 @@
 )]
 
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use mln_actor::RunLoopHandle;
+use mln_actor::RunLoop;
 use mln_gfx::{ConsumerSync, Handoff, RendererBackend, SyncKind};
 use mln_map::{MapView, RenderMode};
+use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
 use mln_style::collection::ImmutableVector;
 use mln_style::source_impl;
@@ -34,49 +35,28 @@ use super::session::{Published, RenderSessionState, SessionShared, WorkId, physi
 use super::target::{BorrowedRing, Device, DeviceLease, Driver, ExportKind, ExportedRing, Surface};
 use crate::completion::Resolver;
 use crate::map::Published as MapPublished;
+use crate::queue::Queue;
 use crate::runtime::Outbox;
 
-/// Where a thread keeps the session whose work it runs.
-pub(crate) type Slot = Rc<RefCell<Option<Worker>>>;
+/// The work of the thread that runs a session, which owns the session's
+/// worker once it is built.
+pub(crate) type SessionQueue = Queue<Option<Worker>>;
 
-thread_local! {
-    /// The session whose work this thread runs now.
-    static CURRENT: RefCell<Option<Slot>> = const { RefCell::new(None) };
-}
-
-/// Makes a session the one whose work this thread runs, until it drops.
-pub(crate) struct Entered {
-    previous: Option<Slot>,
-}
-
-impl Drop for Entered {
-    fn drop(&mut self) {
-        CURRENT.with(|current| *current.borrow_mut() = self.previous.take());
-    }
-}
-
-/// Makes the session in `slot` the one whose work this thread runs, until
-/// the guard drops: a host thread runs several sessions' work in turn.
-pub(crate) fn enter(slot: &Slot) -> Entered {
-    Entered { previous: CURRENT.with(|current| current.borrow_mut().replace(Rc::clone(slot))) }
-}
-
-/// Runs `task` on the session whose loop is `run_loop`, after the work sent
+/// Runs `task` on the session whose thread runs `queue`, after the work sent
 /// before.
-pub(crate) fn post(run_loop: &RunLoopHandle, task: impl FnOnce(&mut Worker, &mut Outbox) + Send + 'static) {
-    run_loop.invoke(move || run(task));
+pub(crate) fn post(queue: &SessionQueue, task: impl FnOnce(&mut Worker, &mut Outbox) + Send + 'static) {
+    queue.post(move |worker| run(worker, task));
 }
 
 /// Runs `task` on the session, then delivers what it sends to the host, with
-/// the session unborrowed and unlocked: a driver call, which the delivery is
-/// part of. A session that was abandoned lets go of its graphics objects
-/// first.
-fn run(task: impl FnOnce(&mut Worker, &mut Outbox)) {
-    let Some(slot) = CURRENT.with(|current| current.borrow().clone()) else { return };
-    let Some(shared) = slot.borrow().as_ref().map(|worker| Arc::clone(&worker.shared)) else { return };
+/// the session unlocked: a driver call, which the delivery is part of. A
+/// session that was abandoned lets go of its graphics objects first.
+fn run(worker: &mut Option<Worker>, task: impl FnOnce(&mut Worker, &mut Outbox)) {
+    let Some(worker) = worker.as_mut() else { return };
+    let shared = Arc::clone(&worker.shared);
     let _call = shared.enter_call();
     let mut outbox = Outbox::default();
-    if let Some(worker) = slot.borrow_mut().as_mut() {
+    {
         let _gate = shared.gate.lock();
         if !worker.torn_down && shared.state.lock().lifecycle == RenderSessionState::Abandoned {
             worker.tear_down(&mut outbox);
@@ -93,11 +73,11 @@ pub(crate) type Task = Box<dyn FnOnce(&mut Worker, &mut Outbox) + Send>;
 /// Tells the session's thread that a resize sent to the map has landed:
 /// [`land`](Self::land) when the resize reaches the session, or on drop
 /// when it never does.
-pub(crate) struct ResizeLanding(Option<RunLoopHandle>);
+pub(crate) struct ResizeLanding(Option<SessionQueue>);
 
 impl ResizeLanding {
-    pub(crate) fn new(run_loop: RunLoopHandle) -> Self {
-        ResizeLanding(Some(run_loop))
+    pub(crate) fn new(queue: SessionQueue) -> Self {
+        ResizeLanding(Some(queue))
     }
 
     pub(crate) fn land(mut self, worker: &mut Worker, outbox: &mut Outbox) {
@@ -108,8 +88,8 @@ impl ResizeLanding {
 
 impl Drop for ResizeLanding {
     fn drop(&mut self) {
-        if let Some(run_loop) = self.0.take() {
-            post(&run_loop, Worker::resize_landed);
+        if let Some(queue) = self.0.take() {
+            post(&queue, Worker::resize_landed);
         }
     }
 }
@@ -120,6 +100,8 @@ pub(crate) struct Init {
     pub(crate) size: Size,
     pub(crate) scale_factor: f64,
     pub(crate) glyph_cache: Arc<GlyphCache>,
+    /// What the renderer loads a style's font faces with.
+    pub(crate) font_face_engine: Arc<dyn FontFaceEngine>,
     /// Whether the renderer keeps tiles that left the view.
     pub(crate) tile_cache_enabled: bool,
     /// The font family, a CSS font-family list, that the renderer draws CJK
@@ -226,16 +208,17 @@ impl TargetInit {
 }
 
 /// Builds the session's renderer into `slot`, on the thread that runs the
-/// session's work, before any other work.
-pub(crate) fn build(shared: &Arc<SessionShared>, slot: &Slot) {
+/// session's work, before any other work. The renderer runs its own work on
+/// `run_loop`.
+pub(crate) fn build(shared: &Arc<SessionShared>, slot: &mut Option<Worker>, run_loop: &RunLoop) {
     let Some(Ok(init)) = shared.state.lock().init.take().map(<Box<dyn Any + Send>>::downcast::<Init>) else {
         return;
     };
     let _call = shared.enter_call();
     let mut outbox = Outbox::default();
     let gate = shared.gate.lock();
-    let worker = Worker::new(Arc::clone(shared), *init, &mut outbox);
-    *slot.borrow_mut() = Some(worker);
+    let worker = Worker::new(Arc::clone(shared), *init, run_loop, &mut outbox);
+    *slot = Some(worker);
     drop(gate);
     shared.wait_for_senders();
     outbox.deliver();
@@ -248,8 +231,11 @@ struct Gfx {
     /// The target's backend, which the renderer draws with.
     backend: Rc<dyn RendererBackend>,
     glyph_cache: Arc<GlyphCache>,
+    font_face_engine: Arc<dyn FontFaceEngine>,
     /// The font family the renderer draws CJK glyphs in (`Init`).
     local_font_family: Option<String>,
+    /// The loop that the renderer runs its own work on.
+    run_loop: RunLoop,
 }
 
 impl Gfx {
@@ -257,8 +243,17 @@ impl Gfx {
     /// renderer's, which the renderer makes when it first draws.
     const OBJECTS: u32 = 2;
 
-    fn new(init: Init) -> Result<Gfx, Error> {
-        let Init { target, size, scale_factor, glyph_cache, tile_cache_enabled, local_font_family, failure } = init;
+    fn new(init: Init, run_loop: &RunLoop) -> Result<Gfx, Error> {
+        let Init {
+            target,
+            size,
+            scale_factor,
+            glyph_cache,
+            font_face_engine,
+            tile_cache_enabled,
+            local_font_family,
+            failure,
+        } = init;
         if let Some(failure) = failure {
             return Err(failure);
         }
@@ -273,15 +268,25 @@ impl Gfx {
             }
         };
         let backend = target.backend();
-        let mut renderer = Renderer::with_glyph_cache(
+        let mut renderer = Renderer::with_fonts(
             Rc::clone(&backend),
             pixel_ratio,
             local_font_family.clone(),
             Arc::clone(&glyph_cache),
+            Arc::clone(&font_face_engine),
+            run_loop,
         );
         renderer.set_tile_cache_enabled(tile_cache_enabled);
-        set_tile_worker_transport(&mut renderer);
-        Ok(Gfx { renderer, target, backend, glyph_cache, local_font_family })
+        set_tile_worker_transport(&mut renderer, run_loop);
+        Ok(Gfx {
+            renderer,
+            target,
+            backend,
+            glyph_cache,
+            font_face_engine,
+            local_font_family,
+            run_loop: run_loop.clone(),
+        })
     }
 
     /// Whether the target can take a frame now: its window, if any, has an
@@ -299,28 +304,30 @@ impl Gfx {
     fn renew_renderer(&mut self, events: &RendererEvents) {
         self.backend = self.target.backend();
         let pixel_ratio = self.renderer.get_pixel_ratio();
-        let mut renderer = Renderer::with_glyph_cache(
+        let mut renderer = Renderer::with_fonts(
             Rc::clone(&self.backend),
             pixel_ratio,
             self.local_font_family.clone(),
             Arc::clone(&self.glyph_cache),
+            Arc::clone(&self.font_face_engine),
+            &self.run_loop,
         );
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
-        set_tile_worker_transport(&mut renderer);
+        set_tile_worker_transport(&mut renderer, &self.run_loop);
         self.renderer = renderer;
     }
 }
 
 /// In the browser, puts the renderer's tile workers in the instance's Web
 /// Workers. Elsewhere they stay on the background threads.
-fn set_tile_worker_transport(renderer: &mut Renderer) {
+fn set_tile_worker_transport(renderer: &mut Renderer, run_loop: &RunLoop) {
     #[cfg(target_family = "wasm")]
-    if let Some(transport) = crate::web::tile_worker_transport() {
+    if let Some(transport) = crate::web::tile_worker_transport(&run_loop.scheduler()) {
         renderer.set_tile_worker_transport(transport);
     }
     #[cfg(not(target_family = "wasm"))]
-    let _ = renderer;
+    let _ = (renderer, run_loop);
 }
 
 /// A host's frame demand on its way, and the last command sent before it.
@@ -489,7 +496,7 @@ impl Drop for Ticker {
 /// session's loop, so a caller-driven session's host gets a wake for each
 /// poll.
 #[cfg(target_family = "wasm")]
-fn start_ticker(run_loop: RunLoopHandle) -> Ticker {
+fn start_ticker(queue: SessionQueue) -> Ticker {
     // The browser's one thread polls in the pump's slices instead, which it
     // asks for meanwhile.
     let stop = Arc::new(AtomicBool::new(false));
@@ -499,7 +506,7 @@ fn start_ticker(run_loop: RunLoopHandle) -> Ticker {
         if stopped.load(Ordering::SeqCst) || Instant::now() >= deadline {
             return false;
         }
-        post(&run_loop, Worker::poll_settling);
+        post(&queue, Worker::poll_settling);
         mln_web_host::pump::wake();
         true
     })
@@ -508,14 +515,14 @@ fn start_ticker(run_loop: RunLoopHandle) -> Ticker {
 }
 
 #[cfg(not(target_family = "wasm"))]
-fn start_ticker(run_loop: RunLoopHandle) -> Ticker {
+fn start_ticker(queue: SessionQueue) -> Ticker {
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = Arc::clone(&stop);
     let deadline = Instant::now() + SETTLE_TIMEOUT * 2;
     let spawned = mln_util::thread::spawn("RenderSessionSettle", move || {
         while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
             std::thread::sleep(SETTLE_POLL);
-            post(&run_loop, Worker::poll_settling);
+            post(&queue, Worker::poll_settling);
         }
     });
     if spawned.is_err() {
@@ -535,11 +542,11 @@ fn target_lost() -> Error {
 }
 
 impl Worker {
-    fn new(shared: Arc<SessionShared>, init: Init, outbox: &mut Outbox) -> Worker {
+    fn new(shared: Arc<SessionShared>, init: Init, run_loop: &RunLoop, outbox: &mut Outbox) -> Worker {
         let renderer_events = RendererEvents::new();
-        let run_loop = shared.run_loop.clone();
+        let queue = shared.queue.clone();
         renderer_events.set_waker(Some(Arc::new(move || {
-            post(&run_loop, |worker, _| {
+            post(&queue, |worker, _| {
                 worker.forward_events();
             });
         })));
@@ -550,7 +557,7 @@ impl Worker {
             TargetInit::Borrowed { ring, .. } => Some(ring.clone()),
             _ => None,
         };
-        let built = attaching.then(|| Gfx::new(init));
+        let built = attaching.then(|| Gfx::new(init, run_loop));
         let gfx = match built {
             Some(Ok(mut gfx)) => {
                 gfx.renderer.set_event_queue(Some(renderer_events.clone()));
@@ -632,7 +639,7 @@ impl Worker {
         self.map_applied = self.map_applied.max(sequence);
         self.map_published = Some(published);
         let scheduled = Arc::clone(&self.update_scheduled);
-        let run_loop = self.shared.run_loop.clone();
+        let queue = self.shared.queue.clone();
         // A caller-driven session's thread runs only when the host services
         // it, which the host may do only once it knows to draw, so the map's
         // thread tells it of the update.
@@ -642,7 +649,7 @@ impl Worker {
                 wake();
             }
             if !scheduled.swap(true, Ordering::SeqCst) {
-                post(&run_loop, Worker::on_update);
+                post(&queue, Worker::on_update);
             }
         })));
         self.reader = Some(reader);
@@ -664,7 +671,7 @@ impl Worker {
         // The demands that came while the session attached wait for the
         // attach to complete, which the outbox delivers once this task ends,
         // so they render in a task of their own.
-        post(&self.shared.run_loop, Worker::pump);
+        post(&self.shared.queue, Worker::pump);
     }
 
     /// The map couldn't bind the session.
@@ -1186,7 +1193,7 @@ impl Worker {
     /// still image again, if one waits, once the barrier ran.
     pub(crate) fn barrier(&mut self, outbox: &mut Outbox) {
         self.end_demands(FrameDisposition::NoUpdate, outbox);
-        post(&self.shared.run_loop, Worker::still_image_changed);
+        post(&self.shared.queue, Worker::still_image_changed);
     }
 
     // MARK: - Borrowed rings
@@ -1340,7 +1347,7 @@ impl Worker {
         self.pump(outbox);
         // A still image that waits for a target gets its demand again, once
         // the replacement no longer counts as on its way.
-        post(&self.shared.run_loop, Worker::still_image_changed);
+        post(&self.shared.queue, Worker::still_image_changed);
         Ok(pending)
     }
 
@@ -1508,7 +1515,7 @@ impl Worker {
         let Some(reads) = pending else { return done(outbox, Ok(())) };
         self.settling.push(Settling { reads, deadline: Instant::now() + SETTLE_TIMEOUT, done: Box::new(done) });
         if self.ticker.is_none() {
-            self.ticker = Some(start_ticker(self.shared.run_loop.clone()));
+            self.ticker = Some(start_ticker(self.shared.queue.clone()));
         }
     }
 
@@ -1581,7 +1588,7 @@ impl Worker {
         if replaced.is_ok() {
             self.wake_for_redraw(outbox);
             // A still image that waits for a target gets its demand again.
-            post(&self.shared.run_loop, Worker::still_image_changed);
+            post(&self.shared.queue, Worker::still_image_changed);
         }
         replaced
     }
@@ -1597,7 +1604,7 @@ impl Worker {
         // The renderer loads what the image needs again, once it tries.
         if let Some(still) = self.still.as_mut() {
             still.tried = None;
-            post(&self.shared.run_loop, Worker::still_image_changed);
+            post(&self.shared.queue, Worker::still_image_changed);
         }
         self.wake_for_redraw(outbox);
         Ok(())
@@ -1711,7 +1718,7 @@ impl Worker {
     /// that a teardown kept for it, and ends a session that waited for that.
     pub(crate) fn release_viewed(&mut self) {
         if self.viewed.take().is_some() && self.finished && self.shared.driver == Driver::CoreWorker {
-            self.shared.run_loop.stop();
+            self.shared.queue.stop();
         }
     }
 
@@ -1759,7 +1766,7 @@ impl Worker {
         self.finished = true;
         // A target that views keep stops the loop once they end.
         if self.shared.driver == Driver::CoreWorker && self.viewed.is_none() {
-            self.shared.run_loop.stop();
+            self.shared.queue.stop();
         }
     }
 }

@@ -1763,6 +1763,7 @@ impl Placement {
                         hide_glyphs(symbol.glyph_offsets.len(), text_positions);
                     }
                     Some(variable_offset) => {
+                        let label_plane = label_plane.raised(symbol.height_offset);
                         let tile_anchor = symbol.anchor_point;
                         let projected = if pitch_with_map {
                             label_plane.to_clip_space_from_tile(tile_anchor)

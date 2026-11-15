@@ -16,13 +16,14 @@ const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
 #[ignore = "needs network access"]
 fn loads_liberty_over_https() {
     let run_loop = RunLoop::new();
-    let mut map = Map::new(MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() }).unwrap();
+    let mut map =
+        Map::new(MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() }, &run_loop).unwrap();
 
     map.style_mut().load_url(LIBERTY);
     assert!(!map.style().is_loaded());
 
     // Give up after 60 s: the timer wakes the loop then.
-    let timeout = Timer::new();
+    let timeout = Timer::new(&run_loop);
     timeout.start(Duration::from_secs(60), Duration::ZERO, || {});
     let deadline = Instant::now() + Duration::from_secs(60);
     let mut loaded = false;

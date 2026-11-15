@@ -1,6 +1,6 @@
 //! The graphics work of a render session that the host's thread runs.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -8,7 +8,7 @@ use mln_actor::RunLoop;
 use mln_util::error::Error;
 
 use super::session::{Abandoner, RenderSessionState, SessionShared};
-use super::worker::{self, Slot, Worker};
+use super::worker::{self, Worker};
 use crate::runtime::Outbox;
 
 /// The graphics work of a render session that attached with
@@ -27,8 +27,11 @@ use crate::runtime::Outbox;
 /// go of the graphics objects on this thread.
 pub struct DriverWork {
     shared: Arc<SessionShared>,
+    /// The loop that the session's renderer runs its own work on, of the
+    /// session's own: a thread may service several sessions.
     run_loop: RunLoop,
-    slot: Slot,
+    /// The session's worker, once the first service built it.
+    worker: RefCell<Option<Worker>>,
     servicing: Cell<bool>,
     finished: Cell<bool>,
 }
@@ -44,8 +47,18 @@ fn ended() -> Error {
 }
 
 impl DriverWork {
-    pub(crate) fn new(shared: Arc<SessionShared>, run_loop: RunLoop) -> DriverWork {
-        DriverWork { shared, run_loop, slot: Slot::default(), servicing: Cell::new(false), finished: Cell::new(false) }
+    pub(crate) fn new(shared: Arc<SessionShared>) -> DriverWork {
+        let run_loop = RunLoop::new();
+        // The renderer's work wakes the host as the session's does.
+        let queue = shared.queue.clone();
+        run_loop.set_waker(Some(Arc::new(move || queue.wake())));
+        DriverWork {
+            shared,
+            run_loop,
+            worker: RefCell::new(None),
+            servicing: Cell::new(false),
+            finished: Cell::new(false),
+        }
     }
 
     /// Runs the session's work that is ready, and returns once none is: the
@@ -81,23 +94,25 @@ impl DriverWork {
         }
         {
             let _call = self.shared.enter_call();
-            let _current = self.run_loop.enter();
-            let _worker = worker::enter(&self.slot);
+            let queue = &self.shared.queue;
             // The wake waits while the service runs, and the service runs
             // the work that comes meanwhile, so the wake never comes on this
             // thread during a service. It's armed again only once the loop
             // is empty; work that came just before that runs here too.
             armed.store(false, Ordering::SeqCst);
-            worker::build(&self.shared, &self.slot);
+            let mut worker = self.worker.borrow_mut();
+            worker::build(&self.shared, &mut worker, &self.run_loop);
             loop {
-                while self.run_loop.run_once() {}
+                while self.run_loop.run_once() | queue.run_once(&mut worker) {}
                 armed.store(true, Ordering::SeqCst);
-                if !self.run_loop.has_pending() {
+                if !self.run_loop.has_pending() && !queue.has_pending() {
                     break;
                 }
                 armed.store(false, Ordering::SeqCst);
             }
-            if abandoned || self.slot.borrow().as_ref().is_some_and(Worker::is_done) {
+            let done = worker.as_ref().is_some_and(Worker::is_done);
+            drop(worker);
+            if abandoned || done {
                 self.end();
             }
         }
@@ -110,19 +125,20 @@ impl DriverWork {
         self.finished.get()
     }
 
-    /// Lets go of the session's renderer and graphics objects, with the
-    /// session's loop current, then of the driver-work wake: its release
-    /// tells the host that the session makes no more graphics calls.
+    /// Lets go of the session's renderer and graphics objects, then of the
+    /// driver-work wake: its release tells the host that the session makes
+    /// no more graphics calls.
     fn end(&self) {
         self.finished.set(true);
         let mut outbox = Outbox::default();
         let gate = self.shared.gate.lock();
-        let worker = self.slot.borrow_mut().take();
+        let worker = self.worker.borrow_mut().take();
         if let Some(worker) = worker {
             worker.close(&mut outbox);
         }
         drop(gate);
-        self.shared.run_loop.set_waker(None);
+        self.shared.queue.set_waker(None);
+        self.run_loop.set_waker(None);
         self.shared.wait_for_senders();
         outbox.deliver();
     }
@@ -134,8 +150,6 @@ impl Drop for DriverWork {
             return;
         }
         let _ = self.shared.abandon(Abandoner::Library);
-        let _current = self.run_loop.enter();
-        let _worker = worker::enter(&self.slot);
         self.end();
     }
 }

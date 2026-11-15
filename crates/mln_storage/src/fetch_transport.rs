@@ -1,6 +1,6 @@
 //! The browser's `fetch` as the `HttpTransport`. The browser's HTTP cache does
 //! the caching. A host can hand it responses it fetched ahead
-//! (`set_fetch_preloads`).
+//! (`OnlineFileSource::set_fetch_preloads`).
 //!
 //! The host's headers (`TransferRequest::headers`) go with the request, which
 //! makes a cross-origin request one that the server must allow in its CORS
@@ -8,8 +8,8 @@
 //! can't drop them when the redirect leaves the origin, so a request with the
 //! host's headers doesn't follow redirects: a redirect fails it.
 
-use std::cell::RefCell;
-
+use mln_actor::LocalObject;
+use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -23,42 +23,47 @@ extern "C" {
     fn global_fetch(request: &web_sys::Request) -> js_sys::Promise;
 }
 
-thread_local! {
-    static PRELOADS: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
-}
-
-/// Sets where this instance's fetch transport looks before it fetches a
-/// whole resource (one without a data range): `take(url)` returns a promise
-/// of the `Response` the host fetched ahead for exactly `url`, at most once
-/// for each, or undefined. A promise that rejects is fetched again, as if
-/// there had been none. Responses are used as they are, whatever their
-/// status, as a fetch of `url` would have answered.
-pub fn set_fetch_preloads(take: Option<js_sys::Function>) {
-    PRELOADS.with(|preloads| *preloads.borrow_mut() = take);
-}
+/// Where the host's responses fetched ahead come from.
+type Preloads = Option<LocalObject<js_sys::Function>>;
 
 /// The response the host fetched ahead for `url`, if it did and it came.
-async fn preloaded(url: &str) -> Option<web_sys::Response> {
-    let take = PRELOADS.with(|preloads| preloads.borrow().clone())?;
+async fn preloaded(take: Option<js_sys::Function>, url: &str) -> Option<web_sys::Response> {
+    let take = take?;
     let promise: js_sys::Promise = take.call1(&JsValue::NULL, &JsValue::from_str(url)).ok()?.dyn_into().ok()?;
     JsFuture::from(promise).await.ok()?.dyn_into().ok()
 }
 
-pub(crate) struct FetchTransport;
+#[derive(Default)]
+pub(crate) struct FetchTransport {
+    preloads: Mutex<Preloads>,
+}
+
+impl FetchTransport {
+    /// Sets where the transport looks before it fetches a whole resource
+    /// (one without a data range): `take(url)` returns a promise of the
+    /// `Response` the host fetched ahead for exactly `url`, at most once for
+    /// each, or undefined. A promise that rejects is fetched again, as if
+    /// there had been none. Responses are used as they are, whatever their
+    /// status, as a fetch of `url` would have answered.
+    pub(crate) fn set_preloads(&self, take: Option<js_sys::Function>) {
+        *self.preloads.lock() = take.map(LocalObject::new);
+    }
+}
 
 impl HttpTransport for FetchTransport {
     fn start(&self, request: TransferRequest) {
+        let take = self.preloads.lock().as_ref().and_then(LocalObject::get).map(|take| (*take).clone());
         wasm_bindgen_futures::spawn_local(async move {
             if request.is_cancelled() {
                 return;
             }
-            let transfer = fetch(&request).await;
+            let transfer = fetch(&request, take).await;
             request.finish(transfer);
         });
     }
 }
 
-async fn fetch(request: &TransferRequest) -> Result<Transfer, Box<ResourceError>> {
+async fn fetch(request: &TransferRequest, take: Option<js_sys::Function>) -> Result<Transfer, Box<ResourceError>> {
     let connection_error = |error: JsValue| {
         let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
         Box::new(ResourceError::new(Reason::Connection, message))
@@ -66,7 +71,7 @@ async fn fetch(request: &TransferRequest) -> Result<Transfer, Box<ResourceError>
     let url = &request.resource().url;
     let range = http_file_source::range_header(request.resource());
     let early = match range {
-        None => preloaded(url).await,
+        None => preloaded(take, url).await,
         Some(_) => None,
     };
     let response = match early {

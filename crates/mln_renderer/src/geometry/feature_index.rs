@@ -22,7 +22,6 @@ use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::grid_index::{BBox, GridIndex};
 use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
-use serde::{Deserialize, Serialize};
 
 use crate::query::RenderedQueryOptions;
 use crate::render_layer::RenderLayer;
@@ -50,7 +49,7 @@ pub(crate) struct RefIndexedSubfeature {
 
 /// This version of an indexed feature has copies of the necessary strings,
 /// so that it can be used outside the index.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct IndexedSubfeature {
     pub(crate) index: usize,
     pub(crate) source_layer_name: String,
@@ -61,7 +60,7 @@ pub(crate) struct IndexedSubfeature {
     pub(crate) collision_group_id: u16,
     /// The overlap mode the symbol was placed with. It's set only in a
     /// collision index, so the worker codec doesn't carry it.
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) overlap_mode: OverlapMode,
 }
 
@@ -465,20 +464,13 @@ impl FeatureIndex {
     }
 }
 
-/// Port-only: a `FeatureIndex` as serde writes it, for a tile worker in
+/// Port-only: a `FeatureIndex` as it crosses, for a tile worker in
 /// another wasm instance (`tile/worker_codec)`: the grid's boxes in insertion
 /// order, which `insert` puts in an empty grid again, with their strings once
 /// each, and the tile data by key (the side that gets the index has the data
 /// it sent). A derive would write the grid's cells too, and every element's
 /// strings. Only symbol layouts insert circles, which a worker never does.
-#[derive(Serialize, Deserialize)]
-struct FeatureIndexParts {
-    grid: Grid,
-    #[serde(with = "crate::tile::worker_codec::fields::tile_data")]
-    tile_data: Option<Arc<dyn GeometryTileData + Send + Sync>>,
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 struct Grid {
     sort_index: usize,
     strings: Vec<String>,
@@ -488,7 +480,7 @@ struct Grid {
 
 /// A box of the grid: its `RefIndexedSubfeature`, with indices into
 /// `strings`, and min x, min y, max x, max y.
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 struct Element {
     index: usize,
     sort_index: usize,
@@ -500,7 +492,7 @@ struct Element {
 }
 
 impl FeatureIndex {
-    fn serde_grid(&self) -> Result<Grid, &'static str> {
+    fn wire_grid(&self) -> Result<Grid, &'static str> {
         if self.grid.has_circles() {
             return Err("a feature index with circles");
         }
@@ -529,44 +521,45 @@ impl FeatureIndex {
         Ok(Grid { sort_index: self.sort_index, strings, bucket_layer_ids: self.bucket_layer_ids(), elements })
     }
 
-    /// The index as serde writes it, without its tile data.
+    /// The index as it crosses, without its tile data.
     #[cfg(test)]
     pub(crate) fn encode_grid(&self) -> Vec<u8> {
-        postcard::to_allocvec(&self.serde_grid().unwrap()).unwrap()
+        mln_wire::to_vec(&self.wire_grid().unwrap()).unwrap()
     }
 }
 
-impl Serialize for FeatureIndex {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let grid = self.serde_grid().map_err(serde::ser::Error::custom)?;
-        FeatureIndexParts { grid, tile_data: self.tile_data.clone() }.serialize(serializer)
+impl mln_wire::Wire for FeatureIndex {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        match self.wire_grid() {
+            Ok(grid) => grid.write(w),
+            Err(error) => return w.fail(error.to_owned()),
+        }
+        crate::tile::worker_codec::fields::tile_data::write(&self.tile_data, w);
     }
-}
 
-impl<'de> Deserialize<'de> for FeatureIndex {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let FeatureIndexParts { grid: parts, tile_data } = FeatureIndexParts::deserialize(deserializer)?;
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        let parts = Grid::read(r)?;
+        let tile_data = crate::tile::worker_codec::fields::tile_data::read(r)?;
         let mut index = FeatureIndex::new(tile_data);
         let strings: Vec<Arc<str>> = parts.strings.iter().map(|string| index.intern_layer_name(string)).collect();
-        let string = |id: u32| {
-            strings
-                .get(id as usize)
-                .cloned()
-                .ok_or_else(|| serde::de::Error::custom("feature index string out of range"))
-        };
         for (leader, layer_ids) in &parts.bucket_layer_ids {
             index.set_bucket_layer_ids(leader, layer_ids);
         }
         for element in parts.elements {
+            let (Some(source_layer_name), Some(bucket_leader_id)) =
+                (strings.get(element.source_layer_name as usize), strings.get(element.bucket_leader_id as usize))
+            else {
+                return r.fail("feature index string out of range");
+            };
             // The leaders share the strings of `bucket_layer_ids`, as `insert`
             // interns them.
-            let bucket_leader_id = index.intern_leader_id(&string(element.bucket_leader_id)?);
+            let bucket_leader_id = index.intern_leader_id(bucket_leader_id);
             let [min_x, min_y, max_x, max_y] = element.bbox;
             index.grid.insert(
                 RefIndexedSubfeature {
                     index: element.index,
                     sort_index: element.sort_index,
-                    source_layer_name: string(element.source_layer_name)?,
+                    source_layer_name: Arc::clone(source_layer_name),
                     bucket_leader_id,
                     bucket_instance_id: element.bucket_instance_id,
                     collision_group_id: element.collision_group_id,
@@ -575,7 +568,7 @@ impl<'de> Deserialize<'de> for FeatureIndex {
             );
         }
         index.sort_index = parts.sort_index;
-        Ok(index)
+        Some(index)
     }
 }
 

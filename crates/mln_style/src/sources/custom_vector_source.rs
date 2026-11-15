@@ -6,7 +6,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::actor::{Actor, PoolActorRef};
-use mln_actor::scheduler;
 use mln_storage::{Data, FileSource};
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
@@ -176,11 +175,11 @@ impl std::fmt::Debug for CustomVectorSource {
 }
 
 impl CustomVectorSource {
-    pub fn new(id: impl Into<String>, options: Options) -> Self {
+    /// Creates the source, whose tile functions run on `pool`.
+    pub fn new(id: impl Into<String>, options: Options, pool: mln_actor::SchedulerPtr) -> Self {
         let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), &options));
-        let loader = Actor::new(scheduler::get_background(), |_| {
-            CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function)
-        });
+        let loader =
+            Actor::new(pool, |_| CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function));
         CustomVectorSource { inner: Rc::new(Inner { base: SourceBase::new(impl_), loader }) }
     }
 
@@ -221,7 +220,7 @@ impl Source for CustomVectorSource {
         &self.inner.base
     }
 
-    fn load_description(&self, _file_source: &dyn FileSource) {
+    fn load_description(&self, _file_source: &dyn FileSource, _run_loop: &mln_actor::RunLoop) {
         let new_impl: Arc<dyn source_impl::Impl> =
             Arc::new(Impl::with_loader(&self.impl_(), self.inner.loader.self_ref()));
         self.inner.base.set_base_impl(new_impl);

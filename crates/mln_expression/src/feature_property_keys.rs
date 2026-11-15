@@ -25,16 +25,8 @@ fn collect_feature_property_keys(expression: &Expr, keys: &mut Vec<String>) -> b
             let signature = e.signature();
             if signature.dependencies.intersects(Dependency::FEATURE) {
                 let reads_key = match signature.op {
-                    Op::Get
-                    | Op::Has
-                    | Op::FilterEq
-                    | Op::FilterLt
-                    | Op::FilterGt
-                    | Op::FilterLe
-                    | Op::FilterGe
-                    | Op::FilterHas
-                    | Op::FilterIn => true,
-                    Op::GeometryType | Op::FilterTypeEq | Op::FilterTypeIn => false,
+                    Op::Get | Op::Has => true,
+                    Op::GeometryType => false,
                     _ => return false,
                 };
                 if reads_key {

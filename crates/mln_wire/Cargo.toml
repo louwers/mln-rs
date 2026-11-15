@@ -1,0 +1,23 @@
+[package]
+name = "mln-rs-wire"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_wire"
+
+[dependencies]
+geo-types = { workspace = true, optional = true }
+glam = { workspace = true, optional = true }
+mln_wire_derive.workspace = true
+parking_lot = { workspace = true, optional = true }
+
+[lints]
+workspace = true

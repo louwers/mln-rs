@@ -1,6 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 pub struct Range<T> {
     pub min: T,
     pub max: T,

@@ -16,10 +16,11 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-    ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
-    ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
-    ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
+    ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
+    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, ID_SYMBOL_DATA_ATTRIBUTE,
+    ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE,
+    ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
+    ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::VertexVector;
@@ -297,13 +298,13 @@ fn capture_rendered_features(
         // tile's projection on the globe.
         let drawable_matrix = if is_text { &text_drawable_matrix } else { &icon_drawable_matrix };
         let translation = if is_text { text_tile_translation } else { icon_tile_translation };
-        let project_tile = |tile_point: Vec2| -> Vec4 {
+        let project_tile = |tile_point: Vec2, elevation: f64| -> Vec4 {
             if let Some(projector) = &projector {
-                let projected = projector.project_as_drawn(&Point::new(tile_point[0], tile_point[1]), 0.0);
+                let projected = projector.project_as_drawn(&Point::new(tile_point[0], tile_point[1]), elevation);
                 let w = projected.signed_distance_from_camera;
                 return [projected.point.x * w, projected.point.y * w, 0.0, w];
             }
-            matrix::transform_mat4_value(&[tile_point[0], tile_point[1], 0.0, 1.0], drawable_matrix)
+            matrix::transform_mat4_value(&[tile_point[0], tile_point[1], elevation, 1.0], drawable_matrix)
         };
 
         let rotate_in_shader = rotate_with_map && !pitch_with_map && !along_line;
@@ -322,7 +323,7 @@ fn capture_rendered_features(
                     f64::from(symbol.anchor_point.x) + translation[0],
                     f64::from(symbol.anchor_point.y) + translation[1],
                 );
-                if projector.project_as_drawn(&anchor, 0.0).occluded {
+                if projector.project_as_drawn(&anchor, f64::from(symbol.height_offset)).occluded {
                     continue;
                 }
             }
@@ -369,7 +370,8 @@ fn capture_rendered_features(
                 let a_size_min = (a_size[0] / 2.0).floor();
                 let in_projected_pos = [f64::from(dynamic_vertex.a1[0]), f64::from(dynamic_vertex.a1[1])];
                 let segment_angle = -dynamic_vertex.a1[2];
-                let projected_point = project_tile([a_pos[0] + translation[0], a_pos[1] + translation[1]]);
+                let elevation = f64::from(static_vertex.a5);
+                let projected_point = project_tile([a_pos[0] + translation[0], a_pos[1] + translation[1]], elevation);
                 let camera_to_anchor_distance = projected_point[3];
 
                 let distance_ratio = if pitch_with_map {
@@ -395,7 +397,7 @@ fn capture_rendered_features(
                 let mut symbol_rotation = 0.0f32;
                 if rotate_in_shader {
                     let offset_projected_point =
-                        project_tile([a_pos[0] + translation[0] + 1.0, a_pos[1] + translation[1]]);
+                        project_tile([a_pos[0] + translation[0] + 1.0, a_pos[1] + translation[1]], elevation);
                     let a = [projected_point[0] / projected_point[3], projected_point[1] / projected_point[3]];
                     let b = [
                         offset_projected_point[0] / offset_projected_point[3],
@@ -409,13 +411,17 @@ fn capture_rendered_features(
 
                 let translated_pos = [in_projected_pos[0] + translation[0], in_projected_pos[1] + translation[1]];
                 let projected_pos = if along_line || has_variable_placement {
-                    [in_projected_pos[0], in_projected_pos[1], 0.0, 1.0]
+                    [in_projected_pos[0], in_projected_pos[1], elevation, 1.0]
                 } else if pitch_with_map {
-                    matrix::transform_mat4_value(&[translated_pos[0], translated_pos[1], 0.0, 1.0], &label_plane_matrix)
+                    matrix::transform_mat4_value(
+                        &[translated_pos[0], translated_pos[1], elevation, 1.0],
+                        &label_plane_matrix,
+                    )
                 } else {
-                    matrix::transform_mat4_value(&project_tile(translated_pos), &label_plane_matrix)
+                    matrix::transform_mat4_value(&project_tile(translated_pos, elevation), &label_plane_matrix)
                 };
                 let pos0 = [projected_pos[0] / projected_pos[3], projected_pos[1] / projected_pos[3]];
+                let z = if pitch_with_map { projected_pos[2] / projected_pos[3] } else { 0.0 };
                 let font_scales = vec2_max_scalar(&a_min_font_scale, font_scale);
                 let pos_offset = [
                     a_offset[0] * font_scales[0] / 32.0 + a_pxoffset[0] / 16.0,
@@ -431,15 +437,15 @@ fn capture_rendered_features(
                 // units, scaled for their latitude on the globe.
                 let mut projection_scaling = 1.0;
                 if let Some(projector) = projector.as_ref().filter(|_| pitch_with_map) {
-                    let anchor_tile = matrix::transform_mat4_value(&[pos0[0], pos0[1], 0.0, 1.0], &gl_coord_matrix);
+                    let anchor_tile = matrix::transform_mat4_value(&[pos0[0], pos0[1], z, 1.0], &gl_coord_matrix);
                     projection_scaling = projector.pitched_text_correction(&Point::new(anchor_tile[0], anchor_tile[1]));
                 }
                 let mut out_pos = matrix::transform_mat4_value(
-                    &[pos0[0] + rotated[0] * projection_scaling, pos0[1] + rotated[1] * projection_scaling, 0.0, 1.0],
+                    &[pos0[0] + rotated[0] * projection_scaling, pos0[1] + rotated[1] * projection_scaling, z, 1.0],
                     &gl_coord_matrix,
                 );
                 if pitch_with_map {
-                    out_pos = project_tile([out_pos[0] / out_pos[3], out_pos[1] / out_pos[3]]);
+                    out_pos = project_tile([out_pos[0] / out_pos[3], out_pos[1] / out_pos[3]], out_pos[2] / out_pos[3]);
                 }
                 Some([out_pos[0] / out_pos[3], out_pos[1] / out_pos[3], out_pos[2] / out_pos[3]])
             };
@@ -646,7 +652,10 @@ fn set_layout_attributes(
         attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 16, 0, layout_size, AttributeDataType::Short4);
     }
     if let Some(attr) = attribs.set(ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(layout_data), 24, 0, layout_size, AttributeDataType::UShort2);
+        attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 24, 0, layout_size, AttributeDataType::UShort2);
+    }
+    if let Some(attr) = attribs.set(ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(Some(layout_data), 28, 0, layout_size, AttributeDataType::Float);
     }
 }
 
@@ -1006,7 +1015,10 @@ fn get_collision_vertex_attributes(buffer: &CollisionBuffer) -> mln_gfx::vertex_
             attr.set_shared_raw_data(Some(Rc::clone(&layout)), 4, 0, layout_stride, AttributeDataType::Short2);
         }
         if let Some(attr) = attrs.set(ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(layout), 8, 0, layout_stride, AttributeDataType::Short2);
+            attr.set_shared_raw_data(Some(Rc::clone(&layout)), 8, 0, layout_stride, AttributeDataType::Short2);
+        }
+        if let Some(attr) = attrs.set(ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+            attr.set_shared_raw_data(Some(layout), 12, 0, layout_stride, AttributeDataType::Float);
         }
         if let Some(attr) = attrs.set(ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(Some(Rc::clone(&dynamic)), 0, 0, dynamic_stride, AttributeDataType::UShort2);

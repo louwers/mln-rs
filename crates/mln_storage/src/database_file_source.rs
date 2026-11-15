@@ -1,44 +1,41 @@
-// The database runs on its own thread (`util::Thread<DatabaseFileSourceThread>`
-// "DatabaseFileSource"); requests reach it as actor messages and the
-// response goes back to the requesting thread's `FileSourceRequest`.
+// The database runs on a worker thread of its own ("DatabaseFileSource"),
+// which owns it; requests and operations reach the worker as actor messages
+// and the responses go to the requests' responders.
 //
-// The offline region API needs `OfflineDownload`, which parses styles and so
-// sits above this crate: mln_storage_offline adds it to `DatabaseFileSource`
-// through `invoke` and `DatabaseFileSourceThread::extension`.
+// The offline region downloads need the style parser, which sits above this
+// crate: mln_storage_offline keeps them in the worker's extension, which the
+// worker owns beside the database.
 
-use std::any::Any;
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use feature::Value;
-use mln_actor::{ActorRef, Thread, Timer, scheduler};
+use mln_actor::{ActorRef, RunLoop, Thread, Timer};
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
-use mln_util::logging::{Event, Log};
-use parking_lot::Mutex;
 
-use crate::async_request::AsyncRequest;
-use crate::file_source::{Callback, FileSource, FileSourceType, READ_ONLY_MODE_KEY};
-use crate::file_source_manager::FileSourceManager;
-use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
+use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
+use crate::request::Responder;
 use crate::resource::{LoadingMethod, Resource, StoragePolicy};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
 /// How long cache hits' `accessed` timestamps wait, so that the reads of a
 /// map load share one write.
 const ACCESSED_FLUSH_DELAY: Duration = Duration::from_millis(250);
 
-/// Owns the `OfflineDatabase` on the database thread.
-pub struct DatabaseFileSourceThread {
-    db: Rc<RefCell<OfflineDatabase>>,
-    online_file_source: Option<Arc<dyn FileSource>>,
-    /// The state extensions keep on the database thread, one per type.
-    extensions: RefCell<Vec<Rc<dyn Any>>>,
-    self_ref: ActorRef<DatabaseFileSourceThread>,
+/// What a database worker owns: the database, and what an extension keeps
+/// beside it, such as the offline regions' downloads.
+pub struct DatabaseState<E> {
+    pub db: OfflineDatabase,
+    pub extension: E,
+}
+
+/// The worker that owns a database, on the database's thread.
+pub struct DatabaseWorker<E: 'static> {
+    state: RefCell<DatabaseState<E>>,
+    network: Option<Arc<dyn FileSource>>,
+    self_ref: ActorRef<DatabaseWorker<E>>,
     accessed_flush_timer: Timer,
     /// A flush of the `accessed` timestamps is scheduled. A failed flush
     /// isn't rescheduled until the next cache hit, so an idle map stays
@@ -46,26 +43,36 @@ pub struct DatabaseFileSourceThread {
     accessed_flush_scheduled: Arc<AtomicBool>,
 }
 
-impl DatabaseFileSourceThread {
+/// Makes the extension of a database worker, on the worker's thread, from the
+/// worker's own reference and its network.
+type MakeExtension<E> = Box<dyn FnOnce(ActorRef<DatabaseWorker<E>>, Option<Arc<dyn FileSource>>) -> E + Send>;
+
+impl<E: 'static> DatabaseWorker<E> {
     fn new(
-        self_ref: ActorRef<DatabaseFileSourceThread>,
-        online_file_source: Option<Arc<dyn FileSource>>,
+        self_ref: ActorRef<DatabaseWorker<E>>,
+        run_loop: &RunLoop,
+        network: Option<Arc<dyn FileSource>>,
         cache_path: &str,
+        read_only: bool,
+        make: MakeExtension<E>,
     ) -> Self {
         let mut db = OfflineDatabase::new(cache_path);
+        if read_only {
+            db.reopen_database_read_only(true);
+        }
         let accessed_flush_scheduled = Arc::new(AtomicBool::new(false));
         let (scheduled, actor) = (Arc::clone(&accessed_flush_scheduled), self_ref.clone());
         db.set_accessed_callback(Box::new(move || {
             if !scheduled.swap(true, Ordering::Relaxed) {
-                actor.invoke(DatabaseFileSourceThread::start_accessed_flush_timer);
+                actor.invoke(|t: &DatabaseWorker<E>| t.start_accessed_flush_timer());
             }
         }));
-        DatabaseFileSourceThread {
-            db: Rc::new(RefCell::new(db)),
-            online_file_source,
-            extensions: RefCell::new(Vec::new()),
+        let extension = make(self_ref.clone(), network.clone());
+        DatabaseWorker {
+            state: RefCell::new(DatabaseState { db, extension }),
+            network,
             self_ref,
-            accessed_flush_timer: Timer::new(),
+            accessed_flush_timer: Timer::new(run_loop),
             accessed_flush_scheduled,
         }
     }
@@ -73,16 +80,30 @@ impl DatabaseFileSourceThread {
     fn start_accessed_flush_timer(&self) {
         let actor = self.self_ref.clone();
         self.accessed_flush_timer.start(ACCESSED_FLUSH_DELAY, Duration::ZERO, move || {
-            actor.invoke(|t: &DatabaseFileSourceThread| {
+            actor.invoke(|t: &DatabaseWorker<E>| {
                 t.accessed_flush_scheduled.store(false, Ordering::Relaxed);
-                t.db.borrow_mut().flush_accessed();
+                t.with(|state| state.db.flush_accessed());
             });
         });
     }
 
-    pub(crate) fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
-        let mut offline_response =
-            if resource.storage_policy == StoragePolicy::Volatile { None } else { self.db.borrow_mut().get(resource) };
+    /// Runs `f` with what the worker owns. What `f` sets off comes back
+    /// later, as a message to the worker, not inside `f`.
+    pub fn with<R>(&self, f: impl FnOnce(&mut DatabaseState<E>) -> R) -> R {
+        f(&mut self.state.borrow_mut())
+    }
+
+    /// The network that offline regions download through, if there is one.
+    pub fn network(&self) -> Option<&Arc<dyn FileSource>> {
+        self.network.as_ref()
+    }
+
+    pub(crate) fn request(&self, resource: &Resource, responder: &Responder) {
+        let mut offline_response = if resource.storage_policy == StoragePolicy::Volatile {
+            None
+        } else {
+            self.with(|state| state.db.get(resource))
+        };
         match &mut offline_response {
             None => {
                 let mut response = Response::new();
@@ -97,106 +118,72 @@ impl DatabaseFileSourceThread {
                 }
             }
         }
-        let response = offline_response.expect("response");
-        req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
+        responder.send(offline_response.expect("response"));
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
-        self.db.borrow_mut().change_path(path);
-        if let Some(callback) = callback {
-            callback();
-        }
-    }
-
-    /// `forward(resource, response, callback)`.
-    pub(crate) fn forward(&self, resource: &Resource, response: &Response, callback: Option<Box<dyn FnMut() + Send>>) {
-        self.db.borrow_mut().put(resource, response);
-        if let Some(mut callback) = callback {
-            callback();
-        }
-    }
-
-    pub(crate) fn reset_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
-        callback(into_result(self.db.borrow_mut().reset_database()));
-    }
-
-    pub(crate) fn pack_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
-        callback(into_result(self.db.borrow_mut().pack()));
-    }
-
-    /// `put(resource, response)`.
-    #[cfg(test)]
-    pub(crate) fn put(&self, resource: &Resource, response: &Response) {
-        self.db.borrow_mut().put(resource, response);
-    }
-
-    pub(crate) fn invalidate_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
-        callback(into_result(self.db.borrow_mut().invalidate_ambient_cache()));
-    }
-
-    pub(crate) fn clear_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
-        callback(into_result(self.db.borrow_mut().clear_ambient_cache()));
-    }
-
-    pub(crate) fn set_maximum_ambient_cache_size(&self, size: u64, callback: impl FnOnce(Result<(), DatabaseError>)) {
-        callback(into_result(self.db.borrow_mut().set_maximum_ambient_cache_size(size)));
-    }
-
-    pub(crate) fn reopen_database_read_only(&self, read_only: bool) {
-        self.db.borrow_mut().reopen_database_read_only(read_only);
-    }
-
-    /// The database. Borrow it only for the duration of one call: requests
-    /// and other messages on this thread borrow it too.
-    pub fn database(&self) -> &Rc<RefCell<OfflineDatabase>> {
-        &self.db
-    }
-
-    /// The Network file source, if there is one.
-    pub fn online_file_source(&self) -> Option<&Arc<dyn FileSource>> {
-        self.online_file_source.as_ref()
-    }
-
-    /// The `T` this thread keeps for an extension, created on first use. It
-    /// lives on the database thread and is dropped with the database.
-    pub fn extension<T: Default + 'static>(&self) -> Rc<T> {
-        let existing = self.extensions.borrow().iter().find_map(|extension| Rc::clone(extension).downcast::<T>().ok());
-        existing.unwrap_or_else(|| {
-            let extension = Rc::new(T::default());
-            self.extensions.borrow_mut().push(Rc::<T>::clone(&extension));
-            extension
-        })
+    fn maintain(
+        &self,
+        operation: impl FnOnce(&mut OfflineDatabase) -> Option<DatabaseError>,
+        callback: impl FnOnce(Result<(), DatabaseError>),
+    ) {
+        let error = self.with(|state| operation(&mut state.db));
+        callback(error.map_or(Ok(()), Err));
     }
 }
 
-/// Turns an optional error into a `Result`.
-fn into_result(error: Option<DatabaseError>) -> Result<(), DatabaseError> {
-    error.map_or(Ok(()), Err)
+/// A cache that a [`Loader`](crate::Loader) reads before the network, and
+/// stores the network's responses in.
+pub trait Cache: FileSource {
+    /// Stores a response to `resource`, unless the resource is volatile.
+    fn put(&self, resource: &Resource, response: &Response);
 }
 
-pub struct DatabaseFileSource {
-    thread: Thread<DatabaseFileSourceThread>,
-    resource_options: Mutex<ResourceOptions>,
+/// The `Database` file source: the ambient cache and the offline regions,
+/// in an SQLite database that a worker thread owns, with the worker's
+/// extension `E` beside it.
+pub struct DatabaseFileSource<E: 'static = ()> {
+    thread: Thread<DatabaseWorker<E>>,
 }
 
 impl DatabaseFileSource {
+    /// A database at `cache_path`, created if needed; `":memory:"` keeps it
+    /// in memory. Offline regions download through `network`, and can't
+    /// without one.
+    #[must_use]
+    pub fn new(cache_path: &str, network: Option<Arc<dyn FileSource>>) -> Self {
+        Self::with_extension(cache_path, network, false, |_, _| ())
+    }
+
+    /// The database at `cache_path`, opened read-only: it answers requests
+    /// but stores nothing.
+    #[must_use]
+    pub fn read_only(cache_path: &str, network: Option<Arc<dyn FileSource>>) -> Self {
+        Self::with_extension(cache_path, network, true, |_, _| ())
+    }
+}
+
+impl<E: 'static> DatabaseFileSource<E> {
+    /// A database at `cache_path`, read-only or not, whose worker keeps the
+    /// extension that `make` makes on the worker's thread.
+    #[must_use]
+    pub fn with_extension(
+        cache_path: &str,
+        network: Option<Arc<dyn FileSource>>,
+        read_only: bool,
+        make: impl FnOnce(ActorRef<DatabaseWorker<E>>, Option<Arc<dyn FileSource>>) -> E + Send + 'static,
+    ) -> Self {
+        let cache_path = cache_path.to_owned();
+        let make: MakeExtension<E> = Box::new(make);
+        let thread = Thread::new("DatabaseFileSource", move |self_ref, run_loop| {
+            DatabaseWorker::new(self_ref, run_loop, network, &cache_path, read_only, make)
+        });
+        DatabaseFileSource { thread }
+    }
+
     /// Holds the database thread until the guard drops (`crate::tests::pause`).
     #[cfg(test)]
     pub(crate) fn pause(&self) -> crate::tests::Paused {
         crate::tests::pause(&self.thread.actor())
-    }
-
-    /// A database at `resource_options`' cache path. Offline downloads go
-    /// through `file_sources`' network file source.
-    #[must_use]
-    pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
-        let online_file_source = file_sources.get_file_source(FileSourceType::Network, resource_options);
-        let cache_path = resource_options.cache_path.clone();
-        let thread = Thread::new("DatabaseFileSource", move |self_ref| {
-            DatabaseFileSourceThread::new(self_ref, online_file_source, &cache_path)
-        });
-        DatabaseFileSource { thread, resource_options: Mutex::new(resource_options.clone()) }
     }
 
     /// Switches to the database at `path`, creating it if needed. The
@@ -204,40 +191,55 @@ impl DatabaseFileSource {
     #[cfg(test)]
     pub(crate) fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
         let path = path.to_owned();
-        self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.set_database_path(&path, callback));
+        self.invoke(move |t| {
+            t.with(|state| state.db.change_path(&path));
+            if let Some(callback) = callback {
+                callback();
+            }
+        });
+    }
+
+    /// Stores a response to `resource`, then runs `then` on `queue`.
+    #[cfg(test)]
+    pub(crate) fn put_then(
+        &self,
+        resource: &Resource,
+        response: &Response,
+        queue: &mln_actor::SchedulerPtr,
+        then: Box<dyn FnOnce() + Send>,
+    ) {
+        let mut then = mln_actor::scheduler::bind_once(queue, then);
+        let resource = resource.clone();
+        let response = response.clone();
+        self.invoke(move |t| {
+            t.with(|state| state.db.put(&resource, &response));
+            then();
+        });
     }
 
     /// Deletes the database file and starts an empty one. The callback runs
     /// on the database thread.
     pub fn reset_database(&self, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
-        self.invoke(move |t| t.reset_database(callback));
+        self.invoke(move |t| t.maintain(OfflineDatabase::reset_database, callback));
     }
 
     /// Vacuums the database file to the space its data needs. The callback
     /// runs on the database thread.
     pub fn pack_database(&self, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
-        self.invoke(move |t| t.pack_database(callback));
-    }
-
-    /// `put(resource, response)`.
-    #[cfg(test)]
-    pub(crate) fn put(&self, resource: &Resource, response: &Response) {
-        let resource = resource.clone();
-        let response = response.clone();
-        self.invoke(move |t| t.put(&resource, &response));
+        self.invoke(move |t| t.maintain(OfflineDatabase::pack, callback));
     }
 
     /// Makes the ambient cache's resources revalidate with their server
     /// before use. Offline regions' resources are unaffected. The callback
     /// runs on the database thread.
     pub fn invalidate_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
-        self.invoke(move |t| t.invalidate_ambient_cache(callback));
+        self.invoke(move |t| t.maintain(OfflineDatabase::invalidate_ambient_cache, callback));
     }
 
     /// Erases the ambient cache's resources. Offline regions' resources are
     /// unaffected. The callback runs on the database thread.
     pub fn clear_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
-        self.invoke(move |t| t.clear_ambient_cache(callback));
+        self.invoke(move |t| t.maintain(OfflineDatabase::clear_ambient_cache, callback));
     }
 
     /// Limits the database to `size` bytes, evicting ambient resources to
@@ -248,62 +250,42 @@ impl DatabaseFileSource {
         size: u64,
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     ) {
-        self.invoke(move |t| t.set_maximum_ambient_cache_size(size, callback));
+        self.invoke(move |t| t.maintain(|db| db.set_maximum_ambient_cache_size(size), callback));
     }
 
     /// Runs `f` on the database thread, after the requests and operations
     /// sent before it.
-    pub fn invoke(&self, f: impl FnOnce(&DatabaseFileSourceThread) + Send + 'static) {
+    pub fn invoke(&self, f: impl FnOnce(&DatabaseWorker<E>) + Send + 'static) {
         self.thread.actor().invoke(f);
     }
 }
 
-impl FileSource for DatabaseFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let req = FileSourceRequest::new(callback);
-        let req_ref = req.actor();
-        let resource = resource.clone();
-        self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.request(&resource, &req_ref));
-        Box::new(req)
-    }
-
-    fn forward(&self, res: &Resource, response: &Response, callback: Option<Box<dyn FnOnce() + Send>>) {
-        if res.storage_policy == StoragePolicy::Volatile {
+impl<E: 'static> Cache for DatabaseFileSource<E> {
+    fn put(&self, resource: &Resource, response: &Response) {
+        if resource.storage_policy == StoragePolicy::Volatile {
             return;
         }
-
-        let wrapper: Option<Box<dyn FnMut() + Send>> = callback.map(|callback| -> Box<dyn FnMut() + Send> {
-            Box::new(scheduler::bind_once(&scheduler::get_current(), callback))
-        });
-        let res = res.clone();
+        let resource = resource.clone();
         let response = response.clone();
-        self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.forward(&res, &response, wrapper));
+        self.invoke(move |t| {
+            t.with(|state| state.db.put(&resource, &response));
+        });
+    }
+}
+
+impl<E: 'static> FileSource for DatabaseFileSource<E> {
+    fn load(&self, resource: &Resource, responder: Responder) {
+        let resource = resource.clone();
+        self.invoke(move |t| {
+            if !responder.is_cancelled() {
+                t.request(&resource, &responder);
+            }
+        });
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
         resource.has_loading_method(LoadingMethod::Cache)
             && !resource.url.starts_with(ASSET_PROTOCOL)
             && !resource.url.starts_with(FILE_PROTOCOL)
-    }
-
-    fn set_property(&self, key: &str, value: &Value) {
-        match value {
-            Value::Bool(read_only) if key == READ_ONLY_MODE_KEY => {
-                let read_only = *read_only;
-                self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.reopen_database_read_only(read_only));
-            }
-            _ => {
-                let message = format!("Resource provider does not support property {key}");
-                Log::error(Event::General, message);
-            }
-        }
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

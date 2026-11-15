@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 
 use mln_actor::actor::Actor;
-use mln_actor::{CooperativeScheduler, RunLoop, Thread, scheduler};
+use mln_actor::{CooperativeScheduler, Thread, scheduler};
 use parking_lot::Mutex;
 
 /// The scheduler, installed by whichever test runs first.
@@ -49,12 +49,11 @@ impl Drop for Counter {
 }
 
 #[test]
-fn a_thread_keeps_its_object_on_the_creating_threads_loop() {
-    cooperative();
-    let run_loop = RunLoop::get();
+fn a_thread_keeps_its_object_on_a_loop_that_the_host_runs() {
+    let cooperative = cooperative();
     let total = Arc::new(AtomicUsize::new(0));
     let t = Arc::clone(&total);
-    let thread = Thread::new("Test", move |_| Counter { count: Cell::new(0), total: t });
+    let thread = Thread::new("Test", move |_, _| Counter { count: Cell::new(0), total: t });
     let main = std::thread::current().id();
     let seen = Arc::new(Mutex::new(Vec::new()));
     for i in 0..10 {
@@ -66,7 +65,7 @@ fn a_thread_keeps_its_object_on_the_creating_threads_loop() {
         });
     }
     assert!(seen.lock().is_empty());
-    run_loop.wait_for_empty();
+    assert!(!cooperative.run_until(None));
     assert_eq!(*seen.lock(), (0..10).collect::<Vec<_>>());
     drop(thread);
     assert_eq!(total.load(Ordering::SeqCst), 10);

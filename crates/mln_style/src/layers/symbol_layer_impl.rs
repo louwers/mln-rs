@@ -9,7 +9,6 @@ use mln_expression::value::from_expression_value;
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Serialize};
 
 use crate::evaluated::Evaluated;
 use crate::expression::{Dependency, Expr, Formatted, FormattedSection, Type};
@@ -162,12 +161,12 @@ impl SymbolLayerPaintPropertyOverrides {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub struct Impl {
     pub(crate) base: ImplBase,
     pub layout: SymbolLayoutProperties::Unevaluated,
     pub paint: SymbolPaintProperties::Transitionable,
-    #[serde(skip)]
+    #[wire(skip)]
     has_format_section_overrides_: OnceLock<bool>,
 }
 

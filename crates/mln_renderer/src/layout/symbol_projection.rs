@@ -183,6 +183,7 @@ enum PlacementResult {
 
 /// Projects tile points to the label plane a symbol is laid out in, through
 /// the tile's projection.
+#[derive(Clone)]
 pub(crate) struct LabelPlaneProjector<'a> {
     tile: TileProjector<'a>,
     pitch_with_map: bool,
@@ -191,6 +192,8 @@ pub(crate) struct LabelPlaneProjector<'a> {
     pitched_label_plane_matrix_inverse: Mat4,
     width: f32,
     height: f32,
+    /// The symbol's `symbol-height-offset`, in meters.
+    elevation: f64,
 }
 
 impl<'a> LabelPlaneProjector<'a> {
@@ -225,7 +228,16 @@ impl<'a> LabelPlaneProjector<'a> {
             pitched_label_plane_matrix_inverse,
             width: size.width as f32,
             height: size.height as f32,
+            elevation: 0.0,
         }
+    }
+
+    /// This projector for a symbol `height_offset` meters above the ground.
+    /// The pitched label plane is the same at any height; the shaders raise
+    /// it.
+    #[must_use]
+    pub(crate) fn raised(&self, height_offset: f32) -> Self {
+        LabelPlaneProjector { elevation: f64::from(height_offset), ..self.clone() }
     }
 
     /// Tile units to the label plane; distance and occlusion come from the
@@ -241,7 +253,8 @@ impl<'a> LabelPlaneProjector<'a> {
                 occluded: false,
             };
         }
-        let mut projected = self.tile.project(&Point::new(f64::from(translated.x), f64::from(translated.y)), 0.0);
+        let mut projected =
+            self.tile.project(&Point::new(f64::from(translated.x), f64::from(translated.y)), self.elevation);
         projected.point = Point::new(
             (projected.point.x * 0.5 + 0.5) * f64::from(self.width),
             (-projected.point.y * 0.5 + 0.5) * f64::from(self.height),
@@ -254,7 +267,8 @@ impl<'a> LabelPlaneProjector<'a> {
     pub(crate) fn to_clip_space(&self, label_plane_point: Vec2) -> Vec2 {
         if self.pitch_with_map {
             let tile_point = project(label_plane_point, &self.pitched_label_plane_matrix_inverse).0;
-            let projected = self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), 0.0);
+            let projected =
+                self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), self.elevation);
             return Vec2::new(projected.point.x as f32, projected.point.y as f32);
         }
         Vec2::new((label_plane_point.x / self.width) * 2.0 - 1.0, 1.0 - (label_plane_point.y / self.height) * 2.0)
@@ -263,7 +277,7 @@ impl<'a> LabelPlaneProjector<'a> {
     /// Tile units straight to clip space.
     #[must_use]
     pub(crate) fn to_clip_space_from_tile(&self, tile_point: Vec2) -> ProjectedTilePoint {
-        self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), 0.0)
+        self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), self.elevation)
     }
 }
 

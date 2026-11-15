@@ -27,7 +27,7 @@ fn get_type(res: &Resource) -> &'static str {
 impl MemoryTest {
     fn new() -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         let cache: Rc<RefCell<HashMap<String, Arc<Vec<u8>>>>> = Rc::default();
 
         // `response(path)`: the fixture's bytes, read once.
@@ -68,6 +68,7 @@ impl MemoryTest {
                 pixel_ratio: ratio,
                 ..Default::default()
             },
+            &self.run_loop,
         )
         .unwrap();
         frontend.attach(&map);
@@ -81,7 +82,7 @@ fn vector() {
     let test = MemoryTest::new();
     let ratio = 2.0;
 
-    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio, &test.run_loop).expect("a headless frontend");
     let mut map = test.map(&frontend, ratio);
     map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     map.style_mut().load_url("https://example.com/maps/streets");
@@ -95,7 +96,7 @@ fn raster() {
     let test = MemoryTest::new();
     let ratio = 2.0;
 
-    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio, &test.run_loop).expect("a headless frontend");
     let mut map = test.map(&frontend, ratio);
     map.style_mut().load_url("https://example.com/maps/hybrid");
 
@@ -136,7 +137,8 @@ fn footprint() {
 
     impl FrontendAndMap {
         fn new(test: &MemoryTest, style: &str) -> Self {
-            let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 2.0).expect("a headless frontend");
+            let mut frontend =
+                HeadlessFrontend::new(Size::new(256, 256), 2.0, &test.run_loop).expect("a headless frontend");
             let mut map = test.map(&frontend, 2.0);
             map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
             map.style_mut().load_url(style);
@@ -214,7 +216,7 @@ fn live(counters: &[(&'static str, i32)], name: &str) -> i32 {
 fn rendering_stats_count_live_resources() {
     const EMPTY: &str = r#"{"version": 8, "sources": {}, "layers": []}"#;
     let test = MemoryTest::new();
-    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &test.run_loop).expect("a headless frontend");
     let mut map = test.map(&frontend, 1.0);
     map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
 
@@ -261,7 +263,7 @@ fn rendering_stats_count_live_resources() {
 #[test]
 fn rendering_stats_count_one_frame_of_globe_clip_masks() {
     let test = MemoryTest::new();
-    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &test.run_loop).expect("a headless frontend");
     let mut map = test.map(&frontend, 1.0);
     map.style_mut().load_json(
         r#"{"version": 8, "projection": {"type": "vertical-perspective"},

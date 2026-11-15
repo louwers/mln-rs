@@ -3,7 +3,7 @@
 # in the change that needs it.
 
 [panic]
-"crates/mln_actor/src/scheduler.rs" = 2
+"crates/mln_actor/src/scheduler.rs" = 1
 "crates/mln_actor/src/thread.rs" = 2
 "crates/mln_actor/src/thread_pool.rs" = 1
 "crates/mln_conversion/src/get_json_type.rs" = 1
@@ -14,7 +14,7 @@
 "crates/mln_expression/src/coercion.rs" = 8
 "crates/mln_expression/src/collator_expression.rs" = 3
 "crates/mln_expression/src/comparison.rs" = 4
-"crates/mln_expression/src/compound_expression.rs" = 17
+"crates/mln_expression/src/compound_expression.rs" = 6
 "crates/mln_expression/src/dsl.rs" = 3
 "crates/mln_expression/src/find_zoom_curve.rs" = 1
 "crates/mln_expression/src/format_expression.rs" = 3
@@ -82,11 +82,10 @@
 "crates/mln_storage/src/mbtiles_file_source.rs" = 1
 "crates/mln_storage/src/offline.rs" = 1
 "crates/mln_storage/src/offline_database.rs" = 3
-"crates/mln_storage/src/pmtiles_file_source.rs" = 2
+"crates/mln_storage/src/pmtiles_file_source.rs" = 1
 "crates/mln_storage/src/stub_file_source.rs" = 2
 "crates/mln_storage/src/ureq_transport.rs" = 1
 "crates/mln_style/src/color_ramp_property_value.rs" = 2
-"crates/mln_style/src/conversion/function.rs" = 3
 "crates/mln_style/src/layer_impl.rs" = 1
 "crates/mln_style/src/layer_properties.rs" = 2
 "crates/mln_style/src/layers/circle_layer_impl.rs" = 1
@@ -116,8 +115,8 @@
 
 [borrow]
 "crates/mln_actor/src/local_object.rs" = 3
-"crates/mln_actor/src/run_loop.rs" = 11
-"crates/mln_actor/src/scheduler.rs" = 3
+"crates/mln_actor/src/run_loop.rs" = 3
+"crates/mln_actor/src/scheduler.rs" = 1
 "crates/mln_actor/src/timer.rs" = 4
 "crates/mln_c/src/render_session.rs" = 3
 "crates/mln_c/src/web.rs" = 5
@@ -186,22 +185,11 @@
 "crates/mln_runtime/src/map.rs" = 2
 "crates/mln_runtime/src/render/driver.rs" = 2
 "crates/mln_runtime/src/render/session.rs" = 9
-"crates/mln_runtime/src/render/worker.rs" = 6
-"crates/mln_runtime/src/resources.rs" = 4
-"crates/mln_runtime/src/runtime.rs" = 6
 "crates/mln_runtime/src/web.rs" = 3
 "crates/mln_sprite/src/sprite_loader.rs" = 8
-"crates/mln_storage/src/database_file_source.rs" = 11
-"crates/mln_storage/src/fetch_transport.rs" = 2
-"crates/mln_storage/src/file_source_request.rs" = 1
-"crates/mln_storage/src/http_file_source.rs" = 1
-"crates/mln_storage/src/main_resource_loader.rs" = 4
-"crates/mln_storage/src/mbtiles_file_source.rs" = 1
-"crates/mln_storage/src/online_file_source.rs" = 38
-"crates/mln_storage/src/pmtiles_file_source.rs" = 17
-"crates/mln_storage/src/stub_file_source.rs" = 19
-"crates/mln_storage_offline/src/database_file_source.rs" = 11
-"crates/mln_storage_offline/src/offline_download.rs" = 57
+"crates/mln_storage/src/database_file_source.rs" = 1
+"crates/mln_storage/src/online_file_source.rs" = 37
+"crates/mln_storage/src/stub_file_source.rs" = 15
 "crates/mln_style/src/source.rs" = 5
 "crates/mln_style/src/sources/geojson_source.rs" = 9
 "crates/mln_style/src/sources/image_source.rs" = 10

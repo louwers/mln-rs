@@ -24,7 +24,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{LocalObject, SchedulerPtr, TaggedScheduler, Thread, scheduler};
+use mln_actor::{LocalObject, SchedulerPtr, TaggedScheduler, Thread};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
@@ -104,17 +104,17 @@ enum RouteTile {
 
 impl SerializingTransport {
     /// A transport over the instances `instances` creates, with the sink
-    /// for their replies. The replies are handled on the calling thread
-    /// (its scheduler runs them), which must be the one that uses the
+    /// for their replies. The replies are handled in tasks of `scheduler`,
+    /// the renderer's loop, which runs on this thread, the one that uses the
     /// transport.
-    pub fn new(instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>) -> Rc<Self> {
+    pub fn new(scheduler: &SchedulerPtr, instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>) -> Rc<Self> {
         Rc::new_cyclic(|self_weak: &Weak<SerializingTransport>| {
             let transport = Arc::new(LocalObject::new(Weak::clone(self_weak)));
-            let instances = instances(ReplySink { scheduler: scheduler::get_current(), transport });
+            let instances = instances(ReplySink { scheduler: Arc::clone(scheduler), transport });
             let count = instances.count();
             assert!(count > 0, "a SerializingTransport needs a worker instance");
             // Its workers are called directly, so it schedules nothing.
-            let synchronous = TaggedScheduler::new(scheduler::get_current(), SimpleIdentity::new());
+            let synchronous = TaggedScheduler::new(Arc::clone(scheduler), SimpleIdentity::new());
             SerializingTransport {
                 self_weak: Weak::clone(self_weak),
                 instances,
@@ -294,8 +294,8 @@ impl ThreadWorkerInstances {
         let threads = (0..count)
             .map(|instance| {
                 let replies = replies.clone();
-                Thread::new(&format!("TileWorker {instance}"), move |_| {
-                    let workers = TaggedScheduler::new(scheduler::get_current(), SimpleIdentity::new());
+                Thread::new(&format!("TileWorker {instance}"), move |_, run_loop| {
+                    let workers = TaggedScheduler::new(run_loop.scheduler(), SimpleIdentity::new());
                     TileWorkerHost::new(workers, move |reply| replies.send(instance, reply))
                 })
             })

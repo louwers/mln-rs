@@ -25,7 +25,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_actor::{ActorRef, LocalObject, Mailbox, TaggedScheduler, scheduler};
+use mln_actor::{ActorRef, LocalObject, Mailbox, TaggedScheduler};
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
@@ -42,7 +42,6 @@ use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::bucket_geometry::BucketGeometry;
@@ -65,17 +64,17 @@ use crate::tile_render_data::{TileAtlasTextures, TileRenderData};
 /// their bins (C++ `~LayoutResult`). Shared, so that copies of a
 /// `LayoutResult` release them once.
 ///
-/// Port-only: serde writes the atlases without the atlas they release their
+/// Port-only: the codec writes the atlases without the atlas they release their
 /// bins to, which is the side's that gets them (`tile/worker_codec`).
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, mln_wire::Wire)]
 pub(crate) struct LayoutAtlases {
     pub(crate) glyph_atlas: GlyphAtlas,
     pub(crate) image_atlas: ImageAtlas,
-    #[serde(skip)]
+    #[wire(skip)]
     pub(crate) dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
     /// The image versions that `update_images` last saw, where they differ
     /// from the layout's.
-    #[serde(skip)]
+    #[wire(skip)]
     seen_image_versions: Mutex<SeenImageVersions>,
 }
 
@@ -600,7 +599,7 @@ impl GeometryTile {
             }
         });
         // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        mailbox.open(&scheduler::get_current(), Rc::<GeometryTileInner>::clone(&inner));
+        mailbox.open(&parameters.scheduler, Rc::<GeometryTileInner>::clone(&inner));
         GeometryTile { inner }
     }
 
@@ -1028,7 +1027,7 @@ mod tests {
     /// workers and releases its atlases on the render thread.
     #[test]
     fn a_layout_frees_its_data_on_the_workers_and_its_atlases_here() {
-        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+        let thread_pool = TaggedScheduler::new(mln_actor::scheduler::get_background(), SimpleIdentity::new());
         let (data_drops, atlas_releases) = (Threads::default(), Threads::default());
         let result = LayoutResult::new(
             HashMap::default(),

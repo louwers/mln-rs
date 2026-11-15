@@ -6,28 +6,104 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use feature::Value;
 use mln_actor::{AsyncTask, LocalObject, RunLoop};
-use mln_storage::file_source::MAX_CONCURRENT_REQUESTS_KEY;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
     OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
-use mln_storage::online_file_source::OnlineFileSource;
 use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{AsyncRequest, Callback, FileSource, Kind, LoadingMethod, Resource, ResourceOptions, Response};
+use mln_storage::{FileSource, Kind, LoadingMethod, Resource, Responder, Response};
 use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::Scheme;
-use parking_lot::Mutex;
 
 use super::cpp_path;
-use crate::offline_download::{OfflineDownload, WeakOfflineDownload};
+use crate::offline_download::{Downloads, OfflineDownload, Post};
+
+/// The database and its downloads, which the test's thread owns as a
+/// database's worker does.
+struct Host {
+    db: OfflineDatabase,
+    downloads: Downloads,
+}
+
+/// Forwards to an observer that a test keeps.
+struct Shared(Rc<dyn OfflineRegionObserver>);
+
+impl OfflineRegionObserver for Shared {
+    fn status_changed(&self, status: OfflineRegionStatus) {
+        self.0.status_changed(status);
+    }
+
+    fn response_error(&self, error: ResourceError) {
+        self.0.response_error(error);
+    }
+}
+
+/// A download in the test's host.
+#[derive(Clone)]
+struct TestDownload {
+    host: Rc<RefCell<Host>>,
+    post: Post,
+    id: i64,
+}
+
+impl TestDownload {
+    fn with<R>(&self, f: impl FnOnce(&mut OfflineDownload, &mut OfflineDatabase) -> R) -> R {
+        let mut host = self.host.borrow_mut();
+        let Host { db, downloads } = &mut *host;
+        f(downloads.get_mut(self.id).expect("the download"), db)
+    }
+
+    fn set_observer(&self, observer: Option<Rc<dyn OfflineRegionObserver>>) {
+        self.with(|download, _| {
+            download.set_observer(
+                observer.map(|observer| -> Box<dyn OfflineRegionObserver> { Box::new(Shared(observer)) }),
+            );
+        });
+    }
+
+    fn set_state(&self, state: OfflineRegionDownloadState) {
+        self.with(|download, _| download.set_state(state));
+    }
+
+    fn get_status(&self) -> OfflineRegionStatus {
+        self.with(|download, db| download.get_status(db))
+    }
+
+    fn set_maximum_concurrent_requests(&self, maximum: u32) {
+        self.with(|download, _| download.set_maximum_concurrent_requests(maximum));
+    }
+
+    /// A handle for the download's observer, which reaches the download in a
+    /// task of the test's loop, after the download's work in progress.
+    fn downgrade(&self) -> LaterDownload {
+        LaterDownload { post: Arc::clone(&self.post), id: self.id }
+    }
+}
+
+/// What an observer does to its download, in a task.
+#[derive(Clone)]
+struct LaterDownload {
+    post: Post,
+    id: i64,
+}
+
+impl LaterDownload {
+    fn set_state(&self, state: OfflineRegionDownloadState) {
+        let id = self.id;
+        (self.post)(Box::new(move |_, downloads| {
+            if let Some(download) = downloads.get_mut(id) {
+                download.set_state(state);
+            }
+        }));
+    }
+}
 
 #[derive(Default)]
 struct MockObserver {
@@ -64,7 +140,8 @@ fn fixture_response(size: &Cell<u64>, path: &str) -> Response {
 struct OfflineTest {
     run_loop: RunLoop,
     file_source: Arc<StubFileSource>,
-    db: Rc<RefCell<OfflineDatabase>>,
+    host: Rc<RefCell<Host>>,
+    post: Post,
     size: Rc<Cell<u64>>,
 }
 
@@ -75,12 +152,44 @@ impl OfflineTest {
 
     fn with_path(path: &str) -> Self {
         let run_loop = RunLoop::new();
-        OfflineTest {
-            run_loop,
-            file_source: Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
-            db: Rc::new(RefCell::new(OfflineDatabase::new(path))),
-            size: Rc::new(Cell::new(0)),
-        }
+        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+        // The downloads' tasks run on the test's loop, with the host.
+        let slot: Arc<std::sync::OnceLock<LocalObject<RefCell<Host>>>> = Arc::default();
+        let (tasks, handle) = (Arc::clone(&slot), run_loop.handle());
+        let post: Post = Arc::new(move |task| {
+            let slot = Arc::clone(&tasks);
+            handle.invoke(move || {
+                let host = slot.get().and_then(LocalObject::get);
+                if let Some(host) = host {
+                    let mut host = host.borrow_mut();
+                    let Host { db, downloads } = &mut *host;
+                    task(db, downloads);
+                }
+            });
+        });
+        let network: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
+        let host = Rc::new(RefCell::new(Host {
+            db: OfflineDatabase::new(path),
+            downloads: Downloads::new(Some(network), Arc::clone(&post)),
+        }));
+        let _ = slot.set(LocalObject::from_rc(Rc::clone(&host)));
+        OfflineTest { run_loop, file_source, host, post, size: Rc::new(Cell::new(0)) }
+    }
+
+    fn db(&self) -> std::cell::RefMut<'_, OfflineDatabase> {
+        std::cell::RefMut::map(self.host.borrow_mut(), |host| &mut host.db)
+    }
+
+    /// Adds the download of `region_id` over `file_source` to the host.
+    fn add_download(
+        &self,
+        region_id: i64,
+        definition: OfflineRegionDefinition,
+        file_source: Arc<dyn FileSource>,
+    ) -> TestDownload {
+        let download = OfflineDownload::new(region_id, definition, file_source, Arc::clone(&self.post));
+        self.host.borrow_mut().downloads.insert(download);
+        TestDownload { host: Rc::clone(&self.host), post: Arc::clone(&self.post), id: region_id }
     }
 
     fn create_region(&self) -> Result<OfflineRegion, DatabaseError> {
@@ -94,7 +203,7 @@ impl OfflineTest {
         )
         .unwrap();
         let metadata = OfflineRegionMetadata::new();
-        self.db.borrow_mut().create_region(&definition.into(), &metadata)
+        self.db().create_region(&definition.into(), &metadata)
     }
 
     fn response(&self, path: &str) -> Response {
@@ -114,7 +223,7 @@ impl OfflineTest {
         });
     }
 
-    fn download(&self, region_id: i64, style_url: &str, include_ideographs: bool) -> OfflineDownload {
+    fn download(&self, region_id: i64, style_url: &str, include_ideographs: bool) -> TestDownload {
         self.download_with_zoom(
             region_id,
             style_url,
@@ -133,8 +242,8 @@ impl OfflineTest {
         max_zoom: f64,
         include_ideographs: bool,
         file_source: Arc<dyn FileSource>,
-    ) -> OfflineDownload {
-        OfflineDownload::new(
+    ) -> TestDownload {
+        self.add_download(
             region_id,
             OfflineTilePyramidRegionDefinition::new(
                 style_url,
@@ -146,7 +255,6 @@ impl OfflineTest {
             )
             .unwrap()
             .into(),
-            Rc::clone(&self.db),
             file_source,
         )
     }
@@ -307,7 +415,7 @@ fn geojson_source() {
 /// The completion check of Activate and `ExcludeIdeographs`: deactivate, then
 /// compare the computed status with the reported one.
 fn check_completed_and_computed(
-    download: &WeakOfflineDownload,
+    download: &TestDownload,
     size: u64,
     expected_resources: u64,
     status: OfflineRegionStatus,
@@ -317,7 +425,7 @@ fn check_completed_and_computed(
     assert_eq!(size, status.completed_resource_size);
 
     download.set_state(OfflineRegionDownloadState::Inactive);
-    let computed_status = download.get_status().expect("download");
+    let computed_status = download.get_status();
     assert_eq!(OfflineRegionDownloadState::Inactive, computed_status.download_state);
     assert_eq!(status.required_resource_count, computed_status.required_resource_count);
     assert_eq!(status.required_tile_count, computed_status.required_tile_count);
@@ -337,13 +445,12 @@ fn activate() {
 
     respond_to_full_style(&test, true);
 
-    let (size, stop, weak) = (Rc::clone(&test.size), test.run_loop.clone(), download.downgrade());
+    let completed = Rc::new(Cell::new(None));
+    let (last, stop) = (Rc::clone(&completed), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
-            if status.complete() {
-                // 256 glyphs, 2 sprite images, 2 sprite jsons, 1 tile, 1
-                // style, source, image
-                check_completed_and_computed(&weak, size.get(), 264, status);
+            if status.complete() && last.get().is_none() {
+                last.set(Some(status));
                 stop.stop();
             }
         })),
@@ -354,6 +461,9 @@ fn activate() {
     download.set_state(OfflineRegionDownloadState::Active);
 
     test.run_loop.run();
+    // 256 glyphs, 2 sprite images, 2 sprite jsons, 1 tile, 1 style, source,
+    // image
+    check_completed_and_computed(&download, test.size.get(), 264, completed.get().expect("complete"));
 }
 
 // gtest: OfflineDownload.ExcludeIdeographs
@@ -365,18 +475,12 @@ fn exclude_ideographs() {
 
     respond_to_full_style(&test, true);
 
-    let (size, stop, weak) = (Rc::clone(&test.size), test.run_loop.clone(), download.downgrade());
+    let completed = Rc::new(Cell::new(None));
+    let (last, stop) = (Rc::clone(&completed), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
-            if status.complete() {
-                // glyph ranges, 2 sprite images, 2 sprite jsons, 1 tile, 1
-                // style, source, image
-                check_completed_and_computed(
-                    &weak,
-                    size.get(),
-                    u64::from(NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK) + 8,
-                    status,
-                );
+            if status.complete() && last.get().is_none() {
+                last.set(Some(status));
                 stop.stop();
             }
         })),
@@ -387,97 +491,57 @@ fn exclude_ideographs() {
     download.set_state(OfflineRegionDownloadState::Active);
 
     test.run_loop.run();
-}
-
-struct FakeFileRequest {
-    id: u64,
-    requests: Rc<RefCell<Vec<FakeRequestEntry>>>,
+    // glyph ranges, 2 sprite images, 2 sprite jsons, 1 tile, 1 style,
+    // source, image
+    let expected = u64::from(NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK) + 8;
+    check_completed_and_computed(&download, test.size.get(), expected, completed.get().expect("complete"));
 }
 
 struct FakeRequestEntry {
-    id: u64,
     resource: Resource,
-    callback: Rc<RefCell<Callback>>,
-}
-
-impl AsyncRequest for FakeFileRequest {}
-
-impl Drop for FakeFileRequest {
-    fn drop(&mut self) {
-        self.requests.borrow_mut().retain(|entry| entry.id != self.id);
-    }
+    responder: Responder,
 }
 
 /// Records the requests; `respond` answers the first of a kind. Requests
 /// come from the thread that created it.
 struct FakeOnlineFileSource {
     requests: LocalObject<RefCell<Vec<FakeRequestEntry>>>,
-    next_id: std::sync::atomic::AtomicU64,
-    online_fs: OnlineFileSource,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl FakeOnlineFileSource {
     fn new() -> Self {
-        FakeOnlineFileSource {
-            requests: LocalObject::new(RefCell::new(Vec::new())),
-            next_id: std::sync::atomic::AtomicU64::new(0),
-            online_fs: OnlineFileSource::new(&ResourceOptions::default()),
-            resource_options: Mutex::new(ResourceOptions::default()),
-        }
+        FakeOnlineFileSource { requests: LocalObject::new(RefCell::new(Vec::new())) }
     }
 
+    /// The requests that weren't cancelled.
     fn requests(&self) -> Rc<RefCell<Vec<FakeRequestEntry>>> {
-        // LocalObject<RefCell<..>> holds an Rc<RefCell<..>>.
-        self.requests.get().expect("FakeOnlineFileSource used from another thread")
+        let requests = self.requests.get().expect("FakeOnlineFileSource used from another thread");
+        requests.borrow_mut().retain(|entry| !entry.responder.is_cancelled());
+        requests
     }
 
     fn respond(&self, kind: Kind, response: &Response) -> bool {
-        let callback = self
+        let responder = self
             .requests()
             .borrow()
             .iter()
             .find(|entry| entry.resource.kind == kind)
-            .map(|entry| Rc::clone(&entry.callback));
-
-        let request_found = callback.is_some();
-
-        if let Some(callback) = callback {
-            // Copy the callback, in case calling it deallocates the
-            // AsyncRequest.
-            (callback.borrow_mut())(response.clone());
+            .map(|entry| entry.responder.clone());
+        let request_found = responder.is_some();
+        if let Some(responder) = responder {
+            responder.send_now(response.clone());
         }
-
         request_found
     }
 }
 
 impl FileSource for FakeOnlineFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let requests = self.requests();
-        requests.borrow_mut().push(FakeRequestEntry {
-            id,
-            resource: resource.clone(),
-            callback: Rc::new(RefCell::new(callback)),
-        });
-        Box::new(FakeFileRequest { id, requests })
+    fn load(&self, resource: &Resource, responder: Responder) {
+        self.requests().borrow_mut().push(FakeRequestEntry { resource: resource.clone(), responder });
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn get_property(&self, property: &str) -> Value {
-        self.online_fs.get_property(property)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }
 
@@ -499,10 +563,10 @@ fn does_not_flood_the_file_source_with_requests() {
     file_source.respond(Kind::Style, &test.response("style.json"));
     test.run_loop.run_once();
 
-    let Value::Uint(max) = file_source.get_property(MAX_CONCURRENT_REQUESTS_KEY) else {
-        panic!("max-concurrent-requests is not a uint");
-    };
-    assert_eq!(max as usize, file_source.requests().borrow().len());
+    assert_eq!(
+        mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize,
+        file_source.requests().borrow().len()
+    );
 }
 
 // gtest: OfflineDownload.GetStatusNoResources
@@ -531,7 +595,7 @@ fn get_status_style_complete() {
     let download = test.download(region.id, STYLE_URL, true);
 
     let response = test.response("style.json");
-    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response);
+    test.db().put_region_resource(1, &Resource::style(STYLE_URL), &response);
 
     let status = download.get_status();
 
@@ -553,10 +617,10 @@ fn get_status_style_and_source_complete() {
     let download = test.download(region.id, STYLE_URL, true);
 
     let response = test.response("style.json");
-    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response);
+    test.db().put_region_resource(1, &Resource::style(STYLE_URL), &response);
 
     let response = test.response("streets.json");
-    test.db.borrow_mut().put_region_resource(1, &Resource::source("http://127.0.0.1:3000/streets.json"), &response);
+    test.db().put_region_resource(1, &Resource::source("http://127.0.0.1:3000/streets.json"), &response);
 
     let status = download.get_status();
 
@@ -575,7 +639,7 @@ fn get_status_style_and_source_complete() {
 fn get_status_infinite_max_zoom() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = OfflineDownload::new(
+    let download = test.add_download(
         region.id,
         OfflineTilePyramidRegionDefinition::new(
             STYLE_URL,
@@ -587,14 +651,13 @@ fn get_status_infinite_max_zoom() {
         )
         .unwrap()
         .into(),
-        Rc::clone(&test.db),
         Arc::<StubFileSource>::clone(&test.file_source),
     );
 
     let response = test.response("style.json");
-    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response);
+    test.db().put_region_resource(1, &Resource::style(STYLE_URL), &response);
     let response = test.response("streets.json");
-    test.db.borrow_mut().put_region_resource(1, &Resource::source("http://127.0.0.1:3000/streets.json"), &response);
+    test.db().put_region_resource(1, &Resource::source("http://127.0.0.1:3000/streets.json"), &response);
 
     let status = download.get_status();
 
@@ -669,7 +732,7 @@ fn request_errors_are_retried() {
 
 fn put_tile(test: &OfflineTest, x: i32, y: i32, z: i8) {
     let response = test.response("0-0-0.vector.pbf");
-    test.db.borrow_mut().put(
+    test.db().put(
         &Resource::tile("http://127.0.0.1:3000/{z}-{x}-{y}.vector.pbf", 1.0, x, y, z, Scheme::XYZ, LoadingMethod::All),
         &response,
     );
@@ -852,8 +915,9 @@ fn interrupt_and_resume() {
             if !interrupted.get() && status.completed_resource_count > 0 {
                 interrupted.set(true);
                 assert!(!status.complete());
+                let run_loop = stop.clone();
                 let (stop, weak) = (stop.clone(), weak.clone());
-                let task = AsyncTask::new(move || {
+                let task = AsyncTask::new(&run_loop, move || {
                     weak.set_state(OfflineRegionDownloadState::Inactive);
                     stop.stop();
                 });
@@ -896,9 +960,9 @@ fn no_freezing_on_cached_tiles_and_new_style() {
     let download =
         test.download_with_zoom(region.id, STYLE_URL, 1.0, 1.0, true, Arc::<StubFileSource>::clone(&test.file_source));
 
-    test.file_source.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(2));
+    download.set_maximum_concurrent_requests(2);
     test.respond_with(Kind::Style, "inline_source.style.json", |_| {});
-    // Number of resources must exceed MAX_CONCURRENT_REQUESTS_KEY
+    // Number of resources must exceed the maximum concurrent requests
     put_tile(&test, 0, 0, 1);
     put_tile(&test, 0, 1, 1);
     put_tile(&test, 1, 0, 1);
@@ -1001,7 +1065,7 @@ fn world_at_zoom(max_zoom: f64) -> OfflineRegionDefinition {
 /// on any if it's `None`.
 fn run_until_inactive(
     test: &OfflineTest,
-    download: &OfflineDownload,
+    download: &TestDownload,
     errors: Option<Rc<RefCell<Vec<ResourceError>>>>,
 ) -> OfflineRegionStatus {
     let completed = Rc::new(Cell::new(OfflineRegionStatus::default()));
@@ -1034,12 +1098,7 @@ fn download_until_inactive(
     definition: &OfflineRegionDefinition,
     errors: Option<Rc<RefCell<Vec<ResourceError>>>>,
 ) -> OfflineRegionStatus {
-    let download = OfflineDownload::new(
-        region_id,
-        definition.clone(),
-        Rc::clone(&test.db),
-        Arc::<StubFileSource>::clone(&test.file_source),
-    );
+    let download = test.add_download(region_id, definition.clone(), Arc::<StubFileSource>::clone(&test.file_source));
     let completed = run_until_inactive(test, &download, errors);
     assert!(completed.complete());
     let stored = download.get_status();
@@ -1051,7 +1110,7 @@ fn download_until_inactive(
 }
 
 fn invalidate_region(test: &OfflineTest, region_id: i64) {
-    assert!(test.db.borrow_mut().invalidate_region(region_id).is_none());
+    assert!(test.db().invalidate_region(region_id).is_none());
 }
 
 /// Downloads a region of a style and one tile, invalidates it, and downloads
@@ -1123,7 +1182,7 @@ fn test_refresh_invalidated_region(style_not_modified: bool, tile_not_modified: 
     assert_eq!(stored_size(tile), status.completed_tile_size);
 
     let check_stored = |resource: &Resource, data: &[u8], etag: &str| {
-        let stored = test.db.borrow_mut().get(resource).expect("stored");
+        let stored = test.db().get(resource).expect("stored");
         assert!(!stored.must_revalidate);
         assert_eq!(Some(expires), stored.expires);
         assert!(stored.is_usable());
@@ -1162,19 +1221,19 @@ fn revalidates_only_stored_resources_that_must_be_revalidated() {
     style.etag = Some("style-1".to_owned());
     style.must_revalidate = true;
     style.expires = Some(past);
-    test.db.borrow_mut().put(&Resource::style(STYLE_URL), &style);
+    test.db().put(&Resource::style(STYLE_URL), &style);
 
     // The z0 tile has expired, and the z1 tiles must be revalidated once they
     // expire.
     let mut expired_tile = test.response("0-0-0.vector.pbf");
     expired_tile.expires = Some(past);
-    test.db.borrow_mut().put(&xyz_tile(tile_url, 0, 0, 0), &expired_tile);
+    test.db().put(&xyz_tile(tile_url, 0, 0, 0), &expired_tile);
     for x in 0..2 {
         for y in 0..2 {
             let mut fresh_tile = test.response("0-0-0.vector.pbf");
             fresh_tile.must_revalidate = true;
             fresh_tile.expires = Some(future);
-            test.db.borrow_mut().put(&xyz_tile(tile_url, x, y, 1), &fresh_tile);
+            test.db().put(&xyz_tile(tile_url, x, y, 1), &fresh_tile);
         }
     }
 
@@ -1212,13 +1271,7 @@ fn tile_json(tile_url: &str) -> String {
 /// The status of the region `region_id` as the database reports it while no
 /// download runs.
 fn stored_status(test: &OfflineTest, region_id: i64) -> OfflineRegionStatus {
-    OfflineDownload::new(
-        region_id,
-        world_at_zoom(0.0),
-        Rc::clone(&test.db),
-        Arc::<StubFileSource>::clone(&test.file_source),
-    )
-    .get_status()
+    test.add_download(region_id, world_at_zoom(0.0), Arc::<StubFileSource>::clone(&test.file_source)).get_status()
 }
 
 fn collect_errors() -> Rc<RefCell<Vec<ResourceError>>> {
@@ -1243,12 +1296,7 @@ fn refresh_keeps_tiles_that_only_an_earlier_style_listed() {
     // The refreshed style moves the tile to another URL.
     *tile_url.borrow_mut() = v2;
     invalidate_region(&test, region.id);
-    let download = OfflineDownload::new(
-        region.id,
-        world_at_zoom(0.0),
-        Rc::clone(&test.db),
-        Arc::<StubFileSource>::clone(&test.file_source),
-    );
+    let download = test.add_download(region.id, world_at_zoom(0.0), Arc::<StubFileSource>::clone(&test.file_source));
     let active = run_until_inactive(&test, &download, None);
 
     // While it runs, the refresh counts what the current style lists.
@@ -1269,9 +1317,9 @@ fn refresh_keeps_tiles_that_only_an_earlier_style_listed() {
         stored.completed_tile_size
     );
 
-    let earlier = test.db.borrow_mut().get(&xyz_tile(v1, 0, 0, 0)).expect("earlier tile");
+    let earlier = test.db().get(&xyz_tile(v1, 0, 0, 0)).expect("earlier tile");
     assert!(earlier.must_revalidate);
-    let current = test.db.borrow_mut().get(&xyz_tile(v2, 0, 0, 0)).expect("current tile");
+    let current = test.db().get(&xyz_tile(v2, 0, 0, 0)).expect("current tile");
     assert_eq!(format!("tile {v2}").as_bytes(), current.data.expect("data").as_slice());
 }
 
@@ -1381,7 +1429,7 @@ impl RefreshedRegion {
         assert_eq!(self.downloaded.completed_resource_size, status.completed_resource_size);
         assert_eq!(self.downloaded.completed_tile_count, status.completed_tile_count);
         assert_eq!(2, self.tile_requests.get());
-        let tile = self.test.db.borrow_mut().get(&xyz_tile(REFRESHED_TILE_URL, 0, 0, 0)).expect("tile");
+        let tile = self.test.db().get(&xyz_tile(REFRESHED_TILE_URL, 0, 0, 0)).expect("tile");
         assert!(!tile.must_revalidate);
     }
 }
@@ -1408,7 +1456,7 @@ fn refresh_continues_from_a_stored_style_when_the_new_one_is_invalid() {
     let refreshed = RefreshedRegion::new();
     *refreshed.style.borrow_mut() = with_data("not JSON");
     refreshed.refresh_keeping_resources(Reason::Other);
-    let style = refreshed.test.db.borrow_mut().get(&Resource::style(STYLE_URL)).expect("style");
+    let style = refreshed.test.db().get(&Resource::style(STYLE_URL)).expect("style");
     assert_eq!(TILE_JSON_SOURCE_STYLE.as_bytes(), style.data.expect("data").as_slice());
 }
 
@@ -1451,16 +1499,12 @@ fn pausing_from_an_error_stops_the_refresh() {
     let test = &refreshed.test;
     // One request at a time, so that work the pause failed to stop would
     // still be queued when the download resumes.
-    test.file_source.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
     *refreshed.style.borrow_mut() = with_data("not JSON");
 
     // The observer pauses the download when it reports the invalid style.
-    let download = OfflineDownload::new(
-        refreshed.region.id,
-        world_at_zoom(0.0),
-        Rc::clone(&test.db),
-        Arc::<StubFileSource>::clone(&test.file_source),
-    );
+    let download =
+        test.add_download(refreshed.region.id, world_at_zoom(0.0), Arc::<StubFileSource>::clone(&test.file_source));
+    download.set_maximum_concurrent_requests(1);
     let (weak, stop) = (download.downgrade(), test.run_loop.clone());
     let observer = MockObserver {
         response_error_fn: Some(Box::new(move |_| {

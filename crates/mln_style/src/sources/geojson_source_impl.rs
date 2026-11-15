@@ -42,7 +42,13 @@ impl std::fmt::Debug for GeoJSONVTData {
 }
 
 impl GeoJSONData for GeoJSONVTData {
-    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, run_synchronously: bool) {
+    fn get_tile(
+        &self,
+        id: &CanonicalTileID,
+        callback: Box<dyn FnOnce(TileFeatures)>,
+        run_synchronously: bool,
+        reply_to: &SchedulerPtr,
+    ) {
         if run_synchronously {
             callback(geojsonvt_tile_features(&self.impl_, id));
         } else {
@@ -51,6 +57,7 @@ impl GeoJSONData for GeoJSONVTData {
             scheduler::schedule_and_reply_value(
                 &*self.sequenced_scheduler,
                 None,
+                reply_to,
                 move || -> TileFeatures { geojsonvt_tile_features(&geojsonvt_impl, &id) },
                 callback,
             );
@@ -81,7 +88,13 @@ impl std::fmt::Debug for SuperclusterData {
 }
 
 impl GeoJSONData for SuperclusterData {
-    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, _run_synchronously: bool) {
+    fn get_tile(
+        &self,
+        id: &CanonicalTileID,
+        callback: Box<dyn FnOnce(TileFeatures)>,
+        _run_synchronously: bool,
+        _reply_to: &SchedulerPtr,
+    ) {
         callback(self.impl_.get_tile(id.z, id.x, id.y));
     }
 

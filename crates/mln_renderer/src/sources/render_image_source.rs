@@ -314,6 +314,7 @@ impl RenderSource for RenderImageSource {
                 tile_lod_mode: parameters.tile_lod_mode,
                 requested_zoom: None,
                 round_zoom: false,
+                max_content_elevation: 0.0,
             },
             transform_state.get_integer_zoom(),
             zoom_range,

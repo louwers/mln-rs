@@ -71,7 +71,7 @@ fn invoke() {
     let failures = Failures::default();
 
     let f = failures.clone();
-    let thread = Thread::new("Test", move |actor| TestObject::new(actor, tid, f));
+    let thread = Thread::new("Test", move |actor, _| TestObject::new(actor, tid, f));
 
     thread.actor().invoke(|o: &TestObject| o.fn1(1));
     let f = failures.clone();
@@ -101,7 +101,7 @@ fn context() {
     let failures = Failures::default();
 
     let f = failures.clone();
-    let thread = Thread::new("Test", move |actor| TestObject::new(actor, tid, f));
+    let thread = Thread::new("Test", move |actor, _| TestObject::new(actor, tid, f));
 
     let (result, result_future) = mpsc::channel();
     thread.actor().invoke(move |o: &TestObject| o.check_context(&result));
@@ -117,8 +117,8 @@ struct TestWorker {
 }
 
 impl TestWorker {
-    fn new(_: ActorRef<TestWorker>) -> Self {
-        TestWorker { timer: Timer::new() }
+    fn new(_: ActorRef<TestWorker>, run_loop: &RunLoop) -> Self {
+        TestWorker { timer: Timer::new(run_loop) }
     }
 
     fn send(cb: impl FnOnce()) {
@@ -271,9 +271,9 @@ struct TestWorkerDelayedConstruction {
 }
 
 impl TestWorkerDelayedConstruction {
-    fn new(_: ActorRef<TestWorkerDelayedConstruction>, start: &mpsc::Receiver<()>) -> Self {
+    fn new(_: ActorRef<TestWorkerDelayedConstruction>, run_loop: &RunLoop, start: &mpsc::Receiver<()>) -> Self {
         wait(start);
-        TestWorkerDelayedConstruction { _timer: Timer::new() }
+        TestWorkerDelayedConstruction { _timer: Timer::new(run_loop) }
     }
 
     fn send(cb: impl FnOnce()) {
@@ -287,7 +287,8 @@ fn invoke_before_child_starts() {
     let run_loop = RunLoop::new();
 
     let (start, start_future) = mpsc::channel();
-    let thread = Thread::new("Test", move |actor| TestWorkerDelayedConstruction::new(actor, &start_future));
+    let thread =
+        Thread::new("Test", move |actor, run_loop| TestWorkerDelayedConstruction::new(actor, run_loop, &start_future));
 
     let count = Arc::new(AtomicI32::new(0));
 
@@ -322,7 +323,8 @@ fn delete_before_child_starts() {
     let (start, start_future) = mpsc::channel();
 
     let control = Thread::new("Control", TestWorker::new);
-    let thread = Thread::new("Test", move |actor| TestWorkerDelayedConstruction::new(actor, &start_future));
+    let thread =
+        Thread::new("Test", move |actor, run_loop| TestWorkerDelayedConstruction::new(actor, run_loop, &start_future));
 
     let f = Arc::clone(&flag);
     thread.actor().invoke(move |_: &TestWorkerDelayedConstruction| {

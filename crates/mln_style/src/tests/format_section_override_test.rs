@@ -85,14 +85,14 @@ fn format_section_override() {
     let constant_value_red = Evaluated::Constant(Color::red());
     let constant_value_green = Evaluated::Constant(Color::green());
     let dds_value_red =
-        per_feature(PropertyExpression::<Color>::from_expr(to_color(string(get_str("color"), None), None), None));
+        per_feature(PropertyExpression::<Color>::from_expr(to_color(string(get_str("color"), None), None)));
 
     assert_eq!(Dependency::FEATURE, dds_value_red.dependencies());
 
     // Evaluation test
     {
         let override1 = create_override(constant_value_green.clone(), "text-color");
-        let prop_expr = PropertyExpression::<Color>::new(override1, None);
+        let prop_expr = PropertyExpression::<Color>::new(override1);
         assert_eq!(
             Color::green(),
             prop_expr.evaluate(&EvaluationContext::with_zoom_feature(15.0, Some(&one_double)), Color::default())
@@ -107,7 +107,7 @@ fn format_section_override() {
         assert_eq!(Dependency::OVERRIDE | Dependency::FEATURE, prop_expr.get_dependencies());
 
         let override2 = create_override(dds_value_red.clone(), "text-color");
-        let prop_expr_dds = PropertyExpression::<Color>::new(override2, None);
+        let prop_expr_dds = PropertyExpression::<Color>::new(override2);
         assert_eq!(
             Color::red(),
             prop_expr_dds.evaluate(&EvaluationContext::from_feature(Some(&one_color)), Color::default())
@@ -132,7 +132,7 @@ fn format_section_override() {
 fn format_section_override_uses_captured_state() {
     let expr = parse_expression(r#"["to-color", ["global-state", "labelColor"]]"#, Some(Type::Color)).unwrap();
 
-    let mut property_expression = PropertyExpression::<Color>::from_expr(expr, None);
+    let mut property_expression = PropertyExpression::<Color>::from_expr(expr);
     let state: Arc<GlobalStateMap> =
         Arc::new(GlobalStateMap::from([("labelColor".to_owned(), MbglValue::String("red".to_owned()))]));
     property_expression.capture_global_state(Some(state));
@@ -214,7 +214,7 @@ impl FormattedCase {
             }
             _ => return None,
         };
-        Some(PropertyExpression::from_expr(expression, None))
+        Some(PropertyExpression::from_expr(expression))
     }
 }
 
@@ -319,7 +319,6 @@ fn symbol_layer_overrides() {
         let unevaluated = SymbolPaintProperties::Unevaluated {
             text_color: Transitioning::new(PropertyValue::Expression(PropertyExpression::<Color>::from_expr(
                 to_color(state_expression, None),
-                None,
             ))),
             ..SymbolPaintProperties::Unevaluated::default()
         };

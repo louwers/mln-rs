@@ -236,7 +236,7 @@ fn get_coerce_function(t: &Type) -> CoerceFunction {
 
 /// `["to-number", ...]` and the other coercions, explicit or inserted by
 /// the parser: the first input that converts, or the last one's error.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, mln_wire::Wire)]
 pub(crate) struct Coercion {
     type_: Type,
     inputs: Box<[Expr]>,
@@ -342,16 +342,6 @@ impl Coercion {
     }
 
     pub(crate) fn serialize(&self) -> MbglValue {
-        // Port-only: the conversion of a token string without tokens (a
-        // legacy function's stop, say) makes `["to-string", "text"]`, which
-        // the parser folds into the literal it coerces to itself. Writing the
-        // literal makes the serialized form the one it parses back to.
-        if let [input] = &*self.inputs
-            && input.literal_value().is_some()
-            && input.get_type() == self.type_
-        {
-            return input.serialize();
-        }
         match &self.type_ {
             Type::Formatted => {
                 // Since there's no explicit "to-formatted" coercion, the only

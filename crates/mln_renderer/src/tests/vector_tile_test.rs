@@ -36,14 +36,15 @@ struct VectorTileTest {
 impl VectorTileTest {
     fn new() -> Self {
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+        let run_loop = RunLoop::new();
         VectorTileTest {
-            run_loop: RunLoop::new(),
+            // C++ uses a FakeFileSource whose requests never answer; the
+            // asynchronous stub answers only when the run loop runs.
+            file_source: Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
+            run_loop,
             transform: Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default),
             transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
             thread_pool,
-            // C++ uses a FakeFileSource whose requests never answer; the
-            // asynchronous stub answers only when the run loop runs.
-            file_source: Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
             tileset: Tileset { tiles: vec!["https://example.com".to_owned()], ..Default::default() },
         }
     }
@@ -55,6 +56,7 @@ impl VectorTileTest {
             debug_options: MapDebugOptions::NO_DEBUG,
             transform_state: self.transform.get_state(),
             file_source: Some(file_source),
+            scheduler: self.run_loop.scheduler(),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -66,8 +68,8 @@ impl VectorTileTest {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: crate::image_manager::ImageManager::create(),
-            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
+            image_manager: crate::image_manager::ImageManager::on(Some(self.run_loop.scheduler())),
+            glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, &self.run_loop),
             dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
             tile_worker_transport: Rc::clone(&self.transport),
             thread_pool: self.thread_pool.clone(),

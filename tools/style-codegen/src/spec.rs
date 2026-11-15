@@ -64,9 +64,8 @@ pub(crate) fn load(text: &str) -> Result<Value, String> {
     // https://github.com/maplibre/maplibre-native/issues/250
     remove(&mut spec, &["layout_symbol", "text-rotation-alignment", "values"], "viewport-glyph")?;
 
-    // https://github.com/maplibre/maplibre-native/issues/1929
+    // Without terrain, the ground and sea level are the same height.
     remove(&mut spec, &["layout_symbol"], "symbol-height-anchor")?;
-    remove(&mut spec, &["layout_symbol"], "symbol-height-offset")?;
 
     // https://github.com/maplibre/maplibre-native/issues/4298
     remove(&mut spec, &["paint_fill"], "fill-layer-opacity")?;

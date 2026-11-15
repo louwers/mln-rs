@@ -17,7 +17,6 @@ use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_vec_map::VecMap;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
@@ -45,7 +44,7 @@ pub(crate) struct HeatmapLayoutVertex {
 
 pub(crate) type HeatmapTextureLayoutVertex = HeatmapLayoutVertex;
 
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub(crate) struct HeatmapBucket {
     pub(crate) base: BucketBase,
     pub(crate) vertices: GeometryVec<HeatmapLayoutVertex>,

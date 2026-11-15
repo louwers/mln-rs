@@ -80,6 +80,8 @@ mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version
 mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.11" }
 mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.11" }
 mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.11" }
+mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.11" }
+mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_derive", version = "=0.0.11" }
 mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.11" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.11" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.11" }
@@ -154,15 +156,12 @@ mlt-core = { version = "0.22.1" }
 # instead of porting wagyu. mlt-core already depends on it through geo.
 i_overlay = { version = "4.5.2", default-features = false }
 # 2D vector maths (mln_renderer's symbol layout, placement and collision).
-glam = { version = "0.34.3", default-features = false, features = [
-  "std",
-  "serde",
-] }
+glam = { version = "0.34.3", default-features = false, features = ["std"] }
 # The GeoJSON and feature geometry (mln-rs-feature's `Feature`, the GeoJSON
 # sources, queries, the `within` and `distance` expressions), in place of a
 # port of the C++ core's vendored geometry.hpp variant. Tile geometry stays
 # the port's (mln-rs-geometry's `Point`). mlt-core already depends on it.
-geo-types = { version = "0.7.20", features = ["serde"] }
+geo-types = { version = "0.7.20" }
 # The geometry that geojson-vt reads, so that it takes any geometry type
 # that implements the traits, `geo_types`' among them.
 geo-traits = { version = "0.3.0", features = ["geo-types"] }
@@ -193,13 +192,9 @@ pmtiles = { version = "0.28.1", default-features = false }
 foldhash = { version = "0.2.0" }
 # Locks without poisoning: a panic while a lock is held doesn't make every
 # later lock panic. wgpu already depends on it.
-parking_lot = { version = "0.12.5", features = ["serde"] }
+parking_lot = { version = "0.12.5" }
 png = { version = "0.18.1" }
 pollster = { version = "1.0.1" }
-# The messages between a tile and its worker in another wasm instance
-# (mln_renderer's tile/worker_codec), and the tests of the types they carry:
-# a compact serde format.
-postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 # The difftests' property tests.
 proptest = { version = "1.12.0" }
 # The windows of window targets (mln_gfx::Window), as winit and others hand them out.

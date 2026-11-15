@@ -8,7 +8,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{TaggedScheduler, scheduler};
+use mln_actor::{RunLoop, SchedulerPtr, TaggedScheduler};
 use mln_gfx::ShaderRegistry;
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_map_types::{MapMode, TransformState};
@@ -169,6 +169,9 @@ fn ptr_eq_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
 }
 
 pub(crate) struct RenderOrchestrator {
+    /// The renderer's loop, where its tiles and managers take their
+    /// responses.
+    scheduler: SchedulerPtr,
     events: EventSink,
     source_observer: Rc<OrchestratorSourceObserver>,
 
@@ -257,19 +260,24 @@ impl RenderOrchestrator {
         background_layer_as_color: bool,
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
+        font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
+        run_loop: &RunLoop,
     ) -> Self {
         let events = EventSink::default();
         // `imageManager->setObserver(this)`.
-        let image_manager = ImageManager::create();
+        let image_manager = ImageManager::on(Some(run_loop.scheduler()));
         image_manager.set_observer(Some(Rc::new(OrchestratorImageObserver { events: events.clone() })));
         // symbols: `glyphManager->setObserver(this)`.
-        let glyph_manager = GlyphManager::with_glyph_cache(
+        let glyph_manager = GlyphManager::with_cache_and_engine(
             Some(Box::new(DefaultLocalGlyphRasterizer::new(local_font_family))),
             glyph_cache,
+            font_face_engine,
+            run_loop.clone(),
         );
         glyph_manager.set_observer(Some(Rc::new(OrchestratorGlyphObserver { events: events.clone() })));
-        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+        let thread_pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
         RenderOrchestrator {
+            scheduler: run_loop.scheduler(),
             events: events.clone(),
             source_observer: Rc::new(OrchestratorSourceObserver { events }),
             zoom_history: ZoomHistory::default(),
@@ -405,6 +413,7 @@ impl RenderOrchestrator {
             debug_options: update_parameters.debug_options,
             transform_state: &update_parameters.transform_state,
             file_source: update_parameters.file_source.clone(),
+            scheduler: Arc::clone(&self.scheduler),
             mode: update_parameters.mode,
             prefetch_zoom_delta: update_parameters.prefetch_zoom_delta,
             tile_lod_min_radius: update_parameters.tile_lod_min_radius,

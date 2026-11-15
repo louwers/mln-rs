@@ -5,12 +5,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
-use mln_actor::{AsyncTask, RunLoopHandle};
+use mln_actor::AsyncTask;
 use mln_map::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent,
     MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
 use mln_renderer::UpdateReader;
+use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
@@ -23,7 +24,7 @@ use crate::completion::{Completion, Resolver};
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
 use crate::feature_state::{FeatureState, FeatureStateSelector};
 use crate::render::{
-    Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionShared, Worker, worker_post,
+    Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionQueue, SessionShared, Worker, worker_post,
 };
 use crate::runtime::{Outbox, Runtime, RuntimeCore, RuntimeShared, async_task};
 use crate::style::{CallbackSources, GeoJsonUpdates};
@@ -692,6 +693,11 @@ impl Map {
         Arc::clone(&self.shared.runtime.glyph_cache)
     }
 
+    /// What the renderers of the runtime's maps load font faces with.
+    pub(crate) fn font_face_engine(&self) -> Arc<dyn FontFaceEngine> {
+        Arc::clone(&self.shared.runtime.font_face_engine)
+    }
+
     /// Reserves the map for the session `id`.
     pub(crate) fn claim_session(&self, id: SessionId, session: Weak<SessionShared>) -> Result<(), Error> {
         let mut claim = self.shared.session.lock();
@@ -718,22 +724,22 @@ impl Map {
     }
 
     /// Sends the command that binds the session `id`, whose thread runs
-    /// `run_loop`, to the map: it sizes the map to `size`, and hands the
+    /// `queue`, to the map: it sizes the map to `size`, and hands the
     /// session the map's updates. The map tells the session of the commands
     /// it runs from `awaited` on.
     pub(crate) fn bind_session(
         &self,
         id: SessionId,
-        run_loop: RunLoopHandle,
+        queue: SessionQueue,
         awaited: Arc<AtomicU64>,
         size: Size,
     ) -> Result<(), Error> {
         let sent = self.shared.send(Some(drop), move |core, outbox, map_id, sequence, resolver: Resolver<()>| {
             drop(resolver);
             if !core.maps.contains_key(&map_id) {
-                return worker_post(&run_loop, |worker, outbox| worker.bind_failed(missing_map(), outbox));
+                return worker_post(&queue, |worker, outbox| worker.bind_failed(missing_map(), outbox));
             }
-            let link = SessionLink { id, run_loop: run_loop.clone(), awaited };
+            let link = SessionLink { id, queue: queue.clone(), awaited };
             apply_command(
                 core,
                 map_id,
@@ -749,9 +755,9 @@ impl Map {
                         let bound = move |worker: &mut Worker, outbox: &mut Outbox| {
                             worker.bound(sequence, reader, events, published, outbox);
                         };
-                        worker_post(&run_loop, bound);
+                        worker_post(&queue, bound);
                     }
-                    Err(error) => worker_post(&run_loop, move |worker, outbox| worker.bind_failed(error, outbox)),
+                    Err(error) => worker_post(&queue, move |worker, outbox| worker.bind_failed(error, outbox)),
                 },
             );
         });
@@ -771,30 +777,30 @@ impl Map {
     pub(crate) fn unbind_session_then(
         &self,
         id: SessionId,
-        run_loop: RunLoopHandle,
+        queue: SessionQueue,
         then: impl FnOnce(&mut Worker, &mut Outbox) + Send + 'static,
     ) {
         let map_id = self.shared.id;
-        let session_loop = run_loop.clone();
+        let session_queue = queue.clone();
         // A runtime that shut down has no map to unbind from.
         self.shared.runtime.post_or(
             then,
             move |core, _, then| {
                 unbind(core, map_id, id);
-                worker_post(&run_loop, then);
+                worker_post(&queue, then);
             },
-            |then| worker_post(&session_loop, then),
+            |then| worker_post(&session_queue, then),
         );
     }
 
     /// Sends a command that resizes the map to `size` at `scale_factor`,
     /// then runs `resize` with its outcome on the thread of the session that
-    /// `run_loop` runs, before the session learns of any later command.
+    /// `queue` runs, before the session learns of any later command.
     pub(crate) fn resize_for_session(
         &self,
         size: Size,
         scale_factor: f64,
-        run_loop: RunLoopHandle,
+        queue: SessionQueue,
         resize: impl FnOnce(&mut Worker, Result<Applied, Error>, &mut Outbox) + Send + 'static,
     ) -> Result<(), Error> {
         // The scale factor that a session attached later renders at.
@@ -802,7 +808,7 @@ impl Map {
         let sent = self.shared.send(Some(drop), move |core, outbox, id, sequence, resolver: Resolver<()>| {
             drop(resolver);
             if !core.maps.contains_key(&id) {
-                return worker_post(&run_loop, move |worker, outbox| resize(worker, Err(missing_map()), outbox));
+                return worker_post(&queue, move |worker, outbox| resize(worker, Err(missing_map()), outbox));
             }
             apply_command(
                 core,
@@ -822,7 +828,7 @@ impl Map {
                 },
                 move |_, resized, applied, _| {
                     let result = resized.map(|()| applied);
-                    worker_post(&run_loop, move |worker, outbox| resize(worker, result, outbox));
+                    worker_post(&queue, move |worker, outbox| resize(worker, result, outbox));
                 },
             );
         });
@@ -1322,7 +1328,7 @@ fn unbind(core: &mut RuntimeCore, map_id: MapId, id: SessionId) {
 /// The render session bound to a map, as the runtime's thread knows it.
 pub(crate) struct SessionLink {
     id: SessionId,
-    run_loop: RunLoopHandle,
+    queue: SessionQueue,
     /// The session's `awaited_command`.
     awaited: Arc<AtomicU64>,
 }
@@ -1413,8 +1419,7 @@ pub(crate) fn create(
     resolver: Resolver<Applied>,
     outbox: &mut Outbox,
 ) {
-    let (file_sources, resource_options) = core.file_sources();
-    let mut map = match mln_map::Map::with_resource_options(options.map, file_sources, resource_options) {
+    let mut map = match mln_map::Map::with_file_source(Arc::clone(core.loader()), options.map, &core.run_loop) {
         Ok(map) => map,
         Err(error) => return outbox.resolve(resolver, Err(error)),
     };
@@ -1426,7 +1431,7 @@ pub(crate) fn create(
         map.style_mut().set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
     }
     let _ = published.updates.set(map.update_reader());
-    let flush_task = async_task(move |core, outbox| flush(core, id, outbox));
+    let flush_task = async_task(&core.run_loop, &core.queue, move |core, outbox| flush(core, id, outbox));
     let flush_sender = flush_task.sender();
     map.set_reports_waker(Some(Arc::new(move || flush_sender.send())));
     published.applied.store(1, Ordering::SeqCst);
@@ -1481,7 +1486,7 @@ pub(crate) fn apply_command<T>(
     if let Some(link) = &entry.session
         && sequence >= link.awaited.load(Ordering::SeqCst)
     {
-        worker_post(&link.run_loop, move |worker, outbox| worker.map_applied(sequence, outbox));
+        worker_post(&link.queue, move |worker, outbox| worker.map_applied(sequence, outbox));
     }
 }
 
@@ -1582,7 +1587,7 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     if entry.published.still_image.swap(still_image, Ordering::SeqCst) != still_image
         && let Some(link) = &entry.session
     {
-        worker_post(&link.run_loop, Worker::still_image_changed);
+        worker_post(&link.queue, Worker::still_image_changed);
     }
 
     let mask = entry.mask;

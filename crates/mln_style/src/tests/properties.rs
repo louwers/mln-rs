@@ -131,7 +131,7 @@ fn transitioning_data_driven_property_value_evaluate() {
         Some(start()),
     );
 
-    let expression = PropertyExpression::<f32>::from_expr(dsl::number(dsl::get_str("property_name"), None), None);
+    let expression = PropertyExpression::<f32>::from_expr(dsl::number(dsl::get_str("property_name"), None));
 
     let mut t1 =
         Transitioning::with_prior(PropertyValue::Expression(expression), t0.clone(), &transition, Some(start()));
@@ -179,10 +179,8 @@ fn possibly_evaluated_evaluate_per_feature() {
     };
     assert_eq!(3.0, paint.circle_radius.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&feature))));
     // A feature expression, with the property's default for a missing value.
-    paint.circle_radius = Evaluated::PerFeature {
-        expression: PropertyExpression::from_expr(number(get_str("r"), None), None),
-        default: 5.0,
-    };
+    paint.circle_radius =
+        Evaluated::PerFeature { expression: PropertyExpression::from_expr(number(get_str("r"), None)), default: 5.0 };
     assert_eq!(7.5, paint.circle_radius.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&feature))));
     let other = StubGeometryTileFeature::new(property_map(&[]));
     assert_eq!(5.0, paint.circle_radius.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&other))));

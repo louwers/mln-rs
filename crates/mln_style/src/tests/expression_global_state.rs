@@ -35,7 +35,7 @@ fn state(entries: &[(&str, Value)]) -> GlobalStateMap {
 fn property_expression_captures_global_state() {
     let expr = parse_expression(r#"["to-number", ["global-state", "width"]]"#, Some(Type::Number)).unwrap();
 
-    let mut property_expression = PropertyExpression::<f32>::from_expr(expr, None);
+    let mut property_expression = PropertyExpression::<f32>::from_expr(expr);
     assert!(property_expression.is_feature_constant());
     assert!(property_expression.is_zoom_constant());
     assert!(!property_expression.is_runtime_constant());
@@ -117,10 +117,10 @@ fn color_ramp() {
 #[test]
 fn property_expression_global_state_refs() {
     let expr = parse_expression(r#"["to-number", ["global-state", "width"]]"#, Some(Type::Number)).unwrap();
-    let property_expression = PropertyExpression::<f32>::from_expr(expr, None);
+    let property_expression = PropertyExpression::<f32>::from_expr(expr);
     assert_eq!(Some(&VecSet::from(["width".to_owned()])), property_expression.get_global_state_refs());
 
     let plain = parse_expression(r#"["to-number", ["get", "width"]]"#, Some(Type::Number)).unwrap();
-    let plain_expression = PropertyExpression::<f32>::from_expr(plain, None);
+    let plain_expression = PropertyExpression::<f32>::from_expr(plain);
     assert_eq!(None, plain_expression.get_global_state_refs());
 }

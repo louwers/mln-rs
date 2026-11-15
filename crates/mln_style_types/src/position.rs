@@ -1,10 +1,9 @@
 use mln_math::deg2radf;
 use mln_util::interpolate::Interpolate;
-use serde::{Deserialize, Serialize};
 
 /// A spherical position (radial, azimuthal, polar) with its cached cartesian
 /// form.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, mln_wire::Wire)]
 pub struct Position {
     radial: f32,
     azimuthal: f32,

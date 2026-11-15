@@ -7,8 +7,8 @@ use geojson::{Feature, GeoJson, Geometry};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
+use mln_storage::ResourceOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSourceManager, ResourceOptions};
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
 use mln_style::layers::fill_layer::FillLayer;
@@ -42,16 +42,16 @@ pub fn set(layer: &mut dyn Layer, name: &str, value: &serde_json::Value) {
 // gtest: CustomGeometrySource.Grid
 #[test]
 fn grid() {
-    let _loop = RunLoop::new();
+    let run_loop = RunLoop::new();
 
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
     let mut map = Map::with_resource_options(
         MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
-        &FileSourceManager::new(),
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
+        &run_loop,
     )
     .unwrap();
     frontend.attach(&map);
@@ -86,7 +86,7 @@ fn grid() {
         ..Default::default()
     };
 
-    let source = CustomGeometrySource::new("custom", options).unwrap();
+    let source = CustomGeometrySource::new("custom", options, run_loop.pool()).unwrap();
     handle.set(source.handle()).unwrap();
     map.style_mut().add_source(Box::new(source)).unwrap();
 
@@ -110,12 +110,13 @@ fn grid() {
 // gtest: API.RecycleMapUpdateImages
 #[test]
 fn recycle_map_update_images() {
-    let _loop = RunLoop::new();
+    let run_loop = RunLoop::new();
 
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
     let mut map = Map::with_file_source(
-        Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
+        Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
         MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
+        &run_loop,
     )
     .unwrap();
     frontend.attach(&map);

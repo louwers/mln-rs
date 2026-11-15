@@ -8,8 +8,9 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
+use mln_actor::SchedulerPtr;
 use mln_storage::response::Reason;
-use mln_storage::{AsyncRequest, Data, FileSource, LoadingMethod, Resource, Response, StoragePolicy};
+use mln_storage::{Data, FileSource, FileSourceExt, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::tileset::Tileset;
@@ -117,7 +118,9 @@ struct State {
     necessity: TileNecessity,
     resource: Resource,
     file_source: Option<Arc<dyn FileSource>>,
-    request: Option<Box<dyn AsyncRequest>>,
+    /// Where the responses arrive: the renderer's loop.
+    scheduler: SchedulerPtr,
+    request: Option<Request>,
     /// The last response was an error: nothing requests the tile again until
     /// `retry_failed_load`.
     failed: bool,
@@ -159,6 +162,7 @@ impl TileLoader {
             necessity: TileNecessity::Optional,
             resource,
             file_source: if tileset.tiles.is_empty() { None } else { parameters.file_source.clone() },
+            scheduler: Arc::clone(&parameters.scheduler),
             request: None,
             failed: false,
             update_parameters: TileUpdateParameters { minimum_update_interval: Duration::ZERO, is_volatile: false },
@@ -173,7 +177,7 @@ impl TileLoader {
             return loader;
         };
 
-        if file_source.supports_cache_only_requests() {
+        if file_source.supports_cache_only() {
             // When supported, the first request is always optional, even if
             // the TileLoader is marked as required. That way, we can let the
             // first optional request continue to load when the TileLoader is
@@ -282,7 +286,10 @@ fn make_optional(state: &Rc<RefCell<State>>) {
 
 fn load_from_cache(state_rc: &Rc<RefCell<State>>) {
     debug_assert!(state_rc.borrow().request.is_none());
-    let file_source = state_rc.borrow().file_source.clone();
+    let (file_source, scheduler) = {
+        let state = state_rc.borrow();
+        (state.file_source.clone(), Arc::clone(&state.scheduler))
+    };
     let Some(file_source) = file_source else {
         if let Some(tile) = tile_of(state_rc) {
             tile.set_error(get_cant_load_tile_error());
@@ -300,6 +307,7 @@ fn load_from_cache(state_rc: &Rc<RefCell<State>>) {
     };
     let weak = Rc::downgrade(state_rc);
     let request = file_source.request(
+        &scheduler,
         &resource,
         Box::new(move |res: Response| {
             let Some(state_rc) = weak.upgrade() else {
@@ -398,7 +406,10 @@ fn loaded_data(state_rc: &Rc<RefCell<State>>, res: &Response, method: LoadingMet
 
 fn load_from_network(state_rc: &Rc<RefCell<State>>) {
     debug_assert!(state_rc.borrow().request.is_none());
-    let file_source = state_rc.borrow().file_source.clone();
+    let (file_source, scheduler) = {
+        let state = state_rc.borrow();
+        (state.file_source.clone(), Arc::clone(&state.scheduler))
+    };
     let Some(file_source) = file_source else {
         if let Some(tile) = tile_of(state_rc) {
             tile.set_error(get_cant_load_tile_error());
@@ -421,6 +432,7 @@ fn load_from_network(state_rc: &Rc<RefCell<State>>) {
     };
     let weak = Rc::downgrade(state_rc);
     let request = file_source.request(
+        &scheduler,
         &resource,
         Box::new(move |res: Response| {
             let Some(state_rc) = weak.upgrade() else {

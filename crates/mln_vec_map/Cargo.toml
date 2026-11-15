@@ -14,7 +14,7 @@ include.workspace = true
 name = "mln_vec_map"
 
 [dependencies]
-serde.workspace = true
+mln_wire.workspace = true
 
 [lints]
 workspace = true

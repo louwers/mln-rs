@@ -1019,14 +1019,23 @@ fn get_geometry(geometry: Option<&geojson::Geometry>, ctx: &mut ParsingContext) 
 }
 
 /// The distance in meters from the feature to a GeoJSON geometry.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(try_from = "MbglValue", into = "MbglValue")]
+#[derive(Clone, PartialEq)]
 pub(crate) struct Distance {
     geojson_source: GeoJson,
     geometries: Geometry<f64>,
 }
 
 /// A `distance` crosses as the style writes it, and finds its geometry again.
+impl mln_wire::Wire for Distance {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.serialize().write(w);
+    }
+
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        Distance::try_from(MbglValue::read(r)?).ok().or_else(|| r.fail("invalid distance GeoJSON"))
+    }
+}
+
 impl TryFrom<MbglValue> for Distance {
     type Error = String;
 

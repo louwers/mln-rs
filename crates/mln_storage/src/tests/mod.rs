@@ -5,7 +5,6 @@
 mod asset_file_source;
 #[cfg(feature = "sqlite")]
 mod database_file_source;
-mod file_source_manager;
 mod http_file_source;
 mod local_file_source;
 // The C++ MainResourceLoader tests assume its Database file source.
@@ -28,10 +27,10 @@ use mln_actor::ActorRef;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use parking_lot::{Mutex, MutexGuard};
 
-use crate::AsyncRequest;
+use crate::Request;
 
-/// A `std::unique_ptr<AsyncRequest>` that a request's own callback can reset.
-pub(crate) type Req = Rc<RefCell<Option<Box<dyn AsyncRequest>>>>;
+/// A request that its own callback can drop.
+pub(crate) type Req = Rc<RefCell<Option<Request>>>;
 
 pub(crate) fn req() -> Req {
     Rc::new(RefCell::new(None))

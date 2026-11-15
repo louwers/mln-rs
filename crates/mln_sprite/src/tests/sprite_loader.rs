@@ -57,10 +57,10 @@ impl SpriteLoaderTest {
         let run_loop = RunLoop::new();
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         SpriteLoaderTest {
-            run_loop,
-            file_source: StubFileSource::new(ResponseType::Asynchronous),
+            file_source: StubFileSource::new(&run_loop, ResponseType::Asynchronous),
             observer: Rc::new(StubSpriteLoaderObserver::default()),
-            sprite_loader: SpriteLoader::new(pixel_ratio, thread_pool.clone()),
+            sprite_loader: SpriteLoader::new(pixel_ratio, run_loop.scheduler(), thread_pool.clone()),
+            run_loop,
             thread_pool,
             sprite_path: default_sprite_path(),
             // Squelch logging.

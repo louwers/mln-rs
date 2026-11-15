@@ -3,7 +3,7 @@ use mln_util::interpolate::interpolation_factor;
 
 use crate::range::Range;
 
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub struct ExponentialInterpolator {
     pub(crate) base: f64,
 }
@@ -24,8 +24,7 @@ impl ExponentialInterpolator {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(from = "[f64; 4]", into = "[f64; 4]")]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CubicBezierInterpolator {
     pub(crate) ub: UnitBezier,
     /// Port-only: the control points as given. C++ serializes
@@ -35,6 +34,16 @@ pub struct CubicBezierInterpolator {
     /// expression may not parse back ("values between 0 and 1") or parses to
     /// another curve.
     control_points: [f64; 4],
+}
+
+impl mln_wire::Wire for CubicBezierInterpolator {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.control_points.write(w);
+    }
+
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        <[f64; 4]>::read(r).map(Self::from)
+    }
 }
 
 impl From<[f64; 4]> for CubicBezierInterpolator {
@@ -75,7 +84,7 @@ impl CubicBezierInterpolator {
 }
 
 /// `Interpolator`: `variant<ExponentialInterpolator, CubicBezierInterpolator>`.
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub enum Interpolator {
     Exponential(ExponentialInterpolator),
     CubicBezier(CubicBezierInterpolator),

@@ -1132,6 +1132,7 @@ struct VertexStage {
     short2 extrude [[attribute(2)]];
     ushort2 placed [[attribute(3)]];
     float2 shift [[attribute(4)]];
+    float height_offset [[attribute(5)]];
 };
 
 struct FragmentStage {
@@ -1147,9 +1148,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
 
 #if defined(PROJECTION_GLOBE)
-    float4 projectedPoint = projectTile(float2(vertx.anchor_pos), projection);
+    float4 projectedPoint = projectTileWithElevation(float2(vertx.anchor_pos), vertx.height_offset, projection);
 #else
-    float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), 0, 1);
+    float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), vertx.height_offset, 1);
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
@@ -1158,13 +1159,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         4.0);
 
 #if defined(PROJECTION_GLOBE)
-    float4 position = projectTile(float2(vertx.pos), projection);
+    float4 position = projectTileWithElevation(float2(vertx.pos), vertx.height_offset, projection);
     // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (position.z / position.w < 1.1) {
         position.z = 0.0;
     }
 #else
-    float4 position = drawable.matrix * float4(float2(vertx.pos), 0.0, 1.0);
+    float4 position = drawable.matrix * float4(float2(vertx.pos), vertx.height_offset, 1.0);
 #endif
     position.xy += (float2(vertx.extrude) + vertx.shift) * tileProps.extrude_scale * position.w * collision_perspective_ratio;
 
@@ -6461,6 +6462,8 @@ struct VertexStage {
 
     // The top-left of the quad's atlas rectangle.
     ushort2 tex_origin [[attribute(6)]];
+    // The symbol's symbol-height-offset, in meters.
+    float height_offset [[attribute(7)]];
 };
 
 struct FragmentStage {
@@ -6530,9 +6533,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -6559,7 +6562,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     float symbol_rotation = 0.0;
     if (drawable.rotate_symbol) {
         // See comments in symbol_sdf.vertex
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), 0.0, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6573,11 +6576,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, 0.0, 1.0);
+        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, 0.0, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, 0.0, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -6734,6 +6737,8 @@ struct VertexStage {
 
     // The top-left of the quad's atlas rectangle.
     ushort2 tex_origin [[attribute(10)]];
+    // The symbol's symbol-height-offset, in meters.
+    float height_offset [[attribute(11)]];
 };
 
 struct FragmentStage {
@@ -6809,9 +6814,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -6845,7 +6850,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), 0.0, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6859,11 +6864,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, 0.0, 1.0);
+        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, 0.0, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, 0.0, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -7075,6 +7080,8 @@ struct VertexStage {
 
     // The top-left of the quad's atlas rectangle.
     ushort2 tex_origin [[attribute(9)]];
+    // The symbol's symbol-height-offset, in meters.
+    float height_offset [[attribute(10)]];
 };
 
 struct FragmentStage {
@@ -7152,9 +7159,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -7188,7 +7195,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), 0.0, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -7203,11 +7210,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, 0.0, 1.0);
+        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, 0.0, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, 0.0, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;

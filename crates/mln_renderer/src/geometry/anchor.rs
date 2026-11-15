@@ -1,8 +1,7 @@
 use glam::Vec2;
-use serde::{Deserialize, Serialize};
 
 /// `Anchor`.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct Anchor {
     pub(crate) point: Vec2,
     pub(crate) angle: f32,

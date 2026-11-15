@@ -21,11 +21,13 @@ fn render_tests_dir() -> PathBuf {
 
 /// Returns (difference, allowed).
 fn run(test: &str) -> (f64, f64) {
-    run_on(test, |size, pixel_ratio| HeadlessFrontend::new(size, pixel_ratio).expect("a headless frontend"))
+    run_on(test, |size, pixel_ratio, run_loop| {
+        HeadlessFrontend::new(size, pixel_ratio, run_loop).expect("a headless frontend")
+    })
 }
 
 /// `run` with the frontend `frontend` makes for the size and pixel ratio.
-fn run_on(test: &str, frontend: impl FnOnce(Size, f32) -> HeadlessFrontend) -> (f64, f64) {
+fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &RunLoop) -> HeadlessFrontend) -> (f64, f64) {
     let dir = render_tests_dir().join(test);
     let json = std::fs::read_to_string(dir.join("style.json")).expect("style.json");
     let document: serde_json::Value = serde_json::from_str(&json).expect("json");
@@ -37,9 +39,10 @@ fn run_on(test: &str, frontend: impl FnOnce(Size, f32) -> HeadlessFrontend) -> (
     let allowed = test_metadata["allowed"].as_f64().unwrap_or(0.00015);
     let size = Size::new(width, height);
 
-    let _run_loop = RunLoop::new();
-    let mut frontend = frontend(size, pixel_ratio);
-    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }).unwrap();
+    let run_loop = RunLoop::new();
+    let mut frontend = frontend(size, pixel_ratio, &run_loop);
+    let mut map =
+        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }, &run_loop).unwrap();
     frontend.attach(&map);
     map.style_mut().load_json(&json);
     let camera = map.style().get_default_camera();
@@ -125,8 +128,8 @@ fn background_visibility_visible() {
 #[test]
 fn frontends_on_one_device_render_in_turn() {
     let device = mln_headless::headless_frontend::harness_device().expect("device");
-    let on_shared_device = |size, pixel_ratio| {
-        HeadlessFrontend::with_device(device.clone(), size, pixel_ratio, true, Arc::default())
+    let on_shared_device = |size, pixel_ratio, run_loop: &RunLoop| {
+        HeadlessFrontend::with_device(device.clone(), size, pixel_ratio, true, Arc::default(), run_loop)
             .expect("a headless frontend")
     };
     for test in ["background-color/literal", "background-color/function", "background-color/literal"] {

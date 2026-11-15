@@ -25,7 +25,7 @@ use crate::type_::Type;
 pub type ObjectType = mln_vec_map::VecMap<String, Value>;
 
 /// An expression value, with the variants in the C++ variant's order.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub enum Value {
     #[default]
     Null,
@@ -35,8 +35,7 @@ pub enum Value {
     Color(Color),
     VariableAnchorOffsetCollection(VariableAnchorOffsetCollection),
     /// Only made while evaluating, so never part of an expression's data.
-    #[serde(serialize_with = "no_collator::serialize", deserialize_with = "no_collator::deserialize")]
-    Collator(Collator),
+    Collator(#[wire(with = "no_collator")] Collator),
     Formatted(Formatted),
     Image(Image),
     Padding(Padding),
@@ -45,21 +44,18 @@ pub enum Value {
     Object(ObjectType),
 }
 
-/// A collator value has no serde form: collators exist only while an
+/// A collator value has no wire form: collators exist only while an
 /// expression evaluates.
 mod no_collator {
-    use serde::de::Error as _;
-    use serde::ser::Error as _;
-    use serde::{Deserializer, Serializer};
 
     use crate::collator::Collator;
 
-    pub(super) fn serialize<S: Serializer>(_: &Collator, _: S) -> Result<S::Ok, S::Error> {
-        Err(S::Error::custom("a collator value doesn't cross"))
+    pub(super) fn write(_: &Collator, w: &mut mln_wire::Writer) {
+        w.fail("a collator value doesn't cross".to_owned());
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(_: D) -> Result<Collator, D::Error> {
-        Err(D::Error::custom("a collator value doesn't cross"))
+    pub(super) fn read(r: &mut mln_wire::Reader<'_>) -> Option<Collator> {
+        r.fail("a collator value doesn't cross")
     }
 }
 

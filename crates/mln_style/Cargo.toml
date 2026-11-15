@@ -34,7 +34,7 @@ mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
-serde.workspace = true
+mln_wire.workspace = true
 serde_json.workspace = true
 supercluster.workspace = true
 thiserror.workspace = true
@@ -42,7 +42,6 @@ thiserror.workspace = true
 [dev-dependencies]
 mln_storage = { workspace = true, features = ["stub-file-source"] }
 mln_tile = { package = "mln-rs-tile", path = "../mln_tile" }
-postcard.workspace = true
 
 [lints]
 workspace = true

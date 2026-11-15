@@ -1,6 +1,6 @@
-// Port-only: how the members of the tile worker messages that serde can't
-// derive cross (mod.rs): trait objects, as the types they can be, and the
-// values that cross once per worker instance, then by key
+// Port-only: how the members of the tile worker messages that the derive
+// can't write cross (mod.rs): trait objects, as the types they can be, and
+// the values that cross once per worker instance, then by key
 // (mln_util::serialization::shared).
 
 use std::sync::Arc;
@@ -8,9 +8,8 @@ use std::sync::Arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::shared_layer_properties;
 use mln_tile_id::EncodedTileData;
-use mln_util::serialization::shared::{self, Kind};
-use serde::ser::Error as _;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use mln_util::serialization::shared::{self, Kind, WireKind};
+use mln_wire::{Reader, Wire, Writer};
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::buckets::circle_bucket::CircleBucket;
@@ -34,15 +33,18 @@ pub(crate) struct SharedTileDataKind;
 impl Kind for SharedTileDataKind {
     type Value = dyn mln_tile_id::GeometryTileData + Send + Sync;
     const NAME: &'static str = "tile data";
+}
 
-    fn write<S: Serializer>(data: &Self::Value, serializer: S) -> Result<S::Ok, S::Error> {
-        data.encoded()
-            .ok_or_else(|| S::Error::custom("tile data that no longer has its bytes can't cross"))?
-            .serialize(serializer)
+impl WireKind for SharedTileDataKind {
+    fn write(data: &Self::Value, w: &mut Writer) {
+        match data.encoded() {
+            Some(encoded) => encoded.write(w),
+            None => w.fail("tile data that no longer has its bytes can't cross".to_owned()),
+        }
     }
 
-    fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SharedTileData, D::Error> {
-        Ok(match EncodedTileData::deserialize(deserializer)? {
+    fn read(r: &mut Reader<'_>) -> Option<SharedTileData> {
+        Some(match EncodedTileData::read(r)? {
             EncodedTileData::Mvt(bytes) => Arc::new(mln_tile::VectorMVTTileData::new(bytes)),
             EncodedTileData::Mlt { data, fast_pfor_enabled } => {
                 Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled))
@@ -52,17 +54,18 @@ impl Kind for SharedTileDataKind {
     }
 }
 
-/// `#[serde(with)]` for an `Option<SharedTileData>`.
+/// `#[wire(with)]` for an `Option<SharedTileData>`.
 pub(crate) mod tile_data {
-    use super::{Deserializer, Serializer, SharedTileData, SharedTileDataKind, shared};
+    use super::{Reader, SharedTileData, SharedTileDataKind, Writer, shared};
 
-    #[expect(clippy::ref_option, reason = "`#[serde(with)]` passes the field by reference")]
-    pub(crate) fn serialize<S: Serializer>(data: &Option<SharedTileData>, serializer: S) -> Result<S::Ok, S::Error> {
-        shared::serialize_option::<SharedTileDataKind, S>(data, serializer)
+    #[expect(clippy::ref_option, reason = "`#[wire(with)]` passes the field by reference")]
+    pub(crate) fn write(data: &Option<SharedTileData>, w: &mut Writer) {
+        shared::write_option::<SharedTileDataKind>(data, w);
     }
 
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<SharedTileData>, D::Error> {
-        shared::deserialize_option::<SharedTileDataKind, D>(deserializer)
+    #[expect(clippy::option_option, reason = "a read that can fail, of an `Option`")]
+    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Option<SharedTileData>> {
+        shared::read_option::<SharedTileDataKind>(r)
     }
 }
 
@@ -74,135 +77,141 @@ pub(crate) struct SharedTexture;
 impl Kind for SharedTexture {
     type Value = DynamicTexture;
     const NAME: &'static str = "texture";
+}
 
-    fn write<S: Serializer>(texture: &DynamicTexture, serializer: S) -> Result<S::Ok, S::Error> {
-        (texture.get_size(), texture.get_pixel_format()).serialize(serializer)
+impl WireKind for SharedTexture {
+    fn write(texture: &DynamicTexture, w: &mut Writer) {
+        texture.get_size().write(w);
+        texture.get_pixel_format().write(w);
     }
 
-    fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<DynamicTexture>, D::Error> {
-        let (size, pixel_type) = Deserialize::deserialize(deserializer)?;
-        Ok(Arc::new(DynamicTexture::new(size, pixel_type)))
+    fn read(r: &mut Reader<'_>) -> Option<Arc<DynamicTexture>> {
+        let size = Wire::read(r)?;
+        let pixel_type = Wire::read(r)?;
+        Some(Arc::new(DynamicTexture::new(size, pixel_type)))
     }
 }
 
-/// `#[serde(with)]` for an `Option<DynamicTexturePtr>`.
+/// `#[wire(with)]` for an `Option<DynamicTexturePtr>`.
 pub(crate) mod texture {
-    use super::{Arc, Deserializer, DynamicTexture, Serializer, SharedTexture, shared};
+    use super::{Arc, DynamicTexture, Reader, SharedTexture, Writer, shared};
 
-    #[expect(clippy::ref_option, reason = "`#[serde(with)]` passes the field by reference")]
-    pub(crate) fn serialize<S: Serializer>(
-        texture: &Option<Arc<DynamicTexture>>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        shared::serialize_option::<SharedTexture, S>(texture, serializer)
+    #[expect(clippy::ref_option, reason = "`#[wire(with)]` passes the field by reference")]
+    pub(crate) fn write(texture: &Option<Arc<DynamicTexture>>, w: &mut Writer) {
+        shared::write_option::<SharedTexture>(texture, w);
     }
 
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<Arc<DynamicTexture>>, D::Error> {
-        shared::deserialize_option::<SharedTexture, D>(deserializer)
+    #[expect(clippy::option_option, reason = "a read that can fail, of an `Option`")]
+    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Option<Arc<DynamicTexture>>> {
+        shared::read_option::<SharedTexture>(r)
     }
 }
 
-/// `#[serde(with)]` for the layers of a `setLayers`.
-pub(crate) mod layers {
-    use super::{Arc, Deserialize, Deserializer, LayerProperties, Serialize, Serializer, shared_layer_properties};
+/// `#[wire(with)]` for a `DynamicTexturePtr`.
+pub(crate) mod shared_texture {
+    use super::{Arc, DynamicTexture, Reader, SharedTexture, Writer, shared};
 
-    #[derive(Serialize, Deserialize)]
-    struct Layer(#[serde(with = "shared_layer_properties")] Arc<dyn LayerProperties>);
-
-    pub(crate) fn serialize<S: Serializer>(
-        layers: &[Arc<dyn LayerProperties>],
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        layers.iter().cloned().map(Layer).collect::<Vec<_>>().serialize(serializer)
+    pub(crate) fn write(texture: &Arc<DynamicTexture>, w: &mut Writer) {
+        shared::write::<SharedTexture>(texture, w);
     }
 
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Vec<Arc<dyn LayerProperties>>, D::Error> {
-        Ok(Vec::<Layer>::deserialize(deserializer)?.into_iter().map(|layer| layer.0).collect())
+    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<DynamicTexture>> {
+        shared::read::<SharedTexture>(r)
+    }
+}
+
+/// `#[wire(with)]` for the layers of a `setLayers`.
+pub(crate) mod layers {
+    use super::{Arc, LayerProperties, Reader, Writer, shared_layer_properties};
+
+    pub(crate) fn write(layers: &[Arc<dyn LayerProperties>], w: &mut Writer) {
+        mln_wire::Wire::write(&layers.len(), w);
+        for layer in layers {
+            shared_layer_properties::write(layer, w);
+        }
+    }
+
+    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Vec<Arc<dyn LayerProperties>>> {
+        let len = r.length()?;
+        let mut layers = Vec::with_capacity(len.min(r.rest().len()));
+        for _ in 0..len {
+            layers.push(shared_layer_properties::read(r)?);
+        }
+        Some(layers)
     }
 }
 
 /// The bucket types a `GeometryTileWorker` makes (debug, raster and
-/// hillshade buckets never come from one), as a tagged enum: a bucket is a
-/// trait object.
+/// hillshade buckets never come from one), each as its index and then the
+/// bucket: a bucket is a trait object.
 macro_rules! bucket_types {
-    ($($tag:ident: $bucket:ty),+ $(,)?) => {
-        #[derive(Serialize)]
-        enum BucketRef<'a> { $($tag(&'a $bucket),)+ }
-
-        #[expect(clippy::large_enum_variant, reason = "the value is read, then moved into an `Arc` at once")]
-        #[derive(Deserialize)]
-        enum BucketOwned { $($tag($bucket),)+ }
-
-        fn bucket_ref(bucket: &dyn Bucket) -> Option<BucketRef<'_>> {
+    ($($bucket:ty),+ $(,)?) => {
+        fn write_bucket(bucket: &dyn Bucket, w: &mut Writer) {
+            let mut index = 0u32;
             $(if let Some(bucket) = bucket.downcast_ref::<$bucket>() {
-                return Some(BucketRef::$tag(bucket));
-            })+
-            None
+                mln_wire::write_tag(w, index);
+                return bucket.write(w);
+            }
+            index += 1;)+
+            let _ = index;
+            w.fail("a bucket type that no tile worker makes".to_owned());
         }
 
-        fn bucket_ptr(bucket: BucketOwned) -> BucketPtr {
-            match bucket { $(BucketOwned::$tag(bucket) => Arc::new(bucket),)+ }
+        fn read_bucket(r: &mut Reader<'_>) -> Option<BucketPtr> {
+            let tag = r.tag()?;
+            let mut index = 0u32;
+            $(if tag == index {
+                return Some(Arc::new(<$bucket>::read(r)?));
+            }
+            index += 1;)+
+            let _ = index;
+            r.fail_tag()
         }
     };
 }
 
 bucket_types! {
-    Fill: FillBucket,
-    Line: LineBucket,
-    Circle: CircleBucket,
-    Heatmap: HeatmapBucket,
-    FillExtrusion: FillExtrusionBucket,
-    Symbol: SymbolBucket,
+    FillBucket,
+    LineBucket,
+    CircleBucket,
+    HeatmapBucket,
+    FillExtrusionBucket,
+    SymbolBucket,
 }
 
-/// The layers that render a bucket, with the properties they were laid out
-/// with, which cross back by key: the map side gets the ones it sent.
-#[derive(Serialize, Deserialize)]
-struct RenderingLayer(String, #[serde(with = "shared_layer_properties")] Arc<dyn LayerProperties>);
-
-/// A `LayoutResult` as serde writes it: each bucket once, with the layers
-/// that render it (a layer group's layers share their bucket), and the
-/// feature index. The atlases cross apart from the layout (envelope.rs), so
-/// that the map side releases their bins even when it can't read the rest;
-/// a layout read back has empty ones until the codec sets them.
-#[derive(Serialize)]
-struct LayoutRef<'a> {
-    buckets: Vec<(BucketRef<'a>, Vec<RenderingLayer>)>,
-    feature_index: &'a FeatureIndex,
-}
-
-#[derive(Deserialize)]
-struct LayoutOwned {
-    buckets: Vec<(BucketOwned, Vec<RenderingLayer>)>,
-    feature_index: FeatureIndex,
-}
+/// A bucket, and the ids of the layers that render it with the properties
+/// they were laid out with.
+type RenderedBucket<'a> = (&'a BucketPtr, Vec<(&'a String, &'a Arc<dyn LayerProperties>)>);
 
 impl LayoutResult {
     /// Each bucket with the layers that render it, in layer id order.
-    fn buckets(&self) -> Result<Vec<(BucketRef<'_>, Vec<RenderingLayer>)>, &'static str> {
+    fn buckets(&self) -> Vec<RenderedBucket<'_>> {
         let mut layer_ids: Vec<&String> = self.layer_render_data.keys().collect();
-        layer_ids.sort();
-        let mut buckets: Vec<(&BucketPtr, Vec<RenderingLayer>)> = Vec::new();
+        layer_ids.sort_unstable();
+        let mut buckets: Vec<RenderedBucket<'_>> = Vec::new();
         for layer_id in layer_ids {
             let LayerRenderData { bucket, layer_properties } = &self.layer_render_data[layer_id];
-            let layer = RenderingLayer(layer_id.clone(), Arc::clone(layer_properties));
             match buckets.iter_mut().find(|(shared, _)| Arc::ptr_eq(shared, bucket)) {
-                Some((_, layers)) => layers.push(layer),
-                None => buckets.push((bucket, vec![layer])),
+                Some((_, layers)) => layers.push((layer_id, layer_properties)),
+                None => buckets.push((bucket, vec![(layer_id, layer_properties)])),
             }
         }
         buckets
-            .into_iter()
-            .map(|(bucket, layers)| {
-                bucket_ref(bucket.as_ref())
-                    .map(|bucket| (bucket, layers))
-                    .ok_or("a bucket type that no tile worker makes")
-            })
-            .collect()
+    }
+
+    fn write_buckets(&self, w: &mut Writer) {
+        let buckets = self.buckets();
+        buckets.len().write(w);
+        for (bucket, layers) in buckets {
+            write_bucket(bucket.as_ref(), w);
+            layers.len().write(w);
+            for (layer_id, properties) in layers {
+                layer_id.write(w);
+                // The layers that render a bucket cross back by key: the map
+                // side gets the properties it sent.
+                shared_layer_properties::write(properties, w);
+            }
+        }
     }
 }
 
@@ -210,29 +219,37 @@ impl LayoutResult {
 /// `LayoutResult` writes them outside a codec's session.
 #[cfg(test)]
 pub(super) fn encode_buckets(result: &LayoutResult) -> Vec<u8> {
-    postcard::to_allocvec(&result.buckets().unwrap()).unwrap()
+    let mut w = Writer::new();
+    result.write_buckets(&mut w);
+    w.finish().unwrap()
 }
 
-impl Serialize for LayoutResult {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let buckets = self.buckets().map_err(S::Error::custom)?;
-        LayoutRef { buckets, feature_index: &self.feature_index }.serialize(serializer)
+/// A `LayoutResult` crosses as each bucket once, with the layers that render
+/// it (a layer group's layers share their bucket), and the feature index.
+/// The atlases cross apart from the layout (envelope.rs), so that the map
+/// side releases their bins even when it can't read the rest; a layout read
+/// back has empty ones until the codec sets them.
+impl Wire for LayoutResult {
+    fn write(&self, w: &mut Writer) {
+        self.write_buckets(w);
+        self.feature_index.write(w);
     }
-}
 
-impl<'de> Deserialize<'de> for LayoutResult {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let layout = LayoutOwned::deserialize(deserializer)?;
+    fn read(r: &mut Reader<'_>) -> Option<Self> {
         let mut layer_render_data = mln_util::hash::HashMap::default();
-        for (bucket, layers) in layout.buckets {
-            let bucket = bucket_ptr(bucket);
-            for RenderingLayer(layer_id, layer_properties) in layers {
+        let buckets = r.length()?;
+        for _ in 0..buckets {
+            let bucket = read_bucket(r)?;
+            let layers = r.length()?;
+            for _ in 0..layers {
+                let layer_id = String::read(r)?;
+                let layer_properties = shared_layer_properties::read(r)?;
                 layer_render_data.insert(layer_id, LayerRenderData { bucket: Arc::clone(&bucket), layer_properties });
             }
         }
-        Ok(LayoutResult {
+        Some(LayoutResult {
             layer_render_data,
-            feature_index: Arc::new(layout.feature_index),
+            feature_index: Arc::new(FeatureIndex::read(r)?),
             atlases: Arc::new(LayoutAtlases::default()),
         })
     }

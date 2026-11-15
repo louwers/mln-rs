@@ -138,12 +138,15 @@ impl TileLayerIndex {
     }
 }
 
-fn is_in_viewport(projector: &TileProjector<'_>, point: Vec2) -> bool {
+/// Whether `point`, `elevation` meters above the ground, is in or near the
+/// viewport.
+fn is_in_viewport(projector: &TileProjector<'_>, point: Vec2, elevation: f32) -> bool {
     // buffer covers area of the next zoom level (current zoom - 1 covered area).
     const BUFFER: f64 = 1.0;
     const EDGE: f64 = 1.0 + BUFFER;
 
-    let projected = projector.project_as_drawn(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
+    let projected =
+        projector.project_as_drawn(&Point::new(f64::from(point.x), f64::from(point.y)), f64::from(elevation));
     let p = &projected.point;
     !projected.occluded && (p.x > -EDGE && p.y > -EDGE && p.x < EDGE && p.y < EDGE)
 }
@@ -251,7 +254,8 @@ impl CrossTileSymbolLayerIndex {
             // so we filter out the off-screen symbols to improve the performance.
             for symbol_instance in &mut state.symbol_instances {
                 symbol_instance.set_cross_tile_id(None);
-                let in_viewport = is_in_viewport(projector, symbol_instance.get_anchor().point);
+                let in_viewport =
+                    is_in_viewport(projector, symbol_instance.get_anchor().point, symbol_instance.height_offset());
                 pending.push(in_viewport);
                 state.has_uninitialized_symbols |= !in_viewport;
             }
@@ -515,6 +519,7 @@ mod tests {
             Some(variable_anchor_offset_collection).as_ref(),
             false,
             SymbolContent::IconSDF,
+            0.0,
         )
     }
 

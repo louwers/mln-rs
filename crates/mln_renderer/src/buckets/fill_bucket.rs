@@ -16,7 +16,6 @@ use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
@@ -41,7 +40,7 @@ pub(crate) struct FillLayoutVertex {
     pub(crate) a1: [i16; 2],
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub(crate) struct FillBucket {
     pub(crate) base: BucketBase,
 
@@ -57,9 +56,9 @@ pub(crate) struct FillBucket {
     /// bucket is shared.
     pub(crate) paint_property_binders: VecMap<String, RwLock<FillBinders>>,
 
-    #[serde(with = "sorted::map")]
+    #[wire(with = "sorted::map")]
     sdf_patterns: HashMap<String, bool>,
-    #[serde(with = "sorted::set")]
+    #[wire(with = "sorted::set")]
     mixed_sdf_pattern_layers: HashSet<String>,
 }
 

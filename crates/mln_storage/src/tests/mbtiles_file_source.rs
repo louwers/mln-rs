@@ -5,10 +5,9 @@ use mln_actor::RunLoop;
 use mln_util::tileset::Scheme;
 
 use super::{cpp_path, req, temp_path};
-use crate::file_source::FileSource;
+use crate::file_source::{FileSource, FileSourceExt};
 use crate::mbtiles_file_source::MBTilesFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
 fn to_absolute_url(file_name: &str) -> String {
@@ -17,7 +16,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn mbtiles_file_source() -> MBTilesFileSource {
-    MBTilesFileSource::new(&ResourceOptions::default())
+    MBTilesFileSource::new(mln_actor::scheduler::get_background())
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.
@@ -27,6 +26,7 @@ fn request(fs: &MBTilesFileSource, resource: &Resource) -> Response {
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();

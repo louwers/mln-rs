@@ -352,8 +352,7 @@ pub(crate) fn geojson_geometries(geojson: &GeoJson) -> Vec<Option<&geojson::Geom
 }
 
 /// `["within", geojson]`: whether the feature lies inside the polygons.
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(try_from = "MbglValue", into = "MbglValue")]
+#[derive(Clone, PartialEq)]
 pub(crate) struct Within {
     geojson_source: GeoJson,
     geometries: Geometry<f64>,
@@ -361,6 +360,16 @@ pub(crate) struct Within {
 
 /// A `within` crosses as its GeoJSON, as the style writes it, and finds its
 /// polygons again.
+impl mln_wire::Wire for Within {
+    fn write(&self, w: &mut mln_wire::Writer) {
+        self.source_value().write(w);
+    }
+
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        Within::try_from(MbglValue::read(r)?).ok().or_else(|| r.fail("invalid within GeoJSON"))
+    }
+}
+
 impl TryFrom<MbglValue> for Within {
     type Error = String;
 

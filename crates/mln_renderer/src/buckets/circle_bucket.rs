@@ -13,7 +13,6 @@ use mln_style_types::image::ImagePositions;
 use mln_util::Color;
 use mln_vec_map::VecMap;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
@@ -39,7 +38,7 @@ pub(crate) struct CircleLayoutVertex {
     pub(crate) a1: [i16; 2],
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub(crate) struct CircleBucket {
     pub(crate) base: BucketBase,
     pub(crate) vertices: GeometryVec<CircleLayoutVertex>,

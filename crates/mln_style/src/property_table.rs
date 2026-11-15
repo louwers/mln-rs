@@ -14,7 +14,6 @@ use feature::{Value, ValueObject};
 use mln_conversion::{Convertible, Error};
 
 use crate::color_ramp_property_value::ColorRampPropertyValue;
-use crate::conversion::property_value::MaybeConvertTokens;
 use crate::conversion::{Converter, convert_color_ramp_property_value, convert_property_value};
 use crate::conversion_impl::{
     ValueFactory, make_color_ramp_style_property, make_style_property, make_transition_style_property,
@@ -104,7 +103,7 @@ pub(crate) trait StyleValue: Clone + Default + PartialEq + 'static {
 
 impl<T> StyleValue for PropertyValue<T>
 where
-    T: Converter + MaybeConvertTokens + ValueConverter + ValueFactory + Clone + PartialEq + 'static,
+    T: Converter + ValueConverter + ValueFactory + Clone + PartialEq + 'static,
 {
     fn convert(value: &Convertible<'_>, info: &PropertyInfo) -> Result<Self, Error> {
         let mut error = Error::default();

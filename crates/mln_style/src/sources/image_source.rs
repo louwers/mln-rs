@@ -6,7 +6,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_image::decoder;
-use mln_storage::{AsyncRequest, FileSource, Resource, Response};
+use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::LatLng;
 use mln_util::error::Error;
@@ -68,7 +68,7 @@ impl source_impl::Impl for Impl {
 struct Inner {
     base: SourceBase,
     url: RefCell<Option<String>>,
-    req: RefCell<Option<Box<dyn AsyncRequest>>>,
+    req: RefCell<Option<Request>>,
     /// Port-only: counts the URLs and images set, so that an image that
     /// decodes after another was set (a decoder that answers later, see
     /// `on_image_response`) is dropped, as a cancelled request's response.
@@ -189,7 +189,7 @@ impl Source for ImageSource {
         &self.inner.base
     }
 
-    fn load_description(&self, file_source: &dyn FileSource) {
+    fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop) {
         let url = self.inner.url.borrow().clone();
         let Some(url) = url else {
             self.inner.base.set_loaded(true);
@@ -201,8 +201,11 @@ impl Source for ImageSource {
         }
 
         let weak = Rc::downgrade(&self.inner);
-        let req =
-            file_source.request(&Resource::image(&url), Box::new(move |res: Response| on_image_response(&weak, &res)));
+        let req = file_source.request(
+            &run_loop.scheduler(),
+            &Resource::image(&url),
+            Box::new(move |res: Response| on_image_response(&weak, &res)),
+        );
         *self.inner.req.borrow_mut() = Some(req);
     }
 

@@ -19,7 +19,6 @@ use mln_util::image::PremultipliedImage;
 use mln_util::tileset::RasterEncoding;
 use mln_util::time::Instant;
 use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::geometry::dem_data::DEMData;
@@ -53,16 +52,16 @@ fn full_mask() -> TileMask {
 /// DEM, border included, which is what a worker sets (`tile/worker_codec`)
 /// and the tile backfills from its neighbours; the geometry is the tile's
 /// (`set_mask`) and the render state this side's.
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub struct HillshadeBucket {
     pub(crate) base: BucketBase,
-    #[serde(skip, default = "unmasked")]
+    #[wire(skip, default = "unmasked")]
     geometry: Mutex<HillshadeBucketGeometry>,
     demdata: RwLock<DEMData>,
-    #[serde(skip)]
+    #[wire(skip)]
     prepared: AtomicBool,
     /// Incremented where C++ sets `renderTargetPrepared = false`.
-    #[serde(skip)]
+    #[wire(skip)]
     render_target_generation: AtomicU64,
 }
 

@@ -12,7 +12,6 @@ use mln_text::glyph::{Shaping, WritingModeType};
 use mln_text::shaping::PositionedIcon;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::Padding;
-use serde::{Deserialize, Serialize};
 
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::IndexedSubfeature;
@@ -20,7 +19,7 @@ use crate::text::collision_feature::CollisionFeature;
 use crate::text::quads::{SymbolQuads, get_glyph_quads, get_icon_quads};
 
 /// Bit flags for what a symbol contains: text, an RGBA icon, an SDF icon.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 pub(crate) struct SymbolContent(pub(crate) u8);
 
 #[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
@@ -176,11 +175,11 @@ impl SymbolInstanceSharedData {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, mln_wire::Wire)]
 pub(crate) struct SymbolInstance {
-    /// Port-only: not written by serde. The layout releases it before the
+    /// Port-only: not written by the codec. The layout releases it before the
     /// bucket leaves the worker (`releaseSharedData`).
-    #[serde(skip)]
+    #[wire(skip)]
     shared_data: Option<Arc<SymbolInstanceSharedData>>,
     anchor: Anchor,
     symbol_content: SymbolContent,
@@ -212,6 +211,8 @@ pub(crate) struct SymbolInstance {
     single_line: bool,
     /// `None` until the cross-tile index assigns one, and for symbols it skips.
     cross_tile_id: Option<NonZeroU32>,
+    /// `symbol-height-offset`, in meters above the ground.
+    height_offset: f32,
 }
 
 impl SymbolInstance {
@@ -243,6 +244,7 @@ impl SymbolInstance {
         text_variable_anchor_offset: Option<&VariableAnchorOffsetCollection>,
         allow_vertical_placement: bool,
         icon_type: SymbolContent,
+        height_offset: f32,
     ) -> Self {
         // Create the collision features that will be used to check whether
         // this symbol instance can be placed As a collision approximation, we
@@ -348,6 +350,7 @@ impl SymbolInstance {
             text_variable_anchor_offset: text_variable_anchor_offset.cloned(),
             single_line: shaped_text_orientations.single_line,
             cross_tile_id: None,
+            height_offset,
         }
     }
 
@@ -473,6 +476,11 @@ impl SymbolInstance {
     #[must_use]
     pub(crate) fn get_icon_offset(&self) -> [f32; 2] {
         self.icon_offset
+    }
+    /// `symbol-height-offset`, in meters above the ground.
+    #[must_use]
+    pub(crate) fn height_offset(&self) -> f32 {
+        self.height_offset
     }
     #[must_use]
     pub(crate) fn get_key(&self) -> &[u16] {

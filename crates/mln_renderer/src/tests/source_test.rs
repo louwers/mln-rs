@@ -11,7 +11,7 @@ use mln_map_types::{
 };
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{AsyncRequest, Callback, FileSource, Kind, RequestOrder, Resource, ResourceOptions, Response};
+use mln_storage::{FileSource, Kind, RequestOrder, Resource, Responder, Response};
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
@@ -57,6 +57,7 @@ struct SourceTest {
 /// The tile parameters for `map_mode`, from a transform state the caller
 /// owns.
 fn tile_parameters<'a>(
+    run_loop: &RunLoop,
     transform_state: &'a TransformState,
     thread_pool: &TaggedScheduler,
     map_mode: MapMode,
@@ -67,6 +68,7 @@ fn tile_parameters<'a>(
         debug_options: MapDebugOptions::NO_DEBUG,
         transform_state,
         file_source,
+        scheduler: run_loop.scheduler(),
         mode: map_mode,
         prefetch_zoom_delta: 0,
         tile_lod_min_radius: 3.0,
@@ -78,8 +80,8 @@ fn tile_parameters<'a>(
         global_state: None,
         is_update_synchronous: false,
         capture_rendered_features: false,
-        image_manager: crate::image_manager::ImageManager::create(),
-        glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
+        image_manager: crate::image_manager::ImageManager::on(Some(run_loop.scheduler())),
+        glyph_manager: crate::text::glyph_manager::GlyphManager::new(None, run_loop),
         dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
         tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
             thread_pool.clone(),
@@ -106,7 +108,7 @@ impl SourceTest {
     }
 
     fn tile_parameters_with(&self, map_mode: MapMode, file_source: Option<Arc<dyn FileSource>>) -> TileParameters<'_> {
-        tile_parameters(self.transform.get_state(), &self.thread_pool, map_mode, file_source)
+        tile_parameters(&self.run_loop, self.transform.get_state(), &self.thread_pool, map_mode, file_source)
     }
 
     /// Ends the test; usable from `'static` callbacks.
@@ -228,7 +230,7 @@ fn run_tile_case(
 ) -> SourceType {
     let layers = kind.layers();
     let source = kind.source(None, tiles_tileset());
-    source.load_description(&*file_source);
+    source.load_description(&*file_source, &test.run_loop);
 
     let mut render_source = render_source::create(&source.base_impl());
     render_source.set_observer(observer);
@@ -247,7 +249,7 @@ fn run_tile_case(
 
 fn tile_empty(kind: Tiled) {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
     file_source.set_response(Kind::Tile, |_resource| {
         let mut response = Response::new();
         response.no_content = true;
@@ -273,7 +275,7 @@ fn tile_empty(kind: Tiled) {
 
 fn tile_fail(kind: Tiled) {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
     file_source.set_response(Kind::Tile, |_resource| {
         let mut response = Response::new();
         response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
@@ -302,7 +304,7 @@ fn tile_fail(kind: Tiled) {
 
 fn tile_corrupt(kind: Tiled) {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
     file_source.set_response(Kind::Tile, |_resource| {
         let mut response = Response::new();
         response.data = Some(Arc::new(b"CORRUPTED".to_vec()));
@@ -334,7 +336,7 @@ fn tile_corrupt(kind: Tiled) {
 
 fn tile_cancel(kind: Tiled) {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
     let requested = Rc::new(RefCell::new(false));
     {
         let requested = Rc::clone(&requested);
@@ -363,36 +365,20 @@ struct PendingTileSource {
     cancelled: Arc<Mutex<Vec<(i8, i32, i32)>>>,
 }
 
-struct PendingTileRequest {
-    tile: (i8, i32, i32),
-    cancelled: Arc<Mutex<Vec<(i8, i32, i32)>>>,
-}
-
-impl AsyncRequest for PendingTileRequest {}
-
-impl Drop for PendingTileRequest {
-    fn drop(&mut self) {
-        self.cancelled.lock().push(self.tile);
-    }
-}
-
 impl FileSource for PendingTileSource {
-    fn request(&self, resource: &Resource, _callback: Callback) -> Box<dyn AsyncRequest> {
+    fn load(&self, resource: &Resource, responder: Responder) {
         let data = resource.tile_data.as_ref().expect("only tiles are requested");
         let tile = (data.z, data.x, data.y);
         self.requested.lock().push(tile);
         self.orders.lock().push(resource.order.clone());
-        Box::new(PendingTileRequest { tile, cancelled: Arc::clone(&self.cancelled) })
+        let cancelled = Arc::clone(&self.cancelled);
+        responder.on_cancel(move || cancelled.lock().push(tile));
+        // The request stays open until it's cancelled.
+        std::mem::forget(responder);
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_resource_options(&self, _options: ResourceOptions) {}
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        ResourceOptions::default()
     }
 }
 
@@ -408,7 +394,7 @@ fn tile_out_of_view_keeps_loading() {
     let (requested, cancelled) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.cancelled));
     let layers = Tiled::Vector.layers();
     let source = Tiled::Vector.source(None, tiles_tileset());
-    source.load_description(&*file_source);
+    source.load_description(&*file_source, &test.run_loop);
     let mut render_source = render_source::create(&source.base_impl());
     let fs: Arc<dyn FileSource> = file_source;
     // Requests made so far, after an update with the camera at `bearing`.
@@ -447,7 +433,7 @@ fn tile_requests_follow_the_view() {
     let (requested, orders) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.orders));
     let layers = Tiled::Vector.layers();
     let source = Tiled::Vector.source(None, tiles_tileset());
-    source.load_description(&*file_source);
+    source.load_description(&*file_source, &test.run_loop);
     let mut render_source = render_source::create(&source.base_impl());
     let fs: Arc<dyn FileSource> = file_source;
     // The tiles requested so far and where their requests stand now, after
@@ -568,7 +554,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
     let test = SourceTest::new();
     let layers = kind.layers();
 
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
     file_source.set_response(Kind::Tile, |_resource| {
         let mut response = Response::new();
         response.no_content = true;
@@ -597,7 +583,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
 
     let source = kind.source(Some("url".to_owned()), PartialTileset::default());
     source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
-    source.load_description(&*file_source);
+    source.load_description(&*file_source, &test.run_loop);
 
     let mut render_source = render_source::create(&source.base_impl());
     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
@@ -635,9 +621,10 @@ fn custom_geometry_case(
     test: &SourceTest,
     observer: Rc<StubRenderSourceObserver>,
 ) -> (CustomGeometrySource, Box<dyn RenderSource>) {
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
-    let source = CustomGeometrySource::new("source", CustomGeometrySourceOptions::default()).unwrap();
-    source.load_description(&file_source);
+    let file_source = StubFileSource::new(&test.run_loop, ResponseType::Asynchronous);
+    let source =
+        CustomGeometrySource::new("source", CustomGeometrySourceOptions::default(), test.run_loop.pool()).unwrap();
+    source.load_description(&file_source, &test.run_loop);
 
     let mut layer = LineLayer::new("id", "source");
     layer.set_source_layer("water");
@@ -716,9 +703,9 @@ fn custom_vector_source_set_tile_data() {
     }
     *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
 
-    let file_source = StubFileSource::new(ResponseType::Asynchronous);
-    let source = CustomVectorSource::new("source", CustomVectorSourceOptions::default());
-    source.load_description(&file_source);
+    let file_source = StubFileSource::new(&test.run_loop, ResponseType::Asynchronous);
+    let source = CustomVectorSource::new("source", CustomVectorSourceOptions::default(), test.run_loop.pool());
+    source.load_description(&file_source, &test.run_loop);
 
     let mut layer = LineLayer::new("id", "source");
     layer.set_source_layer("water");
@@ -745,9 +732,9 @@ fn custom_vector_source_set_tile_data() {
 #[test]
 fn empty_tileset() {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
     let source = TileSource::vector("source", None, PartialTileset::default());
-    source.load_description(&*file_source);
+    source.load_description(&*file_source, &test.run_loop);
     let mut render_source = render_source::create(&source.base_impl());
     let errors = observe_tile_errors(&mut *render_source);
 
@@ -778,9 +765,9 @@ fn empty_tileset() {
 fn empty_raster_tilesets_make_no_tiles() {
     for kind in [Tiled::Raster, Tiled::RasterDEM] {
         let test = SourceTest::new();
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
         let source = kind.source(None, PartialTileset::default());
-        source.load_description(&*file_source);
+        source.load_description(&*file_source, &test.run_loop);
         let mut render_source = render_source::create(&source.base_impl());
         let errors = observe_tile_errors(&mut *render_source);
 
@@ -1023,10 +1010,10 @@ impl Drop for FixtureLog {
 fn set_max_parent_overscale_factor() {
     let mut test = SourceTest::new();
     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(8.0), ..Default::default() });
-    let timer = Rc::new(Timer::new());
+    let timer = Rc::new(Timer::new(&test.run_loop));
     let log = FixtureLog::new();
 
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
     {
         let timer = Rc::clone(&timer);
         let end = test.end_handle();
@@ -1052,7 +1039,7 @@ fn set_max_parent_overscale_factor() {
     assert_eq!(None, source.get_max_overscale_factor_for_parent_tiles());
     source::set_max_overscale_factor_for_parent_tiles(&*source, Some(3));
     assert_eq!(Some(3), source.get_max_overscale_factor_for_parent_tiles());
-    source.load_description(&*file_source);
+    source.load_description(&*file_source, &test.run_loop);
     let base_impl = source.base_impl();
 
     let observer = Rc::new(StubRenderSourceObserver::default());
@@ -1071,9 +1058,11 @@ fn set_max_parent_overscale_factor() {
         let render_source = Rc::downgrade(&render_source);
         let state = test.transform.get_state().clone();
         let thread_pool = test.thread_pool.clone();
+        let run_loop = test.run_loop.clone();
         *observer.tile_changed.borrow_mut() = Some(Box::new(move |_, _| {
             if let Some(render_source) = render_source.upgrade() {
-                let parameters = tile_parameters(&state, &thread_pool, MapMode::Continuous, Some(Arc::clone(&fs)));
+                let parameters =
+                    tile_parameters(&run_loop, &state, &thread_pool, MapMode::Continuous, Some(Arc::clone(&fs)));
                 render_source.borrow_mut().update(Arc::clone(&base_impl), &layers, true, true, &parameters);
             }
         }));
@@ -1095,7 +1084,7 @@ fn raster_dem_tile_rounds_covering_zoom() {
     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(4.6), ..Default::default() });
 
     let requested_zooms = Rc::new(RefCell::new(Vec::<i8>::new()));
-    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
     {
         let requested_zooms = Rc::clone(&requested_zooms);
         file_source.set_response(Kind::Tile, move |res| {
@@ -1108,7 +1097,7 @@ fn raster_dem_tile_rounds_covering_zoom() {
 
     let layers = Tiled::RasterDEM.layers();
     let source = Tiled::RasterDEM.source(None, tiles_tileset());
-    source.load_description(&*file_source);
+    source.load_description(&*file_source, &test.run_loop);
 
     let observer = Rc::new(StubRenderSourceObserver::default());
     let mut render_source = render_source::create(&source.base_impl());
@@ -1152,7 +1141,7 @@ impl TurningSource {
         let mut test = SourceTest::new();
         test.transform.resize(size).unwrap();
         test.transform.set_projection_definition(&ProjectionDefinition::from_name(projection));
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
+        let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Manual));
         let requests = Rc::new(RefCell::new(0));
         {
             let requests = Rc::clone(&requests);
@@ -1172,7 +1161,7 @@ impl TurningSource {
                 ..Default::default()
             },
         );
-        source.load_description(&*file_source);
+        source.load_description(&*file_source, &test.run_loop);
         let render_source = RenderVectorSource::new(source::downcast_arc::<tile_source::Impl>(&source.base_impl()));
         TurningSource {
             test,

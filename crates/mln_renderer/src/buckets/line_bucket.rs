@@ -19,7 +19,6 @@ use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
@@ -51,7 +50,7 @@ pub(crate) struct LineLayoutVertex {
     pub(crate) a2: [u8; 4],
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub(crate) struct LineBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: LineLayoutProperties::PossiblyEvaluated,

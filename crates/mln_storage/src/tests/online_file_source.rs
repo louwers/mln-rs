@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use feature::Value;
 use mln_actor::{RunLoop, Timer};
 use mln_test_server::{HttpServer, closed_port_url};
 use mln_util::chrono::{Timestamp, now};
@@ -17,12 +16,11 @@ use parking_lot::Mutex;
 
 use super::http_file_source::{LoadState, load_request};
 use super::{Req, req, serial};
-use crate::file_source::{FileSource, MAX_CONCURRENT_REQUESTS_KEY};
+use crate::file_source::{FileSource, FileSourceExt};
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Priority, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::resource_transform::FinishedCallback;
 use crate::response::{Reason, ResourceError, Response};
 
@@ -30,7 +28,7 @@ use crate::response::{Reason, ResourceError, Response};
 const CONNECTION_TIMEOUT: f64 = if cfg!(windows) { 2.0 } else { 0.0 };
 
 fn online_file_source() -> Rc<OnlineFileSource> {
-    Rc::new(OnlineFileSource::new(&ResourceOptions::default()))
+    Rc::new(OnlineFileSource::new())
 }
 
 fn data(res: &Response) -> &[u8] {
@@ -40,8 +38,8 @@ fn data(res: &Response) -> &[u8] {
 /// Fails the test with `message` if it still runs in a minute. A test that
 /// waits for a retry only a network status change starts would otherwise
 /// hang when that retry never comes.
-fn fail_after_a_minute(message: &'static str) -> Timer {
-    let timer = Timer::new();
+fn fail_after_a_minute(run_loop: &RunLoop, message: &'static str) -> Timer {
+    let timer = Timer::new(run_loop);
     timer.start(Duration::from_secs(60), Duration::ZERO, move || panic!("{message}"));
     timer
 }
@@ -58,6 +56,7 @@ fn cancel() {
     let fs = online_file_source();
 
     drop(fs.request(
+        &run_loop.scheduler(),
         &Resource::new(Kind::Unknown, "http://127.0.0.1:3000/test"),
         Box::new(|_: Response| panic!("Callback should not be called")),
     ));
@@ -75,10 +74,12 @@ fn cancel_multiple() {
 
     let resource = Resource::new(Kind::Unknown, server.url("/test"));
 
-    let req2 = fs.request(&resource, Box::new(|_: Response| panic!("Callback should not be called")));
+    let req2 =
+        fs.request(&run_loop.scheduler(), &resource, Box::new(|_: Response| panic!("Callback should not be called")));
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -111,6 +112,7 @@ fn temporary_error() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
+        &run_loop.scheduler(),
         &Resource::new(Kind::Unknown, server.url("/temporary-error")),
         Box::new(move |res: Response| {
             let n = counter.get();
@@ -165,6 +167,7 @@ fn connection_error() {
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         &Resource::new(Kind::Unknown, closed_port_url("/")),
         Box::new(move |res: Response| {
             let duration = seconds_since(start);
@@ -204,6 +207,7 @@ fn timeout() {
     let req = req();
     let (r, stop, c) = (Rc::clone(&req), run_loop.clone(), Rc::clone(&counter));
     *req.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         &resource,
         Box::new(move |res: Response| {
             c.set(c.get() + 1);
@@ -238,6 +242,7 @@ fn retry_delay_on_expired_tile() {
     let resource = Resource::new(Kind::Unknown, server.url("/test?expires=10000"));
     let (stop, c) = (run_loop.clone(), Rc::clone(&counter));
     let _req = fs.request(
+        &run_loop.scheduler(),
         &resource,
         Box::new(move |res: Response| {
             c.set(c.get() + 1);
@@ -266,6 +271,7 @@ fn retry_on_clock_skew() {
     let resource = Resource::new(Kind::Unknown, server.url("/clockskew"));
     let stop = run_loop.clone();
     let _req1 = fs.request(
+        &run_loop.scheduler(),
         &resource,
         Box::new(move |res: Response| {
             assert!(!res.must_revalidate);
@@ -306,19 +312,19 @@ fn respect_prior_expires() {
     let mut resource1 = Resource::new(Kind::Unknown, server.url("/test"));
     resource1.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
-    let _req1 = fs.request(&resource1, Box::new(|_: Response| panic!("Should never be called")));
+    let _req1 = fs.request(&run_loop.scheduler(), &resource1, Box::new(|_: Response| panic!("Should never be called")));
 
     // No expiration time, should be requested immediately.
     let resource2 = Resource::new(Kind::Unknown, server.url("/test"));
 
     let stop = run_loop.clone();
-    let _req2 = fs.request(&resource2, Box::new(move |_: Response| stop.stop()));
+    let _req2 = fs.request(&run_loop.scheduler(), &resource2, Box::new(move |_: Response| stop.stop()));
 
     // Very long expiration time, should never arrive.
     let mut resource3 = Resource::new(Kind::Unknown, server.url("/test"));
     resource3.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
-    let _req3 = fs.request(&resource3, Box::new(|_: Response| panic!("Should never be called")));
+    let _req3 = fs.request(&run_loop.scheduler(), &resource3, Box::new(|_: Response| panic!("Should never be called")));
 
     run_loop.run();
 }
@@ -340,6 +346,7 @@ fn respect_minimum_update_interval() {
     let minimum_update_interval = resource.minimum_update_interval;
     let stop = run_loop.clone();
     let _req = fs.request(
+        &run_loop.scheduler(),
         &resource,
         Box::new(move |_: Response| {
             let wait = Duration::from_secs((now().secs_since_epoch() - start.secs_since_epoch()) as u64);
@@ -394,6 +401,7 @@ fn network_status_change() {
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -408,7 +416,7 @@ fn network_status_change() {
     ));
 
     // After 50 milliseconds, we're going to trigger a NetworkStatus change.
-    let reachable_timer = Timer::new();
+    let reachable_timer = Timer::new(&run_loop);
     reachable_timer.start(Duration::from_millis(50), Duration::ZERO, NetworkStatus::reachable);
 
     run_loop.run();
@@ -427,7 +435,7 @@ fn network_status_change_preempt() {
     // Longer than the test runs, so that only the network status change can
     // retry the request.
     fs.set_connection_backoff(Duration::from_secs(3600));
-    let _deadline = fail_after_a_minute("The network status change didn't retry the request");
+    let _deadline = fail_after_a_minute(&run_loop, "The network status change didn't retry the request");
 
     let counter = Rc::new(Cell::new(0));
 
@@ -436,6 +444,7 @@ fn network_status_change_preempt() {
     let req = req();
     let (r, stop, c) = (Rc::clone(&req), run_loop.clone(), Rc::clone(&counter));
     *req.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         &resource,
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -476,13 +485,14 @@ fn network_status_online_offline() {
     assert_eq!(NetworkStatus::get(), Status::Online, "Default status should be Online");
     NetworkStatus::set(Status::Offline);
 
-    let online_timer = Timer::new();
+    let online_timer = Timer::new(&run_loop);
     online_timer.start(Duration::from_millis(100), Duration::ZERO, || NetworkStatus::set(Status::Online));
-    let _deadline = fail_after_a_minute("Going back Online didn't retry the request");
+    let _deadline = fail_after_a_minute(&run_loop, "Going back Online didn't retry the request");
 
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -510,6 +520,7 @@ fn rate_limit_test(path: &str, expect_retry_after: bool) {
     // arrives; it's only certain to be after the request was made.
     let requested_at = now();
     let _req = fs.request(
+        &run_loop.scheduler(),
         &Resource::new(Kind::Unknown, server.url(path)),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -556,7 +567,7 @@ fn low_high_priority_requests() {
     let response_counter = Rc::new(Cell::new(0usize));
 
     NetworkStatus::set(Status::Offline);
-    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
+    fs.set_maximum_concurrent_requests(1);
     // After DefaultFileSource was split, OnlineFileSource lives on a separate
     // thread. Pause OnlineFileSource, so that messages are queued for
     // processing.
@@ -567,6 +578,7 @@ fn low_high_priority_requests() {
     let req_0 = req();
     let (r, c) = (Rc::clone(&req_0), Rc::clone(&response_counter));
     *req_0.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         &regular1,
         Box::new(move |_: Response| {
             c.set(c.get() + 1);
@@ -580,6 +592,7 @@ fn low_high_priority_requests() {
     let req_1 = req();
     let (r, c, stop) = (Rc::clone(&req_1), Rc::clone(&response_counter), run_loop.clone());
     *req_1.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         &low_prio,
         Box::new(move |_: Response| {
             c.set(c.get() + 1);
@@ -595,6 +608,7 @@ fn low_high_priority_requests() {
     let req_2 = req();
     let (r, c) = (Rc::clone(&req_2), Rc::clone(&response_counter));
     *req_2.borrow_mut() = Some(fs.request(
+        &run_loop.scheduler(),
         &regular2,
         Box::new(move |_: Response| {
             c.set(c.get() + 1);
@@ -623,7 +637,7 @@ fn low_high_priority_requests_many() {
     let correct_regular = Rc::new(Cell::new(0));
 
     NetworkStatus::set(Status::Offline);
-    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
+    fs.set_maximum_concurrent_requests(1);
     let paused = fs.pause();
 
     let collector: Rc<RefCell<Vec<Req>>> = Rc::new(RefCell::new(Vec::new()));
@@ -633,6 +647,7 @@ fn low_high_priority_requests_many() {
         if num_reqs % 2 == 0 {
             let (counter, correct_regular) = (Rc::clone(&response_counter), Rc::clone(&correct_regular));
             *r.borrow_mut() = Some(fs.request(
+                &run_loop.scheduler(),
                 &Resource::new(Kind::Unknown, server.url(&format!("/load/{num_reqs}"))),
                 Box::new(move |_: Response| {
                     counter.set(counter.get() + 1);
@@ -655,6 +670,7 @@ fn low_high_priority_requests_many() {
                 Rc::clone(&collector),
             );
             *r.borrow_mut() = Some(fs.request(
+                &run_loop.scheduler(),
                 &resource,
                 Box::new(move |_: Response| {
                     counter.set(counter.get() + 1);
@@ -698,7 +714,7 @@ fn pending_requests_start_by_order() {
     let answered: Rc<RefCell<Vec<usize>>> = Rc::default();
 
     NetworkStatus::set(Status::Offline);
-    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
+    fs.set_maximum_concurrent_requests(1);
     let paused = fs.pause();
 
     // The first request starts at once; the others wait for it.
@@ -710,12 +726,13 @@ fn pending_requests_start_by_order() {
             resource
         })
         .collect();
-    let mut requests: Vec<Option<Box<dyn crate::AsyncRequest>>> = resources
+    let mut requests: Vec<Option<crate::Request>> = resources
         .iter()
         .enumerate()
         .map(|(index, resource)| {
             let (answered, stop) = (Rc::clone(&answered), run_loop.clone());
             Some(fs.request(
+                &run_loop.scheduler(),
                 resource,
                 Box::new(move |_: Response| {
                     answered.borrow_mut().push(index);
@@ -744,10 +761,10 @@ fn maximum_concurrent_requests() {
     let _run_loop = RunLoop::new();
     let fs = online_file_source();
 
-    assert_eq!(fs.get_property(MAX_CONCURRENT_REQUESTS_KEY), Value::Uint(20));
+    assert_eq!(fs.maximum_concurrent_requests(), 20);
 
-    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(10));
-    assert_eq!(fs.get_property(MAX_CONCURRENT_REQUESTS_KEY), Value::Uint(10));
+    fs.set_maximum_concurrent_requests(10);
+    assert_eq!(fs.maximum_concurrent_requests(), 10);
 }
 
 // gtest: OnlineFileSource.RequestSameUrlMultipleTimes
@@ -764,6 +781,7 @@ fn request_same_url_multiple_times() {
     for _ in 0..100 {
         let (count, stop) = (Rc::clone(&count), run_loop.clone());
         requests.push(fs.request(
+            &run_loop.scheduler(),
             &Resource::new(Kind::Unknown, server.url("/load")),
             Box::new(move |_: Response| {
                 count.set(count.get() + 1);
@@ -788,6 +806,7 @@ fn failed_resource_transform() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
+        &run_loop.scheduler(),
         &Resource::new(Kind::Unknown, "http://127.0.0.1:3000/test"),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -826,6 +845,7 @@ fn retry_failed_resource_transform() {
     let responses = Rc::new(Cell::new(0));
     let stop = run_loop.clone();
     let _req = fs.request(
+        &run_loop.scheduler(),
         &Resource::new(Kind::Unknown, server.url("/delayed")),
         Box::new(move |res: Response| {
             responses.set(responses.get() + 1);
@@ -875,6 +895,7 @@ fn a_header_transform_runs_for_every_attempt() {
     let responses = Rc::new(Cell::new(0));
     let stop = run_loop.clone();
     let _req = fs.request(
+        &run_loop.scheduler(),
         &Resource::new(Kind::Source, "localhost://temporary-error"),
         Box::new(move |res: Response| {
             responses.set(responses.get() + 1);

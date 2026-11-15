@@ -32,7 +32,7 @@ pub(crate) enum Params {
 }
 
 /// The operator of a compound expression signature.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, mln_wire::Wire)]
 pub(crate) enum Op {
     E,
     Pi,
@@ -87,22 +87,6 @@ pub(crate) enum Op {
     Error,
     FeatureState,
     GlobalState,
-    FilterEq,
-    FilterIdEq,
-    FilterTypeEq,
-    FilterLt,
-    FilterIdLt,
-    FilterGt,
-    FilterIdGt,
-    FilterLe,
-    FilterIdLe,
-    FilterGe,
-    FilterIdGe,
-    FilterHas,
-    FilterHasId,
-    FilterTypeIn,
-    FilterIdIn,
-    FilterIn,
 }
 
 pub(crate) struct SignatureBase {
@@ -131,7 +115,6 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
     let num1 = || fixed(std::slice::from_ref(&T::Number));
     let num2 = || fixed(&[T::Number, T::Number]);
     let str1 = || fixed(std::slice::from_ref(&T::String));
-    let key_value = || fixed(&[T::String, T::Value]);
     let mut registry = vec![
         sig("e", n.clone(), none(), D::NONE, Op::E),
         sig("pi", n.clone(), none(), D::NONE, Op::Pi),
@@ -192,23 +175,6 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("error", T::Error, str1(), D::NONE, Op::Error),
         sig("feature-state", T::Value, str1(), D::FEATURE | D::FEATURE_STATE, Op::FeatureState),
         sig("global-state", T::Value, str1(), D::GLOBAL_STATE, Op::GlobalState),
-        // Legacy filters
-        sig("filter-==", b.clone(), key_value(), D::FEATURE, Op::FilterEq),
-        sig("filter-id-==", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdEq),
-        sig("filter-type-==", b.clone(), str1(), D::FEATURE, Op::FilterTypeEq),
-        sig("filter-<", b.clone(), key_value(), D::FEATURE, Op::FilterLt),
-        sig("filter-id-<", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdLt),
-        sig("filter->", b.clone(), key_value(), D::FEATURE, Op::FilterGt),
-        sig("filter-id->", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdGt),
-        sig("filter-<=", b.clone(), key_value(), D::FEATURE, Op::FilterLe),
-        sig("filter-id-<=", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdLe),
-        sig("filter->=", b.clone(), key_value(), D::FEATURE, Op::FilterGe),
-        sig("filter-id->=", b.clone(), fixed(&[T::Value]), D::FEATURE, Op::FilterIdGe),
-        sig("filter-has", b.clone(), str1(), D::FEATURE, Op::FilterHas),
-        sig("filter-has-id", b.clone(), none(), D::FEATURE, Op::FilterHasId),
-        sig("filter-type-in", b.clone(), Params::Varargs(s.clone()), D::FEATURE, Op::FilterTypeIn),
-        sig("filter-id-in", b.clone(), Params::Varargs(T::Value), D::FEATURE, Op::FilterIdIn),
-        sig("filter-in", b, Params::Varargs(T::Value), D::FEATURE, Op::FilterIn),
     ]);
     registry
 });
@@ -269,64 +235,27 @@ fn feature_type_as_string(t: FeatureType) -> &'static str {
     }
 }
 
-fn mbgl_as_double(value: &MbglValue) -> Option<f64> {
-    match *value {
-        MbglValue::Double(v) => Some(v),
-        MbglValue::Uint(v) => Some(v as f64),
-        MbglValue::Int(v) => Some(v as f64),
-        _ => None,
-    }
-}
-
-fn id_as_double(id: &FeatureIdentifier) -> Option<f64> {
-    match *id {
-        FeatureIdentifier::Double(v) => Some(v),
-        FeatureIdentifier::Uint(v) => Some(v as f64),
-        FeatureIdentifier::Int(v) => Some(v as f64),
-        _ => None,
-    }
-}
-
-/// The comparison of a legacy ordering filter.
-fn ordering_holds(op: Op, ordering: Option<std::cmp::Ordering>) -> bool {
-    let Some(ordering) = ordering else {
-        return false;
-    };
-    match op {
-        Op::FilterLt | Op::FilterIdLt => ordering.is_lt(),
-        Op::FilterGt | Op::FilterIdGt => ordering.is_gt(),
-        Op::FilterLe | Op::FilterIdLe => ordering.is_le(),
-        Op::FilterGe | Op::FilterIdGe => ordering.is_ge(),
-        _ => unreachable!("not an ordering filter: {op:?}"),
-    }
-}
-
 /// An operator with a name and typed arguments.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, mln_wire::Wire)]
 pub(crate) struct CompoundExpression {
-    #[serde(with = "signature_by_op")]
+    #[wire(with = "signature_by_op")]
     signature: &'static SignatureBase,
     args: Box<[Expr]>,
 }
 
 /// A signature crosses as its op, which only it has.
 mod signature_by_op {
-    use serde::de::Error as _;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     use super::{BY_OP, Op, SignatureBase};
 
-    #[expect(clippy::trivially_copy_pass_by_ref, reason = "`#[serde(with)]` passes the field by reference")]
-    pub(super) fn serialize<S: Serializer>(
-        signature: &&'static SignatureBase,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        signature.op.serialize(serializer)
+    #[expect(clippy::trivially_copy_pass_by_ref, reason = "`#[wire(with)]` passes the field by reference")]
+    pub(super) fn write(signature: &&'static SignatureBase, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(&signature.op, w);
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<&'static SignatureBase, D::Error> {
-        let op = Op::deserialize(deserializer)?;
-        BY_OP.get(&op).copied().ok_or_else(|| D::Error::custom(format!("no signature for {op:?}")))
+    pub(super) fn read(r: &mut mln_wire::Reader<'_>) -> Option<&'static SignatureBase> {
+        let op = <Op as mln_wire::Wire>::read(r)?;
+        BY_OP.get(&op).copied().or_else(|| r.fail("no signature for an op"))
     }
 }
 
@@ -485,86 +414,6 @@ impl CompoundExpression {
                 object.contains_key(&*key)
             }
             Op::IsSupportedScript => is_supported_script(params, &a[0].eval_str(params)?),
-            Op::FilterEq => {
-                let key = a[0].eval_str(params)?;
-                let value = a[1].evaluate_ref(params)?;
-                let feature = params.feature.expect("feature");
-                feature.get_value(&key).is_some_and(|rhs| *value == from_mbgl_value_owned(rhs))
-            }
-            Op::FilterIdEq => {
-                let value = a[0].evaluate_ref(params)?;
-                let feature = params.feature.expect("feature");
-                *value == identifier_to_expression_value(feature.get_id())
-            }
-            Op::FilterTypeEq => {
-                let type_ = a[0].eval_str(params)?;
-                params.feature.is_some_and(|feature| feature_type_as_string(feature.get_type()) == type_)
-            }
-            Op::FilterLt | Op::FilterGt | Op::FilterLe | Op::FilterGe => {
-                // A legacy comparison filter compares a number to a numeric
-                // feature value and a string to a string one.
-                let key = a[0].eval_str(params)?;
-                let value = a[1].evaluate_ref(params)?;
-                let feature = params.feature.expect("feature");
-                match &*value {
-                    Value::Number(value) => feature
-                        .get_value(&key)
-                        .and_then(|v| mbgl_as_double(&v))
-                        .is_some_and(|rhs| ordering_holds(op, rhs.partial_cmp(value))),
-                    Value::String(value) => match feature.get_value(&key) {
-                        Some(MbglValue::String(rhs)) => ordering_holds(op, Some(rhs.as_str().cmp(value))),
-                        _ => false,
-                    },
-                    _ => false,
-                }
-            }
-            Op::FilterIdLt | Op::FilterIdGt | Op::FilterIdLe | Op::FilterIdGe => {
-                let value = a[0].evaluate_ref(params)?;
-                let id = params.feature.expect("feature").get_id();
-                match &*value {
-                    Value::Number(value) => {
-                        id_as_double(&id).is_some_and(|rhs| ordering_holds(op, rhs.partial_cmp(value)))
-                    }
-                    Value::String(value) => match id {
-                        FeatureIdentifier::String(rhs) => ordering_holds(op, Some(rhs.as_str().cmp(value))),
-                        _ => false,
-                    },
-                    _ => false,
-                }
-            }
-            Op::FilterHas => {
-                let key = a[0].eval_str(params)?;
-                params.feature.expect("feature").get_value(&key).is_some()
-            }
-            Op::FilterHasId => !matches!(params.feature.expect("feature").get_id(), FeatureIdentifier::Null),
-            Op::FilterTypeIn => {
-                let t = feature_type_as_string(params.feature.expect("feature").get_type());
-                let mut found = false;
-                for arg in a {
-                    found |= arg.eval_str(params)? == t;
-                }
-                found
-            }
-            Op::FilterIdIn => {
-                let mut values = Vec::with_capacity(a.len());
-                for arg in a {
-                    values.push(arg.evaluate_ref(params)?);
-                }
-                let id = identifier_to_expression_value(params.feature.expect("feature").get_id());
-                values.iter().any(|v| **v == id)
-            }
-            Op::FilterIn => {
-                let mut values = Vec::with_capacity(a.len());
-                for arg in a {
-                    values.push(arg.evaluate_ref(params)?);
-                }
-                if values.len() < 2 {
-                    return Ok(false);
-                }
-                let Value::String(key) = &*values[0] else { unreachable!("string key") };
-                let value = params.feature.expect("feature").get_value(key).map(from_mbgl_value_owned);
-                value.is_some_and(|value| values[1..].iter().any(|v| **v == value))
-            }
             Op::Error => return Err(self.error(params)),
             _ => return bool::from_value(self.evaluate(params)?),
         })

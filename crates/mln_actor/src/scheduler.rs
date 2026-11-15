@@ -42,31 +42,6 @@ pub trait Scheduler {
 pub type SchedulerPtr = Arc<dyn Scheduler + Send + Sync>;
 pub(crate) type WeakScheduler = Weak<dyn Scheduler + Send + Sync>;
 
-thread_local! {
-    static LOCAL_SCHEDULER: RefCell<Option<SchedulerPtr>> = const { RefCell::new(None) };
-}
-
-pub(crate) fn set_current(scheduler: Option<SchedulerPtr>) {
-    LOCAL_SCHEDULER.with(|s| *s.borrow_mut() = scheduler);
-}
-
-/// Returns this thread's scheduler, creating the thread's `RunLoop` if it has
-/// no scheduler yet.
-#[must_use]
-pub fn get_current() -> SchedulerPtr {
-    if let Some(scheduler) = try_get_current() {
-        return scheduler;
-    }
-    // `static thread_local util::RunLoop runLoop; SetCurrent(&runLoop);`
-    let _ = crate::run_loop::RunLoop::get();
-    try_get_current().expect("RunLoop sets the current scheduler")
-}
-
-#[must_use]
-pub fn try_get_current() -> Option<SchedulerPtr> {
-    LOCAL_SCHEDULER.with(|s| s.borrow().clone())
-}
-
 static COOPERATIVE: OnceLock<Arc<CooperativeScheduler>> = OnceLock::new();
 
 /// Port-only: makes `scheduler` run everything that would otherwise run on
@@ -97,7 +72,8 @@ pub fn cooperative() -> Option<&'static Arc<CooperativeScheduler>> {
 }
 
 /// Returns the process-wide thread pool, created on first use and kept alive
-/// by its users (or the installed cooperative scheduler).
+/// by its users (or the installed cooperative scheduler). It's a
+/// [`RunLoop`](crate::RunLoop)'s pool unless the loop was given another.
 pub fn get_background() -> SchedulerPtr {
     static WEAK: Mutex<Option<Weak<ThreadPool>>> = Mutex::new(None);
     if let Some(cooperative) = cooperative() {
@@ -154,8 +130,8 @@ pub fn bind_once(scheduler: &SchedulerPtr, task: Task) -> impl FnMut() + Send + 
     }
 }
 
-/// Runs `task` on `scheduler` and then `reply(result)` on the current
-/// thread's scheduler.
+/// Runs `task` on `scheduler` and then `reply(result)` on `reply_to`, which
+/// runs its tasks on the calling thread.
 ///
 /// C++ captures `reply` in the closure that travels through the pool; here
 /// it stays on the calling thread (it usually holds thread-local state such
@@ -164,6 +140,7 @@ pub fn bind_once(scheduler: &SchedulerPtr, task: Task) -> impl FnMut() + Send + 
 pub fn schedule_and_reply_value<R, TaskFn, ReplyFn>(
     scheduler: &dyn Scheduler,
     tag: Option<SimpleIdentity>,
+    reply_to: &SchedulerPtr,
     task: TaskFn,
     reply: ReplyFn,
 ) where
@@ -171,7 +148,7 @@ pub fn schedule_and_reply_value<R, TaskFn, ReplyFn>(
     TaskFn: FnOnce() -> R + Send + 'static,
     ReplyFn: FnOnce(R) + 'static,
 {
-    schedule_and_reply_later(scheduler, tag, move |respond: Respond<R>| respond(task()), reply);
+    schedule_and_reply_later(scheduler, tag, reply_to, move |respond: Respond<R>| respond(task()), reply);
 }
 
 /// Where a task of `schedule_and_reply_later` hands its result.
@@ -180,11 +157,13 @@ pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
 /// Port-only: `scheduleAndReplyValue` for a task whose result may come
 /// after it returns (an image the browser decodes): `task` runs on
 /// `scheduler` with a `Respond` to call once with its result, then or later
-/// and from any thread, and `reply(result)` runs on the current thread's
-/// scheduler. A `Respond` dropped without a call drops the reply.
-pub(crate) fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
+/// and from any thread, and `reply(result)` runs on `reply_to`, which runs
+/// its tasks on the calling thread. A `Respond` dropped without a call drops
+/// the reply.
+fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
     scheduler: &dyn Scheduler,
     tag: Option<SimpleIdentity>,
+    reply_to: &SchedulerPtr,
     task: TaskFn,
     reply: ReplyFn,
 ) where
@@ -192,7 +171,7 @@ pub(crate) fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
     TaskFn: FnOnce(Respond<R>) + Send + 'static,
     ReplyFn: FnOnce(R) + 'static,
 {
-    let reply_scheduler = Arc::downgrade(&get_current());
+    let reply_scheduler = Arc::downgrade(reply_to);
     let reply = LocalObject::new(RefCell::new(Some(reply)));
     schedule_under(
         scheduler,
@@ -252,13 +231,16 @@ impl TaggedScheduler {
         self.scheduler.wait_for_empty_tagged(self.tag);
     }
 
-    /// `schedule_and_reply_later` on this scheduler and tag.
-    pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(&self, task: TaskFn, reply: ReplyFn)
+    /// Port-only: runs `task` on the scheduler under this tag with a
+    /// `Respond` to call once with its result, then or later and from any
+    /// thread, and `reply(result)` on `reply_to`, which runs its tasks on the
+    /// calling thread. A `Respond` dropped without a call drops the reply.
+    pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(&self, reply_to: &SchedulerPtr, task: TaskFn, reply: ReplyFn)
     where
         R: Send + 'static,
         TaskFn: FnOnce(Respond<R>) + Send + 'static,
         ReplyFn: FnOnce(R) + 'static,
     {
-        schedule_and_reply_later(&*self.scheduler, Some(self.tag), task, reply);
+        schedule_and_reply_later(&*self.scheduler, Some(self.tag), reply_to, task, reply);
     }
 }

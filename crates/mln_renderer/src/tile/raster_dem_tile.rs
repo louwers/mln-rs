@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::{ActorRef, Mailbox, scheduler};
+use mln_actor::{ActorRef, Mailbox};
 use mln_image::decoder;
 use mln_storage::Data;
 use mln_style::layer_properties::LayerProperties;
@@ -17,7 +17,6 @@ use mln_util::chrono::Timestamp;
 use mln_util::error::Error;
 use mln_util::serialization::payload::shared_bytes;
 use mln_util::tileset::{RasterEncoding, Tileset};
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
@@ -67,12 +66,12 @@ impl std::ops::BitAnd for DEMTileNeighbors {
 }
 
 /// The messages a `RasterDEMTile` sends its `RasterDEMTileWorker`: the
-/// worker's public member functions. Port-only: serde writes them for a
-/// worker in another wasm instance (`tile/worker_codec`).
-#[derive(Serialize, Deserialize)]
+/// worker's public member functions. Port-only: the codec writes them for
+/// a worker in another wasm instance (`tile/worker_codec`).
+#[derive(mln_wire::Wire)]
 pub enum RasterDEMWorkerMessage {
     Parse {
-        #[serde(with = "shared_bytes::option")]
+        #[wire(with = "shared_bytes::option")]
         data: Option<Data>,
         correlation_id: u64,
         encoding: RasterEncoding,
@@ -80,9 +79,9 @@ pub enum RasterDEMWorkerMessage {
 }
 
 /// The messages a `RasterDEMTileWorker` sends its `RasterDEMTile`: the
-/// tile's member functions the worker calls. Port-only: serde writes them
+/// tile's member functions the worker calls. Port-only: the codec writes them
 /// for a worker in another wasm instance (`tile/worker_codec`).
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub enum RasterDEMTileMessage {
     Parsed { bucket: Option<Arc<HillshadeBucket>>, correlation_id: u64 },
     Error { error: Error, correlation_id: u64 },
@@ -287,7 +286,7 @@ impl RasterDEMTile {
             worker,
             mailbox: Arc::clone(&mailbox),
         });
-        mailbox.open(&scheduler::get_current(), Rc::<RasterDEMTileInner>::clone(&inner));
+        mailbox.open(&parameters.scheduler, Rc::<RasterDEMTileInner>::clone(&inner));
         let weak: std::rc::Weak<RasterDEMTileInner> = Rc::downgrade(&inner);
         let loader = TileLoader::new(weak, VectorTileEncoding::Mvt, &id, parameters, tileset);
         RasterDEMTile { inner, loader: Some(loader) }

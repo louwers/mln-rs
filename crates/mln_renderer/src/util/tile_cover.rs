@@ -242,6 +242,10 @@ pub(crate) struct TileCoverParameters {
     /// Whether the source rounds zooms to whole tiles, as raster sources do,
     /// instead of flooring them.
     pub(crate) round_zoom: bool,
+    /// The highest the source's content may reach above the ground, in
+    /// meters, such as its largest `symbol-height-offset`. On the globe,
+    /// tiles under content this high stay while the content is in view.
+    pub(crate) max_content_elevation: f64,
 }
 
 impl TileCoverParameters {
@@ -257,6 +261,7 @@ impl TileCoverParameters {
             tile_lod_mode: TileLodMode::Default,
             requested_zoom: None,
             round_zoom: false,
+            max_content_elevation: 0.0,
         }
     }
 }
@@ -723,7 +728,24 @@ mod globe {
         // the frustum's corners bound the visible cap and not the space behind
         // the planet.
         let horizon = projection.clipping_plane;
-        let frustum = Frustum::from_inv_proj_matrix(&inverse, 1.0, 0.0, /*flipped_y*/ true, Some(&horizon));
+        let mut frustum = Frustum::from_inv_proj_matrix(&inverse, 1.0, 0.0, /*flipped_y*/ true, Some(&horizon));
+        // Both the horizon plane and the far plane assume content on the
+        // surface. A point raised to radius r, in planet radii, stays in view
+        // up to acos(1/r) past the surface's horizon and sqrt(r^2 - 1)
+        // farther away, so both move back by as much (GL JS
+        // `coveringTiles`).
+        let mut culling_horizon = horizon;
+        let normal_length = horizon[0].hypot(horizon[1]).hypot(horizon[2]);
+        if state.max_content_elevation > 0.0 && normal_length > 0.0 {
+            let shell_radius = 1.0 + state.max_content_elevation / constants::EARTH_RADIUS_M;
+            let horizon_cos = (-horizon[3] / normal_length).clamp(-1.0, 1.0);
+            let shell_cos = (horizon_cos.acos() + (1.0 / shell_radius).acos()).cos();
+            culling_horizon[3] = -shell_cos * normal_length;
+            frustum = frustum.with_far_plane_pushed(
+                (shell_radius * shell_radius - 1.0).sqrt(),
+                &transform.get_globe_camera_position(),
+            );
+        }
 
         // Tiles nearer the camera than the center may load finer than the
         // nominal zoom, up to the source's maximum.
@@ -771,7 +793,12 @@ mod globe {
             TileZoomFunction::DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN,
             TileZoomFunction::DEFAULT_TILE_COUNT_MAX_MIN_RATIO,
         );
-        let culling_elevation = elevation_for_tile_culling(transform.get_pitch() * 180.0 / PI, fov_degrees, 0.0, 0.0);
+        let culling_elevation = elevation_for_tile_culling(
+            transform.get_pitch() * 180.0 / PI,
+            fov_degrees,
+            0.0,
+            state.max_content_elevation,
+        );
 
         // The pixels across a tile at the center of an unpitched view, were
         // tiles loaded at the requested zoom before it is made whole.
@@ -803,7 +830,7 @@ mod globe {
             let volume = tile_bounding_volume(&tile, culling_elevation);
 
             if !node.fully_visible {
-                let intersection = is_tile_visible(&frustum, &volume, &horizon);
+                let intersection = is_tile_visible(&frustum, &volume, &culling_horizon);
                 if intersection == IntersectionResult::Separate {
                     continue;
                 }
@@ -840,7 +867,7 @@ mod globe {
                 && children(&node).iter().all(|child| {
                     let volume =
                         tile_bounding_volume(&CanonicalTileID::new(child.zoom, child.x, child.y), culling_elevation);
-                    is_tile_visible(&frustum, &volume, &horizon) == IntersectionResult::Separate
+                    is_tile_visible(&frustum, &volume, &culling_horizon) == IntersectionResult::Separate
                 })
             {
                 continue;

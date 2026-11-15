@@ -27,7 +27,6 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::vectors::Vec3f;
 use mln_vec_map::VecMap;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
@@ -63,7 +62,7 @@ pub(crate) type FillExtrusionStaticVertex = [i16; 2];
 
 pub(crate) use crate::render_light::EvaluatedLight;
 
-#[derive(Serialize, Deserialize)]
+#[derive(mln_wire::Wire)]
 pub(crate) struct FillExtrusionBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: FillExtrusionLayoutProperties::PossiblyEvaluated,

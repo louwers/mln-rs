@@ -183,7 +183,7 @@ impl ImageManagerObserver for StubImageManagerObserver {
 // gtest: ImageManager.Missing
 #[test]
 fn missing() {
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(None);
     assert!(image_manager.get_image("doesnotexist").is_none());
 }
 
@@ -191,7 +191,7 @@ fn missing() {
 #[test]
 fn basic() {
     let _log = FixtureLog::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(None);
 
     let images = mln_sprite::sprite_parser::parse_sprite(
         "default",
@@ -213,7 +213,7 @@ fn basic() {
 #[test]
 fn add_remove() {
     let _log = FixtureLog::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(None);
 
     image_manager.add_image(make_image("one", Size::new(16, 16), 2.0, false));
     image_manager.add_image(make_image("two", Size::new(16, 16), 2.0, false));
@@ -231,7 +231,7 @@ fn add_remove() {
 #[test]
 fn update() {
     let _log = FixtureLog::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(None);
 
     image_manager.add_image(make_image("one", Size::new(16, 16), 2.0, false));
     assert_eq!(0, image_manager.updated_image_versions().len());
@@ -245,7 +245,7 @@ fn update() {
 #[test]
 fn sdf_change_requires_relayout() {
     let _log = FixtureLog::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(None);
 
     image_manager.add_image(make_image("one", Size::new(16, 16), 2.0, false));
 
@@ -259,7 +259,7 @@ fn sdf_change_requires_relayout() {
 #[test]
 fn remove_releases_bin_pack_rect() {
     let log = FixtureLog::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(None);
 
     image_manager.add_image(make_image("big", Size::new(32, 32), 1.0, false));
     assert!(image_manager.get_image("big").is_some());
@@ -275,7 +275,7 @@ fn remove_releases_bin_pack_rect() {
 #[test]
 fn notifies_requestor_when_sprite_is_loaded() {
     let run_loop = RunLoop::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(Some(run_loop.scheduler()));
     let requestor = StubImageRequestor::new(&image_manager);
     let notified = Rc::new(Cell::new(false));
 
@@ -302,7 +302,7 @@ fn notifies_requestor_when_sprite_is_loaded() {
 // gtest: ImageManager.NotifiesRequestorImmediatelyIfDependenciesAreSatisfied
 #[test]
 fn notifies_requestor_immediately_if_dependencies_are_satisfied() {
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(None);
     let requestor = StubImageRequestor::new(&image_manager);
     let notified = Rc::new(Cell::new(false));
 
@@ -320,7 +320,7 @@ fn notifies_requestor_immediately_if_dependencies_are_satisfied() {
 #[test]
 fn on_style_image_missing_before_sprite_loaded() {
     let run_loop = RunLoop::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(Some(run_loop.scheduler()));
     let requestor = StubImageRequestor::new(&image_manager);
     let observer = StubImageManagerObserver::new();
 
@@ -378,7 +378,7 @@ fn on_style_image_missing_before_sprite_loaded() {
 #[test]
 fn on_style_image_missing_after_sprite_loaded() {
     let run_loop = RunLoop::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(Some(run_loop.scheduler()));
     let requestor = StubImageRequestor::new(&image_manager);
     let observer = StubImageManagerObserver::new();
 
@@ -413,7 +413,7 @@ fn on_style_image_missing_after_sprite_loaded() {
 #[test]
 fn remove_unused_style_images() {
     let run_loop = RunLoop::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(Some(run_loop.scheduler()));
     let observer = StubImageManagerObserver::new();
     image_manager.set_observer(Some(Rc::<StubImageManagerObserver>::clone(&observer)));
     image_manager.set_loaded(true);
@@ -535,7 +535,7 @@ fn mixed_dependencies_retain_provided_images() {
     );
 
     let run_loop = RunLoop::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(Some(run_loop.scheduler()));
     let observer = StubImageManagerObserver::new();
     image_manager.set_observer(Some(Rc::<StubImageManagerObserver>::clone(&observer)));
     image_manager.set_loaded(true);
@@ -626,7 +626,7 @@ fn mixed_dependencies_retain_provided_images() {
 #[test]
 fn requestor_relayouts_when_requested_image_is_added() {
     let run_loop = RunLoop::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(Some(run_loop.scheduler()));
     image_manager.set_observer(Some(Rc::new(DefaultImageManagerObserver)));
     image_manager.set_loaded(true);
     let requestor = StubImageRequestor::new(&image_manager);
@@ -659,7 +659,7 @@ fn requestor_relayouts_when_requested_image_is_added() {
 #[test]
 fn pending_requestor_gets_added_image_without_relayout() {
     let run_loop = RunLoop::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(Some(run_loop.scheduler()));
     image_manager.set_observer(Some(Rc::new(DefaultImageManagerObserver)));
     image_manager.set_loaded(true);
     let requestor = StubImageRequestor::new(&image_manager);
@@ -684,7 +684,7 @@ fn pending_requestor_gets_added_image_without_relayout() {
 #[test]
 fn removed_requestor_does_not_relayout() {
     let run_loop = RunLoop::new();
-    let image_manager = ImageManager::create();
+    let image_manager = ImageManager::on(Some(run_loop.scheduler()));
     image_manager.set_observer(Some(Rc::new(DefaultImageManagerObserver)));
     image_manager.set_loaded(true);
     let requestor = StubImageRequestor::new(&image_manager);

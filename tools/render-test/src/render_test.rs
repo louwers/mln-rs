@@ -542,7 +542,6 @@ pub fn run_render_tests_with(arguments: &Arguments, factory: Option<ImplFactory>
         let ignores = manifest_data.get_ignores().to_vec();
         let test_paths = manifest_data.get_test_paths().to_vec();
         let root_length = manifest_data.get_test_root_path().len();
-        // mln::util::RunLoop runLoop: created by the map factory (map::factory).
         let mut runner = create_runner(arguments, manifest_data, factory, output_path.clone());
         test_paths
             .iter()

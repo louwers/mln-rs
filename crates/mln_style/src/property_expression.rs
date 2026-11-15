@@ -3,11 +3,10 @@ use std::sync::Arc;
 use mln_expression::range::Range;
 use mln_expression::value::from_expression_values;
 use mln_vec_map::VecSet;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::expression::{
-    Dependency, EvaluationContext, Expr, GlobalStateMap, ValueConverter, ZoomCurvePtr, collect_global_state_refs,
-    find_zoom_curve_checked,
+    Dependency, EvaluationContext, Expr, GlobalStateMap, Value, ValueConverter, ZoomCurvePtr,
+    collect_global_state_refs, find_zoom_curve_checked,
 };
 use crate::serialization::shared_expression;
 
@@ -168,45 +167,40 @@ impl PropertyExpressionBase {
     }
 }
 
-/// Port-only: serde writes the expression (shared, see
-/// serialization.rs) and what was set on it; the flags are
-/// derived from the expression again.
-#[derive(Serialize, Deserialize)]
-struct PropertyExpressionParts {
-    #[serde(with = "shared_expression")]
-    expression: Arc<Expr>,
-    captured_global_state: Option<Arc<GlobalStateMap>>,
-    use_integer_zoom: bool,
-    global_state_pinned: bool,
-}
+/// Port-only: crosses as the expression (shared, see serialization.rs)
+/// and what was set on it; the flags are derived from the expression again.
+///
+/// Not inlined: every `PropertyExpression<T>`, `PropertyValue<T>` and
+/// `Evaluated<T>` reads and writes one, so inlined it would compile once per
+/// value type.
+impl mln_wire::Wire for PropertyExpressionBase {
+    #[inline(never)]
+    fn write(&self, w: &mut mln_wire::Writer) {
+        shared_expression::write(&self.expression, w);
+        self.captured_global_state.write(w);
+        self.use_integer_zoom.write(w);
+        self.global_state_pinned.write(w);
+    }
 
-impl Serialize for PropertyExpressionBase {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        PropertyExpressionParts {
-            expression: Arc::clone(&self.expression),
-            captured_global_state: self.captured_global_state.clone(),
-            use_integer_zoom: self.use_integer_zoom,
-            global_state_pinned: self.global_state_pinned,
-        }
-        .serialize(serializer)
+    #[inline(never)]
+    fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
+        let mut base = PropertyExpressionBase::new(shared_expression::read(r)?);
+        base.captured_global_state = mln_wire::Wire::read(r)?;
+        base.use_integer_zoom = mln_wire::Wire::read(r)?;
+        base.global_state_pinned = mln_wire::Wire::read(r)?;
+        Some(base)
     }
 }
 
-impl<'de> Deserialize<'de> for PropertyExpressionBase {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let parts = PropertyExpressionParts::deserialize(deserializer)?;
-        let mut base = PropertyExpressionBase::new(parts.expression);
-        base.captured_global_state = parts.captured_global_state;
-        base.use_integer_zoom = parts.use_integer_zoom;
-        base.global_state_pinned = parts.global_state_pinned;
-        Ok(base)
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub struct PropertyExpression<T> {
     base: PropertyExpressionBase,
-    default_value: Option<T>,
+    /// A legacy function's `default`, for values its expression can't
+    /// convert to `T`, such as a string that names no enum value. Held as
+    /// a value rather than a `T`, so that only one copy of the code that
+    /// clones and sends it is compiled.
+    default_value: Option<Value>,
+    output: std::marker::PhantomData<fn() -> T>,
 }
 
 impl<T> std::ops::Deref for PropertyExpression<T> {
@@ -223,13 +217,28 @@ impl<T> std::ops::DerefMut for PropertyExpression<T> {
 }
 
 impl<T> PropertyExpression<T> {
-    /// Second parameter to be used only for conversions from legacy functions.
-    pub fn new(expression: Arc<Expr>, default_value: Option<T>) -> Self {
-        PropertyExpression { base: PropertyExpressionBase::new(expression), default_value }
+    #[must_use]
+    pub fn new(expression: Arc<Expr>) -> Self {
+        PropertyExpression {
+            base: PropertyExpressionBase::new(expression),
+            default_value: None,
+            output: std::marker::PhantomData,
+        }
     }
 
-    pub fn from_expr(expression: Expr, default_value: Option<T>) -> Self {
-        PropertyExpression::new(Arc::new(expression), default_value)
+    #[must_use]
+    pub fn from_expr(expression: Expr) -> Self {
+        PropertyExpression::new(Arc::new(expression))
+    }
+
+    /// Evaluates to `default_value` where the expression fails or its value
+    /// doesn't convert to `T`, rather than to the property's default.
+    #[must_use]
+    pub fn with_default(self, default_value: Option<T>) -> Self
+    where
+        T: ValueConverter,
+    {
+        PropertyExpression { default_value: default_value.map(|d| d.to_expression_value()), ..self }
     }
 }
 
@@ -251,13 +260,9 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
     }
 
     fn evaluate_context(&self, context: &EvaluationContext<'_>, final_default_value: T) -> T {
-        if let Some(typed) = T::evaluate(&self.base.expression, context) {
-            return typed;
-        }
-        match &self.default_value {
-            Some(default_value) => default_value.clone(),
-            None => final_default_value,
-        }
+        T::evaluate(&self.base.expression, context)
+            .or_else(|| self.default_value.as_ref().and_then(T::from_expression_value))
+            .unwrap_or(final_default_value)
     }
 }
 

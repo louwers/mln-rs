@@ -1,7 +1,6 @@
 // Not a C++ test: every layer in every render- and query-test style crosses
-// through serde (its `Layer::Impl`, as a tile worker in another wasm
-// instance gets its layers) to one that encodes the same, its expressions as
-// the JSON they serialize to (mln_style::serialization). A layer that
+// (its `Layer::Impl`, as a tile worker in another wasm instance gets its
+// layers, mln_style::serialization) to one that encodes the same. A layer that
 // doesn't cross couldn't be laid out there, and one that crosses as another
 // layer would be laid out differently.
 
@@ -12,10 +11,9 @@ use std::sync::Arc;
 use mln_conversion::{Convertible, Error};
 use mln_style::conversion::convert_layer;
 use mln_style::layer_impl::Impl;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
-struct Crossing(#[serde(with = "mln_style::serialization::shared_layer")] Arc<dyn Impl>);
+#[derive(mln_wire::Wire)]
+struct Crossing(#[wire(with = "mln_style::serialization::shared_layer")] Arc<dyn Impl>);
 
 fn styles(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
@@ -29,7 +27,7 @@ fn styles(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn every_layer_crosses_through_serde() {
+fn every_layer_crosses() {
     let integration = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/metrics/integration");
     let mut paths = Vec::new();
     styles(&integration.join("render-tests"), &mut paths);
@@ -49,10 +47,10 @@ fn every_layer_crosses_through_serde() {
             // styles) have nothing to send.
             let Some(layer) = convert_layer(&Convertible::from(json), &mut Error::default()) else { continue };
             layers += 1;
-            let encoded = postcard::to_allocvec(&Crossing(layer.base_impl())).unwrap();
-            match postcard::from_bytes::<Crossing>(&encoded) {
+            let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
+            match mln_wire::from_slice::<Crossing>(&encoded) {
                 Ok(decoded) => {
-                    if postcard::to_allocvec(&decoded).unwrap() != encoded {
+                    if mln_wire::to_vec(&decoded).unwrap() != encoded {
                         failures.push(format!(
                             "{}: crosses as another layer\n  {:?}",
                             path.display(),

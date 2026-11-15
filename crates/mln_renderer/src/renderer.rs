@@ -83,10 +83,18 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// A renderer with a glyph cache of its own. `local_font_family` is the
-    /// platform's `LocalGlyphRasterizer`'s (see `DefaultLocalGlyphRasterizer`).
-    pub fn new(backend: Rc<dyn RendererBackend>, pixel_ratio: f32, local_font_family: Option<String>) -> Self {
-        Self::with_glyph_cache(backend, pixel_ratio, local_font_family, Arc::default())
+    /// A renderer with a glyph cache of its own, on `run_loop`, which runs
+    /// on this thread: it takes its tiles' and glyphs' responses there, and
+    /// runs its background work on the loop's pool. `local_font_family` is
+    /// the platform's `LocalGlyphRasterizer`'s (see
+    /// `DefaultLocalGlyphRasterizer`).
+    pub fn new(
+        backend: Rc<dyn RendererBackend>,
+        pixel_ratio: f32,
+        local_font_family: Option<String>,
+        run_loop: &mln_actor::RunLoop,
+    ) -> Self {
+        Self::with_glyph_cache(backend, pixel_ratio, local_font_family, Arc::default(), run_loop)
     }
 
     /// A renderer that uses `glyph_cache`: renderers given the same
@@ -96,9 +104,31 @@ impl Renderer {
         pixel_ratio: f32,
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
+        run_loop: &mln_actor::RunLoop,
+    ) -> Self {
+        let engine = crate::text::font_face_engine::default_engine();
+        Self::with_fonts(backend, pixel_ratio, local_font_family, glyph_cache, engine, run_loop)
+    }
+
+    /// A renderer that uses `glyph_cache`, and loads the font files of a
+    /// style's font faces with `font_face_engine` instead of
+    /// `font_face_engine::default_engine()`.
+    pub fn with_fonts(
+        backend: Rc<dyn RendererBackend>,
+        pixel_ratio: f32,
+        local_font_family: Option<String>,
+        glyph_cache: Arc<GlyphCache>,
+        font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
+        run_loop: &mln_actor::RunLoop,
     ) -> Self {
         Renderer {
-            orchestrator: ManuallyDrop::new(RenderOrchestrator::new(true, local_font_family, glyph_cache)),
+            orchestrator: ManuallyDrop::new(RenderOrchestrator::new(
+                true,
+                local_font_family,
+                glyph_cache,
+                font_face_engine,
+                run_loop,
+            )),
             context: Rc::new(Context::new(Rc::clone(&backend))),
             backend,
             pixel_ratio,

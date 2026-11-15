@@ -87,7 +87,7 @@ fn parses_our_manifest() {
 
     // Every render and query test is found.
     let test_paths = manifest.get_test_paths();
-    assert_eq!(test_paths.len(), 1466 + 152);
+    assert_eq!(test_paths.len(), 1475 + 152);
     let default = test_paths
         .iter()
         .find(|t| t.style_path.ends_with("/render-tests/background-color/default/style.json"))
@@ -164,8 +164,8 @@ fn parses_the_cpp_linux_manifest() {
     assert_eq!(manifest.get_test_root_path(), INTEGRATION);
     assert_eq!(manifest.get_cache_path(), "testdata/metrics/cache-style.db");
     assert_eq!(manifest.get_probes().iter().collect::<Vec<_>>(), vec!["probeNetwork"]);
-    assert_eq!(manifest.get_ignores().len(), 125 + 38 + 1);
-    assert_eq!(manifest.get_test_paths().len(), 6);
+    assert_eq!(manifest.get_ignores().len(), 124 + 38 + 1);
+    assert_eq!(manifest.get_test_paths().len(), 7);
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn manifest_errors() {
     assert_eq!(manifest.get_result_path(), generic(&dir));
     let path = dir.join("filter.json");
     let manifest = ManifestParser::parse_manifest(path.to_str().unwrap(), "background-color/".to_string()).unwrap();
-    assert_eq!(manifest.get_test_paths().len(), 6);
+    assert_eq!(manifest.get_test_paths().len(), 7);
 }
 
 // --- parser: metadata ---
@@ -525,9 +525,11 @@ impl Suite {
 }
 
 fn mock_factory() -> ImplFactory {
-    Box::new(|_metadata: &TestMetadata, _options: &ResourceOptions, _impl_options: &ImplOptions| {
-        Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])))
-    })
+    Box::new(
+        |_metadata: &TestMetadata, _options: &ResourceOptions, _impl_options: &ImplOptions, _: &mln_actor::RunLoop| {
+            Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])))
+        },
+    )
 }
 
 fn status<'a>(result: &'a RunResult, id: &str) -> &'a str {
@@ -686,9 +688,21 @@ fn argument_parsing() {
 // waited for.
 #[test]
 fn pending_requests_leave_when_answered_or_cancelled() {
-    use crate::file_source::{PendingRequest, ProxyFileSource, answered, track};
-    struct Request;
-    impl mln_storage::AsyncRequest for Request {}
+    use mln_storage::{FileSource, FileSourceExt, Resource, Responder};
+
+    use crate::file_source::{ProxyFileSource, answered, track};
+    /// Never answers.
+    struct Unanswered;
+    impl FileSource for Unanswered {
+        fn load(&self, _resource: &Resource, responder: Responder) {
+            std::mem::forget(responder);
+        }
+
+        fn can_request(&self, _resource: &Resource) -> bool {
+            true
+        }
+    }
+    let run_loop = mln_actor::RunLoop::new();
     let is_pending = |url: &str| ProxyFileSource::pending_requests().iter().any(|(pending, _)| pending == url);
 
     let number = track("http://tiles/answered.mvt");
@@ -696,7 +710,8 @@ fn pending_requests_leave_when_answered_or_cancelled() {
     answered(number);
     assert!(!is_pending("http://tiles/answered.mvt"));
 
-    let request = PendingRequest { number: track("http://tiles/cancelled.mvt"), _request: Box::new(Request) };
+    let proxy = ProxyFileSource { default_resource_loader: std::sync::Arc::new(Unanswered) };
+    let request = proxy.request(&run_loop.scheduler(), &Resource::style("http://tiles/cancelled.mvt"), |_| {});
     assert!(is_pending("http://tiles/cancelled.mvt"));
     drop(request);
     assert!(!is_pending("http://tiles/cancelled.mvt"));
