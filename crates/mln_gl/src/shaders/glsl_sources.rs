@@ -43,9 +43,10 @@
 //   in the pattern and symbol shaders, and the pattern rectangles and the
 //   symbols' atlas origins reach the fragment shaders `flat`.
 // - The symbol shaders read `a_tex_origin`, the atlas origin of a quad's
-//   image.
+//   image, and the symbol and collision box shaders read `a_height_offset`,
+//   the symbol's `symbol-height-offset`, as GL JS's do.
 // - On the globe, the symbol shaders drop a screen-aligned label whose anchor
-//   is behind the horizon.
+//   is behind the horizon, unless the label is raised.
 // - The fill extrusion shaders declare `gl_Position` invariant. Their vertex
 //   shaders draw the roofs, and the instanced ones, which C++ has no GLSL
 //   for, the walls: an instance of a quad per outline vertex, as the port's
@@ -577,6 +578,7 @@ layout (location = 1) in vec2 a_anchor_pos;
 layout (location = 2) in vec2 a_extrude;
 layout (location = 3) in vec2 a_placed;
 layout (location = 4) in vec2 a_shift;
+layout (location = 5) in float a_height_offset;
 
 layout (std140) uniform GlobalPaintParamsUBO {
     highp vec2 u_pattern_atlas_texsize;
@@ -605,9 +607,9 @@ out float v_notUsed;
 
 void main() {
 #ifdef PROJECTION_GLOBE
-    vec4 projectedPoint = projectTile(a_anchor_pos);
+    vec4 projectedPoint = projectTileWithElevation(a_anchor_pos, a_height_offset);
 #else
-    vec4 projectedPoint = u_matrix * vec4(a_anchor_pos, 0, 1);
+    vec4 projectedPoint = u_matrix * vec4(a_anchor_pos, a_height_offset, 1);
 #endif
     highp float camera_to_anchor_distance = projectedPoint.w;
     highp float collision_perspective_ratio = clamp(
@@ -616,13 +618,13 @@ void main() {
         4.0);
 
 #ifdef PROJECTION_GLOBE
-    gl_Position = projectTile(a_pos);
+    gl_Position = projectTileWithElevation(a_pos, a_height_offset);
     // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (gl_Position.z / gl_Position.w < 1.1) {
         gl_Position.z = 0.0;
     }
 #else
-    gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
+    gl_Position = u_matrix * vec4(a_pos, a_height_offset, 1.0);
 #endif
     gl_Position.xy += (a_extrude + a_shift) * u_extrude_scale * gl_Position.w * collision_perspective_ratio;
 
@@ -4632,6 +4634,7 @@ layout (location = 2) in vec4 a_pixeloffset;
 layout (location = 3) in vec3 a_projected_pos;
 layout (location = 4) in float a_fade_opacity;
 layout (location = 6) in vec2 a_tex_origin;
+layout (location = 11) in float a_height_offset;
 
 layout (std140) uniform GlobalPaintParamsUBO {
     highp vec2 u_pattern_atlas_texsize;
@@ -4733,13 +4736,15 @@ lowp float opacity = u_opacity;
     }
 
     vec2 translated_a_pos = a_pos + u_translation;
-    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0);
+    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, a_height_offset);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
     // its clip Z is 0, so the horizon never clips it. A pitched label's
     // vertices go through the globe projection, which clips them.
-    if (!u_pitch_with_map && projectedPoint.z > projectedPoint.w) {
+    // A raised label is left to placement, which hides it once the planet
+    // blocks the line of sight to it.
+    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -4763,7 +4768,7 @@ lowp float opacity = u_opacity;
     highp float symbol_rotation = 0.0;
     if (u_rotate_symbol) {
         // See comments in symbol_sdf.vertex
-        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), 0.0);
+        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -4777,11 +4782,11 @@ lowp float opacity = u_opacity;
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, 0.0, 1.0);
+        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
     } else if (u_pitch_with_map) {
-        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, 0.0, 1.0);
+        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
     } else {
-        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, 0.0);
+        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
     }
     float z = float(u_pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -4861,6 +4866,7 @@ layout (location = 2) in vec4 a_pixeloffset;
 layout (location = 3) in vec3 a_projected_pos;
 layout (location = 4) in float a_fade_opacity;
 layout (location = 10) in vec2 a_tex_origin;
+layout (location = 11) in float a_height_offset;
 
 // contents of a_size vary based on the type of property value
 // used for {text,icon}-size.
@@ -5009,13 +5015,15 @@ lowp float halo_blur = u_halo_blur;
     }
 
     vec2 translated_a_pos = a_pos + u_translation;
-    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0);
+    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, a_height_offset);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
     // its clip Z is 0, so the horizon never clips it. A pitched label's
     // vertices go through the globe projection, which clips them.
-    if (!u_pitch_with_map && projectedPoint.z > projectedPoint.w) {
+    // A raised label is left to placement, which hides it once the planet
+    // blocks the line of sight to it.
+    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -5046,7 +5054,7 @@ lowp float halo_blur = u_halo_blur;
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), 0.0);
+        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -5060,11 +5068,11 @@ lowp float halo_blur = u_halo_blur;
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, 0.0, 1.0);
+        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
     } else if (u_pitch_with_map) {
-        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, 0.0, 1.0);
+        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
     } else {
-        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, 0.0);
+        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
     }
     float z = float(u_pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -5203,6 +5211,7 @@ layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec3 a_projected_pos;
 layout (location = 3) in float a_fade_opacity;
 layout (location = 9) in vec2 a_tex_origin;
+layout (location = 11) in float a_height_offset;
 
 // contents of a_size vary based on the type of property value
 // used for {text,icon}-size.
@@ -5351,13 +5360,15 @@ lowp float halo_blur = u_halo_blur;
     }
 
     vec2 translated_a_pos = a_pos + u_translation;
-    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0);
+    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, a_height_offset);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
     // its clip Z is 0, so the horizon never clips it. A pitched label's
     // vertices go through the globe projection, which clips them.
-    if (!u_pitch_with_map && projectedPoint.z > projectedPoint.w) {
+    // A raised label is left to placement, which hides it once the planet
+    // blocks the line of sight to it.
+    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -5388,7 +5399,7 @@ lowp float halo_blur = u_halo_blur;
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), 0.0);
+        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -5402,11 +5413,11 @@ lowp float halo_blur = u_halo_blur;
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, 0.0, 1.0);
+        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
     } else if (u_pitch_with_map) {
-        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, 0.0, 1.0);
+        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
     } else {
-        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, 0.0);
+        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
     }
     float z = float(u_pitch_with_map) * projected_pos.z / projected_pos.w;
 

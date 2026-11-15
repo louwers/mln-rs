@@ -793,6 +793,14 @@ impl SymbolLayout {
             &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
         );
         let variable_anchor_offsets = self.get_text_variable_anchor_offset(feature);
+        // The spec raises only point-placed symbols.
+        let height_offset = if *layout.symbol_placement.uniform() == SymbolPlacementType::Point {
+            layout.symbol_height_offset.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+            )
+        } else {
+            0.0
+        };
 
         let text_placement = if *layout.text_rotation_alignment.uniform() == AlignmentType::Map {
             *layout.symbol_placement.uniform()
@@ -905,6 +913,7 @@ impl SymbolLayout {
                         variable_anchor_offsets.as_ref(),
                         allow_vertical_placement,
                         icon_type,
+                        height_offset,
                     ));
 
                     if sort_features_by_key {
@@ -1129,6 +1138,7 @@ impl SymbolLayout {
             placed_icon_index,
         ));
         let placed_index = state.text.placed_symbols.len() - 1;
+        state.text.placed_symbols[placed_index].height_offset = symbol_instance.height_offset();
         state.text.placed_symbols[placed_index].angle =
             if self.allow_vertical_placement && writing_mode == WritingModeType::Vertical {
                 std::f32::consts::FRAC_PI_2
@@ -1173,6 +1183,7 @@ impl SymbolLayout {
         sort_key: f32,
     ) -> usize {
         const VERTEX_LENGTH: usize = 4;
+        let height_offset = buffer.placed_symbols[placed_symbol].height_offset;
 
         let tl = symbol.tl;
         let tr = symbol.tr;
@@ -1223,6 +1234,7 @@ impl SymbolLayout {
             symbol.is_sdf,
             pixel_offset_tl,
             min_font_scale,
+            height_offset,
         ));
         buffer.attribute_data.get_mut().push(SymbolBucket::layout_attributes(
             anchor,
@@ -1235,6 +1247,7 @@ impl SymbolLayout {
             symbol.is_sdf,
             Vec2::new(pixel_offset_br.x, pixel_offset_tl.y),
             min_font_scale,
+            height_offset,
         ));
         buffer.attribute_data.get_mut().push(SymbolBucket::layout_attributes(
             anchor,
@@ -1247,6 +1260,7 @@ impl SymbolLayout {
             symbol.is_sdf,
             Vec2::new(pixel_offset_tl.x, pixel_offset_br.y),
             min_font_scale,
+            height_offset,
         ));
         buffer.attribute_data.get_mut().push(SymbolBucket::layout_attributes(
             anchor,
@@ -1259,6 +1273,7 @@ impl SymbolLayout {
             symbol.is_sdf,
             pixel_offset_br,
             min_font_scale,
+            height_offset,
         ));
 
         // Dynamic/Opacity vertices are initialized so that the vertex count
@@ -1353,10 +1368,15 @@ impl SymbolLayout {
                     let index = segment.vertex_length as u16;
 
                     let symbol_anchor = symbol_instance.get_anchor().point;
-                    collision_buffer.vertices.push(SymbolBucket::collision_layout_vertex(anchor, symbol_anchor, tl));
-                    collision_buffer.vertices.push(SymbolBucket::collision_layout_vertex(anchor, symbol_anchor, tr));
-                    collision_buffer.vertices.push(SymbolBucket::collision_layout_vertex(anchor, symbol_anchor, br));
-                    collision_buffer.vertices.push(SymbolBucket::collision_layout_vertex(anchor, symbol_anchor, bl));
+                    let height = symbol_instance.height_offset();
+                    for corner in [tl, tr, br, bl] {
+                        collision_buffer.vertices.push(SymbolBucket::collision_layout_vertex(
+                            anchor,
+                            symbol_anchor,
+                            corner,
+                            height,
+                        ));
+                    }
 
                     // Dynamic vertices are initialized so that the vertex
                     // count always agrees with the layout vertex buffer, but
@@ -1840,6 +1860,7 @@ impl Layout for SymbolLayout {
                             None,
                         ));
                         let index = icon_buffer.placed_symbols.len() - 1;
+                        icon_buffer.placed_symbols[index].height_offset = symbol_instance.height_offset();
                         icon_buffer.placed_symbols[index].angle =
                             if self.allow_vertical_placement && writing_mode == WritingModeType::Vertical {
                                 std::f32::consts::FRAC_PI_2

@@ -164,6 +164,7 @@ impl RenderLayer for RenderBackgroundLayer {
                 tile_lod_mode: update_parameters.tile_lod_mode,
                 requested_zoom: None,
                 round_zoom: false,
+                max_content_elevation: 0.0,
             },
             zoom,
             zoom_range,
