@@ -36,14 +36,16 @@ impl Key {
 
 /// The inputs apart from the feature that an operand is evaluated with:
 /// layouts evaluate with different ones (only symbols pass font faces), so
-/// an index serves only evaluations with the same ones.
+/// an index serves only evaluations with the same ones. The global state,
+/// font faces and available images are compared by address, so a
+/// `FilterGroups` serves only evaluations whose inputs outlive it.
 #[derive(Clone, Copy, PartialEq)]
 struct Inputs {
     zoom: Option<f32>,
     canonical: Option<(u8, u32, u32)>,
-    global_state: Option<*const ()>,
-    font_faces: Option<*const ()>,
-    available_images: Option<*const ()>,
+    global_state: Option<usize>,
+    font_faces: Option<usize>,
+    available_images: Option<usize>,
 }
 
 impl Inputs {
@@ -51,9 +53,9 @@ impl Inputs {
         Inputs {
             zoom: context.zoom,
             canonical: context.canonical.map(|c| (c.z, c.x, c.y)),
-            global_state: context.global_state.map(|s| std::ptr::from_ref(s).cast()),
-            font_faces: context.font_faces.map(|f| std::ptr::from_ref(f).cast()),
-            available_images: context.available_images.map(|i| std::ptr::from_ref(i).cast()),
+            global_state: context.global_state.map(|s| std::ptr::from_ref(s).addr()),
+            font_faces: context.font_faces.map(|f| std::ptr::from_ref(f).addr()),
+            available_images: context.available_images.map(|i| std::ptr::from_ref(i).addr()),
         }
     }
 }

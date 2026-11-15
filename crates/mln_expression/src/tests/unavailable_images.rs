@@ -15,8 +15,12 @@ fn coalesce() -> Expr {
     ParsingContext::with_expected(Type::Image).parse_expression(&Convertible::from(&document), None).unwrap()
 }
 
-fn evaluate(expression: &Expr, available: &VecSet<String>) {
-    expression.evaluate(&EvaluationContext::new(0.0).with_available_images(Some(available))).unwrap();
+fn evaluate(expression: &Expr, available: &VecSet<String>, unavailable: Option<&UnavailableImages>) {
+    expression
+        .evaluate(
+            &EvaluationContext::new(0.0).with_available_images(Some(available)).with_unavailable_images(unavailable),
+        )
+        .unwrap();
 }
 
 #[test]
@@ -24,36 +28,26 @@ fn records_images_coalesce_passes_over() {
     let expression = coalesce();
     let available: VecSet<String> = ["fallback".to_owned()].into_iter().collect();
 
-    let recorder = UnavailableImages::start();
-    evaluate(&expression, &available);
-    assert_eq!(recorder.finish().into_iter().collect::<Vec<_>>(), ["late"]);
-}
-
-#[test]
-fn records_nothing_outside_a_recorder() {
-    let expression = coalesce();
-    evaluate(&expression, &VecSet::new());
-
-    let recorder = UnavailableImages::start();
-    assert!(recorder.finish().is_empty());
+    let unavailable = UnavailableImages::new();
+    evaluate(&expression, &available, Some(&unavailable));
+    evaluate(&expression, &available, Some(&unavailable));
+    assert_eq!(unavailable.into_inner().into_iter().collect::<Vec<_>>(), ["late"]);
 }
 
 #[test]
 fn records_nothing_without_available_images() {
     let expression = coalesce();
-    let recorder = UnavailableImages::start();
-    expression.evaluate(&EvaluationContext::new(0.0)).unwrap();
-    assert!(recorder.finish().is_empty());
+    let unavailable = UnavailableImages::new();
+    expression.evaluate(&EvaluationContext::new(0.0).with_unavailable_images(Some(&unavailable))).unwrap();
+    assert!(unavailable.into_inner().is_empty());
 }
 
 #[test]
-fn an_inner_recorder_hides_its_images_from_the_outer() {
+fn collectors_record_only_their_own_evaluations() {
     let expression = coalesce();
-    let outer = UnavailableImages::start();
-    {
-        let inner = UnavailableImages::start();
-        evaluate(&expression, &VecSet::new());
-        assert_eq!(inner.finish().len(), 2);
-    }
-    assert!(outer.finish().is_empty());
+    let (first, second) = (UnavailableImages::new(), UnavailableImages::new());
+    evaluate(&expression, &VecSet::new(), Some(&first));
+    evaluate(&expression, &VecSet::new(), None);
+    assert_eq!(first.into_inner().len(), 2);
+    assert!(second.into_inner().is_empty());
 }

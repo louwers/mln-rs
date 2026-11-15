@@ -17,21 +17,19 @@ use mln_style::expression::{EvaluationContext, Image};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties};
 use mln_style::layers::line_layer_properties::{LineLayerProperties, LineLayoutProperties};
-use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
+use mln_style_types::image::{ImagePositions, ImageType};
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::{VecMap, VecSet};
+use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketPtr};
-use crate::bucket_parameters::BucketParameters;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::geometry::feature_index::FeatureIndex;
-use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::render_layer::LayerRenderData;
 
@@ -112,15 +110,16 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     /// Creates the layout from a borrowed source layer. `sorted` selects the
     /// sort-key variant (see the file comment).
     pub(crate) fn new(
-        parameters: &BucketParameters,
+        layout_parameters: &mut LayoutParameters<'_>,
         group: &[Arc<dyn LayerProperties>],
         source_layer: &TileLayer<'_>,
-        image_dependencies: &mut ImageDependencies,
-        available_images: &VecSet<String>,
-        filter_groups: &mut FilterGroups,
         sorted: bool,
     ) -> Result<Self, Error> {
         debug_assert!(!group.is_empty());
+        let parameters = layout_parameters.bucket_parameters;
+        let image_dependencies = &mut *layout_parameters.image_dependencies;
+        let available_images = layout_parameters.available_images;
+        let unavailable_images = layout_parameters.unavailable_images;
         let zoom = f32::from(parameters.tile_id.overscaled_z);
         let overscaling = parameters.tile_id.overscale_factor();
         let leader_layer_properties = &group[0];
@@ -131,18 +130,14 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         let source_layer_id = leader_impl.source_layer.clone();
         let bucket_leader_id = leader_impl.id.clone();
 
-        let mut has_pattern = false;
+        let has_pattern = uses_pattern::<S>(group);
         let mut layer_properties_map: VecMap<String, Arc<dyn LayerProperties>> = VecMap::new();
         for layer_properties in group {
             let layer_id = layer_properties.base_impl.id.clone();
             let pattern_property = S::pattern_property(layer_properties);
             let constant_pattern = pattern_property.faded();
-            // determine if layer group has any layers that use *-pattern
-            // property and add constant pattern dependencies.
-            if !pattern_property.is_constant() {
-                has_pattern = true;
-            } else if !constant_pattern.to.id().is_empty() {
-                has_pattern = true;
+            // Add the constant pattern dependencies.
+            if pattern_property.is_constant() && !constant_pattern.to.id().is_empty() {
                 image_dependencies.entry(constant_pattern.to.id().to_owned()).or_insert(ImageType::Pattern);
                 image_dependencies.entry(constant_pattern.from.id().to_owned()).or_insert(ImageType::Pattern);
             }
@@ -158,7 +153,13 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         let passes = |feature: &dyn GeometryTileFeature| {
             leader_impl.filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
         };
-        let selected = filter_groups.select(&source_layer_id, source_layer, &leader_impl.filter, &context, passes);
+        let selected = layout_parameters.filter_groups.select(
+            &source_layer_id,
+            source_layer,
+            &leader_impl.filter,
+            &context,
+            passes,
+        );
         for i in 0..feature_count {
             if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;
@@ -182,16 +183,19 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                             let min = pattern_property.evaluate_faded(
                                 &EvaluationContext::with_zoom_feature(zoom - 1.0, Some(&feature))
                                     .with_available_images(Some(available_images))
+                                    .with_unavailable_images(Some(unavailable_images))
                                     .with_canonical_tile_id(Some(canonical)),
                             );
                             let mid = pattern_property.evaluate_faded(
                                 &EvaluationContext::with_zoom_feature(zoom, Some(&feature))
                                     .with_available_images(Some(available_images))
+                                    .with_unavailable_images(Some(unavailable_images))
                                     .with_canonical_tile_id(Some(canonical)),
                             );
                             let max = pattern_property.evaluate_faded(
                                 &EvaluationContext::with_zoom_feature(zoom + 1.0, Some(&feature))
                                     .with_available_images(Some(available_images))
+                                    .with_unavailable_images(Some(unavailable_images))
                                     .with_canonical_tile_id(Some(canonical)),
                             );
 
@@ -255,15 +259,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         source_layer: SourceLayer,
         sorted: bool,
     ) -> Result<Self, Error> {
-        let mut layout = PatternLayout::new(
-            parameters.bucket_parameters,
-            group,
-            &source_layer.layer()?,
-            parameters.image_dependencies,
-            parameters.available_images,
-            parameters.filter_groups,
-            sorted,
-        )?;
+        let mut layout = PatternLayout::new(parameters, group, &source_layer.layer()?, sorted)?;
         layout.source_layer = Some(source_layer);
         Ok(layout)
     }
@@ -413,6 +409,15 @@ impl PatternLayoutSpec for LineLayoutSpec {
     fn set_subdivision_granularity(bucket: &mut LineBucket, value: &SubdivisionGranularitySetting) {
         bucket.set_subdivision_granularity(value);
     }
+}
+
+/// Whether a layer of `group` uses its `*-pattern` property, so that the
+/// group's layout needs images.
+pub(crate) fn uses_pattern<S: PatternLayoutSpec>(group: &[Arc<dyn LayerProperties>]) -> bool {
+    group.iter().any(|layer_properties| {
+        let pattern_property = S::pattern_property(layer_properties);
+        !pattern_property.is_constant() || !pattern_property.faded().to.id().is_empty()
+    })
 }
 
 /// Whether a fill layout sorts its features: whether the leader's

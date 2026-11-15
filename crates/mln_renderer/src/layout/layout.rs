@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use mln_expression::image_expression::UnavailableImages;
 use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions};
 use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
 use mln_tile::{TileData, TileLayer};
@@ -75,7 +76,9 @@ pub(crate) trait Layout: Send {
         false
     }
 
-    fn finalize_symbols(&mut self, _results: &mut HBShapeResults) {}
+    /// Applies the HarfBuzz shaping of the text that font faces draw, before
+    /// `prepare_symbols`. The default does nothing.
+    fn finalize_symbols(&mut self, _results: &HBShapeResults) {}
 }
 
 pub(crate) struct LayoutParameters<'a> {
@@ -85,6 +88,8 @@ pub(crate) struct LayoutParameters<'a> {
     pub(crate) glyph_dependencies: &'a mut GlyphDependencies,
     pub(crate) image_dependencies: &'a mut ImageDependencies,
     pub(crate) available_images: &'a VecSet<String>,
+    /// Where `image` expressions record the images not in `available_images`.
+    pub(crate) unavailable_images: &'a UnavailableImages,
     /// Port-only: the tile's feature groups, shared by the layouts' filters.
     pub(crate) filter_groups: &'a mut FilterGroups,
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
+use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::downcast_arc;
@@ -128,6 +129,7 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
             glyph_dependencies: &mut glyph_dependencies,
             image_dependencies: &mut image_dependencies,
             available_images: &available_images,
+            unavailable_images: &UnavailableImages::new(),
             filter_groups: &mut FilterGroups::default(),
         },
         SourceLayer::new(data.clone(), ""),

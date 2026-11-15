@@ -519,6 +519,12 @@ impl FeatureIndex {
         Ok(Grid { sort_index: self.sort_index, strings, bucket_layer_ids: self.bucket_layer_ids(), elements })
     }
 
+    /// The bucket leader of each box, in the order they were inserted.
+    #[cfg(test)]
+    pub(crate) fn leaders(&self) -> Vec<&str> {
+        self.grid.box_elements().iter().map(|(element, _)| &*element.bucket_leader_id).collect()
+    }
+
     /// The index as it crosses, without its tile data.
     #[cfg(test)]
     pub(crate) fn encode_grid(&self) -> Vec<u8> {

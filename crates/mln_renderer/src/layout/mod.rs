@@ -15,3 +15,4 @@ pub(crate) mod symbol_feature;
 pub(crate) mod symbol_instance;
 pub(crate) mod symbol_layout;
 pub(crate) mod symbol_projection;
+pub(crate) mod tile_layout;

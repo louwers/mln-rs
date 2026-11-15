@@ -52,7 +52,7 @@ use crate::layout::symbol_instance::{ShapedTextOrientations, SymbolContent, Symb
 use crate::render_layer::LayerRenderData;
 use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
-use crate::text::glyph_manager::HBShapeResults;
+use crate::text::glyph_manager::{HBShapeResult, HBShapeResults};
 use crate::text::quads::{SymbolQuad, SymbolQuads};
 
 /// Whether `text-field` is set: a constant that is not empty, or an
@@ -465,6 +465,7 @@ impl SymbolLayout {
                 let formatted = layout.text_field.evaluate(
                     &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
                         .with_available_images(Some(layout_parameters.available_images))
+                        .with_unavailable_images(Some(layout_parameters.unavailable_images))
                         .with_canonical_tile_id(Some(&canonical_id))
                         .with_font_faces(layout_parameters.font_faces.as_deref()),
                 );
@@ -598,6 +599,7 @@ impl SymbolLayout {
                 let icon = layout.icon_image.evaluate(
                     &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
                         .with_available_images(Some(layout_parameters.available_images))
+                        .with_unavailable_images(Some(layout_parameters.unavailable_images))
                         .with_canonical_tile_id(Some(&canonical_id)),
                 );
                 // An empty icon name means no icon, so it is not an image
@@ -1430,7 +1432,8 @@ impl Layout for SymbolLayout {
         self.need_finalize_symbols_val
     }
 
-    fn finalize_symbols(&mut self, results: &mut HBShapeResults) {
+    fn finalize_symbols(&mut self, results: &HBShapeResults) {
+        let unshaped = HBShapeResult::default();
         for feature in &mut self.features {
             if feature.geometry.is_empty() {
                 continue;
@@ -1451,7 +1454,7 @@ impl Layout for SymbolLayout {
             let mut sub_string: Vec<u16> = Vec::new();
             let mut section_index = style_text.1.first().copied().unwrap_or(0);
 
-            let mut apply_sub_string = |sub_string: &[u16], section_index: u8, shaped_string: &mut TaggedString| {
+            let apply_sub_string = |sub_string: &[u16], section_index: u8, shaped_string: &mut TaggedString| {
                 if sub_string.is_empty() {
                     return;
                 }
@@ -1467,12 +1470,10 @@ impl Layout for SymbolLayout {
                     );
                 } else {
                     let result = results
-                        .entry(section.font_stack.clone())
-                        .or_default()
-                        .entry(section.type_)
-                        .or_default()
-                        .entry(sub_string.to_vec())
-                        .or_default();
+                        .get(&section.font_stack)
+                        .and_then(|types| types.get(&section.type_))
+                        .and_then(|strings| strings.get(sub_string))
+                        .unwrap_or(&unshaped);
 
                     shaped_string.add_text_section_with_adjusts(
                         &result.str_,
