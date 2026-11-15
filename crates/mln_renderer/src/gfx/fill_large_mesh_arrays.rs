@@ -33,11 +33,10 @@ fn fill_segments<const SIZE: usize, V, L: AsRef<[u32]>>(
     lists: &[L],
     max_vertices: usize,
 ) {
-    const UNSET: usize = usize::MAX;
-    let mut copies = vec![UNSET; flattened.len() / 2];
+    let mut copies: Vec<Option<usize>> = vec![None; flattened.len() / 2];
     let mut segment: Option<usize> = None;
-    let missing = |copies: &[usize], segment: &SegmentBase, index: u32| {
-        copies[index as usize] == UNSET || copies[index as usize] < segment.vertex_offset
+    let missing = |copies: &[Option<usize>], segment: &SegmentBase, index: u32| {
+        copies[index as usize].is_none_or(|copy| copy < segment.vertex_offset)
     };
     for primitives in lists {
         let primitives = primitives.as_ref();
@@ -59,12 +58,17 @@ fn fill_segments<const SIZE: usize, V, L: AsRef<[u32]>>(
             let mut local = [0u16; SIZE];
             for k in 0..SIZE {
                 let index = primitives[p + k];
-                if missing(&copies, &segments[current], index) {
-                    copies[index as usize] = vertices.len();
-                    vertices.push(layout_vertex(flattened[index as usize * 2], flattened[index as usize * 2 + 1]));
-                    segments[current].vertex_length += 1;
-                }
-                local[k] = (copies[index as usize] - segments[current].vertex_offset) as u16;
+                let copy = match copies[index as usize] {
+                    Some(copy) if copy >= segments[current].vertex_offset => copy,
+                    _ => {
+                        let copy = vertices.len();
+                        copies[index as usize] = Some(copy);
+                        vertices.push(layout_vertex(flattened[index as usize * 2], flattened[index as usize * 2 + 1]));
+                        segments[current].vertex_length += 1;
+                        copy
+                    }
+                };
+                local[k] = (copy - segments[current].vertex_offset) as u16;
             }
             indexes.extend_from_slice(&local);
             segments[current].index_length += SIZE;

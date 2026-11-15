@@ -8,6 +8,7 @@
 // frees the GPU texture (and with the last one, the map's device).
 
 use std::cell::RefCell;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -24,17 +25,35 @@ use parking_lot::Mutex;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 
+/// Identifies a bin within a dynamic texture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, mln_wire::Wire)]
+pub(crate) struct DynamicTextureBinId(NonZeroU32);
+
+impl DynamicTextureBinId {
+    fn new(id: u32) -> Option<Self> {
+        NonZeroU32::new(id).map(Self)
+    }
+
+    fn first() -> Self {
+        Self(NonZeroU32::MIN)
+    }
+
+    fn next(self) -> Option<Self> {
+        self.0.get().checked_add(1).and_then(Self::new)
+    }
+}
+
 /// A bin of a dynamic texture.
 #[derive(Clone, Copy, Debug, mln_wire::Wire)]
 pub(crate) struct TextureHandle {
-    id: i32,
+    id: DynamicTextureBinId,
     rectangle: RectU16,
     needs_upload: bool,
 }
 
 impl TextureHandle {
     #[must_use]
-    pub(crate) fn get_id(&self) -> i32 {
+    pub(crate) fn get_id(&self) -> DynamicTextureBinId {
         self.id
     }
 
@@ -68,12 +87,12 @@ struct Bin {
 struct Inner {
     allocator: AtlasAllocator,
     /// The allocated bins, by handle id.
-    bins: HashMap<i32, Bin>,
+    bins: HashMap<DynamicTextureBinId, Bin>,
     /// The highest handle id given out or asked for; a new bin without an id
     /// takes the next one.
-    max_id: i32,
+    max_id: Option<DynamicTextureBinId>,
     /// The images queued for the frame's next upload, keyed by handle id.
-    images_to_upload: HashMap<i32, (RectU16, Vec<u8>)>,
+    images_to_upload: HashMap<DynamicTextureBinId, (RectU16, Vec<u8>)>,
 }
 
 pub(crate) type DynamicTexturePtr = Arc<DynamicTexture>;
@@ -115,7 +134,7 @@ impl DynamicTexture {
             inner: Mutex::new(Inner {
                 allocator: AtlasAllocator::new(size2(size.width as i32, size.height as i32)),
                 bins: HashMap::default(),
-                max_id: 0,
+                max_id: None,
                 images_to_upload: HashMap::default(),
             }),
             gpu_texture: Mutex::new(None),
@@ -145,20 +164,28 @@ impl DynamicTexture {
         self.inner.lock().bins.is_empty()
     }
 
-    /// Reserves a bin of `size`, or another reference to the bin with id
-    /// `unique_id` if it has one. A `unique_id` of -1 asks for a new bin with
-    /// a fresh id. The handle needs an upload when its bin is new.
-    pub(crate) fn reserve_size(&self, size: Size, unique_id: i32) -> Option<TextureHandle> {
+    /// Reserves a bin of `size`, or another reference to the bin with `id` if
+    /// it has one. `None` asks for a new bin with a fresh id. The handle needs
+    /// an upload when its bin is new.
+    pub(crate) fn reserve_size(&self, size: Size, id: Option<DynamicTextureBinId>) -> Option<TextureHandle> {
         let mut inner = self.inner.lock();
-        if let Some(bin) = inner.bins.get_mut(&unique_id) {
+        if let Some(id) = id
+            && let Some(bin) = inner.bins.get_mut(&id)
+        {
             bin.refcount += 1;
-            return Some(TextureHandle { id: unique_id, rectangle: bin.rectangle, needs_upload: false });
+            return Some(TextureHandle { id, rectangle: bin.rectangle, needs_upload: false });
         }
+        let id = match id {
+            Some(id) => id,
+            None => match inner.max_id {
+                Some(max_id) => max_id.next()?,
+                None => DynamicTextureBinId::first(),
+            },
+        };
         let width = u16::try_from(size.width).ok()?;
         let height = u16::try_from(size.height).ok()?;
         let allocation = inner.allocator.allocate(size2(i32::from(width), i32::from(height)))?;
-        let id = if unique_id == -1 { inner.max_id + 1 } else { unique_id };
-        inner.max_id = inner.max_id.max(id);
+        inner.max_id = Some(inner.max_id.map_or(id, |max_id| max_id.max(id)));
         // The allocation can be taller than asked for; the bin is the size
         // asked for, at its corner.
         let min = allocation.rectangle.min;
@@ -167,8 +194,13 @@ impl DynamicTexture {
         Some(TextureHandle { id, rectangle, needs_upload: true })
     }
 
-    pub(crate) fn add_image(&self, pixel_data: &[u8], image_size: Size, unique_id: i32) -> Option<TextureHandle> {
-        let mut tex_handle = self.reserve_size(image_size, unique_id)?;
+    pub(crate) fn add_image(
+        &self,
+        pixel_data: &[u8],
+        image_size: Size,
+        id: Option<DynamicTextureBinId>,
+    ) -> Option<TextureHandle> {
+        let mut tex_handle = self.reserve_size(image_size, id)?;
         if tex_handle.is_upload_needed() {
             self.upload_image(pixel_data, &mut tex_handle);
         }
@@ -224,7 +256,7 @@ impl DynamicTexture {
     /// Port-only: takes the queued images (handle id, rectangle, pixels),
     /// in handle order, for a mirror of this texture in another wasm
     /// instance (`tile/worker_codec`), which uploads them instead.
-    pub(crate) fn take_uploads(&self) -> Vec<(i32, RectU16, Vec<u8>)> {
+    pub(crate) fn take_uploads(&self) -> Vec<(DynamicTextureBinId, RectU16, Vec<u8>)> {
         let mut inner = self.inner.lock();
         let mut uploads: Vec<_> = inner.images_to_upload.drain().map(|(id, (rect, data))| (id, rect, data)).collect();
         uploads.sort_by_key(|(id, _, _)| *id);
@@ -238,7 +270,7 @@ impl DynamicTexture {
     /// pixels queued there before belong to a bin that is gone, and would
     /// otherwise be uploaded over these in whatever order the queue is
     /// drained.
-    pub(crate) fn queue_upload(&self, id: i32, rect: RectU16, data: Vec<u8>) {
+    pub(crate) fn queue_upload(&self, id: DynamicTextureBinId, rect: RectU16, data: Vec<u8>) {
         let span = |start: u16, length: u16| u32::from(start)..u32::from(start) + u32::from(length);
         let intersect = |a: std::ops::Range<u32>, b: std::ops::Range<u32>| a.start < b.end && b.start < a.end;
         let overlaps = |other: &RectU16| {
@@ -283,16 +315,39 @@ impl DynamicTexture {
 mod tests {
     use super::*;
 
+    #[test]
+    fn bin_ids_are_nonzero_and_do_not_wrap() {
+        assert!(DynamicTextureBinId::new(0).is_none());
+        assert_eq!(DynamicTextureBinId::new(u32::MAX).unwrap().next(), None);
+    }
+
+    #[test]
+    fn reserve_size_allocates_fresh_ids_and_reuses_explicit_ids() {
+        let texture = DynamicTexture::new(Size::new(64, 64), TexturePixelType::Alpha);
+        let size = Size::new(8, 8);
+        let first = texture.reserve_size(size, None).expect("first bin");
+        let second = texture.reserve_size(size, None).expect("second bin");
+        let reused = texture.reserve_size(size, Some(first.get_id())).expect("existing bin");
+
+        assert_eq!(first.get_id(), DynamicTextureBinId::new(1).unwrap());
+        assert_eq!(second.get_id(), DynamicTextureBinId::new(2).unwrap());
+        assert_eq!(reused.get_id(), first.get_id());
+        assert!(!reused.is_upload_needed());
+        assert_eq!(reused.get_rectangle(), first.get_rectangle());
+    }
+
     /// Pixels queued for a bin of a mirrored texture replace those still
     /// queued for a freed bin in the same space.
     #[test]
     fn queued_uploads_replace_the_space_they_take() {
         let texture = DynamicTexture::new(Size::new(64, 64), TexturePixelType::Alpha);
         let rect = |x, y, w, h| RectU16 { x, y, w, h };
-        texture.queue_upload(1, rect(0, 0, 8, 8), vec![1; 64]);
-        texture.queue_upload(2, rect(8, 0, 8, 8), vec![2; 64]);
-        texture.queue_upload(3, rect(4, 4, 2, 2), vec![3; 4]);
-        let uploads: Vec<(i32, RectU16)> = texture.take_uploads().into_iter().map(|(id, rect, _)| (id, rect)).collect();
-        assert_eq!(uploads, vec![(2, rect(8, 0, 8, 8)), (3, rect(4, 4, 2, 2))]);
+        let id = |id| DynamicTextureBinId::new(id).unwrap();
+        texture.queue_upload(id(1), rect(0, 0, 8, 8), vec![1; 64]);
+        texture.queue_upload(id(2), rect(8, 0, 8, 8), vec![2; 64]);
+        texture.queue_upload(id(3), rect(4, 4, 2, 2), vec![3; 4]);
+        let uploads: Vec<(DynamicTextureBinId, RectU16)> =
+            texture.take_uploads().into_iter().map(|(id, rect, _)| (id, rect)).collect();
+        assert_eq!(uploads, vec![(id(2), rect(8, 0, 8, 8)), (id(3), rect(4, 4, 2, 2))]);
     }
 }

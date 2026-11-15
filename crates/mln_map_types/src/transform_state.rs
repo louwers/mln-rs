@@ -664,7 +664,7 @@ impl TransformState {
         }
     }
 
-    pub(crate) fn get_north_orientation_angle(&self) -> f64 {
+    pub fn get_north_orientation_angle(&self) -> f64 {
         let mut angle_orientation = 0.0;
         if self.orientation == NorthOrientation::Rightwards {
             angle_orientation += PI / 2.0;

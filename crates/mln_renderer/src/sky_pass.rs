@@ -59,24 +59,31 @@ fn make_fullscreen_layer_group(
     Some(layer_group)
 }
 
+/// The direction of the sun in the globe's frame, where the atmosphere traces
+/// its rays (`get_inverse_globe_view_projection_matrix`). A map-anchored light
+/// is fixed to the globe, so its direction is already in that frame. A
+/// viewport-anchored light is fixed to the view, so it goes back through the
+/// globe's rotation into the view, inverted.
 fn sun_position(light: &EvaluatedLight, state: &TransformState, blend: f32) -> [f32; 4] {
     let position = light.light_position.uniform().get_cartesian();
     let mut sun: Vec4 = [-f64::from(position[0]), -f64::from(position[1]), -f64::from(position[2]), 0.0];
 
-    if *light.light_anchor.uniform() == LightAnchorType::Map {
+    if *light.light_anchor.uniform() == LightAnchorType::Viewport {
+        let center = state.get_lat_lng(WrapMode::Unwrapped);
         let mut m: Mat4 = [0.0; 16];
         matrix::identity(&mut m);
         let a = m;
-        matrix::rotate_z(&mut m, &a, state.get_roll());
+        matrix::rotate_y(&mut m, &a, center.longitude() * PI / 180.0);
         let a = m;
-        matrix::rotate_x(&mut m, &a, -state.get_pitch());
+        matrix::rotate_x(&mut m, &a, -center.latitude() * PI / 180.0);
         let a = m;
-        matrix::rotate_z(&mut m, &a, -state.get_bearing());
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
+        matrix::rotate_z(&mut m, &a, state.get_bearing());
         let a = m;
-        matrix::rotate_x(&mut m, &a, center.latitude() * PI / 180.0);
+        matrix::rotate_x(&mut m, &a, state.get_pitch());
         let a = m;
-        matrix::rotate_y(&mut m, &a, -center.longitude() * PI / 180.0);
+        matrix::rotate_z(&mut m, &a, -state.get_roll());
+        let a = m;
+        matrix::rotate_z(&mut m, &a, state.get_north_orientation_angle());
         let a = sun;
         matrix::transform_mat4(&mut sun, &a, &m);
     }
@@ -212,5 +219,71 @@ impl SkyPass {
     #[must_use]
     pub(crate) fn has_atmosphere(&self) -> bool {
         self.atmosphere_layer_group.as_ref().is_some_and(|group| !group.borrow().empty())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_map_types::NorthOrientation;
+    use mln_style::evaluated::Evaluated;
+    use mln_style_types::Position;
+    use mln_util::geo::LatLng;
+
+    use super::*;
+
+    fn light(anchor: LightAnchorType, position: [f32; 3]) -> EvaluatedLight {
+        EvaluatedLight {
+            light_anchor: Evaluated::Constant(anchor),
+            light_position: Evaluated::Constant(Position::new(position)),
+            ..EvaluatedLight::default()
+        }
+    }
+
+    fn camera(latitude: f64, longitude: f64, bearing: f64) -> TransformState {
+        let mut state = TransformState::default();
+        state.set_size(Size::new(512, 512));
+        state.set_lat_lng_zoom(&LatLng::new(latitude, longitude).unwrap(), 1.0);
+        state.set_bearing(bearing);
+        state
+    }
+
+    fn assert_sun(expected: [f32; 3], sun: [f32; 4]) {
+        for (expected, actual) in expected.iter().zip(sun) {
+            assert!((expected - actual).abs() < 1e-5, "expected {expected:?}, got {sun:?}");
+        }
+    }
+
+    // In the globe's frame +x points to 0°N 90°E, +y to the North Pole and
+    // +z to 0°N 0°E.
+
+    // As GL JS's projection/globe/atmosphere/light-position-map: wherever the
+    // camera is, a map light at [1.5, 90, 90] stays over 0°N 90°E.
+    #[test]
+    fn map_light_stays_over_one_place() {
+        let light = light(LightAnchorType::Map, [1.5, 90.0, 90.0]);
+        for state in [camera(0.0, 0.0, 0.0), camera(0.0, 160.0, 0.0), camera(30.0, 160.0, 0.6)] {
+            assert_sun([1.5, 0.0, 0.0], sun_position(&light, &state, 1.0));
+        }
+    }
+
+    // As GL JS's projection/globe/atmosphere/ligth-position-viewport: a
+    // viewport light at [1.5, 90, 90] stays on the right of the view, which
+    // is east of the center: over 0°N 90°E seen from 0°N 0°E, over 0°N 180°
+    // seen from 0°N 90°E.
+    #[test]
+    fn viewport_light_stays_on_screen() {
+        let light = light(LightAnchorType::Viewport, [1.5, 90.0, 90.0]);
+        assert_sun([1.5, 0.0, 0.0], sun_position(&light, &camera(0.0, 0.0, 0.0), 1.0));
+        assert_sun([0.0, 0.0, -1.5], sun_position(&light, &camera(0.0, 90.0, 0.0), 1.0));
+    }
+
+    // With north down, the right of the view is west of the center: the same
+    // viewport light is over 0°N 90°W seen from 0°N 0°E.
+    #[test]
+    fn viewport_light_turns_with_the_north_orientation() {
+        let light = light(LightAnchorType::Viewport, [1.5, 90.0, 90.0]);
+        let mut state = camera(0.0, 0.0, 0.0);
+        state.set_north_orientation(NorthOrientation::Downwards);
+        assert_sun([-1.5, 0.0, 0.0], sun_position(&light, &state, 1.0));
     }
 }

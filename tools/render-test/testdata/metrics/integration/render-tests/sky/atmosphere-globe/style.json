@@ -2,10 +2,10 @@
   "version": 8,
   "metadata": {
     "test": {
-      "description": "A physical atmosphere surrounds and optically tints the globe using the configured map-anchored light.",
+      "description": "A physical atmosphere surrounds and optically tints the globe using the configured map-anchored light. The 0.15% allowance covers translucent globe-edge PNG round-trip rounding.",
       "width": 256,
       "height": 256,
-      "allowed": 0.00075
+      "allowed": 0.0015
     }
   },
   "center": [

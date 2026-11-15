@@ -16,7 +16,7 @@ use mln_util::serialization::sorted;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
-use super::dynamic_texture::{DynamicTexture, DynamicTexturePtr, TextureHandle};
+use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, DynamicTexturePtr, TextureHandle};
 use crate::tile::worker_codec::fields;
 
 pub(crate) type ImageVersionMap = HashMap<String, u32>;
@@ -151,7 +151,7 @@ struct ImageAllocation {
     // Keeps the revision alive so its address can't be reused by another
     // image while the bin exists.
     _image: Arc<ImageImpl>,
-    bin_id: i32,
+    bin_id: DynamicTextureBinId,
 }
 
 /// Identifies a glyph's allocation: (dynamic texture, glyph). The font stacks
@@ -169,13 +169,13 @@ struct GlyphAllocation {
     // Keeps the glyph alive so its address can't be reused by another glyph
     // while the bin exists.
     _glyph: Arc<Glyph>,
-    bin_id: i32,
+    bin_id: DynamicTextureBinId,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct BinKey {
     dynamic_texture: usize,
-    bin_id: i32,
+    bin_id: DynamicTextureBinId,
 }
 
 #[derive(Default)]
@@ -224,7 +224,7 @@ impl DynamicTextureAtlas {
                     let mut dummy_image = AlphaImage::new(DUMMY_SIZE);
                     dummy_image.fill(0);
                     let texture = Arc::new(DynamicTexture::new(DUMMY_SIZE, TexturePixelType::Alpha));
-                    texture.add_image(&dummy_image.data, DUMMY_SIZE, -1);
+                    texture.add_image(&dummy_image.data, DUMMY_SIZE, None);
                     texture
                 }),
             );
@@ -323,7 +323,7 @@ impl DynamicTextureAtlas {
                     let mut dummy_image = PremultipliedImage::new(DUMMY_SIZE);
                     dummy_image.fill(0);
                     let texture = Arc::new(DynamicTexture::new(DUMMY_SIZE, TexturePixelType::RGBA));
-                    texture.add_image(&dummy_image.data, DUMMY_SIZE, -1);
+                    texture.add_image(&dummy_image.data, DUMMY_SIZE, None);
                     texture
                 }),
             );
@@ -438,7 +438,7 @@ impl DynamicTextureAtlas {
         // Reuse the bin of this exact revision; otherwise let the shelf pack
         // assign a fresh id.
         let existing = state.image_allocations.get(&key).map(|a| a.bin_id);
-        let tex_handle = dynamic_texture.reserve_size(size, existing.unwrap_or(-1));
+        let tex_handle = dynamic_texture.reserve_size(size, existing);
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {
@@ -466,7 +466,7 @@ impl DynamicTextureAtlas {
         // Reuse the bin of this exact glyph; otherwise let the shelf pack
         // assign a fresh id.
         let existing = state.glyph_allocations.get(&key).map(|a| a.bin_id);
-        let tex_handle = dynamic_texture.reserve_size(size, existing.unwrap_or(-1));
+        let tex_handle = dynamic_texture.reserve_size(size, existing);
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {

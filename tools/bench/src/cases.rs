@@ -16,8 +16,8 @@ use crate::meter::{Meter, live_heap_mib, ms, process_cpu};
 use crate::runtime_scene::{self, RuntimeHandle, RuntimeMap, RuntimeScene, jump};
 use crate::scene::{
     BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
-    basemap_center, basemap_mlt_style, basemap_north_west, basemap_point, basemap_south_east, basemap_style,
-    cjk_center, prepare_basemap_mlt, write_frame,
+    basemap_center, basemap_globe_style, basemap_mlt_style, basemap_north_west, basemap_point, basemap_south_east,
+    basemap_style, cjk_center, prepare_basemap_mlt, write_frame,
 };
 use crate::stats::{median, percentile};
 use crate::{Context, Metrics};
@@ -56,6 +56,8 @@ enum Style {
     /// The basemap over its tiles as MLT that carry their polygons'
     /// triangles.
     BasemapMlt,
+    /// The basemap with its projection set to globe.
+    BasemapGlobe,
 }
 
 impl View {
@@ -73,6 +75,7 @@ impl View {
             Style::Json(json) => scene.load_json(json),
             Style::Basemap => scene.load_json(&basemap_style(&cx.fixtures)),
             Style::BasemapMlt => scene.load_json(&basemap_mlt_style(&cx.fixtures)),
+            Style::BasemapGlobe => scene.load_json(&basemap_globe_style(&cx.fixtures)),
         }
     }
 
@@ -128,8 +131,10 @@ pub fn all() -> Vec<Case> {
     for (name, data_driven) in [("Frame/Extrusions", false), ("Frame/Extrusions/DataDriven", true)] {
         cases.push(Case::new(name, move |cx| frame_extrusions(cx, name, data_driven)));
     }
+    cases.push(Case::new("Frame/Globe", frame_globe));
     let basemap_mlt = View { name: "basemap-mlt", style: Style::BasemapMlt, ..basemap_view() };
-    for view in views().into_iter().chain([basemap_mlt]) {
+    let basemap_globe = View { name: "basemap-globe", style: Style::BasemapGlobe, ..basemap_view() };
+    for view in views().into_iter().chain([basemap_mlt, basemap_globe]) {
         let name = format!("Load/Style/{}", view.name);
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
     }
@@ -586,6 +591,95 @@ fn frame_extrusions(cx: &Context, name: &str, data_driven: bool) -> Metrics {
     }
     let mut metrics = meter.finish();
     metrics.lead("gpu_mib", gpu);
+    metrics
+}
+
+/// The zoom that `Frame/Globe` shows the whole planet at, and the latitude
+/// it turns under.
+const PLANET_ZOOM: f64 = 1.5;
+const PLANET_LATITUDE: f64 = 30.0;
+/// The camera steps of one turn of the planet.
+const PLANET_TURN: usize = 240;
+
+/// The planet of `Frame/Globe` on the globe, under the atmosphere and the
+/// light of GL JS's globe example: the render suite's OSM land and water at
+/// zooms 0 and 1, and its Natural Earth places labeled in the basemap's font.
+/// The basemap's own tiles are all at zoom 14, where the globe has handed
+/// over to Mercator.
+fn planet_style(fixtures: &std::path::Path) -> String {
+    serde_json::json!({
+        "version": 8,
+        "projection": {"type": "globe"},
+        "sky": {"atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0]},
+        "light": {"anchor": "map", "position": [1.5, 90, 80]},
+        "glyphs": format!("file://{}/basemap/glyphs/{{fontstack}}/{{range}}.pbf", fixtures.display()),
+        "sources": {
+            "world": {"type": "vector", "tiles": ["local://tiles/{z}-{x}-{y}.osm_basemap.pbf"], "maxzoom": 1},
+            "places": {"type": "geojson", "data": "local://data/places.geojson"}
+        },
+        "layers": [
+            {"id": "water", "type": "background", "paint": {"background-color": "#aad3df"}},
+            {"id": "land", "type": "fill", "source": "world", "source-layer": "land", "paint": {"fill-color": "#f2efe9"}},
+            {
+                "id": "coastline",
+                "type": "line",
+                "source": "world",
+                "source-layer": "coastlines",
+                "paint": {"line-color": "#7fa3b0", "line-width": 0.8}
+            },
+            {
+                "id": "places",
+                "type": "symbol",
+                "source": "places",
+                "layout": {"text-field": ["get", "name"], "text-font": ["noto_sans_regular"], "text-size": 12},
+                "paint": {"text-color": "#2f2c28", "text-halo-color": "#ffffff", "text-halo-width": 1.5}
+            }
+        ]
+    })
+    .to_string()
+}
+
+/// `Frame/Globe`'s camera at `step` of a turn: the planet over
+/// `PLANET_LATITUDE`, turned east by `step` of `PLANET_TURN` steps.
+fn planet_turn(scene: &mut Scene, step: usize) {
+    let longitude = -180.0 + 360.0 * (step % PLANET_TURN) as f64 / PLANET_TURN as f64;
+    scene.jump(LatLng::new(PLANET_LATITUDE, longitude).expect("a center"), PLANET_ZOOM);
+}
+
+/// Frames of the planet turning on the globe, as a spinning globe draws
+/// them: from a camera step until the GPU has finished the frame that shows
+/// it, over tiles an untimed turn loaded. Its labels turn past the horizon,
+/// and its tiles are meshes bent onto the sphere.
+fn frame_globe(cx: &Context) -> Metrics {
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    planet_turn(&mut scene, 0);
+    scene.load_json(&planet_style(&cx.fixtures));
+    scene.settle();
+    for step in 0..PLANET_TURN {
+        planet_turn(&mut scene, step);
+        scene.pump();
+        scene.render_frame();
+    }
+    scene.settle();
+    let mut meter = Meter::new();
+    for step in 0..cx.iterations(300) {
+        planet_turn(&mut scene, step);
+        meter.time(|| {
+            scene.pump();
+            scene.render_frame()
+        });
+    }
+    let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", p95);
+    metrics.lead("frame_p99_ms", p99);
+    // After the metrics, so that the settle, the readback and the PNG don't
+    // raise the peak heap of a run that writes frames.
+    if let Some(dir) = &cx.frames {
+        planet_turn(&mut scene, 0);
+        scene.settle();
+        write_frame(dir, "Frame/Globe", &scene.read_frame());
+    }
     metrics
 }
 

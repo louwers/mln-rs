@@ -15,7 +15,7 @@ use mln_util::serialization::payload::{self, Payload};
 use mln_util::serialization::shared;
 use mln_wire::{Reader, Wire, Writer};
 
-use crate::gfx::dynamic_texture::{DynamicTexturePtr, TextureHandle};
+use crate::gfx::dynamic_texture::{DynamicTextureBinId, DynamicTexturePtr, TextureHandle};
 use crate::tile::geometry_tile::LayoutAtlases;
 use crate::tile::tile_worker_transport::WorkerParameters;
 use crate::tile::worker_codec::fields;
@@ -177,7 +177,7 @@ impl<T: Wire> WriteRef for Option<&T> {
 pub(crate) struct TextureUpload {
     #[wire(with = "fields::shared_texture")]
     pub(crate) texture: DynamicTexturePtr,
-    pub(crate) bin: i32,
+    pub(crate) bin: DynamicTextureBinId,
     pub(crate) rect: RectU16,
     #[wire(with = "payload::bytes")]
     pub(crate) pixels: Vec<u8>,
