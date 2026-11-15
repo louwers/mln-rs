@@ -12,13 +12,37 @@ use crate::value::Value;
 /// `["collator", options]`. Collators count as feature-dependent, so the
 /// parser never folds one into a literal; one whose options are literals is
 /// made on its first evaluation and kept.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CollatorExpression {
     case_sensitive: Expr,
     diacritic_sensitive: Expr,
     locale: Option<Expr>,
-    /// The collator of literal options, once made.
+    /// The collator of literal options, once made. It crosses as whether the
+    /// options are literals.
+    #[serde(with = "constant_cache")]
     constant: Option<OnceLock<EvaluationResult>>,
+}
+
+mod constant_cache {
+    use std::sync::OnceLock;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::expression::EvaluationResult;
+
+    #[expect(clippy::ref_option, reason = "`#[serde(with)]` passes the field by reference")]
+    pub(super) fn serialize<S: Serializer>(
+        cache: &Option<OnceLock<EvaluationResult>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        cache.is_some().serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<OnceLock<EvaluationResult>>, D::Error> {
+        Ok(bool::deserialize(deserializer)?.then(OnceLock::new))
+    }
 }
 
 impl PartialEq for CollatorExpression {

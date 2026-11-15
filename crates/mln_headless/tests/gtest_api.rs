@@ -9,15 +9,15 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSourceManager, ResourceOptions};
-use mln_style::PropertyValue;
+use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
 use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
 use mln_style::sources::geojson_source::GeoJSONSource;
-use mln_util::Color;
 use mln_util::geo::{LatLng, LatLngBounds};
+use serde_json::json;
 use support::*;
 
 #[must_use]
@@ -30,6 +30,13 @@ pub fn style_image(
         mln_style::image::Impl::new(id.to_owned(), image, pixel_ratio, false, Vec::new(), Vec::new(), None, None, None)
             .expect("style::Image"),
     )
+}
+
+/// Sets `layer`'s property `name` from style JSON.
+#[track_caller]
+pub fn set(layer: &mut dyn Layer, name: &str, value: &serde_json::Value) {
+    let error = layer.set_property(name, &Convertible::from(value), None);
+    assert!(error.is_none(), "{name}: {error:?}");
 }
 
 // gtest: CustomGeometrySource.Grid
@@ -85,11 +92,11 @@ fn grid() {
 
     let mut fill_layer = FillLayer::new("landcover", "mapbox");
     fill_layer.set_source_layer("landcover");
-    fill_layer.set_fill_color(&PropertyValue::Constant(Color::new(1.0, 1.0, 0.0, 1.0)));
+    set(&mut fill_layer, "fill-color", &json!("rgba(255,255,0,1)"));
     map.style_mut().add_layer(Box::new(fill_layer), None).unwrap();
 
     let mut layer = LineLayer::new("grid", "custom");
-    layer.set_line_color(&PropertyValue::Constant(Color::new(1.0, 1.0, 1.0, 1.0)));
+    set(&mut layer, "line-color", &json!("rgba(255,255,255,1)"));
     map.style_mut().add_layer(Box::new(layer), None).unwrap();
 
     check_image(
@@ -118,7 +125,7 @@ fn recycle_map_update_images() {
         source.set_geojson(GeoJson::from(Geometry::new_point([0.0, 0.0]))).unwrap();
 
         let mut layer = SymbolLayer::new("geometry", "geometry");
-        layer.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new(marker_name)));
+        set(&mut layer, "icon-image", &json!(marker_name));
 
         map.style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
         map.style_mut().add_source(Box::new(source)).unwrap();

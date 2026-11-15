@@ -6,8 +6,8 @@
 > ([mln-rs-difftests](https://github.com/louwers/mln-rs-difftests)), and its API
 > can change in any release without notice.
 
-Ports MapLibre Native's style code generator (`scripts/generate-style-code.mjs`
-and its templates), which writes `mln-rs-style`'s generated code.
+Writes the declarations of `mln-rs-style`'s style properties from the MapLibre
+style spec.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

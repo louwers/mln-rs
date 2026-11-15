@@ -8,27 +8,6 @@ use crate::types::{evaluated_type, is_color_ramp};
 /// The line width the templates wrap at (`split120Line`, `reduceConditions`).
 pub(crate) const MAX_WIDTH: usize = 120;
 
-/// `if a || b || ... {` at `indent`, wrapped after `||` past
-/// [`MAX_WIDTH`], continuation lines indented four more spaces.
-#[must_use]
-pub(crate) fn if_condition(indent: &str, terms: &[String]) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut current = format!("{indent}if {}", terms[0]);
-    for term in &terms[1..] {
-        if current.len() + 4 + term.len() + 2 > MAX_WIDTH {
-            current.push_str(" ||");
-            lines.push(current);
-            current = format!("{indent}    {term}");
-        } else {
-            current.push_str(" || ");
-            current.push_str(term);
-        }
-    }
-    current.push_str(" {");
-    lines.push(current);
-    lines
-}
-
 pub(crate) struct Writer {
     out: String,
 }
@@ -100,13 +79,6 @@ impl Writer {
         }
         self.line(&current);
         self.line("};");
-    }
-
-    /// Drops the blank line(s) before a closing brace.
-    pub(crate) fn finish_block(&mut self) {
-        while self.out.ends_with("\n\n") {
-            self.out.pop();
-        }
     }
 
     #[must_use]

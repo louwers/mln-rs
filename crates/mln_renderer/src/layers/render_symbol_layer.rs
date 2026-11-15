@@ -29,13 +29,8 @@ use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_impl::{Impl as SymbolLayerImpl, SymbolLayerPaintPropertyOverrides};
 use mln_style::layers::symbol_layer_properties::{
-    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOffset, IconOpacity, IconPitchAlignment,
-    IconRotationAlignment, IconSize, IconTextFit, IconTranslate, IconTranslateAnchor, SymbolLayerProperties,
-    SymbolLayoutProperties, SymbolPaintProperties, SymbolPlacement, SymbolScreenSpace, SymbolSortKey, TextColor,
-    TextField, TextHaloBlur, TextHaloColor, TextHaloWidth, TextOpacity, TextPitchAlignment, TextRotationAlignment,
-    TextTranslate, TextTranslateAnchor,
+    SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties,
 };
-use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType, TranslateAnchorType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
@@ -137,10 +132,10 @@ pub(crate) fn icon_property_values(
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
 ) -> SymbolPropertyValues {
     SymbolPropertyValues {
-        pitch_alignment: *layout.get::<IconPitchAlignment>(),
-        rotation_alignment: *layout.get::<IconRotationAlignment>(),
-        translate: *evaluated.get::<IconTranslate>(),
-        translate_anchor: *evaluated.get::<IconTranslateAnchor>(),
+        pitch_alignment: *layout.icon_pitch_alignment.uniform(),
+        rotation_alignment: *layout.icon_rotation_alignment.uniform(),
+        translate: *evaluated.icon_translate.uniform(),
+        translate_anchor: *evaluated.icon_translate_anchor.uniform(),
     }
 }
 
@@ -150,10 +145,10 @@ pub(crate) fn text_property_values(
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
 ) -> SymbolPropertyValues {
     SymbolPropertyValues {
-        pitch_alignment: *layout.get::<TextPitchAlignment>(),
-        rotation_alignment: *layout.get::<TextRotationAlignment>(),
-        translate: *evaluated.get::<TextTranslate>(),
-        translate_anchor: *evaluated.get::<TextTranslateAnchor>(),
+        pitch_alignment: *layout.text_pitch_alignment.uniform(),
+        rotation_alignment: *layout.text_rotation_alignment.uniform(),
+        translate: *evaluated.text_translate.uniform(),
+        translate_anchor: *evaluated.text_translate_anchor.uniform(),
     }
 }
 
@@ -196,21 +191,21 @@ fn capture_rendered_features(
     let has_icon_data = !bucket_state.icon.segments.is_empty();
     let has_sdf_icon_data = !bucket_state.sdf_icon.segments.is_empty();
 
-    let icon_opacity = evaluated.get::<IconOpacity>();
-    let icon_color = evaluated.get::<IconColor>();
-    let icon_halo_color = evaluated.get::<IconHaloColor>();
-    let text_opacity = evaluated.get::<TextOpacity>();
-    let text_color = evaluated.get::<TextColor>();
-    let text_halo_color = evaluated.get::<TextHaloColor>();
+    let icon_opacity = &evaluated.icon_opacity;
+    let icon_color = &evaluated.icon_color;
+    let icon_halo_color = &evaluated.icon_halo_color;
+    let text_opacity = &evaluated.text_opacity;
+    let text_color = &evaluated.text_color;
+    let text_halo_color = &evaluated.text_halo_color;
 
     let visible_text = has_text_data
-        && text_opacity.constant_or(&TextOpacity::default_value()) > 0.0
-        && (text_color.constant_or(&TextColor::default_value()).a > 0.0
-            || text_halo_color.constant_or(&TextHaloColor::default_value()).a > 0.0);
+        && text_opacity.constant_or(&SymbolPaintProperties::Defaults::text_opacity()) > 0.0
+        && (text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
+            || text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0);
     let visible_icons = (has_icon_data || has_sdf_icon_data)
-        && icon_opacity.constant_or(&IconOpacity::default_value()) > 0.0
-        && (icon_color.constant_or(&IconColor::default_value()).a > 0.0
-            || icon_halo_color.constant_or(&IconHaloColor::default_value()).a > 0.0);
+        && icon_opacity.constant_or(&SymbolPaintProperties::Defaults::icon_opacity()) > 0.0
+        && (icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
+            || icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0);
     if !visible_text && !visible_icons {
         return;
     }
@@ -225,10 +220,10 @@ fn capture_rendered_features(
     let overscaled_tile_id = *tile.get_overscaled_tile_id();
     let tile_id = overscaled_tile_id.to_unwrapped();
 
-    let text_translation = evaluated.get::<TextTranslate>();
-    let icon_translation = evaluated.get::<IconTranslate>();
-    let text_translation_anchor = *evaluated.get::<TextTranslateAnchor>();
-    let icon_translation_anchor = *evaluated.get::<IconTranslateAnchor>();
+    let text_translation = evaluated.text_translate.uniform();
+    let icon_translation = evaluated.icon_translate.uniform();
+    let text_translation_anchor = &evaluated.text_translate_anchor;
+    let icon_translation_anchor = &evaluated.icon_translate_anchor;
     let zoom = state.get_zoom();
     let zoom_fraction = state.get_zoom_fraction();
     let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom as f32);
@@ -236,8 +231,8 @@ fn capture_rendered_features(
     let aspect_ratio = f64::from(state.get_size().aspect_ratio());
 
     let bucket_layout = &*bucket.layout;
-    let placement = *bucket_layout.get::<SymbolPlacement>();
-    let text_fit = *bucket_layout.get::<IconTextFit>();
+    let placement = &bucket_layout.symbol_placement;
+    let text_fit = &bucket_layout.icon_text_fit;
 
     let get_tile_matrix = |translation: &[f32; 2], anchor: TranslateAnchorType| {
         get_tile_matrix_for(
@@ -259,12 +254,12 @@ fn capture_rendered_features(
     let text_drawable_matrix = if is_screen_space {
         get_screen_matrix(*text_translation)
     } else {
-        get_tile_matrix(&untranslated, text_translation_anchor)
+        get_tile_matrix(&untranslated, *text_translation_anchor.uniform())
     };
     let icon_drawable_matrix = if is_screen_space {
         get_screen_matrix(*icon_translation)
     } else {
-        get_tile_matrix(&untranslated, icon_translation_anchor)
+        get_tile_matrix(&untranslated, *icon_translation_anchor.uniform())
     };
 
     // On the globe the tile's projection stands in for the tile matrix.
@@ -276,8 +271,8 @@ fn capture_rendered_features(
         let translate = RenderTile::tile_unit_translation(&tile_id, *translation, anchor, state);
         [f64::from(translate[0]), f64::from(translate[1])]
     };
-    let text_tile_translation = tile_translation(text_translation, text_translation_anchor);
-    let icon_tile_translation = tile_translation(icon_translation, icon_translation_anchor);
+    let text_tile_translation = tile_translation(text_translation, *text_translation_anchor.uniform());
+    let icon_tile_translation = tile_translation(icon_translation, *icon_translation_anchor.uniform());
 
     let mut compute_buffer_bounds = |buffer: &Buffer, is_text: bool| {
         let values = if is_text {
@@ -287,9 +282,10 @@ fn capture_rendered_features(
         };
         let pitch_with_map = values.pitch_alignment == AlignmentType::Map;
         let rotate_with_map = values.rotation_alignment == AlignmentType::Map;
-        let along_line = placement != SymbolPlacementType::Point && values.rotation_alignment == AlignmentType::Map;
+        let along_line =
+            *placement.uniform() != SymbolPlacementType::Point && values.rotation_alignment == AlignmentType::Map;
         let has_variable_placement =
-            bucket_state.has_variable_placement && (is_text || text_fit != IconTextFitType::None);
+            bucket_state.has_variable_placement && (is_text || *text_fit.uniform() != IconTextFitType::None);
 
         let size_binder = if is_text { &bucket.text_size_binder } else { &bucket.icon_size_binder };
         let evaluated_size = size_binder.evaluate_for_zoom(zoom as f32);
@@ -459,11 +455,11 @@ fn capture_rendered_features(
     };
 
     let icons_visible = icon_opacity.constant_or(&1.0) > 0.0
-        && (icon_color.constant_or(&IconColor::default_value()).a > 0.0
-            || icon_halo_color.constant_or(&IconHaloColor::default_value()).a > 0.0);
+        && (icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
+            || icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0);
     let text_visible = text_opacity.constant_or(&1.0) > 0.0
-        && (text_color.constant_or(&TextColor::default_value()).a > 0.0
-            || text_halo_color.constant_or(&TextHaloColor::default_value()).a > 0.0);
+        && (text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
+            || text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0);
 
     if has_icon_data && icons_visible {
         compute_buffer_bounds(&bucket_state.icon, /* is_text = */ false);
@@ -517,7 +513,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_opacity"],
-            evaluated.get::<TextOpacity>().is_constant(),
+            evaluated.text_opacity.is_constant(),
             pau,
             &mut id,
         );
@@ -527,7 +523,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_fill_color"],
-            evaluated.get::<TextColor>().is_constant(),
+            evaluated.text_color.is_constant(),
             pau,
             &mut id,
         );
@@ -537,7 +533,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_color"],
-            evaluated.get::<TextHaloColor>().is_constant(),
+            evaluated.text_halo_color.is_constant(),
             pau,
             &mut id,
         );
@@ -547,7 +543,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_width"],
-            evaluated.get::<TextHaloWidth>().is_constant(),
+            evaluated.text_halo_width.is_constant(),
             pau,
             &mut id,
         );
@@ -557,7 +553,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_blur"],
-            evaluated.get::<TextHaloBlur>().is_constant(),
+            evaluated.text_halo_blur.is_constant(),
             pau,
             &mut id,
         );
@@ -571,7 +567,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_opacity"],
-            evaluated.get::<IconOpacity>().is_constant(),
+            evaluated.icon_opacity.is_constant(),
             pau,
             &mut id,
         );
@@ -581,7 +577,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_fill_color"],
-            evaluated.get::<IconColor>().is_constant(),
+            evaluated.icon_color.is_constant(),
             pau,
             &mut id,
         );
@@ -591,7 +587,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_color"],
-            evaluated.get::<IconHaloColor>().is_constant(),
+            evaluated.icon_halo_color.is_constant(),
             pau,
             &mut id,
         );
@@ -601,7 +597,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_width"],
-            evaluated.get::<IconHaloWidth>().is_constant(),
+            evaluated.icon_halo_width.is_constant(),
             pau,
             &mut id,
         );
@@ -611,7 +607,7 @@ fn set_binder_attributes(
             ib,
             &shared,
             &["a_halo_blur"],
-            evaluated.get::<IconHaloBlur>().is_constant(),
+            evaluated.icon_halo_blur.is_constant(),
             pau,
             &mut id,
         );
@@ -1035,7 +1031,7 @@ impl RenderLayer for RenderSymbolLayer {
         let prior = std::mem::take(&mut self.unevaluated);
         self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
         self.has_format_section_overrides =
-            SymbolLayerPaintPropertyOverrides::has_overrides(impl_cast(&self.base.base_impl).layout.get::<TextField>());
+            SymbolLayerPaintPropertyOverrides::has_overrides(&impl_cast(&self.base.base_impl).layout.text_field);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
@@ -1056,14 +1052,14 @@ impl RenderLayer for RenderSymbolLayer {
         }
 
         let evaluated = &properties.evaluated;
-        let has_icon_opacity = evaluated.get::<IconColor>().constant_or(&IconColor::default_value()).a > 0.0
-            || evaluated.get::<IconHaloColor>().constant_or(&IconHaloColor::default_value()).a > 0.0;
-        let has_text_opacity = evaluated.get::<TextColor>().constant_or(&TextColor::default_value()).a > 0.0
-            || evaluated.get::<TextHaloColor>().constant_or(&TextHaloColor::default_value()).a > 0.0;
+        let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
+            || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
+        let has_text_opacity = evaluated.text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
+            || evaluated.text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0;
 
         self.base.passes =
-            if (evaluated.get::<IconOpacity>().constant_or(&1.0) > 0.0 && has_icon_opacity && self.icon_size > 0.0)
-                || (evaluated.get::<TextOpacity>().constant_or(&1.0) > 0.0 && has_text_opacity && self.text_size > 0.0)
+            if (evaluated.icon_opacity.constant_or(&1.0) > 0.0 && has_icon_opacity && self.icon_size > 0.0)
+                || (evaluated.text_opacity.constant_or(&1.0) > 0.0 && has_text_opacity && self.text_size > 0.0)
             {
                 RenderPass::Translucent
             } else {
@@ -1142,12 +1138,12 @@ impl RenderLayer for RenderSymbolLayer {
 
         let evaluated = &get_evaluated::<SymbolLayerProperties>(&self.base.evaluated_properties);
         let text_translate = SymbolTranslate {
-            offset: *evaluated.get::<TextTranslate>(),
-            anchor: *evaluated.get::<TextTranslateAnchor>(),
+            offset: *evaluated.text_translate.uniform(),
+            anchor: *evaluated.text_translate_anchor.uniform(),
         };
         let icon_translate = SymbolTranslate {
-            offset: *evaluated.get::<IconTranslate>(),
-            anchor: *evaluated.get::<IconTranslateAnchor>(),
+            offset: *evaluated.icon_translate.uniform(),
+            anchor: *evaluated.icon_translate_anchor.uniform(),
         };
 
         let Some(render_tiles) = self.base.render_tiles.clone() else {
@@ -1306,19 +1302,19 @@ impl RenderLayer for RenderSymbolLayer {
         self.tile_bucket_versions.retain(|id, _| render_tile_ids.contains_key(id));
 
         let layout = &impl_cast(&self.base.base_impl).layout;
-        let sort_features_by_key = layout.get::<SymbolSortKey>().is_expression();
-        let constant_sort_key = layout.get::<SymbolSortKey>().is_constant();
+        let sort_features_by_key = layout.symbol_sort_key.is_expression();
+        let constant_sort_key = layout.symbol_sort_key.is_constant();
         // Screen-space symbols are drawn over the view, not projected onto
         // the map.
-        let screen_space_prop = layout.get::<SymbolScreenSpace>();
+        let screen_space_prop = &layout.symbol_screen_space;
         let is_screen_space = if screen_space_prop.is_constant() {
             *screen_space_prop.as_constant()
         } else {
-            SymbolScreenSpace::default_value()
+            SymbolLayoutProperties::Defaults::symbol_screen_space()
         };
         let symbol_projection_variant =
             if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
-        let is_offset = !layout.get::<IconOffset>().is_undefined();
+        let is_offset = !layout.icon_offset.is_undefined();
 
         let current_zoom = state.get_zoom() as f32;
         let layer_prefix = format!("{}/", self.get_id());
@@ -1421,7 +1417,7 @@ impl RenderLayer for RenderSymbolLayer {
             // A bucket laid out before a layout change can still have the
             // previous sort-key expression until it is rebuilt.
             let sort_segments =
-                sort_features_by_key || (constant_sort_key && !bucket.layout.get::<SymbolSortKey>().is_constant());
+                sort_features_by_key || (constant_sort_key && !bucket.layout.symbol_sort_key.is_constant());
             let mut add_renderables = |buffer: &Buffer, type_: SymbolType| {
                 if sort_segments {
                     // Features need to be rendered in a specific order, so we
@@ -1556,13 +1552,13 @@ impl RenderLayer for RenderSymbolLayer {
                 &mut properties_as_uniforms,
             );
 
-            let text_halo = evaluated.get::<TextHaloColor>().constant_or(&Color::black()).a > 0.0
-                && evaluated.get::<TextHaloWidth>().constant_or(&1.0) != 0.0;
-            let text_fill = evaluated.get::<TextColor>().constant_or(&Color::black()).a > 0.0;
+            let text_halo = evaluated.text_halo_color.constant_or(&Color::black()).a > 0.0
+                && evaluated.text_halo_width.constant_or(&1.0) != 0.0;
+            let text_fill = evaluated.text_color.constant_or(&Color::black()).a > 0.0;
 
-            let icon_halo = evaluated.get::<IconHaloColor>().constant_or(&Color::black()).a > 0.0
-                && evaluated.get::<IconHaloWidth>().constant_or(&1.0) != 0.0;
-            let icon_fill = evaluated.get::<IconColor>().constant_or(&Color::black()).a > 0.0;
+            let icon_halo = evaluated.icon_halo_color.constant_or(&Color::black()).a > 0.0
+                && evaluated.icon_halo_width.constant_or(&1.0) != 0.0;
+            let icon_fill = evaluated.icon_color.constant_or(&Color::black()).a > 0.0;
 
             if let Some(builder) = builder.as_mut() {
                 builder.set_atlases(None);
@@ -1589,8 +1585,7 @@ impl RenderLayer for RenderSymbolLayer {
                     )));
                 }
                 if !is_text && tile_info.icon_tweaker.is_none() {
-                    let icon_scaled =
-                        bucket_layout.get::<IconSize>().constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
+                    let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
                     tile_info.icon_tweaker = Some(Rc::new(DrawableAtlasesTweaker::new(
                         Some(Rc::clone(atlases)),
                         Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
@@ -1659,8 +1654,8 @@ impl RenderLayer for RenderSymbolLayer {
                         symbol_type: group.type_,
                         pitch_alignment: values.pitch_alignment,
                         rotation_alignment: values.rotation_alignment,
-                        placement: *bucket_layout.get::<SymbolPlacement>(),
-                        text_fit: *bucket_layout.get::<IconTextFit>(),
+                        placement: *bucket_layout.symbol_placement.uniform(),
+                        text_fit: *bucket_layout.icon_text_fit.uniform(),
                         is_offset,
                         segment: group.segment,
                     }));

@@ -8,7 +8,7 @@ use crate::type_::Type;
 use crate::value::{Value, from_expression_value};
 
 /// `["coalesce", ...]`: the first operand that is not null.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Coalesce {
     type_: Type,
     args: Box<[Expr]>,

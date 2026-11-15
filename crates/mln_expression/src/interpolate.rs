@@ -12,7 +12,7 @@ use crate::type_::{self, Type};
 use crate::value::{Value, type_of};
 
 /// The `T` of `InterpolateImpl<T>`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum InterpolateOutput {
     Number,
     Color,
@@ -58,7 +58,7 @@ fn interpolate_double(a: f64, b: f64, t: f64) -> f64 {
 
 /// `["interpolate", interpolation, input, label, output, ...]` and its color
 /// space variants.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Interpolate {
     type_: Type,
     interpolator: Interpolator,

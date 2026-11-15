@@ -8,13 +8,9 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_IMAGE_TEXTURE, ID_FILL_TILE_PROPS_UBO,
 };
-use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::fill_layer_properties::{
-    FillColor, FillLayerProperties, FillOpacity, FillOutlineColor, FillPattern, FillTranslate, FillTranslateAnchor,
-};
-use mln_style::properties::Property;
-use mln_style::renderer::cross_faded_property_evaluator::Faded;
+use mln_style::layers::FillPaintProperties;
+use mln_style::layers::fill_layer_properties::FillLayerProperties;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -71,12 +67,12 @@ impl LayerTweaker for FillLayerTweaker {
 
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             let props_ubo = FillEvaluatedPropsUBO {
-                color: evaluated.get::<FillColor>().constant_or(&FillColor::default_value()).to_float_array(),
+                color: evaluated.fill_color.constant_or(&FillPaintProperties::Defaults::fill_color()).to_float_array(),
                 outline_color: evaluated
-                    .get::<FillOutlineColor>()
-                    .constant_or(&FillOutlineColor::default_value())
+                    .fill_outline_color
+                    .constant_or(&FillPaintProperties::Defaults::fill_outline_color())
                     .to_float_array(),
-                opacity: evaluated.get::<FillOpacity>().constant_or(&FillOpacity::default_value()),
+                opacity: evaluated.fill_opacity.constant_or(&FillPaintProperties::Defaults::fill_opacity()),
                 fade: crossfade.t,
                 from_scale: crossfade.from_scale,
                 to_scale: crossfade.to_scale,
@@ -88,8 +84,8 @@ impl LayerTweaker for FillLayerTweaker {
             .mutable_uniform_buffers()
             .set(ID_FILL_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
-        let translation = *evaluated.get::<FillTranslate>();
-        let anchor = *evaluated.get::<FillTranslateAnchor>();
+        let translation = &evaluated.fill_translate;
+        let anchor = &evaluated.fill_translate_anchor;
         let zoom = parameters.state.get_zoom() as f32;
         let int_zoom = parameters.state.get_integer_zoom();
 
@@ -132,16 +128,15 @@ impl LayerTweaker for FillLayerTweaker {
 
             let sdf_pattern: f32 = if bucket.is_sdf_pattern(&id) { 1.0 } else { 0.0 };
 
-            let fill_pattern_value =
-                evaluated.get::<FillPattern>().constant_or(&Faded { from: Image::new(""), to: Image::new("") });
+            let fill_pattern_value = evaluated.fill_pattern.faded();
             let pattern_pos_a = tile.and_then(|t| t.get_pattern(fill_pattern_value.from.id()));
             let pattern_pos_b = tile.and_then(|t| t.get_pattern(fill_pattern_value.to.id()));
 
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
-                translation,
-                anchor,
+                *translation.uniform(),
+                *anchor.uniform(),
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
                 drawable,

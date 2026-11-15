@@ -100,7 +100,7 @@ impl Filter {
         if let Some(legacy_filter) = &self.legacy_filter {
             legacy_filter.clone()
         } else if let Some(expression) = &self.expression {
-            expression.serialize()
+            Expr::serialize(expression)
         } else {
             Value::Null
         }

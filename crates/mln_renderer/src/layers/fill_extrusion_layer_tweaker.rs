@@ -9,14 +9,9 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_PROPS_UBO,
     ID_FILL_EXTRUSION_TILE_PROPS_UBO,
 };
-use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::fill_extrusion_layer_properties::{
-    FillExtrusionBase, FillExtrusionColor, FillExtrusionHeight, FillExtrusionLayerProperties, FillExtrusionOpacity,
-    FillExtrusionPattern, FillExtrusionTranslate, FillExtrusionTranslateAnchor, FillExtrusionVerticalGradient,
-};
-use mln_style::properties::Property;
-use mln_style::renderer::cross_faded_property_evaluator::Faded;
+use mln_style::layers::FillExtrusionPaintProperties;
+use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayerProperties;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::size::Size;
 
@@ -75,17 +70,21 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         // all the drawables from the layer.
         let props_ubo = FillExtrusionPropsUBO {
             color: evaluated
-                .get::<FillExtrusionColor>()
-                .constant_or(&FillExtrusionColor::default_value())
+                .fill_extrusion_color
+                .constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_color())
                 .to_float_array(),
             light_color: FillExtrusionBucket::light_color(&parameters.evaluated_light),
             pad1: 0.0,
             light_position: FillExtrusionBucket::light_position(&parameters.evaluated_light, state),
-            base: evaluated.get::<FillExtrusionBase>().constant_or(&FillExtrusionBase::default_value()),
-            height: evaluated.get::<FillExtrusionHeight>().constant_or(&FillExtrusionHeight::default_value()),
+            base: evaluated
+                .fill_extrusion_base
+                .constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_base()),
+            height: evaluated
+                .fill_extrusion_height
+                .constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_height()),
             light_intensity: FillExtrusionBucket::light_intensity(&parameters.evaluated_light),
-            vertical_gradient: if *evaluated.get::<FillExtrusionVerticalGradient>() { 1.0 } else { 0.0 },
-            opacity: *evaluated.get::<FillExtrusionOpacity>(),
+            vertical_gradient: if *evaluated.fill_extrusion_vertical_gradient.uniform() { 1.0 } else { 0.0 },
+            opacity: *evaluated.fill_extrusion_opacity.uniform(),
             fade: crossfade.t,
             from_scale: crossfade.from_scale,
             to_scale: crossfade.to_scale,
@@ -97,10 +96,9 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         self.base.properties_updated = false;
 
         let zoom = parameters.state.get_zoom() as f32;
-        let def_pattern = Faded { from: Image::new(""), to: Image::new("") };
-        let fill_pattern_value = evaluated.get::<FillExtrusionPattern>().constant_or(&def_pattern);
-        let translation = *evaluated.get::<FillExtrusionTranslate>();
-        let anchor = *evaluated.get::<FillExtrusionTranslateAnchor>();
+        let fill_pattern_value = evaluated.fill_extrusion_pattern.faded();
+        let translation = &evaluated.fill_extrusion_translate;
+        let anchor = &evaluated.fill_extrusion_translate_anchor;
 
         let mut i: u32 = 0;
         let count = layer_group.drawable_count();
@@ -147,8 +145,8 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             let mut projection = get_projection_data(
                 &tile_id,
                 parameters,
-                translation,
-                anchor,
+                *translation.uniform(),
+                *anchor.uniform(),
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
                 drawable,

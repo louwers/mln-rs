@@ -109,3 +109,87 @@ impl std::fmt::Debug for dyn LayerProperties {
             .finish_non_exhaustive()
     }
 }
+
+/// Declares `$name`, a layer type's evaluated properties: the `evaluated`
+/// paint set, the layer's `$impl_`, and with `[crossfade]` the cross-fade of
+/// its patterns. `layout $layout` adds the layout set's dependencies.
+macro_rules! layer_properties {
+    ($(#[$meta:meta])* $name:ident for $impl_:ty, paint $paint:ident $(, layout $layout:ident)? $(, [$crossfade:ident])?) => {
+        $(#[$meta])*
+        #[derive(Clone, Debug, ::serde::Serialize, ::serde::Deserialize)]
+        pub struct $name {
+            pub base: $crate::layer_properties::LayerPropertiesBase,
+            $(pub $crossfade: $crate::renderer::property_evaluation_parameters::CrossfadeParameters,)?
+            pub evaluated: $paint::PossiblyEvaluated,
+        }
+
+        impl $name {
+            pub fn new(impl_: ::std::sync::Arc<$impl_>) -> Self {
+                $name {
+                    base: $crate::layer_properties::LayerPropertiesBase::new(impl_),
+                    $($crossfade: ::core::default::Default::default(),)?
+                    evaluated: ::core::default::Default::default(),
+                }
+            }
+
+            pub fn with_evaluated(
+                impl_: ::std::sync::Arc<$impl_>,
+                $($crossfade: $crate::renderer::property_evaluation_parameters::CrossfadeParameters,)?
+                evaluated: $paint::PossiblyEvaluated,
+            ) -> Self {
+                $name { base: $crate::layer_properties::LayerPropertiesBase::new(impl_), $($crossfade,)? evaluated }
+            }
+
+            /// The layer's impl. Panics if it is another layer type's.
+            #[must_use]
+            pub fn layer_impl(&self) -> &$impl_ {
+                self.base
+                    .base_impl
+                    .downcast_ref::<$impl_>()
+                    .expect(concat!(stringify!($name), ": not its layer type's impl"))
+            }
+        }
+
+        impl $crate::layer_properties::LayerProperties for $name {
+            fn base(&self) -> &$crate::layer_properties::LayerPropertiesBase {
+                &self.base
+            }
+
+            fn base_mut(&mut self) -> &mut $crate::layer_properties::LayerPropertiesBase {
+                &mut self.base
+            }
+
+            fn constants_mask(&self) -> u64 {
+                self.evaluated.constants_mask()
+            }
+
+            fn get_dependencies(&self) -> $crate::expression::Dependency {
+                self.layer_impl().paint.get_dependencies()
+                    $(| <$layout::Unevaluated>::get_dependencies(&self.layer_impl().layout))?
+            }
+
+            fn get_evaluated_dependencies(&self) -> $crate::expression::Dependency {
+                self.evaluated.get_dependencies()
+            }
+
+            fn collect_evaluated_global_state_refs(&self, refs: &mut ::mln_vec_map::VecSet<String>) {
+                self.evaluated.collect_global_state_refs(refs);
+            }
+        }
+
+        impl $crate::layer_properties::HasEvaluated for $name {
+            type Evaluated = $paint::PossiblyEvaluated;
+
+            fn evaluated(&self) -> &Self::Evaluated {
+                &self.evaluated
+            }
+        }
+
+        $(impl $crate::layer_properties::HasCrossfade for $name {
+            fn crossfade(&self) -> &$crate::renderer::property_evaluation_parameters::CrossfadeParameters {
+                &self.$crossfade
+            }
+        })?
+    };
+}
+pub(crate) use layer_properties;

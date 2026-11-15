@@ -352,10 +352,30 @@ pub(crate) fn geojson_geometries(geojson: &GeoJson) -> Vec<Option<&geojson::Geom
 }
 
 /// `["within", geojson]`: whether the feature lies inside the polygons.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "MbglValue", into = "MbglValue")]
 pub(crate) struct Within {
     geojson_source: GeoJson,
     geometries: Geometry<f64>,
+}
+
+/// A `within` crosses as its GeoJSON, as the style writes it, and finds its
+/// polygons again.
+impl TryFrom<MbglValue> for Within {
+    type Error = String;
+
+    fn try_from(value: MbglValue) -> Result<Self, String> {
+        let mut ctx = ParsingContext::default();
+        parse_value(&Convertible::from(&value), &mut ctx)
+            .and_then(|geojson_source| Within::from_source(geojson_source, &mut ctx))
+            .ok_or_else(|| ctx.get_combined_errors())
+    }
+}
+
+impl From<Within> for MbglValue {
+    fn from(within: Within) -> Self {
+        within.source_value()
+    }
 }
 
 impl Within {
@@ -371,27 +391,23 @@ impl Within {
             }
 
             let parsed_value = parse_value(&value.array_member(1), ctx)?;
-
-            let geometries = geojson_geometries(&parsed_value);
-            // The first polygon wins; every non-polygon before it reports an
-            // error.
-            for geometry in &geometries {
-                if let Some(ret) = get_polygon_info(*geometry, ctx) {
-                    return Some(Expr::new(Node::Within(Box::new(Within {
-                        geojson_source: parsed_value.clone(),
-                        geometries: ret,
-                    }))));
-                }
-            }
-            // C++ reports nothing for an empty collection, and its parser
-            // then asserts that a failed parse reported an error.
-            if geometries.is_empty() {
-                ctx.error(POLYGON_REQUIRED.to_owned());
-            }
-            return None;
+            return Within::from_source(parsed_value, ctx).map(|within| Expr::new(Node::Within(Box::new(within))));
         }
         ctx.error("'within' expression needs to be an array with exactly one argument.".to_owned());
         None
+    }
+
+    /// The `within` of a GeoJSON value: of its first polygon. Every
+    /// non-polygon before that reports an error.
+    fn from_source(geojson_source: GeoJson, ctx: &mut ParsingContext) -> Option<Within> {
+        let candidates = geojson_geometries(&geojson_source);
+        let found = candidates.iter().find_map(|geometry| get_polygon_info(*geometry, ctx));
+        // C++ reports nothing for an empty collection, and its parser then
+        // asserts that a failed parse reported an error.
+        if candidates.is_empty() {
+            ctx.error(POLYGON_REQUIRED.to_owned());
+        }
+        Some(Within { geometries: found?, geojson_source })
     }
 }
 
@@ -433,6 +449,11 @@ impl Within {
     }
 
     pub(crate) fn serialize(&self) -> MbglValue {
+        MbglValue::Array(vec![MbglValue::String("within".to_owned()), self.source_value()])
+    }
+
+    /// The GeoJSON, as a style value.
+    fn source_value(&self) -> MbglValue {
         let value = serde_json::to_value(&self.geojson_source).unwrap_or_default();
         let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
             o.iter().map(|(k, v)| (k.clone(), value_converter(v))).collect()
@@ -440,7 +461,7 @@ impl Within {
             Log::error(Event::General, "Failed to serialize 'within' expression, converted rapidJSON is not an object");
             ValueObject::new()
         };
-        MbglValue::Array(vec![MbglValue::String("within".to_owned()), MbglValue::Object(serialized)])
+        MbglValue::Object(serialized)
     }
 }
 

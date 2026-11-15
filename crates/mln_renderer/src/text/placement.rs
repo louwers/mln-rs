@@ -30,11 +30,7 @@ use glam::Vec2;
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileProjector, TransformState};
 use mln_math::{fmaxf, fminf};
 use mln_style::TransitionOptions;
-use mln_style::layers::symbol_layer_properties::{
-    IconIgnorePlacement, IconKeepUpright, IconOptional, IconPitchAlignment, IconRotationAlignment, IconTextFit,
-    SymbolAvoidEdges, SymbolLayoutProperties, SymbolPlacement, SymbolScreenSpace, SymbolZOrder, TextIgnorePlacement,
-    TextKeepUpright, TextOptional, TextPitchAlignment, TextRotationAlignment,
-};
+use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
     TextWritingModeType,
@@ -350,17 +346,19 @@ impl PlacementContext {
         let pixel_ratio = (TILE_SIZE_D * f64::from(overscaled_id.overscale_factor()) / f64::from(EXTENT)) as f32;
 
         let layout = &*bucket.layout;
-        let rotate_text_with_map = *layout.get::<TextRotationAlignment>() == AlignmentType::Map;
-        let pitch_text_with_map = *layout.get::<TextPitchAlignment>() == AlignmentType::Map;
-        let rotate_icon_with_map = *layout.get::<IconRotationAlignment>() == AlignmentType::Map;
-        let pitch_icon_with_map = *layout.get::<IconPitchAlignment>() == AlignmentType::Map;
-        let placement_type = *layout.get::<SymbolPlacement>();
+        let rotate_text_with_map = *layout.text_rotation_alignment.uniform() == AlignmentType::Map;
+        let pitch_text_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
+        let rotate_icon_with_map = *layout.icon_rotation_alignment.uniform() == AlignmentType::Map;
+        let pitch_icon_with_map = *layout.icon_pitch_alignment.uniform() == AlignmentType::Map;
+        let placement_type = &layout.symbol_placement;
 
-        let screen_space = *layout.get::<SymbolScreenSpace>();
-        let text_translation = translation_point(&render_tile.id, &params.text_translate, state, screen_space);
-        let icon_translation = translation_point(&render_tile.id, &params.icon_translate, state, screen_space);
+        let screen_space = &layout.symbol_screen_space;
+        let text_translation =
+            translation_point(&render_tile.id, &params.text_translate, state, *screen_space.uniform());
+        let icon_translation =
+            translation_point(&render_tile.id, &params.icon_translate, state, *screen_space.uniform());
         let tile_projection =
-            if screen_space { without_horizon(render_tile.projection) } else { render_tile.projection };
+            if *screen_space.uniform() { without_horizon(render_tile.projection) } else { render_tile.projection };
 
         let partially_evaluated_text_size = bucket.text_size_binder.evaluate_for_zoom(placement_zoom);
         let partially_evaluated_icon_size = bucket.icon_size_binder.evaluate_for_zoom(placement_zoom);
@@ -372,11 +370,11 @@ impl PlacementContext {
         let always_show_text = text_always_overlap
             && (icon_always_overlap
                 || !(bucket.has_icon_data() || bucket.has_sdf_icon_data())
-                || *layout.get::<IconOptional>());
+                || *layout.icon_optional.uniform());
         let always_show_icon =
-            icon_always_overlap && (text_always_overlap || !bucket.has_text_data() || *layout.get::<TextOptional>());
+            icon_always_overlap && (text_always_overlap || !bucket.has_text_data() || *layout.text_optional.uniform());
 
-        let has_icon_text_fit = *layout.get::<IconTextFit>() != IconTextFitType::None;
+        let has_icon_text_fit = *layout.icon_text_fit.uniform() != IconTextFitType::None;
 
         PlacementContext {
             bucket: Arc::clone(&params.bucket),
@@ -390,7 +388,7 @@ impl PlacementContext {
             pitch_text_with_map,
             rotate_icon_with_map,
             pitch_icon_with_map,
-            placement_type,
+            placement_type: *placement_type.uniform(),
             tile_projection,
             text_translation,
             icon_translation,
@@ -671,7 +669,7 @@ fn get_bucket_symbols(
     sort_key_range: Option<&SortKeyRange>,
     bearing: f64,
 ) -> Vec<usize> {
-    if *bucket.layout.get::<SymbolZOrder>() == SymbolZOrderType::ViewportY {
+    if *bucket.layout.symbol_z_order.uniform() == SymbolZOrderType::ViewportY {
         let mut sorted_symbols = get_sorted_symbols(&state.symbol_instances, bearing as f32);
         // Place in the reverse order than draw i.e., starting from the foreground elements.
         sorted_symbols.reverse();
@@ -1247,8 +1245,8 @@ impl Placement {
             offscreen &= placed_icon.offscreen;
         }
 
-        let icon_without_text = !symbol_instance.has_text() || *ctx.get_layout().get::<TextOptional>();
-        let text_without_icon = !symbol_instance.has_icon() || *ctx.get_layout().get::<IconOptional>();
+        let icon_without_text = !symbol_instance.has_text() || *ctx.get_layout().text_optional.uniform();
+        let text_without_icon = !symbol_instance.has_icon() || *ctx.get_layout().icon_optional.uniform();
 
         // combine placements for icon and text
         if !icon_without_text && !text_without_icon {
@@ -1269,7 +1267,7 @@ impl Placement {
                 feature,
                 &self.text_boxes,
                 ctx.text_overlap_mode,
-                *ctx.get_layout().get::<TextIgnorePlacement>(),
+                *ctx.get_layout().text_ignore_placement.uniform(),
                 bucket.bucket_instance_id,
                 ctx.collision_group.0,
             );
@@ -1284,7 +1282,7 @@ impl Placement {
                 feature,
                 &self.icon_boxes,
                 ctx.icon_overlap_mode,
-                *ctx.get_layout().get::<IconIgnorePlacement>(),
+                *ctx.get_layout().icon_ignore_placement.uniform(),
                 bucket.bucket_instance_id,
                 ctx.collision_group.0,
             );
@@ -1624,7 +1622,7 @@ impl Placement {
     ) -> bool {
         let tile = data.tile();
         let layout = &*bucket.layout;
-        let along_line = *layout.get::<SymbolPlacement>() != SymbolPlacementType::Point;
+        let along_line = *layout.symbol_placement.uniform() != SymbolPlacementType::Point;
         let has_variable_text_anchors = bucket.has_variable_text_anchors();
         let mut guard = bucket.state();
         let bs = &mut *guard;
@@ -1632,14 +1630,14 @@ impl Placement {
         let has_icon = has_icon_data(bs);
         let has_sdf_icon = has_sdf_icon_data(bs);
         let has_variable_anchors = has_variable_text_anchors && has_text;
-        let update_text_fit_icon = *layout.get::<IconTextFit>() != IconTextFitType::None
+        let update_text_fit_icon = *layout.icon_text_fit.uniform() != IconTextFitType::None
             && (bucket.allow_vertical_placement || has_variable_anchors)
             && (has_icon || has_sdf_icon);
         let mut result = false;
         let tile_projector = TileProjector::with_data(state, &tile.id, tile.projection);
-        let screen_space = *layout.get::<SymbolScreenSpace>();
-        let text_translation = translation_point(&tile.id, &data.text_translate, state, screen_space);
-        let icon_translation = translation_point(&tile.id, &data.icon_translate, state, screen_space);
+        let screen_space = &layout.symbol_screen_space;
+        let text_translation = translation_point(&tile.id, &data.text_translate, state, *screen_space.uniform());
+        let icon_translation = translation_point(&tile.id, &data.icon_translate, state, *screen_space.uniform());
         match layer_id {
             None => {
                 bs.dynamic_text_translation = text_translation;
@@ -1659,9 +1657,9 @@ impl Placement {
         // one at another translation keeps its own (`positions_and_symbols`).
 
         if along_line {
-            if *layout.get::<IconRotationAlignment>() == AlignmentType::Map {
-                let pitch_with_map = *layout.get::<IconPitchAlignment>() == AlignmentType::Map;
-                let keep_upright = *layout.get::<IconKeepUpright>();
+            if *layout.icon_rotation_alignment.uniform() == AlignmentType::Map {
+                let pitch_with_map = *layout.icon_pitch_alignment.uniform() == AlignmentType::Map;
+                let keep_upright = &layout.icon_keep_upright;
                 if has_sdf_icon {
                     let (positions, placed_symbols) = bs.sdf_icon.positions_and_symbols(layer_id);
                     reproject_line_labels(
@@ -1670,7 +1668,7 @@ impl Placement {
                         &tile_projector,
                         pitch_with_map,
                         true, /*rotateWithMap*/
-                        keep_upright,
+                        *keep_upright.uniform(),
                         tile,
                         &bucket.icon_size_binder,
                         state,
@@ -1686,7 +1684,7 @@ impl Placement {
                         &tile_projector,
                         pitch_with_map,
                         true, /*rotateWithMap*/
-                        keep_upright,
+                        *keep_upright.uniform(),
                         tile,
                         &bucket.icon_size_binder,
                         state,
@@ -1696,9 +1694,9 @@ impl Placement {
                 }
             }
 
-            if has_text && *layout.get::<TextRotationAlignment>() == AlignmentType::Map {
-                let pitch_with_map = *layout.get::<TextPitchAlignment>() == AlignmentType::Map;
-                let keep_upright = *layout.get::<TextKeepUpright>();
+            if has_text && *layout.text_rotation_alignment.uniform() == AlignmentType::Map {
+                let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
+                let keep_upright = &layout.text_keep_upright;
                 let (positions, placed_symbols) = bs.text.positions_and_symbols(layer_id);
                 reproject_line_labels(
                     positions,
@@ -1706,7 +1704,7 @@ impl Placement {
                     &tile_projector,
                     pitch_with_map,
                     true, /*rotateWithMap*/
-                    keep_upright,
+                    *keep_upright.uniform(),
                     tile,
                     &bucket.text_size_binder,
                     state,
@@ -1719,8 +1717,8 @@ impl Placement {
 
             let partially_evaluated_size = bucket.text_size_binder.evaluate_for_zoom(state.get_zoom() as f32);
             let tile_scale = 2f64.powf(state.get_zoom() - f64::from(tile.get_overscaled_tile_id().overscaled_z)) as f32;
-            let rotate_with_map = *layout.get::<TextRotationAlignment>() == AlignmentType::Map;
-            let pitch_with_map = *layout.get::<TextPitchAlignment>() == AlignmentType::Map;
+            let rotate_with_map = *layout.text_rotation_alignment.uniform() == AlignmentType::Map;
+            let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
             let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.get_zoom() as f32);
             // The shader leaves the translation to us for variable anchors,
             // so the shifted anchor carries it.
@@ -1938,10 +1936,10 @@ impl Placement {
 
         let text_always_overlap = OverlapMode::text(layout) == OverlapMode::Always;
         let icon_always_overlap = OverlapMode::icon(layout) == OverlapMode::Always;
-        let rotate_with_map = *layout.get::<TextRotationAlignment>() == AlignmentType::Map;
-        let pitch_with_map = *layout.get::<TextPitchAlignment>() == AlignmentType::Map;
-        let has_icon_text_fit = *layout.get::<IconTextFit>() != IconTextFitType::None;
-        let screen_space = *layout.get::<SymbolScreenSpace>();
+        let rotate_with_map = *layout.text_rotation_alignment.uniform() == AlignmentType::Map;
+        let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
+        let has_icon_text_fit = *layout.icon_text_fit.uniform() != IconTextFitType::None;
+        let screen_space = &layout.symbol_screen_space;
 
         // If overlap is always, we can show symbols before placement runs on them
         // But we have to wait for placement if we potentially depend on a paired icon/text
@@ -1949,12 +1947,12 @@ impl Placement {
         // See https://github.com/mapbox/mapbox-gl-native/issues/12483
         // Prevent a flickering issue when showing a symbol allowing overlap.
         let default_opacity_state = JointOpacityState::new(
-            (screen_space || bs.just_reloaded)
+            (*screen_space.uniform() || bs.just_reloaded)
                 && text_always_overlap
-                && (icon_always_overlap || !(has_icon || has_sdf_icon) || *layout.get::<IconOptional>()),
-            (screen_space || bs.just_reloaded)
+                && (icon_always_overlap || !(has_icon || has_sdf_icon) || *layout.icon_optional.uniform()),
+            (*screen_space.uniform() || bs.just_reloaded)
                 && icon_always_overlap
-                && (text_always_overlap || !has_text || *layout.get::<TextOptional>()),
+                && (text_always_overlap || !has_text || *layout.text_optional.uniform()),
             true,
         );
 
@@ -2322,7 +2320,7 @@ impl Placement {
         // `TilePlacement::getAvoidEdges`.
         tile.tile_borders = Some(self.collision_index.project_tile_boundaries(pos_matrix));
         let layout = &*bucket.layout;
-        if *layout.get::<SymbolAvoidEdges>() || *layout.get::<SymbolPlacement>() == SymbolPlacementType::Line {
+        if *layout.symbol_avoid_edges.uniform() || *layout.symbol_placement.uniform() == SymbolPlacementType::Line {
             return tile.tile_borders;
         }
         None
@@ -2470,7 +2468,7 @@ impl Placement {
             self.base_place_symbol_bucket(params, seen);
             return;
         }
-        if *layout.get::<SymbolPlacement>() != SymbolPlacementType::Point || *layout.get::<SymbolAvoidEdges>() {
+        if *layout.symbol_placement.uniform() != SymbolPlacementType::Point || *layout.symbol_avoid_edges.uniform() {
             // Collect intersection only for point placement.
             return;
         }

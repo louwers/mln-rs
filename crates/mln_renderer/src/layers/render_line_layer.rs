@@ -16,14 +16,11 @@ use mln_gfx::{
     VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
-use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
+use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::line_layer_impl::Impl as LineLayerImpl;
-use mln_style::layers::line_layer_properties::{
-    LineBlur, LineCap, LineColor, LineDasharray, LineFloorWidth, LineGapWidth, LineGradient, LineLayerProperties,
-    LineOffset, LineOpacity, LinePaintProperties, LinePattern, LineTranslate, LineTranslateAnchor, LineWidth,
-};
+use mln_style::layers::line_layer_properties::{LineLayerProperties, LinePaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::LineCapType;
 use mln_util::Color;
@@ -58,7 +55,7 @@ use crate::update_parameters::UpdateParameters;
 /// bucket, so a `line-cap` that varies by feature gets square dashes, as in
 /// GL JS; each line still gets its own cap at its ends.
 fn dash_pattern_cap(bucket: &LineBucket) -> LinePatternCap {
-    if bucket.layout.get::<LineCap>().constant_or(&LineCapType::Butt) == LineCapType::Round {
+    if bucket.layout.line_cap.constant_or(&LineCapType::Butt) == LineCapType::Round {
         LinePatternCap::Round
     } else {
         LinePatternCap::Square
@@ -105,13 +102,13 @@ fn capture_rendered_features(
     state: &TransformState,
     transform_params: &TransformParameters,
 ) {
-    let alpha = evaluated.get::<LineOpacity>();
+    let alpha = &evaluated.line_opacity;
     let alpha_is_constant = alpha.is_constant();
     if alpha_is_constant && binders.line_opacity.uniform_value(alpha) == 0.0 {
         return;
     }
 
-    let color = evaluated.get::<LineColor>();
+    let color = &evaluated.line_color;
     let color_is_constant = color.is_constant();
     if color_is_constant && binders.line_color.uniform_value(color).a == 0.0 {
         return;
@@ -126,8 +123,8 @@ fn capture_rendered_features(
         tile.get_overscaled_tile_id(),
         state,
         transform_params,
-        *evaluated.get::<LineTranslate>(),
-        *evaluated.get::<LineTranslateAnchor>(),
+        *evaluated.line_translate.uniform(),
+        *evaluated.line_translate_anchor.uniform(),
         |vertex_offset| {
             if !alpha_is_constant {
                 let opacity = binders.line_opacity.get_vertex_value(buffer, vertex_offset);
@@ -168,7 +165,7 @@ fn read_line_attributes(
         buffer,
         shared,
         &["a_color"],
-        evaluated.get::<LineColor>().is_constant(),
+        evaluated.line_color.is_constant(),
         pau,
         &mut id,
     );
@@ -178,7 +175,7 @@ fn read_line_attributes(
         buffer,
         shared,
         &["a_blur"],
-        evaluated.get::<LineBlur>().is_constant(),
+        evaluated.line_blur.is_constant(),
         pau,
         &mut id,
     );
@@ -188,7 +185,7 @@ fn read_line_attributes(
         buffer,
         shared,
         &["a_opacity"],
-        evaluated.get::<LineOpacity>().is_constant(),
+        evaluated.line_opacity.is_constant(),
         pau,
         &mut id,
     );
@@ -198,7 +195,7 @@ fn read_line_attributes(
         buffer,
         shared,
         &["a_gapwidth"],
-        evaluated.get::<LineGapWidth>().is_constant(),
+        evaluated.line_gap_width.is_constant(),
         pau,
         &mut id,
     );
@@ -208,7 +205,7 @@ fn read_line_attributes(
         buffer,
         shared,
         &["a_offset"],
-        evaluated.get::<LineOffset>().is_constant(),
+        evaluated.line_offset.is_constant(),
         pau,
         &mut id,
     );
@@ -218,7 +215,7 @@ fn read_line_attributes(
         buffer,
         shared,
         &["a_width"],
-        evaluated.get::<LineWidth>().is_constant(),
+        evaluated.line_width.is_constant(),
         pau,
         &mut id,
     );
@@ -228,7 +225,7 @@ fn read_line_attributes(
         buffer,
         shared,
         &["a_floorwidth"],
-        evaluated.get::<LineFloorWidth>().is_constant(),
+        evaluated.line_floor_width.is_constant(),
         pau,
         &mut id,
     );
@@ -238,7 +235,7 @@ fn read_line_attributes(
         buffer,
         shared,
         &["a_pattern_to", "a_pattern_from"],
-        evaluated.get::<LinePattern>().is_constant(),
+        evaluated.line_pattern.is_constant(),
         pau,
         &mut id,
     );
@@ -284,7 +281,7 @@ impl RenderLineLayer {
     }
 
     fn update_color_ramp(&mut self) {
-        let color_value = self.unevaluated.get::<LineGradient>().get_value().clone();
+        let color_value = self.unevaluated.line_gradient.get_value().clone();
         let mut image = (*self.color_ramp).clone();
         if !apply_color_ramp(&color_value, &mut image, self.color_ramp_global_state.as_deref()) {
             return;
@@ -310,21 +307,17 @@ impl RenderLineLayer {
         zoom: f32,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> f32 {
-        use mln_style::properties::Property;
-
         let evaluated = get_evaluated::<LineLayerProperties>(&self.base.evaluated_properties);
-        let line_width = evaluated.get::<LineWidth>().evaluate_feature_state(
-            feature,
+        let line_width = evaluated.line_width.evaluate(&EvaluationContext::with_zoom_feature_state(
             zoom,
-            feature_state,
-            LineWidth::default_value(),
-        );
-        let gap_width = evaluated.get::<LineGapWidth>().evaluate_feature_state(
-            feature,
+            Some(feature),
+            Some(feature_state),
+        ));
+        let gap_width = evaluated.line_gap_width.evaluate(&EvaluationContext::with_zoom_feature_state(
             zoom,
-            feature_state,
-            LineGapWidth::default_value(),
-        );
+            Some(feature),
+            Some(feature_state),
+        ));
         if gap_width == 0.0 { line_width } else { gap_width + 2.0 * line_width }
     }
 }
@@ -394,7 +387,7 @@ impl RenderLayer for RenderLineLayer {
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        let ramp_value = self.unevaluated.get::<LineGradient>().get_value();
+        let ramp_value = self.unevaluated.line_gradient.get_value();
         let ramp_affected = parameters.layer_changed
             || (global_state_differs
                 && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
@@ -415,9 +408,9 @@ impl RenderLayer for RenderLineLayer {
         );
         let evaluated = &properties.evaluated;
 
-        self.base.passes = if evaluated.get::<LineOpacity>().constant_or(&1.0) > 0.0
-            && evaluated.get::<LineColor>().constant_or(&Color::black()).a > 0.0
-            && evaluated.get::<LineWidth>().constant_or(&1.0) > 0.0
+        self.base.passes = if evaluated.line_opacity.constant_or(&1.0) > 0.0
+            && evaluated.line_color.constant_or(&Color::black()).a > 0.0
+            && evaluated.line_width.constant_or(&1.0) > 0.0
         {
             RenderPass::Translucent
         } else {
@@ -450,26 +443,23 @@ impl RenderLayer for RenderLineLayer {
         _projector: &mln_map_types::TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
-        use mln_style::properties::Property;
-
         let evaluated = get_evaluated::<LineLayerProperties>(&self.base.evaluated_properties);
         // Translate query geometry
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
-            *evaluated.get::<LineTranslate>(),
-            *evaluated.get::<LineTranslateAnchor>(),
+            *evaluated.line_translate.uniform(),
+            *evaluated.line_translate_anchor.uniform(),
             transform_state.get_bearing() as f32,
             pixels_to_tile_units,
         );
         let query = translated_query_geometry.as_ref().unwrap_or(query_geometry);
 
         // Evaluate function
-        let offset = evaluated.get::<LineOffset>().evaluate_feature_state(
-            feature,
+        let offset = evaluated.line_offset.evaluate(&EvaluationContext::with_zoom_feature_state(
             zoom,
-            feature_state,
-            LineOffset::default_value(),
-        ) * pixels_to_tile_units;
+            Some(feature),
+            Some(feature_state),
+        )) * pixels_to_tile_units;
         // Test intersection
         let half_width = (f64::from(self.get_line_width(feature, zoom, feature_state)) / 2.0
             * f64::from(pixels_to_tile_units)) as f32;
@@ -503,7 +493,7 @@ impl RenderLayer for RenderLineLayer {
             };
 
             let evaluated = get_evaluated::<LineLayerProperties>(&render_data.layer_properties);
-            if evaluated.get::<LineDasharray>().from.is_empty() {
+            if evaluated.line_dasharray.faded().from.is_empty() {
                 continue;
             }
 
@@ -513,8 +503,8 @@ impl RenderLayer for RenderLineLayer {
             let cap = dash_pattern_cap(bucket);
             // Ensures that the dash data gets added to the atlas.
             params.line_atlas.borrow_mut().get_dash_pattern_texture(
-                &evaluated.get::<LineDasharray>().from,
-                &evaluated.get::<LineDasharray>().to,
+                evaluated.line_dasharray.faded().from,
+                evaluated.line_dasharray.faded().to,
                 cap,
             );
         }
@@ -733,8 +723,8 @@ impl RenderLayer for RenderLineLayer {
                 &mut properties_as_uniforms,
             );
 
-            let has_dasharray = !evaluated.get::<LineDasharray>().from.is_empty();
-            let has_gradient = !self.unevaluated.get::<LineGradient>().get_value().is_undefined();
+            let has_dasharray = !evaluated.line_dasharray.faded().from.is_empty();
+            let has_gradient = !self.unevaluated.line_gradient.get_value().is_undefined();
 
             // The ramp texture is shared by every tile of the layer.
             let ensure_color_ramp_texture =
@@ -801,7 +791,7 @@ impl RenderLayer for RenderLineLayer {
                 for drawable in builder.clear_drawables() {
                     add_drawable(drawable, LineType::Sdf);
                 }
-            } else if !self.unevaluated.get::<LinePattern>().is_undefined() {
+            } else if !self.unevaluated.line_pattern.is_undefined() {
                 // pattern line (conformance)
                 if self.line_pattern_shader_group.is_none() {
                     self.line_pattern_shader_group = shaders.shader_group("LinePatternShader");

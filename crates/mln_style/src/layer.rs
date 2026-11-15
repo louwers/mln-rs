@@ -1,14 +1,13 @@
 // C++ `Layer` is an abstract class: the virtual members are the required
 // methods of the `Layer` trait, the non-virtual ones are provided methods.
 //
-// Deviation (structural, no behaviour change): C++ layers hold a
-// `LayerObserver*` (the owning `Style::Impl`) and every setter calls
-// `observer->onLayerChanged(*this)`. A Rust layer cannot point back at the
-// collection that owns it, so `Style::Impl` hands out layers through
-// `LayerRefMut` guards, which run `Style::Impl::onLayerChanged` when the
-// guard is dropped if the layer's `base_impl` changed (every C++ setter that
-// notifies also replaces `baseImpl`). Several setter calls through one guard
-// therefore notify once.
+// A layer cannot point back at the style that owns it, so `Style::Impl` hands
+// out layers through `LayerRefMut` guards, which run
+// `Style::Impl::on_layer_changed` when the guard is dropped if the layer's
+// `base_impl` changed. A change copies the impl when it is shared, as it is
+// while the guard holds the impl from before, and leaves it alone when the
+// value doesn't change. Several changes through one guard therefore notify
+// once.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -308,22 +307,6 @@ pub(crate) fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
     Value::Object(result)
 }
 
-pub(crate) fn serialize_property(out: &mut Value, property: &StyleProperty, property_name: &str, is_paint: bool) {
-    let Value::Object(object) = out else {
-        debug_assert!(false, "serialize_property: not an object");
-        return;
-    };
-    let property_type = if is_paint { "paint" } else { "layout" };
-    if let Some(Value::Object(existing)) = object.get_mut(property_type) {
-        // emplace: does not overwrite an existing key.
-        existing.entry(property_name.to_owned()).or_insert_with(|| property.get_value().clone());
-    } else {
-        let mut inner = ValueObject::new();
-        inner.insert(property_name.to_owned(), property.get_value().clone());
-        object.insert(property_type.to_owned(), Value::Object(inner));
-    }
-}
-
 pub(crate) fn set_property_base(
     layer: &mut (impl Layer + ?Sized),
     name: &str,
@@ -426,3 +409,76 @@ impl std::fmt::Debug for dyn Layer {
         f.debug_struct("Layer").field("id", &base.id).field("type", &base.get_type_info().type_).finish_non_exhaustive()
     }
 }
+
+/// Declares the layer struct `$name` over the `Impl` in scope, whose
+/// properties implement [`Properties`](crate::property_table::Properties),
+/// and implements [`Layer`] for it through the property table.
+macro_rules! layer_type {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[derive(Debug)]
+        pub struct $name {
+            base_impl: ::std::sync::Arc<Impl>,
+        }
+
+        impl $name {
+            #[must_use]
+            pub fn from_impl(impl_: ::std::sync::Arc<Impl>) -> Self {
+                $name { base_impl: impl_ }
+            }
+
+            #[must_use]
+            pub fn impl_(&self) -> &Impl {
+                &self.base_impl
+            }
+        }
+
+        impl $crate::layer::Layer for $name {
+            fn base_impl(&self) -> ::std::sync::Arc<dyn $crate::layer::Impl> {
+                ::std::sync::Arc::<Impl>::clone(&self.base_impl)
+            }
+
+            fn base_impl_ref(&self) -> &dyn $crate::layer::Impl {
+                &*self.base_impl
+            }
+
+            fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut $crate::layer::ImplBase)) {
+                f(&mut ::std::sync::Arc::make_mut(&mut self.base_impl).base);
+            }
+
+            fn get_property(&self, name: &str) -> $crate::style_property::StyleProperty {
+                $crate::property_table::get_property(&*self.base_impl, name)
+            }
+
+            fn serialize(&self) -> ::feature::Value {
+                let mut result = $crate::layer::serialize_base(self);
+                if let ::feature::Value::Object(object) = &mut result {
+                    $crate::property_table::serialize_properties(&*self.base_impl, object);
+                }
+                result
+            }
+
+            fn clone_ref(&self, id: &str) -> Box<dyn $crate::layer::Layer> {
+                let mut impl_ = (*self.base_impl).clone();
+                impl_.base.id = id.to_owned();
+                impl_.paint = Default::default();
+                Box::new($name::from_impl(::std::sync::Arc::new(impl_)))
+            }
+
+            fn set_property_internal(
+                &mut self,
+                name: &str,
+                value: &::mln_conversion::Convertible<'_>,
+            ) -> Option<::mln_conversion::Error> {
+                match $crate::property_table::set_property(&mut self.base_impl, name, value) {
+                    Ok(()) => None,
+                    Err($crate::property_table::SetPropertyError::Invalid(error)) => Some(error),
+                    Err($crate::property_table::SetPropertyError::Unknown) => Some(::mln_conversion::Error::new(
+                        format!("layer '{}' doesn't support property '{}'", self.get_id(), name),
+                    )),
+                }
+            }
+        }
+    };
+}
+pub(crate) use layer_type;

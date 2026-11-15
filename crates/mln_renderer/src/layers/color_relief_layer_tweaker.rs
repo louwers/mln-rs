@@ -8,7 +8,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_TILE_PROPS_UBO,
 };
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefOpacity};
+use mln_style::layers::color_relief_layer_properties::ColorReliefLayerProperties;
 
 use super::cast_matrix;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
@@ -61,7 +61,7 @@ impl LayerTweaker for ColorReliefLayerTweaker {
 
         // Update evaluated properties UBO
         let evaluated_props_ubo = ColorReliefEvaluatedPropsUBO {
-            opacity: *evaluated.get::<ColorReliefOpacity>(),
+            opacity: *evaluated.color_relief_opacity.uniform(),
             pad_eval0: 0.0,
             pad_eval1: 0.0,
             pad_eval2: 0.0,

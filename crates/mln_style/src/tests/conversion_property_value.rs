@@ -4,6 +4,7 @@ use mln_style_types::{SymbolAnchorType, VariableAnchorOffsetCollection};
 
 use super::util::{StubGeometryTileFeature, parse_json, property_map};
 use crate::conversion::convert_property_value;
+use crate::expression::EvaluationContext;
 
 // gtest: StyleConversion.PropertyValue
 #[test]
@@ -28,7 +29,10 @@ fn semiliteral_offsets() {
     let result = result.unwrap_or_else(|| panic!("{}", error.message));
     assert!(result.is_expression());
     let feature = StubGeometryTileFeature::new(property_map(&[("x", Value::Double(3.0)), ("y", Value::Double(4.0))]));
-    assert_eq!(result.as_expression().evaluate_feature(&feature, [0.0, 0.0]), [3.0_f32, 8.0]);
+    assert_eq!(
+        result.as_expression().evaluate(&EvaluationContext::from_feature(Some(&feature)), [0.0, 0.0]),
+        [3.0_f32, 8.0]
+    );
 
     let doc = parse_json(
         r#"["semiliteral", ["top", ["semiliteral", [["number", ["get", "x"]], 2]], "bottom", ["literal", [0, 1]]]]"#,
@@ -37,7 +41,9 @@ fn semiliteral_offsets() {
         convert_property_value::<VariableAnchorOffsetCollection>(&Convertible::from(&doc), &mut error, true, false);
     let anchors = anchors.unwrap_or_else(|| panic!("{}", error.message));
     assert!(anchors.is_expression());
-    let evaluated = anchors.as_expression().evaluate_feature(&feature, VariableAnchorOffsetCollection::default());
+    let evaluated = anchors
+        .as_expression()
+        .evaluate(&EvaluationContext::from_feature(Some(&feature)), VariableAnchorOffsetCollection::default());
     assert_eq!(evaluated.len(), 2);
     assert_eq!(evaluated[0].anchor_type, SymbolAnchorType::Top);
     assert_eq!(evaluated[0].offset, [3.0_f32, 2.0]);

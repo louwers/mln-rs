@@ -5,9 +5,7 @@
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, TransformState};
-use mln_style::layers::symbol_layer_properties::{
-    IconAllowOverlap, IconOverlap, SymbolLayoutProperties, TextAllowOverlap, TextOverlap,
-};
+use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::IconOverlapType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
@@ -59,13 +57,13 @@ impl OverlapMode {
     /// The mode of a symbol layer's text: its `text-overlap`, or its
     /// `text-allow-overlap` when `text-overlap` isn't set.
     pub(crate) fn text(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> Self {
-        Self::new(*layout.get::<TextOverlap>(), *layout.get::<TextAllowOverlap>())
+        Self::new(*layout.text_overlap.uniform(), *layout.text_allow_overlap.uniform())
     }
 
     /// The mode of a symbol layer's icon: its `icon-overlap`, or its
     /// `icon-allow-overlap` when `icon-overlap` isn't set.
     pub(crate) fn icon(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> Self {
-        Self::new(*layout.get::<IconOverlap>(), *layout.get::<IconAllowOverlap>())
+        Self::new(*layout.icon_overlap.uniform(), *layout.icon_allow_overlap.uniform())
     }
 
     fn new(overlap: IconOverlapType, allow_overlap: bool) -> Self {

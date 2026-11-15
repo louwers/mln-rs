@@ -4,11 +4,7 @@ use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedProps
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::circle_layer_properties::{
-    CircleBlur, CircleColor, CircleLayerProperties, CircleOpacity, CirclePitchAlignment, CirclePitchScale,
-    CircleRadius, CircleStrokeColor, CircleStrokeOpacity, CircleStrokeWidth, CircleTranslate, CircleTranslateAnchor,
-};
-use mln_style::properties::Property;
+use mln_style::layers::circle_layer_properties::CircleLayerProperties;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 
 use super::{cast_matrix, check_tweak_drawable_ptr, slot_bucket};
@@ -38,12 +34,6 @@ impl CircleLayerTweaker {
 
 /// The constant value of paint property `$p`, or its default if it isn't
 /// constant.
-macro_rules! const_or_default {
-    ($evaluated:expr, $p:ty) => {
-        $evaluated.get::<$p>().constant_or(&<$p>::default_value())
-    };
-}
-
 impl LayerTweaker for CircleLayerTweaker {
     fn base(&self) -> &LayerTweakerBase {
         &self.base
@@ -63,19 +53,19 @@ impl LayerTweaker for CircleLayerTweaker {
         let evaluated = get_evaluated::<CircleLayerProperties>(&properties);
 
         let zoom = parameters.state.get_zoom() as f32;
-        let pitch_with_map = *evaluated.get::<CirclePitchAlignment>() == AlignmentType::Map;
-        let scale_with_map = *evaluated.get::<CirclePitchScale>() == CirclePitchScaleType::Map;
+        let pitch_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
+        let scale_with_map = *evaluated.circle_pitch_scale.uniform() == CirclePitchScaleType::Map;
 
         // Updated only with evaluated properties
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             let evaluated_props_ubo = CircleEvaluatedPropsUBO {
-                color: const_or_default!(evaluated, CircleColor).to_float_array(),
-                stroke_color: const_or_default!(evaluated, CircleStrokeColor).to_float_array(),
-                radius: const_or_default!(evaluated, CircleRadius),
-                blur: const_or_default!(evaluated, CircleBlur),
-                opacity: const_or_default!(evaluated, CircleOpacity),
-                stroke_width: const_or_default!(evaluated, CircleStrokeWidth),
-                stroke_opacity: const_or_default!(evaluated, CircleStrokeOpacity),
+                color: evaluated.circle_color.uniform().to_float_array(),
+                stroke_color: evaluated.circle_stroke_color.uniform().to_float_array(),
+                radius: *evaluated.circle_radius.uniform(),
+                blur: *evaluated.circle_blur.uniform(),
+                opacity: *evaluated.circle_opacity.uniform(),
+                stroke_width: *evaluated.circle_stroke_width.uniform(),
+                stroke_opacity: *evaluated.circle_stroke_opacity.uniform(),
                 scale_with_map: i32::from(scale_with_map),
                 pitch_with_map: i32::from(pitch_with_map),
                 pad1: 0.0,
@@ -120,13 +110,13 @@ impl LayerTweaker for CircleLayerTweaker {
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
 
-            let translation = evaluated.get::<CircleTranslate>();
-            let anchor = *evaluated.get::<CircleTranslateAnchor>();
+            let translation = evaluated.circle_translate.uniform();
+            let anchor = &evaluated.circle_translate_anchor;
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
                 *translation,
-                anchor,
+                *anchor.uniform(),
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
                 drawable,

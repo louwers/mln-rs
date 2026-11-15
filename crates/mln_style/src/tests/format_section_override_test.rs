@@ -20,14 +20,13 @@ use mln_util::Color;
 use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
 
+use crate::evaluated::Evaluated;
 use crate::format_section_override::{format_section_override as new_override, set_overrides};
 use crate::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides as MockOverrides;
-use crate::layers::symbol_layer_properties::{TextColor, TextField};
 use crate::layers::{SymbolLayoutProperties, SymbolPaintProperties};
 use crate::properties::{Transitionable, Transitioning};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
-use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 use crate::transition_options::TransitionOptions;
 
 /// `test/include/mln/test/stub_geometry_tile_feature.hpp` (the property-map
@@ -56,7 +55,12 @@ impl GeometryTileFeature for StubGeometryTileFeature {
     }
 }
 
-fn create_override(prop_value: PossiblyEvaluatedPropertyValue<Color>, prop_name: &str) -> Arc<Expr> {
+/// A value that differs by feature, with the type's default.
+fn per_feature<T: Default>(expression: PropertyExpression<T>) -> Evaluated<T> {
+    Evaluated::PerFeature { expression, default: T::default() }
+}
+
+fn create_override(prop_value: Evaluated<Color>, prop_name: &str) -> Arc<Expr> {
     Arc::new(new_override(prop_value, prop_name.to_owned()))
 }
 
@@ -78,21 +82,25 @@ fn format_section_override() {
 
     let formatted_section = Value::Object(ObjectType::from([("text-color".to_owned(), Value::Color(Color::blue()))]));
     let ctx = EvaluationContext::from_feature(Some(&one_double)).with_formatted_section(Some(&formatted_section));
-    let constant_value_red = PossiblyEvaluatedPropertyValue::Constant(Color::red());
-    let constant_value_green = PossiblyEvaluatedPropertyValue::Constant(Color::green());
-    let dds_value_red = PossiblyEvaluatedPropertyValue::Expression(PropertyExpression::<Color>::from_expr(
-        to_color(string(get_str("color"), None), None),
-        None,
-    ));
+    let constant_value_red = Evaluated::Constant(Color::red());
+    let constant_value_green = Evaluated::Constant(Color::green());
+    let dds_value_red =
+        per_feature(PropertyExpression::<Color>::from_expr(to_color(string(get_str("color"), None), None), None));
 
-    assert_eq!(Dependency::FEATURE, dds_value_red.get_dependencies());
+    assert_eq!(Dependency::FEATURE, dds_value_red.dependencies());
 
     // Evaluation test
     {
         let override1 = create_override(constant_value_green.clone(), "text-color");
         let prop_expr = PropertyExpression::<Color>::new(override1, None);
-        assert_eq!(Color::green(), prop_expr.evaluate_zoom_feature(15.0, &one_double, Color::default()));
-        assert_eq!(Color::green(), prop_expr.evaluate_feature(&one_double, Color::default()));
+        assert_eq!(
+            Color::green(),
+            prop_expr.evaluate(&EvaluationContext::with_zoom_feature(15.0, Some(&one_double)), Color::default())
+        );
+        assert_eq!(
+            Color::green(),
+            prop_expr.evaluate(&EvaluationContext::from_feature(Some(&one_double)), Color::default())
+        );
         assert_eq!(Color::blue(), prop_expr.evaluate(&ctx, Color::default()));
 
         // Override implies a feature dependency (See `::isFeatureConstant`)
@@ -100,7 +108,10 @@ fn format_section_override() {
 
         let override2 = create_override(dds_value_red.clone(), "text-color");
         let prop_expr_dds = PropertyExpression::<Color>::new(override2, None);
-        assert_eq!(Color::red(), prop_expr_dds.evaluate_feature(&one_color, Color::default()));
+        assert_eq!(
+            Color::red(),
+            prop_expr_dds.evaluate(&EvaluationContext::from_feature(Some(&one_color)), Color::default())
+        );
         assert_eq!(Color::blue(), prop_expr_dds.evaluate(&ctx, Color::default()));
     }
 
@@ -126,7 +137,7 @@ fn format_section_override_uses_captured_state() {
         Arc::new(GlobalStateMap::from([("labelColor".to_owned(), MbglValue::String("red".to_owned()))]));
     property_expression.capture_global_state(Some(state));
 
-    let default_value = PossiblyEvaluatedPropertyValue::Expression(property_expression);
+    let default_value = per_feature(property_expression);
     let override_expression = new_override(default_value, "text-color".to_owned());
 
     // Evaluating without a formatted section and without global state in the
@@ -211,9 +222,10 @@ impl FormattedCase {
 /// the port's `set_overrides` takes: only its text-field is read, through
 /// `hasOverrides`, which gives the same answer for both.
 fn unevaluated_layout_with_text_field(formatted: Formatted) -> SymbolLayoutProperties::Unevaluated {
-    let mut layout = SymbolLayoutProperties::Unevaluated::default();
-    *layout.get_mut::<TextField>() = PropertyValue::Constant(formatted);
-    layout
+    SymbolLayoutProperties::Unevaluated {
+        text_field: PropertyValue::Constant(formatted),
+        ..SymbolLayoutProperties::Unevaluated::default()
+    }
 }
 
 // gtest: Layer.SymbolLayerOverrides
@@ -235,19 +247,19 @@ fn symbol_layer_overrides() {
                     .or_else(|| case.expression().map(PropertyValue::Expression))
                     .unwrap(),
             };
-            *layout.get_mut::<TextField>() = value;
-            assert_eq!(case.has_override(), MockOverrides::has_overrides(layout.get::<TextField>()), "{case:?}");
+            layout.text_field = value;
+            assert_eq!(case.has_override(), MockOverrides::has_overrides(&layout.text_field), "{case:?}");
         }
 
         let mut current = SymbolPaintProperties::Transitionable::default();
         let mut updated = SymbolPaintProperties::Transitionable::default();
-        *current.get_mut::<TextColor>() =
+        current.text_color =
             Transitionable { value: PropertyValue::Constant(Color::green()), options: TransitionOptions::default() };
-        *updated.get_mut::<TextColor>() =
+        updated.text_color =
             Transitionable { value: PropertyValue::Constant(Color::green()), options: TransitionOptions::default() };
         assert!(!MockOverrides::has_paint_property_difference(&current, &updated));
 
-        *current.get_mut::<TextColor>() =
+        current.text_color =
             Transitionable { value: PropertyValue::Constant(Color::red()), options: TransitionOptions::default() };
         assert!(MockOverrides::has_paint_property_difference(&current, &updated));
     }
@@ -256,46 +268,46 @@ fn symbol_layer_overrides() {
     {
         let mut layout = SymbolLayoutProperties::PossiblyEvaluated::default();
         let mut paint = SymbolPaintProperties::PossiblyEvaluated::default();
-        // testHasOverrides<PossiblyEvaluatedPropertyValue>(layout); C++'s
-        // `PossiblyEvaluatedPropertyValue<Formatted>()` is a default-constructed
+        // testHasOverrides<Evaluated>(layout); C++'s
+        // `Evaluated<Formatted>()` is a default-constructed
         // (empty) constant, so its "Undefined" step has no override.
         for case in FORMATTED_CASES {
             let value = match case {
-                FormattedCase::Undefined => PossiblyEvaluatedPropertyValue::default(),
-                _ => case
-                    .constant()
-                    .map(PossiblyEvaluatedPropertyValue::Constant)
-                    .or_else(|| case.expression().map(PossiblyEvaluatedPropertyValue::Expression))
-                    .unwrap(),
+                FormattedCase::Undefined => Evaluated::default(),
+                _ => case.constant().map(Evaluated::Constant).or_else(|| case.expression().map(per_feature)).unwrap(),
             };
-            *layout.get_mut::<TextField>() = value;
-            assert_eq!(case.has_override(), MockOverrides::has_overrides(layout.get::<TextField>()), "{case:?}");
+            layout.text_field = value;
+            assert_eq!(case.has_override(), MockOverrides::has_overrides(&layout.text_field), "{case:?}");
         }
 
         // Constant, overridden text-color.
-        *layout.get_mut::<TextField>() = PossiblyEvaluatedPropertyValue::Constant(overridden_formatted());
-        *paint.get_mut::<TextColor>() = PossiblyEvaluatedPropertyValue::Constant(Color::red());
-        assert!(paint.get::<TextColor>().is_constant());
+        layout.text_field = Evaluated::Constant(overridden_formatted());
+        paint.text_color = Evaluated::Constant(Color::red());
+        assert!(paint.text_color.is_constant());
         set_overrides(
             &unevaluated_layout_with_text_field(overridden_formatted()),
             &mut paint,
             &SymbolPaintProperties::Unevaluated::default(),
             &None,
         );
-        assert!(!paint.get::<TextColor>().is_constant());
+        assert!(!paint.text_color.is_constant());
 
-        let mut updated = SymbolPaintProperties::PossiblyEvaluated::default();
-        *updated.get_mut::<TextColor>() = PossiblyEvaluatedPropertyValue::Constant(Color::red());
+        let mut updated = SymbolPaintProperties::PossiblyEvaluated {
+            text_color: Evaluated::Constant(Color::red()),
+            ..SymbolPaintProperties::PossiblyEvaluated::default()
+        };
         MockOverrides::update_overrides(&paint, &mut updated);
-        assert!(!updated.get::<TextColor>().is_constant());
+        assert!(!updated.text_color.is_constant());
     }
 
     // A text-color folded to a constant from a global-state-only expression
     // keeps the dependency, its keys, and the state through the override
     // wrapper.
     {
-        let mut paint = SymbolPaintProperties::PossiblyEvaluated::default();
-        *paint.get_mut::<TextColor>() = PossiblyEvaluatedPropertyValue::Constant(Color::red());
+        let mut paint = SymbolPaintProperties::PossiblyEvaluated {
+            text_color: Evaluated::Constant(Color::red()),
+            ..SymbolPaintProperties::PossiblyEvaluated::default()
+        };
 
         let mut ctx = ParsingContext::new();
         let state_expression = mln_expression::compound_expression::create_compound_expression(
@@ -304,10 +316,13 @@ fn symbol_layer_overrides() {
             &mut ctx,
         );
         let state_expression = state_expression.expect("global-state");
-        let mut unevaluated = SymbolPaintProperties::Unevaluated::default();
-        *unevaluated.get_mut::<TextColor>() = Transitioning::new(PropertyValue::Expression(
-            PropertyExpression::<Color>::from_expr(to_color(state_expression, None), None),
-        ));
+        let unevaluated = SymbolPaintProperties::Unevaluated {
+            text_color: Transitioning::new(PropertyValue::Expression(PropertyExpression::<Color>::from_expr(
+                to_color(state_expression, None),
+                None,
+            ))),
+            ..SymbolPaintProperties::Unevaluated::default()
+        };
 
         let state: Arc<GlobalStateMap> =
             Arc::new(GlobalStateMap::from([("labelColor".to_owned(), MbglValue::String("red".to_owned()))]));
@@ -318,18 +333,19 @@ fn symbol_layer_overrides() {
             &Some(state),
         );
 
-        let wrapped = paint.get::<TextColor>();
+        let wrapped = &paint.text_color;
         assert!(!wrapped.is_constant());
-        assert!(wrapped.get_dependencies().intersects(Dependency::GLOBAL_STATE));
-        assert_eq!(Some(&VecSet::from(["labelColor".to_owned()])), wrapped.get_global_state_refs());
+        assert!(wrapped.dependencies().intersects(Dependency::GLOBAL_STATE));
+        assert_eq!(Some(&VecSet::from(["labelColor".to_owned()])), wrapped.global_state_refs());
 
         // A section without an override evaluates from the captured state.
         let feature = StubGeometryTileFeature::new(&[]);
         let evaluated = match wrapped {
-            PossiblyEvaluatedPropertyValue::Expression(f) => {
+            Evaluated::PerFeature { expression: f, .. } => {
                 f.evaluate(&EvaluationContext::with_zoom_feature(0.0, Some(&feature)), Color::black())
             }
-            PossiblyEvaluatedPropertyValue::Constant(constant) => *constant,
+            Evaluated::Constant(constant) => *constant,
+            Evaluated::CrossFaded(faded) => faded.to,
         };
         assert_eq!(Color::parse("red").unwrap(), evaluated);
     }

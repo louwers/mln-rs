@@ -31,9 +31,7 @@ use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
-use mln_style::layers::hillshade_layer_properties::{
-    HillshadeExaggeration, HillshadeLayerProperties, HillshadePaintProperties, Resampling,
-};
+use mln_style::layers::hillshade_layer_properties::{HillshadeLayerProperties, HillshadePaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::ResamplingType;
 use mln_util::constants;
@@ -184,7 +182,7 @@ impl RenderLayer for RenderHillshadeLayer {
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.get::<HillshadeExaggeration>() > 0.0 {
+        self.base.passes = if *properties.evaluated.hillshade_exaggeration.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
             RenderPass::None
@@ -322,7 +320,7 @@ impl RenderLayer for RenderHillshadeLayer {
         // `resampling` filters the prepared texture the tile drawable
         // samples; the prepare pass reads the DEM with Nearest regardless.
         let evaluated = get_evaluated::<HillshadeLayerProperties>(&self.base.evaluated_properties);
-        let resampling_filter = match *evaluated.get::<Resampling>() {
+        let resampling_filter = match *evaluated.resampling.uniform() {
             ResamplingType::Linear => TextureFilterType::Linear,
             ResamplingType::Nearest => TextureFilterType::Nearest,
         };

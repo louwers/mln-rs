@@ -14,17 +14,16 @@ use std::sync::{Arc, OnceLock};
 
 use glam::Vec2;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_style::expression::EvaluationContext;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{
-    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOpacity, IconSize, SymbolLayerProperties,
-    SymbolLayoutProperties, SymbolPaintProperties, TextColor, TextField, TextHaloBlur, TextHaloColor, TextHaloWidth,
-    TextOpacity, TextSize, TextVariableAnchor, TextVariableAnchorOffset,
+    SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties,
 };
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
+use mln_style_types::TextWritingModeType;
 use mln_style_types::image::ImagePositions;
-use mln_style_types::{TextWritingModeType, VariableAnchorOffsetCollection};
 use mln_text::glyph::WritingModeType;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature, GeometryTileLayer};
 use mln_util::Color;
@@ -42,21 +41,21 @@ use crate::paint_property_binder::PaintPropertyBinder;
 
 crate::paint_property_binders!(
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
-        icon_opacity: IconOpacity => PaintPropertyBinder<f32>,
-        icon_color: IconColor => PaintPropertyBinder<Color>,
-        icon_halo_color: IconHaloColor => PaintPropertyBinder<Color>,
-        icon_halo_width: IconHaloWidth => PaintPropertyBinder<f32>,
-        icon_halo_blur: IconHaloBlur => PaintPropertyBinder<f32>,
+        icon_opacity => PaintPropertyBinder<f32>,
+        icon_color => PaintPropertyBinder<Color>,
+        icon_halo_color => PaintPropertyBinder<Color>,
+        icon_halo_width => PaintPropertyBinder<f32>,
+        icon_halo_blur => PaintPropertyBinder<f32>,
     }
 );
 
 crate::paint_property_binders!(
     pub struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
-        text_opacity: TextOpacity => PaintPropertyBinder<f32>,
-        text_color: TextColor => PaintPropertyBinder<Color>,
-        text_halo_color: TextHaloColor => PaintPropertyBinder<Color>,
-        text_halo_width: TextHaloWidth => PaintPropertyBinder<f32>,
-        text_halo_blur: TextHaloBlur => PaintPropertyBinder<f32>,
+        text_opacity => PaintPropertyBinder<f32>,
+        text_color => PaintPropertyBinder<Color>,
+        text_halo_color => PaintPropertyBinder<Color>,
+        text_halo_width => PaintPropertyBinder<f32>,
+        text_halo_blur => PaintPropertyBinder<f32>,
     }
 );
 
@@ -160,7 +159,7 @@ impl SymbolSizeBinder {
         }
         let expression = size_property.as_expression().clone();
         if expression.is_feature_constant() {
-            let layout_size = expression.evaluate_zoom(tile_zoom + 1.0);
+            let layout_size = expression.evaluate(&EvaluationContext::new(tile_zoom + 1.0), 0.0);
             // A feature-constant expression without a zoom dependency (e.g.
             // one that only depends on the global state) has no zoom curve.
             let covering_ranges = if expression.is_zoom_constant() {
@@ -170,8 +169,8 @@ impl SymbolSizeBinder {
                 Some((
                     zoom_levels,
                     Range {
-                        min: expression.evaluate_zoom(zoom_levels.min),
-                        max: expression.evaluate_zoom(zoom_levels.max),
+                        min: expression.evaluate(&EvaluationContext::new(zoom_levels.min), 0.0),
+                        max: expression.evaluate(&EvaluationContext::new(zoom_levels.max), 0.0),
                     },
                 ))
             };
@@ -193,12 +192,18 @@ impl SymbolSizeBinder {
         match self {
             SymbolSizeBinder::Constant { .. } => Range { min: 0.0, max: 0.0 },
             SymbolSizeBinder::SourceFunction { expression, default_value } => {
-                let size = expression.evaluate_feature(feature, *default_value);
+                let size = expression.evaluate(&EvaluationContext::from_feature(Some(feature)), *default_value);
                 Range { min: size, max: size }
             }
             SymbolSizeBinder::CompositeFunction { expression, default_value, covering_zoom_stops, .. } => Range {
-                min: expression.evaluate_zoom_feature(covering_zoom_stops.min, feature, *default_value),
-                max: expression.evaluate_zoom_feature(covering_zoom_stops.max, feature, *default_value),
+                min: expression.evaluate(
+                    &EvaluationContext::with_zoom_feature(covering_zoom_stops.min, Some(feature)),
+                    *default_value,
+                ),
+                max: expression.evaluate(
+                    &EvaluationContext::with_zoom_feature(covering_zoom_stops.max, Some(feature)),
+                    *default_value,
+                ),
             },
         }
     }
@@ -221,7 +226,7 @@ impl SymbolSizeBinder {
                     let t = mln_math::clamp_f32(expression.interpolation_factor(*zoom_levels, current_zoom), 0.0, 1.0);
                     size = size_levels.min + t * (size_levels.max - size_levels.min);
                 } else if let Some(expression) = expression {
-                    size = expression.evaluate_zoom(current_zoom);
+                    size = expression.evaluate(&EvaluationContext::new(current_zoom), 0.0);
                 }
                 ZoomEvaluatedSize {
                     is_zoom_constant,
@@ -546,8 +551,8 @@ impl SymbolBucket {
             icons_in_text,
             sort_key_ranges,
             paint_properties: binders,
-            text_size_binder: SymbolSizeBinder::create(zoom, text_size, TextSize::default_value_f32()),
-            icon_size_binder: SymbolSizeBinder::create(zoom, icon_size, IconSize::default_value_f32()),
+            text_size_binder: SymbolSizeBinder::create(zoom, text_size, SymbolLayoutProperties::Defaults::text_size()),
+            icon_size_binder: SymbolSizeBinder::create(zoom, icon_size, SymbolLayoutProperties::Defaults::icon_size()),
             tile_pixel_ratio,
             bucket_instance_id: next_bucket_instance_id(),
             allow_vertical_placement,
@@ -601,18 +606,14 @@ impl SymbolBucket {
     pub(crate) fn has_format_section_overrides(&self) -> bool {
         *self
             .has_format_section_overrides
-            .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(self.layout.get::<TextField>()))
+            .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field))
     }
 
     pub(crate) fn has_variable_text_anchors(&self) -> bool {
-        let tvao = self.layout.get::<TextVariableAnchorOffset>();
-        let has_text_variable_anchor_offset = if tvao.is_constant() {
-            tvao.constant().is_some_and(|c: VariableAnchorOffsetCollection| !c.is_empty())
-        } else {
-            // C++ `isExpression()`: a PossiblyEvaluatedPropertyValue is either.
-            true
-        };
-        has_text_variable_anchor_offset || !self.layout.get::<TextVariableAnchor>().is_empty()
+        // A value that differs by feature may have offsets for some.
+        let has_text_variable_anchor_offset =
+            self.layout.text_variable_anchor_offset.constant().is_none_or(|offsets| !offsets.is_empty());
+        has_text_variable_anchor_offset || !self.layout.text_variable_anchor.uniform().is_empty()
     }
 
     pub(crate) fn sort_features(&self, angle: f32) {
@@ -843,23 +844,6 @@ impl Bucket for SymbolBucket {
             self.binder_version.fetch_add(1, Ordering::SeqCst);
             self.bump_version();
         }
-    }
-}
-
-/// The default `text-size` or `icon-size`, as `f32`.
-trait DefaultValueF32 {
-    fn default_value_f32() -> f32;
-}
-
-impl DefaultValueF32 for TextSize {
-    fn default_value_f32() -> f32 {
-        <TextSize as mln_style::properties::Property>::default_value()
-    }
-}
-
-impl DefaultValueF32 for IconSize {
-    fn default_value_f32() -> f32 {
-        <IconSize as mln_style::properties::Property>::default_value()
     }
 }
 

@@ -53,6 +53,31 @@ fn parse_filter(expression: &str) -> Filter {
     convert::<Filter>(&Convertible::from(&json), &mut error).expect("filter")
 }
 
+/// Sets the property `name` of `layer` from style JSON.
+fn set(layer: &mut dyn Layer, name: &str, json: &str) {
+    let value = parse_json(json);
+    let error = layer.set_property(name, &Convertible::from(&value), None);
+    assert!(error.is_none(), "{name}: {error:?}");
+}
+
+/// Sets a paint property from JSON and checks the value it holds.
+macro_rules! paint {
+    ($layer:ident, $field:ident, $name:literal, $json:expr, $expected:expr) => {
+        set(&mut $layer, $name, $json);
+        assert_eq!($layer.impl_().paint.$field.value, $expected, $name);
+    };
+}
+
+/// Sets a layout property from JSON and checks the value it holds.
+macro_rules! layout {
+    ($layer:ident, $field:ident, $name:literal, $json:expr, $expected:expr) => {
+        set(&mut $layer, $name, $json);
+        assert_eq!($layer.impl_().layout.$field, $expected, $name);
+    };
+}
+
+const RED: &str = r##""#ff0000""##;
+
 // gtest: Layer.BackgroundProperties
 #[test]
 fn background_properties() {
@@ -61,14 +86,9 @@ fn background_properties() {
 
     // Paint properties
 
-    layer.set_background_color(&c(color()));
-    assert_eq!(*layer.get_background_color(), c(color()));
-
-    layer.set_background_opacity(&c(OPACITY));
-    assert_eq!(*layer.get_background_opacity(), c(OPACITY));
-
-    layer.set_background_pattern(&pattern());
-    assert_eq!(*layer.get_background_pattern(), pattern());
+    paint!(layer, background_color, "background-color", RED, c(color()));
+    paint!(layer, background_opacity, "background-opacity", "1", c(OPACITY));
+    paint!(layer, background_pattern, "background-pattern", r#""foo""#, pattern());
 }
 
 // gtest: Layer.CircleProperties
@@ -79,23 +99,12 @@ fn circle_properties() {
 
     // Paint properties
 
-    layer.set_circle_color(&c(color()));
-    assert_eq!(*layer.get_circle_color(), c(color()));
-
-    layer.set_circle_opacity(&c(OPACITY));
-    assert_eq!(*layer.get_circle_opacity(), c(OPACITY));
-
-    layer.set_circle_radius(&c(RADIUS));
-    assert_eq!(*layer.get_circle_radius(), c(RADIUS));
-
-    layer.set_circle_blur(&c(BLUR));
-    assert_eq!(*layer.get_circle_blur(), c(BLUR));
-
-    layer.set_circle_translate(&c(TRANSLATE));
-    assert_eq!(*layer.get_circle_translate(), c(TRANSLATE));
-
-    layer.set_circle_translate_anchor(&c(TRANSLATE_ANCHOR));
-    assert_eq!(*layer.get_circle_translate_anchor(), c(TRANSLATE_ANCHOR));
+    paint!(layer, circle_color, "circle-color", RED, c(color()));
+    paint!(layer, circle_opacity, "circle-opacity", "1", c(OPACITY));
+    paint!(layer, circle_radius, "circle-radius", "1", c(RADIUS));
+    paint!(layer, circle_blur, "circle-blur", "1", c(BLUR));
+    paint!(layer, circle_translate, "circle-translate", "[0, 0]", c(TRANSLATE));
+    paint!(layer, circle_translate_anchor, "circle-translate-anchor", r#""map""#, c(TRANSLATE_ANCHOR));
 }
 
 // gtest: Layer.FillProperties
@@ -106,26 +115,13 @@ fn fill_properties() {
 
     // Paint properties
 
-    layer.set_fill_color(&c(color()));
-    assert_eq!(*layer.get_fill_color(), c(color()));
-
-    layer.set_fill_outline_color(&c(color()));
-    assert_eq!(*layer.get_fill_outline_color(), c(color()));
-
-    layer.set_fill_opacity(&c(OPACITY));
-    assert_eq!(*layer.get_fill_opacity(), c(OPACITY));
-
-    layer.set_fill_pattern(&pattern());
-    assert_eq!(*layer.get_fill_pattern(), pattern());
-
-    layer.set_fill_antialias(&c(ANTIALIAS));
-    assert_eq!(*layer.get_fill_antialias(), c(ANTIALIAS));
-
-    layer.set_fill_translate(&c(TRANSLATE));
-    assert_eq!(*layer.get_fill_translate(), c(TRANSLATE));
-
-    layer.set_fill_translate_anchor(&c(TRANSLATE_ANCHOR));
-    assert_eq!(*layer.get_fill_translate_anchor(), c(TRANSLATE_ANCHOR));
+    paint!(layer, fill_color, "fill-color", RED, c(color()));
+    paint!(layer, fill_outline_color, "fill-outline-color", RED, c(color()));
+    paint!(layer, fill_opacity, "fill-opacity", "1", c(OPACITY));
+    paint!(layer, fill_pattern, "fill-pattern", r#""foo""#, pattern());
+    paint!(layer, fill_antialias, "fill-antialias", "false", c(ANTIALIAS));
+    paint!(layer, fill_translate, "fill-translate", "[0, 0]", c(TRANSLATE));
+    paint!(layer, fill_translate_anchor, "fill-translate-anchor", r#""map""#, c(TRANSLATE_ANCHOR));
 }
 
 // gtest: Layer.FillExtrusionLayoutDifference
@@ -134,7 +130,7 @@ fn fill_extrusion_layout_difference() {
     let mut layer = FillExtrusionLayer::new("fill-extrusion", "source");
     let original = layer.base_impl();
 
-    layer.set_fill_extrusion_rounded_corner_distance(&c(2.0));
+    set(&mut layer, "fill-extrusion-rounded-corner-distance", "2");
     assert!(layer.base_impl().has_layout_difference(&*original));
 }
 
@@ -146,49 +142,25 @@ fn line_properties() {
 
     // Layout properties
 
-    layer.set_line_cap(&c(LINE_CAP));
-    assert_eq!(*layer.get_line_cap(), c(LINE_CAP));
-
-    layer.set_line_join(&c(LINE_JOIN));
-    assert_eq!(*layer.get_line_join(), c(LINE_JOIN));
-
-    layer.set_line_miter_limit(&c(MITER_LIMIT));
-    assert_eq!(*layer.get_line_miter_limit(), c(MITER_LIMIT));
-
-    layer.set_line_round_limit(&c(ROUND_LIMIT));
-    assert_eq!(*layer.get_line_round_limit(), c(ROUND_LIMIT));
+    layout!(layer, line_cap, "line-cap", r#""round""#, c(LINE_CAP));
+    layout!(layer, line_join, "line-join", r#""miter""#, c(LINE_JOIN));
+    layout!(layer, line_miter_limit, "line-miter-limit", "1", c(MITER_LIMIT));
+    layout!(layer, line_round_limit, "line-round-limit", "1", c(ROUND_LIMIT));
 
     // Paint properties
 
-    layer.set_line_color(&c(color()));
-    assert_eq!(*layer.get_line_color(), c(color()));
-
-    layer.set_line_opacity(&c(OPACITY));
-    assert_eq!(*layer.get_line_opacity(), c(OPACITY));
-
-    layer.set_line_translate(&c(TRANSLATE));
-    assert_eq!(*layer.get_line_translate(), c(TRANSLATE));
-
-    layer.set_line_translate_anchor(&c(TRANSLATE_ANCHOR));
-    assert_eq!(*layer.get_line_translate_anchor(), c(TRANSLATE_ANCHOR));
-
-    layer.set_line_width(&c(WIDTH));
-    assert_eq!(*layer.get_line_width(), c(WIDTH));
-
-    layer.set_line_gap_width(&c(GAP_WIDTH));
-    assert_eq!(*layer.get_line_gap_width(), c(GAP_WIDTH));
-
-    layer.set_line_offset(&c(OFFSET));
-    assert_eq!(*layer.get_line_offset(), c(OFFSET));
-
-    layer.set_line_blur(&c(BLUR));
-    assert_eq!(*layer.get_line_blur(), c(BLUR));
-
-    layer.set_line_dasharray(&c(dash_array()));
-    assert_eq!(*layer.get_line_dasharray(), c(dash_array()));
-
-    layer.set_line_pattern(&pattern());
-    assert_eq!(*layer.get_line_pattern(), pattern());
+    paint!(layer, line_color, "line-color", RED, c(color()));
+    paint!(layer, line_opacity, "line-opacity", "1", c(OPACITY));
+    paint!(layer, line_translate, "line-translate", "[0, 0]", c(TRANSLATE));
+    paint!(layer, line_translate_anchor, "line-translate-anchor", r#""map""#, c(TRANSLATE_ANCHOR));
+    paint!(layer, line_width, "line-width", "1", c(WIDTH));
+    let unevaluated = layer.impl_().paint.untransitioned();
+    assert_eq!(*unevaluated.line_floor_width.get_value(), c(WIDTH), "the floor width follows line-width");
+    paint!(layer, line_gap_width, "line-gap-width", "1", c(GAP_WIDTH));
+    paint!(layer, line_offset, "line-offset", "1", c(OFFSET));
+    paint!(layer, line_blur, "line-blur", "1", c(BLUR));
+    paint!(layer, line_dasharray, "line-dasharray", "[]", c(dash_array()));
+    paint!(layer, line_pattern, "line-pattern", r#""foo""#, pattern());
 }
 
 // gtest: Layer.RasterProperties
@@ -199,26 +171,13 @@ fn raster_properties() {
 
     // Paint properties
 
-    layer.set_raster_opacity(&c(OPACITY));
-    assert_eq!(*layer.get_raster_opacity(), c(OPACITY));
-
-    layer.set_raster_hue_rotate(&c(HUE_ROTATE));
-    assert_eq!(*layer.get_raster_hue_rotate(), c(HUE_ROTATE));
-
-    layer.set_raster_brightness_min(&c(BRIGHTNESS));
-    assert_eq!(*layer.get_raster_brightness_min(), c(BRIGHTNESS));
-
-    layer.set_raster_brightness_max(&c(BRIGHTNESS));
-    assert_eq!(*layer.get_raster_brightness_max(), c(BRIGHTNESS));
-
-    layer.set_raster_saturation(&c(SATURATION));
-    assert_eq!(*layer.get_raster_saturation(), c(SATURATION));
-
-    layer.set_raster_contrast(&c(CONTRAST));
-    assert_eq!(*layer.get_raster_contrast(), c(CONTRAST));
-
-    layer.set_raster_fade_duration(&c(DURATION));
-    assert_eq!(*layer.get_raster_fade_duration(), c(DURATION));
+    paint!(layer, raster_opacity, "raster-opacity", "1", c(OPACITY));
+    paint!(layer, raster_hue_rotate, "raster-hue-rotate", "1", c(HUE_ROTATE));
+    paint!(layer, raster_brightness_min, "raster-brightness-min", "1", c(BRIGHTNESS));
+    paint!(layer, raster_brightness_max, "raster-brightness-max", "1", c(BRIGHTNESS));
+    paint!(layer, raster_saturation, "raster-saturation", "1", c(SATURATION));
+    paint!(layer, raster_contrast, "raster-contrast", "1", c(CONTRAST));
+    paint!(layer, raster_fade_duration, "raster-fade-duration", "1", c(DURATION));
 }
 
 // gtest: Layer.Observer
@@ -242,19 +201,25 @@ fn observer() {
     assert!(notified(&mut layer, &mut |l| l.set_visibility(VisibilityType::None)));
 
     // Notifies observer on paint property change.
-    assert!(notified(&mut layer, &mut |l| l.set_line_color(&c(color()))));
+    assert!(notified(&mut layer, &mut |l| set(l, "line-color", RED)));
 
     // Notifies observer on layout property change.
-    assert!(notified(&mut layer, &mut |l| l.set_line_cap(&c(LINE_CAP))));
+    assert!(notified(&mut layer, &mut |l| set(l, "line-cap", r#""round""#)));
+
+    // Notifies observer on paint property transition change.
+    assert!(notified(&mut layer, &mut |l| set(l, "line-color-transition", r#"{"duration": 300}"#)));
 
     // Does not notify observer on no-op visibility change.
     assert!(!notified(&mut layer, &mut |l| l.set_visibility(VisibilityType::None)));
 
     // Does not notify observer on no-op paint property change.
-    assert!(!notified(&mut layer, &mut |l| l.set_line_color(&c(color()))));
+    assert!(!notified(&mut layer, &mut |l| set(l, "line-color", RED)));
 
     // Does not notify observer on no-op layout property change.
-    assert!(!notified(&mut layer, &mut |l| l.set_line_cap(&c(LINE_CAP))));
+    assert!(!notified(&mut layer, &mut |l| set(l, "line-cap", r#""round""#)));
+
+    // Does not notify observer on no-op paint property transition change.
+    assert!(!notified(&mut layer, &mut |l| set(l, "line-color-transition", r#"{"duration": 300}"#)));
 
     // Notifies observer on source-layer change.
     assert!(notified(&mut layer, &mut |l| l.set_source_layer("roads")));

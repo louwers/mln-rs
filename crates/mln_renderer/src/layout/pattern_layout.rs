@@ -13,13 +13,11 @@
 use std::sync::Arc;
 
 use mln_style::PropertyEvaluationParameters;
+use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, Image};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPattern, FillSortKey};
-use mln_style::layers::line_layer_properties::{LineLayerProperties, LineLayoutProperties, LinePattern, LineSortKey};
-use mln_style::properties::Property;
-use mln_style::renderer::cross_faded_property_evaluator::Faded;
-use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedFadedPropertyValue;
+use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties};
+use mln_style::layers::line_layer_properties::{LineLayerProperties, LineLayoutProperties};
 use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
@@ -71,8 +69,7 @@ pub(crate) trait PatternLayoutSpec: 'static {
         properties: &Arc<dyn LayerProperties>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout;
-    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image>;
-    fn pattern_default() -> Image;
+    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &Evaluated<Image>;
     fn sort_key(
         layout: &Self::Layout,
         feature: &dyn GeometryTileFeature,
@@ -111,10 +108,6 @@ pub(crate) struct PatternLayout<S: PatternLayoutSpec> {
     pub(crate) source_layer: Option<SourceLayer>,
 }
 
-fn empty_faded() -> Faded<Image> {
-    Faded { from: Image::new(""), to: Image::new("") }
-}
-
 impl<S: PatternLayoutSpec> PatternLayout<S> {
     /// Creates the layout from a borrowed source layer. `sorted` selects the
     /// sort-key variant (see the file comment).
@@ -143,7 +136,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         for layer_properties in group {
             let layer_id = layer_properties.base_impl.id.clone();
             let pattern_property = S::pattern_property(layer_properties);
-            let constant_pattern = pattern_property.constant_or(&empty_faded());
+            let constant_pattern = pattern_property.faded();
             // determine if layer group has any layers that use *-pattern
             // property and add constant pattern dependencies.
             if !pattern_property.is_constant() {
@@ -190,26 +183,20 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                             // properties, evaluate their expression and add
                             // the patterns to the dependency vector
                             let canonical = &parameters.tile_id.canonical;
-                            let min = pattern_property.evaluate(
-                                &*feature,
-                                zoom - 1.0,
-                                available_images,
-                                canonical,
-                                S::pattern_default(),
+                            let min = pattern_property.evaluate_faded(
+                                &EvaluationContext::with_zoom_feature(zoom - 1.0, Some(&*feature))
+                                    .with_available_images(Some(available_images))
+                                    .with_canonical_tile_id(Some(canonical)),
                             );
-                            let mid = pattern_property.evaluate(
-                                &*feature,
-                                zoom,
-                                available_images,
-                                canonical,
-                                S::pattern_default(),
+                            let mid = pattern_property.evaluate_faded(
+                                &EvaluationContext::with_zoom_feature(zoom, Some(&*feature))
+                                    .with_available_images(Some(available_images))
+                                    .with_canonical_tile_id(Some(canonical)),
                             );
-                            let max = pattern_property.evaluate(
-                                &*feature,
-                                zoom + 1.0,
-                                available_images,
-                                canonical,
-                                S::pattern_default(),
+                            let max = pattern_property.evaluate_faded(
+                                &EvaluationContext::with_zoom_feature(zoom + 1.0, Some(&*feature))
+                                    .with_available_images(Some(available_images))
+                                    .with_canonical_tile_id(Some(canonical)),
                             );
 
                             // An empty pattern name means no pattern, so it is not an
@@ -317,7 +304,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         for (layer_id, layer_properties) in &self.layer_properties_map {
             let pattern_property = S::pattern_property(layer_properties);
             if pattern_property.is_constant() {
-                let pattern = pattern_property.constant_or(&empty_faded());
+                let pattern = pattern_property.faded();
                 record_sdf_pattern(&mut bucket, layer_id, pattern.from.id());
                 record_sdf_pattern(&mut bucket, layer_id, pattern.to.id());
             }
@@ -366,11 +353,8 @@ impl PatternLayoutSpec for FillLayoutSpec {
         let properties = (**properties).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
         properties.layer_impl().layout.evaluate(parameters)
     }
-    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
-        get_evaluated::<FillLayerProperties>(properties).get::<FillPattern>()
-    }
-    fn pattern_default() -> Image {
-        FillPattern::default_value()
+    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &Evaluated<Image> {
+        &get_evaluated::<FillLayerProperties>(properties).fill_pattern
     }
     fn sort_key(
         layout: &Self::Layout,
@@ -378,10 +362,12 @@ impl PatternLayoutSpec for FillLayoutSpec {
         zoom: f32,
         canonical: &CanonicalTileID,
     ) -> f32 {
-        layout.get::<FillSortKey>().evaluate_feature_canonical(feature, zoom, canonical, FillSortKey::default_value())
+        layout.fill_sort_key.evaluate(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+        )
     }
     fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
-        layout.get::<FillSortKey>().constant()
+        layout.fill_sort_key.constant()
     }
     fn create_bucket(
         layout: &Self::Layout,
@@ -409,11 +395,8 @@ impl PatternLayoutSpec for LineLayoutSpec {
         let properties = (**properties).downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
         properties.layer_impl().layout.evaluate(parameters)
     }
-    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
-        get_evaluated::<LineLayerProperties>(properties).get::<LinePattern>()
-    }
-    fn pattern_default() -> Image {
-        LinePattern::default_value()
+    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &Evaluated<Image> {
+        &get_evaluated::<LineLayerProperties>(properties).line_pattern
     }
     fn sort_key(
         layout: &Self::Layout,
@@ -421,10 +404,12 @@ impl PatternLayoutSpec for LineLayoutSpec {
         zoom: f32,
         canonical: &CanonicalTileID,
     ) -> f32 {
-        layout.get::<LineSortKey>().evaluate_feature_canonical(feature, zoom, canonical, LineSortKey::default_value())
+        layout.line_sort_key.evaluate(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+        )
     }
     fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
-        layout.get::<LineSortKey>().constant()
+        layout.line_sort_key.constant()
     }
     fn create_bucket(
         layout: &Self::Layout,
@@ -443,12 +428,12 @@ impl PatternLayoutSpec for LineLayoutSpec {
 /// unevaluated layout sets `fill-sort-key`.
 pub(crate) fn fill_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
     let properties = (**leader).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
-    !properties.layer_impl().layout.get::<FillSortKey>().is_undefined()
+    !properties.layer_impl().layout.fill_sort_key.is_undefined()
 }
 
 pub(crate) fn line_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
     let properties = (**leader).downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
-    !properties.layer_impl().layout.get::<LineSortKey>().is_undefined()
+    !properties.layer_impl().layout.line_sort_key.is_undefined()
 }
 
 impl<S: PatternLayoutSpec> Layout for PatternLayout<S> {

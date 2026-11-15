@@ -16,7 +16,6 @@ use super::util::{FixtureLog, parse_json, read_file};
 use crate::image;
 use crate::layer::Layer;
 use crate::layers::line_layer::{Impl as LineLayerImpl, LineLayer};
-use crate::layers::line_layer_properties::LineColor;
 use crate::observer::{Observer, SourceObserver};
 use crate::projection::Projection;
 use crate::property_value::PropertyValue;
@@ -198,20 +197,16 @@ fn layer_transition_refreshes_immutable_collection() {
 
     {
         let mut layer = style.get_layer_mut("line").unwrap();
-        let line = layer.downcast_mut::<LineLayer>().unwrap();
-        line.set_line_color_transition(&TransitionOptions::new(
-            Some(Duration::from_millis(123)),
-            Some(Duration::from_millis(45)),
-            true,
-        ));
+        let transition = serde_json::json!({"duration": 123, "delay": 45});
+        assert!(layer.set_property("line-color-transition", &Convertible::from(&transition), None).is_none());
     }
     let after = style.get_layer_impls();
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(1, after.len());
     assert!(Arc::ptr_eq(&style.get_layer("line").unwrap().base_impl(), &after[0]));
     let impl_ = after[0].downcast_ref::<LineLayerImpl>().unwrap();
-    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.get::<LineColor>().options.duration);
-    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.get::<LineColor>().options.delay);
+    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.line_color.options.duration);
+    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.line_color.options.delay);
 }
 
 #[derive(Default)]
@@ -586,20 +581,20 @@ fn sky_presence_and_replacement() {
     assert!(style.get_sky().is_none());
 
     style.load_json(r#"{"sky":{}}"#);
-    assert!(style.get_sky().expect("sky").get_sky_color().is_undefined());
+    assert!(style.get_sky().expect("sky").impl_.properties.sky_color.value.is_undefined());
 
     style.load_json(r#"{"sky":{"sky-color":"blue","atmosphere-blend":0.4}}"#);
     let sky = style.get_sky().expect("sky");
-    assert_eq!(Color::blue(), *sky.get_sky_color().as_constant());
-    assert_float_eq(0.4, *sky.get_atmosphere_blend().as_constant());
+    assert_eq!(Color::blue(), *sky.impl_.properties.sky_color.value.as_constant());
+    assert_float_eq(0.4, *sky.impl_.properties.sky_atmosphere_blend.value.as_constant());
 
     let mut replacement = Sky::new();
-    replacement.set_fog_color(PropertyValue::Constant(Color::red()));
+    assert!(replacement.set_property("fog-color", &Convertible::from(&serde_json::json!("red"))).is_none());
     style.set_sky(Some(replacement));
     let sky = style.get_sky().expect("sky");
-    assert!(sky.get_sky_color().is_undefined());
-    assert!(sky.get_atmosphere_blend().is_undefined());
-    assert_eq!(Color::red(), *sky.get_fog_color().as_constant());
+    assert!(sky.impl_.properties.sky_color.value.is_undefined());
+    assert!(sky.impl_.properties.sky_atmosphere_blend.value.is_undefined());
+    assert_eq!(Color::red(), *sky.impl_.properties.sky_fog_color.value.as_constant());
 
     style.set_sky(None);
     assert!(style.get_sky().is_none());
@@ -629,13 +624,13 @@ fn sky_projection_and_global_state_coexist() {
     }"#,
     );
 
-    assert_eq!(Color::blue(), *style.get_sky().expect("sky").get_sky_color().as_constant());
+    assert_eq!(Color::blue(), *style.get_sky().expect("sky").impl_.properties.sky_color.value.as_constant());
     assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
     assert_eq!(Value::Bool(true), style.get_global_state()["showLabels"]);
 
     style.set_global_state_property("showLabels", &Value::Bool(false));
     assert_eq!(Value::Bool(false), style.get_global_state()["showLabels"]);
-    assert_eq!(Color::blue(), *style.get_sky().expect("sky").get_sky_color().as_constant());
+    assert_eq!(Color::blue(), *style.get_sky().expect("sky").impl_.properties.sky_color.value.as_constant());
     assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
 
     style.set_sky(None);

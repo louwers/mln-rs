@@ -14,14 +14,9 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_DASH_TEXTURE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO,
     ID_LINE_IMAGE_TEXTURE, ID_LINE_TILE_PROPS_UBO,
 };
-use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::line_layer_properties::{
-    LineBlur, LineColor, LineDasharray, LineFloorWidth, LineGapWidth, LineLayerProperties, LineOffset, LineOpacity,
-    LinePattern, LineTranslate, LineTranslateAnchor, LineWidth,
-};
-use mln_style::properties::Property;
-use mln_style::renderer::cross_faded_property_evaluator::Faded;
+use mln_style::layers::LinePaintProperties;
+use mln_style::layers::line_layer_properties::LineLayerProperties;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -109,8 +104,7 @@ impl LayerTweaker for LineLayerTweaker {
         let evaluated = get_evaluated::<LineLayerProperties>(&properties);
         let crossfade = *get_crossfade::<LineLayerProperties>(&properties);
 
-        let line_pattern_value =
-            evaluated.get::<LinePattern>().constant_or(&Faded { from: Image::new(""), to: Image::new("") });
+        let line_pattern_value = evaluated.line_pattern.faded();
 
         let zoom = parameters.state.get_zoom() as f32;
         let int_zoom = parameters.state.get_integer_zoom();
@@ -125,37 +119,37 @@ impl LayerTweaker for LineLayerTweaker {
             // properties evaluated on the GPU (none, see the top of the
             // file); elsewhere, the constant ones.
             if !gpu_expressions {
-                if evaluated.get::<LineColor>().is_constant() {
+                if evaluated.line_color.is_constant() {
                     self.expression_mask |= COLOR;
                 }
-                if evaluated.get::<LineBlur>().is_constant() {
+                if evaluated.line_blur.is_constant() {
                     self.expression_mask |= BLUR;
                 }
-                if evaluated.get::<LineOpacity>().is_constant() {
+                if evaluated.line_opacity.is_constant() {
                     self.expression_mask |= OPACITY;
                 }
-                if evaluated.get::<LineGapWidth>().is_constant() {
+                if evaluated.line_gap_width.is_constant() {
                     self.expression_mask |= GAP_WIDTH;
                 }
-                if evaluated.get::<LineOffset>().is_constant() {
+                if evaluated.line_offset.is_constant() {
                     self.expression_mask |= OFFSET;
                 }
-                if evaluated.get::<LineWidth>().is_constant() {
+                if evaluated.line_width.is_constant() {
                     self.expression_mask |= WIDTH;
                 }
-                if evaluated.get::<LineFloorWidth>().is_constant() {
+                if evaluated.line_floor_width.is_constant() {
                     self.expression_mask |= FLOOR_WIDTH;
                 }
             }
 
             let props_ubo = LineEvaluatedPropsUBO {
-                color: evaluated.get::<LineColor>().constant_or(&LineColor::default_value()).to_float_array(),
-                blur: evaluated.get::<LineBlur>().constant_or(&LineBlur::default_value()),
-                opacity: evaluated.get::<LineOpacity>().constant_or(&LineOpacity::default_value()),
-                gapwidth: evaluated.get::<LineGapWidth>().constant_or(&LineGapWidth::default_value()),
-                offset: evaluated.get::<LineOffset>().constant_or(&LineOffset::default_value()),
-                width: evaluated.get::<LineWidth>().constant_or(&LineWidth::default_value()),
-                floorwidth: evaluated.get::<LineFloorWidth>().constant_or(&LineFloorWidth::default_value()),
+                color: evaluated.line_color.constant_or(&LinePaintProperties::Defaults::line_color()).to_float_array(),
+                blur: evaluated.line_blur.constant_or(&LinePaintProperties::Defaults::line_blur()),
+                opacity: evaluated.line_opacity.constant_or(&LinePaintProperties::Defaults::line_opacity()),
+                gapwidth: evaluated.line_gap_width.constant_or(&LinePaintProperties::Defaults::line_gap_width()),
+                offset: evaluated.line_offset.constant_or(&LinePaintProperties::Defaults::line_offset()),
+                width: evaluated.line_width.constant_or(&LinePaintProperties::Defaults::line_width()),
+                floorwidth: evaluated.line_floor_width.constant_or(&LinePaintProperties::Defaults::line_floor_width()),
                 expression_mask: self.expression_mask,
                 pad1: 0.0,
             };
@@ -212,13 +206,13 @@ impl LayerTweaker for LineLayerTweaker {
             let pattern_pos_a = tile.and_then(|t| t.get_pattern(line_pattern_value.from.id()));
             let pattern_pos_b = tile.and_then(|t| t.get_pattern(line_pattern_value.to.id()));
 
-            let translation = *evaluated.get::<LineTranslate>();
-            let anchor = *evaluated.get::<LineTranslateAnchor>();
+            let translation = &evaluated.line_translate;
+            let anchor = &evaluated.line_translate_anchor;
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
-                translation,
-                anchor,
+                *translation.uniform(),
+                *anchor.uniform(),
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
                 drawable,
@@ -303,8 +297,8 @@ impl LayerTweaker for LineLayerTweaker {
                     if let Some(cap) = line_pattern_cap {
                         let mut line_atlas = parameters.line_atlas.borrow_mut();
                         let dash_pattern_texture = line_atlas.get_dash_pattern_texture(
-                            &evaluated.get::<LineDasharray>().from,
-                            &evaluated.get::<LineDasharray>().to,
+                            evaluated.line_dasharray.faded().from,
+                            evaluated.line_dasharray.faded().to,
                             cap,
                         );
 

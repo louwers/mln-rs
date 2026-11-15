@@ -9,16 +9,12 @@ use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
+use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Image, Value};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::fill_extrusion_layer_properties::{
-    FillExtrusionBase, FillExtrusionColor, FillExtrusionHeight, FillExtrusionLayerProperties,
-    FillExtrusionLayoutProperties, FillExtrusionPaintProperties, FillExtrusionPattern,
-    FillExtrusionRoundedCornerDistance, FillExtrusionTranslate,
+    FillExtrusionLayerProperties, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
 };
-use mln_style::light::{LightAnchor, LightColor, LightIntensity, LightPosition};
-use mln_style::properties::Property;
-use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedFadedPropertyValue;
 use mln_style_types::LightAnchorType;
 use mln_style_types::image::ImagePositions;
 use mln_tile::geometry_tile_data::{classify_rings, limit_holes, round_polygon_corners};
@@ -45,10 +41,10 @@ use crate::util::triangulate::triangulate;
 
 crate::paint_property_binders!(
     pub struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
-        fill_extrusion_base: FillExtrusionBase => PaintPropertyBinder<f32>,
-        fill_extrusion_color: FillExtrusionColor => PaintPropertyBinder<Color>,
-        fill_extrusion_height: FillExtrusionHeight => PaintPropertyBinder<f32>,
-        fill_extrusion_pattern: FillExtrusionPattern => CrossFadedPaintPropertyBinder<Image>,
+        fill_extrusion_base => PaintPropertyBinder<f32>,
+        fill_extrusion_color => PaintPropertyBinder<Color>,
+        fill_extrusion_height => PaintPropertyBinder<f32>,
+        fill_extrusion_pattern => CrossFadedPaintPropertyBinder<Image>,
     }
 );
 
@@ -237,15 +233,15 @@ impl FillExtrusionBucket {
 
     #[must_use]
     pub(crate) fn light_color(light: &EvaluatedLight) -> [f32; 3] {
-        let color = light.get::<LightColor>();
+        let color = light.light_color.uniform();
         [color.r, color.g, color.b]
     }
 
     pub(crate) fn light_position(light: &EvaluatedLight, state: &TransformState) -> [f32; 3] {
-        let mut light_pos: Vec3f = light.get::<LightPosition>().get_cartesian();
+        let mut light_pos: Vec3f = light.light_position.uniform().get_cartesian();
         let mut light_mat: Mat3 = [0.0; 9];
         mat3::identity(&mut light_mat);
-        if *light.get::<LightAnchor>() == LightAnchorType::Viewport {
+        if *light.light_anchor.uniform() == LightAnchorType::Viewport {
             let a = light_mat;
             mat3::rotate(&mut light_mat, &a, -state.get_bearing());
         }
@@ -256,7 +252,7 @@ impl FillExtrusionBucket {
 
     #[must_use]
     pub(crate) fn light_intensity(light: &EvaluatedLight) -> f32 {
-        *light.get::<LightIntensity>()
+        *light.light_intensity.uniform()
     }
 }
 
@@ -285,7 +281,7 @@ impl Bucket for FillExtrusionBucket {
             // tessellation.
             limit_holes(&mut polygon, 500);
 
-            let rounded_corner_distance = f64::from(*self.layout.get::<FillExtrusionRoundedCornerDistance>());
+            let rounded_corner_distance = f64::from(*self.layout.fill_extrusion_rounded_corner_distance.uniform());
             if rounded_corner_distance > 0.0 {
                 self.add_polygon(&round_polygon_corners(&polygon, rounded_corner_distance), None)?;
                 continue;
@@ -341,7 +337,7 @@ impl Bucket for FillExtrusionBucket {
 
     fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
         let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&layer.base().evaluated_properties);
-        let translate = evaluated.get::<FillExtrusionTranslate>();
+        let translate = evaluated.fill_extrusion_translate.uniform();
         (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 
@@ -378,12 +374,8 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
         properties.layer_impl().layout.evaluate(parameters)
     }
 
-    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
-        get_evaluated::<FillExtrusionLayerProperties>(properties).get::<FillExtrusionPattern>()
-    }
-
-    fn pattern_default() -> Image {
-        FillExtrusionPattern::default_value()
+    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &Evaluated<Image> {
+        &get_evaluated::<FillExtrusionLayerProperties>(properties).fill_extrusion_pattern
     }
 
     fn sort_key(

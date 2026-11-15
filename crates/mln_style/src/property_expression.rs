@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
-use mln_expression::expression::FeatureState;
 use mln_expression::range::Range;
 use mln_expression::value::from_expression_values;
-use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -29,7 +26,7 @@ fn collect_global_state_refs_shared(expression: &Expr) -> Option<Arc<VecSet<Stri
 /// A Rust struct cannot hold borrows of its own `Arc`, so
 /// `get_zoom_curve` recomputes it with
 /// `find_zoom_curve_checked` (a pure function of the expression).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PropertyExpressionBase {
     expression: Arc<Expr>,
     captured_global_state: Option<Arc<GlobalStateMap>>,
@@ -41,33 +38,12 @@ pub struct PropertyExpressionBase {
     is_runtime_constant: bool,
 }
 
-// Not derived, so that it can be `#[inline(never)]`: see `PropertyValue`'s
-// Clone.
-impl Clone for PropertyExpressionBase {
-    #[inline(never)]
-    fn clone(&self) -> Self {
-        PropertyExpressionBase {
-            expression: Arc::clone(&self.expression),
-            captured_global_state: self.captured_global_state.clone(),
-            global_state_refs: self.global_state_refs.clone(),
-            use_integer_zoom: self.use_integer_zoom,
-            global_state_pinned: self.global_state_pinned,
-            is_zoom_constant: self.is_zoom_constant,
-            is_feature_constant: self.is_feature_constant,
-            is_runtime_constant: self.is_runtime_constant,
-        }
-    }
-}
-
 impl PropertyExpressionBase {
     pub(crate) fn new(expression: Arc<Expr>) -> Self {
         let global_state_refs = collect_global_state_refs_shared(expression.as_ref());
         let is_zoom_constant = !expression.has(Dependency::ZOOM);
         let is_feature_constant = !expression.has(Dependency::FEATURE);
         let is_runtime_constant = !expression.has(Dependency::IMAGE | Dependency::GLOBAL_STATE);
-        debug_assert_eq!(is_zoom_constant, crate::expression::is_zoom_constant(expression.as_ref()));
-        debug_assert_eq!(is_feature_constant, crate::expression::is_feature_constant(expression.as_ref()));
-        debug_assert_eq!(is_runtime_constant, crate::expression::is_runtime_constant(expression.as_ref()));
         PropertyExpressionBase {
             expression,
             captured_global_state: None,
@@ -268,94 +244,6 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
             }
             _ => self.evaluate_context(context, final_default_value),
         }
-    }
-
-    /// `evaluate(float zoom)`.
-    pub fn evaluate_zoom(&self, zoom: f32) -> T
-    where
-        T: Default,
-    {
-        debug_assert!(!self.is_zoom_constant() || self.get_dependencies().intersects(Dependency::GLOBAL_STATE));
-        debug_assert!(self.is_feature_constant());
-        self.evaluate(&EvaluationContext::new(zoom), T::default())
-    }
-
-    pub fn evaluate_feature(&self, feature: &dyn GeometryTileFeature, final_default_value: T) -> T {
-        debug_assert!(self.is_zoom_constant());
-        debug_assert!(!self.is_feature_constant());
-        self.evaluate(&EvaluationContext::from_feature(Some(feature)), final_default_value)
-    }
-
-    pub(crate) fn evaluate_feature_images(
-        &self,
-        feature: &dyn GeometryTileFeature,
-        available_images: &VecSet<String>,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::from_feature(Some(feature)).with_available_images(Some(available_images)),
-            final_default_value,
-        )
-    }
-
-    pub fn evaluate_zoom_feature(&self, zoom: f32, feature: &dyn GeometryTileFeature, final_default_value: T) -> T {
-        self.evaluate(&EvaluationContext::with_zoom_feature(zoom, Some(feature)), final_default_value)
-    }
-
-    pub(crate) fn evaluate_zoom_feature_images(
-        &self,
-        zoom: f32,
-        feature: &dyn GeometryTileFeature,
-        available_images: &VecSet<String>,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_available_images(Some(available_images)),
-            final_default_value,
-        )
-    }
-
-    pub(crate) fn evaluate_zoom_feature_images_canonical(
-        &self,
-        zoom: f32,
-        feature: &dyn GeometryTileFeature,
-        available_images: &VecSet<String>,
-        canonical: &CanonicalTileID,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                .with_available_images(Some(available_images))
-                .with_canonical_tile_id(Some(canonical)),
-            final_default_value,
-        )
-    }
-
-    pub(crate) fn evaluate_zoom_feature_canonical(
-        &self,
-        zoom: f32,
-        feature: &dyn GeometryTileFeature,
-        canonical: &CanonicalTileID,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-            final_default_value,
-        )
-    }
-
-    pub(crate) fn evaluate_zoom_feature_state(
-        &self,
-        zoom: f32,
-        feature: &dyn GeometryTileFeature,
-        state: &FeatureState,
-        final_default_value: T,
-    ) -> T {
-        debug_assert!(!self.is_feature_constant());
-        self.evaluate(
-            &EvaluationContext::with_zoom_feature_state(zoom, Some(feature), Some(state)),
-            final_default_value,
-        )
     }
 
     pub(crate) fn possible_outputs(&self) -> Vec<Option<T>> {

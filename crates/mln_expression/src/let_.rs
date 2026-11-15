@@ -9,7 +9,7 @@ use crate::expression::{Expr, Node, SharedExpr};
 use crate::parsing_context::{Bindings, ParseResult, ParsingContext};
 
 /// `["let", name, value, ..., result]`.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Let {
     bindings: Bindings,
     result: Expr,
@@ -80,7 +80,7 @@ impl Let {
 
 /// `["var", name]`: the expression its enclosing `let` bound to the name,
 /// which it evaluates in its place.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Var {
     name: String,
     value: SharedExpr,

@@ -9,9 +9,7 @@ use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
-use mln_style::layers::{
-    BackgroundColor, BackgroundLayerProperties, BackgroundOpacity, BackgroundPaintProperties, BackgroundPattern,
-};
+use mln_style::layers::{BackgroundLayerProperties, BackgroundPaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
 use mln_util::range::Range;
@@ -69,11 +67,11 @@ impl RenderBackgroundLayer {
     /// The `drawPasses` / `passes` expression shared by `evaluate` and
     /// `update`.
     fn passes_for(&self, evaluated: &BackgroundPaintProperties::PossiblyEvaluated) -> RenderPass {
-        if *evaluated.get::<BackgroundOpacity>() == 0.0 {
+        if *evaluated.background_opacity.uniform() == 0.0 {
             RenderPass::None
-        } else if !self.unevaluated.get::<BackgroundPattern>().is_undefined()
-            || *evaluated.get::<BackgroundOpacity>() < 1.0
-            || evaluated.get::<BackgroundColor>().a < 1.0
+        } else if !self.unevaluated.background_pattern.is_undefined()
+            || *evaluated.background_opacity.uniform() < 1.0
+            || evaluated.background_color.uniform().a < 1.0
         {
             RenderPass::Translucent
         } else {
@@ -127,21 +125,21 @@ impl RenderLayer for RenderBackgroundLayer {
 
     fn get_solid_background(&self) -> Option<Color> {
         let evaluated = background_layer_properties(&self.base.evaluated_properties);
-        if !evaluated.get::<BackgroundPattern>().from.empty() || *evaluated.get::<BackgroundOpacity>() <= 0.0 {
+        if !evaluated.background_pattern.faded().from.empty() || *evaluated.background_opacity.uniform() <= 0.0 {
             return None;
         }
 
-        Some(*evaluated.get::<BackgroundColor>() * *evaluated.get::<BackgroundOpacity>())
+        Some(*evaluated.background_color.uniform() * *evaluated.background_opacity.uniform())
     }
 
     fn prepare(&mut self, parameters: &mut LayerPrepareParameters<'_>) {
         let evaluated = background_layer_properties(&self.base.evaluated_properties);
-        if !evaluated.get::<BackgroundPattern>().to.empty() {
+        if !evaluated.background_pattern.faded().to.empty() {
             // Ensures that the pattern bitmap gets copied to atlas bitmap.
             // Atlas bitmap is uploaded to atlas texture in upload.
             // (conformance)
-            add_pattern_if_needed(evaluated.get::<BackgroundPattern>().from.id(), parameters);
-            add_pattern_if_needed(evaluated.get::<BackgroundPattern>().to.id(), parameters);
+            add_pattern_if_needed(evaluated.background_pattern.faded().from.id(), parameters);
+            add_pattern_if_needed(evaluated.background_pattern.faded().to.id(), parameters);
         }
     }
 
@@ -179,7 +177,7 @@ impl RenderLayer for RenderBackgroundLayer {
         }
 
         let evaluated = background_layer_properties(&self.base.evaluated_properties).clone();
-        let has_pattern = !evaluated.get::<BackgroundPattern>().to.empty();
+        let has_pattern = !evaluated.background_pattern.faded().to.empty();
 
         // TODO: If background is solid, we can skip drawables and rely on the
         // clear color

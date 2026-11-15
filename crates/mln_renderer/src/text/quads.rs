@@ -281,7 +281,7 @@ pub(crate) fn get_icon_quads(
 pub(crate) fn get_glyph_quads(
     shaped_text: &Shaping,
     text_offset: [f32; 2],
-    layout: &SymbolLayoutProperties::Evaluated,
+    layout: &SymbolLayoutProperties::Values,
     placement: SymbolPlacementType,
     image_map: &ImageMap,
     allow_vertical_placement: bool,
@@ -515,7 +515,7 @@ mod tests {
             metrics2x,
         ));
 
-        let layout = SymbolLayoutProperties::Evaluated::default();
+        let layout = SymbolLayoutProperties::Values::default();
         let image_map = ImageMap::new();
         let quads1x =
             get_glyph_quads(&shaped_text1x, [0.0, 0.0], &layout, SymbolPlacementType::Point, &image_map, false);
@@ -541,7 +541,7 @@ mod tests {
     // gtest: getIconQuads.normal
     #[test]
     fn get_icon_quads_normal() {
-        let _layout = SymbolLayoutProperties::Evaluated::default();
+        let _layout = SymbolLayoutProperties::Values::default();
         let _anchor = Anchor::new(2.0, 3.0, 0.0, Some(0));
         let image = ImagePosition::new(rect(0, 0, 15, 11), &test_image_impl(), 0);
 

@@ -460,7 +460,7 @@ mod tests {
         let line = GeometryCoordinates::new();
         let image_map = ImageMap::new();
         let shaping = ShapedTextOrientations::default();
-        let layout = SymbolLayoutProperties::Evaluated::default();
+        let layout = SymbolLayoutProperties::Values::default();
         let subfeature = IndexedSubfeature {
             index: 0,
             source_layer_name: String::new(),
