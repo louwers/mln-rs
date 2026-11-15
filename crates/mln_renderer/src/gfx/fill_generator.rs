@@ -10,7 +10,7 @@ use mln_util::error::Error;
 use crate::bucket::geometry_too_long;
 use crate::buckets::fill_bucket::{FillBucket, FillLayoutVertex};
 use crate::gfx::fill_large_mesh_arrays::{MeshLines, fill_large_mesh_arrays};
-use crate::util::subdivision::{SubdivisionResult, subdivide_polygon};
+use crate::util::subdivision::{SubdivisionResult, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
 use crate::util::triangulate::triangulate;
 
 fn add_ring_vertices(vertices: &mut Vec<FillLayoutVertex>, ring: &GeometryCoordinates) -> usize {
@@ -208,8 +208,10 @@ pub(crate) fn generate_fill_and_outline_buffers(
         limit_holes(&mut polygon, 500);
 
         if subdivision_granularity >= 2 {
+            let mut subdivided = subdivide_polygon(&polygon, canonical, subdivision_granularity, true);
+            add_tile_border_strips(&mut subdivided, canonical, TILE_BORDER_STRIP_WIDTH);
             add_subdivided_polygon(
-                &subdivide_polygon(&polygon, canonical, subdivision_granularity, true),
+                &subdivided,
                 fill_vertices,
                 fill_indexes,
                 fill_segments,

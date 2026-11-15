@@ -4,22 +4,33 @@
 pub struct SubdivisionGranularityExpression {
     base_zoom_granularity: u32,
     min_granularity: u32,
+    surface_granularity: u32,
 }
 
 impl SubdivisionGranularityExpression {
     #[must_use]
     pub const fn new(base_zoom_granularity: u32, min_granularity: u32) -> Self {
         debug_assert!(min_granularity <= base_zoom_granularity || base_zoom_granularity == 0);
-        SubdivisionGranularityExpression { base_zoom_granularity, min_granularity }
+        SubdivisionGranularityExpression { base_zoom_granularity, min_granularity, surface_granularity: 0 }
+    }
+
+    /// Sets the granularity at zoom 0 of a second rule, which halves every
+    /// second zoom level instead of every level.
+    #[must_use]
+    pub const fn with_surface_granularity(self, surface_granularity: u32) -> Self {
+        SubdivisionGranularityExpression { surface_granularity, ..self }
     }
 
     /// The base granularity halves with every zoom level, down to the
-    /// minimum and never below 1. (A C++ build without the globe always
-    /// returns 1; the port always builds the globe.)
+    /// minimum and never below 1. The surface granularity halves every
+    /// second zoom level: a chord's distance from the sphere falls with the
+    /// square of its length, so this keeps that distance about the same in
+    /// pixels at every zoom level. A tile gets the finer of the two.
     #[must_use]
     pub fn get_granularity_for_zoom_level(&self, zoom: u8) -> u32 {
-        let base = if zoom < 32 { self.base_zoom_granularity >> zoom } else { 0 };
-        base.max(self.min_granularity).max(1)
+        let base = self.base_zoom_granularity.checked_shr(u32::from(zoom)).unwrap_or(0);
+        let surface = self.surface_granularity.checked_shr(u32::from(zoom / 2)).unwrap_or(0);
+        base.max(surface).max(self.min_granularity).max(1)
     }
 }
 
@@ -55,10 +66,10 @@ impl SubdivisionGranularitySetting {
     #[must_use]
     pub const fn globe() -> Self {
         SubdivisionGranularitySetting {
-            fill: SubdivisionGranularityExpression::new(128, 2),
+            fill: SubdivisionGranularityExpression::new(128, 2).with_surface_granularity(32),
             line: SubdivisionGranularityExpression::new(512, 0),
             tile: SubdivisionGranularityExpression::new(128, 32),
-            stencil: SubdivisionGranularityExpression::new(128, 1),
+            stencil: SubdivisionGranularityExpression::new(128, 1).with_surface_granularity(32),
             circle: 3,
         }
     }

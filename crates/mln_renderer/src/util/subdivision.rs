@@ -459,6 +459,93 @@ pub(crate) fn subdivide_polygon(
     Subdivider::new(granularity, canonical).subdivide(polygon, generate_outline_lines)
 }
 
+/// How far past the tile border [`add_tile_border_strips`] reaches: several
+/// times the widest sliver between the meshes of neighboring zoom levels
+/// (about 2π units with the globe's granularities), and inside the stencil
+/// masks' border.
+pub(crate) const TILE_BORDER_STRIP_WIDTH: i16 = (EXTENT / 256) as i16;
+
+/// Extends every triangle edge that lies on the tile border with nothing
+/// beyond it by a strip `width` units outside the tile.
+///
+/// Tiles of neighboring zoom levels split their shared edge at different
+/// points, and only the stencil masks' borders cover the slivers between the
+/// two meshes. The strip lets a fill that ends exactly at the tile border
+/// reach them, as the geometry of a tile with a buffer does. An edge with
+/// triangles on both sides of the border belongs to a tile with a buffer and
+/// gets none, and neither do pole borders or the zoom 0 tile's antimeridian
+/// edges.
+pub(crate) fn add_tile_border_strips(result: &mut SubdivisionResult, canonical: &CanonicalTileID, width: i16) {
+    struct BorderEdge {
+        a: u32,
+        b: u32,
+        /// The outward direction, -1, 0 or 1 on each axis.
+        dx: i16,
+        dy: i16,
+        uses: u32,
+    }
+
+    let extent = EXTENT as i16;
+    let north_pole_tile = canonical.y == 0;
+    let south_pole_tile = canonical.y == (1u32 << canonical.z) - 1;
+    let wraps_x = canonical.z == 0;
+    let vertices = &mut result.vertices;
+    let position = |vertices: &[i16], index: u32| (vertices[index as usize * 2], vertices[index as usize * 2 + 1]);
+
+    let mut edges: Vec<BorderEdge> = Vec::new();
+    let mut edge_indices: HashMap<(u32, u32), usize> = HashMap::default();
+    for triangle in result.triangle_indices.as_chunks::<3>().0 {
+        for e in 0..3 {
+            let (a, b) = (triangle[e], triangle[(e + 1) % 3]);
+            let ((ax, ay), (bx, by)) = (position(vertices, a), position(vertices, b));
+            let mut dx = 0;
+            let mut dy = 0;
+            if ax == bx && !wraps_x {
+                if ax == 0 {
+                    dx = -1;
+                } else if ax == extent {
+                    dx = 1;
+                }
+            }
+            if ay == by {
+                if ay == 0 && !north_pole_tile {
+                    dy = -1;
+                } else if ay == extent && !south_pole_tile {
+                    dy = 1;
+                }
+            }
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let index = *edge_indices.entry((a.min(b), a.max(b))).or_insert_with(|| {
+                edges.push(BorderEdge { a, b, dx, dy, uses: 0 });
+                edges.len() - 1
+            });
+            edges[index].uses += 1;
+        }
+    }
+    if edges.is_empty() {
+        return;
+    }
+
+    let mut outer_vertices: HashMap<(u32, i16, i16), u32> = HashMap::default();
+    let mut outer = |vertices: &mut Vec<i16>, index: u32, dx: i16, dy: i16| {
+        *outer_vertices.entry((index, dx, dy)).or_insert_with(|| {
+            let (x, y) = position(vertices, index);
+            let outer_index = (vertices.len() / 2) as u32;
+            vertices.extend_from_slice(&[x + dx * width, y + dy * width]);
+            outer_index
+        })
+    };
+    let mut strips = Vec::new();
+    for edge in edges.iter().filter(|edge| edge.uses == 1) {
+        let outer_a = outer(vertices, edge.a, edge.dx, edge.dy);
+        let outer_b = outer(vertices, edge.b, edge.dx, edge.dy);
+        strips.extend_from_slice(&[edge.a, edge.b, outer_b, edge.a, outer_b, outer_a]);
+    }
+    result.triangle_indices.extend(fix_winding_order(vertices, &strips));
+}
+
 /// Inserts a vertex wherever the line crosses a cell boundary; `is_ring`
 /// closes the line first. (C++ defaults `is_ring` to false.)
 #[must_use]

@@ -21,7 +21,8 @@ use crate::globe_tile_mesh::{GlobeTileMesh, GlobeTileMeshCache};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{
-    NORTH_POLE_Y, SOUTH_POLE_Y, SubdivisionResult, subdivide_polygon, subdivide_vertex_line,
+    NORTH_POLE_Y, SOUTH_POLE_Y, SubdivisionResult, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon,
+    subdivide_vertex_line,
 };
 use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
 
@@ -170,8 +171,7 @@ fn expect_sound_mesh(r: &SubdivisionResult, clipped_at_zoom_zero: bool) {
                 continue;
             }
             let dot = (px - ax) * (bx - ax) + (py - ay) * (by - ay);
-            // As the C++ writes it.
-            let len2 = (bx - ax) * (bx - ax) + (py - ay) * (by - ay);
+            let len2 = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
             if dot > 0.0 && dot < len2 {
                 t_junctions += 1;
                 break;
@@ -313,6 +313,19 @@ fn roof_granularity(bucket: &FillExtrusionBucket, polygon: &GeometryCollection, 
     0
 }
 
+fn vertices_outside_border(r: &SubdivisionResult, distance: i16) -> usize {
+    r.vertices
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .filter(|&&[x, y]| x == -distance || x == EXTENT_I16 + distance || y == -distance || y == EXTENT_I16 + distance)
+        .count()
+}
+
+fn y_coordinates(r: &SubdivisionResult) -> BTreeSet<i16> {
+    r.vertices.iter().skip(1).step_by(2).copied().collect()
+}
+
 // gtest: Subdivision.Granularity
 #[test]
 fn granularity() {
@@ -322,6 +335,16 @@ fn granularity() {
     assert_eq!(2, fill.get_granularity_for_zoom_level(6));
     assert_eq!(2, fill.get_granularity_for_zoom_level(12));
     assert_eq!(1, SubdivisionGranularityExpression::new(0, 0).get_granularity_for_zoom_level(3));
+}
+
+// gtest: Subdivision.GranularityKeepsTheSurfaceGranularity
+#[test]
+fn granularity_keeps_the_surface_granularity() {
+    let fill = SubdivisionGranularityExpression::new(128, 2).with_surface_granularity(32);
+    let granularities: Vec<u32> = (0..=12).map(|zoom| fill.get_granularity_for_zoom_level(zoom)).collect();
+    // The base granularity alone gives 4 at zoom 5 and 2 from zoom 6.
+    assert_eq!(vec![128, 64, 32, 16, 8, 8, 4, 4, 2, 2, 2, 2, 2], granularities);
+    assert_eq!(2, fill.get_granularity_for_zoom_level(u8::MAX));
 }
 
 // gtest: Subdivision.NoSubdivisionKeepsTriangles
@@ -357,6 +380,75 @@ fn splits_on_cell_boundaries_and_keeps_area() {
     assert_eq!(1, result.line_index_lists.len());
     assert_eq!(16 * 2, result.line_index_lists[0].len());
     expect_sound_mesh(&result, false);
+}
+
+// gtest: Subdivision.StripsExtendEachEdgeOfAFillThatEndsAtTheTileBorder
+#[test]
+fn strips_extend_each_edge_of_a_fill_that_ends_at_the_tile_border() {
+    let tile = CanonicalTileID::new(9, 255, 149);
+    let mut result = subdivide_polygon(&square(0, 0, EXTENT_I16, EXTENT_I16), &tile, 4, true);
+    add_tile_border_strips(&mut result, &tile, TILE_BORDER_STRIP_WIDTH);
+
+    // The 4x4 grid's 32 triangles, two more for each of its 16 cell edges on
+    // the border, five outer vertices per side.
+    assert_eq!(64, result.triangle_indices.len() / 3);
+    assert_eq!(20, vertices_outside_border(&result, TILE_BORDER_STRIP_WIDTH));
+    assert_double_eq(
+        f64::from(EXTENT) * f64::from(EXTENT) + 4.0 * f64::from(EXTENT) * f64::from(TILE_BORDER_STRIP_WIDTH),
+        total_area(&result),
+    );
+    for triangle in result.triangle_indices.as_chunks::<3>().0 {
+        assert!(signed_area(&result.vertices, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize) < 0.0);
+    }
+}
+
+// gtest: Subdivision.NoStripsWhereTheFillContinuesPastTheTileBorder
+#[test]
+fn no_strips_where_the_fill_continues_past_the_tile_border() {
+    let tile = CanonicalTileID::new(9, 255, 149);
+    let mut result = subdivide_polygon(&square(-128, -128, EXTENT_I16 + 128, EXTENT_I16 + 128), &tile, 4, true);
+    let index_count = result.triangle_indices.len();
+    add_tile_border_strips(&mut result, &tile, TILE_BORDER_STRIP_WIDTH);
+
+    assert_eq!(index_count, result.triangle_indices.len());
+}
+
+// gtest: Subdivision.NoStripsForAFillThatStaysInsideTheTile
+#[test]
+fn no_strips_for_a_fill_that_stays_inside_the_tile() {
+    let tile = CanonicalTileID::new(9, 255, 149);
+    let mut result = subdivide_polygon(&square(1000, 1000, 3000, 3000), &tile, 4, true);
+    let index_count = result.triangle_indices.len();
+    add_tile_border_strips(&mut result, &tile, TILE_BORDER_STRIP_WIDTH);
+
+    assert_eq!(index_count, result.triangle_indices.len());
+}
+
+// gtest: Subdivision.NoStripsOnThePoleBorderOfAPoleTile
+#[test]
+fn no_strips_on_the_pole_border_of_a_pole_tile() {
+    let full = square(0, 0, EXTENT_I16, EXTENT_I16);
+    let north_pole_tile = CanonicalTileID::new(1, 0, 0);
+    let mut north = subdivide_polygon(&full, &north_pole_tile, 4, true);
+    add_tile_border_strips(&mut north, &north_pole_tile, TILE_BORDER_STRIP_WIDTH);
+    let south_pole_tile = CanonicalTileID::new(1, 1, 1);
+    let mut south = subdivide_polygon(&full, &south_pole_tile, 4, true);
+    add_tile_border_strips(&mut south, &south_pole_tile, TILE_BORDER_STRIP_WIDTH);
+
+    assert!(!y_coordinates(&north).contains(&-TILE_BORDER_STRIP_WIDTH));
+    assert!(y_coordinates(&north).contains(&(EXTENT_I16 + TILE_BORDER_STRIP_WIDTH)));
+    assert!(!y_coordinates(&south).contains(&(EXTENT_I16 + TILE_BORDER_STRIP_WIDTH)));
+    assert!(y_coordinates(&south).contains(&-TILE_BORDER_STRIP_WIDTH));
+}
+
+// gtest: Subdivision.NoStripsOnTheZoomZeroTileWhoseEdgesAreTheAntimeridianAndThePoles
+#[test]
+fn no_strips_on_the_zoom_zero_tile_whose_edges_are_the_antimeridian_and_the_poles() {
+    let world_tile = CanonicalTileID::new(0, 0, 0);
+    let mut result = subdivide_polygon(&square(0, 0, EXTENT_I16, EXTENT_I16), &world_tile, 4, true);
+    add_tile_border_strips(&mut result, &world_tile, TILE_BORDER_STRIP_WIDTH);
+
+    assert_eq!(0, vertices_outside_border(&result, TILE_BORDER_STRIP_WIDTH));
 }
 
 // gtest: Subdivision.PoleTilesGetPoleQuads

@@ -8,7 +8,7 @@ use mln_util::constants::EXTENT;
 
 use crate::buckets::fill_bucket::FillLayoutVertex;
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
-use crate::util::subdivision::{SubdivisionResult, subdivide_polygon};
+use crate::util::subdivision::{SubdivisionResult, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -182,7 +182,8 @@ fn globe_subdivided_polygon_beyond_the_index_limit_keeps_its_granularity() {
 
     let buffers = generate(&polygon, &tile, 128);
 
-    let full = subdivide_polygon(&polygon, &tile, 128, true);
+    let mut full = subdivide_polygon(&polygon, &tile, 128, true);
+    add_tile_border_strips(&mut full, &tile, TILE_BORDER_STRIP_WIDTH);
     assert!(full.vertices.len() / 2 > MAX_SEGMENT_VERTICES);
     assert!(buffers.fill_segments.len() > 1);
     let expected_triangles = mesh_triangles(&full);
