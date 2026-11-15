@@ -111,7 +111,7 @@ pub fn geojson_to_tile(
     let tolerance = (options.tolerance / f64::from(options.extent)) / f64::from(z2);
     let mut features = detail::convert(feature_parts(features), tolerance, false);
     if wrap {
-        features = detail::wrap(&features, f64::from(options.buffer) / f64::from(options.extent), options.line_metrics);
+        features = detail::wrap(features, f64::from(options.buffer) / f64::from(options.extent), options.line_metrics);
     }
     if clip || options.line_metrics {
         let p = f64::from(options.buffer) / f64::from(options.extent);
@@ -132,7 +132,8 @@ pub fn geojson_to_tile(
             -1.0,
             2.0,
             options.line_metrics,
-        );
+        )
+        .into_owned();
     }
     InternalTile::new(&features, z, x, y, options.extent, tolerance, options.line_metrics).tile
 }
@@ -166,7 +167,7 @@ impl GeoJSONVT {
             options.generate_id,
         );
         let features = detail::wrap(
-            &converted,
+            converted,
             f64::from(options.tile.buffer) / f64::from(options.tile.extent),
             options.tile.line_metrics,
         );
@@ -201,9 +202,13 @@ impl GeoJSONVT {
         };
 
         // if we found a parent tile containing the original geometry, we can
-        // drill down from it
-        let parent = &self.tiles[&parent_id];
-        let (source_features, pz, px, py) = (parent.source_features.clone(), parent.z, parent.x, parent.y);
+        // drill down from it. The parent is an ancestor of the requested
+        // tile, below the maximum zoom, so the drill-down slices it and drops
+        // its source features: it takes them rather than a copy.
+        let Some(parent) = self.tiles.get_mut(&parent_id) else {
+            return Err("Parent tile not found".to_owned());
+        };
+        let (source_features, pz, px, py) = (std::mem::take(&mut parent.source_features), parent.z, parent.x, parent.y);
 
         // drill down parent tile up to the requested one
         self.split_tile(&source_features, pz, px, py, z, x, y);

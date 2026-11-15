@@ -11,10 +11,11 @@ use feature::Value;
 use mln_map::{CameraOptions, CameraUpdate, MapMode, RenderMode};
 use mln_runtime::{
     AttachOptions, DemandMode, Device, EventMask, EventType, FrameDemand, FrameDisposition, FrameResult, Map,
-    MapOptions, RenderSession, RenderTarget, Runtime, RuntimeOptions, SourceQueryOptions,
+    MapOptions, RenderSession, RenderTarget, RenderedQueryGeometry, RenderedQueryOptions, Runtime, RuntimeOptions,
+    SourceQueryOptions,
 };
 use mln_util::feature::Feature;
-use mln_util::geo::LatLng;
+use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use parking_lot::{Condvar, Mutex};
@@ -118,10 +119,29 @@ pub(crate) struct RuntimeMap {
     session: RenderSession,
     wakes: Arc<Wakes>,
     token: u64,
+    /// What [`settle_until_shown`](Self::settle_until_shown) waits to see.
+    probe: Option<Probe>,
     /// Each frame's time since the last [`take_frame_times`](Self::take_frame_times),
     /// from asking for it until its result arrives.
     times: Vec<Duration>,
 }
+
+/// A rendered-feature query that runs after each frame until it shows the
+/// features of `layer` with `value` for `key`.
+struct Probe {
+    layer: String,
+    key: String,
+    value: u64,
+    /// When the first frame's result arrived.
+    since: Option<Instant>,
+    /// How long after `since` the query showed them.
+    shown: Option<Duration>,
+    /// The query on its way, which keeps going across frames.
+    in_flight: Option<Answer>,
+}
+
+/// Where a rendered-feature query puts its result, and when it arrived.
+type Answer = Arc<Mutex<Option<(Instant, Result<Vec<Feature>, mln_runtime::Error>)>>>;
 
 /// Where a [`RuntimeMap`] looks, and what at.
 pub(crate) struct View {
@@ -158,7 +178,7 @@ impl RuntimeMap {
         let attach = AttachOptions { frame_wake: Some(Arc::new(move || wake.notify())), ..Default::default() };
         let (session, attached) = map.attach(RenderTarget::Offscreen { size, device }, attach).expect("a session");
         attached.wait().expect("the session");
-        RuntimeMap { map, session, wakes, token: 0, times: Vec::new() }
+        RuntimeMap { map, session, wakes, token: 0, probe: None, times: Vec::new() }
     }
 
     pub(crate) fn map(&self) -> &Map {
@@ -204,6 +224,9 @@ impl RuntimeMap {
             refresh = start + REFRESH * (u32::try_from(elapsed).expect("a refresh count") + 1);
             if result.disposition == FrameDisposition::Rendered {
                 frames += 1;
+                if let Some(probe) = self.probe.as_mut() {
+                    probe.since.get_or_insert_with(Instant::now);
+                }
                 let snapshot = self.map.snapshot().expect("a snapshot");
                 if result.mode == RenderMode::Full
                     && result.map_update_generation >= snapshot.update_generation
@@ -211,6 +234,9 @@ impl RuntimeMap {
                 {
                     return frames;
                 }
+                // After the check, so that what loads meanwhile shows in the
+                // next frame's check, as it would without the probe.
+                self.run_probe(refresh);
                 mode = if result.needs_repaint { DemandMode::Force } else { DemandMode::WaitForUpdate };
             } else {
                 mode = DemandMode::Force;
@@ -247,6 +273,82 @@ impl RuntimeMap {
             frames += self.settle_by(deadline);
         }
         frames
+    }
+
+    /// As [`settle_until_source_shows`](Self::settle_until_source_shows),
+    /// and also returns how long after the first frame's result a query of
+    /// the features that `layer` draws in the view first showed every one
+    /// with `value` for `key`. Until then, after each frame that doesn't end
+    /// a settle, the query runs again and again until the next refresh, as a
+    /// host that queries after each frame does. It neither moves nor adds a
+    /// frame, and leaves the settle's decisions as they would be without it.
+    pub(crate) fn settle_until_shown(&mut self, layer: &str, source: &str, key: &str, value: u64) -> (usize, Duration) {
+        self.probe = Some(Probe {
+            layer: layer.to_owned(),
+            key: key.to_owned(),
+            value,
+            since: None,
+            shown: None,
+            in_flight: None,
+        });
+        let frames = self.settle_until_source_shows(source, key, value);
+        // The source shows the value once the map settles, so the layer
+        // does by now if it didn't between frames.
+        self.run_probe(Instant::now() + WAIT_LIMIT);
+        let shown = self.probe.take().and_then(|probe| probe.shown).expect("the layer shows the value");
+        (frames, shown)
+    }
+
+    /// Queries the rendered features until the probe sees what it waits
+    /// for, or until `until`; a query still on its way then is waited for in
+    /// the next call.
+    fn run_probe(&mut self, until: Instant) {
+        let Some(probe) = self.probe.as_mut() else { return };
+        if probe.shown.is_some() {
+            return;
+        }
+        let since = *probe.since.get_or_insert_with(Instant::now);
+        loop {
+            let answer = if let Some(answer) = &probe.in_flight {
+                Arc::clone(answer)
+            } else if Instant::now() >= until {
+                return;
+            } else {
+                let size = self.session.snapshot().expect("a session snapshot").extent.size;
+                let view = RenderedQueryGeometry::Box {
+                    min: ScreenCoordinate::new(0.0, 0.0),
+                    max: ScreenCoordinate::new(f64::from(size.width), f64::from(size.height)),
+                };
+                let options = RenderedQueryOptions::new(Some(vec![probe.layer.clone()]), None);
+                let answer = Answer::default();
+                let (slot, wakes) = (Arc::clone(&answer), Arc::clone(&self.wakes));
+                self.session.query_rendered_features(view, options).expect("a rendered query").on_complete(
+                    move |features| {
+                        *slot.lock() = Some((Instant::now(), features));
+                        wakes.notify();
+                    },
+                );
+                probe.in_flight = Some(Arc::clone(&answer));
+                answer
+            };
+            loop {
+                // Before the check, so that an answer that comes after it
+                // ends the wait.
+                let seen = self.wakes.seen();
+                if let Some((arrived, features)) = answer.lock().take() {
+                    probe.in_flight = None;
+                    if features_show(&features.expect("the layer's features"), &probe.key, probe.value) {
+                        probe.shown = Some(arrived - since);
+                        return;
+                    }
+                    break;
+                }
+                if Instant::now() >= until {
+                    return;
+                }
+                self.wakes.wait(seen, until);
+            }
+        }
     }
 
     /// Whether the session's last frame had features of `source` and every

@@ -3,6 +3,8 @@
 // The C++ `clipper<I>` and `clip<I>` are templates on the axis `I`
 // (0 = x, 1 = y); here a const generic.
 
+use std::borrow::Cow;
+
 use crate::types::{
     VtFeature, VtFeatures, VtGeometry, VtGeometryCollection, VtLineString, VtLinearRing, VtMultiLineString,
     VtMultiPoint, VtMultiPolygon, VtPolygon, calc_progress, get, get_point, intersect,
@@ -303,7 +305,8 @@ impl<const I: u8> Clipper<I> {
 }
 
 /// `clip<I>(features, k1, k2, minAll, maxAll, lineMetrics)`: clip features
-/// between two axis-parallel lines.
+/// between two axis-parallel lines. Features that all lie between them come
+/// back borrowed.
 #[must_use]
 pub(crate) fn clip<const I: u8>(
     features: &VtFeatures,
@@ -312,15 +315,15 @@ pub(crate) fn clip<const I: u8>(
     min_all: f64,
     max_all: f64,
     line_metrics: bool,
-) -> VtFeatures {
+) -> Cow<'_, VtFeatures> {
     if min_all >= k1 && max_all < k2 {
         // trivial accept
-        return features.clone();
+        return Cow::Borrowed(features);
     }
 
     if max_all < k1 || min_all >= k2 {
         // trivial reject
-        return VtFeatures::new();
+        return Cow::Owned(VtFeatures::new());
     }
 
     let mut clipped = VtFeatures::with_capacity(features.len());
@@ -358,5 +361,5 @@ pub(crate) fn clip<const I: u8>(
         }
     }
 
-    clipped
+    Cow::Owned(clipped)
 }

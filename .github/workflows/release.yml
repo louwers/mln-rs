@@ -1,27 +1,72 @@
 name: release
 
-# Publishes the workspace in Cargo.toml to crates.io at its version: mln-rs
-# and its internal mln-rs-* crates. Then tags the commit v<version>
-# and creates a GitHub release. See RELEASING.md. Rerunning after a partial
-# failure finishes the job: packages crates.io already has at this version
-# are skipped.
+# Releases the workspace in Cargo.toml: mln-rs and its internal mln-rs-*
+# crates, all at the workspace's version (RELEASING.md). On every push to
+# main, `version` checks whether that version has its GitHub release, which
+# a release creates last. Once a release pull request (release-pr.yml)
+# merges, it doesn't: `release` publishes the packages, tags the commit
+# v<version> and creates the GitHub release. A release that failed part way
+# runs again on the next push, or by hand, from the commit that set the
+# version: packages crates.io already has at this version are skipped.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# One run at a time, so that a push's `version` check waits for a release
+# that is running, and then finds its GitHub release.
 concurrency:
   group: release
   cancel-in-progress: false
 
-permissions:
-  contents: write # the tag and the GitHub release
-
 jobs:
+  # A few seconds, so that a push that releases nothing costs no more. Forks
+  # release nothing.
+  version:
+    if: ${{ !github.event.repository.fork }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      released: ${{ steps.version.outputs.released }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: /Cargo.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Look for the version's GitHub release
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -I -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          if out=$(gh release view "v$version" --repo "$GITHUB_REPOSITORY" --json tagName 2>&1); then
+            released=true
+          elif [[ $out == "release not found" ]]; then
+            released=false
+          else
+            echo "::error::$out"
+            exit 1
+          fi
+          echo "v$version released: $released"
+          echo "released=$released" >> "$GITHUB_OUTPUT"
+
   release:
+    needs: version
+    if:
+      github.event_name == 'workflow_dispatch' || needs.version.outputs.released
+      == 'false'
     runs-on: ubuntu-26.04
     # The publish step waits out crates.io's limit on new crates, which the
     # first release of new packages runs into.
     timeout-minutes: 360
+    permissions:
+      contents: write # the tag and the GitHub release
     steps:
       - name: Require the default branch
         if:
@@ -33,7 +78,23 @@ jobs:
 
       - uses: actions/checkout@v7
         with:
+          # The history, to find the commit that set the version.
+          fetch-depth: 0
           persist-credentials: false
+
+      # The commit that set the version, normally the release pull request's
+      # merge, so that a release that runs again, on a later push or by hand,
+      # packages and tags the same sources.
+      - name: Check out the commit that set the version
+        run: |
+          version=$(python3 -I -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          commit=$(git log -1 --first-parent --format=%H -G "^version = \"${version//./\\.}\"$" -- Cargo.toml)
+          if [[ -z $commit ]]; then
+            echo "::error::No commit on this branch sets version $version in Cargo.toml."
+            exit 1
+          fi
+          git checkout --quiet --detach "$commit"
+          echo "RELEASE_COMMIT=$commit" >> "$GITHUB_ENV"
 
       - name: Install Rust
         run: |
@@ -81,6 +142,8 @@ jobs:
             sleep 600
           done
 
+      # The release notes are the version's section of CHANGELOG.md, which
+      # the release pull request wrote, or else a link to crates.io.
       - name: Tag and create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -90,11 +153,22 @@ jobs:
             echo "The $tag release exists."
             exit 0
           fi
+          notes="$RUNNER_TEMP/notes.md"
+          if [[ -f CHANGELOG.md ]]; then
+            awk -v heading="## [$VERSION]" '
+              index($0, heading) == 1 { found = 1; next }
+              found && /^## / { exit }
+              found
+            ' CHANGELOG.md > "$notes"
+          fi
+          if [[ ! -s $notes ]]; then
+            echo "https://crates.io/crates/mln-rs/$VERSION" > "$notes"
+          fi
           files=()
           for package in $PACKAGES; do
             files+=("target/package/$package-$VERSION.crate")
           done
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$RELEASE_COMMIT" \
             --title "$tag" \
-            --notes "https://crates.io/crates/mln-rs/$VERSION" \
+            --notes-file "$notes" \
             "${files[@]}"

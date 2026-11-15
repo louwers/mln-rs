@@ -1,0 +1,67 @@
+name: release-pr
+
+# Has release-plz open the pull request for the next release, or update the
+# one it opened (release-plz.toml, RELEASING.md). Nightly rather than on
+# every push: for each library changed since the last release, release-plz
+# runs cargo-semver-checks, which takes most of an hour of CPU time. Run it
+# by hand for a release pull request sooner.
+
+on:
+  schedule:
+    - cron: "13 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Forks open no release pull request, and the pull request is for the
+  # default branch, whichever branch the workflow runs on. A scheduled run's
+  # event says neither, so this asks the API.
+  repository:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      fork: ${{ steps.repository.outputs.fork }}
+      default-branch: ${{ steps.repository.outputs.default-branch }}
+    steps:
+      - name: Look up the repository
+        id: repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY" --jq '"fork=\(.fork)", "default-branch=\(.default_branch)"' >> "$GITHUB_OUTPUT"
+
+  release-pr:
+    needs: repository
+    if: needs.repository.outputs.fork == 'false'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    permissions:
+      contents: write # the pull request's branch
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.repository.outputs.default-branch }}
+          # The commits since the last release.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # For cargo-semver-checks, which the action installs.
+      - name: Install Rust
+        run: |
+          rustup toolchain install --profile minimal --no-self-update
+
+      # A pull request opened with the default token starts no workflows, so
+      # CI doesn't run on it; one opened with RELEASE_PLZ_TOKEN does
+      # (RELEASING.md).
+      - uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || github.token }}

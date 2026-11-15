@@ -1286,7 +1286,9 @@ fn points_geojson(variant: usize) -> String {
 /// with every tile showing the new points, as maplibre-compose's
 /// update-points and source-completion cases do. A tile draws its old
 /// points until the new ones are cut, so a complete frame doesn't mean the
-/// new points show.
+/// new points show. `ready_ms` is when a query of the rendered features,
+/// which compose sends after each frame, first shows them, from the result
+/// of the first frame after the command.
 fn geojson_replace(cx: &Context) -> Metrics {
     let style = r##"{"version":8,"transition":{"duration":0,"delay":0},"sources":{"data":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[{"id":"points","type":"circle","source":"data","paint":{"circle-radius":5,"circle-color":"#e63946"}}]}"##;
     let data = [points_geojson(0), points_geojson(1)];
@@ -1298,13 +1300,15 @@ fn geojson_replace(cx: &Context) -> Metrics {
     let mut meter = Meter::new();
     let mut frames = Vec::new();
     let mut longest = Vec::new();
+    let mut ready = Vec::new();
     for i in 0..cx.iterations(30) {
         let variant = (i + 1) % 2;
         let json = data[variant].clone();
         meter.start();
         map.map().set_geojson_source_data("data", json).expect("GeoJSON data").wait().expect("the data");
-        map.settle_until_source_shows("data", "revision", variant as u64);
+        let (_, shown) = map.settle_until_shown("points", "data", "revision", variant as u64);
         meter.stop();
+        ready.push(ms(shown));
         let times = map.take_frame_times();
         longest.push(times.iter().copied().max().map_or(0.0, ms));
         frames.extend(times.into_iter().map(ms));
@@ -1315,6 +1319,7 @@ fn geojson_replace(cx: &Context) -> Metrics {
     let mut metrics = meter.finish();
     metrics.lead("frame_p95_ms", percentile(&frames, 95.0));
     metrics.lead("update_frame_ms", median(&longest));
+    metrics.lead("ready_ms", median(&ready));
     metrics.other("frames", frames.len() as f64 / longest.len() as f64);
     metrics
 }

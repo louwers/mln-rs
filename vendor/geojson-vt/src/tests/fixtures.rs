@@ -192,6 +192,21 @@ fn get_tile_us_states() {
 }
 
 #[test]
+fn get_tile_drills_down_from_any_tile_it_holds() {
+    let geojson = read(&load_file("test/fixtures/us-states.json")).unwrap();
+    let index = || GeoJSONVT::new(&geojson, Options::default());
+    // A tile, its sibling, a tile below it and one of another branch, each
+    // drilled down from the tiles the requests before it left.
+    let tiles = [(7, 37, 48), (7, 37, 49), (9, 148, 192), (10, 297, 385), (8, 60, 95), (7, 36, 48)];
+    let mut shared = index();
+    for (z, x, y) in tiles {
+        let expected = index().get_tile(z, x, y).unwrap().features.clone();
+        assert!(!expected.is_empty(), "tile {z}/{x}/{y} has features");
+        features_eq(&expected, &shared.get_tile(z, x, y).unwrap().features);
+    }
+}
+
+#[test]
 fn get_tile_generate_ids() {
     let geojson = read(&load_file("test/fixtures/us-states.json")).unwrap();
     let options = Options {
