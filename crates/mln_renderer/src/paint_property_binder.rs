@@ -218,11 +218,9 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
 pub(crate) struct PaintPropertyBinder<T> {
     pub(crate) kind: PaintPropertyBinderKind<T>,
     pub(crate) statistics: PaintPropertyStatistics<T>,
-    /// Whether `set_interleaved_buffer` gave the binder vertex data.
-    pub(crate) has_interleaved_buffer: bool,
-    /// The binder's offset in the interleaved vertex; `usize::MAX` until
-    /// `set_interleaved_buffer`.
-    pub(crate) vertex_offset: usize,
+    /// The binder's offset in the interleaved vertex; `None` until
+    /// `set_interleaved_buffer` gives the binder vertex data.
+    pub(crate) vertex_offset: Option<usize>,
 }
 
 impl<T: BinderValue> PaintPropertyBinder<T> {
@@ -248,12 +246,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 }
             }
         };
-        PaintPropertyBinder {
-            kind,
-            statistics: PaintPropertyStatistics::default(),
-            has_interleaved_buffer: false,
-            vertex_offset: usize::MAX,
-        }
+        PaintPropertyBinder { kind, statistics: PaintPropertyStatistics::default(), vertex_offset: None }
     }
 
     /// The size in bytes of the zoom-interpolated vertex: `2 * DIMENSIONS`
@@ -268,15 +261,12 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         if let PaintPropertyBinderKind::Constant { .. } = self.kind {
             return;
         }
-        self.has_interleaved_buffer = true;
         let new_vertex_offset = buffer.extend_vertex_format(Self::zoom_interpolated_size(), align_of::<f32>());
-        if self.vertex_offset == usize::MAX {
-            self.vertex_offset = new_vertex_offset;
-        }
+        self.vertex_offset.get_or_insert(new_vertex_offset);
     }
 
     pub(crate) fn get_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
-        if self.has_interleaved_buffer { buffer.vertex_count } else { 0 }
+        if self.vertex_offset.is_some() { buffer.vertex_count } else { 0 }
     }
 
     pub(crate) fn is_interpolated(&self) -> bool {
@@ -293,7 +283,9 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         formatted_section: &Value,
     ) {
         let elements = self.get_vertex_count(buffer);
-        let vertex_offset = self.vertex_offset;
+        let Some(vertex_offset) = self.vertex_offset else {
+            return;
+        };
         match &mut self.kind {
             PaintPropertyBinderKind::Constant { .. } => {}
             PaintPropertyBinderKind::SourceFunction { expression, default_value, feature_map } => {
@@ -368,6 +360,9 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
             PaintPropertyBinderKind::SourceFunction { feature_map, .. }
             | PaintPropertyBinderKind::CompositeFunction { feature_map, .. } => feature_map,
         };
+        let Some(vertex_offset) = *vertex_offset else {
+            return;
+        };
         for (id, state) in states {
             let Some(positions) = feature_map.get(id) else {
                 continue;
@@ -379,7 +374,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 let Ok(feature) = layer.get_feature(pos.feature_index) else {
                     continue;
                 };
-                kind.update_vertex_vector(statistics, buffer, *vertex_offset, pos, &*feature, state);
+                kind.update_vertex_vector(statistics, buffer, vertex_offset, pos, &*feature, state);
             }
         }
     }
@@ -417,13 +412,13 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         Some(match &self.kind {
             PaintPropertyBinderKind::Constant { .. } => vec![0.0; 2 * n],
             PaintPropertyBinderKind::SourceFunction { .. } => {
-                let base: Vec<f32> = bytemuck::pod_collect_to_vec(&buffer.try_get(index, self.vertex_offset, n * 4)?);
+                let base: Vec<f32> = bytemuck::pod_collect_to_vec(&buffer.try_get(index, self.vertex_offset?, n * 4)?);
                 let mut value = base.clone();
                 value.extend_from_slice(&base);
                 value
             }
             PaintPropertyBinderKind::CompositeFunction { .. } => {
-                bytemuck::pod_collect_to_vec(&buffer.try_get(index, self.vertex_offset, 2 * n * 4)?)
+                bytemuck::pod_collect_to_vec(&buffer.try_get(index, self.vertex_offset?, 2 * n * 4)?)
             }
         })
     }
@@ -435,14 +430,14 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         _attr_index: usize,
         attrib: &mut VertexAttribute,
     ) {
-        if self.has_interleaved_buffer {
+        if let Some(vertex_offset) = self.vertex_offset {
             let raw_size = buffer.stride as u32;
             let data_type = if self.is_interpolated() { T::INTERPOLATED_DATA_TYPE } else { T::BASE_DATA_TYPE };
 
             debug_assert_eq!(shared.get_raw_count() / buffer.stride.max(1), self.get_vertex_count(buffer));
             attrib.set_shared_raw_data(
                 Some(std::rc::Rc::clone(shared)),
-                self.vertex_offset as u32,
+                vertex_offset as u32,
                 0,
                 raw_size,
                 data_type,
@@ -478,8 +473,9 @@ pub(crate) enum CrossFadedPaintPropertyBinderKind<T> {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct CrossFadedPaintPropertyBinder<T> {
     pub(crate) kind: CrossFadedPaintPropertyBinderKind<T>,
-    pub(crate) has_interleaved_buffer: bool,
-    pub(crate) vertex_offset: usize,
+    /// The binder's offset in the interleaved vertex; `None` until
+    /// `set_interleaved_buffer` gives the binder vertex data.
+    pub(crate) vertex_offset: Option<usize>,
 }
 
 /// The size of a zoom-interpolated pattern vertex: eight `u16`s.
@@ -501,7 +497,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
                 }
             }
         };
-        CrossFadedPaintPropertyBinder { kind, has_interleaved_buffer: false, vertex_offset: usize::MAX }
+        CrossFadedPaintPropertyBinder { kind, vertex_offset: None }
     }
 
     /// Adds the binder's vertex data to the vertex format; only the composite
@@ -510,15 +506,12 @@ impl CrossFadedPaintPropertyBinder<Image> {
         if let CrossFadedPaintPropertyBinderKind::Constant { .. } = self.kind {
             return;
         }
-        self.has_interleaved_buffer = true;
         let new_vertex_offset = buffer.extend_vertex_format(PATTERN_ZOOM_INTERPOLATED_SIZE, align_of::<u16>());
-        if self.vertex_offset == usize::MAX {
-            self.vertex_offset = new_vertex_offset;
-        }
+        self.vertex_offset.get_or_insert(new_vertex_offset);
     }
 
     pub(crate) fn get_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
-        if self.has_interleaved_buffer { buffer.vertex_count } else { 0 }
+        if self.vertex_offset.is_some() { buffer.vertex_count } else { 0 }
     }
 
     pub(crate) fn populate_vertex_vector(
@@ -528,7 +521,9 @@ impl CrossFadedPaintPropertyBinder<Image> {
         pattern_positions: &ImagePositions,
         pattern_dependencies: Option<&PatternDependency>,
     ) {
-        let vertex_offset = self.vertex_offset;
+        let Some(vertex_offset) = self.vertex_offset else {
+            return;
+        };
         let CrossFadedPaintPropertyBinderKind::Composite { populated_count, .. } = &mut self.kind else {
             return;
         };
@@ -583,13 +578,13 @@ impl CrossFadedPaintPropertyBinder<Image> {
         _attr_index: usize,
         attrib: &mut VertexAttribute,
     ) {
-        if self.has_interleaved_buffer {
+        if let Some(vertex_offset) = self.vertex_offset {
             let raw_size = buffer.stride as u32;
             // isInterpolated() is false: `Type::DataType`.
             let data_type = AttributeDataType::UShort4;
             attrib.set_shared_raw_data(
                 Some(std::rc::Rc::clone(shared)),
-                self.vertex_offset as u32,
+                vertex_offset as u32,
                 0,
                 raw_size,
                 data_type,
