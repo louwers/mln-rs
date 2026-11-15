@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use parking_lot::{Condvar, Mutex};
 
 use crate::scheduler::{self, Scheduler};
-use crate::timer::TimerHandle;
+use crate::timer::Timers;
 
 type Task = Box<dyn FnOnce() + Send + 'static>;
 
@@ -139,7 +139,7 @@ struct Inner {
     /// The buffer that `run_once` copies the handles into, kept between
     /// passes so that a pass doesn't allocate.
     sending: Cell<Vec<Rc<AsyncHandle>>>,
-    timers: RefCell<Vec<Weak<TimerHandle>>>,
+    timers: Rc<Timers>,
 }
 
 thread_local! {
@@ -178,7 +178,7 @@ impl RunLoop {
                 scheduler,
                 handles: RefCell::new(Vec::new()),
                 sending: Cell::new(Vec::new()),
-                timers: RefCell::new(Vec::new()),
+                timers: Rc::default(),
             }),
         }
     }
@@ -313,29 +313,21 @@ impl RunLoop {
     /// Returns whether any was due.
     fn run_timers(&self) -> bool {
         let now = mln_util::time::Instant::now();
-        let mut due: Vec<Rc<TimerHandle>> = {
-            let mut timers = self.inner.timers.borrow_mut();
-            timers.retain(|t| t.strong_count() > 0);
-            timers.iter().filter_map(Weak::upgrade).filter(|t| t.due.get().is_some_and(|d| d <= now)).collect()
-        };
-        due.sort_by_key(|t| (t.due.get(), t.start_id.get()));
+        let due = self.inner.timers.take_due(now);
         let any_due = !due.is_empty();
-        for timer in due {
-            // An earlier callback may have stopped or restarted it.
-            if timer.due.get().is_some_and(|d| d <= now) {
-                timer.fire(now);
-            }
+        for (timer, armed) in due {
+            timer.fire(armed, now);
         }
         any_due
     }
 
     /// The earliest due time of this loop's running timers.
     fn next_timer_due(&self) -> Option<mln_util::time::Instant> {
-        self.inner.timers.borrow().iter().filter_map(Weak::upgrade).filter_map(|t| t.due.get()).min()
+        self.inner.timers.next_due()
     }
 
-    pub(crate) fn register_timer(&self, timer: &Rc<TimerHandle>) {
-        self.inner.timers.borrow_mut().push(Rc::downgrade(timer));
+    pub(crate) fn timers(&self) -> &Rc<Timers> {
+        &self.inner.timers
     }
 
     /// Makes `run` return once the tasks queued before this one have run.
