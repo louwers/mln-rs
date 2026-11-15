@@ -3,7 +3,6 @@
 // context (its dynamic textures create their GPU texture in the upload
 // pass, see dynamic_texture.rs), so the fixture has no backend.
 
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use mln_style_types::image::{ImageMap, ImagePosition, ImageType, Impl as ImageImpl};
@@ -11,6 +10,7 @@ use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
 
+use crate::gfx::dynamic_texture::DynamicTextureBinId;
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphAtlas, ImageAtlas, ImageVersionMap};
 
 fn make_glyph(code: char) -> Arc<Glyph> {
@@ -219,7 +219,7 @@ fn updated_icon_gets_fresh_allocation() {
 fn many_live_icon_revisions_get_their_own_allocations() {
     const REVISIONS: u32 = 64;
     let mut test = DynamicTextureAtlasTest::new();
-    let ids: mln_util::hash::HashSet<NonZeroU32> = (0..REVISIONS)
+    let ids: mln_util::hash::HashSet<DynamicTextureBinId> = (0..REVISIONS)
         .map(|version| test.upload_icon(&make_image("marker", false), version).texture_handles[0].get_id())
         .collect();
     assert_eq!(ids.len(), REVISIONS as usize);

@@ -4,7 +4,6 @@
 // needs no context here: the GPU texture is created when the frame uploads
 // (see dynamic_texture.rs).
 
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -18,7 +17,7 @@ use mln_util::size::Size;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-use super::dynamic_texture::{DynamicTexture, DynamicTexturePtr, TextureHandle};
+use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, DynamicTexturePtr, TextureHandle};
 use crate::tile::worker_codec::fields;
 
 pub(crate) type ImageVersionMap = HashMap<String, u32>;
@@ -153,7 +152,7 @@ struct ImageAllocation {
     // Keeps the revision alive so its address can't be reused by another
     // image while the bin exists.
     _image: Arc<ImageImpl>,
-    bin_id: NonZeroU32,
+    bin_id: DynamicTextureBinId,
 }
 
 /// Identifies a glyph's allocation: (dynamic texture, glyph). The font stacks
@@ -171,13 +170,13 @@ struct GlyphAllocation {
     // Keeps the glyph alive so its address can't be reused by another glyph
     // while the bin exists.
     _glyph: Arc<Glyph>,
-    bin_id: NonZeroU32,
+    bin_id: DynamicTextureBinId,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct BinKey {
     dynamic_texture: usize,
-    bin_id: NonZeroU32,
+    bin_id: DynamicTextureBinId,
 }
 
 #[derive(Default)]
