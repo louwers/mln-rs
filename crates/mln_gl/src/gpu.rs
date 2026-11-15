@@ -29,7 +29,7 @@ use mln_util::size::Size;
 
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
-use crate::renderer_backend::GlContext;
+use crate::renderer_backend::{Current, GlContext};
 use crate::shaders::glsl_sources::PRELUDE;
 use crate::shaders::shader_source::shader_source;
 use crate::state::State;
@@ -74,6 +74,9 @@ struct Elements {
     dirty: Cell<bool>,
     /// The element size `data` was uploaded for; 0 before the first upload.
     element_size: Cell<usize>,
+    /// The bytes the GL buffer holds, which a later upload of as many
+    /// writes in place.
+    uploaded: Cell<usize>,
 }
 
 /// A GL buffer, deleted when the last holder drops.
@@ -281,6 +284,8 @@ impl Drop for Geometry {
 /// The open pass, and what the draws in it set so far: `None` where a draw
 /// sets it again.
 struct OpenPass {
+    /// Has the context current while the pass is open, for its draws.
+    _current: Current,
     target: PassTarget,
     framebuffer: Option<FramebufferID>,
     /// Whether the pass names a color and a depth-stencil attachment.
@@ -869,13 +874,20 @@ impl GlGpu {
             spaced = spacing;
             &spaced
         };
-        // SAFETY: the buffer is alive, or new; its storage is replaced, so
-        // the cached bindings of it are forgotten.
+        // SAFETY: the buffer is alive, or new. Where it holds as many bytes,
+        // they are written over; otherwise its storage is replaced, so the
+        // cached bindings of it are forgotten.
         unsafe {
-            self.context.state().forget_uniform_buffer(object);
-            gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
-            gl.buffer_data_u8_slice(glow::UNIFORM_BUFFER, bytes, glow::DYNAMIC_DRAW);
+            if buffer.object.get().is_some() && elements.uploaded.get() == bytes.len() {
+                gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
+                gl.buffer_sub_data_u8_slice(glow::UNIFORM_BUFFER, 0, bytes);
+            } else {
+                self.context.state().forget_uniform_buffer(object);
+                gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
+                gl.buffer_data_u8_slice(glow::UNIFORM_BUFFER, bytes, glow::DYNAMIC_DRAW);
+            }
         }
+        elements.uploaded.set(bytes.len());
         elements.data.set(data);
         buffer.object.set(Some(object));
         elements.dirty.set(false);
@@ -936,17 +948,14 @@ impl GlGpu {
         let fixed = &pipeline.state;
         // An imported framebuffer keeps the attachment that a pass leaves
         // out bound, which the draw leaves alone.
-        let (depth, stencil) = if depth_stencil {
-            (fixed.depth, fixed.stencil)
-        } else {
-            (DepthState::from(&DepthMode::disabled()), StencilState::from(&StencilMode::disabled()))
-        };
         if differs(|a, b| a.depth_range == b.depth_range) {
+            let depth = if depth_stencil { fixed.depth } else { DepthState::from(&DepthMode::disabled()) };
             let (min, max) = dynamic.depth_range;
             let mask = if depth.write { DepthMaskType::ReadWrite } else { DepthMaskType::ReadOnly };
             state.set_depth_mode(gl, &DepthMode { func: depth.compare, mask, range: Range { min, max } });
         }
         if differs(|a, b| a.stencil_reference == b.stencil_reference) {
+            let stencil = if depth_stencil { fixed.stencil } else { StencilState::from(&StencilMode::disabled()) };
             state.set_stencil_mode(
                 gl,
                 &StencilMode {
@@ -1117,7 +1126,12 @@ impl Gpu for GlGpu {
         let deleted = Rc::clone(&self.deleted);
         if desc.usage == BufferUsage::Storage {
             let data = vec![0u8; usize::try_from(size).map_err(|_| unsupported())?];
-            let elements = Some(Elements { data: Cell::new(data), dirty: Cell::new(true), element_size: Cell::new(0) });
+            let elements = Some(Elements {
+                data: Cell::new(data),
+                dirty: Cell::new(true),
+                element_size: Cell::new(0),
+                uploaded: Cell::new(0),
+            });
             let native = Rc::new(NativeBuffer { object: Cell::new(None), elements, deleted });
             return Ok(self.buffers.insert(Buffer { native, usage: desc.usage, size }));
         }
@@ -1475,6 +1489,7 @@ impl Gpu for GlGpu {
             .filter_map(|id| Some((id, Rc::clone(&self.textures.get(id)?.native))))
             .collect();
         self.pass = Some(OpenPass {
+            _current: self.context.enter(),
             target,
             framebuffer,
             attachments: (color.is_some(), depth_stencil.is_some()),
@@ -1515,8 +1530,6 @@ impl Gpu for GlGpu {
         let bindings = self.bindings.get(draw.bindings).ok_or(GpuError::UnknownId("bindings"))?;
         let geometry = self.geometries.get(draw.geometry).ok_or(GpuError::UnknownId("geometry"))?;
         validation::check_draw(draw, open.target.targets, &pipeline.tags, &bindings.tags, &geometry.tags)?;
-        let context = Rc::clone(&self.context);
-        let _current = context.enter();
         let changed = open.pipeline != Some(draw.pipeline);
         self.set_state(pipeline, changed, open.dynamic.as_ref(), &draw.dynamic, open.attachments);
         if open.bindings != Some(draw.bindings) {
@@ -1536,7 +1549,7 @@ impl Gpu for GlGpu {
             open.geometry = Some((draw.geometry, bases));
             open.dynamic = Some(draw.dynamic);
         }
-        let gl = context.gl();
+        let gl = self.context.gl();
         let (count, offset) = (draw.index_count as i32, (u64::from(draw.first_index) * 2) as i32);
         // SAFETY: the draw's checks passed; its vertex array, program,
         // blocks and textures are bound.

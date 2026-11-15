@@ -507,7 +507,9 @@ impl Renderer {
         if last.is_some() {
             clip_tiles.extend(parameters.stencil_clear_tile());
         }
-        clip_tiles.sort_unstable();
+        if !clip_tiles.is_sorted() {
+            clip_tiles.sort_unstable();
+        }
         clip_tiles.dedup();
         self.clip_masks.update(
             context,

@@ -99,11 +99,13 @@ pub(crate) struct ClipMasks {
     /// The meshes of the masks.
     meshes: BTreeMap<MeshKey, Mesh>,
     /// Each tile's slot of `projections` and the keys of its meshes: on the
-    /// globe with a border and then without, elsewhere the square.
-    masks: BTreeMap<UnwrappedTileID, (usize, Vec<MeshKey>)>,
+    /// globe with a border and then without, elsewhere the square twice.
+    masks: BTreeMap<UnwrappedTileID, (usize, [MeshKey; 2])>,
     /// The masks' projections, each at an offset the GPU can bind, in the
     /// order of their tiles: one write a frame.
     projections: Option<UniformBufferPtr>,
+    /// The bytes of `projections`, kept between frames.
+    bytes: Vec<u8>,
     /// The bindings of each slot of `projections`, and what they were made
     /// of: the epoch of the frame's buffers and the projections' buffer.
     bindings: Vec<Owned<BindingsId>>,
@@ -130,8 +132,8 @@ impl ClipMasks {
             let variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
             self.shader = shaders.shader("ClippingMaskProgram", variant);
         }
-        self.masks.clear();
         if self.shader.is_none() || tiles.is_empty() {
+            self.masks.clear();
             self.meshes.clear();
             self.projections = None;
             self.bindings.clear();
@@ -140,18 +142,25 @@ impl ClipMasks {
         }
         let size = size_of::<ProjectionUBO>();
         let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
-        let mut bytes = vec![0; tiles.len() * stride];
+        self.bytes.clear();
+        self.bytes.resize(tiles.len() * stride, 0);
+        let tiles_before = self.masks.len();
+        self.masks.retain(|tile, _| tiles.binary_search(tile).is_ok());
+        let tiles_gone = self.masks.len() < tiles_before;
         for (slot, tile) in tiles.iter().enumerate() {
+            self.bytes[slot * stride..][..size].copy_from_slice(bytemuck::bytes_of(&projection(tile)));
+            if let Some((kept, _)) = self.masks.get_mut(tile) {
+                *kept = slot;
+                continue;
+            }
             let keys = if globe {
                 let canonical = &tile.canonical;
                 [true, false]
-                    .into_iter()
                     .map(|borders| (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1, borders))
-                    .collect()
             } else {
-                vec![SQUARE]
+                [SQUARE; 2]
             };
-            for &key in &keys {
+            for key in keys {
                 if self.meshes.contains_key(&key) {
                     continue;
                 }
@@ -171,12 +180,13 @@ impl ClipMasks {
                 }
             }
             self.masks.insert(*tile, (slot, keys));
-            bytes[slot * stride..][..size].copy_from_slice(bytemuck::bytes_of(&projection(tile)));
         }
         // Those of the tiles gone go with them.
-        let masks = &self.masks;
-        self.meshes.retain(|key, _| masks.values().any(|(_, keys)| keys.contains(key)));
-        context.write_uniform_buffer(&mut self.projections, &bytes);
+        if tiles_gone {
+            let masks = &self.masks;
+            self.meshes.retain(|key, _| masks.values().any(|(_, keys)| keys.contains(key)));
+        }
+        context.write_uniform_buffer(&mut self.projections, &self.bytes);
     }
 
     /// Draws the mask of each tile of `masks` with its stencil value, which
@@ -292,7 +302,7 @@ impl ClipMasks {
                     debug_assert!(false, "no clipping mask for {tile:?}");
                     continue;
                 };
-                let Some(mesh) = keys.get(pass).and_then(|key| self.meshes.get_mut(key)) else {
+                let Some(mesh) = self.meshes.get_mut(&keys[pass]) else {
                     continue;
                 };
                 let geometry = mesh.geometry(gpu, context, shader_id)?;
