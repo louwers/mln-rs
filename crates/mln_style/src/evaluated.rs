@@ -18,21 +18,14 @@ pub struct Faded<T> {
     pub to: T,
 }
 
-/// How a property's value evaluates, from its style-spec property type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Evaluation {
-    /// To one value for every feature, or for a data-driven property, to an
-    /// expression for each feature when the value reads the feature.
-    Plain,
-    /// As `Plain`, at the integer zoom below.
-    IntegerZoom,
-    /// To the values at two zooms to fade between: `line-dasharray` and
-    /// `background-pattern`.
-    CrossFaded,
-    /// As `CrossFaded`, or to an expression for each feature when the value
-    /// reads the feature or the images: the patterns.
-    CrossFadedPerFeature,
-}
+/// How a property's value evaluates for a frame, with a default for an
+/// undefined value or an expression that gives no value: one of
+/// [`Evaluated::plain`], [`Evaluated::integer_zoom`],
+/// [`Evaluated::cross_faded`] and [`Evaluated::cross_faded_per_feature`].
+///
+/// A function rather than an enum, so that only the value types that cross-fade
+/// compile the cross-fade code.
+pub type Evaluation<T> = fn(&PropertyValue<T>, &PropertyEvaluationParameters, T) -> Evaluated<T>;
 
 /// A property's value for a frame.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -53,70 +46,92 @@ impl<T: Default> Default for Evaluated<T> {
 }
 
 impl<T: Clone + Default + ValueConverter> Evaluated<T> {
-    /// Evaluates `value` for a frame, with `default` for an undefined value
-    /// or an expression that gives no value.
-    #[must_use]
+    /// To one value for every feature, or for a data-driven property, to an
+    /// expression for each feature when the value reads the feature.
+    pub fn plain(value: &PropertyValue<T>, parameters: &PropertyEvaluationParameters, default: T) -> Self {
+        Self::uniform_or_per_feature(value, parameters, default, false)
+    }
+
+    /// As [`Evaluated::plain`], at the integer zoom below.
+    pub fn integer_zoom(value: &PropertyValue<T>, parameters: &PropertyEvaluationParameters, default: T) -> Self {
+        Self::uniform_or_per_feature(value, parameters, default, true)
+    }
+
     #[inline(never)]
-    pub fn new(
+    fn uniform_or_per_feature(
         value: &PropertyValue<T>,
-        evaluation: Evaluation,
         parameters: &PropertyEvaluationParameters,
         default: T,
+        integer_zoom: bool,
     ) -> Self {
-        let cross_fade = |min: T, mid: T, max: T| {
-            if parameters.z > parameters.zoom_history.last_integer_zoom {
-                Evaluated::CrossFaded(Faded { from: min, to: mid })
-            } else {
-                Evaluated::CrossFaded(Faded { from: max, to: mid })
-            }
-        };
         let expression = match value {
-            PropertyValue::Undefined | PropertyValue::Constant(_) => {
-                let value = match value {
-                    PropertyValue::Constant(constant) => constant.clone(),
-                    _ => default,
-                };
-                return match evaluation {
-                    Evaluation::Plain | Evaluation::IntegerZoom => Evaluated::Constant(value),
-                    Evaluation::CrossFaded | Evaluation::CrossFadedPerFeature => {
-                        cross_fade(value.clone(), value.clone(), value)
-                    }
-                };
+            PropertyValue::Undefined => return Evaluated::Constant(default),
+            PropertyValue::Constant(constant) => return Evaluated::Constant(constant.clone()),
+            PropertyValue::Expression(expression) => expression,
+        };
+        if expression.get_dependencies().intersects(Dependency::FEATURE | Dependency::IMAGE) {
+            return Self::per_feature(expression, parameters, integer_zoom, default);
+        }
+        let z = if integer_zoom { parameters.z.floor() } else { parameters.z };
+        let context = EvaluationContext::new(z).with_global_state(parameters.global_state.as_deref());
+        Evaluated::Constant(expression.evaluate(&context, default))
+    }
+
+    /// To the values at two zooms to fade between: `line-dasharray` and
+    /// `background-pattern`.
+    #[inline(never)]
+    pub fn cross_faded(value: &PropertyValue<T>, parameters: &PropertyEvaluationParameters, default: T) -> Self {
+        let expression = match value {
+            PropertyValue::Undefined => return Self::cross_fade(parameters, default.clone(), default.clone(), default),
+            PropertyValue::Constant(constant) => {
+                return Self::cross_fade(parameters, constant.clone(), constant.clone(), constant.clone());
             }
             PropertyValue::Expression(expression) => expression,
         };
         let global_state = parameters.global_state.as_deref();
-        let at = |z: f32, default: T| {
-            expression.evaluate(&EvaluationContext::new(z).with_global_state(global_state), default)
-        };
-        let per_feature = |integer_zoom: bool, default: T| {
-            let mut expression = expression.clone();
-            expression.set_use_integer_zoom(integer_zoom);
-            expression.capture_global_state(parameters.global_state.clone());
-            Evaluated::PerFeature { expression, default }
-        };
+        let at = |z: f32| expression.evaluate(&EvaluationContext::new(z).with_global_state(global_state), T::default());
         let z = parameters.z;
-        match evaluation {
-            Evaluation::Plain | Evaluation::IntegerZoom => {
-                let integer_zoom = evaluation == Evaluation::IntegerZoom;
-                if expression.get_dependencies().intersects(Dependency::FEATURE | Dependency::IMAGE) {
-                    per_feature(integer_zoom, default)
-                } else {
-                    Evaluated::Constant(at(if integer_zoom { z.floor() } else { z }, default))
-                }
-            }
-            Evaluation::CrossFaded => {
-                cross_fade(at(z - 1.0, T::default()), at(z, T::default()), at(z + 1.0, T::default()))
-            }
-            Evaluation::CrossFadedPerFeature => {
+        Self::cross_fade(parameters, at(z - 1.0), at(z), at(z + 1.0))
+    }
+
+    /// As [`Evaluated::cross_faded`], or to an expression for each feature when
+    /// the value reads the feature or the images: the patterns.
+    #[inline(never)]
+    pub fn cross_faded_per_feature(
+        value: &PropertyValue<T>,
+        parameters: &PropertyEvaluationParameters,
+        default: T,
+    ) -> Self {
+        let value = match value {
+            PropertyValue::Undefined => default,
+            PropertyValue::Constant(constant) => constant.clone(),
+            PropertyValue::Expression(expression) => {
                 if !expression.is_feature_constant() || !expression.is_runtime_constant() {
-                    per_feature(false, default)
-                } else {
-                    let value = expression.evaluate(&EvaluationContext::new(z.floor()), T::default());
-                    cross_fade(value.clone(), value.clone(), value)
+                    return Self::per_feature(expression, parameters, false, default);
                 }
+                expression.evaluate(&EvaluationContext::new(parameters.z.floor()), T::default())
             }
-        }
+        };
+        Self::cross_fade(parameters, value.clone(), value.clone(), value)
+    }
+
+    /// Fades to `mid` from `min` when zooming in, or from `max` when zooming
+    /// out.
+    fn cross_fade(parameters: &PropertyEvaluationParameters, min: T, mid: T, max: T) -> Self {
+        let from = if parameters.z > parameters.zoom_history.last_integer_zoom { min } else { max };
+        Evaluated::CrossFaded(Faded { from, to: mid })
+    }
+
+    fn per_feature(
+        expression: &PropertyExpression<T>,
+        parameters: &PropertyEvaluationParameters,
+        integer_zoom: bool,
+        default: T,
+    ) -> Self {
+        let mut expression = expression.clone();
+        expression.set_use_integer_zoom(integer_zoom);
+        expression.capture_global_state(parameters.global_state.clone());
+        Evaluated::PerFeature { expression, default }
     }
 }
 

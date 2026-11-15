@@ -116,7 +116,7 @@ impl PropertyValueLike for ColorRampPropertyValue {
     type Type = Color;
 
     /// The default: a layer builds its ramp from the expression itself.
-    fn evaluate(&self, _: Evaluation, _: &PropertyEvaluationParameters, default: Color) -> Evaluated<Color> {
+    fn evaluate(&self, _: Evaluation<Color>, _: &PropertyEvaluationParameters, default: Color) -> Evaluated<Color> {
         Evaluated::Constant(default)
     }
 

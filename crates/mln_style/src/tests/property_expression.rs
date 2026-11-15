@@ -7,7 +7,7 @@ use mln_util::geometry::FeatureType;
 use mln_vec_map::VecSet;
 
 use super::util::{StubGeometryTileFeature, property_map};
-use crate::evaluated::{Evaluated, Evaluation};
+use crate::evaluated::Evaluated;
 use crate::expression::dsl::{get, get_str, image, interpolate, linear, literal, literal_str, number, step, zoom};
 use crate::expression::{Dependency, EvaluationContext, Image, Value};
 use crate::property_expression::PropertyExpression;
@@ -36,7 +36,7 @@ fn empty_tile_feature() -> StubGeometryTileFeature {
 
 fn evaluate(value: &PropertyValue<f32>, zoom: f32) -> f32 {
     let parameters = PropertyEvaluationParameters::new(zoom);
-    *Evaluated::new(value, Evaluation::Plain, &parameters, 0.0).uniform()
+    *Evaluated::plain(value, &parameters, 0.0).uniform()
 }
 
 fn num(v: f64) -> crate::expression::Expr {

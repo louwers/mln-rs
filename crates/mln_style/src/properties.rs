@@ -30,7 +30,7 @@ pub trait PropertyValueLike: Clone + Default + Debug {
     /// The value for a frame, with `default` for an undefined value.
     fn evaluate(
         &self,
-        evaluation: Evaluation,
+        evaluation: Evaluation<Self::Type>,
         parameters: &PropertyEvaluationParameters,
         default: Self::Type,
     ) -> Evaluated<Self::Type>;
@@ -61,8 +61,13 @@ pub(crate) fn reads_global_state<V: PropertyValueLike>(value: &V, changed_keys: 
 impl<T: Clone + Debug + Default + PartialEq + ValueConverter + 'static> PropertyValueLike for PropertyValue<T> {
     type Type = T;
 
-    fn evaluate(&self, evaluation: Evaluation, parameters: &PropertyEvaluationParameters, default: T) -> Evaluated<T> {
-        Evaluated::new(self, evaluation, parameters, default)
+    fn evaluate(
+        &self,
+        evaluation: Evaluation<T>,
+        parameters: &PropertyEvaluationParameters,
+        default: T,
+    ) -> Evaluated<T> {
+        evaluation(self, parameters, default)
     }
 
     fn is_undefined(&self) -> bool {
@@ -161,12 +166,12 @@ impl<V: PropertyValueLike> Transitioning<V> {
     /// for an undefined value. A transition that has ended, or that ends in
     /// a data-driven value, drops the value it came from.
     ///
-    /// Not inlined, like `Evaluated::new`: the property sets call these once
+    /// Not inlined: the property sets call these once
     /// per property, so inlining copies them into every call.
     #[inline(never)]
     pub(crate) fn evaluate(
         &mut self,
-        evaluation: Evaluation,
+        evaluation: Evaluation<V::Type>,
         parameters: &PropertyEvaluationParameters,
         default: V::Type,
     ) -> Evaluated<V::Type>
@@ -220,7 +225,7 @@ impl<V: PropertyValueLike> Transitioning<V> {
     #[inline(never)]
     pub(crate) fn evaluate_with_previous(
         &mut self,
-        evaluation: Evaluation,
+        evaluation: Evaluation<V::Type>,
         parameters: &PropertyEvaluationParameters,
         default: V::Type,
         previous: &Evaluated<V::Type>,
@@ -282,16 +287,16 @@ pub(crate) use __property_value;
 /// How a property kind evaluates.
 macro_rules! __property_evaluation {
     (integer_zoom) => {
-        $crate::evaluated::Evaluation::IntegerZoom
+        $crate::evaluated::Evaluated::integer_zoom
     };
     (cross_faded) => {
-        $crate::evaluated::Evaluation::CrossFaded
+        $crate::evaluated::Evaluated::cross_faded
     };
     (cross_faded_data_driven) => {
-        $crate::evaluated::Evaluation::CrossFadedPerFeature
+        $crate::evaluated::Evaluated::cross_faded_per_feature
     };
     ($kind:ident) => {
-        $crate::evaluated::Evaluation::Plain
+        $crate::evaluated::Evaluated::plain
     };
 }
 pub(crate) use __property_evaluation;

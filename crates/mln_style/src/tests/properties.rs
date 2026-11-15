@@ -8,7 +8,7 @@ use mln_vec_map::VecSet;
 
 use super::util::parse_json;
 use crate::conversion::convert_property_value;
-use crate::evaluated::{Evaluated, Evaluation};
+use crate::evaluated::Evaluated;
 use crate::expression::{EvaluationContext, GlobalStateMap, Image, dsl};
 use crate::light::LightProperties;
 use crate::map::zoom_history::ZoomHistory;
@@ -32,7 +32,7 @@ fn evaluate(property: &mut Transitioning<PropertyValue<f32>>, delta: Duration) -
     let parameters =
         PropertyEvaluationParameters::with_zoom_history(zoom_history, Some(start() + delta), Duration::ZERO);
 
-    *property.evaluate(Evaluation::Plain, &parameters, 0.0_f32).uniform()
+    *property.evaluate(Evaluated::plain, &parameters, 0.0_f32).uniform()
 }
 
 /// gtest `ASSERT_FLOAT_EQ`: within 4 ULPs.
@@ -112,7 +112,7 @@ fn evaluate_data_expression(property: &mut Transitioning<PropertyValue<f32>>, de
     let parameters =
         PropertyEvaluationParameters::with_zoom_history(zoom_history, Some(start() + delta), Duration::ZERO);
 
-    property.evaluate(Evaluation::Plain, &parameters, 0.0_f32)
+    property.evaluate(Evaluated::plain, &parameters, 0.0_f32)
 }
 
 // gtest: TransitioningDataDrivenPropertyValue.Evaluate
@@ -226,7 +226,7 @@ fn evaluate_with_state(
         PropertyEvaluationParameters::with_zoom_history(zoom_history, Some(start() + delta), Duration::ZERO);
     parameters.global_state = Some(global_state);
 
-    *property.evaluate(Evaluation::Plain, &parameters, 0.0_f32).uniform()
+    *property.evaluate(Evaluated::plain, &parameters, 0.0_f32).uniform()
 }
 
 fn global_state_change(

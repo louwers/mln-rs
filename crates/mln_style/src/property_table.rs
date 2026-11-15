@@ -182,12 +182,7 @@ fn style_property<S: Properties>(owner: &S, slot: usize, transition: bool) -> St
             get: fn(&S) -> &Transitionable<V>,
             _: fn(&mut S) -> &mut Transitionable<V>,
         ) -> StyleProperty {
-            let property = get(self.owner);
-            if self.transition {
-                make_transition_style_property(&property.options)
-            } else {
-                property.value.style_property()
-            }
+            paint_style_property(get(self.owner), self.transition)
         }
 
         fn layout<V: StyleValue>(self, get: fn(&S) -> &V, _: fn(&mut S) -> &mut V) -> StyleProperty {
@@ -196,6 +191,17 @@ fn style_property<S: Properties>(owner: &S, slot: usize, transition: bool) -> St
     }
 
     S::visit(slot, Get { owner, transition }).unwrap_or_default()
+}
+
+// The visitors' work is split by the type it depends on: what depends only on
+// the value type is in a function of its own, so that it compiles once per
+// value type rather than once per value type and owner. And what depends on
+// both is not inlined into `Properties::visit`, so that it compiles once per
+// pair rather than once per property.
+
+#[inline(never)]
+fn paint_style_property<V: StyleValue>(property: &Transitionable<V>, transition: bool) -> StyleProperty {
+    if transition { make_transition_style_property(&property.options) } else { property.value.style_property() }
 }
 
 /// Sets the property `name` (or a paint property's `<name>-transition`) of
@@ -211,52 +217,137 @@ pub(crate) fn set_property<S: Properties>(
         value: &'a Convertible<'v>,
         info: &'static PropertyInfo,
         transition: bool,
+        error: &'a mut Option<Error>,
     }
 
+    // The change passes through a slot of the caller's, rather than by value,
+    // so that this code, compiled for each pair of owner and value type, is
+    // only calls.
     impl<S: Clone> PropertyVisitor<S> for Set<'_, '_, S> {
-        type Output = Result<(), Error>;
+        type Output = ();
 
+        #[inline(never)]
         fn paint<V: StyleValue>(
             self,
             get: fn(&S) -> &Transitionable<V>,
             get_mut: fn(&mut S) -> &mut Transitionable<V>,
-        ) -> Result<(), Error> {
-            if self.transition {
-                let mut error = Error::default();
-                let options = <TransitionOptions as Converter>::convert(self.value, &mut error).ok_or(error)?;
-                if get(self.owner).options != options {
-                    get_mut(Arc::make_mut(self.owner)).options = options;
-                }
-            } else {
-                let value = V::convert(self.value, self.info)?;
-                if get(self.owner).value != value {
-                    get_mut(Arc::make_mut(self.owner)).value = value;
-                }
+        ) {
+            let mut change = PaintChange::None;
+            if paint_change(get(self.owner), self.value, self.info, self.transition, &mut change, self.error) {
+                apply_paint_change(get_mut(make_mut(self.owner)), &mut change);
             }
-            Ok(())
         }
 
-        fn layout<V: StyleValue>(self, get: fn(&S) -> &V, get_mut: fn(&mut S) -> &mut V) -> Result<(), Error> {
-            let value = V::convert(self.value, self.info)?;
-            if *get(self.owner) != value {
-                *get_mut(Arc::make_mut(self.owner)) = value;
+        #[inline(never)]
+        fn layout<V: StyleValue>(self, get: fn(&S) -> &V, get_mut: fn(&mut S) -> &mut V) {
+            let mut change = None;
+            if changed_value(get(self.owner), self.value, self.info, &mut change, self.error) {
+                store(get_mut(make_mut(self.owner)), &mut change);
             }
-            Ok(())
         }
     }
 
     let (slot, transition) = S::TABLE.resolve(name).ok_or(SetPropertyError::Unknown)?;
     let info = &S::TABLE.properties[slot];
-    S::visit(slot, Set { owner, value, info, transition })
-        .ok_or(SetPropertyError::Unknown)?
-        .map_err(SetPropertyError::Invalid)?;
-    Ok(())
+    let mut error = None;
+    S::visit(slot, Set { owner, value, info, transition, error: &mut error }).ok_or(SetPropertyError::Unknown)?;
+    error.map_or(Ok(()), |error| Err(SetPropertyError::Invalid(error)))
+}
+
+/// Sets `change` to `value` converted for the property `info` if it differs
+/// from `current`, and returns whether it does. Sets `error` if it doesn't
+/// convert.
+#[inline(never)]
+fn changed_value<V: StyleValue>(
+    current: &V,
+    value: &Convertible<'_>,
+    info: &PropertyInfo,
+    change: &mut Option<V>,
+    error: &mut Option<Error>,
+) -> bool {
+    match V::convert(value, info) {
+        Ok(value) if *current != value => {
+            *change = Some(value);
+            true
+        }
+        Ok(_) => false,
+        Err(e) => {
+            *error = Some(e);
+            false
+        }
+    }
+}
+
+/// What setting a paint property changes.
+enum PaintChange<V> {
+    None,
+    Value(V),
+    Options(TransitionOptions),
+}
+
+/// Sets `change` to what setting a paint property's value, or with
+/// `transition` true its transition, to `value` changes, and returns whether
+/// it changes anything. Sets `error` if `value` doesn't convert.
+#[inline(never)]
+fn paint_change<V: StyleValue>(
+    current: &Transitionable<V>,
+    value: &Convertible<'_>,
+    info: &PropertyInfo,
+    transition: bool,
+    change: &mut PaintChange<V>,
+    error: &mut Option<Error>,
+) -> bool {
+    if transition {
+        let mut conversion_error = Error::default();
+        match <TransitionOptions as Converter>::convert(value, &mut conversion_error) {
+            Some(options) if current.options != options => *change = PaintChange::Options(options),
+            Some(_) => {}
+            None => *error = Some(conversion_error),
+        }
+    } else {
+        let mut new_value = None;
+        changed_value(&current.value, value, info, &mut new_value, error);
+        if let Some(value) = new_value {
+            *change = PaintChange::Value(value);
+        }
+    }
+    !matches!(change, PaintChange::None)
+}
+
+#[inline(never)]
+fn apply_paint_change<V>(property: &mut Transitionable<V>, change: &mut PaintChange<V>) {
+    match std::mem::replace(change, PaintChange::None) {
+        PaintChange::None => {}
+        PaintChange::Value(value) => property.value = value,
+        PaintChange::Options(options) => property.options = options,
+    }
+}
+
+#[inline(never)]
+fn make_mut<S: Clone>(owner: &mut Arc<S>) -> &mut S {
+    Arc::make_mut(owner)
+}
+
+#[inline(never)]
+fn store<V>(slot: &mut V, change: &mut Option<V>) {
+    if let Some(value) = change.take() {
+        *slot = value;
+    }
 }
 
 /// Each defined property of `owner` and paint property transition, in table
 /// order, with its name and scope.
 pub(crate) fn defined_properties<S: Properties>(owner: &S) -> Vec<(String, PropertyScope, StyleProperty)> {
-    let table = S::TABLE.properties;
+    defined_properties_in(S::TABLE, &|slot, transition| style_property(owner, slot, transition))
+}
+
+/// `defined_properties` over the `table` of an owner whose property in a slot
+/// `get` returns, compiled once rather than for each owner.
+fn defined_properties_in(
+    table: &PropertyTable,
+    get: &dyn Fn(usize, bool) -> StyleProperty,
+) -> Vec<(String, PropertyScope, StyleProperty)> {
+    let table = table.properties;
     let mut defined = Vec::new();
     let paint = table.iter().enumerate().filter(|(_, info)| info.scope == PropertyScope::Paint);
     let layout = table.iter().enumerate().filter(|(_, info)| info.scope == PropertyScope::Layout);
@@ -264,7 +355,7 @@ pub(crate) fn defined_properties<S: Properties>(owner: &S) -> Vec<(String, Prope
     let transitions = paint.map(|(slot, info)| (slot, info, true));
     let layout = layout.map(|(slot, info)| (slot, info, false));
     for (slot, info, transition) in values.chain(transitions).chain(layout) {
-        let property = style_property(owner, slot, transition);
+        let property = get(slot, transition);
         if property.get_kind() == Kind::Undefined {
             continue;
         }
@@ -277,7 +368,11 @@ pub(crate) fn defined_properties<S: Properties>(owner: &S) -> Vec<(String, Prope
 /// Writes the defined properties of `owner` into a layer's style JSON `out`,
 /// under "paint" and "layout". A key already there stays.
 pub(crate) fn serialize_properties<S: Properties>(owner: &S, out: &mut ValueObject) {
-    for (name, scope, property) in defined_properties(owner) {
+    insert_properties(defined_properties(owner), out);
+}
+
+fn insert_properties(defined: Vec<(String, PropertyScope, StyleProperty)>, out: &mut ValueObject) {
+    for (name, scope, property) in defined {
         let key = match scope {
             PropertyScope::Paint => "paint",
             PropertyScope::Layout => "layout",
