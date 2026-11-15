@@ -3,3 +3,7 @@
 # mln-rs-expression-test`) fails only on failures not listed here. A line names
 # a whole test, or one input of it as `test#index`, the 0-based index into the
 # test's `inputs`.
+
+# icu_experimental has no names for celsius and kilobyte, so ICU4X fails them.
+number-format/unit#1
+number-format/unit#2
