@@ -61,7 +61,9 @@
 // pixels, read back from the GPU. `fetches()` resolves with every URL the
 // map's Web Worker fetched and how many times, `idle()` with the camera
 // once the map is fully loaded and has stopped moving, and `nextFrame()`
-// once the map has run its next animation frame. A panic in any of
+// once the map has run its next animation frame. `checkGpu()` runs a check
+// of the map's GPU (WebMap::start_gpu_check) and resolves once it passed.
+// A panic in any of
 // the Web Workers' wasm instances stops the map: the page shows its
 // message, `fatal` resolves with it as an Error, and `loaded` and the
 // methods reject with it.
@@ -94,6 +96,7 @@ declare global {
       fetches(): Promise<Record<string, number>>;
       idle(): Promise<Camera>;
       nextFrame(): Promise<void>;
+      checkGpu(): Promise<void>;
     };
   }
 }
@@ -297,6 +300,7 @@ const pixelRequests: Pending<Pixels>[] = [];
 const fetchesRequests: Pending<Record<string, number>>[] = [];
 const idleRequests: Pending<Camera>[] = [];
 const nextFrameRequests: Pending<void>[] = [];
+const gpuCheckRequests: Pending<void>[] = [];
 /** Asks the map's Web Worker with `message`; its answer resolves the first of `queue`. */
 function ask<T>(queue: Pending<T>[], message: ToMap): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -321,6 +325,7 @@ window.mln = {
   fetches: () => ask(fetchesRequests, { type: "fetches" }),
   idle: () => ask(idleRequests, { type: "idle" }),
   nextFrame: () => ask(nextFrameRequests, { type: "nextFrame" }),
+  checkGpu: () => ask(gpuCheckRequests, { type: "checkGpu" }),
 };
 // Rejected on a panic, which the page reports itself.
 window.mln.loaded.catch(() => {});
@@ -349,6 +354,9 @@ map.onmessage = ({ data }: MessageEvent<FromMap>) => {
       break;
     case "nextFrame":
       nextFrameRequests.shift()?.resolve();
+      break;
+    case "gpuChecked":
+      for (const request of gpuCheckRequests.splice(0)) request.resolve();
       break;
     case "fatal":
       stop(data.message);
@@ -389,6 +397,7 @@ function stop(message: string) {
     fetchesRequests,
     idleRequests,
     nextFrameRequests,
+    gpuCheckRequests,
   ]) {
     for (const request of queue.splice(0)) request.reject(error);
   }

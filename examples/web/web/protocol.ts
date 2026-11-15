@@ -85,6 +85,9 @@ export type ToMap =
   | { type: "preload"; style: string; ratio: number; zoom: number }
   | Start
   | { type: "readPixels" }
+  // Run mln_gfx's conformance case of writes from JS arrays on the map's
+  // GPU (WebMap::start_gpu_check), for check/check.mjs.
+  | { type: "checkGpu" }
   | { type: "fetches" }
   | { type: "idle" }
   | { type: "nextFrame" }
@@ -166,6 +169,8 @@ export type FromMap =
   // Once the map is fully loaded, and again once each later style is.
   | { type: "loaded"; loaded: Loaded }
   | { type: "pixels"; pixels: Pixels }
+  // The GPU check passed; a failed one panics.
+  | { type: "gpuChecked" }
   // Every URL the map's Web Worker fetched, and how many times.
   | { type: "fetches"; fetches: Record<string, number> }
   // The camera, once the map is fully loaded and has stopped moving.

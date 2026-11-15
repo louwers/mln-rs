@@ -1,23 +1,20 @@
 // The target of a browser canvas: a WebGL2 context, which is OpenGL ES 3.0,
-// on an OffscreenCanvas or an HTMLCanvasElement. After the GLFW app's backend
-// (platform/glfw/glfw_gl_backend.cpp), whose window is the canvas here.
+// on an OffscreenCanvas or an HTMLCanvasElement.
 //
 // The context belongs to the canvas and is always current, and the browser
 // presents the canvas after the task that drew into it, so there is nothing
 // to activate or swap.
 
-use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::cell::Cell;
+use std::rc::Rc;
 
-use mln_gfx::command_encoder::CommandEncoder;
-use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_util::error::Error;
 use mln_util::size::Size;
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlCanvasElement, OffscreenCanvas, WebGl2RenderingContext, WebGlContextAttributes};
 
-use crate::context::Context;
-use crate::draw_target::{DrawTarget, TargetResource};
+use crate::frame_image::{FrameImports, default_framebuffer};
 use crate::renderer_backend::{PlatformContext, RendererBackend};
 
 /// The canvas's context, which is always current.
@@ -26,20 +23,6 @@ struct CanvasContext;
 impl PlatformContext for CanvasContext {
     fn make_current(&self) {}
     fn done_current(&self) {}
-}
-
-/// The canvas's drawing buffer: the default framebuffer.
-struct CanvasResource {
-    context: Weak<Context>,
-    size: Rc<Cell<Size>>,
-}
-
-impl TargetResource for CanvasResource {
-    fn bind(&self) {
-        if let Some(context) = self.context.upgrade() {
-            context.bind_framebuffer(None, self.size.get(), true);
-        }
-    }
 }
 
 /// A canvas that a [`CanvasTarget`] draws into.
@@ -90,9 +73,9 @@ impl WebCanvas {
 pub struct CanvasTarget {
     backend: Rc<RendererBackend>,
     canvas: WebCanvas,
-    size: Rc<Cell<Size>>,
-    /// Made with the first frame.
-    image: RefCell<Option<Rc<DrawTarget>>>,
+    size: Cell<Size>,
+    /// The frame's default framebuffer, imported into the backend's `GlGpu`.
+    image: FrameImports,
 }
 
 impl CanvasTarget {
@@ -129,8 +112,8 @@ impl CanvasTarget {
         let target = CanvasTarget {
             backend: Rc::clone(&backend),
             canvas,
-            size: Rc::new(Cell::new(size)),
-            image: RefCell::new(None),
+            size: Cell::new(size),
+            image: FrameImports::default(),
         };
         Ok((backend, target))
     }
@@ -145,19 +128,13 @@ impl CanvasTarget {
 }
 
 impl FrameTarget for CanvasTarget {
-    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        let mut image = self.image.borrow_mut();
-        if image.is_none() {
-            let resource = CanvasResource { context: self.backend.gl_context()?.weak(), size: Rc::clone(&self.size) };
-            *image = Some(Rc::new(DrawTarget::new(self.size.get(), Rc::new(resource))));
-        }
-        let image = image.clone()?;
-        image.set_size(self.size.get());
-        Some(image)
+    fn begin_frame(&self) -> Option<FrameImage> {
+        self.image.get_or_import(|| default_framebuffer(&self.backend, self.size.get()))
     }
 
     /// The browser presents the canvas after the task that drew into it.
-    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
+    fn end_frame(&self) -> Handoff {
+        self.image.release(&self.backend);
         Handoff::Presented
     }
 }

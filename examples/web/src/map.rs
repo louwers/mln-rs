@@ -10,7 +10,8 @@ use std::time::Duration;
 use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelDelta};
-use mln_gfx::{BackendScope, FrameTarget, RendererBackend, ScopeType};
+use mln_gfx::gpu::{ReadbackId, ResourceId, conformance};
+use mln_gfx::{FrameTarget, RendererBackend};
 use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent, MapOptions,
     UpdateReader,
@@ -33,10 +34,8 @@ use crate::{deadline, js_error};
 
 /// Draws the map's updates on the canvas.
 struct Frontend {
-    /// Dropped first, before its backend.
     renderer: Renderer,
     target: Target,
-    backend: Rc<dyn RendererBackend>,
     updates: UpdateReader,
     /// The generation of the update the renderer drew last.
     drawn_update: u64,
@@ -53,7 +52,6 @@ impl Frontend {
         if !self.redraw && update.generation == self.drawn_update {
             return false;
         }
-        let _scope = BackendScope::new(&*self.backend, ScopeType::Implicit);
         if self.target.begin_frame().is_none() {
             return false;
         }
@@ -106,6 +104,11 @@ pub struct WebMap {
     pending: [f64; PHASES],
     /// What the last frame that drew spent on each phase (`frame_timings`).
     phases: [f64; PHASES],
+    /// What the renderer draws with.
+    backend: Rc<dyn RendererBackend>,
+    /// The frame of the GPU check that `start_gpu_check` started, until
+    /// `take_gpu_check` takes it.
+    gpu_check: Option<ReadbackId>,
 }
 
 /// How many phases `WebMap::frame_timings` reports.
@@ -373,9 +376,7 @@ impl WebMap {
     /// The graphics context's counters: the draw calls of the last frame it
     /// drew, and the bytes of its live textures and of its live buffers.
     pub fn render_stats(&self) -> Vec<f64> {
-        let backend = &*self.frontend.backend;
-        let _scope = BackendScope::new(backend, ScopeType::Implicit);
-        let stats = backend.get_context().rendering_stats();
+        let stats = self.frontend.renderer.rendering_stats();
         vec![f64::from(stats.num_draw_calls), f64::from(stats.mem_textures), f64::from(stats.mem_buffers)]
     }
 
@@ -487,6 +488,30 @@ impl WebMap {
     pub fn take_pixels(&self) -> Option<Vec<u8>> {
         self.frontend.target.take_readback().map(|image| image.data)
     }
+
+    /// Starts `mln_gfx`'s conformance case of writes from JS arrays on the
+    /// renderer's `Gpu`, whose frame `take_gpu_check` checks. Only
+    /// check/check.mjs asks for it.
+    pub fn start_gpu_check(&mut self) -> Result<(), JsValue> {
+        let host = |bytes: &[u8]| mln_util::host_bytes::HostBytes::new(js_sys::Uint8Array::from(bytes));
+        let readback = conformance::host_writes(&mut *self.backend.gpu(), host).map_err(js_error)?;
+        if let Some(stale) = self.gpu_check.replace(readback) {
+            self.backend.gpu().destroy(ResourceId::Readback(stale));
+        }
+        Ok(())
+    }
+
+    /// Whether the GPU has the frame of the check that `start_gpu_check`
+    /// started, which passed its checks. Panics where a check doesn't hold.
+    pub fn take_gpu_check(&mut self) -> Result<bool, JsValue> {
+        let readback = self.gpu_check.take().ok_or_else(|| js_error("no GPU check started"))?;
+        let Some(pixels) = self.backend.gpu().take_readback(readback, false).map_err(js_error)? else {
+            self.gpu_check = Some(readback);
+            return Ok(false);
+        };
+        conformance::check_host_writes(&pixels);
+        Ok(true)
+    }
 }
 
 /// `WebMap::wheel`'s `kind`, as web/protocol.ts's `WHEEL_PIXELS` and
@@ -552,8 +577,7 @@ impl WebMap {
             Map::new(MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() }).map_err(js_error)?;
         map.set_waker(Some(pump::waker()));
         renderer.set_event_queue(Some(map.renderer_events()));
-        let frontend =
-            Frontend { renderer, target, backend, updates: map.update_reader(), drawn_update: 0, redraw: false };
+        let frontend = Frontend { renderer, target, updates: map.update_reader(), drawn_update: 0, redraw: false };
         Ok(WebMap {
             frontend,
             map,
@@ -568,6 +592,8 @@ impl WebMap {
             between_frames_ms,
             pending: [0.0; PHASES],
             phases: [0.0; PHASES],
+            backend,
+            gpu_check: None,
         })
     }
 

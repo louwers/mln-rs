@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_actor::TaggedScheduler;
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
@@ -33,4 +34,7 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) dynamic_texture_atlas: DynamicTextureAtlasPtr,
     /// Port-only: creates the tiles' workers (`tile_worker_transport.rs`).
     pub(crate) tile_worker_transport: Rc<dyn TileWorkerTransport>,
+    /// Port-only: the orchestrator's workers, which free the data of the
+    /// tiles' layouts (see `render_orchestrator::drop_on_workers`).
+    pub(crate) thread_pool: TaggedScheduler,
 }

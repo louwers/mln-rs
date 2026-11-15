@@ -32,7 +32,6 @@ use std::time::{Duration, Instant};
 
 use mln_actor::{RunLoop, Timer};
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
-use mln_gfx::{BackendScope, ScopeType};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapDebugOptions,
     MapEvent, MapOptions, UpdateReader,
@@ -716,9 +715,6 @@ impl View {
             let Some(Gfx { renderer, backend: target }) = self.gfx.as_mut() else {
                 return;
             };
-            let backend = target.renderer_backend();
-            let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-            let _frame = BackendScope::new(&*backend, ScopeType::Implicit);
             renderer.render(&update.parameters, target.frames());
         }
         self.report((1000.0 * started.elapsed().as_secs_f64()) as f32);

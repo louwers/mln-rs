@@ -8,10 +8,10 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_actor::{AsyncTask, RunLoop};
+use mln_gfx::RendererBackend;
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::Map;
-use mln_renderer::{Renderer, UpdateParameters, UpdateReader};
+use mln_renderer::{Renderer, Stats, UpdateParameters, UpdateReader};
 use mln_runtime::{BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
@@ -34,6 +34,8 @@ struct Shared {
     glyph_cache: Arc<GlyphCache>,
     /// Made when first used, and dropped when the attached map goes.
     renderer: RefCell<Option<Renderer>>,
+    /// The stats of the renderer made last, which outlive it.
+    stats: RefCell<Option<Rc<Stats>>>,
     /// The updates of the map that the frontend renders.
     updates: RefCell<Option<UpdateReader>>,
 }
@@ -122,6 +124,7 @@ impl HeadlessFrontend {
             invalidate_on_update,
             glyph_cache,
             renderer: RefCell::new(None),
+            stats: RefCell::new(None),
             updates: RefCell::new(None),
         });
         let weak: Weak<Shared> = Rc::downgrade(&shared);
@@ -213,9 +216,7 @@ impl HeadlessFrontend {
         // the short waits of a single renderer; spinning briefly keeps them.
         const SPIN: std::time::Duration = std::time::Duration::from_millis(2);
 
-        let backend = Rc::clone(&self.shared.backend);
         self.attach(map);
-        let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
 
         let outcome: Rc<RefCell<Option<Result<(), Error>>>> = Rc::new(RefCell::new(None));
         let o = Rc::clone(&outcome);
@@ -243,12 +244,18 @@ impl HeadlessFrontend {
             }
         }
 
-        let stats = backend.get_context().rendering_stats().clone();
-        Ok(RenderResult { image, stats })
+        Ok(RenderResult { image, stats: self.rendering_stats() })
     }
 
     pub fn render_frame(&self) {
         Shared::render_frame(&self.shared);
+    }
+
+    /// The rendering stats of the frontend's renderer, or of the last one
+    /// after it went: what it released as it went comes off them.
+    #[must_use]
+    pub fn rendering_stats(&self) -> RenderingStats {
+        self.shared.stats.borrow().as_ref().map(|stats| stats.get()).unwrap_or_default()
     }
 
     /// Port-only: the target the frontend draws into, so a host can reach
@@ -264,12 +271,14 @@ impl Shared {
     fn renderer(&self) -> RefMut<'_, Renderer> {
         RefMut::map(self.renderer.borrow_mut(), |renderer| {
             renderer.get_or_insert_with(|| {
-                Renderer::with_glyph_cache(
+                let renderer = Renderer::with_glyph_cache(
                     Rc::clone(&self.backend),
                     self.pixel_ratio.get(),
                     None,
                     Arc::clone(&self.glyph_cache),
-                )
+                );
+                *self.stats.borrow_mut() = Some(renderer.stats());
+                renderer
             })
         })
     }
@@ -281,7 +290,6 @@ impl Shared {
 
     /// The last frame's pixels.
     fn read_image(&self) -> Result<PremultipliedImage, Error> {
-        let _guard = BackendScope::new(&*self.backend, ScopeType::Explicit);
         self.target.read_image()
     }
 
@@ -309,8 +317,6 @@ impl Shared {
     }
 
     fn render(shared: &Rc<Shared>, update_parameters: &Arc<UpdateParameters>) {
-        let backend = Rc::clone(&shared.backend);
-        let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
         if let Some(frames) = shared.target.frames() {
             shared.renderer().render(update_parameters, frames);
         }

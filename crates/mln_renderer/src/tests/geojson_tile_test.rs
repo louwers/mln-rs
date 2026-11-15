@@ -62,6 +62,7 @@ impl GeoJSONTileTest {
             tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
                 self.thread_pool.clone(),
             )),
+            thread_pool: self.thread_pool.clone(),
         }
     }
 }

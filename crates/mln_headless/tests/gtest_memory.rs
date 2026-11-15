@@ -187,8 +187,7 @@ fn footprint() {
 
 /// The live-resource counters of the frontend's context, by name.
 fn live_resources(frontend: &HeadlessFrontend) -> Vec<(&'static str, i32)> {
-    let _scope = mln_gfx::BackendScope::new(frontend.get_backend(), mln_gfx::ScopeType::Explicit);
-    let stats = frontend.get_backend().get_context().rendering_stats().clone();
+    let stats = frontend.rendering_stats();
     vec![
         ("num_active_textures", stats.num_active_textures),
         ("num_buffers", stats.num_buffers),

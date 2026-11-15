@@ -1,6 +1,5 @@
-// What a custom layer's host gets of a Vulkan frame (C++:
-// `style::vulkan::CustomLayerRenderParameters`, which also has the device's
-// dispatcher; here the device's raw handles load its functions).
+// What a custom layer's host gets of a Vulkan frame. The device's raw
+// handles load its functions.
 
 use ash::vk;
 

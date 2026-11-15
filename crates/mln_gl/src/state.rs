@@ -1,7 +1,5 @@
-// C++ wraps each piece of GL state in a `State<value::T>` that remembers the
-// value it last set, and the context has one member per piece. The port
-// keeps them in one struct of `Cached` values. Only the states the drawable
-// path sets are here.
+// The GL state that the backend sets, each piece with the value it last set,
+// so that a call that sets it again reaches GL only when the value changes.
 
 use std::cell::Cell;
 
@@ -19,7 +17,7 @@ use mln_gfx::types::{
 use mln_util::Color;
 
 use crate::enums;
-use crate::types::{BufferID, FramebufferID, Gl, ProgramID, TextureID, VertexArrayID};
+use crate::types::{BufferID, FramebufferID, Gl, ProgramID, SamplerID, TextureID, VertexArrayID};
 
 /// A scissor box or a viewport: x, y, width, height, from the bottom left.
 pub(crate) type Rect = (i32, i32, i32, i32);
@@ -27,7 +25,7 @@ pub(crate) type Rect = (i32, i32, i32, i32);
 /// What GL was last told about one piece of state.
 #[derive(Clone, Copy, Default, PartialEq)]
 enum Cached<T> {
-    /// Not known: C++'s dirty state, whose next set always reaches GL.
+    /// Not known, so the next set always reaches GL.
     #[default]
     Dirty,
     /// GL holds this value.
@@ -50,6 +48,7 @@ pub(crate) struct State {
     framebuffer: Cell<Cached<Option<FramebufferID>>>,
     active_texture_unit: Cell<Cached<u32>>,
     textures: [Cell<Cached<Option<TextureID>>>; MAX_ACTIVE_TEXTURE_UNITS as usize],
+    samplers: [Cell<Cached<Option<SamplerID>>>; MAX_ACTIVE_TEXTURE_UNITS as usize],
     /// The buffer range bound to each uniform buffer binding point.
     uniform_buffers: [Cell<Cached<(BufferID, i32, i32)>>; MAX_UBO_COUNT_PER_SHADER],
 
@@ -96,6 +95,9 @@ impl State {
         self.active_texture_unit.set(Cached::Dirty);
         for texture in &self.textures {
             texture.set(Cached::Dirty);
+        }
+        for sampler in &self.samplers {
+            sampler.set(Cached::Dirty);
         }
         for buffer in &self.uniform_buffers {
             buffer.set(Cached::Dirty);
@@ -195,12 +197,33 @@ impl State {
         }
     }
 
-    /// Forgets `texture`, which is being deleted or rendered into: unbinds it
-    /// from the units it is bound to.
-    pub(crate) fn unbind_texture(&self, gl: &Gl, texture: TextureID) {
-        for unit in 0..self.textures.len() {
-            if self.textures[unit].get() == Cached::Known(Some(texture)) {
-                self.bind_texture(gl, unit as u32, None);
+    /// Binds `sampler` to `unit`, where it overrides the sampling parameters
+    /// of the texture bound there.
+    pub(crate) fn bind_sampler(&self, gl: &Gl, unit: u32, sampler: Option<SamplerID>) {
+        let Some(cell) = self.samplers.get(unit as usize) else {
+            debug_assert!(false, "texture unit out of range");
+            return;
+        };
+        if changed(cell, sampler) {
+            // SAFETY: the sampler is alive, or none, and the unit is below
+            // MAX_ACTIVE_TEXTURE_UNITS.
+            unsafe { gl.bind_sampler(unit, sampler) };
+        }
+    }
+
+    /// Unbinds the samplers from every texture unit, for code outside the
+    /// backend that samples with its textures' own parameters.
+    pub(crate) fn unbind_samplers(&self, gl: &Gl) {
+        for unit in 0..self.samplers.len() {
+            self.bind_sampler(gl, unit as u32, None);
+        }
+    }
+
+    /// Forgets `sampler`, which is being deleted.
+    pub(crate) fn forget_sampler(&self, sampler: SamplerID) {
+        for cell in &self.samplers {
+            if cell.get() == Cached::Known(Some(sampler)) {
+                cell.set(Cached::Dirty);
             }
         }
     }

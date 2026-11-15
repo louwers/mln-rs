@@ -5,7 +5,6 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::expression::Value;
@@ -25,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
 use crate::bucket_parameters::BucketParameters;
+use crate::gfx::context::Context;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::render_layer::RenderLayer;
@@ -184,7 +184,7 @@ impl Bucket for HeatmapBucket {
         Ok(())
     }
 
-    fn upload(&self, _upload_pass: &dyn UploadPass) {
+    fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 

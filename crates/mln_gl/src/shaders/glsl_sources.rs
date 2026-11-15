@@ -55,8 +55,8 @@
 //   source's maxzoom, their pattern positions outgrow a 16-bit mediump
 //   float (maplibre/maplibre-native#4951). The background pattern draws at
 //   the current zoom, so its positions stay small.
-// - ClippingMaskProgram has a globe variant, which projects through the
-//   projection block as the other shaders do.
+// - ClippingMaskProgram projects through the projection block as the other
+//   shaders do, and has a globe variant.
 // - Fragment shaders declare the uniform blocks they share with their vertex
 //   shader first, in the vertex shader's order, which SwiftShader needs
 //   (maplibre/maplibre-native#4625, ffi patch 0011, and `line_gradient_sdf`).
@@ -561,17 +561,9 @@ lowp float stroke_opacity = u_stroke_opacity;
 pub(crate) const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
     vertex: r"layout (location = 0) in vec2 a_pos;
 
-#ifdef PROJECTION_GLOBE
 void main() {
     gl_Position = projectTile(a_pos, a_pos);
 }
-#else
-uniform mat4 u_matrix;
-
-void main() {
-    gl_Position = u_matrix * vec4(a_pos, 0, 1);
-}
-#endif
 ",
     fragment: r"void main() {
     fragColor = vec4(1.0);

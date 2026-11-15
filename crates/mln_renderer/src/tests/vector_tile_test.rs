@@ -70,6 +70,7 @@ impl VectorTileTest {
             glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
             dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
             tile_worker_transport: Rc::clone(&self.transport),
+            thread_pool: self.thread_pool.clone(),
         }
     }
 }

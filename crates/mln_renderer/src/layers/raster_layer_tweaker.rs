@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::{ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO};
-use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::raster_layer_properties::{
     RasterBrightnessMax, RasterBrightnessMin, RasterContrast, RasterHueRotate, RasterLayerProperties, RasterOpacity,
@@ -13,6 +11,8 @@ use mln_style::layers::raster_layer_properties::{
 use mln_style_types::TranslateAnchorType;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
+use crate::gfx::uniform_buffer::UniformBufferPtr;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -57,7 +57,7 @@ impl LayerTweaker for RasterLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -81,7 +81,7 @@ impl LayerTweaker for RasterLayerTweaker {
                 pad1: 0.0,
                 pad2: 0.0,
             };
-            context.emplace_or_update_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
+            context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
             self.base.properties_updated = false;
         }
         layer_group
@@ -89,12 +89,12 @@ impl LayerTweaker for RasterLayerTweaker {
             .set(ID_RASTER_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
         let mut i: u32 = 0;
-        let mut drawable_ubo_vector = vec![RasterDrawableUBO::default(); layer_group.get_drawable_count()];
-        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
+        let mut drawable_ubo_vector = vec![RasterDrawableUBO::default(); layer_group.drawable_count()];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
 
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
-            let Some(tile_id) = drawable.get_tile_id() else {
+        layer_group.visit_drawables(|drawable| {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             if !check_tweak_drawable_ptr(drawable, self_ptr) {
@@ -117,17 +117,12 @@ impl LayerTweaker for RasterLayerTweaker {
             projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             drawable_ubo_vector[i as usize] = RasterDrawableUBO { matrix: cast_matrix(&matrix) };
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        match &self.drawable_uniform_buffer {
-            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
-            _ => {
-                self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true));
-            }
-        }
+        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
 
         layer_group.mutable_uniform_buffers().set(ID_RASTER_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);
