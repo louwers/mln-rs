@@ -66,7 +66,8 @@ impl Module {
         // Not the uniformity of control flow: it is WGSL's rule for
         // derivatives, which GLSL doesn't have.
         let flags = ValidationFlags::all() & !ValidationFlags::CONTROL_FLOW_UNIFORMITY;
-        let info = Validator::new(flags, Capabilities::all()).validate(&module).map_err(|error| format!("{error:?}"))?;
+        let info =
+            Validator::new(flags, Capabilities::all()).validate(&module).map_err(|error| format!("{error:?}"))?;
         Ok(Module { module, info })
     }
 
@@ -87,7 +88,11 @@ impl Module {
                     }
                     _ => 0,
                 };
-                global.binding.as_ref().map(|binding| ResourceUse { set: binding.group, binding: binding.binding, size })
+                global.binding.as_ref().map(|binding| ResourceUse {
+                    set: binding.group,
+                    binding: binding.binding,
+                    size,
+                })
             })
             .collect())
     }

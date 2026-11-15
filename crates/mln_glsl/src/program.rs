@@ -2,6 +2,8 @@
 // aren't instanced and have a `tex_origin` attribute, and the instanced fill
 // extrusions have the next outline vertex as instance attributes of its own.
 
+use std::collections::BTreeSet;
+
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
@@ -37,8 +39,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
 use mln_gfx::shaders::shader_source::BuiltIn;
-
-use std::collections::BTreeSet;
 
 use crate::front_end::Stage;
 use crate::sources;

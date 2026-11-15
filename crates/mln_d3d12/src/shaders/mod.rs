@@ -49,7 +49,11 @@ impl ShaderCompiler {
     }
 
     /// Compiles `source` with `defines` (`#define` lines).
-    pub(crate) fn compile_source(&self, source: &'static ShaderSource, defines: &str) -> Result<CompiledProgram, String> {
+    pub(crate) fn compile_source(
+        &self,
+        source: &'static ShaderSource,
+        defines: &str,
+    ) -> Result<CompiledProgram, String> {
         let mut resources: Vec<ResourceUse> = Vec::new();
         let mut compile = |stage| -> Result<Vec<u8>, String> {
             let module = Module::parse(stage, &source.compose(stage, defines))?;

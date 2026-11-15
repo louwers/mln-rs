@@ -36,5 +36,6 @@ fn write(stage: Stage, module: &Module, flags: spv::WriterFlags) -> Result<Vec<u
         ..spv::Options::default()
     };
     let pipeline_options = spv::PipelineOptions { shader_stage: stage.naga(), entry_point: "main".to_owned() };
-    spv::write_vec(&module.module, &module.info, &options, Some(&pipeline_options)).map_err(|error| format!("{error:?}"))
+    spv::write_vec(&module.module, &module.info, &options, Some(&pipeline_options))
+        .map_err(|error| format!("{error:?}"))
 }

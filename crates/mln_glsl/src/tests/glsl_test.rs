@@ -44,9 +44,8 @@ use crate::layout::{
     LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE, drawable_uniform_binding,
     global_uniform_binding, image_sampler_binding, image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
-use crate::sources;
 use crate::variants::variants;
-use crate::{AttributeInfo, PROGRAMS, ShaderSource, Stage};
+use crate::{AttributeInfo, PROGRAMS, ShaderSource, Stage, sources};
 
 fn programs() -> impl Iterator<Item = &'static ShaderSource> {
     PROGRAMS.iter().map(|&(_, source)| source)
@@ -56,7 +55,8 @@ const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
 
 /// The module of a stage of `source` with `defines`, unvalidated.
 fn module(source: &ShaderSource, stage: Stage, defines: &str) -> Module {
-    parse(stage, &source.compose(stage, defines)).unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", source.name))
+    parse(stage, &source.compose(stage, defines))
+        .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", source.name))
 }
 
 // Every stage parses and validates, with every property per vertex, every

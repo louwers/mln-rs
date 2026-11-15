@@ -11,10 +11,10 @@ use mln_gfx::gpu::{
     TextureUsage, read_texels,
 };
 use mln_gfx::shader_group::GLOBE_DEFINE;
+use mln_glsl::PROGRAMS;
 use mln_util::Color;
 use mln_util::size::Size;
 
-use mln_glsl::PROGRAMS;
 use crate::{Device, ImportedImage, VulkanGpu};
 
 #[test]
