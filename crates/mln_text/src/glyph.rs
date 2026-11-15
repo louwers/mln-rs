@@ -406,8 +406,9 @@ pub type GlyphPositions = VecMap<FontStackHash, GlyphPositionMap>;
 
 /// Advances the process-wide glyph type counter, skipping zero when it wraps.
 fn gen_new_glyph_id_type_counter(counter: &mut u16) -> NonZeroU16 {
-    *counter = counter.wrapping_add(1).max(1);
-    NonZeroU16::new(*counter).expect("the counter is at least 1")
+    let id = NonZeroU16::new(counter.wrapping_add(1)).unwrap_or(NonZeroU16::MIN);
+    *counter = id.get();
+    id
 }
 
 struct GlyphTypes {
