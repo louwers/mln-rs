@@ -32,6 +32,7 @@ mln_conversion.workspace = true
 mln_gfx.workspace = true
 mln_headless.workspace = true
 mln_image.workspace = true
+mln_video.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true

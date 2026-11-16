@@ -68,6 +68,13 @@ fn parse_ignores(ignores_paths: &[String]) -> Vec<(String, String)> {
         for (ignore, reason) in members {
             // C++ reads the value with GetString().
             let reason = reason.as_str().unwrap_or_default().to_string();
+            // Port-only: a reason that starts with "runs" drops the ignores
+            // of the test that files before it list, so that a test which
+            // upstream ignores runs here.
+            if reason.starts_with("runs") {
+                ignores.retain(|(name, _)| *name != ignore);
+                continue;
+            }
             ignores.push((ignore, reason));
         }
     }

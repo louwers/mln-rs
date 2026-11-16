@@ -2452,6 +2452,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "mln-rs-video",
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "mln-rs-webgpu",
@@ -2721,6 +2722,7 @@ dependencies = [
  "raw-window-handle",
  "slotmap",
  "thiserror 2.0.21",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2826,6 +2828,7 @@ dependencies = [
  "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-video",
  "parking_lot",
 ]
 
@@ -2897,6 +2900,7 @@ dependencies = [
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-util",
+ "mln-rs-video",
  "mln-rs-wire",
  "parking_lot",
  "regex",
@@ -2936,6 +2940,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "mln-rs-video",
  "mln-rs-webgpu",
  "mln-rs-wire",
  "mlt-core",
@@ -2975,6 +2980,7 @@ dependencies = [
  "mln-rs-text",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-video",
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "mln-rs-webgpu",
@@ -3081,6 +3087,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "mln-rs-video",
  "mln-rs-wire",
  "parking_lot",
  "serde_json",
@@ -3231,6 +3238,16 @@ name = "mln-rs-vec-map"
 version = "0.0.12"
 dependencies = [
  "mln-rs-wire",
+]
+
+[[package]]
+name = "mln-rs-video"
+version = "0.0.12"
+dependencies = [
+ "mln-rs-gfx",
+ "mln-rs-storage",
+ "mln-rs-util",
+ "parking_lot",
 ]
 
 [[package]]

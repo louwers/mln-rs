@@ -19,6 +19,7 @@ pub mod render_test;
 pub mod runner;
 mod style_ops;
 mod test_runner_common;
+mod video;
 mod watchdog;
 
 pub use render_test::run_render_tests;

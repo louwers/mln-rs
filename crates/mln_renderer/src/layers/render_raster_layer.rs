@@ -114,17 +114,24 @@ impl RenderRasterLayer {
         }
     }
 
-    /// Creates the bucket's texture if needed and attaches it to both image
-    /// slots.
-    fn set_textures(&mut self, context: &Context, builder: &mut DrawableBuilder, bucket: &RasterBucket) {
-        let Some(image) = &bucket.image else {
-            return;
+    /// Creates the bucket's texture if needed and attaches it, or `video`, a
+    /// video source's texture, to both image slots.
+    fn set_textures(
+        &mut self,
+        context: &Context,
+        builder: &mut DrawableBuilder,
+        bucket: &RasterBucket,
+        video: Option<&Texture2DPtr>,
+    ) {
+        let texture = match (video, &bucket.image) {
+            (Some(video), _) => Rc::clone(video),
+            (None, Some(image)) => Rc::clone(self.textures.entry(bucket.base.bucket_id).or_insert_with(|| {
+                let texture = context.create_texture_2d();
+                texture.borrow_mut().set_image(Some(Rc::new((**image).clone())));
+                texture
+            })),
+            (None, None) => return,
         };
-        let texture = Rc::clone(self.textures.entry(bucket.base.bucket_id).or_insert_with(|| {
-            let texture = context.create_texture_2d();
-            texture.borrow_mut().set_image(Some(Rc::new((**image).clone())));
-            texture
-        }));
 
         texture.borrow_mut().set_sampler(self.sampler_state());
 
@@ -179,6 +186,12 @@ impl RenderRasterLayer {
         if !has_vertices {
             return;
         }
+        // A video draws once its first frame is in its texture.
+        let video_texture = image_data.video.as_ref().map(|video| video.texture());
+        if matches!(video_texture, Some(None)) {
+            return;
+        }
+        let video_texture = video_texture.flatten();
 
         let layer_tweaker = self.base.layer_tweaker.clone();
         if self.image_layer_group.is_none() {
@@ -216,7 +229,7 @@ impl RenderRasterLayer {
                     &geometry.segments,
                 );
             }
-            self.set_textures(context, builder.as_mut(), &bucket);
+            self.set_textures(context, builder.as_mut(), &bucket, video_texture.as_ref());
 
             // finish
             builder.flush();
@@ -550,7 +563,7 @@ impl RenderLayer for RenderRasterLayer {
             builder.set_color_mode(&ColorMode::alpha_blended());
             builder.set_cull_face_mode(CullFaceMode::disabled());
 
-            self.set_textures(context, builder.as_mut(), bucket);
+            self.set_textures(context, builder.as_mut(), bucket, None);
 
             // buildVertexData(builder, nullptr, bucket, tileID): the bucket
             // only fills in geometry for masked tiles, otherwise the standard

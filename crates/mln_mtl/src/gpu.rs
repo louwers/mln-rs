@@ -66,8 +66,9 @@ const MAX_BUFFERS: usize = 31;
 const BUFFER_OFFSET_ALIGNMENT: u32 = 256;
 
 /// The formats that [`TextureFormat`]s map to, for an imported texture's.
-const TEXTURE_FORMATS: [TextureFormat; 14] = [
+const TEXTURE_FORMATS: [TextureFormat; 15] = [
     TextureFormat::R8Unorm,
+    TextureFormat::Rg8Unorm,
     TextureFormat::A8Unorm,
     TextureFormat::R16Float,
     TextureFormat::R32Float,
@@ -1171,6 +1172,7 @@ pub(crate) fn texture_descriptor(format: MTLPixelFormat, size: Size) -> Retained
 fn pixel_format(format: TextureFormat) -> MTLPixelFormat {
     match format {
         TextureFormat::R8Unorm => MTLPixelFormat::R8Unorm,
+        TextureFormat::Rg8Unorm => MTLPixelFormat::RG8Unorm,
         TextureFormat::A8Unorm => MTLPixelFormat::A8Unorm,
         TextureFormat::R16Float => MTLPixelFormat::R16Float,
         TextureFormat::R32Float => MTLPixelFormat::R32Float,

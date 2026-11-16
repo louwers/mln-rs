@@ -6,12 +6,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use geojson::{GeoJson, GeometryValue};
+use mln_map::VideoControl;
 use mln_style::expression::Functions;
 use mln_style::image::Impl as StyleImage;
 use mln_style::source::{Source, same_source, set_volatile};
 use mln_style::sources::custom_geometry_source::{self, TileOptions};
 use mln_style::sources::geojson_source::GeoJSONData;
 use mln_style::sources::image_source::ImageSource;
+use mln_style::sources::video_source::VideoSource;
 use mln_style::sources::{
     CustomGeometrySource, CustomVectorSource, GeoJSONOptions, GeoJSONSource, TileDataFormat, TileSource,
     custom_vector_source,
@@ -40,6 +42,7 @@ pub enum SourceKind {
     Image,
     CustomGeometry,
     CustomVector,
+    Video,
 }
 
 /// The tiles that a source lists in the style itself, rather than at a URL.
@@ -385,6 +388,7 @@ fn source_kind(source: &dyn Source) -> SourceKind {
         SourceType::Image => SourceKind::Image,
         SourceType::CustomVector => SourceKind::CustomGeometry,
         SourceType::CustomMVTVector => SourceKind::CustomVector,
+        SourceType::Video => SourceKind::Video,
     }
 }
 
@@ -939,6 +943,51 @@ impl Map {
         let source_id = source_id.into();
         self.query(move |map| {
             Ok(find_source_as::<ImageSource>(map.style(), &source_id, "an image source")?.get_coordinates())
+        })
+    }
+
+    // MARK: - Video sources
+
+    /// Plays the video of the video source `source_id` again, after
+    /// [`pause_video`](Self::pause_video). A video plays from the moment its
+    /// source is added.
+    pub fn play_video(&self, source_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
+        self.control_video(source_id.into(), VideoControl::Play)
+    }
+
+    /// Pauses the video of the video source `source_id`, which keeps showing
+    /// its frame.
+    pub fn pause_video(&self, source_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
+        self.control_video(source_id.into(), VideoControl::Pause)
+    }
+
+    /// Moves the video of the video source `source_id` to `seconds` from its
+    /// start.
+    pub fn seek_video(&self, source_id: impl Into<String>, seconds: f64) -> Result<Completion<Applied>, Error> {
+        self.control_video(source_id.into(), VideoControl::Seek(seconds))
+    }
+
+    fn control_video(&self, source_id: String, control: VideoControl) -> Result<Completion<Applied>, Error> {
+        self.command(move |map| {
+            require_loaded(map.style())?;
+            find_source_as::<VideoSource>(map.style(), &source_id, "a video source")?;
+            map.control_video(&source_id, control)
+        })
+    }
+
+    /// Moves the video of a video source to `coordinates`, its four corners
+    /// clockwise from the top left.
+    pub fn set_video_source_coordinates(
+        &self,
+        source_id: impl Into<String>,
+        coordinates: [LatLng; 4],
+    ) -> Result<Completion<Applied>, Error> {
+        let source_id = source_id.into();
+        self.command(move |map| {
+            let style = map.style();
+            require_loaded(style)?;
+            find_source_as::<VideoSource>(style, &source_id, "a video source")?.set_coordinates(coordinates);
+            Ok(())
         })
     }
 

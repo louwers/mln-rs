@@ -43,14 +43,15 @@ use crate::generated::types::{
     MLN_STYLE_SOURCE_INFO_TILE_SIZE, MLN_STYLE_SOURCE_INFO_VECTOR_ENCODING, MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY,
     MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR, MLN_STYLE_SOURCE_TYPE_GEO_JSON, MLN_STYLE_SOURCE_TYPE_IMAGE,
     MLN_STYLE_SOURCE_TYPE_RASTER, MLN_STYLE_SOURCE_TYPE_RASTER_DEM, MLN_STYLE_SOURCE_TYPE_VECTOR,
-    MLN_STYLE_TILE_SCHEME_TMS, MLN_STYLE_TILE_SCHEME_XYZ, MLN_STYLE_TRANSITION_OPTION_DELAY,
-    MLN_STYLE_TRANSITION_OPTION_DURATION, MLN_STYLE_TRANSITION_OPTION_ENABLE_PLACEMENT_TRANSITIONS,
-    MLN_STYLE_VECTOR_TILE_ENCODING_MLT, MLN_STYLE_VECTOR_TILE_ENCODING_MVT, mln_buffer_view, mln_canonical_tile_id,
-    mln_completion, mln_custom_geometry_source_options, mln_custom_vector_source_options, mln_diagnostic,
-    mln_geo_json_source_options, mln_image_content, mln_image_stretch, mln_lat_lng, mln_lat_lng_bounds, mln_map,
-    mln_premultiplied_rgba8_image, mln_status, mln_style_image_info, mln_style_image_options, mln_style_image_text_fit,
-    mln_style_layer_info, mln_style_source_info, mln_style_source_tile_info, mln_style_source_type,
-    mln_style_transition_options, mln_style_vector_tile_encoding,
+    MLN_STYLE_SOURCE_TYPE_VIDEO, MLN_STYLE_TILE_SCHEME_TMS, MLN_STYLE_TILE_SCHEME_XYZ,
+    MLN_STYLE_TRANSITION_OPTION_DELAY, MLN_STYLE_TRANSITION_OPTION_DURATION,
+    MLN_STYLE_TRANSITION_OPTION_ENABLE_PLACEMENT_TRANSITIONS, MLN_STYLE_VECTOR_TILE_ENCODING_MLT,
+    MLN_STYLE_VECTOR_TILE_ENCODING_MVT, mln_buffer_view, mln_canonical_tile_id, mln_completion,
+    mln_custom_geometry_source_options, mln_custom_vector_source_options, mln_diagnostic, mln_geo_json_source_options,
+    mln_image_content, mln_image_stretch, mln_lat_lng, mln_lat_lng_bounds, mln_map, mln_premultiplied_rgba8_image,
+    mln_status, mln_style_image_info, mln_style_image_options, mln_style_image_text_fit, mln_style_layer_info,
+    mln_style_source_info, mln_style_source_tile_info, mln_style_source_type, mln_style_transition_options,
+    mln_style_vector_tile_encoding,
 };
 use crate::map::{self, command, query};
 use crate::{abi, buffer, geo, parse_thread};
@@ -460,6 +461,7 @@ const fn source_type(kind: SourceKind) -> mln_style_source_type {
         SourceKind::Image => MLN_STYLE_SOURCE_TYPE_IMAGE,
         SourceKind::CustomGeometry => MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY,
         SourceKind::CustomVector => MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR,
+        SourceKind::Video => MLN_STYLE_SOURCE_TYPE_VIDEO,
     }
 }
 

@@ -6,8 +6,10 @@ pub mod geojson_source;
 pub mod geojson_source_impl;
 pub mod image_source;
 pub mod tile_source;
+pub mod video_source;
 
 pub use custom_geometry_source::{CustomGeometrySource, CustomGeometrySourceHandle};
 pub use custom_vector_source::{CustomVectorSource, TileDataFormat};
 pub use geojson_source::{GeoJSONData, GeoJSONOptions, GeoJSONSource};
 pub use tile_source::TileSource;
+pub use video_source::VideoSource;

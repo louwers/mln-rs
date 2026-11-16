@@ -491,7 +491,9 @@ impl RenderTileSource {
             SourceType::GeoJSON => (TileKind::Geometry, true, Origin::GeoJson { data: None, synchronous: false }),
             SourceType::CustomVector => (TileKind::Geometry, true, Origin::Custom),
             SourceType::CustomMVTVector => (TileKind::Geometry, false, Origin::Custom),
-            SourceType::Vector | SourceType::Image => (TileKind::Geometry, false, Origin::Tileset { tileset: None }),
+            SourceType::Vector | SourceType::Image | SourceType::Video => {
+                (TileKind::Geometry, false, Origin::Tileset { tileset: None })
+            }
         };
         let key = store.add_source(impl_.id.clone(), kind, single_layer);
         RenderTileSource {

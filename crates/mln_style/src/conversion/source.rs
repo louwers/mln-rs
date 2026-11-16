@@ -80,13 +80,24 @@ fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) ->
         None => None,
     };
 
+    let coordinates = convert_corners(value, "Image", error)?;
+    let result = crate::sources::image_source::ImageSource::new(id, coordinates);
+    if let Some(url_string) = url_string {
+        result.set_url(&url_string);
+    }
+
+    Some(Box::new(result))
+}
+
+/// The four corners of an image or video source, its `coordinates`.
+fn convert_corners(value: &Convertible<'_>, kind: &str, error: &mut Error) -> Option<[mln_util::LatLng; 4]> {
     let Some(coordinates_value) = value.object_member("coordinates") else {
-        error.message = "Image source must have a coordinates values".to_owned();
+        error.message = format!("{kind} source must have a coordinates values");
         return None;
     };
 
     if !coordinates_value.is_array() || coordinates_value.array_length() != 4 {
-        error.message = "Image coordinates must be an array of four longitude latitude pairs".to_owned();
+        error.message = format!("{kind} coordinates must be an array of four longitude latitude pairs");
         return None;
     }
 
@@ -95,12 +106,25 @@ fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) ->
         let lat_lng = super::convert::<mln_util::LatLng>(&coordinates_value.array_member(i), error)?;
         *coordinate = lat_lng;
     }
-    let result = crate::sources::image_source::ImageSource::new(id, coordinates);
-    if let Some(url_string) = url_string {
-        result.set_url(&url_string);
-    }
+    Some(coordinates)
+}
 
-    Some(Box::new(result))
+fn convert_video_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
+    let Some(urls_value) = value.object_member("urls") else {
+        error.message = "Video source must have urls".to_owned();
+        return None;
+    };
+    let urls = urls_value
+        .is_array()
+        .then(|| (0..urls_value.array_length()).map(|i| urls_value.array_member(i).to_string()).collect())
+        .flatten()
+        .filter(|urls: &Vec<String>| !urls.is_empty());
+    let Some(urls) = urls else {
+        error.message = "Video urls must be an array of URL strings".to_owned();
+        return None;
+    };
+    let coordinates = convert_corners(value, "Video", error)?;
+    Some(Box::new(crate::sources::video_source::VideoSource::new(id, urls, coordinates)))
 }
 
 /// Converts the source `id`. A GeoJSON source's `clusterProperties`
@@ -131,6 +155,7 @@ pub fn convert_source(
         "raster-dem" => SourceType::RasterDEM, // dem-heatmap
         "geojson" => return convert_geojson_source(id, value, functions, error),
         "image" => return convert_image_source(id, value, error), // conformance
+        "video" => return convert_video_source(id, value, error),
         _ => {
             error.message = "invalid source type".to_owned();
             return None;

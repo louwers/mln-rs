@@ -38,6 +38,7 @@ use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::transform::{CameraCommandId, CommandEnd, Transform, TransformEvent};
+use crate::video::{VideoControl, Videos};
 
 /// A call of the style's observer.
 enum StyleEvent {
@@ -166,6 +167,8 @@ pub struct Map {
     /// The ends of the camera commands, for its owner.
     command_ends: Vec<CommandEnd>,
 
+    /// The players of the style's video sources.
+    videos: Videos,
     /// Declared after `style`, so the style and its requests go first.
     file_source: Option<Arc<dyn FileSource>>,
     /// The loop that the map's responses and background work answer on.
@@ -259,6 +262,7 @@ impl Map {
             renderer_events,
             events,
             command_ends: Vec::new(),
+            videos: Videos::default(),
             file_source: Some(file_source),
             run_loop: run_loop.clone(),
         };
@@ -580,6 +584,12 @@ impl Map {
         // even in still mode, where no update goes out.
         self.changed();
 
+        // The style's video sources play from the moment they're added, as
+        // GL JS's do.
+        for failure in self.videos.sync(&self.style, self.file_source.as_ref(), &self.renderer_events, &self.run_loop) {
+            self.on_resource_error(failure);
+        }
+
         // Don't load/render anything in still mode until explicitly requested.
         if self.mode != MapMode::Continuous && self.still_image != StillImage::Pending {
             return;
@@ -633,6 +643,25 @@ impl Map {
 
         self.updates.publish(Arc::new(params));
         self.forward_camera_events();
+    }
+
+    /// Opens the players of the style's video sources with `players` from
+    /// now on: the platform's (`mln_video::platform_players`), an app's or a
+    /// test's. Without any, each video source fails to play. Videos playing
+    /// already open again with the new players.
+    pub fn set_video_players(&mut self, players: Option<Arc<dyn mln_video::VideoPlayers>>) {
+        self.videos.set_players(players);
+        self.on_update();
+    }
+
+    /// Plays, pauses or seeks the video of the video source `source_id`, as
+    /// GL JS's `VideoSource` does.
+    ///
+    /// # Errors
+    ///
+    /// The style has no video source `source_id` playing.
+    pub fn control_video(&mut self, source_id: &str, control: VideoControl) -> Result<(), Error> {
+        self.videos.control(source_id, control)
     }
 
     pub fn jump_to(&mut self, camera: &CameraOptions) {

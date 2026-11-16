@@ -959,6 +959,7 @@ impl VulkanGpu {
     fn vk_format(&self, format: TextureFormat) -> vk::Format {
         match format {
             TextureFormat::R8Unorm | TextureFormat::A8Unorm => vk::Format::R8_UNORM,
+            TextureFormat::Rg8Unorm => vk::Format::R8G8_UNORM,
             TextureFormat::R16Float => vk::Format::R16_SFLOAT,
             TextureFormat::R32Float => vk::Format::R32_SFLOAT,
             TextureFormat::Rgba8Unorm => vk::Format::R8G8B8A8_UNORM,
@@ -1630,8 +1631,9 @@ impl VulkanGpu {
     /// The format a texture of `format` has, `None` for a format no
     /// texture has.
     pub(crate) fn texture_format(&self, format: vk::Format) -> Option<TextureFormat> {
-        const FORMATS: [TextureFormat; 14] = [
+        const FORMATS: [TextureFormat; 15] = [
             TextureFormat::R8Unorm,
+            TextureFormat::Rg8Unorm,
             TextureFormat::A8Unorm,
             TextureFormat::R16Float,
             TextureFormat::R32Float,

@@ -321,6 +321,7 @@ impl OpenPass {
 fn texture_format(format: TextureFormat, desktop: bool) -> Option<(u32, u32, u32)> {
     Some(match format {
         TextureFormat::R8Unorm => (glow::R8, glow::RED, glow::UNSIGNED_BYTE),
+        TextureFormat::Rg8Unorm => (glow::RG8, glow::RG, glow::UNSIGNED_BYTE),
         TextureFormat::A8Unorm if desktop => (glow::R8, glow::RED, glow::UNSIGNED_BYTE),
         TextureFormat::A8Unorm => (glow::ALPHA, glow::ALPHA, glow::UNSIGNED_BYTE),
         TextureFormat::R16Float => (glow::R16F, glow::RED, glow::HALF_FLOAT),

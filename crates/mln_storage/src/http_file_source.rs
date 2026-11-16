@@ -153,6 +153,7 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
 
     let mut retry_after: Option<String> = None;
     let mut x_rate_limit_reset: Option<String> = None;
+    let mut content_range_total: Option<u64> = None;
     for (name, value) in &transfer.headers {
         let (name, value) = (name.as_str(), value.as_str());
         if let Some(value) = header_value(name, "last-modified", value) {
@@ -172,13 +173,27 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
             retry_after = Some(value.to_owned());
         } else if let Some(value) = header_value(name, "x-rate-limit-reset", value) {
             x_rate_limit_reset = Some(value.to_owned());
+        } else if let Some(value) = header_value(name, "content-range", value) {
+            content_range_total = parse_content_range_total(value);
         }
     }
 
     let response_code = transfer.status;
     if response_code == 200 || response_code == 206 {
         match transfer.body {
-            Ok(data) => response.data = Some(Arc::new(data)),
+            Ok(mut data) => {
+                if response_code == 200 {
+                    response.total_size = Some(data.len() as u64);
+                    // A server that ignores `Range` sends the whole resource:
+                    // the range is cut out of it.
+                    if let Some((first, last)) = resource.data_range {
+                        data = whole_body_range(data, first, last);
+                    }
+                } else {
+                    response.total_size = content_range_total;
+                }
+                response.data = Some(Arc::new(data));
+            }
             // curl reports a failed transfer as an error code, not a status.
             Err(error) => response.error = Some(error),
         }
@@ -204,6 +219,24 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
         response.error = Some(Box::new(ResourceError::new(Reason::Other, format!("HTTP status code {response_code}"))));
     }
     response
+}
+
+/// The resource's total size in a `Content-Range` header's value, as in
+/// `bytes 0-99/1234`; `None` for an unknown total (`*`) or another unit.
+fn parse_content_range_total(value: &str) -> Option<u64> {
+    let range = value.trim().strip_prefix("bytes")?.trim_start();
+    range.rsplit_once('/')?.1.trim().parse().ok()
+}
+
+/// Bytes `first` to `last` of a whole resource's `data`, as a server that
+/// honoured `Range` would have sent them: fewer past the end.
+fn whole_body_range(mut data: Vec<u8>, first: u64, last: u64) -> Vec<u8> {
+    let length = data.len() as u64;
+    let end = last.saturating_add(1).min(length);
+    let start = first.min(end);
+    data.truncate(end as usize);
+    data.drain(..start as usize);
+    data
 }
 
 /// The `Range` request header for a resource's data range, for transports
@@ -298,5 +331,25 @@ impl FileSource for HTTPFileSource {
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::{parse_content_range_total, whole_body_range};
+
+    #[test]
+    fn content_range_totals() {
+        assert_eq!(Some(1234), parse_content_range_total("bytes 0-99/1234"));
+        assert_eq!(Some(7), parse_content_range_total(" bytes 3-6/7 "));
+        assert_eq!(None, parse_content_range_total("bytes 0-99/*"));
+        assert_eq!(None, parse_content_range_total("items 0-99/1234"));
+    }
+
+    #[test]
+    fn a_whole_body_answers_a_range_with_its_bytes() {
+        assert_eq!(b"lo Wor".to_vec(), whole_body_range(b"Hello World!".to_vec(), 3, 8));
+        assert_eq!(b"d!".to_vec(), whole_body_range(b"Hello World!".to_vec(), 10, 99));
+        assert_eq!(whole_body_range(b"Hello".to_vec(), 9, 12), [] as [u8; 0]);
     }
 }

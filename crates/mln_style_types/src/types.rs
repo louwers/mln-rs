@@ -1,5 +1,6 @@
 // Variant order and discriminants follow the C++ enums, except that
-// `SourceType` has no `Video` or `Annotations`: mln-rs has neither source.
+// `SourceType` has no `Annotations`, which mln-rs doesn't have, and has
+// `Video` last.
 // `TextVariableAnchorType` is an alias of `SymbolAnchorType` as in C++.
 
 use std::str::FromStr;
@@ -17,6 +18,7 @@ pub enum SourceType {
     Image,
     CustomVector,
     CustomMVTVector,
+    Video,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]

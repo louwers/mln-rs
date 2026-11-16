@@ -158,6 +158,11 @@ pub(crate) fn create(impl_: &Arc<dyn source::Impl>, store: &mut TileStore) -> Bo
                 mln_style::sources::image_source::Impl,
             >(impl_)))
         }
+        SourceType::Video => {
+            Box::new(crate::sources::render_image_source::RenderImageSource::video(source::downcast_arc::<
+                mln_style::sources::video_source::Impl,
+            >(impl_)))
+        }
         SourceType::Vector
         | SourceType::Raster
         | SourceType::RasterDEM

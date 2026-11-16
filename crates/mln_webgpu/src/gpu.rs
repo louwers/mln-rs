@@ -448,6 +448,7 @@ fn texture_format(format: TextureFormat) -> wgpu::TextureFormat {
     match format {
         // WGSL reads an alpha texture's one channel as red.
         TextureFormat::R8Unorm | TextureFormat::A8Unorm => wgpu::TextureFormat::R8Unorm,
+        TextureFormat::Rg8Unorm => wgpu::TextureFormat::Rg8Unorm,
         TextureFormat::R16Float => wgpu::TextureFormat::R16Float,
         TextureFormat::R32Float => wgpu::TextureFormat::R32Float,
         TextureFormat::Rgba8Unorm => wgpu::TextureFormat::Rgba8Unorm,
@@ -500,6 +501,7 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
 pub(crate) fn from_wgpu_format(format: wgpu::TextureFormat) -> Option<TextureFormat> {
     Some(match format {
         wgpu::TextureFormat::R8Unorm => TextureFormat::R8Unorm,
+        wgpu::TextureFormat::Rg8Unorm => TextureFormat::Rg8Unorm,
         wgpu::TextureFormat::R16Float => TextureFormat::R16Float,
         wgpu::TextureFormat::R32Float => TextureFormat::R32Float,
         wgpu::TextureFormat::Rgba8Unorm => TextureFormat::Rgba8Unorm,
