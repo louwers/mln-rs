@@ -1,5 +1,5 @@
-// `LayerChanges::between`: which layers changed between two layer lists, and
-// how.
+// `LayerChanges::between` and `StyleDiff::between`: which layers, sources
+// and images changed between two versions, and how.
 
 use std::sync::Arc;
 
@@ -116,7 +116,7 @@ fn a_change_tiles_are_laid_out_with_is_relaid() {
 
 // `StyleDiff::between`: what changed between two versions of a style.
 
-mod style_diff {
+mod versions {
     use std::sync::Arc;
 
     use mln_util::image::PremultipliedImage;

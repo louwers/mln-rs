@@ -72,6 +72,13 @@ struct SpriteLoad {
 }
 
 /// Loads a map's style document and its sprites (see the module docs).
+///
+/// "Loaded" has two meanings here. The document is loaded from the time a
+/// document parses until the next URL load begins: the map refuses edits of
+/// the loaded document meanwhile, since the parse that ends the load
+/// replaces the whole style. The sprites are loaded once each sprite of the
+/// parsed document loaded or failed for good; with the sources, they make
+/// the style loaded for a still image.
 pub(crate) struct StyleLoader {
     file_source: Option<Arc<dyn FileSource>>,
     run_loop: RunLoop,

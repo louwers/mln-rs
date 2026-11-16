@@ -26,7 +26,6 @@ mod gtest_tile_lod;
 mod gtest_update_renderables;
 // gtests-core: test/geometry/line_atlas.test.cpp.
 mod gtest_line_atlas;
-// gtests-core: test/renderer/style_diff.test.cpp.
 // Ports test/util/tile_range.test.cpp (marker `// gtest: Group.Name`).
 mod gtest_tile_range;
 // test/util/tile_cover.test.cpp: needs mln_map's Transform, which is above

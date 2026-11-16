@@ -6,7 +6,8 @@ use mln_util::hash::RandomState;
 use crate::layer::Layer;
 
 /// A style's layers in drawing order, bottom first, found by id. Ids are
-/// unique.
+/// unique. A style version holds its list behind an `Arc`, which an edit
+/// copies and replaces, so a list that a version shares never changes.
 #[derive(Clone, Default)]
 pub struct LayerList(IndexMap<Arc<str>, Layer, RandomState>);
 

@@ -1,11 +1,25 @@
-//! The map style: `Style` and its `style::Impl`, the style JSON parser,
-//! layers and sources, the property system and the typed converters
-//! (`conversion`). It also holds the parts of the renderer and the map that
-//! the property system needs (`renderer`, `map`), so that crates don't
-//! depend on each other in a cycle.
+//! The map style: [`Style`], the style JSON parser, layers and sources, the
+//! property system and the typed converters (`conversion`). It also holds
+//! the parts of the renderer and the map that the property system needs
+//! (`renderer`, `map`), so that crates don't depend on each other in a
+//! cycle.
 //!
 //! A style parses against a [`StyleRegistry`]: the expression functions and
 //! layer types its JSON, property values and filters may name.
+//!
+//! Versions:
+//! - A [`Style`] is a value: a version of a map's style. Its parts sit
+//!   behind `Arc`s, so versions share what they don't change, and a part
+//!   whose `Arc` is the same pointer in two versions is the same part.
+//! - [`Style::apply`] makes an [`Edit`], the only way to change a style; the
+//!   JSON entry points (`add_layer_json`, `set_layer_property_json`, ...)
+//!   parse and then apply one.
+//! - [`Parts::between`] says in O(1) which parts two versions differ in, and
+//!   [`diff::StyleDiff::between`] what a renderer has to redo for each layer,
+//!   source and image to go from one version to another.
+//! - Loading isn't here: the map's loader fetches documents and sprites, and
+//!   [`Style::from_json`] parses a document. A style holds its sources'
+//!   records ([`SourceList`]); the map holds their live handles.
 //!
 //! Layers:
 //! - `layer::Layer` is a layer of any type. Its style data is an

@@ -185,9 +185,9 @@ fn raster_properties() {
 #[test]
 fn observer() {
     // TEST(Layer, Observer). C++ counts `StubLayerObserver::layerChanged`
-    // calls; in the port a change reaches `Style::Impl::onLayerChanged` when
-    // the layer's impl `Arc` is replaced (see layer.rs), so each "notifies"
-    // check is "the impl pointer changed".
+    // calls; in the port a layer changes when its impl `Arc` is replaced
+    // (see layer.rs), which is what a style version compares, so each
+    // "notifies" check is "the impl pointer changed".
     let mut layer = new_layer("line", "line", "source");
     let notified = |layer: &mut Layer, f: &mut dyn FnMut(&mut Layer)| {
         let before = Arc::clone(layer.style());

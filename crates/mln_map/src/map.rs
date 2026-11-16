@@ -1,7 +1,7 @@
-// C++ `Map::Impl` observes the transform, the style and the renderer, and
-// reacts inside their callbacks. Here they push events into queues that the
-// map drains (`process_events`), so the map owns its style and transform and
-// lends them out as `&mut`.
+// The map owns its style versions, its transform, its style loader and its
+// sources' handles. An edit reacts in the call that makes it; the loader,
+// the sources and the renderer report through queues that the map drains in
+// `process_events`.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -57,7 +57,9 @@ enum StillImage {
 /// The map publishes its state for a renderer in an update slot, which a
 /// renderer reads through [`update_reader`](Self::update_reader) and
 /// reports back to through [`renderer_events`](Self::renderer_events).
-/// The style and the renderer report to the map through queues, which the
+/// The style is an `Arc<Style>` version: [`edit_style`](Self::edit_style)
+/// makes the next one and publishes it at once. The style's loader, its
+/// sources and the renderer report to the map through queues, which the
 /// map handles only in [`process_events`](Self::process_events) (which
 /// [`drain_events`](Self::drain_events) calls): an owner calls it once per
 /// phase, before the commands that should see what was reported, such as a
