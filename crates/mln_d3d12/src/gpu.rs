@@ -59,6 +59,7 @@ use windows::core::{Interface, s};
 use crate::heaps::{CpuDescriptors, CpuSlot, SamplerHeap, TABLE_SIZE, TableHeap};
 use crate::memory::{BufferMemory, Memory, NO_RANGE, TextureMemory};
 use crate::root_signature::{self, ROOT_CONSTANTS, SAMPLER_INDICES, SAMPLER_TABLE, TEXTURE_TABLE, View};
+use crate::shaders::hlsl::VECTOR_BLOCK;
 use crate::shaders::{CompiledProgram, ShaderCompiler};
 use crate::upload::UploadRing;
 use crate::{CustomLayerEncoder, CustomLayerPass, Device, conv};
@@ -119,8 +120,9 @@ struct Shader {
     key: ShaderKey,
     program: Arc<CompiledProgram>,
     reads: Vec<ShaderBinding>,
-    /// The buffers it reads, by id, with their root parameter and view.
-    buffers: Vec<(u32, u32, View)>,
+    /// The buffers it reads, by id, with their root parameter, view, and
+    /// size: of an element, for a vector.
+    buffers: Vec<(u32, u32, View, u64)>,
     /// The textures it reads, by id, with their index in the table.
     textures: Vec<(u32, u32)>,
 }
@@ -139,6 +141,8 @@ struct BoundBuffer {
     view: View,
     address: u64,
     stride: u64,
+    /// The size of a vector's element.
+    element: u64,
 }
 
 /// What a draw sets in the root signature: each buffer's address, the
@@ -198,6 +202,8 @@ struct OpenPass {
     pipeline: Option<PipelineId>,
     bindings: Option<BindingsId>,
     global_index: Option<u32>,
+    /// The block of the vectors' elements that their views start at.
+    block: Option<u32>,
     geometry: Option<GeometryId>,
     /// The views of the vertex buffers bound, by slot, and of the index
     /// buffer: geometries of other indices or attributes often share them.
@@ -212,6 +218,7 @@ impl OpenPass {
         self.pipeline = None;
         self.bindings = None;
         self.global_index = None;
+        self.block = None;
         self.geometry = None;
         self.vertex_buffers.clear();
         self.index_buffer = None;
@@ -1090,7 +1097,7 @@ impl Gpu for D3d12Gpu {
                         *min_size = (*min_size).max(resource.size);
                     } else {
                         reads.push(ShaderBinding::Buffer { id, min_size: resource.size });
-                        buffers.push((id, parameter, view));
+                        buffers.push((id, parameter, view, resource.size));
                     }
                 }
                 Resource::Texture { id, index } => {
@@ -1129,7 +1136,7 @@ impl Gpu for D3d12Gpu {
         };
         let (mut kept_buffers, mut kept_textures) = (Vec::new(), Vec::new());
         let mut buffers = Vec::new();
-        for &(id, parameter, view) in &shader.buffers {
+        for &(id, parameter, view, element) in &shader.buffers {
             let (buffer, offset) = desc
                 .entries
                 .iter()
@@ -1142,7 +1149,7 @@ impl Gpu for D3d12Gpu {
                 .ok_or_else(|| missing("buffer", id))?;
             let buffer = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
             let stride = buffer.windows.as_ref().map_or(0, |windows| windows.stride);
-            buffers.push(BoundBuffer { parameter, view, address: buffer.memory.address() + offset, stride });
+            buffers.push(BoundBuffer { parameter, view, address: buffer.memory.address() + offset, stride, element });
             kept_buffers.push(Rc::clone(&buffer.memory));
         }
         let textures = if shader.textures.is_empty() {
@@ -1367,6 +1374,7 @@ impl Gpu for D3d12Gpu {
             pipeline: None,
             bindings: None,
             global_index: None,
+            block: None,
             geometry: None,
             vertex_buffers: Vec::new(),
             index_buffer: None,
@@ -1391,22 +1399,32 @@ impl Gpu for D3d12Gpu {
                 list.IASetPrimitiveTopology(pipeline.topology);
                 open.pipeline = Some(draw.pipeline);
             }
-            if open.bindings != Some(draw.bindings) {
+            let new_bindings = open.bindings != Some(draw.bindings);
+            let block = draw.global_index / VECTOR_BLOCK;
+            if new_bindings || open.block != Some(block) {
                 for buffer in &bindings.buffers {
                     let address = buffer.address + buffer.stride * open.window as u64;
                     match buffer.view {
-                        View::Constant => list.SetGraphicsRootConstantBufferView(buffer.parameter, address),
-                        View::Shader => list.SetGraphicsRootShaderResourceView(buffer.parameter, address),
+                        View::Constant if new_bindings => {
+                            list.SetGraphicsRootConstantBufferView(buffer.parameter, address);
+                        }
+                        View::Constant => {}
+                        View::Vector => {
+                            let start = u64::from(block * VECTOR_BLOCK) * buffer.element;
+                            list.SetGraphicsRootConstantBufferView(buffer.parameter, address + start);
+                        }
                     }
                 }
-                if let Some((table, indices)) = bindings.textures {
+                if let Some((table, indices)) = bindings.textures.filter(|_| new_bindings) {
                     list.SetGraphicsRootDescriptorTable(TEXTURE_TABLE, self.tables.gpu(table));
                     list.SetGraphicsRootShaderResourceView(SAMPLER_INDICES, indices);
                 }
                 open.bindings = Some(draw.bindings);
+                open.block = Some(block);
             }
             if open.global_index != Some(draw.global_index) {
-                list.SetGraphicsRoot32BitConstant(ROOT_CONSTANTS, draw.global_index, 0);
+                // The draw's index in the block of the vectors' elements.
+                list.SetGraphicsRoot32BitConstant(ROOT_CONSTANTS, draw.global_index % VECTOR_BLOCK, 0);
                 open.global_index = Some(draw.global_index);
             }
             if open.geometry != Some(draw.geometry) {

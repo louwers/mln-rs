@@ -1,6 +1,6 @@
 //! The root signature of every pipeline, for the registers that
 //! `shaders::hlsl` puts the shaders' resources in: `ubo_index` as a root
-//! constant, each buffer as a root CBV or SRV, the textures as one table,
+//! constant, each buffer as a root CBV, the textures as one table,
 //! and the sampler heap as another, with the buffer of the indices in it of
 //! a draw's samplers as a root SRV. Binding a draw sets GPU addresses only.
 
@@ -51,8 +51,10 @@ pub(crate) const SAMPLER_TABLE: u32 = SAMPLER_INDICES + 1;
 pub(crate) enum View {
     /// A uniform buffer: a root CBV.
     Constant,
-    /// A storage buffer: a root SRV.
-    Shader,
+    /// A storage buffer, a vector of a layer's drawables' elements: a root
+    /// CBV of the block of `hlsl::VECTOR_BLOCK` elements that holds the
+    /// draw's.
+    Vector,
 }
 
 /// The parameter of the buffer at `binding` of `set`, and how it binds;
@@ -65,7 +67,7 @@ pub(crate) fn buffer_parameter(set: u32, binding: u32) -> Option<(u32, View)> {
         if type_.set_index() == set {
             let binding = binding as usize;
             return match binding {
-                _ if binding < shape.storage => Some((parameter + binding as u32, View::Shader)),
+                _ if binding < shape.storage => Some((parameter + binding as u32, View::Vector)),
                 _ if binding < shape.storage + shape.uniform => Some((parameter + binding as u32, View::Constant)),
                 _ => None,
             };
@@ -100,12 +102,7 @@ pub(crate) fn create(device: &ID3D12Device) -> Result<ID3D12RootSignature, GpuEr
     for type_ in BUFFER_SETS {
         let shape = type_.buffer_shape();
         for binding in 0..(shape.storage + shape.uniform) as u32 {
-            let kind = if (binding as usize) < shape.storage {
-                D3D12_ROOT_PARAMETER_TYPE_SRV
-            } else {
-                D3D12_ROOT_PARAMETER_TYPE_CBV
-            };
-            parameters.push(descriptor(kind, binding, type_.set_index(), all));
+            parameters.push(descriptor(D3D12_ROOT_PARAMETER_TYPE_CBV, binding, type_.set_index(), all));
         }
     }
     let image_space = DescriptorSetType::DrawableImage.set_index();
