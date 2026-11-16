@@ -53,5 +53,30 @@ windows = { workspace = true, features = [
 # For the code that windows' #[implement] generates.
 windows-core.workspace = true
 
+# The AVFoundation player of Apple platforms.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+block2.workspace = true
+dispatch2.workspace = true
+objc2.workspace = true
+objc2-av-foundation.workspace = true
+objc2-core-foundation = { workspace = true, features = [
+  "CFDictionary",
+  "CFString",
+] }
+objc2-core-media.workspace = true
+objc2-core-video.workspace = true
+objc2-foundation = { workspace = true, features = ["NSDictionary", "NSValue"] }
+# Enables the IOSurface types that objc2-core-video names.
+objc2-io-surface.workspace = true
+
+[target.'cfg(target_vendor = "apple")'.dev-dependencies]
+objc2-core-video.workspace = true
+
+# The AVFoundation player's tests run on threads while the main thread runs
+# its run loop, which AVFoundation steps players on.
+[[test]]
+name = "avfoundation"
+harness = false
+
 [lints]
 workspace = true

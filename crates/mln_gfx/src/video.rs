@@ -193,7 +193,7 @@ impl Drop for GpuFrame {
     }
 }
 
-/// The call that gives back a frame's CVPixelBuffer.
+/// The call that gives back a frame's `CVPixelBuffer`.
 #[cfg(target_vendor = "apple")]
 #[expect(unsafe_code, reason = "CoreFoundation's C API")]
 mod apple {

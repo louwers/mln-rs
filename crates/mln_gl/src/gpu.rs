@@ -22,10 +22,10 @@ use mln_gfx::gpu::{
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
-#[cfg(not(target_family = "wasm"))]
-use mln_gfx::video::{FrameKeepAlive, GpuFrame, ImportedFrame};
 #[cfg(target_os = "android")]
 use mln_gfx::video::PlaneLayout;
+#[cfg(not(target_family = "wasm"))]
+use mln_gfx::video::{FrameKeepAlive, GpuFrame, ImportedFrame};
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
@@ -1246,7 +1246,10 @@ impl Gpu for GlGpu {
                 let (layout, planes) = self.import_dma_buf(*fourcc, *modifier, *size, planes, &keep_alive)?;
                 Ok(ImportedFrame { layout, planes, color: *color, external: false })
             }
-            frame => Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind()))),
+            frame => {
+                drop(keep_alive);
+                Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind())))
+            }
         }
     }
 

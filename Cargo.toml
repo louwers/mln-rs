@@ -352,6 +352,7 @@ objc2-quartz-core = { version = "0.3.2", default-features = false, features = [
 objc2-av-foundation = { version = "0.3.2", default-features = false, features = [
   "std",
   "block2",
+  "dispatch2",
   "objc2-core-media",
   "objc2-core-video",
   "AVAsset",
@@ -360,6 +361,10 @@ objc2-av-foundation = { version = "0.3.2", default-features = false, features = 
   "AVPlayerItem",
   "AVPlayerItemOutput",
   "AVTime",
+] }
+dispatch2 = { version = "0.3.1", default-features = false, features = [
+  "std",
+  "objc2",
 ] }
 objc2-core-media = { version = "0.3.2", default-features = false, features = [
   "std",

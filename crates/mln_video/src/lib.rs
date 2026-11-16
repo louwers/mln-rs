@@ -11,6 +11,8 @@
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_vendor = "apple")]
+mod apple;
 mod bytes;
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))]
 mod gstreamer;
@@ -36,8 +38,13 @@ pub use web::{VideoHost, WebPlayers};
 
 /// The players of the platform the library runs on: GStreamer's on Linux and
 /// the BSDs, which fail to open each video, saying so, where GStreamer 1.x
-/// isn't installed, the NDK's media API on Android, and Media Foundation on
-/// Windows. A platform without players fails to open each video too.
+/// isn't installed, the NDK's media API on Android, Media Foundation on
+/// Windows, and `AVFoundation` on Apple's platforms. A platform without players
+/// fails to open each video too.
+///
+/// `AVFoundation` steps its players on the main thread: in a process whose
+/// main thread doesn't run its run loop, such as a command-line tool, each
+/// video fails after a few seconds.
 #[cfg(not(target_family = "wasm"))]
 #[must_use]
 pub fn platform_players() -> Arc<dyn VideoPlayers> {
@@ -47,7 +54,9 @@ pub fn platform_players() -> Arc<dyn VideoPlayers> {
     let players: Arc<dyn VideoPlayers> = Arc::new(android::AndroidPlayers);
     #[cfg(windows)]
     let players: Arc<dyn VideoPlayers> = Arc::new(windows::MediaFoundationPlayers);
-    #[cfg(not(any(all(unix, not(target_vendor = "apple")), windows)))]
+    #[cfg(target_vendor = "apple")]
+    let players: Arc<dyn VideoPlayers> = Arc::new(apple::AvFoundationPlayers);
+    #[cfg(not(any(unix, windows)))]
     let players: Arc<dyn VideoPlayers> = Arc::new(NoPlayers);
     players
 }
