@@ -18,7 +18,7 @@ use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::range::Range;
 use mln_util::size::Size;
-use support::{EMPTY_STYLE, TestRuntime, map, runtime, wait, wait_err};
+use support::{EMPTY_STYLE, TestRuntime, map, map_options, runtime, wait, wait_err};
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 
@@ -422,4 +422,85 @@ fn root_properties_change_the_live_style_and_the_view() {
 
     wait(map.set_style_root_property("projection", "null"));
     assert!(!map.snapshot().unwrap().globe_rendering);
+}
+
+/// Records what the map asks of its video players.
+#[derive(Debug, Default)]
+struct RecordedVideos(Arc<parking_lot::Mutex<Vec<String>>>);
+
+struct RecordedPlayer(Arc<parking_lot::Mutex<Vec<String>>>);
+
+impl mln_video::VideoPlayer for RecordedPlayer {
+    fn play(&mut self) {
+        self.0.lock().push("play".to_owned());
+    }
+    fn pause(&mut self) {
+        self.0.lock().push("pause".to_owned());
+    }
+    fn seek(&mut self, seconds: f64) {
+        self.0.lock().push(format!("seek {seconds}"));
+    }
+}
+
+impl Drop for RecordedPlayer {
+    fn drop(&mut self) {
+        self.0.lock().push("close".to_owned());
+    }
+}
+
+impl mln_video::VideoPlayers for RecordedVideos {
+    fn open(&self, request: mln_video::OpenRequest) -> Result<Box<dyn mln_video::VideoPlayer>, String> {
+        self.0.lock().push(format!("open {}", request.urls.join(" ")));
+        Ok(Box::new(RecordedPlayer(Arc::clone(&self.0))))
+    }
+}
+
+const VIDEO_SOURCE: &str = r#"{
+  "type": "video",
+  "urls": ["fixture://drone.mp4", "fixture://drone.webm"],
+  "coordinates": [[0, 1], [1, 1], [1, 0], [0, 0]]
+}"#;
+
+#[test]
+fn video_sources_open_players_that_the_map_steers() {
+    let runtime = runtime();
+    let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let players = RecordedVideos(Arc::clone(&calls));
+    let options = mln_runtime::MapOptions { video_players: Some(Arc::new(players)), ..map_options() };
+    let (map, created) = runtime.create_map(options).unwrap();
+    created.wait().unwrap();
+    wait(map.set_style_json(EMPTY_STYLE));
+
+    wait(map.add_style_source_json("drone", VIDEO_SOURCE));
+    assert_eq!(wait(map.style_source("drone")).unwrap().kind, SourceKind::Video);
+    wait(map.pause_video("drone"));
+    wait(map.seek_video("drone", 2.5));
+    wait(map.play_video("drone"));
+    wait(map.set_video_source_coordinates("drone", corners(1.0)));
+    wait(map.remove_style_source("drone"));
+    assert_eq!(*calls.lock(), ["open fixture://drone.mp4 fixture://drone.webm", "pause", "seek 2.5", "play", "close"]);
+
+    wait(map.add_style_source_json("geojson", EMPTY_GEOJSON_SOURCE));
+    let wrong = wait_err(map.pause_video("geojson"));
+    assert_eq!(
+        (wrong.kind, wrong.message.as_str()),
+        (ErrorKind::InvalidArgument, "source \"geojson\" is not a video source")
+    );
+    assert_eq!(wait_err(map.play_video("missing")).kind, ErrorKind::NotFound);
+}
+
+#[test]
+fn a_video_source_needs_urls_and_corners() {
+    let (_runtime, map) = styled_map();
+    let error = wait_err(
+        map.add_style_source_json("drone", r#"{"type": "video", "coordinates": [[0, 1], [1, 1], [1, 0], [0, 0]]}"#),
+    );
+    assert!(error.message.contains("Video source must have urls"), "{}", error.message);
+    let error = wait_err(map.add_style_source_json(
+        "drone",
+        r#"{"type": "video", "urls": [], "coordinates": [[0, 1], [1, 1], [1, 0], [0, 0]]}"#,
+    ));
+    assert!(error.message.contains("Video urls must be an array of URL strings"), "{}", error.message);
+    let error = wait_err(map.add_style_source_json("drone", r#"{"type": "video", "urls": ["fixture://drone.mp4"]}"#));
+    assert!(error.message.contains("Video source must have a coordinates values"), "{}", error.message);
 }
