@@ -27,6 +27,8 @@ mod renderer_backend;
 mod shaders;
 mod surface_resource;
 mod surface_target;
+#[cfg(unix)]
+mod video_import;
 mod vk_state;
 #[cfg(windows)]
 mod win32;

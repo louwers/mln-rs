@@ -1,7 +1,8 @@
 // A video frame in a dmabuf through Map -> HeadlessFrontend: an NV12 frame
 // of four colored quarters in a udmabuf, which a test player hands the map.
-// A backend that imports dmabufs draws it; one that doesn't refuses GPU
-// frames, and the player sends the frame in memory instead. Either way each
+// A backend that imports dmabufs (OpenGL, Vulkan) draws it; one that
+// doesn't refuses GPU frames, and the player sends the frame in memory
+// instead. Either way each
 // quarter keeps its color and place.
 #![cfg(target_os = "linux")]
 #![expect(unsafe_code, reason = "udmabuf and memfd are system calls")]
@@ -216,7 +217,7 @@ fn an_nv12_dmabuf_frame_draws_in_place() {
         }
     }
     let backend = std::env::var("MLN_RENDER_BACKEND").unwrap_or_default();
-    if backend.starts_with("gl") {
-        assert_eq!(Some(false), *refused.lock(), "OpenGL imports dmabufs");
+    if backend.starts_with("gl") || backend == "vulkan" {
+        assert_eq!(Some(false), *refused.lock(), "{backend} imports dmabufs");
     }
 }
