@@ -9,8 +9,8 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use mln_actor::RunLoop;
 use mln_storage::FileSource;
-use mln_style::Style;
 use mln_style::source::{Source, SourceObserver};
+use mln_style::{Edit, Style};
 use mln_util::error::Error;
 use mln_util::event_queue::EventQueue;
 use mln_util::hash::RandomState;
@@ -124,13 +124,23 @@ impl StyleSources {
     }
 
     /// Writes into `style` the record of each source whose record changed
-    /// since `style` last took it. Returns whether any did.
-    pub(crate) fn sync(&self, style: &mut Style) -> bool {
-        let mut changed = false;
-        for (id, source) in &self.sources {
-            changed |= style.refresh_source_impl(id, source.base_impl());
+    /// since `style` last took it, copying the version only then. Returns
+    /// whether any did.
+    pub(crate) fn sync(&self, style: &mut Arc<Style>) -> bool {
+        let stale = |style: &Style, id: &str, source: &dyn Source| {
+            !style.get_source(id).is_some_and(|record| Arc::ptr_eq(record, &source.base_impl()))
+        };
+        if !self.sources.iter().any(|(id, source)| stale(style, id, &**source)) {
+            return false;
         }
-        changed
+        let style = Arc::make_mut(style);
+        for (id, source) in &self.sources {
+            if stale(style, id, &**source) {
+                // Recording a source's record can't fail.
+                let _ = style.apply(Edit::SetSourceImpl { id: id.to_string(), source: Some(source.base_impl()) });
+            }
+        }
+        true
     }
 
     /// Whether every source loaded its description.

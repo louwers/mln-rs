@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::Layer;
 use mln_style::sources::tile_source::TileSource;
+use mln_style::{Edit, Layer};
 use mln_util::ErrorKind;
 use mln_util::tileset::PartialTileset;
 
@@ -45,7 +45,7 @@ fn remove_source_in_use() {
     let mut map = loaded_map(&run_loop);
     map.add_source(vector_source("sourceId")).unwrap();
     let layer = Layer::new(map.style().registry(), "line", "layerId", "sourceId").unwrap();
-    map.style_mut().add_layer(layer, None).unwrap();
+    map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
     assert!(map.remove_source("sourceId").is_none());
     assert!(map.source("sourceId").is_some());

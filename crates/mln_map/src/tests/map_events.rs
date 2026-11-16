@@ -8,6 +8,7 @@ use mln_actor::RunLoop;
 use mln_renderer::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
+use mln_style::Edit;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -107,7 +108,7 @@ fn each_change_to_the_style_projection_reaches_the_transform() {
     map.process_events();
     run_loop.run_once();
     map.process_events();
-    assert!(map.style().is_loaded());
+    assert!(map.style_document_loaded());
     assert!((lowest_jump(&mut map) + 0.5).abs() < 1e-9);
     let globe_below_3 = (**map.style().get_projection()).clone();
 
@@ -115,14 +116,12 @@ fn each_change_to_the_style_projection_reaches_the_transform() {
     map.load_style_json(STYLE);
     assert!(lowest_jump(&mut map) >= 1.0);
 
-    // The setter.
-    map.style_mut().set_projection(globe_below_3);
-    map.process_events();
+    // An edit.
+    map.edit_style(|style| style.apply(Edit::SetProjection(globe_below_3))).unwrap();
     assert!((lowest_jump(&mut map) + 0.5).abs() < 1e-9);
 
-    // An edit.
-    map.style_mut().set_root_property_json("projection", r#"{"type":"mercator"}"#).unwrap();
-    map.process_events();
+    // A JSON edit.
+    map.edit_style(|style| style.set_root_property_json("projection", r#"{"type":"mercator"}"#)).unwrap();
     assert!(lowest_jump(&mut map) >= 1.0);
 }
 
@@ -170,7 +169,7 @@ fn missing_images_reach_the_owner() {
     let run_loop = RunLoop::new();
     let mut map = map(MapOptions::default(), &run_loop);
     map.load_style_json(STYLE);
-    map.style_mut().add_image(image("present"));
+    map.edit_style(|style| style.apply(Edit::AddImage(image("present")))).unwrap();
     map.drain_events();
 
     report(&map, RendererEvent::StyleImageMissing("present".to_owned()));
@@ -200,7 +199,7 @@ fn the_unused_image_policy_decides_what_stays() {
     for (policy, kept) in [(UnusedStyleImagePolicy::Remove, false), (UnusedStyleImagePolicy::Keep, true)] {
         let mut map = map(MapOptions { unused_style_image_policy: policy, ..Default::default() }, &run_loop);
         map.load_style_json(STYLE);
-        map.style_mut().add_image(image("marker"));
+        map.edit_style(|style| style.apply(Edit::AddImage(image("marker")))).unwrap();
         report(&map, RendererEvent::UnusedStyleImages(vec!["marker".to_owned()]));
         map.process_events();
         assert_eq!(map.style().get_image("marker").is_some(), kept, "{policy:?}");
@@ -214,8 +213,8 @@ fn an_image_that_keeps_itself_outlasts_the_remove_policy() {
     map.load_style_json(STYLE);
     let mut kept = (*image("kept")).clone();
     kept.keep_unused = true;
-    map.style_mut().add_image(Arc::new(kept));
-    map.style_mut().add_image(image("dropped"));
+    map.edit_style(|style| style.apply(Edit::AddImage(Arc::new(kept)))).unwrap();
+    map.edit_style(|style| style.apply(Edit::AddImage(image("dropped")))).unwrap();
     report(&map, RendererEvent::UnusedStyleImages(vec!["kept".to_owned(), "dropped".to_owned()]));
     map.process_events();
     assert!(map.style().get_image("kept").is_some());

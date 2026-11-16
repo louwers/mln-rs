@@ -1,7 +1,7 @@
 use mln_conversion::Convertible;
 use mln_map::Map;
 use mln_map_types::CameraOptions;
-use mln_style::Style;
+use mln_style::{Edit, Style};
 
 use crate::runner::MapError;
 
@@ -18,11 +18,13 @@ pub(crate) fn set_layer_property(
     property_name: &str,
     value: &serde_json::Value,
 ) -> Result<(), MapError> {
-    style
-        .update_layer(layer_name, |layer| {
-            let _ = layer.set_property(property_name, &Convertible::from(value), None);
-        })
-        .ok_or(MapError::LayerNotFound)
+    if style.get_layer(layer_name).is_none() {
+        return Err(MapError::LayerNotFound);
+    }
+    let edit =
+        Edit::SetLayerProperty { layer: layer_name.to_owned(), name: property_name.to_owned(), value: value.clone() };
+    let _ = style.apply(edit);
+    Ok(())
 }
 
 /// Sets the zoom range of the layer `layer_name`.
@@ -32,12 +34,8 @@ pub(crate) fn set_layer_zoom_range(
     min_zoom: f32,
     max_zoom: f32,
 ) -> Result<(), MapError> {
-    style
-        .update_layer(layer_name, |layer| {
-            layer.set_min_zoom(min_zoom);
-            layer.set_max_zoom(max_zoom);
-        })
-        .ok_or(MapError::LayerNotFound)
+    let edit = Edit::SetLayerZoomRange { layer: layer_name.to_owned(), min: min_zoom, max: max_zoom };
+    style.apply(edit).map_err(|_| MapError::LayerNotFound)
 }
 
 /// Parses a layer from `json` and adds it to the style.
@@ -52,7 +50,7 @@ pub(crate) fn add_layer(style: &mut Style, json: &str) -> Result<(), MapError> {
         return Err(MapError::Conversion(error.message));
     };
     // C++ Style::addLayer throws (uncaught by the runner) on a duplicate id.
-    style.add_layer(layer, None).map_err(|e| MapError::Exception(e.to_string()))
+    style.apply(Edit::AddLayer { layer, before: None }).map_err(|e| MapError::Exception(e.to_string()))
 }
 
 /// Converts `filter` (a conversion error first) and sets it on the layer
@@ -68,18 +66,20 @@ pub(crate) fn set_layer_filter(
     else {
         return Err(MapError::Conversion(error.message));
     };
-    style.update_layer(layer_name, |layer| layer.set_filter(&filter)).ok_or(MapError::LayerNotFound)
+    let edit = Edit::SetLayerFilter { layer: layer_name.to_owned(), filter };
+    style.apply(edit).map_err(|_| MapError::LayerNotFound)
 }
 
 /// Sets the global state property `name`. Its error (style not loaded) is
 /// a [`MapError::Exception`], as the C++ runner doesn't catch it.
-pub(crate) fn set_global_state_property(style: &mut Style, name: &str, value: &feature::Value) -> Result<(), MapError> {
-    style.set_global_state_property(name, value).map_err(|e| MapError::Exception(e.to_string()))
+pub(crate) fn set_global_state_property(map: &mut Map, name: &str, value: &feature::Value) -> Result<(), MapError> {
+    let edit = Edit::SetGlobalState { name: name.to_owned(), value: value.clone() };
+    map.edit_loaded_style(|style| style.apply(edit)).map_err(|e| MapError::Exception(e.to_string()))
 }
 
 /// Removes the layer `layer_name`, and returns whether there was one.
 pub(crate) fn remove_layer(style: &mut Style, layer_name: &str) -> bool {
-    style.remove_layer(layer_name).is_some()
+    style.apply(Edit::RemoveLayer(layer_name.to_owned())).is_ok()
 }
 
 /// Parses a source named `source_name` from `json` and adds it to the
@@ -113,7 +113,7 @@ pub(crate) fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
     else {
         return Err(MapError::Conversion(error.message));
     };
-    style.set_light(light);
+    let _ = style.apply(Edit::SetLight(light));
     Ok(())
 }
 

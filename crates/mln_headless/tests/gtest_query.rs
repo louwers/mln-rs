@@ -8,7 +8,6 @@ use mln_renderer::Registry;
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::Layer;
 use mln_style::conversion::{Convertible, Error, convert_filter};
 use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_style::expression::expression::FeatureState;
@@ -16,6 +15,7 @@ use mln_style::expression::{Functions, Value as ExpressionValue};
 use mln_style::filter::Filter;
 use mln_style::source::Source;
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
+use mln_style::{Edit, Layer};
 use mln_util::ErrorKind;
 use mln_util::feature::Feature;
 use mln_util::geo::{LatLng, ScreenCoordinate};
@@ -35,11 +35,15 @@ impl QueryTest {
         let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         let test = QueryTest(MapTest::create(run_loop, file_source, 1.0, MapMode::Static));
         test.map().load_style_json(&read_file("test/fixtures/api/query_style.json"));
-        test.map().style_mut().add_image(style_image(
-            "test-icon",
-            decode_image("test/fixtures/sprites/default_marker.png"),
-            1.0,
-        ));
+        test.map()
+            .edit_style(|style| {
+                style.apply(Edit::AddImage(style_image(
+                    "test-icon",
+                    decode_image("test/fixtures/sprites/default_marker.png"),
+                    1.0,
+                )))
+            })
+            .unwrap();
 
         test.0.render();
         test
@@ -62,7 +66,11 @@ impl QueryTest {
     }
 
     fn set_global_state_property(&self, name: &str, value: &str) {
-        self.map().style_mut().set_global_state_property(name, &Value::String(value.to_owned())).unwrap();
+        self.map()
+            .edit_style(|style| {
+                style.apply(Edit::SetGlobalState { name: name.to_owned(), value: Value::String(value.to_owned()) })
+            })
+            .unwrap();
     }
 }
 
@@ -167,9 +175,9 @@ fn global_state_change_relayouts_source_filter() {
     let test = QueryTest::new();
     {
         let mut map = test.map();
-        let style = map.style_mut();
         let filter = parse_filter(r#"["==", ["get", "key1"], ["global-state", "filterValue"]]"#);
-        style.update_layer("layer4", |layer| layer.set_filter(&filter)).expect("layer4");
+        map.edit_style(|style| style.apply(Edit::SetLayerFilter { layer: "layer4".to_owned(), filter }))
+            .expect("layer4");
     }
 
     let point = test.map().pixel_for_lat_lng(&ll(0.0, 0.0));
@@ -322,13 +330,8 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
             let source = map.source("source1").expect("source1");
             let source = source.downcast_ref::<GeoJSONSource>().expect("GeoJSONSource");
             source.set_geojson(GeoJson::from(Geometry::new_point([1.003, 1.003]))).unwrap();
-            let style = map.style_mut();
-            style
-                .add_layer(
-                    Layer::new(Registry::with_builtins().style(), "circle", "circle_layer", "source1").unwrap(),
-                    None,
-                )
-                .unwrap();
+            let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle_layer", "source1").unwrap();
+            map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
         }
         // std::to_string(int).
         let tile_zoom = camera_zoom as i32;
@@ -340,8 +343,9 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
         // Cover both the collision-index symbol path and the geometry-index circle path.
         for layer_id in ["layer1", "circle_layer"] {
             let mut map = test.map();
-            let style = map.style_mut();
-            style.update_layer(layer_id, |layer| layer.set_filter(&equal_zoom)).expect("layer");
+            let filter = equal_zoom.clone();
+            map.edit_style(|style| style.apply(Edit::SetLayerFilter { layer: layer_id.to_owned(), filter }))
+                .expect("layer");
         }
         test.map().jump_to(&CameraOptions {
             center: Some(ll(1.003, 1.003)),
@@ -575,7 +579,7 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
 
     test.map().jump_to(&CameraOptions { center: Some(coordinate), zoom: Some(0.0), ..Default::default() });
     test.map().add_source(Box::new(source)).unwrap();
-    test.map().style_mut().add_layer(cluster_layer, None).unwrap();
+    test.map().edit_style(|style| style.apply(Edit::AddLayer { layer: cluster_layer, before: None })).unwrap();
     test.0.run_loop.run_once();
     test.render();
 

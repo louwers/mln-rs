@@ -16,7 +16,7 @@ use mln_style::sources::{
     CustomGeometrySource, CustomVectorSource, GeoJSONOptions, GeoJSONSource, TileDataFormat, TileSource,
     custom_vector_source,
 };
-use mln_style::{Style, TransitionOptions};
+use mln_style::{Edit, TransitionOptions};
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
@@ -348,8 +348,8 @@ fn quote(id: &str) -> String {
     format!("\"{id}\"")
 }
 
-fn require_loaded(style: &Style) -> Result<(), Error> {
-    if style.is_loaded() { Ok(()) } else { Err(style_not_loaded()) }
+fn require_loaded(map: &mln_map::Map) -> Result<(), Error> {
+    if map.style_document_loaded() { Ok(()) } else { Err(style_not_loaded()) }
 }
 
 fn source_not_found(id: &str) -> Error {
@@ -369,7 +369,7 @@ fn find_source_as<'a, T: Source>(map: &'a mln_map::Map, id: &str, kind: &str) ->
 }
 
 fn require_new_source(map: &mln_map::Map, id: &str) -> Result<(), Error> {
-    require_loaded(map.style())?;
+    require_loaded(map)?;
     if map.source(id).is_some() {
         return Err(Error::already_exists(format!("source {} already exists", quote(id))));
     }
@@ -508,7 +508,7 @@ impl Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (name, json) = (name.into(), json.into());
-        self.command(move |map| map.style_mut().set_global_state_property_json(&name, &json))
+        self.command(move |map| map.edit_loaded_style(|style| style.set_global_state_property_json(&name, &json)))
     }
 
     /// The style's global state as a JSON object.
@@ -537,7 +537,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            require_loaded(map.style())?;
+            require_loaded(map)?;
             set_volatile(find_source(map, &source_id)?, is_volatile);
             Ok(())
         })
@@ -577,7 +577,7 @@ impl Map {
         let (source_id, url) = (source_id.into(), url.into());
         self.send(
             move |entry, outbox| {
-                require_loaded(entry.core.style())?;
+                require_loaded(&entry.core)?;
                 find_source_as::<GeoJSONSource>(&entry.core, &source_id, "a GeoJSON source")?.set_url(&url);
                 if let Some((_, resolver)) =
                     entry.geojson_updates.0.get_mut(&source_id).and_then(|update| update.waiting.take())
@@ -648,7 +648,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            require_loaded(map.style())?;
+            require_loaded(map)?;
             find_source_as::<GeoJSONSource>(map, &source_id, "a GeoJSON source")?
                 .set_override_synchronous_update(enabled);
             Ok(())
@@ -834,12 +834,7 @@ impl Map {
 
     /// Adds `image` to the style, or replaces the image with its ID.
     pub fn set_style_image(&self, image: StyleImage) -> Result<Completion<Applied>, Error> {
-        self.command(move |map| {
-            let style = map.style_mut();
-            require_loaded(style)?;
-            style.add_image(Arc::new(image));
-            Ok(())
-        })
+        self.command(move |map| map.edit_loaded_style(|style| style.apply(Edit::AddImage(Arc::new(image)))))
     }
 
     /// Removes an image from the style. Completes with
@@ -848,20 +843,19 @@ impl Map {
     pub fn remove_style_image(&self, image_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let image_id = image_id.into();
         self.command(move |map| {
-            let style = map.style_mut();
-            require_loaded(style)?;
-            if style.get_image(&image_id).is_none() {
-                return Err(Error::not_found(format!("style image {} does not exist", quote(&image_id))));
-            }
-            style.remove_image(&image_id);
-            Ok(())
+            map.edit_loaded_style(|style| {
+                if style.get_image(&image_id).is_none() {
+                    return Err(Error::not_found(format!("style image {} does not exist", quote(&image_id))));
+                }
+                style.apply(Edit::RemoveImage(image_id))
+            })
         })
     }
 
     /// An image of the style, or `None` when the style has no such image.
     pub fn style_image(&self, image_id: impl Into<String>) -> Result<Completion<Option<Arc<StyleImage>>>, Error> {
         let image_id = image_id.into();
-        self.query(move |map| Ok(map.style().get_image(&image_id)))
+        self.query(move |map| Ok(map.style().get_image(&image_id).cloned()))
     }
 
     // MARK: - Image sources
@@ -891,7 +885,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let (source_id, url) = (source_id.into(), url.into());
         self.command(move |map| {
-            require_loaded(map.style())?;
+            require_loaded(map)?;
             find_source_as::<ImageSource>(map, &source_id, "an image source")?.set_url(&url);
             Ok(())
         })
@@ -905,7 +899,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            require_loaded(map.style())?;
+            require_loaded(map)?;
             find_source_as::<ImageSource>(map, &source_id, "an image source")?.set_image(image);
             Ok(())
         })
@@ -920,7 +914,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            require_loaded(map.style())?;
+            require_loaded(map)?;
             find_source_as::<ImageSource>(map, &source_id, "an image source")?.set_coordinates(coordinates);
             Ok(())
         })
@@ -953,19 +947,14 @@ impl Map {
         before_layer_id: Option<String>,
     ) -> Result<Completion<Applied>, Error> {
         let layer_id = layer_id.into();
-        self.command(move |map| map.style_mut().move_layer(&layer_id, before_layer_id.as_deref()))
+        self.command(move |map| map.edit_loaded_style(|style| style.move_layer(&layer_id, before_layer_id.as_deref())))
     }
 
     // MARK: - Transitions
 
     /// Sets the default transition of the style's paint properties.
     pub fn set_style_transition_options(&self, options: TransitionOptions) -> Result<Completion<Applied>, Error> {
-        self.command(move |map| {
-            let style = map.style_mut();
-            require_loaded(style)?;
-            style.set_transition_options(&options);
-            Ok(())
-        })
+        self.command(move |map| map.edit_loaded_style(|style| style.apply(Edit::SetTransition(options))))
     }
 
     /// The default transition of the style's paint properties.
@@ -1040,7 +1029,7 @@ fn queue_geojson(
     outbox: &mut Outbox,
 ) -> Result<Option<Resolver<Applied>>, (Error, Resolver<Applied>)> {
     let found = (|| {
-        require_loaded(entry.core.style())?;
+        require_loaded(&entry.core)?;
         let source = find_source_as::<GeoJSONSource>(&entry.core, source_id, "a GeoJSON source")?.clone();
         let geojson = parse_geojson(json)?;
         if source.get_options().cluster {

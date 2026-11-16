@@ -12,8 +12,8 @@ use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 
 use crate::conversion::{Converter, convert_layer, convert_light, convert_projection, convert_sky};
+use crate::edit::Edit;
 use crate::expression::GlobalStateMap;
-use crate::filter::Filter;
 use crate::layer::Layer;
 use crate::layer_type::SourceKind;
 use crate::light::Light;
@@ -29,14 +29,12 @@ impl Style {
     /// that `json` describes, below the layer named `before_layer_id`, or
     /// above every layer when it is `None`.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
-    /// style isn't loaded, with `NotFound` if the style has no layer named
+    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
     /// `before_layer_id` or no source with the ID that the layer uses, with
     /// `AlreadyExists` if the style has a layer with the new layer's ID, and
     /// with `InvalidArgument` if `json` isn't a valid layer or its source
     /// can't feed a layer of its type.
     pub fn add_layer_json(&mut self, json: &str, before_layer_id: Option<&str>) -> Result<(), Error> {
-        self.require_loaded()?;
         if let Some(before) = before_layer_id
             && self.get_layer(before).is_none()
         {
@@ -72,14 +70,13 @@ impl Style {
                 )));
             }
         }
-        self.add_layer(layer, before_layer_id)
+        self.apply(Edit::AddLayer { layer, before: before_layer_id.map(str::to_owned) })
     }
 
     /// Adds a custom layer named `id` that `host` draws, below the layer
     /// named `before_layer_id`, or above every layer when it is `None`.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
-    /// style isn't loaded, with `NotFound` if the style has no layer named
+    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
     /// `before_layer_id`, and with `AlreadyExists` if it has a layer named
     /// `id`. The style drops `host` when it fails.
     pub fn add_custom_layer(
@@ -88,7 +85,6 @@ impl Style {
         host: Arc<dyn crate::layers::CustomLayerHost>,
         before_layer_id: Option<&str>,
     ) -> Result<(), Error> {
-        self.require_loaded()?;
         if let Some(before) = before_layer_id
             && self.get_layer(before).is_none()
         {
@@ -98,18 +94,16 @@ impl Style {
             return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
         }
         let layer = Layer::custom(self.registry(), id, host);
-        self.add_layer(layer, before_layer_id)
+        self.apply(Edit::AddLayer { layer, before: before_layer_id.map(str::to_owned) })
     }
 
     /// Moves the layer named `id` below the layer named `before_layer_id`,
     /// or above every layer when it is `None`. A move below itself changes
     /// nothing.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
-    /// style isn't loaded, and with `NotFound` if the style has no layer
+    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer
     /// named `id` or `before_layer_id`.
     pub fn move_layer(&mut self, id: &str, before_layer_id: Option<&str>) -> Result<(), Error> {
-        self.require_loaded()?;
         if self.get_layer(id).is_none() {
             return Err(layer_not_found(id));
         }
@@ -121,9 +115,7 @@ impl Style {
                 return Err(Error::not_found(format!("before_layer_id {} does not exist", quote(before))));
             }
         }
-        self.impl_.mutated = true;
-        self.impl_.move_layer(id, before_layer_id);
-        Ok(())
+        self.apply(Edit::MoveLayer { id: id.to_owned(), before: before_layer_id.map(str::to_owned) })
     }
 
     /// The layer named `id` as a
@@ -143,37 +135,13 @@ impl Style {
     /// `filter`, `minzoom`, `maxzoom`, `source` or `source-layer`. A `null`
     /// resets any of these but `source` and `source-layer` to its default.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
-    /// style isn't loaded, with `NotFound` if the style has no layer named
+    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
     /// `layer_id`, and with `InvalidArgument` if `json` isn't valid JSON,
     /// the layer has no property `name` or the value doesn't fit it.
     pub fn set_layer_property_json(&mut self, layer_id: &str, name: &str, json: &str) -> Result<(), Error> {
-        self.require_loaded()?;
         let context = format!("property {} of layer {}", quote(name), quote(layer_id));
-        let value = parse(json, &context)?;
-        let result = self.update_layer(layer_id, |layer| {
-            let type_info = layer.info();
-            if (name == "source" || name == "source-layer") && type_info.source == SourceKind::None {
-                // A layer that takes no source would ignore the value.
-                return Err(Error::invalid_argument(format!(
-                    "{} layer {} does not take a {name}",
-                    type_info.name,
-                    quote(layer_id)
-                )));
-            }
-            match name {
-                "filter" if value.is_null() => layer.set_filter(&Filter::default()),
-                "minzoom" if value.is_null() => layer.set_min_zoom(f32::NEG_INFINITY),
-                "maxzoom" if value.is_null() => layer.set_max_zoom(f32::INFINITY),
-                _ => {
-                    if let Some(error) = layer.set_property(name, &Convertible::from(&value), None) {
-                        return Err(conversion_error(&context, &error));
-                    }
-                }
-            }
-            Ok(())
-        });
-        result.unwrap_or_else(|| Err(layer_not_found(layer_id)))
+        let value = parse_value(json, &context)?;
+        self.apply(Edit::SetLayerProperty { layer: layer_id.to_owned(), name: name.to_owned(), value })
     }
 
     /// The JSON value of the property `name` of the layer named `layer_id`,
@@ -224,14 +192,12 @@ impl Style {
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
     /// `name` isn't a root property, or is `sources` or `layers`, or if
-    /// `json` isn't a valid value for it; with `InvalidState` while the style
-    /// isn't loaded; and with `Unsupported` for the root properties that only
+    /// `json` isn't a valid value for it; and with `Unsupported` for the root properties that only
     /// take effect as a style loads (the default camera, the sprite, the
     /// glyphs and font faces, and the metadata) and for `terrain`, which the
     /// map doesn't draw.
     pub fn set_root_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
         require_root_property(name)?;
-        self.require_loaded()?;
         let context = format!("style root property {}", quote(name));
         let value = parse(json, &context)?;
         let convertible = Convertible::from(&value);
@@ -245,7 +211,7 @@ impl Style {
                     convert_light(&convertible, &functions, &mut error)
                         .ok_or_else(|| conversion_error(&context, &error))?
                 };
-                self.set_light(light);
+                self.apply(Edit::SetLight(light))?;
             }
             "sky" => {
                 let sky = if value.is_null() {
@@ -256,7 +222,7 @@ impl Style {
                             .ok_or_else(|| conversion_error(&context, &error))?,
                     )
                 };
-                self.set_sky(sky);
+                self.apply(Edit::SetSky(sky))?;
             }
             "projection" => {
                 let projection = if value.is_null() {
@@ -265,12 +231,11 @@ impl Style {
                     convert_projection(&convertible, &functions, &mut error)
                         .ok_or_else(|| conversion_error(&context, &error))?
                 };
-                self.set_projection(projection);
+                self.apply(Edit::SetProjection(projection))?;
             }
             "state" => {
                 let defaults = if value.is_null() { GlobalStateMap::new() } else { state_defaults(&value, &context)? };
-                self.impl_.mutated = true;
-                self.impl_.set_global_state_defaults(defaults);
+                self.apply(Edit::SetGlobalStateDefaults(defaults))?;
             }
             "transition" => {
                 let placement = self.get_transition_options().enable_placement_transitions;
@@ -281,7 +246,7 @@ impl Style {
                         .ok_or_else(|| conversion_error(&context, &error))?
                 };
                 transition.enable_placement_transitions = placement;
-                self.set_transition_options(&transition);
+                self.apply(Edit::SetTransition(transition))?;
             }
             "terrain" => return Err(Error::unsupported(format!("{context}: the map doesn't draw terrain"))),
             _ => return Err(Error::unsupported(format!("{context} can't change while the style is loaded"))),
@@ -309,7 +274,7 @@ impl Style {
                 properties_json(&["type"], |name| projection.get_property(name))
             }
             "state" => {
-                let defaults = self.impl_.get_global_state_defaults();
+                let defaults = self.get_global_state_defaults();
                 (!defaults.is_empty()).then(|| {
                     let definitions = defaults.iter().map(|(name, default)| {
                         (name.clone(), serde_json::json!({ "default": value_to_json(default) }))
@@ -325,7 +290,7 @@ impl Style {
                     .collect::<serde_json::Map<_, _>>();
                 (!members.is_empty()).then_some(serde_json::Value::Object(members))
             }
-            _ => serde_json::from_str::<serde_json::Value>(&self.get_json())
+            _ => serde_json::from_str::<serde_json::Value>(self.get_json())
                 .ok()
                 .and_then(|mut document| document.get_mut(name).map(serde_json::Value::take)),
         };
@@ -335,19 +300,12 @@ impl Style {
     /// Sets the property `name` of the style's light to the JSON value
     /// `json`. A `null` resets it to its default.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
-    /// style isn't loaded, and with `InvalidArgument` if `json` isn't valid
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't valid
     /// JSON, the light has no property `name` or the value doesn't fit it.
     pub fn set_light_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
-        self.require_loaded()?;
         let context = format!("style light property {}", quote(name));
-        let value = parse(json, &context)?;
-        let functions = Arc::clone(self.registry().functions());
-        self.impl_.mutated = true;
-        match self.impl_.set_light_property(name, &Convertible::from(&value), &functions) {
-            None => Ok(()),
-            Some(error) => Err(conversion_error(&context, &error)),
-        }
+        let value = parse_value(json, &context)?;
+        self.apply(Edit::SetLightProperty { name: name.to_owned(), value })
     }
 
     /// The JSON value of the property `name` of the style's light, or `None`
@@ -364,27 +322,18 @@ impl Style {
     /// read to the JSON value `json`. A `null` resets it to the default that
     /// the style's `state` gives it.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
-    /// style isn't loaded, and with `InvalidArgument` if `json` isn't valid
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't valid
     /// JSON.
     pub fn set_global_state_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
-        self.require_loaded()?;
         let value = parse(json, &format!("global state property {}", quote(name)))?;
-        self.set_global_state_property(name, &borrowed_json_to_value(&value))
+        self.apply(Edit::SetGlobalState { name: name.to_owned(), value: borrowed_json_to_value(&value) })
     }
 
     /// The values that the style's `global-state` expressions read, as a
     /// JSON object.
     #[must_use]
     pub fn global_state_json(&self) -> String {
-        json_text(&Value::Object(self.get_global_state()))
-    }
-
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
-    /// style isn't loaded: the parse that ends a load replaces the whole
-    /// style, so an edit made before it would be lost.
-    fn require_loaded(&self) -> Result<(), Error> {
-        if self.is_loaded() { Ok(()) } else { Err(Error::invalid_state("style is not loaded")) }
+        json_text(&Value::Object((**self.get_global_state()).clone()))
     }
 }
 
@@ -474,6 +423,11 @@ fn state_defaults(value: &Json<'_>, context: &str) -> Result<GlobalStateMap, Err
 
 fn quote(id: &str) -> String {
     format!("\"{id}\"")
+}
+
+/// `json` as an owned value, for an [`Edit`].
+fn parse_value(json: &str, context: &str) -> Result<serde_json::Value, Error> {
+    serde_json::from_str(json).map_err(|error| Error::invalid_argument(format!("{context} is not valid JSON: {error}")))
 }
 
 fn parse<'a>(json: &'a str, context: &str) -> Result<Json<'a>, Error> {

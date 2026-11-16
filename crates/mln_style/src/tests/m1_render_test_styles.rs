@@ -1,6 +1,6 @@
 // Not a C++ gtest: checks that every M1 render-test style.json
 // (metrics/integration/render-tests, read in place from @maplibre) parses
-// into a `Style::Impl` whose background layer evaluates, at the test's zoom,
+// into a `Style` whose background layer evaluates, at the test's zoom,
 // through Transitioning -> PossiblyEvaluated to the values the C++ core
 // computes. The evaluation mirrors RenderOrchestrator::createRenderTree +
 // RenderBackgroundLayer (transition, then evaluate) in MapMode::Static, where
@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_conversion::Convertible;
 use mln_style_types::VisibilityType;
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::time::Instant;
@@ -25,23 +24,20 @@ use crate::map::zoom_history::ZoomHistory;
 use crate::registry::StyleRegistry;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::transition_parameters::TransitionParameters;
-use crate::style::Impl;
+use crate::style::Style;
 use crate::transition_options::TransitionOptions;
 
 fn render_tests_dir() -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/metrics/integration/render-tests")
 }
 
-fn load(test: &str) -> Impl {
+fn load(test: &str) -> Style {
     let path = render_tests_dir().join(test).join("style.json");
     let json = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let mut style = Impl::new(StyleRegistry::with_builtins());
-    style.load_json(&json);
-    assert!(style.loaded, "{test} did not load");
-    style
+    Style::from_json(&StyleRegistry::with_builtins(), &json, None).unwrap_or_else(|e| panic!("{test}: {e}")).style
 }
 
-fn background_impl(style: &Impl, id: &str) -> Arc<LayerStyle<Background>> {
+fn background_impl(style: &Style, id: &str) -> Arc<LayerStyle<Background>> {
     let layer = style.get_layer(id).unwrap_or_else(|| panic!("no layer {id}"));
     let impl_ = layer.style();
     assert_eq!(impl_.info().name, "background");
@@ -67,7 +63,7 @@ fn transition_and_evaluate(
 
 /// A static-mode render of the style's background layer `id` at the style's
 /// default zoom.
-fn evaluate_static(style: &Impl, id: &str) -> BackgroundPaintProperties::PossiblyEvaluated {
+fn evaluate_static(style: &Style, id: &str) -> BackgroundPaintProperties::PossiblyEvaluated {
     let impl_ = background_impl(style, id);
     let zoom = style.get_default_camera().zoom.unwrap() as f32;
     let mut zoom_history = ZoomHistory::default();
@@ -172,9 +168,12 @@ fn background_color_transition() {
     assert_background(&evaluated, Color::parse("red").unwrap(), 1.0);
 
     let white = serde_json::json!("white");
-    let error = style
-        .update_layer("background", |layer| layer.set_property("background-color", &Convertible::from(&white), None));
-    assert!(error.unwrap().is_none());
+    let edit = crate::Edit::SetLayerProperty {
+        layer: "background".to_owned(),
+        name: "background-color".to_owned(),
+        value: white,
+    };
+    style.apply(edit).unwrap();
     let impl1 = background_impl(&style, "background");
     assert!(!Arc::ptr_eq(&impl0, &impl1));
 

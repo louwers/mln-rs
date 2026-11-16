@@ -175,10 +175,11 @@ pub(crate) fn style_of<T: crate::layer_type::StyleLayerType>(
 
 impl crate::Style {
     /// Replaces the style with the one `json` describes, as a map's loader
-    /// does, keeping its observer; a document that doesn't parse leaves the
-    /// style as it was.
+    /// does; a document that doesn't parse leaves the style as it was.
     pub(crate) fn load_json(&mut self, json: &str) {
-        self.impl_.load_json(json);
+        if let Ok(parsed) = Self::from_json(&Arc::clone(self.registry()), json, None) {
+            *self = parsed.style;
+        }
     }
 }
 
@@ -192,6 +193,6 @@ impl crate::Style {
         let source =
             crate::conversion::convert_source(&mln_conversion::Convertible::from(&value), &mut error, id, &functions)
                 .expect("a source");
-        self.set_source_impl(id, Some(source.base_impl()));
+        let _ = self.apply(crate::edit::Edit::SetSourceImpl { id: id.to_owned(), source: Some(source.base_impl()) });
     }
 }

@@ -18,6 +18,7 @@ use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStat
 use mln_renderer::query::SourceQueryOptions;
 use mln_runtime::Device;
 use mln_storage::{FileSource, ResourceOptions};
+use mln_style::Edit;
 use mln_style_types::VisibilityType;
 use mln_text::GlyphCache;
 use mln_util::feature::feature_id_to_string;
@@ -324,11 +325,13 @@ impl Scene {
             &mut error,
         )
         .expect("a valid layer");
-        self.map.style_mut().add_layer(layer, before).expect("a new layer");
+        self.map
+            .edit_style(|style| style.apply(Edit::AddLayer { layer, before: before.map(str::to_owned) }))
+            .expect("a new layer");
     }
 
     pub(crate) fn remove_layer(&mut self, id: &str) {
-        self.map.style_mut().remove_layer(id).expect("the layer");
+        self.map.edit_style(|style| style.apply(Edit::RemoveLayer(id.to_owned()))).expect("the layer");
     }
 
     /// Adds an image to the style, as a sprite's would be.
@@ -336,7 +339,7 @@ impl Scene {
         let image =
             mln_style::image::Impl::new(id.to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None)
                 .expect("a style image");
-        self.map.style_mut().add_image(Arc::new(image));
+        self.map.edit_style(|style| style.apply(Edit::AddImage(Arc::new(image)))).unwrap();
     }
 
     pub(crate) fn jump(&mut self, center: LatLng, zoom: f64) {
@@ -531,7 +534,9 @@ impl Scene {
         assert!(!ids.is_empty(), "no layer draws {source}");
         let visibility = if visible { VisibilityType::Visible } else { VisibilityType::None };
         for id in ids {
-            self.map.style_mut().update_layer(&id, |layer| layer.set_visibility(visibility)).expect("the layer");
+            self.map
+                .edit_style(|style| style.apply(Edit::SetLayerVisibility { layer: id, visibility }))
+                .expect("the layer");
         }
     }
 
@@ -546,7 +551,13 @@ impl Scene {
             .map(|layer| layer.get_id().to_owned())
             .collect();
         for id in &ids {
-            self.map.style_mut().update_layer(id, |layer| layer.set_min_zoom(min_zoom)).expect("the layer");
+            self.map
+                .edit_style(|style| {
+                    let mut layer = style.get_layer(id).expect("the layer").clone();
+                    layer.set_min_zoom(min_zoom);
+                    style.apply(Edit::SetLayer(layer))
+                })
+                .expect("the layer");
         }
         ids.len()
     }

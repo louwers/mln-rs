@@ -224,7 +224,7 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
     map.renderer_events().push(RendererEvent::Invalidate);
     map.process_events();
     peek.lock().take();
-    assert!(map.style().is_loaded());
+    assert!(map.style_document_loaded());
     let carried = carried.lock().clone();
     assert!(!carried.is_empty(), "no update carried the style's source");
     assert!(!carried.contains(&true), "an update carried the old state: {carried:?}");

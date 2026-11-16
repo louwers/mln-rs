@@ -14,7 +14,6 @@ const DOTS: &str = r#"{"id":"dots","type":"circle","source":"points"}"#;
 fn loaded_style() -> Style {
     let mut style = Style::new(StyleRegistry::with_builtins());
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    assert!(style.is_loaded());
     style
 }
 
@@ -40,18 +39,6 @@ fn property(style: &Style, layer_id: &str, name: &str) -> Option<String> {
 
 fn set_property(style: &mut Style, layer_id: &str, name: &str, json: &str) {
     style.set_layer_property_json(layer_id, name, json).unwrap();
-}
-
-#[test]
-fn edits_fail_while_the_style_is_not_loaded() {
-    let mut style = Style::new(StyleRegistry::with_builtins());
-    assert!(!style.is_loaded());
-    let not_loaded = "style is not loaded";
-    assert_fails(style.add_layer_json(DOTS, None), ErrorKind::InvalidState, not_loaded);
-    assert_fails(style.set_layer_property_json("dots", "circle-radius", "4"), ErrorKind::InvalidState, not_loaded);
-    assert_fails(style.set_root_property_json("light", r#"{"intensity":0.5}"#), ErrorKind::InvalidState, not_loaded);
-    assert_fails(style.set_light_property_json("intensity", "0.5"), ErrorKind::InvalidState, not_loaded);
-    assert!(style.get_sources().is_empty() && style.get_layers().len() == 0);
 }
 
 #[test]
@@ -216,7 +203,7 @@ fn layer_json_serializes_the_current_layer() {
         assert!(json.contains(part), "{json} doesn't contain {part}");
     }
 
-    style.remove_layer("paper").unwrap();
+    style.apply(crate::Edit::RemoveLayer("paper".to_owned())).unwrap();
     style.add_layer_json(&json, None).unwrap();
     assert_eq!(style.layer_json("paper").unwrap(), json);
 }
@@ -287,7 +274,6 @@ fn the_style_light_round_trips_through_json() {
 #[test]
 fn global_state_reads_back_defaults_and_set_properties() {
     let mut style = Style::new(StyleRegistry::with_builtins());
-    assert_fails(style.set_global_state_property_json("theme", "true"), ErrorKind::InvalidState, "style is not loaded");
     style.load_json(r#"{"version":8,"sources":{},"layers":[],"state":{"theme":{"default":"light"}}}"#);
     assert_eq!(style.global_state_json(), r#"{"theme":"light"}"#);
 
@@ -319,7 +305,7 @@ fn the_light_and_the_transition_change_and_reset() {
 
     let mut no_placement = style.get_transition_options();
     no_placement.enable_placement_transitions = false;
-    style.set_transition_options(&no_placement);
+    style.apply(crate::Edit::SetTransition(no_placement)).unwrap();
     style.set_root_property_json("transition", r#"{"delay":50,"duration":300}"#).unwrap();
     assert_eq!(root_property(&style, "transition").as_deref(), Some(r#"{"duration":300,"delay":50}"#));
     assert!(!style.get_transition_options().enable_placement_transitions);

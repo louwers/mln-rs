@@ -45,7 +45,7 @@ use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::tile_source::TileSource;
 use mln_style::sprite::Sprite;
 use mln_style::style_property::Kind as StylePropertyKind;
-use mln_style::{PropertyValue, TransitionOptions, source};
+use mln_style::{Edit, PropertyValue, TransitionOptions, source};
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_test_server::HttpServer;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
@@ -88,6 +88,11 @@ fn red_background(id: &str) -> Layer {
 fn set(layer: &mut Layer, name: &str, value: &serde_json::Value) {
     let error = layer.set_property(name, &Convertible::from(value), None);
     assert!(error.is_none(), "{name}: {error:?}");
+}
+
+/// The edit that sets the property `name` of the layer `layer` to `value`.
+fn layer_property(layer: &str, name: &str, value: serde_json::Value) -> Edit {
+    Edit::SetLayerProperty { layer: layer.to_owned(), name: name.to_owned(), value }
 }
 
 fn vector_source(id: &str, tiles: &str) -> TileSource {
@@ -905,8 +910,12 @@ fn style_expired() {
     // overwrite it anymore, but we should continue to wait for a fresh
     // response.
     test.map()
-        .style_mut()
-        .add_layer(Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(), None)
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(),
+                before: None,
+            })
+        })
         .unwrap();
     assert_eq!(1, test.file_source.requests_len());
 
@@ -961,11 +970,11 @@ fn style_expired_with_projection() {
         test.file_source.respond(Kind::Style, &response);
 
         if in_place {
-            test.map().style_mut().set_root_property_json("projection", r#"{"type":"globe"}"#).unwrap();
+            test.map().edit_style(|style| style.set_root_property_json("projection", r#"{"type":"globe"}"#)).unwrap();
         } else {
             let mut projection = Projection::new();
             projection.set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
-            test.map().style_mut().set_projection(projection);
+            test.map().edit_style(|style| style.apply(Edit::SetProjection(projection))).unwrap();
         }
 
         test.file_source.respond(Kind::Style, &response);
@@ -985,8 +994,12 @@ fn style_early_mutation() {
 
     test.map().load_style_url("https://example.com/maps/test");
     test.map()
-        .style_mut()
-        .add_layer(Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(), None)
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(),
+                before: None,
+            })
+        })
         .unwrap();
 
     let response = file_response("test/fixtures/api/water.json");
@@ -1098,7 +1111,9 @@ fn add_layer() {
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    test.map().style_mut().add_layer(red_background("background"), None).unwrap();
+    test.map()
+        .edit_style(|style| style.apply(Edit::AddLayer { layer: red_background("background"), before: None }))
+        .unwrap();
 
     check_image("test/fixtures/map/add_layer", &test.render().image, 0.0, 0.0);
 }
@@ -1110,8 +1125,10 @@ fn remove_layer() {
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    test.map().style_mut().add_layer(red_background("background"), None).unwrap();
-    test.map().style_mut().remove_layer("background");
+    test.map()
+        .edit_style(|style| style.apply(Edit::AddLayer { layer: red_background("background"), before: None }))
+        .unwrap();
+    test.map().edit_style(|style| style.apply(Edit::RemoveLayer("background".to_owned()))).unwrap();
 
     check_image("test/fixtures/map/remove_layer", &test.render().image, 0.0, 0.0);
 }
@@ -1615,8 +1632,12 @@ fn issue15216() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
     test.map().add_source(Box::new(ImageSource::new("ImageSource", [LatLng::default(); 4]))).unwrap();
     test.map()
-        .style_mut()
-        .add_layer(Layer::new(Registry::with_builtins().style(), "raster", "RasterLayer", "ImageSource").unwrap(), None)
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(Registry::with_builtins().style(), "raster", "RasterLayer", "ImageSource").unwrap(),
+                before: None,
+            })
+        })
         .unwrap();
     // Passes, if there is no assertion hit.
     test.run_loop.run_once();
@@ -1629,14 +1650,20 @@ fn globe_image_source_below_zoom_zero() {
     // zoom was cast to an unsigned tile zoom and the render never returned.
     let test = MapTest::new();
     test.load_json(&read_file("test/fixtures/api/empty.json"));
-    test.map().style_mut().set_root_property_json("projection", r#"{"type":"vertical-perspective"}"#).unwrap();
+    test.map()
+        .edit_style(|style| style.set_root_property_json("projection", r#"{"type":"vertical-perspective"}"#))
+        .unwrap();
     let coords = [ll(60.0, -10.0), ll(60.0, 10.0), ll(50.0, 10.0), ll(50.0, -10.0)];
     let source = ImageSource::new("image", coords);
     source.set_image(decode_image("test/fixtures/image/no_profile.png"));
     test.map().add_source(Box::new(source)).unwrap();
     test.map()
-        .style_mut()
-        .add_layer(Layer::new(Registry::with_builtins().style(), "raster", "raster", "image").unwrap(), None)
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(Registry::with_builtins().style(), "raster", "raster", "image").unwrap(),
+                before: None,
+            })
+        })
         .unwrap();
     test.map().jump_to(&CameraOptions { center: Some(ll(80.0, 0.0)), zoom: Some(-1.5), ..Default::default() });
     assert_near(-1.5, CameraOptions::from(test.map().snapshot().view.camera).zoom.unwrap(), 1e-9);
@@ -1657,8 +1684,12 @@ fn image_source_beyond_mercator_latitudes() {
     source.set_image(PremultipliedImage::new(Size::new(4, 4)));
     test.map().add_source(Box::new(source)).unwrap();
     test.map()
-        .style_mut()
-        .add_layer(Layer::new(Registry::with_builtins().style(), "raster", "image", "image").unwrap(), None)
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(Registry::with_builtins().style(), "raster", "image", "image").unwrap(),
+                before: None,
+            })
+        })
         .unwrap();
 
     // Passes, if rendering a frame doesn't crash.
@@ -1904,9 +1935,9 @@ fn reduce_memory_use_removes_unused_requested_images() {
         image.keep_unused = keep_unused;
         Arc::new(image)
     };
-    test.map().style_mut().add_image(image("kept-icon", true));
-    test.map().style_mut().add_image(image("dropped-icon", false));
-    test.map().style_mut().add_image(image("other-icon", false));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(image("kept-icon", true)))).unwrap();
+    test.map().edit_style(|style| style.apply(Edit::AddImage(image("dropped-icon", false)))).unwrap();
+    test.map().edit_style(|style| style.apply(Edit::AddImage(image("other-icon", false)))).unwrap();
     test.render();
     let reduce_memory_use = || {
         test.frontend().renderer().reduce_memory_use();
@@ -1918,7 +1949,12 @@ fn reduce_memory_use_removes_unused_requested_images() {
 
     for layer in ["kept", "dropped"] {
         let mut map = test.map();
-        map.style_mut().update_layer(layer, |layer| set(layer, "icon-image", &json!("other-icon"))).expect("the layer");
+        map.edit_style(|style| {
+            let mut copy = style.get_layer(layer).expect("the layer").clone();
+            set(&mut copy, "icon-image", &json!("other-icon"));
+            style.apply(Edit::SetLayer(copy))
+        })
+        .expect("the layer");
     }
     test.render();
     assert_eq!(reduce_memory_use(), [true, false, true]);
@@ -1945,8 +1981,12 @@ fn rendering_trims_unused_requested_images_past_the_cache_limit() {
     );
     test.render();
     // Together more than the limit of 819200 bytes.
-    test.map().style_mut().add_image(style_image("used-icon", red_image(330, 330), 1.0));
-    test.map().style_mut().add_image(style_image("unused-icon", red_image(330, 330), 1.0));
+    test.map()
+        .edit_style(|style| style.apply(Edit::AddImage(style_image("used-icon", red_image(330, 330), 1.0))))
+        .unwrap();
+    test.map()
+        .edit_style(|style| style.apply(Edit::AddImage(style_image("unused-icon", red_image(330, 330), 1.0))))
+        .unwrap();
     test.render();
     let images = || {
         let map = test.map();
@@ -1956,9 +1996,12 @@ fn rendering_trims_unused_requested_images_past_the_cache_limit() {
 
     {
         let mut map = test.map();
-        map.style_mut()
-            .update_layer("unused", |layer| set(layer, "icon-image", &json!("used-icon")))
-            .expect("the layer");
+        map.edit_style(|style| {
+            let mut layer = style.get_layer("unused").expect("the layer").clone();
+            set(&mut layer, "icon-image", &json!("used-icon"));
+            style.apply(Edit::SetLayer(layer))
+        })
+        .expect("the layer");
     }
     test.render();
     assert_eq!(images(), [true, false]);
@@ -2045,7 +2088,14 @@ fn empty_image_name_is_no_image() {
         FormattedSection::new("a".to_owned(), None, None, None),
         FormattedSection::from_image(Image::new("")),
     ]));
-    test.map().style_mut().add_layer(Layer::from_style(Arc::new(text), Functions::with_builtins()), None).unwrap();
+    test.map()
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::from_style(Arc::new(text), Functions::with_builtins()),
+                before: None,
+            })
+        })
+        .unwrap();
     test.render();
 
     assert!(missing.borrow().is_empty(), "{:?}", missing.borrow());
@@ -2301,9 +2351,10 @@ fn prefetch_delta_override_custom_source() {
 
     {
         let mut map = test.map();
-        let layer = map.style_mut().remove_layer("custom").unwrap();
+        let layer = map.style().get_layer("custom").unwrap().clone();
+        map.edit_style(|style| style.apply(Edit::RemoveLayer("custom".to_owned()))).unwrap();
         map.remove_source("custom");
-        map.style_mut().add_layer(layer, None).unwrap();
+        map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
         map.add_source(Box::new(counted_custom_source(&requested_tiles, None, &test.run_loop))).unwrap();
     }
     test.run_loop.run();
@@ -2843,8 +2894,12 @@ fn still_image_after_tile_error() {
     // A new layer relays the errored tile out. The next still image finishes,
     // and as it retries the tile, it reports the tile's error again.
     test.map()
-        .style_mut()
-        .add_layer(Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(), None)
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(),
+                before: None,
+            })
+        })
         .unwrap();
     test.map().process_events();
     test.map().render_still().unwrap();
@@ -2877,8 +2932,12 @@ fn continuous_map_finishes_loading_when_its_tile_requests_fail() {
     test.observer.did_finish_loading_map_callback.clear();
 
     test.map()
-        .style_mut()
-        .add_layer(Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(), None)
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(),
+                before: None,
+            })
+        })
         .unwrap();
     {
         let run_loop = test.run_loop.clone();
@@ -2916,8 +2975,12 @@ fn stencil_overflow() {
 
     test.map().add_source(Box::new(custom)).unwrap();
     test.map()
-        .style_mut()
-        .add_layer(Layer::new(Registry::with_builtins().style(), "fill", "fill", "custom").unwrap(), None)
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(Registry::with_builtins().style(), "fill", "fill", "custom").unwrap(),
+                before: None,
+            })
+        })
         .unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(5.0), ..Default::default() });
@@ -3061,7 +3124,7 @@ fn observe_tile_lifecycle() {
     let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
     layer.set_source_layer("landcover");
     set(&mut layer, "fill-color", &json!("rgba(0,255,0,1)"));
-    map.style_mut().add_layer(layer, None).unwrap();
+    map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
     map.jump_to(&CameraOptions { center: Some(ll(37.8, -122.5)), zoom: Some(10.0), ..Default::default() });
     frontend.render(&mut map).unwrap();
     for event in map.drain_events() {
@@ -3161,15 +3224,18 @@ fn empty_placement_does_not_request_repaint() {
         assert!(!value.needs_repaint, "frame {frame}");
     }
 
-    test.map().style_mut().set_transition_options(&TransitionOptions {
-        duration: Some(Duration::from_millis(300)),
-        ..TransitionOptions::default()
-    });
+    test.map()
+        .edit_style(|style| {
+            style.apply(Edit::SetTransition(TransitionOptions {
+                duration: Some(Duration::from_millis(300)),
+                ..TransitionOptions::default()
+            }))
+        })
+        .unwrap();
     {
         let mut map = test.map();
-        let style = map.style_mut();
-        style
-            .update_layer("background", |layer| set(layer, "background-color", &json!("rgba(255,0,0,1)")))
+        let value = json!("rgba(255,0,0,1)");
+        map.edit_style(|style| style.apply(layer_property("background", "background-color", value)))
             .expect("background");
     }
     test.run_loop.run_once();
@@ -3195,7 +3261,7 @@ fn immediate_style_replacement_retains_color() {
         );
         let mut layer = Layer::new(Registry::with_builtins().style(), "background", "background", "").unwrap();
         set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
-        test.map().style_mut().add_layer(layer, None).unwrap();
+        test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
         let image = test.render().image;
         assert_eq!(center_pixel(&image), [255, 0, 0, 255], "iteration {iteration}");
@@ -3218,11 +3284,15 @@ fn switches_between_solid_and_patterned_drawables() {
     }"#,
     );
     let blue = vec![0u8, 0, 255, 255];
-    test.map().style_mut().add_image(style_image("blue", PremultipliedImage::from_vec(Size::new(1, 1), blue), 1.0));
+    test.map()
+        .edit_style(|style| {
+            style.apply(Edit::AddImage(style_image("blue", PremultipliedImage::from_vec(Size::new(1, 1), blue), 1.0)))
+        })
+        .unwrap();
     let set_pattern = |value: serde_json::Value| {
         let mut map = test.map();
-        let style = map.style_mut();
-        style.update_layer("background", |layer| set(layer, "background-pattern", &value)).expect("background");
+        map.edit_style(|style| style.apply(layer_property("background", "background-pattern", value)))
+            .expect("background");
     };
     let expect_color = |red: u8, blue_channel: u8| {
         let image = test.render().image;
@@ -3249,9 +3319,9 @@ fn style_update_zoom_dependency() {
     // Update background layer to use zoom-dependent color
     {
         let mut map = test.map();
-        let style = map.style_mut();
         let color = json!(["interpolate", ["linear"], ["zoom"], 0, "rgba(255,0,0,1)", 14, "rgba(0,255,0,1)"]);
-        style.update_layer("background", |layer| set(layer, "background-color", &color)).expect("background");
+        map.edit_style(|style| style.apply(layer_property("background", "background-color", color)))
+            .expect("background");
     }
 
     test.render();
@@ -3293,7 +3363,7 @@ fn globe_hand_off_keeps_tiles() {
     .unwrap();
 
     map.load_style_json(&read_file("test/fixtures/api/water.json"));
-    map.style_mut().set_root_property_json("projection", r#"{"type":"globe"}"#).unwrap();
+    map.edit_style(|style| style.set_root_property_json("projection", r#"{"type":"globe"}"#)).unwrap();
     let center = ll(37.8, -122.5); // the fixture has tile 10/163/395
     map.jump_to(&CameraOptions { center: Some(center), zoom: Some(10.5), ..Default::default() });
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
@@ -3370,7 +3440,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     assert!(parses.get() > 0);
 
     parses.set(0);
-    map.style_mut().move_layer("line", Some("fill")).unwrap();
+    map.edit_style(|style| style.move_layer("line", Some("fill"))).unwrap();
     let moved = render(&mut map);
     assert_eq!(0, parses.get(), "moving a layer laid its tiles out again");
     assert_ne!(before, moved);
@@ -3685,7 +3755,7 @@ fn line_layer_depth_distribution() {
 
     let mut background_layer = Layer::new(Registry::with_builtins().style(), "background", "Background", "").unwrap();
     set(&mut background_layer, "background-color", &json!("rgba(255,255,0,1)"));
-    test.map().style_mut().add_layer(background_layer, None).unwrap();
+    test.map().edit_style(|style| style.apply(Edit::AddLayer { layer: background_layer, before: None })).unwrap();
 
     let colors = ["rgba(255,0,0,1)", "rgba(0,255,0,1)", "rgba(0,0,255,1)"];
     let bounds = {
@@ -3718,7 +3788,7 @@ fn line_layer_depth_distribution() {
         .unwrap();
         set(&mut layer, "line-color", &json!(colors[i as usize % colors.len()]));
 
-        test.map().style_mut().add_layer(layer, None).unwrap();
+        test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
     }
 
     check_image("test/fixtures/map/layer_depth_distribution/line", &test.render().image, 0.0006, 0.1);
@@ -3732,7 +3802,9 @@ fn set_frustum_offset() {
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    test.map().style_mut().add_layer(red_background("background"), None).unwrap();
+    test.map()
+        .edit_style(|style| style.apply(Edit::AddLayer { layer: red_background("background"), before: None }))
+        .unwrap();
 
     check_image("test/fixtures/map/setFrustumOffset/before", &test.render().image, 0.0006, 0.1);
 
@@ -3798,13 +3870,13 @@ fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous:
     let mut error = ConversionError::default();
     let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
-    test.map().style_mut().add_layer(layer, None).unwrap();
+    test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 }
 
 // gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom
 fn retains_icons_and_text_across_zoom(synchronous: bool, with_text: bool) {
     let (test, glyph_requests) = geojson_symbol_map();
-    test.map().style_mut().add_image(style_image("marker", red_image(40, 48), 1.0));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(style_image("marker", red_image(40, 48), 1.0)))).unwrap();
     for i in 0..3 {
         add_geojson_symbol(&test, i, (i as f64 - 1.0) * 0.01, synchronous, with_text);
     }
@@ -3869,7 +3941,11 @@ fn renders_image_added_after_layout(synchronous: bool, with_text: bool) {
     let y = before.size.height / 2 - icon_size.height / 2;
     assert_eq!(pixel_at(&before, x, y)[..3], [255, 255, 255]);
 
-    test.map().style_mut().add_image(style_image("marker", red_image(icon_size.width, icon_size.height), 1.0));
+    test.map()
+        .edit_style(|style| {
+            style.apply(Edit::AddImage(style_image("marker", red_image(icon_size.width, icon_size.height), 1.0)))
+        })
+        .unwrap();
     let after = test.render().image;
     assert_eq!(pixel_at(&after, x, y), [255, 0, 0, 255]);
 }
@@ -3931,7 +4007,9 @@ fn unrelated_image_preserves_tile_layout_and_cache() {
     test.map().jump_to(&CameraOptions { center: Some(ll(40.0, 0.0)), zoom: Some(3.0), ..Default::default() });
     test.render();
     parses.set(0);
-    test.map().style_mut().add_image(style_image("unrelated", red_image(16, 16), 1.0));
+    test.map()
+        .edit_style(|style| style.apply(Edit::AddImage(style_image("unrelated", red_image(16, 16), 1.0))))
+        .unwrap();
     test.render();
     assert_eq!(parses.get(), 0);
 
@@ -3962,7 +4040,7 @@ fn coalesced_image_added_after_layout_replaces_fallback() {
     }"#,
     );
     let blue = PremultipliedImage::from_vec(Size::new(32, 32), [0, 0, 255, 255].repeat(32 * 32));
-    test.map().style_mut().add_image(style_image("fallback", blue, 1.0));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(style_image("fallback", blue, 1.0)))).unwrap();
     let parses = Rc::new(Cell::new(0));
     {
         let parses = Rc::clone(&parses);
@@ -3976,7 +4054,7 @@ fn coalesced_image_added_after_layout_replaces_fallback() {
     assert_eq!(pixel_at(&before, 64, 64), [0, 0, 255, 255]);
 
     parses.set(0);
-    test.map().style_mut().add_image(style_image("late", red_image(32, 32), 1.0));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(style_image("late", red_image(32, 32), 1.0)))).unwrap();
     let after = test.render().image;
     assert!(parses.get() > 0);
     assert_eq!(pixel_at(&after, 64, 64), [255, 0, 0, 255]);
@@ -4240,8 +4318,9 @@ fn rendering_statistics_track_draws_across_frames() {
     assert_eq!(first.total_draw_calls + second.num_draw_calls, second.total_draw_calls);
 
     test.map()
-        .style_mut()
-        .update_layer("circle", |layer| layer.set_visibility(VisibilityType::None))
+        .edit_style(|style| {
+            style.apply(Edit::SetLayerVisibility { layer: "circle".to_owned(), visibility: VisibilityType::None })
+        })
         .expect("circle layer");
     let empty = test.render().stats;
     assert_eq!(second.num_frames + 1, empty.num_frames);
@@ -4300,7 +4379,9 @@ fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
                             {"id": "icon", "type": "symbol", "source": "point",
                              "layout": {"icon-image": "square", "icon-allow-overlap": true}}]}"#,
     );
-    test.map().style_mut().add_image(style_image("square", red_image(SIDE, SIDE), 1.0));
+    test.map()
+        .edit_style(|style| style.apply(Edit::AddImage(style_image("square", red_image(SIDE, SIDE), 1.0))))
+        .unwrap();
     test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(1.0), ..Default::default() });
 
     let red_pixels = |test: &MapTest| {
@@ -4319,10 +4400,14 @@ fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
     // Turn the planet so the icon's anchor is 130 degrees from the center. A
     // long fade keeps placement showing it at full opacity on the next frame,
     // so only the horizon test in the shader can hide it there.
-    test.map().style_mut().set_transition_options(&TransitionOptions {
-        duration: Some(Duration::from_secs(30)),
-        ..TransitionOptions::default()
-    });
+    test.map()
+        .edit_style(|style| {
+            style.apply(Edit::SetTransition(TransitionOptions {
+                duration: Some(Duration::from_secs(30)),
+                ..TransitionOptions::default()
+            }))
+        })
+        .unwrap();
     {
         let run_loop = test.run_loop.clone();
         test.observer.did_finish_rendering_frame_callback.set(move |_| run_loop.stop());
@@ -4354,7 +4439,11 @@ fn global_state_change_transitions_paint_property() {
     assert!(initial[0] > 240, "{initial:?}");
     assert!(initial[2] < 10, "{initial:?}");
 
-    test.map().style_mut().set_global_state_property("color", &Value::String("#0000ff".to_owned())).unwrap();
+    test.map()
+        .edit_style(|style| {
+            style.apply(Edit::SetGlobalState { name: "color".to_owned(), value: Value::String("#0000ff".to_owned()) })
+        })
+        .unwrap();
 
     // The frame that picks up the change starts the transition at its own time point, so it still shows red.
     let changed = render_center_pixel(&test);
@@ -4391,7 +4480,11 @@ fn layer_added_with_global_state_change_shows_new_state() {
     assert!(initial[1] < 10, "{initial:?}");
 
     // The state changes and a layer reading it is added before the next frame.
-    test.map().style_mut().set_global_state_property("color", &Value::String("#00ff00".to_owned())).unwrap();
+    test.map()
+        .edit_style(|style| {
+            style.apply(Edit::SetGlobalState { name: "color".to_owned(), value: Value::String("#00ff00".to_owned()) })
+        })
+        .unwrap();
 
     let layer_value: serde_json::Value = serde_json::from_str(
         r#"{"id": "added", "type": "background", "paint": {"background-color": ["global-state", "color"]}}"#,
@@ -4400,7 +4493,7 @@ fn layer_added_with_global_state_change_shows_new_state() {
     let mut error = ConversionError::default();
     let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
-    test.map().style_mut().add_layer(layer, None).unwrap();
+    test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
     // The new layer never showed the prior state, so it must show the current one at once.
     let added = render_center_pixel(&test);
@@ -4516,13 +4609,13 @@ fn center_pixel_of(test: &MapTest) -> [u8; 4] {
 fn image_updated_again_before_resize_relayout() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
     test.load_json(ICON_STYLE);
-    test.map().style_mut().add_image(solid_icon(Size::new(10, 10), RED));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(solid_icon(Size::new(10, 10), RED)))).unwrap();
     render_until_idle(&test);
 
     // The old layout must not receive pixels of a size it has no room for.
-    test.map().style_mut().add_image(solid_icon(Size::new(20, 20), BLUE));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(solid_icon(Size::new(20, 20), BLUE)))).unwrap();
     render_frame(&test);
-    test.map().style_mut().add_image(solid_icon(Size::new(20, 20), GREEN));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(solid_icon(Size::new(20, 20), GREEN)))).unwrap();
     render_frame(&test);
 
     render_until_idle(&test);
@@ -4535,15 +4628,15 @@ fn image_updated_again_before_resize_relayout() {
 fn image_readded_before_relayout() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
     test.load_json(ICON_STYLE);
-    test.map().style_mut().add_image(solid_icon(Size::new(10, 10), RED));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(solid_icon(Size::new(10, 10), RED)))).unwrap();
     render_until_idle(&test);
 
     // The relayout must show the re-added pixels, although the old layout
     // still holds the texture of the removed image when the relayout
     // reserves its own.
-    test.map().style_mut().remove_image("icon");
+    test.map().edit_style(|style| style.apply(Edit::RemoveImage("icon".to_owned()))).unwrap();
     render_frame(&test);
-    test.map().style_mut().add_image(solid_icon(Size::new(10, 10), BLUE));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(solid_icon(Size::new(10, 10), BLUE)))).unwrap();
     render_frame(&test);
 
     render_until_idle(&test);
@@ -4635,13 +4728,10 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
     let set_ramp = |color: &str| {
         let value: serde_json::Value = serde_json::from_str(&ramp(color)).unwrap();
         let mut map = test.map();
-        let style = map.style_mut();
-        let error =
-            style.update_layer("ramp", |layer| layer.set_property(&ramp_property, &Convertible::from(&value), None));
-        assert!(error.unwrap().is_none());
+        map.edit_style(|style| style.apply(layer_property("ramp", &ramp_property, value))).unwrap();
     };
     let set_state = |name: &str, value: Value| {
-        test.map().style_mut().set_global_state_property(name, &value).unwrap();
+        test.map().edit_style(|style| style.apply(Edit::SetGlobalState { name: name.to_owned(), value })).unwrap();
     };
 
     let extra_paint = match type_ {
@@ -4660,7 +4750,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
 
     // The layer joins the render tree in the same update as a write to a key its ramp does not read.
     set_state("unrelated", Value::Double(1.0));
-    test.map().style_mut().add_layer(layer, None).unwrap();
+    test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
     expect_center(Color::red());
 
     // While the ramp reads no state, the layer skips evaluation for state changes.

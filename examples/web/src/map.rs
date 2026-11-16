@@ -295,7 +295,7 @@ impl WebMap {
                 .filter_map(|source| source.get_attribution())
                 .filter(|a| !a.is_empty())
                 .collect::<Vec<_>>();
-            (attributions, style.get_name())
+            (attributions, style.get_name().to_owned())
         });
         let reports = Arc::clone(&self.reports);
         match read {

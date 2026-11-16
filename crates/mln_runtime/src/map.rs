@@ -10,6 +10,7 @@ use mln_map::{
 };
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, UpdateReader};
+use mln_style::Edit;
 use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
@@ -952,7 +953,7 @@ impl Map {
     /// The JSON of the style that the map loaded, without the changes made
     /// since.
     pub fn loaded_style_json(&self) -> Result<Completion<String>, Error> {
-        self.query(|map| Ok(map.style().get_json()))
+        self.query(|map| Ok(map.style().get_json().to_owned()))
     }
 
     /// The URL of the map's style, or `None` for a style loaded from JSON.
@@ -982,7 +983,7 @@ impl Map {
         self.send(
             move |entry, _| {
                 let map = &mut entry.core;
-                if !map.style().is_loaded() {
+                if !map.style_document_loaded() {
                     return Err(style_not_loaded());
                 }
                 if map.source(&source_id).is_none() {
@@ -1008,7 +1009,7 @@ impl Map {
         before_layer_id: Option<String>,
     ) -> Result<Completion<Applied>, Error> {
         let json = json.into();
-        self.command(move |map| map.style_mut().add_layer_json(&json, before_layer_id.as_deref()))
+        self.command(move |map| map.edit_loaded_style(|style| style.add_layer_json(&json, before_layer_id.as_deref())))
     }
 
     /// Adds a custom layer named `layer_id` that `host` draws, below
@@ -1022,7 +1023,9 @@ impl Map {
         before_layer_id: Option<String>,
     ) -> Result<Completion<Applied>, Error> {
         let layer_id = layer_id.into();
-        self.command(move |map| map.style_mut().add_custom_layer(&layer_id, host, before_layer_id.as_deref()))
+        self.command(move |map| {
+            map.edit_loaded_style(|style| style.add_custom_layer(&layer_id, host, before_layer_id.as_deref()))
+        })
     }
 
     /// Removes a layer from the style. Completes with
@@ -1031,16 +1034,7 @@ impl Map {
     /// while the style isn't loaded.
     pub fn remove_style_layer(&self, layer_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let layer_id = layer_id.into();
-        self.command(move |map| {
-            let style = map.style_mut();
-            if !style.is_loaded() {
-                return Err(style_not_loaded());
-            }
-            style
-                .remove_layer(&layer_id)
-                .map(drop)
-                .ok_or_else(|| Error::not_found(format!("layer \"{layer_id}\" does not exist")))
-        })
+        self.command(move |map| map.edit_loaded_style(|style| style.apply(Edit::RemoveLayer(layer_id))))
     }
 
     /// A layer of the style as JSON, or `None` when the style has no such
@@ -1059,7 +1053,7 @@ impl Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (layer_id, name, json) = (layer_id.into(), name.into(), json.into());
-        self.command(move |map| map.style_mut().set_layer_property_json(&layer_id, &name, &json))
+        self.command(move |map| map.edit_loaded_style(|style| style.set_layer_property_json(&layer_id, &name, &json)))
     }
 
     /// A property of a layer as JSON, or `None` when the layer doesn't set
@@ -1082,7 +1076,7 @@ impl Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (name, json) = (name.into(), json.into());
-        self.command(move |map| map.style_mut().set_root_property_json(&name, &json))
+        self.command(move |map| map.edit_loaded_style(|style| style.set_root_property_json(&name, &json)))
     }
 
     /// A root property of the style as JSON, or `None` when neither the
@@ -1099,7 +1093,7 @@ impl Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (name, json) = (name.into(), json.into());
-        self.command(move |map| map.style_mut().set_light_property_json(&name, &json))
+        self.command(move |map| map.edit_loaded_style(|style| style.set_light_property_json(&name, &json)))
     }
 
     /// A property of the style's light as JSON, or `None` when the light

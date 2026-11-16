@@ -38,6 +38,7 @@ pub(crate) enum SpritePart {
 }
 
 /// What the map does about a load, in the order the loader returns them.
+#[expect(clippy::large_enum_variant, reason = "the events are handled as they are returned, not stored")]
 pub(crate) enum LoadEvent {
     /// A load began.
     Loading,
@@ -94,6 +95,11 @@ pub(crate) struct StyleLoader {
     fallback_font_faces: Option<Arc<FontFaces>>,
     /// The last error of a sprite or a source, which fails still images.
     last_error: Option<Error>,
+    /// A style document parsed, and no URL load began since.
+    document_loaded: bool,
+    /// An edit changed the style since its document parsed, so a later
+    /// answer to the document's request doesn't replace it.
+    edited: bool,
 }
 
 impl StyleLoader {
@@ -115,6 +121,8 @@ impl StyleLoader {
             pixel_ratio,
             fallback_font_faces: None,
             last_error: None,
+            document_loaded: false,
+            edited: false,
         }
     }
 
@@ -149,9 +157,9 @@ impl StyleLoader {
         events
     }
 
-    /// Fetches the style document at `url`, which replaces `style` when it
-    /// arrives. `style` stays meanwhile, though not loaded.
-    pub(crate) fn load_url(&mut self, style: &mut Style, url: &str) -> Vec<LoadEvent> {
+    /// Fetches the style document at `url`, which replaces the style when
+    /// it arrives. The style stays meanwhile, but its document isn't loaded.
+    pub(crate) fn load_url(&mut self, url: &str) -> Vec<LoadEvent> {
         let Some(file_source) = self.file_source.clone() else {
             return vec![LoadEvent::Failed(StyleLoadError::Load(
                 "Unable to find resource provider for style url.".to_owned(),
@@ -159,7 +167,7 @@ impl StyleLoader {
         };
 
         self.last_error = None;
-        style.begin_url_load();
+        self.document_loaded = false;
         self.url = Some(url.to_owned());
 
         self.delivered = false;
@@ -174,11 +182,12 @@ impl StyleLoader {
         vec![LoadEvent::Loading]
     }
 
-    /// Handles a reply from the inbox.
-    pub(crate) fn on_reply(&mut self, style: &Style, reply: Reply) -> Vec<LoadEvent> {
+    /// Handles a reply from the inbox, parsing a style document against
+    /// `registry`.
+    pub(crate) fn on_reply(&mut self, registry: &Arc<StyleRegistry>, reply: Reply) -> Vec<LoadEvent> {
         let mut events = Vec::new();
         match reply {
-            Reply::Style { load, response } => self.on_style_response(style, load, &response, &mut events),
+            Reply::Style { load, response } => self.on_document_response(registry, load, &response, &mut events),
             Reply::Sprite { id, load, part, response } => {
                 self.on_sprite_response(&id, load, part, response, &mut events);
             }
@@ -197,12 +206,18 @@ impl StyleLoader {
         events
     }
 
-    fn on_style_response(&mut self, style: &Style, load: u64, res: &Response, events: &mut Vec<LoadEvent>) {
+    fn on_document_response(
+        &mut self,
+        registry: &Arc<StyleRegistry>,
+        load: u64,
+        res: &Response,
+        events: &mut Vec<LoadEvent>,
+    ) {
         if load != self.style_load {
             return;
         }
         // Don't allow a loaded, edited style to be overwritten with a new version.
-        if style.is_mutated() && style.is_loaded() {
+        if self.edited && self.document_loaded {
             return;
         }
 
@@ -230,7 +245,7 @@ impl StyleLoader {
         } else if !empty && let Some(data) = &res.data {
             self.delivered = true;
             let json = String::from_utf8_lossy(data);
-            self.parse(style.registry(), &json, events);
+            self.parse(registry, &json, events);
         }
     }
 
@@ -246,6 +261,8 @@ impl StyleLoader {
                 return;
             }
         };
+        self.document_loaded = true;
+        self.edited = false;
         self.sprites.clear();
         self.sprite_list = parsed.style.get_sprites().to_vec();
         let mut sprite_events = Vec::new();
@@ -384,6 +401,16 @@ impl StyleLoader {
     /// good. False before a document parsed.
     pub(crate) fn sprites_loaded(&self) -> bool {
         !self.sprites.is_empty() && self.sprites.iter().all(|entry| entry.loaded)
+    }
+
+    /// Whether a style document parsed, and no URL load began since.
+    pub(crate) fn document_loaded(&self) -> bool {
+        self.document_loaded
+    }
+
+    /// Records that an edit changed the style since its document parsed.
+    pub(crate) fn edited(&mut self) {
+        self.edited = true;
     }
 
     /// Records a source's load error, which fails still images until the

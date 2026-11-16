@@ -6,13 +6,14 @@ use mln_util::Color;
 
 use super::util::{new_layer, parse_json, style_of};
 use crate::conversion::convert_filter;
+use crate::edit::Edit;
 use crate::expression::{Functions, Image};
 use crate::filter::Filter;
 use crate::layer::Layer;
 use crate::layers::{Background, Circle, Fill, Line, Raster};
 use crate::property_value::PropertyValue;
 use crate::registry::StyleRegistry;
-use crate::style_impl::Impl as StyleImpl;
+use crate::style::Style;
 
 fn color() -> Color {
     Color::new(1.0, 0.0, 0.0, 1.0)
@@ -243,14 +244,14 @@ fn fixture(path: &str) -> String {
 #[test]
 fn duplicate_layer() {
     // Setup style
-    let mut style = StyleImpl::new(StyleRegistry::with_builtins());
+    let mut style = Style::new(StyleRegistry::with_builtins());
     style.load_json(&fixture("test/fixtures/resources/style-unused-sources.json"));
 
     // Add initial layer
-    style.add_layer(new_layer("line", "line", "unusedsource"), None).expect("first add");
+    style.apply(Edit::AddLayer { layer: new_layer("line", "line", "unusedsource"), before: None }).expect("first add");
 
     // Try to add duplicate
-    match style.add_layer(new_layer("line", "line", "unusedsource"), None) {
+    match style.apply(Edit::AddLayer { layer: new_layer("line", "line", "unusedsource"), before: None }) {
         Ok(()) => panic!("Should not have been allowed to add a duplicate layer id"),
         // Expected
         Err(e) => assert_eq!(mln_util::Error::already_exists("Layer line already exists"), e),
@@ -261,11 +262,11 @@ fn duplicate_layer() {
 #[test]
 fn incompatible_layer() {
     // Setup style
-    let mut style = StyleImpl::new(StyleRegistry::with_builtins());
+    let mut style = Style::new(StyleRegistry::with_builtins());
     style.load_json(&fixture("test/fixtures/resources/style-unused-sources.json"));
 
     // Try to add duplicate
-    match style.add_layer(new_layer("raster", "raster", "unusedsource"), None) {
+    match style.apply(Edit::AddLayer { layer: new_layer("raster", "raster", "unusedsource"), before: None }) {
         Ok(()) => panic!("Should not have been allowed to add an incompatible layer to the source"),
         // Expected
         Err(e) => assert_eq!(

@@ -9,6 +9,7 @@ use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
 use mln_runtime::{BackendType, Device, DeviceOptions};
+use mln_style::Edit;
 use mln_style::layers::{CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;
@@ -99,7 +100,7 @@ fn session(
             .unwrap();
     frontend.attach(&map);
     map.load_style_json(STYLE);
-    map.style_mut().add_custom_layer("quad", host, before).expect("the custom layer");
+    map.edit_style(|style| style.add_custom_layer("quad", host, before)).expect("the custom layer");
     Some((frontend, map))
 }
 
@@ -372,7 +373,7 @@ mod gl {
     use mln_map::Map;
     use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check, session};
+    use super::{Arc, BackendType, Calls, CustomLayerHost, Edit, Mutex, Ordering, check, session};
 
     const VERTEX: &str = "#version 300 es
 const vec2 corners[6] = vec2[6](
@@ -483,7 +484,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
     #[test]
     fn a_removed_layer_deinitializes_on_its_context() {
         check_end(|frontend, map| {
-            map.style_mut().remove_layer("quad").expect("the layer");
+            map.edit_style(|style| style.apply(Edit::RemoveLayer("quad".to_owned()))).expect("the layer");
             frontend.as_mut().unwrap().render(map).expect("a frame");
         });
     }
@@ -491,8 +492,9 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
     #[test]
     fn a_replaced_host_deinitializes_on_its_context() {
         check_end(|frontend, map| {
-            map.style_mut().remove_layer("quad").expect("the layer");
-            map.style_mut().add_custom_layer("quad", Arc::new(Host::default()), None).expect("the new host");
+            map.edit_style(|style| style.apply(Edit::RemoveLayer("quad".to_owned()))).expect("the layer");
+            map.edit_style(|style| style.add_custom_layer("quad", Arc::new(Host::default()), None))
+                .expect("the new host");
             frontend.as_mut().unwrap().render(map).expect("a frame");
         });
     }

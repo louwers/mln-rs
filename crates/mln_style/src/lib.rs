@@ -27,6 +27,7 @@ pub mod conversion;
 mod conversion_impl;
 pub mod custom_tile_loader;
 pub mod diff;
+pub mod edit;
 pub mod evaluated;
 pub mod expression;
 pub mod filter;
@@ -40,7 +41,6 @@ pub mod light;
 #[rustfmt::skip]
 mod light_properties;
 pub mod map;
-pub mod observer;
 pub mod parser;
 pub mod projection;
 pub mod properties;
@@ -60,11 +60,11 @@ pub mod source_list;
 pub mod sources;
 pub mod sprite;
 mod style;
-pub mod style_impl;
 mod style_json;
 pub mod style_property;
 pub mod transition_options;
 
+pub use edit::{Edit, Parts};
 pub use layer::Layer;
 pub use layer_list::LayerList;
 pub use layer_type::LayerTypeInfo;

@@ -5,11 +5,11 @@ use std::time::Duration;
 use feature::Value;
 use geojson::{Feature, GeoJson, Geometry};
 use mln_renderer::RenderingStats;
-use mln_style::Layer;
 use mln_style::conversion::Convertible;
 use mln_style::sources::custom_geometry_source::{
     CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
 };
+use mln_style::{Edit, Layer};
 use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::constants::EXTENT;
@@ -82,7 +82,7 @@ impl RenderingStatsView {
             }
         }
 
-        let style = map.style_unrecorded();
+        let style = map.style();
         if style.get_layer(RENDERING_STATS_LAYER_ID).is_none()
             // A registry without the symbol layer type has no layer to show.
             && let Ok(mut layer) =
@@ -109,14 +109,14 @@ impl RenderingStatsView {
                 debug_assert!(error.is_none(), "{name}: {error:?}");
             }
 
-            let _ = style.add_layer(layer, None);
+            let _ = map.apply_loaded(Edit::AddLayer { layer, before: None });
         }
     }
 
     /// `destroy(style)`: removes the layer and the source.
     #[expect(clippy::unused_self, reason = "the view removes what it added, as its `create` does")]
     pub(crate) fn destroy(&self, map: &mut Map) {
-        map.style_unrecorded().remove_layer(RENDERING_STATS_LAYER_ID);
+        let _ = map.apply_loaded(Edit::RemoveLayer(RENDERING_STATS_LAYER_ID.to_owned()));
         map.remove_source(RENDERING_STATS_SOURCE_ID);
     }
 
@@ -138,10 +138,12 @@ impl RenderingStatsView {
         }
 
         let text = self.text(stats);
-        let error = map.style_unrecorded().update_layer(RENDERING_STATS_LAYER_ID, |layer| {
-            layer.set_property("text-field", &Convertible::from(&Value::String(text)), None)
+        let result = map.apply_loaded(Edit::SetLayerProperty {
+            layer: RENDERING_STATS_LAYER_ID.to_owned(),
+            name: "text-field".to_owned(),
+            value: serde_json::Value::String(text),
         });
-        debug_assert!(matches!(error, None | Some(None)), "text-field: {error:?}");
+        debug_assert!(result.is_ok(), "text-field: {result:?}");
 
         self.frame_count = 0;
         self.encoding_time = 0.0;

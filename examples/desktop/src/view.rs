@@ -117,7 +117,7 @@ impl StyleInfo {
         let globe = projection
             .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
             .is_some_and(|projection| projection["type"] == "globe");
-        StyleInfo { name: style.get_name(), attributions, globe }
+        StyleInfo { name: style.get_name().to_owned(), attributions, globe }
     }
 }
 

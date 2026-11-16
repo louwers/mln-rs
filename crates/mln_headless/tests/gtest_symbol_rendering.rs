@@ -15,6 +15,7 @@ use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
 use mln_renderer::Registry;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::Edit;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
 use mln_style_types::VisibilityType;
@@ -122,7 +123,7 @@ impl SymbolRenderingTest {
         .unwrap();
         frontend.attach(&map);
         map.load_style_json(&colliding_symbols_style(count, spacing, kind));
-        map.style_mut().add_image(marker(kind == SymbolKind::SdfIcon));
+        map.edit_style(|style| style.apply(Edit::AddImage(marker(kind == SymbolKind::SdfIcon)))).unwrap();
         map.jump_to(&CameraOptions { center: Some(lat_lng(5.0, 5.0)), zoom: Some(4.0), ..Default::default() });
         let map = Rc::new(RefCell::new(map));
         let frontend = Rc::new(RefCell::new(frontend));
@@ -356,15 +357,16 @@ fn fully_hidden_layer_can_reappear() {
     let mut blocker = Layer::new(Registry::with_builtins().style(), "symbol", "blocker", "points").unwrap();
     let error = blocker.set_property("icon-image", &Convertible::from(&serde_json::json!("marker")), None);
     assert!(error.is_none(), "{error:?}");
-    test.map.borrow_mut().style_mut().add_layer(blocker, None).unwrap();
+    test.map.borrow_mut().edit_style(|style| style.apply(Edit::AddLayer { layer: blocker, before: None })).unwrap();
     let hidden = test.render();
     assert_eq!(hidden.stats.num_draw_calls, 1);
     assert_eq!(initial.image, hidden.image);
 
     test.map
         .borrow_mut()
-        .style_mut()
-        .update_layer("blocker", |layer| layer.set_visibility(VisibilityType::None))
+        .edit_style(|style| {
+            style.apply(Edit::SetLayerVisibility { layer: "blocker".to_owned(), visibility: VisibilityType::None })
+        })
         .expect("the blocker layer");
     let visible = test.render();
     assert_eq!(visible.stats.num_draw_calls, 1);
@@ -407,7 +409,7 @@ fn shown_icons_take_image_updates_while_a_style_url_loads() {
     let red =
         mln_style::image::Impl::new("marker".to_owned(), red, 1.0, false, Vec::new(), Vec::new(), None, None, None)
             .expect("style::Image");
-    test.map.borrow_mut().style_mut().add_image(Arc::new(red));
+    test.map.borrow_mut().edit_style(|style| style.apply(Edit::AddImage(Arc::new(red)))).unwrap();
     frame(1200);
     assert_eq!(pixel_at_symbol(&frame(1300).image), [255, 0, 0, 255]);
 }

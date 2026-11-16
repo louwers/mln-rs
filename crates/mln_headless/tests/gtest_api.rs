@@ -10,6 +10,7 @@ use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_renderer::Registry;
 use mln_storage::ResourceOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::Edit;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
@@ -91,11 +92,11 @@ fn grid() {
     let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
     fill_layer.set_source_layer("landcover");
     set(&mut fill_layer, "fill-color", &json!("rgba(255,255,0,1)"));
-    map.style_mut().add_layer(fill_layer, None).unwrap();
+    map.edit_style(|style| style.apply(Edit::AddLayer { layer: fill_layer, before: None })).unwrap();
 
     let mut layer = Layer::new(Registry::with_builtins().style(), "line", "grid", "custom").unwrap();
     set(&mut layer, "line-color", &json!("rgba(255,255,255,1)"));
-    map.style_mut().add_layer(layer, None).unwrap();
+    map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
     check_image(
         "test/fixtures/custom_geometry_source/grid",
@@ -128,8 +129,9 @@ fn recycle_map_update_images() {
 
         map.load_style_json(&read_file("test/fixtures/api/empty.json"));
         map.add_source(Box::new(source)).unwrap();
-        map.style_mut().add_layer(layer, None).unwrap();
-        map.style_mut().add_image(style_image(marker_name, decode_image(marker_path), 1.0));
+        map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
+        map.edit_style(|style| style.apply(Edit::AddImage(style_image(marker_name, decode_image(marker_path), 1.0))))
+            .unwrap();
     };
 
     // default marker

@@ -7,7 +7,7 @@ use mln_actor::RunLoop;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
-use mln_style::StyleLoadError;
+use mln_style::{Edit, StyleLoadError};
 
 use crate::{Map, MapEvent, MapOptions};
 
@@ -53,12 +53,12 @@ fn load_url_parses_the_response() {
         Some(style_response(REMOTE))
     });
     map.load_style_url("http://some-url");
-    assert!(!map.style().is_loaded());
+    assert!(!map.style_document_loaded());
     assert_eq!(Some("http://some-url"), map.style_url());
     run_loop.run_once();
     assert!(map.has_reports());
     map.process_events();
-    assert!(map.style().is_loaded());
+    assert!(map.style_document_loaded());
     assert_eq!("Remote", map.style().get_name());
     assert_eq!(Some("http://some-url"), map.style_url());
 }
@@ -77,7 +77,7 @@ fn load_url_error() {
         vec![StyleLoadError::Load("loading style failed: HTTP status code 404".to_owned())],
         load_failures(&events)
     );
-    assert!(!map.style().is_loaded());
+    assert!(!map.style_document_loaded());
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn load_url_answered_without_a_style_fails() {
         run_loop.run_once();
         let events = map.drain_events();
         assert_eq!(vec![StyleLoadError::Load(format!("loading style failed: {message}"))], load_failures(&events));
-        assert!(!map.style().is_loaded());
+        assert!(!map.style_document_loaded());
     }
 }
 
@@ -106,7 +106,7 @@ fn load_url_ignores_no_content_and_not_modified_after_a_style() {
     map.load_style_url("http://some-url");
     run_loop.run_once();
     map.drain_events();
-    assert!(map.style().is_loaded());
+    assert!(map.style_document_loaded());
     // A revalidation that confirms the style the first response brought.
     for (no_content, not_modified) in [(true, false), (false, true)] {
         let mut response = Response::new();
@@ -116,7 +116,7 @@ fn load_url_ignores_no_content_and_not_modified_after_a_style() {
         let events = map.drain_events();
         assert!(load_failures(&events).is_empty(), "{events:?}");
     }
-    assert!(map.style().is_loaded());
+    assert!(map.style_document_loaded());
     assert_eq!("Remote", map.style().get_name());
 }
 
@@ -129,7 +129,7 @@ fn load_json_parse_error() {
         vec![StyleLoadError::Parse("Failed to parse style: style must be an object".to_owned())],
         load_failures(&events)
     );
-    assert!(!map.style().is_loaded());
+    assert!(!map.style_document_loaded());
 }
 
 // gtest: Style.LoadJSONCancelsPendingLoadURL
@@ -165,7 +165,7 @@ fn load_json_cancels_pending_load_url() {
 fn public_load_state_does_not_wait_for_resources() {
     let run_loop = RunLoop::new();
     let mut map = map_over(StubFileSource::new(&run_loop, ResponseType::Manual), MapOptions::default(), &run_loop);
-    assert!(!map.style().is_loaded());
+    assert!(!map.style_document_loaded());
 
     map.load_style_json(
         r#"{
@@ -179,10 +179,10 @@ fn public_load_state_does_not_wait_for_resources() {
         "layers": []
     }"#,
     );
-    assert!(map.style().is_loaded());
+    assert!(map.style_document_loaded());
 
     map.load_style_url("http://some-url");
-    assert!(!map.style().is_loaded());
+    assert!(!map.style_document_loaded());
 }
 
 // Sprites. Ported gtests: test/sprite/sprite_loader.test.cpp.
@@ -251,7 +251,7 @@ fn loading_success(sprite_path: &str, expected_images: usize, pixel_ratio: f32) 
 
     let (map, event) = load_sprite(file_source, sprite_path, pixel_ratio, &run_loop);
     assert!(matches!(event, MapEvent::SpriteLoaded(Some(_))), "{event:?}");
-    assert_eq!(expected_images, map.style().impl_.get_image_impls().len());
+    assert_eq!(expected_images, map.style().get_images().len());
     assert!(map.style_loaded());
 }
 
@@ -351,4 +351,70 @@ fn a_style_without_a_sprite_loads_an_empty_one() {
     let events = map.drain_events();
     assert!(events.iter().any(|event| matches!(event, MapEvent::SpriteLoaded(None))), "{events:?}");
     assert!(map.style_loaded());
+}
+
+// Edits of the loaded document.
+
+const DOTS: &str = r#"{"id":"dots","type":"circle","source":"points"}"#;
+
+#[test]
+fn edits_fail_while_the_style_is_not_loaded() {
+    let (mut map, _run_loop) = map_with_style_response(|_| None);
+    assert!(!map.style_document_loaded());
+    let not_loaded = |result: Result<(), mln_util::Error>| {
+        let error = result.expect_err("the edit should fail");
+        assert_eq!((mln_util::ErrorKind::InvalidState, "style is not loaded"), (error.kind, error.message.as_str()));
+    };
+    not_loaded(map.edit_loaded_style(|style| style.add_layer_json(DOTS, None)));
+    not_loaded(map.edit_loaded_style(|style| style.set_layer_property_json("dots", "circle-radius", "4")));
+    not_loaded(map.edit_loaded_style(|style| style.set_root_property_json("light", r#"{"intensity":0.5}"#)));
+    not_loaded(map.edit_loaded_style(|style| style.set_light_property_json("intensity", "0.5")));
+    not_loaded(map.edit_loaded_style(|style| style.set_global_state_property_json("theme", "true")));
+    assert!(map.style().get_sources().is_empty() && map.style().get_layers().len() == 0);
+}
+
+// gtest: Style.GlobalStatePropertyRequiresLoadedStyle
+#[test]
+fn global_state_property_requires_loaded_style() {
+    let (mut map, _run_loop) = map_with_style_response(|_| None);
+    let set = |map: &mut Map, value: bool| {
+        let value = feature::Value::Bool(value);
+        map.edit_loaded_style(|style| style.apply(Edit::SetGlobalState { name: "showLabels".to_owned(), value }))
+    };
+    assert!(set(&mut map, false).is_err());
+    assert!(map.style().get_global_state().is_empty());
+
+    map.load_style_json(r#"{"version": 8, "state": {"showLabels": {"default": true}}, "sources": {}, "layers": []}"#);
+    assert!(map.style_document_loaded());
+    assert_eq!(feature::Value::Bool(true), map.style().get_global_state()["showLabels"]);
+    set(&mut map, false).unwrap();
+    assert_eq!(feature::Value::Bool(false), map.style().get_global_state()["showLabels"]);
+}
+
+#[test]
+fn edits_fail_during_a_url_load_and_the_old_version_stays_published() {
+    let run_loop = RunLoop::new();
+    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
+    file_source.set_response(Kind::Style, |_| Some(style_response(REMOTE)));
+    let options = MapOptions { map_mode: crate::MapMode::Continuous, ..MapOptions::default() };
+    let mut map = Map::with_file_source(Arc::<StubFileSource>::clone(&file_source), options, &run_loop).expect("map");
+    let reader = map.update_reader();
+    map.load_style_json(r#"{"version": 8, "name": "Local", "sources": {}, "layers": []}"#);
+    let published = Arc::clone(&reader.latest().expect("an update").parameters.layers);
+    let local = Arc::clone(map.style());
+
+    map.load_style_url("http://some-url");
+    assert!(!map.style_document_loaded());
+    let error = map.edit_loaded_style(|style| style.add_layer_json(r#"{"id":"paper","type":"background"}"#, None));
+    assert_eq!(mln_util::ErrorKind::InvalidState, error.unwrap_err().kind);
+    // The version from before the load stays, and stays published.
+    assert!(Arc::ptr_eq(&local, map.style()));
+    assert!(Arc::ptr_eq(&published, &reader.latest().expect("an update").parameters.layers));
+
+    file_source.respond_to_all();
+    run_loop.run_once();
+    map.process_events();
+    assert!(map.style_document_loaded());
+    assert_eq!("Remote", map.style().get_name());
+    map.edit_loaded_style(|style| style.add_layer_json(r#"{"id":"paper","type":"background"}"#, None)).unwrap();
 }
