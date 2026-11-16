@@ -31,11 +31,6 @@ crate::properties!(
     use mln_style_types::AlignmentType, mln_style_types::CirclePitchScaleType, mln_style_types::TranslateAnchorType, mln_util::Color;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a circle layer.
-    CircleLayerProperties for CircleLayerImpl, paint CirclePaintProperties, layout CircleLayoutProperties
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[

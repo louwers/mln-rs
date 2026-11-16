@@ -72,7 +72,23 @@ pub trait LayoutSet: Clone + Default + PartialEq + std::fmt::Debug + Wire + Send
 }
 
 /// A set of paint properties as the style sets them, or [`NoProperties`].
-pub trait PaintSet: Clone + Default + PartialEq + std::fmt::Debug + Wire + Send + Sync + 'static {}
+pub trait PaintSet: Clone + Default + PartialEq + std::fmt::Debug + Wire + Send + Sync + 'static {
+    /// The set evaluated for a frame: a value per property, which for a
+    /// data-driven one can still differ by feature.
+    type Evaluated: Clone + Default + std::fmt::Debug + Wire + Send + Sync + 'static;
+
+    /// The combined dependencies of the values in `evaluated` that still
+    /// differ by feature.
+    fn evaluated_dependencies(evaluated: &Self::Evaluated) -> Dependency;
+
+    /// Bit i is set when the i-th data-driven property of `evaluated` is
+    /// the same for every feature.
+    fn constants_mask(evaluated: &Self::Evaluated) -> u64;
+
+    /// Adds the global-state keys that the values in `evaluated` still read
+    /// to `refs`.
+    fn collect_evaluated_global_state_refs(evaluated: &Self::Evaluated, refs: &mut VecSet<String>);
+}
 
 /// The property set of a layer type that has no properties of a scope.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -94,7 +110,19 @@ impl LayoutSet for NoProperties {
     fn collect_global_state_refs(&self, _refs: &mut VecSet<String>) {}
 }
 
-impl PaintSet for NoProperties {}
+impl PaintSet for NoProperties {
+    type Evaluated = NoProperties;
+
+    fn evaluated_dependencies(_evaluated: &NoProperties) -> Dependency {
+        Dependency::NONE
+    }
+
+    fn constants_mask(_evaluated: &NoProperties) -> u64 {
+        0
+    }
+
+    fn collect_evaluated_global_state_refs(_evaluated: &NoProperties, _refs: &mut VecSet<String>) {}
+}
 
 /// A layer type: what its layers hold and how they differ.
 pub trait StyleLayerType: Sized + Send + Sync + 'static {
@@ -368,6 +396,11 @@ pub trait ErasedStyleLayerType: Send + Sync + 'static {
 /// The [`ErasedStyleLayerType`] of `T`, which [`style_entry`] returns.
 pub struct LayerTypeEntry<T>(PhantomData<fn() -> T>);
 
+impl<T: 'static> LayerTypeEntry<T> {
+    /// The entry of `T`.
+    pub const INSTANCE: &'static Self = &LayerTypeEntry(PhantomData);
+}
+
 impl<T: StyleLayerType> ErasedStyleLayerType for LayerTypeEntry<T> {
     fn info(&self) -> LayerTypeInfo {
         T::INFO
@@ -426,7 +459,7 @@ impl<T: StyleLayerType> OwnerSlot<LayerStyle<T>> for ErasedSlot<'_, T> {
 /// The layer type `T` as a value.
 #[must_use]
 pub const fn style_entry<T: StyleLayerType>() -> &'static dyn ErasedStyleLayerType {
-    const { &LayerTypeEntry::<T>(PhantomData) }
+    LayerTypeEntry::<T>::INSTANCE
 }
 
 /// The built-in layer types.

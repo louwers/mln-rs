@@ -5,12 +5,11 @@
 
 use std::sync::Arc;
 
-use mln_style::layer_properties::LayerProperties;
-use mln_style::serialization::shared_layer_properties;
 use mln_util::serialization::shared;
 use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 
+use super::decoding_layer_type;
 use crate::bucket::{Bucket, BucketPtr};
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
@@ -19,26 +18,65 @@ use crate::buckets::heatmap_bucket::HeatmapBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_layer::LayerRenderData;
 use crate::tile::contents::LayoutResult;
 use crate::tile::job::SourceStyle;
 
+/// The `shared::Kind` of layers' evaluated values: their type's name, then
+/// the values, which the reading side reads as the type that its registry
+/// has by the name.
+pub(crate) struct SharedEvaluatedLayer;
+
+impl shared::Kind for SharedEvaluatedLayer {
+    type Value = dyn ErasedEvaluatedLayer;
+    const NAME: &'static str = "evaluated layer";
+}
+
+impl shared::WireKind for SharedEvaluatedLayer {
+    fn write(layer: &dyn ErasedEvaluatedLayer, w: &mut Writer) {
+        mln_wire::write_str(w, layer.style().get_type_info().name);
+        layer.write(w);
+    }
+
+    fn read(r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
+        let name = mln_wire::read_str(r)?;
+        match decoding_layer_type(name) {
+            Ok(layer_type) => layer_type.read_evaluated(r),
+            Err(message) => r.fail(message),
+        }
+    }
+}
+
+/// `#[wire(with)]` for a layer's evaluated values, by key.
+pub(crate) mod evaluated_layer {
+    use super::{Arc, ErasedEvaluatedLayer, Reader, SharedEvaluatedLayer, Writer, shared};
+
+    pub(crate) fn write(layer: &Arc<dyn ErasedEvaluatedLayer>, w: &mut Writer) {
+        shared::write::<SharedEvaluatedLayer>(layer, w);
+    }
+
+    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
+        shared::read::<SharedEvaluatedLayer>(r)
+    }
+}
+
 /// `#[wire(with)]` for a source style's layers, each by key.
 pub(crate) mod layers {
-    use super::{Arc, LayerProperties, Reader, Writer, shared_layer_properties};
+    use super::{Arc, ErasedEvaluatedLayer, Reader, Writer, evaluated_layer};
 
-    pub(crate) fn write(layers: &[Arc<dyn LayerProperties>], w: &mut Writer) {
+    pub(crate) fn write(layers: &[Arc<dyn ErasedEvaluatedLayer>], w: &mut Writer) {
         mln_wire::Wire::write(&layers.len(), w);
         for layer in layers {
-            shared_layer_properties::write(layer, w);
+            evaluated_layer::write(layer, w);
         }
     }
 
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Vec<Arc<dyn LayerProperties>>> {
+    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Vec<Arc<dyn ErasedEvaluatedLayer>>> {
         let len = r.length()?;
         let mut layers = Vec::with_capacity(len.min(r.rest().len()));
         for _ in 0..len {
-            layers.push(shared_layer_properties::read(r)?);
+            layers.push(evaluated_layer::read(r)?);
         }
         Some(layers)
     }
@@ -155,7 +193,7 @@ bucket_types! {
 
 /// A bucket, and the ids of the layers that render it with the properties
 /// they were laid out with.
-type RenderedBucket<'a> = (&'a BucketPtr, Vec<(&'a String, &'a Arc<dyn LayerProperties>)>);
+type RenderedBucket<'a> = (&'a BucketPtr, Vec<(&'a String, &'a Arc<dyn ErasedEvaluatedLayer>)>);
 
 impl LayoutResult {
     /// Each bucket with the layers that render it, in layer id order.
@@ -183,7 +221,7 @@ impl LayoutResult {
                 layer_id.write(w);
                 // The layers that render a bucket cross back by key: the map
                 // side gets the properties it sent.
-                shared_layer_properties::write(properties, w);
+                evaluated_layer::write(properties, w);
             }
         }
     }
@@ -215,7 +253,7 @@ impl Wire for LayoutResult {
             let layers = r.length()?;
             for _ in 0..layers {
                 let layer_id = String::read(r)?;
-                let layer_properties = shared_layer_properties::read(r)?;
+                let layer_properties = evaluated_layer::read(r)?;
                 layer_render_data.insert(layer_id, LayerRenderData { bucket: Arc::clone(&bucket), layer_properties });
             }
         }

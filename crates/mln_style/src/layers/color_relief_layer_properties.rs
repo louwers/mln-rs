@@ -15,11 +15,6 @@ crate::properties!(
     use mln_style_types::ResamplingType, mln_util::Color;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a color-relief layer.
-    ColorReliefLayerProperties for ColorReliefLayerImpl, paint ColorReliefPaintProperties
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[

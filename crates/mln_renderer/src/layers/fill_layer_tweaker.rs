@@ -8,9 +8,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_IMAGE_TEXTURE, ID_FILL_TILE_PROPS_UBO,
 };
-use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::FillPaintProperties;
-use mln_style::layers::fill_layer_properties::FillLayerProperties;
+use mln_style::layers::{Fill, FillPaintProperties};
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -22,6 +20,7 @@ use crate::buckets::fill_bucket::FillBucket;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::paint_parameters::PaintParameters;
 
 pub(crate) struct FillLayerTweaker {
@@ -32,9 +31,9 @@ pub(crate) struct FillLayerTweaker {
 }
 
 impl FillLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
         FillLayerTweaker {
-            base: LayerTweakerBase::new(id, properties),
+            base: LayerTweakerBase::new(id, Some(properties)),
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
             tile_props_uniform_buffer: None,
@@ -61,9 +60,12 @@ impl LayerTweaker for FillLayerTweaker {
         }
 
         let context = parameters.context;
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<FillLayerProperties>(&properties);
-        let crossfade = *get_crossfade::<FillLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let layer = evaluated::<Fill>(&properties);
+        let evaluated = &layer.paint;
+        let crossfade = layer.crossfade;
 
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             let props_ubo = FillEvaluatedPropsUBO {

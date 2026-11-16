@@ -8,8 +8,8 @@ use std::sync::atomic::Ordering;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::expression::Value;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::heatmap_layer_properties::{HeatmapLayerProperties, HeatmapPaintProperties};
+use mln_style::layers::Heatmap;
+use mln_style::layers::heatmap_layer_properties::HeatmapPaintProperties;
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -22,6 +22,7 @@ use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
 use crate::bucket_parameters::BucketParameters;
 use crate::gfx::context::Context;
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::render_layer::RenderLayer;
@@ -59,13 +60,13 @@ pub(crate) struct HeatmapBucket {
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl HeatmapBucket {
-    pub(crate) fn new(parameters: &BucketParameters, layers: &[Arc<dyn LayerProperties>]) -> Self {
+    pub(crate) fn new(parameters: &BucketParameters, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Self {
         let mut paint_property_binders = VecMap::new();
         for layer in layers {
             // `emplace` keeps the first entry for an id.
-            paint_property_binders.entry(layer.base_impl.id.clone()).or_insert_with(|| {
+            paint_property_binders.entry(layer.style().id.clone()).or_insert_with(|| {
                 RwLock::new(HeatmapBinders::new(
-                    get_evaluated::<HeatmapLayerProperties>(layer),
+                    &evaluated::<Heatmap>(layer).paint,
                     f32::from(parameters.tile_id.overscaled_z),
                 ))
             });

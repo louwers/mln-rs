@@ -11,7 +11,6 @@ use geo_types::{Geometry, Point};
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map_types::MapMode;
 use mln_storage::{FileSource, Resource, Responder, Response};
-use mln_style::layer_properties::LayerProperties;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
@@ -20,6 +19,7 @@ use parking_lot::Mutex;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
 use crate::tests::tile::png;
 use crate::tests::{OneTile, style, tile_store};
@@ -66,7 +66,7 @@ fn water() -> Response {
     response
 }
 
-fn water_layer(id: &str, color: &str) -> Arc<dyn LayerProperties> {
+fn water_layer(id: &str, color: &str) -> Arc<dyn ErasedEvaluatedLayer> {
     layer(json!({"id": id, "type": "fill", "source-layer": "water", "paint": {"fill-color": color}}))
 }
 

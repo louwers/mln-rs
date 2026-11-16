@@ -34,7 +34,6 @@ pub mod format_section_override;
 pub mod image;
 pub mod layer;
 pub mod layer_impl;
-pub mod layer_properties;
 pub mod layer_type;
 pub mod layers;
 pub mod light;

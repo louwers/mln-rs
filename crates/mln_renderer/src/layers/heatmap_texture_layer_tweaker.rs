@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::shader_defines::ID_HEATMAP_TEXTURE_PROPS_UBO;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::heatmap_layer_properties::HeatmapLayerProperties;
+use mln_style::layers::Heatmap;
 use mln_util::mat4::{Mat4, matrix};
 
 use super::cast_matrix;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase};
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::paint_parameters::PaintParameters;
 
 pub(crate) struct HeatmapTextureLayerTweaker {
@@ -16,8 +16,8 @@ pub(crate) struct HeatmapTextureLayerTweaker {
 }
 
 impl HeatmapTextureLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
-        HeatmapTextureLayerTweaker { base: LayerTweakerBase::new(id, properties) }
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
+        HeatmapTextureLayerTweaker { base: LayerTweakerBase::new(id, Some(properties)) }
     }
 }
 
@@ -35,8 +35,10 @@ impl LayerTweaker for HeatmapTextureLayerTweaker {
             return;
         }
 
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<HeatmapLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let evaluated = &evaluated::<Heatmap>(&properties).paint;
 
         self.base.properties_updated = false;
 

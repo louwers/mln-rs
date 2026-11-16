@@ -39,11 +39,6 @@ crate::properties!(
     use crate::expression::Image, mln_style_types::TranslateAnchorType, mln_util::Color;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a line layer.
-    LineLayerProperties for LineLayerImpl, paint LinePaintProperties, layout LineLayoutProperties, [crossfade]
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[

@@ -12,9 +12,10 @@ use std::sync::Arc;
 use mln_style::expression::Expr;
 use mln_style::layer;
 use mln_style::layer::LayerTypeInfo;
-use mln_style::layer_properties::LayerProperties;
 use mln_style_types::VisibilityType;
 use mln_util::hash::{HashMap, RandomState};
+
+use crate::layer_type::ErasedEvaluatedLayer;
 
 pub(crate) struct LayoutGroupKey {
     // Direct comparable fields (fast path)
@@ -107,12 +108,12 @@ fn create_group_key(impl_: &Arc<dyn layer::Impl>) -> LayoutGroupKey {
 }
 
 /// The groups with their keys, in first-appearance order.
-pub(crate) type GroupMap = Vec<(LayoutGroupKey, Vec<Arc<dyn LayerProperties>>)>;
+pub(crate) type GroupMap = Vec<(LayoutGroupKey, Vec<Arc<dyn ErasedEvaluatedLayer>>)>;
 
 /// Groups `layers` by their layout keys. A layer joins the first group, in
 /// group order, whose key equals its own; only groups whose keys hash alike
 /// are compared.
-pub(crate) fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
+pub(crate) fn group_layers(layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> GroupMap {
     let mut group_map: GroupMap = Vec::with_capacity(layers.len());
     // The first group with each key hash, and for each group the next
     // group with its key's hash.
@@ -120,7 +121,7 @@ pub(crate) fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
     let mut next: Vec<Option<usize>> = Vec::with_capacity(layers.len());
 
     for layer in layers {
-        let key = create_group_key(&layer.base_impl);
+        let key = create_group_key(&layer.shared_style());
         let mut candidate = first.get(&key.hash).copied();
         let mut last = None;
         // libstdc++ compares the new key against the stored one.
@@ -151,28 +152,14 @@ pub(crate) fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
 mod tests {
     use mln_style::StyleRegistry;
     use mln_style::conversion::{Convertible, Error, convert_filter};
-    use mln_style::expression::{Dependency, Functions};
+    use mln_style::expression::Functions;
     use mln_style::filter::Filter;
     use mln_style::layer::Layer;
-    use mln_style::layer_properties::LayerPropertiesBase;
+    use mln_style::layer_type::LayerStyle;
+    use mln_style::layers::{Circle, Fill, Raster};
 
     use super::*;
-
-    struct Properties(LayerPropertiesBase);
-
-    impl LayerProperties for Properties {
-        fn base(&self) -> &LayerPropertiesBase {
-            &self.0
-        }
-
-        fn base_mut(&mut self) -> &mut LayerPropertiesBase {
-            &mut self.0
-        }
-
-        fn get_dependencies(&self) -> Dependency {
-            Dependency::NONE
-        }
-    }
+    use crate::layer_type::{EvaluatedLayer, LayerType};
 
     /// A filter of its own, which shares no expression with another.
     fn filter(json: &str) -> Filter {
@@ -180,27 +167,29 @@ mod tests {
         convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut Error::default()).expect("filter")
     }
 
-    fn layer(mut layer: Layer, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn LayerProperties> {
+    /// A `T` layer `id` of `source_layer` in "source".
+    fn layer<T: LayerType>(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
+        let mut layer = Layer::new(&StyleRegistry::with_builtins(), T::INFO.name, id, "source").unwrap();
         layer.set_source_layer(source_layer);
         if let Some(filter) = filter {
             layer.set_filter(filter);
         }
-        Arc::new(Properties(LayerPropertiesBase::new(layer.base_impl())))
+        Arc::new(EvaluatedLayer::<T>::new(LayerStyle::recover(&layer.base_impl()).unwrap()))
     }
 
-    fn circle(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn LayerProperties> {
-        layer(Layer::new(&StyleRegistry::with_builtins(), "circle", id, "source").unwrap(), source_layer, filter)
+    fn circle(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
+        layer::<Circle>(id, source_layer, filter)
     }
 
     fn ids(groups: &GroupMap) -> Vec<Vec<String>> {
-        groups.iter().map(|(_, group)| group.iter().map(|l| l.base_impl.id.clone()).collect()).collect()
+        groups.iter().map(|(_, group)| group.iter().map(|l| l.style().id.clone()).collect()).collect()
     }
 
     /// The grouping by comparing each key with every group's, in order.
-    fn grouped_by_comparison(layers: &[Arc<dyn LayerProperties>]) -> Vec<Vec<String>> {
+    fn grouped_by_comparison(layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Vec<Vec<String>> {
         let mut groups: GroupMap = Vec::new();
         for layer in layers {
-            let key = create_group_key(&layer.base_impl);
+            let key = create_group_key(&layer.shared_style());
             match groups.iter_mut().find(|(k, _)| key == *k) {
                 Some((_, group)) => group.push(Arc::clone(layer)),
                 None => groups.push((key, vec![Arc::clone(layer)])),
@@ -221,11 +210,7 @@ mod tests {
             circle("c", "roads", Some(&motorway)),
             circle("d", "roads", None),
             circle("e", "water", Some(&motorway)),
-            layer(
-                Layer::new(&StyleRegistry::with_builtins(), "fill", "f", "source").unwrap(),
-                "roads",
-                Some(&motorway),
-            ),
+            layer::<Fill>("f", "roads", Some(&motorway)),
             circle("g", "roads", Some(&primary)),
             circle("h", "roads", None),
             // An equal filter that isn't shared: a filterable layer's
@@ -242,9 +227,7 @@ mod tests {
     /// them.
     #[test]
     fn groups_equal_filters_that_are_not_shared() {
-        let raster = |id: &str, json: &str| {
-            layer(Layer::new(&StyleRegistry::with_builtins(), "raster", id, "source").unwrap(), "", Some(&filter(json)))
-        };
+        let raster = |id: &str, json: &str| layer::<Raster>(id, "", Some(&filter(json)));
         let layers = [
             raster("a", r#"["==", ["get", "rank"], 0]"#),
             raster("b", r#"["==", ["get", "rank"], 1]"#),
@@ -272,7 +255,8 @@ mod tests {
         assert_eq!(groups.len(), 50);
         assert_eq!(groups, grouped_by_comparison(&layers));
         // Each group's key hashes apart from the others.
-        let hashes: mln_util::hash::HashSet<u64> = layers.iter().map(|l| create_group_key(&l.base_impl).hash).collect();
+        let hashes: mln_util::hash::HashSet<u64> =
+            layers.iter().map(|l| create_group_key(&l.shared_style()).hash).collect();
         assert_eq!(hashes.len(), 50);
     }
 }

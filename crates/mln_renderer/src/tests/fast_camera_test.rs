@@ -19,10 +19,9 @@ use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, Tile
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::StyleRegistry;
 use mln_style::layer::{Layer, downcast_arc};
-use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::fill_layer::Impl as FillLayerImpl;
 use mln_style::layers::raster_layer::Impl as RasterLayerImpl;
-use mln_style::layers::{FillLayerProperties, RasterLayerProperties};
+use mln_style::layers::{Fill, Raster};
 use mln_style::source::Source;
 use mln_style::sources::tile_source::TileSource;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
@@ -32,6 +31,7 @@ use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
 
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::{self as render_source, RenderSource};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{SourceInfo, TileStore};
@@ -151,8 +151,8 @@ struct Scene {
     transform: Transform,
     vector: TileSource,
     raster: TileSource,
-    fill_layers: Vec<Arc<dyn LayerProperties>>,
-    raster_layers: Vec<Arc<dyn LayerProperties>>,
+    fill_layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
+    raster_layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     vector_render_source: Box<dyn RenderSource>,
     raster_render_source: Box<dyn RenderSource>,
     store: TileStore,
@@ -178,11 +178,11 @@ impl Scene {
 
         let mut fill = Layer::new(&StyleRegistry::with_builtins(), "fill", "water", "vector").unwrap();
         fill.set_source_layer("water");
-        let fill_layers: Vec<Arc<dyn LayerProperties>> =
-            vec![Arc::new(FillLayerProperties::new(downcast_arc::<FillLayerImpl>(&fill.base_impl())))];
+        let fill_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
+            vec![Arc::new(EvaluatedLayer::<Fill>::new(downcast_arc::<FillLayerImpl>(&fill.base_impl())))];
         let raster_layer = Layer::new(&StyleRegistry::with_builtins(), "raster", "raster", "raster").unwrap();
-        let raster_layers: Vec<Arc<dyn LayerProperties>> =
-            vec![Arc::new(RasterLayerProperties::new(downcast_arc::<RasterLayerImpl>(&raster_layer.base_impl())))];
+        let raster_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
+            vec![Arc::new(EvaluatedLayer::<Raster>::new(downcast_arc::<RasterLayerImpl>(&raster_layer.base_impl())))];
 
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(size).unwrap();

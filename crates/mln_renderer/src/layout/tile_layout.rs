@@ -10,7 +10,6 @@ use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer::LayerTypeInfo;
-use mln_style::layer_properties::LayerProperties;
 use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
@@ -27,6 +26,7 @@ use crate::bucket::BucketPtr;
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::group_by_layout::group_layers;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layermanager;
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
@@ -53,7 +53,7 @@ pub(crate) struct LayoutInput<'a> {
     /// `None` when the tile has no data.
     pub(crate) data: Option<&'a TileData>,
     /// The source's layers, in style order.
-    pub(crate) layers: &'a [Arc<dyn LayerProperties>],
+    pub(crate) layers: &'a [Arc<dyn ErasedEvaluatedLayer>],
     pub(crate) global_state: Option<&'a Arc<GlobalStateMap>>,
     pub(crate) font_faces: Option<&'a Arc<FontFaces>>,
     /// The images that exist, which `image` expressions branch on.
@@ -146,7 +146,7 @@ pub(crate) struct Discovered {
 }
 
 struct DiscoveredGroup {
-    layers: Vec<Arc<dyn LayerProperties>>,
+    layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     /// The layout of a group that can need glyphs or images, with its
     /// features selected and evaluated; `None` for a group `build` lays out
     /// alone.
@@ -175,7 +175,7 @@ pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
     let unavailable_images = UnavailableImages::new();
 
     for (_, layers) in group_layers(input.layers) {
-        let leader_impl = &layers[0].base_impl;
+        let leader_impl = &layers[0].style();
         if !data.has_layer(&leader_impl.source_layer)? {
             continue;
         }
@@ -228,8 +228,8 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
 
     let mut waiting = Vec::new();
     for DiscoveredGroup { layers, layout } in groups {
-        let leader_impl = &layers[0].base_impl;
-        let layer_ids: Vec<String> = layers.iter().map(|layer| layer.base_impl.id.clone()).collect();
+        let leader_impl = &layers[0].style();
+        let layer_ids: Vec<String> = layers.iter().map(|layer| layer.style().id.clone()).collect();
         built.feature_index.set_bucket_layer_ids(&leader_impl.id, &layer_ids);
 
         match layout {
@@ -268,13 +268,13 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
 
 /// Builds the bucket of a group that needs no glyphs or images.
 fn build_group(
-    layers: &[Arc<dyn LayerProperties>],
+    layers: &[Arc<dyn ErasedEvaluatedLayer>],
     data: &TileData,
     input: &LayoutInput<'_>,
     filter_groups: &mut FilterGroups,
     built: &mut Built,
 ) -> Result<(), Error> {
-    let leader_impl = &layers[0].base_impl;
+    let leader_impl = &layers[0].style();
     let layer_type = leader_impl.get_type_info();
     let parameters = input.bucket_parameters(layer_type);
     let canonical = &input.id.canonical;
@@ -353,7 +353,7 @@ fn build_group(
         let bucket: BucketPtr = Arc::from(bucket);
         for layer in layers {
             // `emplace` keeps an existing entry.
-            built.render_data.entry(layer.base_impl.id.clone()).or_insert_with(|| LayerRenderData {
+            built.render_data.entry(layer.style().id.clone()).or_insert_with(|| LayerRenderData {
                 bucket: Arc::clone(&bucket),
                 layer_properties: Arc::clone(layer),
             });

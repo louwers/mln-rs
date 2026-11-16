@@ -314,7 +314,7 @@ impl OneTile {
 /// Port-only: a source's style of `layers`, without global state or font
 /// faces.
 pub(crate) fn style(
-    layers: &[std::sync::Arc<dyn mln_style::layer_properties::LayerProperties>],
+    layers: &[std::sync::Arc<dyn crate::layer_type::ErasedEvaluatedLayer>],
 ) -> std::sync::Arc<crate::tile::job::SourceStyle> {
     std::sync::Arc::new(crate::tile::job::SourceStyle {
         version: 0,

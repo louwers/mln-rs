@@ -30,9 +30,9 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
+use mln_style::layers::Raster;
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
-use mln_style::layers::raster_layer_properties::{RasterLayerProperties, RasterPaintProperties};
+use mln_style::layers::raster_layer_properties::RasterPaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_tile_id::OverscaledTileID;
@@ -50,6 +50,7 @@ use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
     LayerPrepareParameters, RenderLayer, RenderLayerBase, activate_layer_group, change_layer_index,
@@ -63,6 +64,8 @@ use crate::update_parameters::UpdateParameters;
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &RasterLayerImpl {
     impl_.downcast_ref::<RasterLayerImpl>().expect("RenderRasterLayer: not a raster layer impl")
 }
+
+impl LayerType for Raster {}
 
 pub(crate) struct RenderRasterLayer {
     base: RenderLayerBase,
@@ -86,7 +89,7 @@ pub(crate) struct RenderRasterLayer {
 impl RenderRasterLayer {
     pub(crate) fn new(impl_: Arc<RasterLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(RasterLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Raster>::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderRasterLayer {
@@ -124,7 +127,7 @@ impl RenderRasterLayer {
     /// The sampler of the layer's tile textures for the evaluated
     /// properties.
     fn sampler_state(&self) -> SamplerState {
-        let evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<Raster>(&self.base.evaluated_properties).paint;
         // GL JS draws Nearest when either property asks for it.
         let nearest = *evaluated.raster_resampling.uniform() == RasterResamplingType::Nearest
             || *evaluated.resampling.uniform() == ResamplingType::Nearest;
@@ -257,18 +260,15 @@ impl RenderLayer for RenderRasterLayer {
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = RasterLayerProperties::with_evaluated(
+        let previous_evaluated = evaluated::<Raster>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Raster>::with_paint(
             downcast_arc::<RasterLayerImpl>(&self.base.base_impl),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.raster_opacity.uniform() > 0.0 {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        self.base.passes =
+            if *properties.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {

@@ -8,8 +8,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_TILE_PROPS_UBO,
 };
 use mln_math::deg2radf;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::hillshade_layer_properties::{HillshadeLayerProperties, HillshadePaintProperties};
+use mln_style::layers::Hillshade;
+use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
@@ -19,6 +19,7 @@ use super::{cast_matrix, check_tweak_drawable_ptr};
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::paint_parameters::PaintParameters;
 
 /// Structure to hold processed illumination properties
@@ -128,9 +129,9 @@ pub(crate) struct HillshadeLayerTweaker {
 }
 
 impl HillshadeLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
         HillshadeLayerTweaker {
-            base: LayerTweakerBase::new(id, properties),
+            base: LayerTweakerBase::new(id, Some(properties)),
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
             tile_props_uniform_buffer: None,
@@ -152,8 +153,10 @@ impl LayerTweaker for HillshadeLayerTweaker {
             return;
         }
 
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<HillshadeLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let evaluated = &evaluated::<Hillshade>(&properties).paint;
 
         // Get illumination properties
         let mut illumination = get_illumination_properties(evaluated);

@@ -14,7 +14,6 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::expression::Dependency;
-use mln_style::layer_properties::LayerProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::OverscaledTileID;
@@ -31,6 +30,7 @@ use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::context::Context;
 use crate::layer_group::LayerGroupPtr;
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
@@ -45,7 +45,7 @@ pub(crate) type RenderLayerPtr = Rc<RefCell<dyn RenderLayer>>;
 #[derive(Clone)]
 pub(crate) struct LayerRenderData {
     pub(crate) bucket: BucketPtr,
-    pub(crate) layer_properties: Arc<dyn LayerProperties>,
+    pub(crate) layer_properties: Arc<dyn ErasedEvaluatedLayer>,
 }
 
 // symbols: `BucketPlacementData`. C++ holds `reference_wrapper`s to the
@@ -444,7 +444,7 @@ pub(crate) fn compute_globe_feature_ndc_bound(
 
 /// The data members of `RenderLayer`.
 pub struct RenderLayerBase {
-    pub(crate) evaluated_properties: Arc<dyn LayerProperties>,
+    pub(crate) evaluated_properties: Arc<dyn ErasedEvaluatedLayer>,
     pub(crate) base_impl: Arc<dyn layer::Impl>,
 
     pub(crate) passes: RenderPass,
@@ -473,8 +473,8 @@ pub struct RenderLayerBase {
 }
 
 impl RenderLayerBase {
-    pub(crate) fn new(properties: Arc<dyn LayerProperties>) -> Self {
-        let base_impl = Arc::clone(&properties.base_impl);
+    pub(crate) fn new(properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
+        let base_impl = properties.shared_style();
         RenderLayerBase {
             evaluated_properties: properties,
             base_impl,
@@ -636,7 +636,7 @@ pub trait RenderLayer {
         let render_tiles = base.render_tiles.clone().expect("renderTiles");
         for tile in render_tiles.iter() {
             if let Some(render_data) = tile.get_layer_render_data(&*base.base_impl) {
-                base.passes |= RenderPass(render_data.layer_properties.render_passes);
+                base.passes |= RenderPass(render_data.layer_properties.render_passes());
             }
         }
     }

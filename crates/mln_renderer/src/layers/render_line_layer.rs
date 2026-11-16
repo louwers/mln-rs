@@ -18,9 +18,9 @@ use mln_gfx::{
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
+use mln_style::layers::Line;
 use mln_style::layers::line_layer_impl::Impl as LineLayerImpl;
-use mln_style::layers::line_layer_properties::{LineLayerProperties, LinePaintProperties};
+use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::LineCapType;
 use mln_util::Color;
@@ -39,6 +39,7 @@ use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
@@ -240,6 +241,8 @@ fn read_line_attributes(
     );
 }
 
+impl LayerType for Line {}
+
 pub(crate) struct RenderLineLayer {
     base: RenderLayerBase,
     // Paint properties
@@ -262,7 +265,7 @@ pub(crate) struct RenderLineLayer {
 impl RenderLineLayer {
     pub(crate) fn new(impl_: Arc<LineLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(LineLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Line>::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderLineLayer {
@@ -306,7 +309,7 @@ impl RenderLineLayer {
         zoom: f32,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> f32 {
-        let evaluated = get_evaluated::<LineLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<Line>(&self.base.evaluated_properties).paint;
         let line_width = evaluated.line_width.evaluate(&EvaluationContext::with_zoom_feature_state(
             zoom,
             Some(feature),
@@ -399,13 +402,15 @@ impl RenderLayer for RenderLineLayer {
             self.update_color_ramp();
         }
 
-        let previous_evaluated = get_evaluated::<LineLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = LineLayerProperties::with_evaluated(
-            downcast_arc::<LineLayerImpl>(&self.base.base_impl),
-            parameters.get_crossfade_parameters(),
-            self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-        );
-        let evaluated = &properties.evaluated;
+        let previous_evaluated = evaluated::<Line>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Line> {
+            crossfade: parameters.get_crossfade_parameters(),
+            ..EvaluatedLayer::with_paint(
+                downcast_arc::<LineLayerImpl>(&self.base.base_impl),
+                self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
+            )
+        };
+        let evaluated = &properties.paint;
 
         self.base.passes = if evaluated.line_opacity.constant_or(&1.0) > 0.0
             && evaluated.line_color.constant_or(&Color::black()).a > 0.0
@@ -415,7 +420,7 @@ impl RenderLayer for RenderLineLayer {
         } else {
             RenderPass::None
         };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
@@ -428,7 +433,7 @@ impl RenderLayer for RenderLineLayer {
     }
 
     fn has_crossfade(&self) -> bool {
-        get_crossfade::<LineLayerProperties>(&self.base.evaluated_properties).t != 1.0
+        evaluated::<Line>(&self.base.evaluated_properties).crossfade.t != 1.0
     }
 
     // query
@@ -443,7 +448,7 @@ impl RenderLayer for RenderLineLayer {
         _projector: &mln_map_types::TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
-        let evaluated = get_evaluated::<LineLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<Line>(&self.base.evaluated_properties).paint;
         // Translate query geometry
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
@@ -488,7 +493,7 @@ impl RenderLayer for RenderLineLayer {
                 continue;
             };
 
-            let evaluated = get_evaluated::<LineLayerProperties>(&render_data.layer_properties);
+            let evaluated = &evaluated::<Line>(&render_data.layer_properties).paint;
             if evaluated.line_dasharray.faded().from.is_empty() {
                 continue;
             }
@@ -540,7 +545,7 @@ impl RenderLayer for RenderLineLayer {
         }
 
         let render_pass =
-            RenderPass(self.base.evaluated_properties.render_passes & !RenderPass::Opaque.underlying_type());
+            RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
 
         {
             let mut tile_layer_group = layer_group.borrow_mut();
@@ -649,7 +654,7 @@ impl RenderLayer for RenderLineLayer {
                     paint_property_binders.depends_on_feature_state(),
                 )
             };
-            let evaluated = get_evaluated::<LineLayerProperties>(&render_data.layer_properties);
+            let evaluated = &evaluated::<Line>(&render_data.layer_properties).paint;
 
             if parameters.capture_rendered_features {
                 let params = &render_tree.get_parameters().transform_params;

@@ -5,8 +5,8 @@ use geometry::Point;
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorDistances, PolylineGeneratorOptions, dist};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{EvaluationContext, Image, Value};
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::line_layer_properties::{LineLayerProperties, LineLayoutProperties, LinePaintProperties};
+use mln_style::layers::Line;
+use mln_style::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
 use mln_style_types::image::ImagePositions;
 use mln_style_types::{LineCapType, LineJoinType};
 use mln_tile_id::CanonicalTileID;
@@ -23,6 +23,7 @@ use parking_lot::RwLock;
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
 use crate::gfx::context::Context;
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::render_layer::RenderLayer;
@@ -78,15 +79,15 @@ impl LineBucket {
     #[must_use]
     pub(crate) fn new(
         layout: LineLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
         zoom: f32,
         overscaling: u32,
     ) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
-            paint_property_binders.entry(id.clone()).or_insert_with(|| {
-                RwLock::new(LineBinders::new(get_evaluated::<LineLayerProperties>(properties), zoom))
-            });
+            paint_property_binders
+                .entry(id.clone())
+                .or_insert_with(|| RwLock::new(LineBinders::new(&evaluated::<Line>(properties).paint, zoom)));
         }
         LineBucket {
             base: BucketBase::default(),
@@ -311,7 +312,7 @@ impl Bucket for LineBucket {
     }
 
     fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
-        let evaluated = get_evaluated::<LineLayerProperties>(&layer.base().evaluated_properties);
+        let evaluated = &evaluated::<Line>(&layer.base().evaluated_properties).paint;
         let binders = self.paint_property_binders.get(layer.get_id());
         let translate = evaluated.line_translate.uniform();
         let offset = get_or_max(

@@ -415,7 +415,24 @@ macro_rules! properties {
                 }
             }
 
-            impl $crate::layer_type::PaintSet for Transitionable {}
+            impl $crate::layer_type::PaintSet for Transitionable {
+                type Evaluated = PossiblyEvaluated;
+
+                fn evaluated_dependencies(evaluated: &PossiblyEvaluated) -> $crate::expression::Dependency {
+                    evaluated.get_dependencies()
+                }
+
+                fn constants_mask(evaluated: &PossiblyEvaluated) -> u64 {
+                    evaluated.constants_mask()
+                }
+
+                fn collect_evaluated_global_state_refs(
+                    evaluated: &PossiblyEvaluated,
+                    refs: &mut mln_vec_map::VecSet<String>,
+                ) {
+                    evaluated.collect_global_state_refs(refs);
+                }
+            }
 
             impl Unevaluated {
                 pub fn has_transition(&self) -> bool {

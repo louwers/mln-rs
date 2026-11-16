@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use mln_image::decoder;
 use mln_style::expression::GlobalStateMap;
-use mln_style::layer_properties::LayerProperties;
 use mln_text::glyph::FontFaces;
 use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -30,6 +29,7 @@ use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
 use crate::geometry::dem_data::DEMData;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::contents::LayoutResult;
 use crate::tile::worker_codec::fields;
@@ -131,7 +131,7 @@ pub(crate) struct SourceStyle {
     pub(crate) version: u64,
     /// The source's visible layers in style order, for every zoom: a job
     /// lays out those of its tile's zoom.
-    pub(crate) layers: Vec<Arc<dyn LayerProperties>>,
+    pub(crate) layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) font_faces: Option<Arc<FontFaces>>,
 }
@@ -140,7 +140,7 @@ impl SourceStyle {
     /// Whether this style has these exact values.
     pub(crate) fn is(
         &self,
-        layers: &[Arc<dyn LayerProperties>],
+        layers: &[Arc<dyn ErasedEvaluatedLayer>],
         global_state: Option<&Arc<GlobalStateMap>>,
         font_faces: Option<&Arc<FontFaces>>,
     ) -> bool {
@@ -268,10 +268,10 @@ fn layout(
 
     let tile_id = id.tile.id;
     let zoom = f32::from(tile_id.overscaled_z);
-    let layers: Vec<Arc<dyn LayerProperties>> = style
+    let layers: Vec<Arc<dyn ErasedEvaluatedLayer>> = style
         .layers
         .iter()
-        .filter(|layer| zoom >= layer.base_impl.min_zoom.floor() && zoom < layer.base_impl.max_zoom.ceil())
+        .filter(|layer| zoom >= layer.style().min_zoom.floor() && zoom < layer.style().max_zoom.ceil())
         .cloned()
         .collect();
     let input = LayoutInput {

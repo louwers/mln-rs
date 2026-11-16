@@ -7,9 +7,8 @@ use mln_gfx::shaders::shader_defines::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
 use mln_gfx::{AttributeDataType, ColorMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
-use mln_style::layers::{BackgroundLayerProperties, BackgroundPaintProperties};
+use mln_style::layers::{Background, BackgroundPaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
 use mln_util::range::Range;
@@ -22,6 +21,7 @@ use crate::gfx::context::Context;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::layers::background_layer_tweaker::BackgroundLayerTweaker;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
@@ -47,6 +47,8 @@ fn add_pattern_if_needed(id: &str, params: &LayerPrepareParameters<'_>) {
     }
 }
 
+impl LayerType for Background {}
+
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     unevaluated: BackgroundPaintProperties::Unevaluated,
@@ -57,7 +59,7 @@ pub(crate) struct RenderBackgroundLayer {
 impl RenderBackgroundLayer {
     pub(crate) fn new(impl_: Arc<BackgroundLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(BackgroundLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Background>::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderBackgroundLayer { base, unevaluated, plain_shader: None, pattern_shader: None }
@@ -98,14 +100,13 @@ impl RenderLayer for RenderBackgroundLayer {
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = background_layer_properties(&self.base.evaluated_properties).clone();
         let evaluated = self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated);
-        let mut properties = BackgroundLayerProperties::with_evaluated(
-            downcast_arc::<BackgroundLayerImpl>(&self.base.base_impl),
-            parameters.get_crossfade_parameters(),
-            evaluated,
-        );
+        let mut properties = EvaluatedLayer::<Background> {
+            crossfade: parameters.get_crossfade_parameters(),
+            ..EvaluatedLayer::with_paint(downcast_arc::<BackgroundLayerImpl>(&self.base.base_impl), evaluated)
+        };
 
-        self.base.passes = self.passes_for(&properties.evaluated);
-        properties.base.render_passes = self.base.passes.underlying_type();
+        self.base.passes = self.passes_for(&properties.paint);
+        properties.render_passes = self.base.passes.underlying_type();
 
         self.base.evaluated_properties = Arc::new(properties);
 

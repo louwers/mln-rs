@@ -15,7 +15,6 @@ use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map_types::MapMode;
 use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer_properties::{LayerProperties, LayerPropertiesBase};
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::TileData;
@@ -30,6 +29,7 @@ use serde_json::json;
 
 use crate::gfx::dynamic_texture::DynamicTextureBinId;
 use crate::image_store::ImageStoreObserver;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
 use crate::tests::tile::png;
 use crate::tests::{OneTile, style, tile_store};
@@ -128,7 +128,7 @@ pub(super) fn image(id: &str) -> Arc<ImageImpl> {
 
 /// A layer from its style JSON on source `s`, evaluated at zoom 0 as the
 /// `RenderOrchestrator` evaluates it.
-pub(super) fn layer(mut json: serde_json::Value) -> Arc<dyn LayerProperties> {
+pub(super) fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     json["source"] = json!("s");
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
@@ -139,7 +139,7 @@ pub(super) fn layer(mut json: serde_json::Value) -> Arc<dyn LayerProperties> {
 }
 
 /// Icons of `icon-image`, at size `size`.
-pub(super) fn icons(icon_image: &serde_json::Value, size: f32) -> Arc<dyn LayerProperties> {
+pub(super) fn icons(icon_image: &serde_json::Value, size: f32) -> Arc<dyn ErasedEvaluatedLayer> {
     layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": icon_image, "icon-size": size}}))
 }
 
@@ -188,7 +188,7 @@ impl Test {
     }
 
     /// A tile with `layers`, whose data arrived.
-    fn load(&mut self, layers: &[Arc<dyn LayerProperties>]) {
+    fn load(&mut self, layers: &[Arc<dyn ErasedEvaluatedLayer>]) {
         self.tile.set_style(&style(layers));
         self.tile.set_data(Some(points()));
     }
@@ -462,19 +462,29 @@ impl scheduler::Scheduler for Catching {
     fn wait_for_empty(&self) {}
 }
 
-/// Layer properties of no layer type's, which a layout of their layer's
-/// type can't read: a bug that the layout panics at.
-struct Mistyped(LayerPropertiesBase);
+/// Evaluated values of no layer type's, which a layout of their layer's type
+/// can't read: a bug that the layout panics at.
+struct Mistyped(Arc<dyn mln_style::layer::Impl>);
 
-impl LayerProperties for Mistyped {
-    fn base(&self) -> &LayerPropertiesBase {
-        &self.0
+impl ErasedEvaluatedLayer for Mistyped {
+    fn style(&self) -> &dyn mln_style::layer::Impl {
+        &*self.0
     }
-    fn base_mut(&mut self) -> &mut LayerPropertiesBase {
-        &mut self.0
+    fn shared_style(&self) -> Arc<dyn mln_style::layer::Impl> {
+        Arc::clone(&self.0)
     }
-    fn get_dependencies(&self) -> mln_style::expression::Dependency {
+    fn render_passes(&self) -> u8 {
+        0
+    }
+    fn constants_mask(&self) -> u64 {
+        0
+    }
+    fn evaluated_dependencies(&self) -> mln_style::expression::Dependency {
         mln_style::expression::Dependency::NONE
+    }
+    fn collect_evaluated_global_state_refs(&self, _refs: &mut mln_vec_map::VecSet<String>) {}
+    fn write(&self, w: &mut mln_wire::Writer) {
+        w.fail("no wire form".to_owned());
     }
 }
 
@@ -486,8 +496,7 @@ fn a_panicking_native_job_fails() {
     let mut workers = PoolWorkers::new(pool, 1);
     let inbox = Inbox::new(Arc::new(|| {}));
     let circles = layer(json!({"id": "dots", "type": "circle"}));
-    let mistyped: Arc<dyn LayerProperties> =
-        Arc::new(Mistyped(LayerPropertiesBase::new(Arc::clone(&circles.base_impl))));
+    let mistyped: Arc<dyn ErasedEvaluatedLayer> = Arc::new(Mistyped(circles.shared_style()));
     let id = JobId {
         tile: crate::tile::job::TileKey {
             source: crate::tile::job::SourceKey(1),

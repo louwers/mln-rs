@@ -32,9 +32,9 @@ use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
+use mln_style::layers::ColorRelief;
 use mln_style::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
-use mln_style::layers::color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefPaintProperties};
+use mln_style::layers::color_relief_layer_properties::ColorReliefPaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
@@ -55,6 +55,7 @@ use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
 use crate::render_pass::RenderPass;
@@ -67,6 +68,8 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &ColorReliefLayerImpl {
 }
 
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
+
+impl LayerType for ColorRelief {}
 
 pub(crate) struct RenderColorReliefLayer {
     base: RenderLayerBase,
@@ -103,7 +106,7 @@ pub(crate) struct RenderColorReliefLayer {
 impl RenderColorReliefLayer {
     pub(crate) fn new(impl_: Arc<ColorReliefLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(ColorReliefLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<ColorRelief>::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
 
@@ -291,18 +294,18 @@ impl RenderLayer for RenderColorReliefLayer {
             self.update_color_ramp();
         }
 
-        let previous_evaluated = get_evaluated::<ColorReliefLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = ColorReliefLayerProperties::with_evaluated(
+        let previous_evaluated = evaluated::<ColorRelief>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<ColorRelief>::with_paint(
             downcast_arc::<ColorReliefLayerImpl>(&self.base.base_impl),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.color_relief_opacity.uniform() > 0.0 {
+        self.base.passes = if *properties.paint.color_relief_opacity.uniform() > 0.0 {
             RenderPass::Translucent
         } else {
             RenderPass::None
         };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
@@ -384,7 +387,7 @@ impl RenderLayer for RenderColorReliefLayer {
         };
 
         let render_pass = RenderPass::Translucent;
-        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes) == 0 {
+        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
             return;
         }
 
@@ -452,7 +455,7 @@ impl RenderLayer for RenderColorReliefLayer {
             render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.base_impl).map(|b| b.get_id())).collect();
         self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
-        let evaluated = get_evaluated::<ColorReliefLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<ColorRelief>(&self.base.evaluated_properties).paint;
         let dem_sampler = SamplerState {
             filter: match *evaluated.resampling.uniform() {
                 ResamplingType::Linear => TextureFilterType::Linear,

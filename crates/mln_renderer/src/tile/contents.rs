@@ -11,7 +11,6 @@ use std::sync::Arc;
 use mln_actor::TaggedScheduler;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer;
-use mln_style::layer_properties::LayerProperties;
 use mln_style_types::image::{ImagePosition, ImagePositions, ImageType};
 use mln_text::glyph::{GlyphID, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
@@ -29,6 +28,7 @@ use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::geometry::feature_index::{FeatureIndex, QueryLayers, QueryResults};
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
 use crate::render_layer::LayerRenderData;
@@ -57,7 +57,7 @@ impl LayoutResult {
     /// nothing.
     pub(crate) fn get_layer_render_data(&self, layer_impl: &dyn layer::Impl) -> Option<&LayerRenderData> {
         let result = self.layer_render_data.get(&layer_impl.id)?;
-        if result.layer_properties.base_impl.get_type_info().name != layer_impl.get_type_info().name {
+        if result.layer_properties.style().get_type_info().name != layer_impl.get_type_info().name {
             return None;
         }
         Some(result)
@@ -227,7 +227,7 @@ impl GeometryContents {
         let no_patterns = ImagePositions::default();
         let pattern_positions = self.pattern_positions().unwrap_or(&no_patterns);
         for (layer_id, render_data) in &self.result.layer_render_data {
-            let source_layer_id = &render_data.layer_properties.base_impl.source_layer;
+            let source_layer_id = &render_data.layer_properties.style().source_layer;
             // The worker got the layer from the same data.
             if let Ok(Some(source_layer)) = layers.layer(source_layer_id) {
                 let Some(feature_states) = states.get(source_layer_id) else {
@@ -419,13 +419,13 @@ impl Contents {
     /// data then takes the new properties if only their values changed.
     pub(crate) fn layer_properties_updated(
         this: &mut Rc<Contents>,
-        layer_properties: &Arc<dyn LayerProperties>,
+        layer_properties: &Arc<dyn ErasedEvaluatedLayer>,
     ) -> bool {
         let Contents::Geometry(contents) = &**this else {
             return !matches!(**this, Contents::Empty);
         };
-        let layer_impl = &layer_properties.base_impl;
-        let Some(render_data) = contents.result.get_layer_render_data(&**layer_impl) else {
+        let layer_impl = layer_properties.style();
+        let Some(render_data) = contents.result.get_layer_render_data(layer_impl) else {
             return false;
         };
         if !Arc::ptr_eq(&render_data.layer_properties, layer_properties)

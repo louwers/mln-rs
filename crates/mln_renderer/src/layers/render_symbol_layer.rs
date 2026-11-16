@@ -27,11 +27,9 @@ use mln_gfx::vertex_vector::VertexVector;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
+use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer_impl::{Impl as SymbolLayerImpl, SymbolLayerPaintPropertyOverrides};
-use mln_style::layers::symbol_layer_properties::{
-    SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties,
-};
+use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
@@ -58,6 +56,7 @@ use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::{LayerTweakerPtr, get_tile_matrix_for};
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
@@ -861,6 +860,8 @@ impl SegmentGroup {
     }
 }
 
+impl LayerType for Symbol {}
+
 pub(crate) struct RenderSymbolLayer {
     base: RenderLayerBase,
     unevaluated: SymbolPaintProperties::Unevaluated,
@@ -885,7 +886,7 @@ pub(crate) struct RenderSymbolLayer {
 impl RenderSymbolLayer {
     pub(crate) fn new(impl_: Arc<SymbolLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(SymbolLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Symbol>::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderSymbolLayer {
@@ -1061,8 +1062,8 @@ impl RenderLayer for RenderSymbolLayer {
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = get_evaluated::<SymbolLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = SymbolLayerProperties::with_evaluated(
+        let previous_evaluated = evaluated::<Symbol>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Symbol>::with_paint(
             downcast_arc::<SymbolLayerImpl>(&self.base.base_impl),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
@@ -1070,13 +1071,13 @@ impl RenderLayer for RenderSymbolLayer {
         if self.has_format_section_overrides {
             mln_style::format_section_override::set_overrides(
                 &impl_cast(&self.base.base_impl).layout,
-                &mut properties.evaluated,
+                &mut properties.paint,
                 &self.unevaluated,
                 &parameters.global_state,
             );
         }
 
-        let evaluated = &properties.evaluated;
+        let evaluated = &properties.paint;
         let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
             || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
         let has_text_opacity = evaluated.text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
@@ -1090,7 +1091,7 @@ impl RenderLayer for RenderSymbolLayer {
             } else {
                 RenderPass::None
             };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         // The symbol tweaker supports updating properties. When the style
@@ -1161,7 +1162,7 @@ impl RenderLayer for RenderSymbolLayer {
         self.base.placement_data.clear();
         self.base.follower_data.clear();
 
-        let evaluated = &get_evaluated::<SymbolLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<Symbol>(&self.base.evaluated_properties).paint;
         let text_translate = SymbolTranslate {
             offset: *evaluated.text_translate.uniform(),
             anchor: *evaluated.text_translate_anchor.uniform(),
@@ -1389,7 +1390,7 @@ impl RenderLayer for RenderSymbolLayer {
                 continue;
             }
 
-            let evaluated = get_evaluated::<SymbolLayerProperties>(&render_data.layer_properties);
+            let evaluated = &evaluated::<Symbol>(&render_data.layer_properties).paint;
 
             if update_parameters.capture_rendered_features {
                 let params = &render_tree.get_parameters().transform_params;
@@ -1541,7 +1542,7 @@ impl RenderLayer for RenderSymbolLayer {
             }
             let visible = buffer.segment_has_visible_vertices(group.segment);
 
-            let evaluated = get_evaluated::<SymbolLayerProperties>(&render_data.layer_properties);
+            let evaluated = &evaluated::<Symbol>(&render_data.layer_properties).paint;
             let Some(bucket_paint_properties) = bucket.paint_properties.get(self.get_id()) else {
                 continue;
             };

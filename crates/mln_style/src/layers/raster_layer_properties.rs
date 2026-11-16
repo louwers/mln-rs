@@ -21,11 +21,6 @@ crate::properties!(
     use mln_style_types::RasterResamplingType, mln_style_types::ResamplingType;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a raster layer.
-    RasterLayerProperties for RasterLayerImpl, paint RasterPaintProperties
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[

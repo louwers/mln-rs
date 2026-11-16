@@ -29,9 +29,9 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
+use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
-use mln_style::layers::hillshade_layer_properties::{HillshadeLayerProperties, HillshadePaintProperties};
+use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::ResamplingType;
 use mln_util::constants;
@@ -51,6 +51,7 @@ use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
 use crate::render_pass::RenderPass;
@@ -65,6 +66,8 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HillshadeLayerImpl {
 
 const HILLSHADE_PREPARE_SHADER_GROUP_NAME: &str = "HillshadePrepareShader";
 const HILLSHADE_SHADER_GROUP_NAME: &str = "HillshadeShader";
+
+impl LayerType for Hillshade {}
 
 pub(crate) struct RenderHillshadeLayer {
     base: RenderLayerBase,
@@ -89,7 +92,7 @@ pub(crate) struct RenderHillshadeLayer {
 impl RenderHillshadeLayer {
     pub(crate) fn new(impl_: Arc<HillshadeLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(HillshadeLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Hillshade>::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderHillshadeLayer {
@@ -175,18 +178,18 @@ impl RenderLayer for RenderHillshadeLayer {
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = get_evaluated::<HillshadeLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = HillshadeLayerProperties::with_evaluated(
+        let previous_evaluated = evaluated::<Hillshade>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Hillshade>::with_paint(
             downcast_arc::<HillshadeLayerImpl>(&self.base.base_impl),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.hillshade_exaggeration.uniform() > 0.0 {
+        self.base.passes = if *properties.paint.hillshade_exaggeration.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
             RenderPass::None
         };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
             layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
@@ -294,7 +297,7 @@ impl RenderLayer for RenderHillshadeLayer {
         };
 
         let render_pass = RenderPass::Translucent;
-        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes) == 0 {
+        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
             return;
         }
 
@@ -318,7 +321,7 @@ impl RenderLayer for RenderHillshadeLayer {
 
         // `resampling` filters the prepared texture the tile drawable
         // samples; the prepare pass reads the DEM with Nearest regardless.
-        let evaluated = get_evaluated::<HillshadeLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<Hillshade>(&self.base.evaluated_properties).paint;
         let resampling_filter = match *evaluated.resampling.uniform() {
             ResamplingType::Linear => TextureFilterType::Linear,
             ResamplingType::Nearest => TextureFilterType::Nearest,

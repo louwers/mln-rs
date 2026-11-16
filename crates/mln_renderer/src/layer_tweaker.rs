@@ -12,7 +12,6 @@ use glam::Vec2;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_map_types::{ProjectionData, TransformState};
-use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, M2PI};
@@ -22,6 +21,7 @@ use crate::drawable::Drawable;
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use crate::layer_group::LayerGroup;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
@@ -31,13 +31,15 @@ pub(crate) type LayerTweakerPtr = Rc<RefCell<dyn LayerTweaker>>;
 /// The data members of `LayerTweaker`.
 pub struct LayerTweakerBase {
     pub(crate) id: String,
-    pub(crate) evaluated_properties: Arc<dyn LayerProperties>,
+    /// The evaluated values of the layer the tweaker sets the uniforms of,
+    /// if it is a style layer.
+    pub(crate) evaluated_properties: Option<Arc<dyn ErasedEvaluatedLayer>>,
     pub(crate) properties_updated: bool,
     pub(crate) projection_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl LayerTweakerBase {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Option<Arc<dyn ErasedEvaluatedLayer>>) -> Self {
         LayerTweakerBase {
             id,
             evaluated_properties: properties,
@@ -82,9 +84,9 @@ pub trait LayerTweaker {
         &self.base().id
     }
 
-    fn update_properties(&mut self, new_props: Arc<dyn LayerProperties>) {
+    fn update_properties(&mut self, new_props: Arc<dyn ErasedEvaluatedLayer>) {
         let base = self.base_mut();
-        base.evaluated_properties = new_props;
+        base.evaluated_properties = Some(new_props);
         base.properties_updated = true;
     }
 }

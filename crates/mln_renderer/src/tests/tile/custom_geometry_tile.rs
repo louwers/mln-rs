@@ -13,8 +13,7 @@ use mln_actor::scheduler;
 use mln_style::StyleRegistry;
 use mln_style::custom_tile_loader::{CustomTileLoader, TileFunction};
 use mln_style::layer::{Layer, downcast_arc};
-use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::CircleLayerProperties;
+use mln_style::layers::Circle;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
 use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
 use mln_style::sources::geojson_source::TileFeatures;
@@ -23,6 +22,7 @@ use mln_util::error::Error;
 use parking_lot::Mutex;
 
 use super::RasterTileTest;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
 use crate::tile::contents::Contents;
@@ -156,8 +156,8 @@ fn invoke_tile_changed() {
     let mut tiles = tiles(&test, &[root()], loader.self_ref());
 
     let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
-    let layer_properties: Arc<dyn LayerProperties> =
-        Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
+        Arc::new(EvaluatedLayer::<Circle>::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())));
 
     tiles.set_style(&crate::tests::style(std::slice::from_ref(&layer_properties)));
     assert!(tiles.tile().contents.is_none());

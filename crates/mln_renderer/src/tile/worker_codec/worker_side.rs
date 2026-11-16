@@ -3,12 +3,12 @@
 
 use std::sync::Arc;
 
-use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
+use mln_style::serialization::{SharedExpression, SharedLayer};
 use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
 
 use super::envelope::{self, Encoded};
-use super::fields::{SharedAvailableImages, SharedSourceStyle};
+use super::fields::{SharedAvailableImages, SharedEvaluatedLayer, SharedSourceStyle};
 use super::session;
 use crate::Registry;
 use crate::tile::job::{Job, JobResult, JobTimes, Reply};
@@ -32,7 +32,7 @@ impl WorkerCodec {
             .copies::<SharedSourceStyle>()
             .copies::<SharedAvailableImages>()
             .copies::<SharedLayer>()
-            .copies::<SharedLayerProperties>()
+            .copies::<SharedEvaluatedLayer>()
             .copies::<SharedExpression>();
         WorkerCodec { tables, registry, same_registry: None }
     }

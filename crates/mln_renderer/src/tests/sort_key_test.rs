@@ -7,8 +7,7 @@ use mln_map_types::MapMode;
 use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::{CircleLayerProperties, FillLayerProperties, LineLayerProperties, SymbolLayerProperties};
+use mln_style::layers::{Circle, Fill, Line, Symbol};
 use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
 use mln_text::glyph::{GlyphDependencies, GlyphPositions};
 use mln_tile_id::OverscaledTileID;
@@ -26,6 +25,7 @@ use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layermanager;
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -69,7 +69,7 @@ enum Shape {
 
 /// The properties of a layer of the given style JSON, with `sort_key_name`
 /// set to the sort key of `type_`.
-fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -> Arc<dyn LayerProperties> {
+fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -> Arc<dyn ErasedEvaluatedLayer> {
     if let Some(sort_key) = sort_key(type_) {
         json["layout"][sort_key_name] = sort_key;
     }
@@ -78,17 +78,17 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
         .unwrap_or_else(|| panic!("{}", error.message));
     let base_impl = layer.base_impl();
     match json["type"].as_str().unwrap() {
-        "fill" => Arc::new(FillLayerProperties::new(downcast_arc(&base_impl))),
-        "line" => Arc::new(LineLayerProperties::new(downcast_arc(&base_impl))),
-        "circle" => Arc::new(CircleLayerProperties::new(downcast_arc(&base_impl))),
-        "symbol" => Arc::new(SymbolLayerProperties::new(downcast_arc(&base_impl))),
+        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(downcast_arc(&base_impl))),
+        "line" => Arc::new(EvaluatedLayer::<Line>::new(downcast_arc(&base_impl))),
+        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(downcast_arc(&base_impl))),
+        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(downcast_arc(&base_impl))),
         other => panic!("no properties for {other}"),
     }
 }
 
 /// Lays out three features with ranks 2, 0, 1 at x = 100, 200, 300 and
 /// returns the layer's bucket.
-fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPtr {
+fn create_bucket(properties: Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> BucketPtr {
     let ranks = [2.0, 0.0, 1.0];
     let features = ranks
         .iter()
@@ -115,7 +115,7 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
         tile_id: OverscaledTileID::from_zxy(0, 0, 0),
         mode: MapMode::Continuous,
         pixel_ratio: 1.0,
-        layer_type: properties.base_impl.get_type_info(),
+        layer_type: properties.style().get_type_info(),
         global_state: None,
         retain_features_by_id: false,
         subdivision_granularity: SubdivisionGranularitySetting::none(),
@@ -123,7 +123,7 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
     let mut glyph_dependencies = GlyphDependencies::default();
     let mut image_dependencies = ImageDependencies::default();
     let available_images = VecSet::from_iter(["marker".to_owned()]);
-    let layer_id = properties.base_impl.id.clone();
+    let layer_id = properties.style().id.clone();
     let mut layout = layermanager::create_layout(
         &mut LayoutParameters {
             bucket_parameters: &bucket_parameters,
@@ -235,7 +235,7 @@ fn circle_order() {
     }
 }
 
-fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Arc<dyn LayerProperties> {
+fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut json = json!({
         "id": "symbol", "type": "symbol", "source": "source",
         "layout": { "icon-image": "marker", "icon-allow-overlap": true }

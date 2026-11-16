@@ -7,8 +7,8 @@ use std::sync::atomic::Ordering;
 
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::circle_layer_properties::{CircleLayerProperties, CirclePaintProperties};
+use mln_style::layers::Circle;
+use mln_style::layers::circle_layer_properties::CirclePaintProperties;
 use mln_style_types::image::ImagePositions;
 use mln_util::Color;
 use mln_vec_map::VecMap;
@@ -17,6 +17,7 @@ use parking_lot::RwLock;
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
 use crate::gfx::context::Context;
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::render_layer::RenderLayer;
 
@@ -53,15 +54,15 @@ pub(crate) struct CircleBucket {
 impl CircleBucket {
     #[must_use]
     pub(crate) fn new(
-        layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
         mode: MapMode,
         zoom: f32,
     ) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
-            paint_property_binders.entry(id.clone()).or_insert_with(|| {
-                RwLock::new(CircleBinders::new(get_evaluated::<CircleLayerProperties>(properties), zoom))
-            });
+            paint_property_binders
+                .entry(id.clone())
+                .or_insert_with(|| RwLock::new(CircleBinders::new(&evaluated::<Circle>(properties).paint, zoom)));
         }
         CircleBucket {
             base: BucketBase::default(),
@@ -116,7 +117,7 @@ impl Bucket for CircleBucket {
     }
 
     fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
-        let evaluated = get_evaluated::<CircleLayerProperties>(&layer.base().evaluated_properties);
+        let evaluated = &evaluated::<Circle>(&layer.base().evaluated_properties).paint;
         let binders = self.paint_property_binders.get(layer.get_id());
         let radius = get_radius_or_width(
             evaluated.circle_radius.constant(),

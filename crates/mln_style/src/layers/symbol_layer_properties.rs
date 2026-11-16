@@ -80,11 +80,6 @@ crate::properties!(
     use mln_style_types::TranslateAnchorType, mln_util::Color;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a symbol layer.
-    SymbolLayerProperties for SymbolLayerImpl, paint SymbolPaintProperties, layout SymbolLayoutProperties
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[

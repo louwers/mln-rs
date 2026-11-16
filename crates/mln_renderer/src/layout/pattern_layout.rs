@@ -14,9 +14,9 @@ use std::sync::Arc;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, Image};
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties};
-use mln_style::layers::line_layer_properties::{LineLayerProperties, LineLayoutProperties};
+use mln_style::layers::fill_layer_properties::FillLayoutProperties;
+use mln_style::layers::line_layer_properties::LineLayoutProperties;
+use mln_style::layers::{Fill, Line};
 use mln_style_types::image::{ImagePositions, ImageType};
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
@@ -30,6 +30,7 @@ use crate::bucket::{Bucket, BucketPtr};
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::render_layer::LayerRenderData;
 
@@ -64,10 +65,10 @@ pub(crate) trait PatternLayoutSpec: 'static {
     type Layout: Clone + Send + Sync;
 
     fn evaluate_layout(
-        properties: &Arc<dyn LayerProperties>,
+        properties: &Arc<dyn ErasedEvaluatedLayer>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout;
-    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &Evaluated<Image>;
+    fn pattern_property(properties: &Arc<dyn ErasedEvaluatedLayer>) -> &Evaluated<Image>;
     fn sort_key(
         layout: &Self::Layout,
         feature: &dyn GeometryTileFeature,
@@ -78,7 +79,7 @@ pub(crate) trait PatternLayoutSpec: 'static {
     fn constant_sort_key(layout: &Self::Layout) -> Option<f32>;
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
         zoom: f32,
         overscaling: u32,
     ) -> Self::Bucket;
@@ -88,7 +89,7 @@ pub(crate) trait PatternLayoutSpec: 'static {
 }
 
 pub(crate) struct PatternLayout<S: PatternLayoutSpec> {
-    pub(crate) layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
+    pub(crate) layer_properties_map: VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
     pub(crate) bucket_leader_id: String,
 
     pub(crate) features: Vec<PatternFeature>,
@@ -111,7 +112,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     /// sort-key variant (see the file comment).
     pub(crate) fn new(
         layout_parameters: &mut LayoutParameters<'_>,
-        group: &[Arc<dyn LayerProperties>],
+        group: &[Arc<dyn ErasedEvaluatedLayer>],
         source_layer: &TileLayer<'_>,
         sorted: bool,
     ) -> Result<Self, Error> {
@@ -126,14 +127,14 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         let mut evaluation_parameters = PropertyEvaluationParameters::new(zoom);
         evaluation_parameters.global_state = parameters.global_state.clone();
         let layout = S::evaluate_layout(leader_layer_properties, &evaluation_parameters);
-        let leader_impl = &leader_layer_properties.base_impl;
+        let leader_impl = leader_layer_properties.style();
         let source_layer_id = leader_impl.source_layer.clone();
         let bucket_leader_id = leader_impl.id.clone();
 
         let has_pattern = uses_pattern::<S>(group);
-        let mut layer_properties_map: VecMap<String, Arc<dyn LayerProperties>> = VecMap::new();
+        let mut layer_properties_map: VecMap<String, Arc<dyn ErasedEvaluatedLayer>> = VecMap::new();
         for layer_properties in group {
-            let layer_id = layer_properties.base_impl.id.clone();
+            let layer_id = layer_properties.style().id.clone();
             let pattern_property = S::pattern_property(layer_properties);
             let constant_pattern = pattern_property.faded();
             // Add the constant pattern dependencies.
@@ -172,7 +173,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             let mut pattern_dependency_map = PatternLayerMap::default();
             if has_pattern {
                 for layer_properties in group {
-                    let layer_id = &layer_properties.base_impl.id;
+                    let layer_id = &layer_properties.style().id;
                     if let Some(properties) = layer_properties_map.get(layer_id) {
                         let pattern_property = S::pattern_property(properties);
                         if !pattern_property.is_constant() {
@@ -255,7 +256,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     /// do.
     pub(crate) fn with_source_layer(
         parameters: &mut LayoutParameters<'_>,
-        group: &[Arc<dyn LayerProperties>],
+        group: &[Arc<dyn ErasedEvaluatedLayer>],
         source_layer: SourceLayer,
         sorted: bool,
     ) -> Result<Self, Error> {
@@ -334,14 +335,14 @@ impl PatternLayoutSpec for FillLayoutSpec {
     type Layout = FillLayoutProperties::PossiblyEvaluated;
 
     fn evaluate_layout(
-        properties: &Arc<dyn LayerProperties>,
+        properties: &Arc<dyn ErasedEvaluatedLayer>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout {
-        let properties = (**properties).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
-        properties.layer_impl().layout.evaluate(parameters)
+        let properties = evaluated::<Fill>(properties);
+        properties.style.layout.evaluate(parameters)
     }
-    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &Evaluated<Image> {
-        &get_evaluated::<FillLayerProperties>(properties).fill_pattern
+    fn pattern_property(properties: &Arc<dyn ErasedEvaluatedLayer>) -> &Evaluated<Image> {
+        &evaluated::<Fill>(properties).paint.fill_pattern
     }
     fn sort_key(
         layout: &Self::Layout,
@@ -358,7 +359,7 @@ impl PatternLayoutSpec for FillLayoutSpec {
     }
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
         zoom: f32,
         overscaling: u32,
     ) -> FillBucket {
@@ -376,14 +377,14 @@ impl PatternLayoutSpec for LineLayoutSpec {
     type Layout = LineLayoutProperties::PossiblyEvaluated;
 
     fn evaluate_layout(
-        properties: &Arc<dyn LayerProperties>,
+        properties: &Arc<dyn ErasedEvaluatedLayer>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout {
-        let properties = (**properties).downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
-        properties.layer_impl().layout.evaluate(parameters)
+        let properties = evaluated::<Line>(properties);
+        properties.style.layout.evaluate(parameters)
     }
-    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &Evaluated<Image> {
-        &get_evaluated::<LineLayerProperties>(properties).line_pattern
+    fn pattern_property(properties: &Arc<dyn ErasedEvaluatedLayer>) -> &Evaluated<Image> {
+        &evaluated::<Line>(properties).paint.line_pattern
     }
     fn sort_key(
         layout: &Self::Layout,
@@ -400,7 +401,7 @@ impl PatternLayoutSpec for LineLayoutSpec {
     }
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
         zoom: f32,
         overscaling: u32,
     ) -> LineBucket {
@@ -413,7 +414,7 @@ impl PatternLayoutSpec for LineLayoutSpec {
 
 /// Whether a layer of `group` uses its `*-pattern` property, so that the
 /// group's layout needs images.
-pub(crate) fn uses_pattern<S: PatternLayoutSpec>(group: &[Arc<dyn LayerProperties>]) -> bool {
+pub(crate) fn uses_pattern<S: PatternLayoutSpec>(group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool {
     group.iter().any(|layer_properties| {
         let pattern_property = S::pattern_property(layer_properties);
         !pattern_property.is_constant() || !pattern_property.faded().to.id().is_empty()
@@ -422,14 +423,14 @@ pub(crate) fn uses_pattern<S: PatternLayoutSpec>(group: &[Arc<dyn LayerPropertie
 
 /// Whether a fill layout sorts its features: whether the leader's
 /// unevaluated layout sets `fill-sort-key`.
-pub(crate) fn fill_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
-    let properties = (**leader).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
-    !properties.layer_impl().layout.fill_sort_key.is_undefined()
+pub(crate) fn fill_layout_is_sorted(leader: &Arc<dyn ErasedEvaluatedLayer>) -> bool {
+    let properties = evaluated::<Fill>(leader);
+    !properties.style.layout.fill_sort_key.is_undefined()
 }
 
-pub(crate) fn line_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
-    let properties = (**leader).downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
-    !properties.layer_impl().layout.line_sort_key.is_undefined()
+pub(crate) fn line_layout_is_sorted(leader: &Arc<dyn ErasedEvaluatedLayer>) -> bool {
+    let properties = evaluated::<Line>(leader);
+    !properties.style.layout.line_sort_key.is_undefined()
 }
 
 impl<S: PatternLayoutSpec> Layout for PatternLayout<S> {

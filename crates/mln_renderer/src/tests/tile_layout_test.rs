@@ -8,7 +8,6 @@ use geo_types::{Geometry, LineString, Polygon};
 use mln_map_types::MapMode;
 use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer_properties::LayerProperties;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style_types::image::ImageType;
 use mln_text::glyph::GlyphID;
@@ -18,6 +17,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde_json::json;
 
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layermanager;
 use crate::layout::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, Run, SourceKey, TileKey, run_job};
@@ -25,7 +25,7 @@ use crate::tile::tile_workers::InlineWorkers;
 
 /// A layer from its style JSON on source `s`, evaluated at zoom 0 as the
 /// `RenderOrchestrator` evaluates it.
-fn layer(mut json: serde_json::Value) -> Arc<dyn LayerProperties> {
+fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     json["source"] = json!("s");
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
@@ -61,7 +61,7 @@ fn params() -> LayoutParams {
 
 fn input<'a>(
     data: &'a TileData,
-    layers: &'a [Arc<dyn LayerProperties>],
+    layers: &'a [Arc<dyn ErasedEvaluatedLayer>],
     available: &'a VecSet<String>,
 ) -> LayoutInput<'a> {
     LayoutInput {
@@ -121,7 +121,7 @@ fn build_indexes_the_layouts_that_waited_last() {
 
 /// The result of a job that lays tile 0/0/0 out with `layers`, `data` and
 /// `resolved`.
-fn run(layers: &[Arc<dyn LayerProperties>], available: &[&str], resolved: Resolved) -> JobResult {
+fn run(layers: &[Arc<dyn ErasedEvaluatedLayer>], available: &[&str], resolved: Resolved) -> JobResult {
     let tile = TileKey { source: SourceKey(1), id: OverscaledTileID::from_zxy(0, 0, 0) };
     let key = DataKey { source: SourceKey(1), tile: CanonicalTileID::new(0, 0, 0), load: 1 };
     let job = LayoutJob {

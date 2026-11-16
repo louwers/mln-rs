@@ -12,15 +12,14 @@ use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::evaluated::Evaluated;
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::LayerProperties;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
-use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPaintProperties};
+use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::layers::{Fill, Line};
 use mln_style::property_value::PropertyValue;
-use mln_style::{CrossfadeParameters, PropertyEvaluationParameters, StyleRegistry};
+use mln_style::{PropertyEvaluationParameters, StyleRegistry};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
@@ -44,6 +43,7 @@ use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::upload::{upload_indexes, vertex_buffer};
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;
 
@@ -195,11 +195,8 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         },
         ..FillPaintProperties::PossiblyEvaluated::default()
     };
-    let properties: Arc<dyn LayerProperties> = Arc::new(FillLayerProperties::with_evaluated(
-        downcast_arc(&layer.base_impl()),
-        CrossfadeParameters::default(),
-        evaluated,
-    ));
+    let properties: Arc<dyn ErasedEvaluatedLayer> =
+        Arc::new(EvaluatedLayer::<Fill>::with_paint(downcast_arc(&layer.base_impl()), evaluated));
     let mut bucket = FillBucket::new(
         &FillLayoutProperties::PossiblyEvaluated::default(),
         &VecMap::from_iter([("fill".to_owned(), properties)]),

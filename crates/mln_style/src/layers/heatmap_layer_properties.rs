@@ -21,11 +21,6 @@ crate::properties!(
     use mln_util::Color;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a heatmap layer.
-    HeatmapLayerProperties for HeatmapLayerImpl, paint HeatmapPaintProperties
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[

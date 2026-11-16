@@ -3,12 +3,12 @@
 
 use std::sync::Arc;
 
-use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
+use mln_style::serialization::{SharedExpression, SharedLayer};
 use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
 
 use super::envelope::{self, Encoded};
-use super::fields::{SharedAvailableImages, SharedSourceStyle};
+use super::fields::{SharedAvailableImages, SharedEvaluatedLayer, SharedSourceStyle};
 use super::session;
 use crate::Registry;
 use crate::tile::job::{JobResult, Run};
@@ -33,7 +33,7 @@ impl MapCodec {
                 .origin::<SharedSourceStyle>()
                 .origin::<SharedAvailableImages>()
                 .origin::<SharedLayer>()
-                .origin::<SharedLayerProperties>()
+                .origin::<SharedEvaluatedLayer>()
                 .origin::<SharedExpression>(),
             registry,
             digest_sent: false,

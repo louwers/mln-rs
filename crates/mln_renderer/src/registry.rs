@@ -13,6 +13,27 @@ use std::sync::Arc;
 use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::{RegisterError, register_builtin_functions};
+use mln_style::layers::{
+    Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
+};
+use mln_vec_map::VecMap;
+
+use crate::layer_type::{ErasedLayerType, entry};
+
+/// The built-in layer types' render halves.
+const BUILTIN_LAYER_TYPES: [&dyn ErasedLayerType; 11] = [
+    entry::<Fill>(),
+    entry::<Line>(),
+    entry::<Circle>(),
+    entry::<Symbol>(),
+    entry::<Raster>(),
+    entry::<Background>(),
+    entry::<Hillshade>(),
+    entry::<ColorRelief>(),
+    entry::<FillExtrusion>(),
+    entry::<Heatmap>(),
+    entry::<Custom>(),
+];
 
 /// What a [`Registry`] is built from.
 #[derive(Debug, Default)]
@@ -36,9 +57,10 @@ impl RegistryBuilder {
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
         let style = StyleRegistry::new(Arc::new(self.functions));
+        let layer_types = BUILTIN_LAYER_TYPES.iter().map(|&layer_type| (layer_type.info().name, layer_type)).collect();
         let mut hasher = Fnv::default();
         style.digest(&mut hasher);
-        Arc::new(Registry { style: Arc::new(style), digest: hasher.finish() })
+        Arc::new(Registry { style: Arc::new(style), layer_types, digest: hasher.finish() })
     }
 }
 
@@ -55,11 +77,18 @@ pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterEr
 /// A map and the renderer and tile workers that draw it must be given
 /// registries filled by the same calls: they identify functions and layer
 /// types by name.
-#[derive(Debug)]
 pub struct Registry {
     style: Arc<StyleRegistry>,
+    /// The render halves of the style's layer types, by name.
+    layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
     /// [`Registry::digest`].
     digest: u64,
+}
+
+impl std::fmt::Debug for Registry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Registry").field("style", &self.style).field("digest", &self.digest).finish_non_exhaustive()
+    }
 }
 
 impl Registry {
@@ -84,6 +113,11 @@ impl Registry {
     #[must_use]
     pub fn functions(&self) -> &Arc<Functions> {
         self.style.functions()
+    }
+
+    /// The layer type named `name`.
+    pub(crate) fn layer_type(&self, name: &str) -> Option<&'static dyn ErasedLayerType> {
+        self.layer_types.get(name).copied()
     }
 
     /// A hash of the registrations' names and signatures, in the order they
@@ -161,5 +195,7 @@ mod tests {
             mln_style::layer_type::BUILTIN_STYLE_TYPES.iter().map(|layer_type| layer_type.info()).collect();
         builtins.sort_by_key(|info| info.name);
         assert_eq!(registered, builtins);
+        let rendered: Vec<_> = registry.layer_types.values().map(|layer_type| layer_type.info()).collect();
+        assert_eq!(rendered, builtins);
     }
 }

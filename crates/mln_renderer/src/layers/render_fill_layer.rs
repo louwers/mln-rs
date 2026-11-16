@@ -15,9 +15,9 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
+use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
-use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillPaintProperties};
+use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
 
@@ -33,6 +33,7 @@ use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
@@ -198,6 +199,8 @@ fn read_fill_attributes(
     );
 }
 
+impl LayerType for Fill {}
+
 pub(crate) struct RenderFillLayer {
     base: RenderLayerBase,
     // Paint properties
@@ -218,7 +221,7 @@ pub(crate) struct RenderFillLayer {
 impl RenderFillLayer {
     pub(crate) fn new(impl_: Arc<FillLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(FillLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Fill>::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderFillLayer {
@@ -250,13 +253,15 @@ impl RenderLayer for RenderFillLayer {
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = get_evaluated::<FillLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = FillLayerProperties::with_evaluated(
-            downcast_arc::<FillLayerImpl>(&self.base.base_impl),
-            parameters.get_crossfade_parameters(),
-            self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-        );
-        let evaluated = &mut properties.evaluated;
+        let previous_evaluated = evaluated::<Fill>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Fill> {
+            crossfade: parameters.get_crossfade_parameters(),
+            ..EvaluatedLayer::with_paint(
+                downcast_arc::<FillLayerImpl>(&self.base.base_impl),
+                self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
+            )
+        };
+        let evaluated = &mut properties.paint;
 
         if self.unevaluated.fill_outline_color.is_undefined() {
             evaluated.fill_outline_color = evaluated.fill_color.clone();
@@ -271,7 +276,7 @@ impl RenderLayer for RenderFillLayer {
             // Supply both - evaluated based on opaquePassCutoff in render().
             self.base.passes |= RenderPass::Opaque;
         }
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
@@ -284,7 +289,7 @@ impl RenderLayer for RenderFillLayer {
     }
 
     fn has_crossfade(&self) -> bool {
-        get_crossfade::<FillLayerProperties>(&self.base.evaluated_properties).t != 1.0
+        evaluated::<Fill>(&self.base.evaluated_properties).crossfade.t != 1.0
     }
 
     // query
@@ -299,7 +304,7 @@ impl RenderLayer for RenderFillLayer {
         _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
-        let evaluated = get_evaluated::<FillLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<Fill>(&self.base.evaluated_properties).paint;
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
             *evaluated.fill_translate.uniform(),
@@ -448,7 +453,7 @@ impl RenderLayer for RenderFillLayer {
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
-            let evaluated = get_evaluated::<FillLayerProperties>(&render_data.layer_properties);
+            let evaluated = &evaluated::<Fill>(&render_data.layer_properties).paint;
             let geometry = tile.get_bucket_geometry();
             let paint_of = || {
                 paint_vertices(geometry, bucket, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state())

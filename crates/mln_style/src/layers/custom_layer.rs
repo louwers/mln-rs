@@ -14,9 +14,7 @@ use std::sync::{Arc, Weak};
 
 use mln_map_types::{FrameProjection, MapView};
 
-use crate::expression::Dependency;
 use crate::layer::{LayerTypeInfo, SourceKind};
-use crate::layer_properties::{LayerProperties, LayerPropertiesBase};
 use crate::layer_type::{LayerStyle, NoProperties, StyleLayerType};
 use crate::property_table::{PropertyTable, PropertyVisitor};
 
@@ -140,32 +138,6 @@ impl LayerStyle<Custom> {
     #[must_use]
     pub fn has_host(&self, host: &Arc<dyn CustomLayerHost>) -> bool {
         std::ptr::addr_eq(self.extra.0.as_ptr(), Arc::as_ptr(host))
-    }
-}
-
-#[derive(Debug)]
-pub struct CustomLayerProperties {
-    pub base: LayerPropertiesBase,
-}
-
-impl CustomLayerProperties {
-    #[must_use]
-    pub fn new(impl_: Arc<Impl>) -> Self {
-        CustomLayerProperties { base: LayerPropertiesBase::new(impl_) }
-    }
-}
-
-impl LayerProperties for CustomLayerProperties {
-    fn base(&self) -> &LayerPropertiesBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut LayerPropertiesBase {
-        &mut self.base
-    }
-
-    fn get_dependencies(&self) -> Dependency {
-        Dependency::NONE
     }
 }
 

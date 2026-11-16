@@ -4,12 +4,6 @@ use crate::spec::{LayerSpec, Property};
 use crate::types::{camelize, evaluated_type, is_color_ramp, is_data_driven, snake};
 use crate::writer::{Writer, imports_for, layer_file_name};
 
-/// Whether a layer type's `LayerProperties` hold a `CrossfadeParameters`:
-/// whether it has a cross-faded paint property.
-fn has_crossfade(layer: &LayerSpec) -> bool {
-    layer.paint_properties.iter().any(|p| matches!(p.property_type(), Some("cross-faded" | "cross-faded-data-driven")))
-}
-
 /// The kind and type of a property in `properties!`: `data_driven Color`.
 fn kind_and_type(property: &Property, layout: bool) -> (&'static str, String) {
     if is_color_ramp(property) {
@@ -65,7 +59,6 @@ fn emit_set(w: &mut Writer, layer_type: &str, class: &str, scope: &str, properti
 pub(crate) fn emit(layer: &LayerSpec) -> String {
     let t = camelize(&layer.type_);
     let file = layer_file_name(&layer.type_);
-    let crossfade = has_crossfade(layer);
     let has_layout = !layer.layout_properties.is_empty();
     let mut w = Writer::new();
 
@@ -89,14 +82,6 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
         emit_set(&mut w, &layer.type_, &format!("{t}LayoutProperties"), "layout", &layer.layout_properties);
     }
     emit_set(&mut w, &layer.type_, &format!("{t}PaintProperties"), "paint", &layer.paint_properties);
-
-    w.line("crate::layer_properties::layer_properties!(");
-    w.line(&format!("    /// The evaluated properties of a {} layer.", layer.type_));
-    let layout = if has_layout { format!(", layout {t}LayoutProperties") } else { String::new() };
-    let crossfade = if crossfade { ", [crossfade]" } else { "" };
-    w.line(&format!("    {t}LayerProperties for {t}LayerImpl, paint {t}PaintProperties{layout}{crossfade}"));
-    w.line(");");
-    w.blank();
 
     let entries = crate::emit_table::layer_entries(&layer.paint_properties, &layer.layout_properties);
     crate::emit_table::emit(&mut w, &format!("{t}LayerImpl"), &entries, &Visit::Function);

@@ -3,9 +3,7 @@ use std::sync::Arc;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO};
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::HeatmapPaintProperties;
-use mln_style::layers::heatmap_layer_properties::HeatmapLayerProperties;
+use mln_style::layers::{Heatmap, HeatmapPaintProperties};
 use mln_style_types::TranslateAnchorType;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, slot_bucket};
@@ -15,6 +13,7 @@ use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{
     LayerTweaker, LayerTweakerBase, get_projection_data, globe_extrude_scale, to_projection_ubo,
 };
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::paint_parameters::PaintParameters;
 
 pub(crate) struct HeatmapLayerTweaker {
@@ -24,9 +23,9 @@ pub(crate) struct HeatmapLayerTweaker {
 }
 
 impl HeatmapLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
         HeatmapLayerTweaker {
-            base: LayerTweakerBase::new(id, properties),
+            base: LayerTweakerBase::new(id, Some(properties)),
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
         }
@@ -49,8 +48,10 @@ impl LayerTweaker for HeatmapLayerTweaker {
 
         let context = parameters.context;
         let zoom = parameters.state.get_zoom() as f32;
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<HeatmapLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let evaluated = &evaluated::<Heatmap>(&properties).paint;
 
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             let evaluated_props_ubo = HeatmapEvaluatedPropsUBO {

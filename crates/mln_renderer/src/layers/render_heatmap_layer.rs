@@ -22,11 +22,9 @@ use mln_gfx::{
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
+use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
-use mln_style::layers::heatmap_layer_properties::{
-    HeatmapLayerProperties, HeatmapPaintProperties, default_heatmap_color,
-};
+use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_tile_id::OverscaledTileID;
 use mln_util::image::PremultipliedImage;
@@ -44,6 +42,7 @@ use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{RenderLayer, RenderLayerBase};
@@ -77,6 +76,8 @@ pub(crate) fn activate_render_target(
     }
 }
 
+impl LayerType for Heatmap {}
+
 pub(crate) struct RenderHeatmapLayer {
     base: RenderLayerBase,
     // Paint properties
@@ -102,7 +103,7 @@ pub(crate) struct RenderHeatmapLayer {
 impl RenderHeatmapLayer {
     pub(crate) fn new(impl_: Arc<HeatmapLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(HeatmapLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Heatmap>::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderHeatmapLayer {
@@ -226,18 +227,18 @@ impl RenderLayer for RenderHeatmapLayer {
             self.update_color_ramp();
         }
 
-        let previous_evaluated = get_evaluated::<HeatmapLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = HeatmapLayerProperties::with_evaluated(
+        let previous_evaluated = evaluated::<Heatmap>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Heatmap>::with_paint(
             downcast_arc::<HeatmapLayerImpl>(&self.base.base_impl),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.heatmap_opacity.uniform() > 0.0 {
+        self.base.passes = if *properties.paint.heatmap_opacity.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
             RenderPass::None
         };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
@@ -330,7 +331,7 @@ impl RenderLayer for RenderHeatmapLayer {
 
         let render_pass = RenderPass::Translucent;
 
-        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes) == 0 {
+        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
             return;
         }
 
@@ -343,7 +344,7 @@ impl RenderLayer for RenderHeatmapLayer {
         }
 
         let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<HeatmapLayerProperties>(&evaluated_properties);
+        let evaluated = &evaluated::<Heatmap>(&evaluated_properties).paint;
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 
         let mut heatmap_shader: Option<ShaderProgramPtr> = None;

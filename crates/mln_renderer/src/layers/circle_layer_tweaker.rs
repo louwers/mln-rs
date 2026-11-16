@@ -3,8 +3,7 @@ use std::sync::Arc;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::circle_layer_properties::CircleLayerProperties;
+use mln_style::layers::Circle;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 
 use super::{cast_matrix, check_tweak_drawable_ptr, slot_bucket};
@@ -14,6 +13,7 @@ use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{
     LayerTweaker, LayerTweakerBase, get_projection_data, globe_extrude_scale, to_projection_ubo,
 };
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::paint_parameters::PaintParameters;
 
 pub(crate) struct CircleLayerTweaker {
@@ -23,9 +23,9 @@ pub(crate) struct CircleLayerTweaker {
 }
 
 impl CircleLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
         CircleLayerTweaker {
-            base: LayerTweakerBase::new(id, properties),
+            base: LayerTweakerBase::new(id, Some(properties)),
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
         }
@@ -49,8 +49,10 @@ impl LayerTweaker for CircleLayerTweaker {
         }
 
         let context = parameters.context;
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<CircleLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let evaluated = &evaluated::<Circle>(&properties).paint;
 
         let zoom = parameters.state.get_zoom() as f32;
         let pitch_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;

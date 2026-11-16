@@ -28,11 +28,6 @@ crate::properties!(
     use crate::expression::Image, mln_style_types::TranslateAnchorType, mln_util::Color;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a fill-extrusion layer.
-    FillExtrusionLayerProperties for FillExtrusionLayerImpl, paint FillExtrusionPaintProperties, layout FillExtrusionLayoutProperties, [crossfade]
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[

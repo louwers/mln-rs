@@ -9,9 +9,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_PROPS_UBO,
     ID_FILL_EXTRUSION_TILE_PROPS_UBO,
 };
-use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::FillExtrusionPaintProperties;
-use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayerProperties;
+use mln_style::layers::{FillExtrusion, FillExtrusionPaintProperties};
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::size::Size;
 
@@ -21,6 +19,7 @@ use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::paint_parameters::PaintParameters;
 
 pub(crate) struct FillExtrusionLayerTweaker {
@@ -31,9 +30,9 @@ pub(crate) struct FillExtrusionLayerTweaker {
 }
 
 impl FillExtrusionLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
         FillExtrusionLayerTweaker {
-            base: LayerTweakerBase::new(id, properties),
+            base: LayerTweakerBase::new(id, Some(properties)),
             drawable_uniform_buffer: None,
             tile_props_uniform_buffer: None,
             props_uniform_buffer: None,
@@ -60,9 +59,12 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         }
 
         let context = parameters.context;
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&properties);
-        let crossfade = *get_crossfade::<FillExtrusionLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let layer = evaluated::<FillExtrusion>(&properties);
+        let evaluated = &layer.paint;
+        let crossfade = layer.crossfade;
         let state = parameters.state;
 
         // UBO depends on more than just evaluated properties, so we need to

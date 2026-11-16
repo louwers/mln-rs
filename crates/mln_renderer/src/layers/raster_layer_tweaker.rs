@@ -3,14 +3,14 @@ use std::sync::Arc;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::{ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO};
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::raster_layer_properties::RasterLayerProperties;
+use mln_style::layers::Raster;
 use mln_style_types::TranslateAnchorType;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::paint_parameters::PaintParameters;
 
 pub(crate) struct RasterLayerTweaker {
@@ -20,9 +20,9 @@ pub(crate) struct RasterLayerTweaker {
 }
 
 impl RasterLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
         RasterLayerTweaker {
-            base: LayerTweakerBase::new(id, properties),
+            base: LayerTweakerBase::new(id, Some(properties)),
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
         }
@@ -60,8 +60,10 @@ impl LayerTweaker for RasterLayerTweaker {
         }
 
         let context = parameters.context;
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<RasterLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let evaluated = &evaluated::<Raster>(&properties).paint;
 
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             let props_ubo = RasterEvaluatedPropsUBO {

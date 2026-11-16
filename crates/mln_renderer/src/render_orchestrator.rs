@@ -13,7 +13,6 @@ use mln_map_types::{MapMode, TransformState};
 use mln_style::collection::ImmutableVector;
 use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer::SourceKind;
-use mln_style::layer_properties::LayerProperties;
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
     GlobalStateChange, PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image, layer, source,
@@ -33,6 +32,7 @@ use crate::gfx::context::Context;
 use crate::image_store::{ImageStore, ImageStoreObserver};
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweaker;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layermanager;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
@@ -190,7 +190,7 @@ pub(crate) struct RenderOrchestrator {
     /// Whether the next update makes the render layers again, for new
     /// shaders.
     remake_render_layers: bool,
-    filtered_layers_for_source: Vec<Arc<dyn LayerProperties>>,
+    filtered_layers_for_source: Vec<Arc<dyn ErasedEvaluatedLayer>>,
 
     thread_pool: TaggedScheduler,
     /// The target of the tile store's waker, which asks for an update.
@@ -732,7 +732,7 @@ impl RenderOrchestrator {
                         let global_state_requires_relayout = {
                             if !global_state_changed
                                 || !(base_impl.get_layout_dependencies()
-                                    | layer.base().evaluated_properties.get_evaluated_dependencies())
+                                    | layer.base().evaluated_properties.evaluated_dependencies())
                                 .intersects(Dependency::GLOBAL_STATE)
                             {
                                 false

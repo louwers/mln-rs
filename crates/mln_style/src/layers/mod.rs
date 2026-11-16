@@ -51,28 +51,25 @@ pub mod symbol_layer_impl;
 pub mod symbol_layer_properties;
 
 pub use background_layer::Background;
-pub use background_layer_properties::{BackgroundLayerProperties, BackgroundPaintProperties};
+pub use background_layer_properties::BackgroundPaintProperties;
 pub use circle_layer::Circle;
-pub use circle_layer_properties::{CircleLayerProperties, CircleLayoutProperties, CirclePaintProperties};
+pub use circle_layer_properties::{CircleLayoutProperties, CirclePaintProperties};
 pub use color_relief_layer::ColorRelief;
-pub use color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefPaintProperties};
+pub use color_relief_layer_properties::ColorReliefPaintProperties;
 pub use custom_layer::{
-    Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerProperties,
-    CustomLayerRenderParameters,
+    Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
 pub use fill_extrusion_layer::FillExtrusion;
-pub use fill_extrusion_layer_properties::{
-    FillExtrusionLayerProperties, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
-};
+pub use fill_extrusion_layer_properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 pub use fill_layer::Fill;
-pub use fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPaintProperties};
+pub use fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
 pub use heatmap_layer::Heatmap;
-pub use heatmap_layer_properties::{HeatmapLayerProperties, HeatmapPaintProperties};
+pub use heatmap_layer_properties::HeatmapPaintProperties;
 pub use hillshade_layer::Hillshade;
-pub use hillshade_layer_properties::{HillshadeLayerProperties, HillshadePaintProperties};
+pub use hillshade_layer_properties::HillshadePaintProperties;
 pub use line_layer::Line;
-pub use line_layer_properties::{LineLayerProperties, LineLayoutProperties, LinePaintProperties};
+pub use line_layer_properties::{LineLayoutProperties, LinePaintProperties};
 pub use raster_layer::Raster;
-pub use raster_layer_properties::{RasterLayerProperties, RasterPaintProperties};
+pub use raster_layer_properties::RasterPaintProperties;
 pub use symbol_layer::Symbol;
-pub use symbol_layer_properties::{SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties};
+pub use symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};

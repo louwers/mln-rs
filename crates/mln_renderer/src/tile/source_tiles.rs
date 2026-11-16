@@ -11,7 +11,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
-use mln_style::layer_properties::LayerProperties;
 use mln_style::property_value::PropertyValue;
 use mln_style::source;
 use mln_style_types::SourceType;
@@ -27,6 +26,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::algorithm::update_tile_masks::update_tile_masks;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
 use crate::tile::contents::Contents;
 use crate::tile::dem::{self, DEMTileNeighbors};
@@ -51,7 +51,7 @@ const GLOBE_BASE_LEVEL_MAX_RADIUS: f64 = 2.0;
 /// What a source's update gives its cover.
 pub(crate) struct CoverUpdate<'a, 'p> {
     /// The source's visible layers, in style order.
-    pub(crate) layers: &'a [Arc<dyn LayerProperties>],
+    pub(crate) layers: &'a [Arc<dyn ErasedEvaluatedLayer>],
     pub(crate) needs_rendering: bool,
     pub(crate) needs_relayout: bool,
     pub(crate) parameters: &'a TileParameters<'p>,
@@ -693,7 +693,7 @@ impl SourceTiles {
             tile.used_by_rendered_layers = false;
             let hold_for_fade = tile.hold_for_fade();
             for layer_properties in update.layers {
-                let type_info = layer_properties.base_impl.get_type_info();
+                let type_info = layer_properties.style().get_type_info();
                 if hold_for_fade && !type_info.fading_tiles {
                     continue;
                 }
@@ -722,14 +722,14 @@ impl SourceTiles {
     /// Raises the high-water mark of the source's content elevation (such as
     /// `symbol-height-offset`) to the constants of `layers` and the highest
     /// content of the cover's loaded tiles, and returns it.
-    fn update_max_content_elevation(&mut self, layers: &[Arc<dyn LayerProperties>]) -> f32 {
+    fn update_max_content_elevation(&mut self, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> f32 {
         let mut max = self.max_content_elevation;
         // Only the buckets know the heights of an expression.
         let mut expression_layers = Vec::new();
         for layer in layers {
-            match layer.base_impl.content_elevation() {
+            match layer.style().content_elevation() {
                 Some(PropertyValue::Constant(height_offset)) => max = max.max(*height_offset),
-                Some(PropertyValue::Expression(_)) => expression_layers.push(&*layer.base_impl),
+                Some(PropertyValue::Expression(_)) => expression_layers.push(layer.style()),
                 Some(PropertyValue::Undefined) | None => {}
             }
         }
@@ -1274,7 +1274,7 @@ impl SourceTiles {
     /// font faces: the last one, if it has those values.
     fn source_style(
         &mut self,
-        layers: &[Arc<dyn LayerProperties>],
+        layers: &[Arc<dyn ErasedEvaluatedLayer>],
         parameters: &TileParameters<'_>,
     ) -> Arc<SourceStyle> {
         let global_state = parameters.global_state.as_ref();

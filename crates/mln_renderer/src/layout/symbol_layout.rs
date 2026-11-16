@@ -15,7 +15,6 @@ use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
-use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::property_value::PropertyValue;
 use mln_style_types::image::{ImagePositions, ImageType};
@@ -46,6 +45,7 @@ use crate::buckets::symbol_bucket::{
 };
 use crate::geometry::anchor::{Anchor, Anchors};
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::clip_lines::clip_lines;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::layout::merge_lines::merge_lines;
@@ -292,7 +292,7 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32;
 }
 
 pub(crate) struct SymbolLayout {
-    pub(crate) layer_paint_properties: VecMap<String, Arc<dyn LayerProperties>>,
+    pub(crate) layer_paint_properties: VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
     pub(crate) bucket_leader_id: String,
     pub(crate) symbol_instances: Vec<SymbolInstance>,
     pub(crate) sort_key_ranges: Vec<SortKeyRange>,
@@ -339,7 +339,7 @@ impl SymbolLayout {
 
     pub(crate) fn new(
         parameters: &BucketParameters,
-        layers: &[Arc<dyn LayerProperties>],
+        layers: &[Arc<dyn ErasedEvaluatedLayer>],
         source_layer: SourceLayer,
         layout_parameters: &mut LayoutParameters<'_>,
     ) -> Result<Self, Error> {
@@ -350,7 +350,7 @@ impl SymbolLayout {
         }
 
         let leader = layers[0]
-            .base_impl
+            .style()
             .downcast_ref::<mln_style::layers::symbol_layer_impl::Impl>()
             .expect("SymbolLayout: not a symbol layer");
         let overscaling = parameters.tile_id.overscale_factor() as f32;
@@ -361,7 +361,7 @@ impl SymbolLayout {
 
         let mut this = SymbolLayout {
             layer_paint_properties: VecMap::new(),
-            bucket_leader_id: layers[0].base_impl.id.clone(),
+            bucket_leader_id: layers[0].style().id.clone(),
             symbol_instances: Vec::new(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
@@ -433,7 +433,7 @@ impl SymbolLayout {
         }
 
         for layer in layers {
-            this.layer_paint_properties.entry(layer.base_impl.id.clone()).or_insert_with(|| Arc::clone(layer));
+            this.layer_paint_properties.entry(layer.style().id.clone()).or_insert_with(|| Arc::clone(layer));
         }
 
         // Determine glyph dependencies

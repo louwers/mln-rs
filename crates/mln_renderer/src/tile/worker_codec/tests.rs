@@ -7,7 +7,7 @@ use mln_map_types::MapMode;
 use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::Layer;
-use mln_style::layer_properties::LayerProperties;
+use mln_style::layers::Fill;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style::renderer::transition_parameters::TransitionParameters;
 use mln_style::transition_options::TransitionOptions;
@@ -24,6 +24,7 @@ use super::map_side::MapCodec;
 use super::worker_side::WorkerCodec;
 use super::{Encoded, TileWorkerHost, envelope, fields};
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::text::glyph_store::HBShapeResults;
 use crate::tile::contents::LayoutResult;
@@ -52,17 +53,17 @@ fn convert(json: &str) -> Layer {
 
 /// A layer from its style JSON, evaluated at `z` by its render layer, as
 /// the `RenderOrchestrator` evaluates it.
-fn layer(json: &str, z: f32) -> Arc<dyn LayerProperties> {
+fn layer(json: &str, z: f32) -> Arc<dyn ErasedEvaluatedLayer> {
     let render_layer = layermanager::create_render_layer(&convert(json).base_impl()).unwrap();
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(z));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }
 
-fn layers(jsons: &[&str]) -> Vec<Arc<dyn LayerProperties>> {
+fn layers(jsons: &[&str]) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
     jsons.iter().map(|json| layer(json, 0.0)).collect()
 }
 
-fn style(layers: &[Arc<dyn LayerProperties>]) -> Arc<SourceStyle> {
+fn style(layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Arc<SourceStyle> {
     Arc::new(SourceStyle { version: 0, layers: layers.to_vec(), global_state: None, font_faces: None })
 }
 
@@ -154,7 +155,7 @@ fn direct_result(run: Run) -> JobResult {
 /// Runs the job of `layers` and `data` until it lays out, answering its
 /// `NeedsDeps` with `run`.
 fn lay_out(
-    layers: &[Arc<dyn LayerProperties>],
+    layers: &[Arc<dyn ErasedEvaluatedLayer>],
     data: &TileData,
     mut run: impl FnMut(Run) -> JobResult,
 ) -> LayoutOutput {
@@ -227,7 +228,7 @@ fn comparable(result: &LayoutResult) -> [Vec<u8>; 2] {
 /// directly (in that order: decoding MLT data drops its bytes, and a tile
 /// sends its data before anything decodes it), checks that both layouts
 /// are the same, and returns the one that crossed.
-fn cross(layers: &[Arc<dyn LayerProperties>], data: &TileData) -> LayoutResult {
+fn cross(layers: &[Arc<dyn ErasedEvaluatedLayer>], data: &TileData) -> LayoutResult {
     let mut codec = ThroughCodec::new();
     let result = lay_out(layers, data, |run| codec.run(&run)).result;
     assert_eq!(result.layer_render_data.len(), layers.len());
@@ -317,7 +318,7 @@ fn every_geometry_layer_type_crosses() {
     let layers: Vec<_> = layers_of_type.iter().flat_map(|(_, jsons)| jsons).map(|json| layer(json, 0.0)).collect();
     let result = cross(&layers, &tile_data());
     for (layer_id, render_data) in &result.layer_render_data {
-        let sent = layers.iter().find(|layer| &layer.base_impl.id == layer_id).unwrap();
+        let sent = layers.iter().find(|layer| &layer.style().id == layer_id).unwrap();
         assert!(Arc::ptr_eq(&render_data.layer_properties, sent));
         assert!(render_data.bucket.has_data());
     }
@@ -479,8 +480,6 @@ fn geojson_tiles_cross() {
 fn properties_cross_while_a_paint_property_transitions() {
     use std::time::Duration;
 
-    use mln_style::layer_properties::get_evaluated;
-    use mln_style::layers::fill_layer_properties::FillLayerProperties;
     use mln_style::map::zoom_history::ZoomHistory;
     use mln_util::time::Instant;
 
@@ -496,7 +495,7 @@ fn properties_cross_while_a_paint_property_transitions() {
         .transition_with_impl(&TransitionParameters::new(Some(start), transition), convert(&constant).base_impl());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
-    assert!(!get_evaluated::<FillLayerProperties>(&transitioning).fill_color.is_constant());
+    assert!(!evaluated::<Fill>(&transitioning).paint.fill_color.is_constant());
 
     let mut codec = ThroughCodec::new();
     let style = style(std::slice::from_ref(&transitioning));
@@ -549,7 +548,7 @@ fn styles_and_layers_are_defined_once() {
 
     // Evaluated again (another zoom), the line layer's properties travel
     // again, but not the layer or its expressions, and the fill layer by key.
-    let line = layermanager::create_render_layer(&layers[1].base_impl).unwrap();
+    let line = layermanager::create_render_layer(&layers[1].shared_style()).unwrap();
     line.borrow_mut().evaluate(&PropertyEvaluationParameters::new(1.0));
     let again = style(&[Arc::clone(&layers[0]), Arc::clone(&line.borrow().base().evaluated_properties)]);
     drop(line);
@@ -563,7 +562,7 @@ fn styles_and_layers_are_defined_once() {
     drop(layers);
     let forget = forgotten(&map.encode_run(&job(&fill_only, data_input(&data), Resolved::default())).unwrap());
     let count = |table: &str| forget.iter().find(|(name, _)| name == table).map_or(0, |(_, keys)| keys.len());
-    assert_eq!((count("source style"), count("layer"), count("expression"), count("layer properties")), (2, 1, 1, 2));
+    assert_eq!((count("source style"), count("layer"), count("expression"), count("evaluated layer")), (2, 1, 1, 2));
 }
 
 fn data_input(data: &DataInput) -> DataInput {
@@ -595,19 +594,28 @@ fn answers_cross_without_pixels() {
     assert!(resumed.len() - empty.len() < 256 * 40, "{} bytes", resumed.len() - empty.len());
 }
 
-/// Layer properties of a type without a wire form.
-#[derive(Debug)]
-struct Unknown(mln_style::layer_properties::LayerPropertiesBase);
+/// Evaluated values without a wire form.
+struct Unknown(Arc<dyn mln_style::layer::Impl>);
 
-impl LayerProperties for Unknown {
-    fn base(&self) -> &mln_style::layer_properties::LayerPropertiesBase {
-        &self.0
+impl ErasedEvaluatedLayer for Unknown {
+    fn style(&self) -> &dyn mln_style::layer::Impl {
+        &*self.0
     }
-    fn base_mut(&mut self) -> &mut mln_style::layer_properties::LayerPropertiesBase {
-        &mut self.0
+    fn shared_style(&self) -> Arc<dyn mln_style::layer::Impl> {
+        Arc::clone(&self.0)
     }
-    fn get_dependencies(&self) -> mln_style::expression::Dependency {
+    fn render_passes(&self) -> u8 {
+        0
+    }
+    fn constants_mask(&self) -> u64 {
+        0
+    }
+    fn evaluated_dependencies(&self) -> mln_style::expression::Dependency {
         mln_style::expression::Dependency::NONE
+    }
+    fn collect_evaluated_global_state_refs(&self, _refs: &mut VecSet<String>) {}
+    fn write(&self, w: &mut mln_wire::Writer) {
+        w.fail("no wire form".to_owned());
     }
 }
 
@@ -617,9 +625,7 @@ impl LayerProperties for Unknown {
 fn failed_jobs_define_nothing() {
     let mut map = MapCodec::new(Registry::with_builtins());
     let fill = layer(FILL, 0.0);
-    let unknown: Arc<dyn LayerProperties> = Arc::new(Unknown(mln_style::layer_properties::LayerPropertiesBase::new(
-        Arc::clone(&layer(LINE, 0.0).base_impl),
-    )));
+    let unknown: Arc<dyn ErasedEvaluatedLayer> = Arc::new(Unknown(layer(LINE, 0.0).shared_style()));
     let failed = style(&[Arc::clone(&fill), unknown]);
     assert!(map.encode_run(&job(&failed, DataInput::Cached(key(1)), Resolved::default())).is_err());
 
@@ -629,7 +635,7 @@ fn failed_jobs_define_nothing() {
     let Job::Layout(job) = WorkerCodec::new(Registry::with_builtins()).decode_job(body).unwrap() else {
         panic!("not a layout job");
     };
-    assert_eq!(job.style.layers[0].base_impl.id, "water");
+    assert_eq!(job.style.layers[0].style().id, "water");
 }
 
 /// A map side's first frame carries its registry's digest, and an instance

@@ -7,9 +7,7 @@ use std::sync::Arc;
 use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{EvaluationContext, Value};
-use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::CircleLayoutProperties;
-use mln_style::layers::circle_layer_properties::CircleLayerProperties;
+use mln_style::layers::{Circle, CircleLayoutProperties};
 use mln_style_types::image::ImagePositions;
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
@@ -23,6 +21,7 @@ use crate::bucket::{Bucket, BucketPtr};
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, SourceLayer};
 use crate::render_layer::LayerRenderData;
@@ -35,7 +34,7 @@ pub(crate) struct CircleFeature {
 }
 
 pub(crate) struct CircleLayout {
-    pub(crate) layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
+    pub(crate) layer_properties_map: VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
     pub(crate) bucket_leader_id: String,
 
     pub(crate) features: Vec<CircleFeature>,
@@ -55,15 +54,14 @@ static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 impl CircleLayout {
     pub(crate) fn new(
         parameters: &BucketParameters,
-        group: &[Arc<dyn LayerProperties>],
+        group: &[Arc<dyn ErasedEvaluatedLayer>],
         source_layer: &TileLayer<'_>,
         filter_groups: &mut FilterGroups,
     ) -> Result<Self, Error> {
         debug_assert!(!group.is_empty());
         let zoom = f32::from(parameters.tile_id.overscaled_z);
-        let leader_layer_properties =
-            (*group[0]).downcast_ref::<CircleLayerProperties>().expect("CircleLayout: not circle layer properties");
-        let leader_impl = leader_layer_properties.layer_impl();
+        let leader_layer_properties = evaluated::<Circle>(&group[0]);
+        let leader_impl = &leader_layer_properties.style;
         let unevaluated_layout = &leader_impl.layout;
         let sort_features_by_key = !unevaluated_layout.circle_sort_key.is_undefined();
         let mut evaluation_parameters = PropertyEvaluationParameters::new(zoom);
@@ -74,9 +72,9 @@ impl CircleLayout {
         let source_layer_id = leader_impl.source_layer.clone();
         let bucket_leader_id = leader_impl.id.clone();
 
-        let mut layer_properties_map: VecMap<String, Arc<dyn LayerProperties>> = VecMap::new();
+        let mut layer_properties_map: VecMap<String, Arc<dyn ErasedEvaluatedLayer>> = VecMap::new();
         for layer_properties in group {
-            let layer_id = layer_properties.base_impl.id.clone();
+            let layer_id = layer_properties.style().id.clone();
             layer_properties_map.entry(layer_id).or_insert_with(|| Arc::clone(layer_properties));
         }
 
@@ -136,7 +134,7 @@ impl CircleLayout {
     /// does.
     pub(crate) fn with_source_layer(
         parameters: &BucketParameters,
-        group: &[Arc<dyn LayerProperties>],
+        group: &[Arc<dyn ErasedEvaluatedLayer>],
         source_layer: SourceLayer,
         filter_groups: &mut FilterGroups,
     ) -> Result<Self, Error> {

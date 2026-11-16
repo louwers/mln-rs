@@ -21,11 +21,6 @@ crate::properties!(
     use mln_style_types::HillshadeIlluminationAnchorType, mln_style_types::HillshadeMethodType, mln_style_types::ResamplingType, mln_util::Color;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a hillshade layer.
-    HillshadeLayerProperties for HillshadeLayerImpl, paint HillshadePaintProperties
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[

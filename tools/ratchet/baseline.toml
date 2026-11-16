@@ -16,7 +16,7 @@
 "crates/mln_map/src/transform.rs" = 1
 "crates/mln_map_types/src/transform_state.rs" = 3
 "crates/mln_map_types/src/vertical_perspective_projection.rs" = 1
-"crates/mln_renderer/src/buckets/fill_extrusion_bucket.rs" = 1
+"crates/mln_renderer/src/layer_type.rs" = 1
 "crates/mln_renderer/src/layers/render_background_layer.rs" = 3
 "crates/mln_renderer/src/layers/render_circle_layer.rs" = 2
 "crates/mln_renderer/src/layers/render_color_relief_layer.rs" = 3
@@ -27,9 +27,8 @@
 "crates/mln_renderer/src/layers/render_line_layer.rs" = 2
 "crates/mln_renderer/src/layers/render_raster_layer.rs" = 5
 "crates/mln_renderer/src/layers/render_symbol_layer.rs" = 2
-"crates/mln_renderer/src/layers/symbol_layer_tweaker.rs" = 1
-"crates/mln_renderer/src/layout/circle_layout.rs" = 2
-"crates/mln_renderer/src/layout/pattern_layout.rs" = 5
+"crates/mln_renderer/src/layout/circle_layout.rs" = 1
+"crates/mln_renderer/src/layout/pattern_layout.rs" = 1
 "crates/mln_renderer/src/layout/symbol_instance.rs" = 1
 "crates/mln_renderer/src/layout/symbol_layout.rs" = 4
 "crates/mln_renderer/src/render_layer.rs" = 1
@@ -47,7 +46,6 @@
 "crates/mln_storage/src/ureq_transport.rs" = 1
 "crates/mln_style/src/color_ramp_property_value.rs" = 2
 "crates/mln_style/src/layer_impl.rs" = 1
-"crates/mln_style/src/layer_properties.rs" = 2
 "crates/mln_style/src/layers/heatmap_layer_properties.rs" = 1
 "crates/mln_style/src/property_value.rs" = 3
 "crates/mln_style/src/source_impl.rs" = 1

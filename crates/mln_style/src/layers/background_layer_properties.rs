@@ -15,11 +15,6 @@ crate::properties!(
     use crate::expression::Image, mln_util::Color;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a background layer.
-    BackgroundLayerProperties for BackgroundLayerImpl, paint BackgroundPaintProperties, [crossfade]
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[

@@ -14,9 +14,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_DASH_TEXTURE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO,
     ID_LINE_IMAGE_TEXTURE, ID_LINE_TILE_PROPS_UBO,
 };
-use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::LinePaintProperties;
-use mln_style::layers::line_layer_properties::LineLayerProperties;
+use mln_style::layers::{Line, LinePaintProperties};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -25,6 +23,7 @@ use crate::buckets::line_bucket::LineBucket;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::PaintParameters;
 
@@ -69,9 +68,9 @@ pub(crate) struct LineLayerTweaker {
 }
 
 impl LineLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
         LineLayerTweaker {
-            base: LayerTweakerBase::new(id, properties),
+            base: LayerTweakerBase::new(id, Some(properties)),
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
             tile_props_uniform_buffer: None,
@@ -100,9 +99,12 @@ impl LayerTweaker for LineLayerTweaker {
         }
 
         let context = parameters.context;
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<LineLayerProperties>(&properties);
-        let crossfade = *get_crossfade::<LineLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let layer = evaluated::<Line>(&properties);
+        let evaluated = &layer.paint;
+        let crossfade = layer.crossfade;
 
         let line_pattern_value = evaluated.line_pattern.faded();
 

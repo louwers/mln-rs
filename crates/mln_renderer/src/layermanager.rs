@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use mln_style::layer;
 use mln_style::layer::{LayerTypeInfo, SourceKind, downcast_arc};
-use mln_style::layer_properties::LayerProperties;
 use mln_style::layer_type::StyleLayerType;
 use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
 use mln_style::layers::circle_layer_impl::Impl as CircleLayerImpl;
@@ -30,6 +29,7 @@ use mln_util::logging::{Event, Log};
 use crate::bucket::Bucket;
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionLayoutSpec;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::render_color_relief_layer::RenderColorReliefLayer;
 use crate::layers::render_custom_layer::RenderCustomLayer;
 use crate::layers::render_heatmap_layer::RenderHeatmapLayer;
@@ -85,7 +85,7 @@ pub(crate) fn lays_out(layer_type: LayerTypeInfo) -> bool {
 /// Creates the bucket of a layer type that has no layout.
 pub(crate) fn create_bucket(
     parameters: &BucketParameters,
-    layers: &[Arc<dyn LayerProperties>],
+    layers: &[Arc<dyn ErasedEvaluatedLayer>],
 ) -> Option<Box<dyn Bucket>> {
     debug_assert!(!layers.is_empty());
     debug_assert!(!lays_out(parameters.layer_type));
@@ -99,7 +99,10 @@ pub(crate) fn create_bucket(
 /// Whether the layout of `layers`, a group of `layer_type`, can need glyphs
 /// or images: a symbol group, or a fill, line or fill-extrusion group with a
 /// pattern.
-pub(crate) fn layout_can_need_dependencies(layer_type: LayerTypeInfo, layers: &[Arc<dyn LayerProperties>]) -> bool {
+pub(crate) fn layout_can_need_dependencies(
+    layer_type: LayerTypeInfo,
+    layers: &[Arc<dyn ErasedEvaluatedLayer>],
+) -> bool {
     let name = layer_type.name;
     if name == Symbol::INFO.name {
         true
@@ -117,7 +120,7 @@ pub(crate) fn layout_can_need_dependencies(layer_type: LayerTypeInfo, layers: &[
 pub(crate) fn create_layout(
     parameters: &mut LayoutParameters<'_>,
     tile_layer: SourceLayer,
-    layers: &[Arc<dyn LayerProperties>],
+    layers: &[Arc<dyn ErasedEvaluatedLayer>],
 ) -> Result<Option<Box<dyn Layout>>, Error> {
     debug_assert!(!layers.is_empty());
     debug_assert!(lays_out(parameters.bucket_parameters.layer_type));

@@ -18,11 +18,9 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::{RendererBackend, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::custom_layer::Impl as CustomLayerImpl;
 use mln_style::layers::{
-    CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerProperties,
-    CustomLayerRenderParameters,
+    Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::logging::{Event, Log};
@@ -30,6 +28,7 @@ use mln_util::logging::{Event, Log};
 use crate::change_request::UniqueChangeRequestVec;
 use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupKind};
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
 use crate::render_pass::RenderPass;
@@ -79,6 +78,8 @@ impl Shared {
     }
 }
 
+impl LayerType for Custom {}
+
 pub(crate) struct RenderCustomLayer {
     base: RenderLayerBase,
     shared: Rc<Shared>,
@@ -87,7 +88,7 @@ pub(crate) struct RenderCustomLayer {
 impl RenderCustomLayer {
     pub(crate) fn new(impl_: Arc<CustomLayerImpl>) -> Self {
         let host = impl_.host();
-        let properties: Arc<dyn LayerProperties> = Arc::new(CustomLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Custom>::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.passes = RenderPass::Translucent;
         RenderCustomLayer {
