@@ -616,7 +616,7 @@ fn planet_style(fixtures: &std::path::Path) -> String {
         "projection": {"type": "globe"},
         "sky": {"atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0]},
         "light": {"anchor": "map", "position": [1.5, 90, 80]},
-        "glyphs": format!("file://{}/basemap/glyphs/{{fontstack}}/{{range}}.pbf", fixtures.display()),
+        "glyphs": format!("{}basemap/glyphs/{{fontstack}}/{{range}}.pbf", crate::scene::file_url(fixtures)),
         "sources": {
             "world": {"type": "vector", "tiles": ["local://tiles/{z}-{x}-{y}.osm_basemap.pbf"], "maxzoom": 1},
             "places": {"type": "geojson", "data": "local://data/places.geojson"}

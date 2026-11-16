@@ -118,11 +118,21 @@ pub(crate) fn basemap_south_east() -> LatLng {
     basemap_point(2622.0, 6334.0)
 }
 
+/// The `file://` URL of the directory `path`, with a slash after it: on
+/// Windows `file:///C:/...`, without the `\\?\` of a canonical path.
+#[must_use]
+pub(crate) fn file_url(path: &Path) -> String {
+    let path = path.display().to_string();
+    let path = path.strip_prefix(r"\\?\").unwrap_or(&path).replace('\\', "/");
+    let slash = if path.starts_with('/') { "" } else { "/" };
+    format!("file://{slash}{path}/")
+}
+
 /// The basemap's style, its URLs pointing into `fixtures`.
 #[must_use]
 pub(crate) fn basemap_style(fixtures: &Path) -> String {
     let style = include_str!("../style.json");
-    style.replace("mln-bench-fixtures:/", &format!("file://{}/", fixtures.display()))
+    style.replace("mln-bench-fixtures:/", &file_url(fixtures))
 }
 
 /// The basemap's style with its projection set to globe. Its tiles are at
@@ -151,7 +161,7 @@ pub(crate) fn basemap_mlt_style(fixtures: &Path) -> String {
         tiles,
         &format!(r#""tiles": ["mln-bench-fixtures:/{BASEMAP_MLT_DIR}/{{z}}/{{x}}/{{y}}.mlt"], "encoding": "mlt","#),
     );
-    style.replace("mln-bench-fixtures:/", &format!("file://{}/", fixtures.display()))
+    style.replace("mln-bench-fixtures:/", &file_url(fixtures))
 }
 
 /// Writes the basemap's tiles as MLT, every polygon with its triangles, as
@@ -417,23 +427,26 @@ impl Scene {
         self.observer.last_frame.clone().expect("the renderer reports each frame")
     }
 
-    /// The Metal and Vulkan backends finish a frame before `render_frame`
-    /// returns (their swap waits for the frame's commands); WebGPU's is left
-    /// to the device.
+    /// Waits for the GPU to finish the frame `render_frame` drew: the native
+    /// backends submit it without waiting, as WebGPU leaves it to the device.
     fn wait_for_gpu(&self) {
-        if let Device::WebGpu(device) = self.frontend.device() {
-            let device = device.device();
-            // PowerVR's Vulkan driver on Android ends a wait shortly before
-            // wgpu sees the submission finished, which wgpu reports as a
-            // timeout; waiting again returns at once then.
-            let start = Instant::now();
-            loop {
-                match device.poll(wgpu::PollType::wait_indefinitely()) {
-                    Err(wgpu::PollError::Timeout) if start.elapsed() < WAIT_LIMIT => {}
-                    result => {
-                        result.expect("the GPU finishes the frame");
-                        break;
-                    }
+        let Device::WebGpu(device) = self.frontend.device() else {
+            let backend = self.frontend.backend();
+            let _hold = backend.hold();
+            backend.gpu().flush(true).expect("the GPU finishes the frame");
+            return;
+        };
+        let device = device.device();
+        // PowerVR's Vulkan driver on Android ends a wait shortly before wgpu
+        // sees the submission finished, which wgpu reports as a timeout;
+        // waiting again returns at once then.
+        let start = Instant::now();
+        loop {
+            match device.poll(wgpu::PollType::wait_indefinitely()) {
+                Err(wgpu::PollError::Timeout) if start.elapsed() < WAIT_LIMIT => {}
+                result => {
+                    result.expect("the GPU finishes the frame");
+                    break;
                 }
             }
         }
@@ -612,6 +625,11 @@ impl Scene {
         #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
         if let Some(vulkan) = backend.downcast_ref::<mln_vulkan::RendererBackend>() {
             return (format!("{} (Vulkan)", vulkan.get_device_name()), vulkan.is_software_device());
+        }
+        #[cfg(windows)]
+        if let Some(d3d12) = backend.downcast_ref::<mln_d3d12::RendererBackend>() {
+            let gpu = d3d12.d3d12_gpu();
+            return (format!("{} (D3D12)", gpu.device().adapter_name()), gpu.device().is_software());
         }
         if let Some(gl) = backend.downcast_ref::<mln_gl::RendererBackend>() {
             let name = gl.get_renderer_name();

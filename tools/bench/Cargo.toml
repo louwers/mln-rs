@@ -63,7 +63,11 @@ mln_vulkan.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+# The D3D12 backend, which MLN_RENDER_BACKEND=d3d12 picks in the headless
+# frontend (scene.rs describes it), and the CPU time of the process
+# (meter.rs).
 [target.'cfg(windows)'.dependencies]
+mln_d3d12.workspace = true
 windows-sys.workspace = true
 
 [lints]
