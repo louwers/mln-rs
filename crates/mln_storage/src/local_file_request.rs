@@ -21,18 +21,26 @@ pub(crate) fn path_from_utf8(path: &[u8]) -> Result<PathBuf, String> {
 }
 
 /// The whole file, or `data_range`'s bytes (`end - start + 1` of them,
-/// zero-padded past the end as in C++), or `None` when the file can't be
-/// opened. A range too large to allocate (e.g. from a corrupt PMTiles
-/// header) is `None` too; C++ throws `std::length_error` or `std::bad_alloc`,
-/// uncaught.
+/// zero-padded past the end as in C++), with the file's size, or `None` when
+/// the file can't be opened. A range too large to allocate (e.g. from a
+/// corrupt PMTiles header) is `None` too; C++ throws `std::length_error` or
+/// `std::bad_alloc`, uncaught.
 #[must_use]
-pub(crate) fn read_file(path: &std::path::Path, data_range: Option<(u64, u64)>) -> Option<Vec<u8>> {
+pub(crate) fn read_file(path: &std::path::Path, data_range: Option<(u64, u64)>) -> Option<(Vec<u8>, Option<u64>)> {
     read_range(std::fs::File::open(path).ok()?, data_range)
 }
 
 /// [`read_file`]'s read of an open file, or of anything else that reads and
 /// seeks like one.
-pub(crate) fn read_range(mut file: impl Read + Seek, data_range: Option<(u64, u64)>) -> Option<Vec<u8>> {
+pub(crate) fn read_range(mut file: impl Read + Seek, data_range: Option<(u64, u64)>) -> Option<(Vec<u8>, Option<u64>)> {
+    let size = file.seek(SeekFrom::End(0)).ok();
+    if file.seek(SeekFrom::Start(0)).is_err() {
+        return Some((Vec::new(), size));
+    }
+    Some((read_part(file, data_range)?, size))
+}
+
+fn read_part(mut file: impl Read + Seek, data_range: Option<(u64, u64)>) -> Option<Vec<u8>> {
     if let Some((first, second)) = data_range {
         let size = second.wrapping_sub(first).wrapping_add(1);
         let mut data = Vec::new();
@@ -84,7 +92,10 @@ pub(crate) fn local_file_response(path: &[u8], data_range: Option<(u64, u64)>) -
                 response.error =
                     Some(Box::new(ResourceError::new(Reason::Other, format!("Cannot read file {path_display}"))));
             }
-            Some(data) => response.data = Some(Arc::new(data)),
+            Some((data, size)) => {
+                response.data = Some(Arc::new(data));
+                response.total_size = size;
+            }
         }
     }
     response

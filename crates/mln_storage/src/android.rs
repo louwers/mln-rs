@@ -182,7 +182,10 @@ pub(crate) fn asset_response(name: &[u8], data_range: Option<(u64, u64)>) -> Res
                 response.error = error(Reason::NotFound, format!("Cannot find asset {display}"));
             } else {
                 match read_range(Asset(asset), data_range) {
-                    Some(data) => response.data = Some(Arc::new(data)),
+                    Some((data, size)) => {
+                        response.data = Some(Arc::new(data));
+                        response.total_size = size;
+                    }
                     None => response.error = error(Reason::Other, format!("Cannot read asset {display}")),
                 }
             }

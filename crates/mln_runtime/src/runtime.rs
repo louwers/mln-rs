@@ -20,6 +20,7 @@ use mln_storage_offline::RegionDatabase;
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::thread::Joined;
+use mln_video::VideoPlayers;
 use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
@@ -27,7 +28,9 @@ use crate::event::{EventHandler, RuntimeEvent};
 use crate::map::{Applied, Map, MapEntry, MapId, MapOptions, MapShared, Published};
 use crate::offline::Offline;
 use crate::queue::Queue;
-use crate::resources::{CacheDatabaseOperation, ProviderFileSource, ResourceHooks, ResourceProvider};
+use crate::resources::{
+    CacheDatabaseOperation, ProviderFileSource, ResourceHooks, ResourceProvider, TransformedPlayers,
+};
 
 /// Where a runtime keeps its assets and its cache.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -399,6 +402,12 @@ impl RuntimeCore {
         })
     }
 
+    /// `players`, for a map of the runtime: they get its resource transform
+    /// with each video they open.
+    pub(crate) fn video_players(&self, players: Arc<dyn VideoPlayers>) -> Arc<dyn VideoPlayers> {
+        Arc::new(TransformedPlayers { players, hooks: Arc::clone(&self.hooks) })
+    }
+
     /// The library's own network loading.
     fn online(&self) -> &Arc<OnlineFileSource> {
         self.online.get_or_init(|| Arc::new(OnlineFileSource::new()))
@@ -678,14 +687,17 @@ impl Runtime {
     /// out: `transform` gets the resource's kind and URL, and answers through
     /// the callback, now or later and on any thread, with the URL to load or
     /// the error to fail the request with. It replaces the transform before.
+    /// Video players that load a video themselves (the browser's) rewrite
+    /// its URLs with it too, as [`Kind::Source`] resources, when the video
+    /// opens.
     pub fn set_resource_transform(
         &self,
         transform: impl Fn(Kind, &str, FinishedCallback) + Send + Sync + 'static,
     ) -> Result<Completion<()>, Error> {
         let transform: ResourceTransform = Arc::new(transform);
         self.apply(move |core| {
-            core.online().set_resource_transform(Some(transform));
-            core.hooks.set_transform_set(true);
+            core.online().set_resource_transform(Some(Arc::clone(&transform)));
+            core.hooks.set_transform(Some(transform));
             Ok(())
         })
     }
@@ -694,7 +706,7 @@ impl Runtime {
     pub fn clear_resource_transform(&self) -> Result<Completion<()>, Error> {
         self.apply(move |core| {
             core.online().set_resource_transform(None);
-            core.hooks.set_transform_set(false);
+            core.hooks.set_transform(None);
             Ok(())
         })
     }

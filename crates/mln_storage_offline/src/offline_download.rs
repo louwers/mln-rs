@@ -384,7 +384,9 @@ impl OfflineDownload {
                     }
                 }
 
-                SourceType::CustomVector | SourceType::CustomMVTVector => {}
+                // Offline regions don't hold videos, whose bytes a player
+                // reads in ranges as it plays.
+                SourceType::CustomVector | SourceType::CustomMVTVector | SourceType::Video => {}
             }
         }
 
@@ -489,7 +491,7 @@ impl OfflineDownload {
                     }
                 }
 
-                SourceType::CustomVector | SourceType::CustomMVTVector => {}
+                SourceType::CustomVector | SourceType::CustomMVTVector | SourceType::Video => {}
             }
         }
 

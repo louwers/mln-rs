@@ -30,6 +30,19 @@ mln_wire.workspace = true
 slotmap.workspace = true
 thiserror.workspace = true
 
+# The function that releases a video frame's Android hardware buffer,
+# loaded at run time.
+[target.'cfg(target_os = "android")'.dependencies]
+libloading.workspace = true
+
+# The function that unreferences a video frame's OpenHarmony native buffer.
+[target.'cfg(target_env = "ohos")'.dependencies]
+ohos-window-sys.workspace = true
+
+# The browser's images that video frames hold (`video::WebImage`).
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen.workspace = true
+
 [features]
 # `gpu::conformance`, the frames that the backends' tests draw through their
 # `Gpu`.

@@ -72,6 +72,7 @@ impl Impl {
             run_loop,
         )
         .map_err(|e| e.to_string())?;
+        map.set_video_players(Some(crate::video::players()));
         frontend.attach(&map);
         if let Some(max_pitch) = metadata.max_pitch {
             map.set_bounds(&BoundOptions { max_pitch: Some(f64::from(max_pitch)), ..Default::default() })

@@ -12,6 +12,11 @@ and diff images, and HTML reports that show the failed and errored tests, to
 `cargo run -p mln-rs-render-test -- --help` lists the runner's options, such as
 `--filter`, `--jobs` and `--tileWorkerCodec`.
 
+Each manifest lists the upstream ignore files and then the port's (`ignores/`).
+A port's entry whose reason starts with "runs" runs a test that an upstream file
+ignores, such as `video/default`, which the runner plays with a player that
+shows the video's first frame (`src/video.rs`).
+
 The tests render on WebGPU, or on the backend that `MLN_RENDER_BACKEND` names:
 `vulkan`, `d3d12` (Windows; DXC's `dxcompiler.dll` on the DLL search path),
 `gl`, `gl-desktop`, or `metal` (macOS). Each backend takes the expectations and

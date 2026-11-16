@@ -40,6 +40,7 @@ use crate::shaders::shader_source::BuiltIn;
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
+use crate::video::{FrameKeepAlive, GpuFrame, ImportedFrame};
 
 /// Why a [`Gpu`] call failed.
 #[derive(Debug, thiserror::Error)]
@@ -119,6 +120,9 @@ pub struct BufferDesc<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextureFormat {
     R8Unorm,
+    /// Two 8-bit channels, red and green: the interleaved chroma of an NV12
+    /// video frame.
+    Rg8Unorm,
     /// One 8-bit channel that shaders read as alpha, with red, green and
     /// blue 0. WebGPU, which has no such format, stores it as `R8Unorm`,
     /// which its shaders read as red.
@@ -139,8 +143,9 @@ pub enum TextureFormat {
 
 impl TextureFormat {
     /// Every format.
-    pub const ALL: [TextureFormat; 13] = [
+    pub const ALL: [TextureFormat; 14] = [
         TextureFormat::R8Unorm,
+        TextureFormat::Rg8Unorm,
         TextureFormat::R16Float,
         TextureFormat::R32Float,
         TextureFormat::Rgba8Unorm,
@@ -162,7 +167,7 @@ impl TextureFormat {
     pub fn bytes_per_texel(self) -> Option<u32> {
         match self {
             TextureFormat::R8Unorm | TextureFormat::A8Unorm => Some(1),
-            TextureFormat::R16Float => Some(2),
+            TextureFormat::R16Float | TextureFormat::Rg8Unorm => Some(2),
             TextureFormat::R32Float
             | TextureFormat::Rgba8Unorm
             | TextureFormat::Rgba8UnormSrgb
@@ -597,6 +602,19 @@ pub trait Gpu {
     /// [`Index`](BufferUsage::Index), an offset past a buffer's end, or a
     /// buffer for each layout but not one.
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError>;
+
+    /// Takes the planes of `frame`, a video frame in GPU memory, as sampled
+    /// textures: the frame's own memory, wrapped without a copy, or a copy
+    /// on the GPU where the platform only copies (a browser's images). The
+    /// backend holds `keep_alive` until it has destroyed every plane texture
+    /// and the GPU no longer reads the frame's memory. Fails with
+    /// [`GpuError::Unsupported`] for a kind of frame, or a format of one,
+    /// that the backend doesn't import, which the default does for every
+    /// frame.
+    fn import_video_frame(&mut self, frame: &GpuFrame, keep_alive: FrameKeepAlive) -> Result<ImportedFrame, GpuError> {
+        let _ = keep_alive;
+        Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind())))
+    }
 
     /// Destroys `resource`, or drops a readback without reading it.
     fn destroy(&mut self, resource: ResourceId);

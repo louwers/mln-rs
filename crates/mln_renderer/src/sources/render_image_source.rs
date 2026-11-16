@@ -10,7 +10,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
 use mln_style::source::{self, downcast_arc};
-use mln_style::sources::image_source;
+use mln_style::sources::{image_source, video_source};
 use mln_tile_id::{GeometryCoordinate, GeometryCoordinates, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::LatLngBounds;
@@ -25,6 +25,7 @@ use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
 use crate::render_tree::RenderItem;
+use crate::sources::video_texture::VideoTexture;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds};
@@ -166,12 +167,15 @@ fn build_image_mesh(bucket: &RasterBucket, corners: &GeometryCoordinates, cells:
 pub(crate) struct ImageSourceRenderData {
     pub(crate) bucket: Option<Arc<RasterBucket>>,
     pub(crate) tile_ids: Vec<UnwrappedTileID>,
+    /// A video source's frames, which the layers draw instead of the
+    /// bucket's image.
+    pub(crate) video: Option<Rc<VideoTexture>>,
 }
 
 impl ImageSourceRenderData {
     #[must_use]
     pub(crate) fn new(bucket: Option<Arc<RasterBucket>>, tile_ids: Vec<UnwrappedTileID>) -> Self {
-        ImageSourceRenderData { bucket, tile_ids }
+        ImageSourceRenderData { bucket, tile_ids, video: None }
     }
 }
 
@@ -181,6 +185,9 @@ impl RenderItem for ImageSourceRenderData {
             && bucket.needs_upload()
         {
             bucket.upload(context);
+        }
+        if let Some(video) = &self.video {
+            video.upload(context);
         }
     }
 }
@@ -194,9 +201,13 @@ impl RenderItem for ImageSourceRenderItem {
     }
 }
 
+/// The render source of an image source, or of a video source, whose
+/// frames go into a texture instead of the bucket's image.
 pub(crate) struct RenderImageSource {
     base: RenderSourceBase,
     bucket: Option<Arc<RasterBucket>>,
+    /// A video source's frames.
+    video: Option<Rc<VideoTexture>>,
     render_data: Option<Rc<ImageSourceRenderData>>,
     tile_ids: Vec<UnwrappedTileID>,
     mesh_corners: GeometryCoordinates,
@@ -206,10 +217,22 @@ pub(crate) struct RenderImageSource {
 impl RenderImageSource {
     #[must_use]
     pub(crate) fn new(impl_: Arc<image_source::Impl>) -> Self {
+        RenderImageSource::new_base(impl_)
+    }
+
+    /// The render source of a video source.
+    #[must_use]
+    pub(crate) fn video(impl_: Arc<video_source::Impl>) -> Self {
+        let video = Rc::new(VideoTexture::new(Arc::clone(impl_.frames())));
         let impl_: Arc<dyn source::Impl> = impl_;
+        RenderImageSource { video: Some(video), ..RenderImageSource::new_base(impl_) }
+    }
+
+    fn new_base(impl_: Arc<dyn source::Impl>) -> Self {
         RenderImageSource {
             base: RenderSourceBase::new(impl_),
             bucket: None,
+            video: None,
             render_data: None,
             tile_ids: Vec::new(),
             mesh_corners: GeometryCoordinates::new(),
@@ -217,15 +240,26 @@ impl RenderImageSource {
         }
     }
 
-    /// Whether the source's image has arrived. Unlike C++, a source without
-    /// an image (one made without a url) has nothing to load, so a still
-    /// render of it finishes.
+    /// Whether the source's image has arrived, or its video's first frame
+    /// or failure. Unlike C++, a source without an image (one made without
+    /// a url) has nothing to load, so a still render of it finishes.
     fn loaded(&self) -> bool {
-        self.bucket.is_some() || self.impl_().get_image().is_none()
+        match &self.video {
+            Some(video) => video.frames().is_settled(),
+            None => self.bucket.is_some() || self.image_impl().get_image().is_none(),
+        }
     }
 
-    fn impl_(&self) -> Arc<image_source::Impl> {
+    fn image_impl(&self) -> Arc<image_source::Impl> {
         downcast_arc::<image_source::Impl>(&self.base.base_impl)
+    }
+
+    /// The corners of the image or video, clockwise from the top left.
+    fn coordinates(&self) -> [mln_util::LatLng; 4] {
+        match &self.video {
+            Some(_) => downcast_arc::<video_source::Impl>(&self.base.base_impl).get_coordinates(),
+            None => self.image_impl().get_coordinates(),
+        }
     }
 }
 
@@ -236,6 +270,10 @@ impl RenderSource for RenderImageSource {
 
     fn is_loaded(&self, _store: &TileStore) -> bool {
         self.loaded()
+    }
+
+    fn drawn(&self) -> bool {
+        self.video.as_ref().is_none_or(|video| video.drawn())
     }
 
     fn update(
@@ -255,13 +293,25 @@ impl RenderSource for RenderImageSource {
         let transform_state = parameters.transform_state;
         self.base.base_impl = base_impl;
 
-        let impl_ = self.impl_();
-        let coords = impl_.get_coordinates();
-        let image = impl_.get_image();
-
-        let Some(image) = image.filter(|image| image.valid()) else {
-            self.base.enabled = false;
-            return;
+        let coords = self.coordinates();
+        // A video's bucket has no image: its frames go to the video's
+        // texture.
+        let image = match &mut self.video {
+            Some(video) => {
+                let frames = Arc::clone(downcast_arc::<video_source::Impl>(&self.base.base_impl).frames());
+                if !Arc::ptr_eq(video.frames(), &frames) {
+                    *video = Rc::new(VideoTexture::new(frames));
+                }
+                None
+            }
+            None => {
+                if let Some(image) = self.image_impl().get_image().filter(|image| image.valid()) {
+                    Some(image)
+                } else {
+                    self.base.enabled = false;
+                    return;
+                }
+            }
         };
 
         // Compute the z0 tile coordinates for the given LatLngs
@@ -362,8 +412,9 @@ impl RenderSource for RenderImageSource {
         // C++ swaps the image of its bucket in place; a changed image gets a
         // new bucket here (buckets are shared across threads).
         let bucket = match &mut self.bucket {
-            Some(bucket) if bucket.image.as_ref().is_some_and(|i| Arc::ptr_eq(i, &image)) => bucket,
-            slot => slot.insert(Arc::new(RasterBucket::with_shared_image(Some(image)))),
+            Some(bucket) if bucket.image.is_none() && image.is_none() => bucket,
+            Some(bucket) if bucket.image.as_ref().zip(image.as_ref()).is_some_and(|(a, b)| Arc::ptr_eq(a, b)) => bucket,
+            slot => slot.insert(Arc::new(RasterBucket::with_shared_image(image))),
         };
 
         // The globe bends the quad over the sphere with the tile mesh
@@ -387,10 +438,13 @@ impl RenderSource for RenderImageSource {
     }
 
     fn prepare(&mut self, _store: &mut TileStore, _parameters: &SourcePrepareParameters<'_>) {
-        self.render_data = Some(Rc::new(ImageSourceRenderData::new(
-            self.bucket.clone(),
-            if self.loaded() { self.tile_ids.clone() } else { Vec::new() },
-        )));
+        self.render_data = Some(Rc::new(ImageSourceRenderData {
+            video: self.video.clone(),
+            ..ImageSourceRenderData::new(
+                self.bucket.clone(),
+                if self.loaded() { self.tile_ids.clone() } else { Vec::new() },
+            )
+        }));
     }
 
     fn get_image_render_data(&self) -> Option<Rc<ImageSourceRenderData>> {

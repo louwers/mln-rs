@@ -54,6 +54,10 @@ pub struct MapOptions {
     /// Whether the map's render sessions keep tiles in memory after they
     /// leave the view, so they show again without loading. On by default.
     pub tile_cache_enabled: bool,
+    /// The players of the style's video sources: by default the platform's
+    /// ([`mln_video::platform_players`]). Without any, video sources fail
+    /// to play and draw nothing.
+    pub video_players: Option<Arc<dyn mln_video::VideoPlayers>>,
 }
 
 impl Default for MapOptions {
@@ -64,6 +68,7 @@ impl Default for MapOptions {
             fallback_font_faces: None,
             system_fonts: true,
             tile_cache_enabled: true,
+            video_players: Some(mln_video::platform_players()),
         }
     }
 }
@@ -1482,6 +1487,7 @@ pub(crate) fn create(
     } else if options.system_fonts {
         map.style_mut().set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
     }
+    map.set_video_players(options.video_players.clone().map(|players| core.video_players(players)));
     let _ = published.updates.set(map.update_reader());
     let flush_task = async_task(&core.run_loop, &core.queue, move |core, outbox| flush(core, id, outbox));
     let flush_sender = flush_task.sender();

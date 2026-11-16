@@ -50,6 +50,7 @@ pub use mln_tile;
 pub use mln_tile_id;
 pub use mln_util;
 pub use mln_vec_map;
+pub use mln_video;
 /// Empty on Apple platforms and in the browser build.
 pub use mln_vulkan;
 /// Empty except in the browser build.

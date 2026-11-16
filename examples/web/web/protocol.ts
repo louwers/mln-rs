@@ -117,7 +117,28 @@ export type ToMap =
   | { type: "input"; inputs: Input[] }
   // Whether the page shows its debug overlay (debug.ts): while it does, the
   // map's Web Worker reports each frame that draws.
-  | { type: "debug"; on: boolean };
+  | { type: "debug"; on: boolean }
+  // A frame of the video that a VideoRequest opened, its size in pixels and
+  // its time in seconds, or why the video doesn't play (video.ts).
+  | {
+      type: "videoFrame";
+      id: number;
+      frame: ImageBitmap;
+      width: number;
+      height: number;
+      time: number;
+    }
+  | { type: "videoError"; id: number; message: string };
+
+/**
+ * What the map's video players ask of the page, which plays their videos
+ * (video.ts): a video to open, by an id of the map's Web Worker, and its
+ * controls.
+ */
+export type VideoRequest =
+  | { type: "videoOpen"; id: number; urls: string[] }
+  | { type: "videoControl"; id: number; control: "play" | "pause" | "close" }
+  | { type: "videoSeek"; id: number; seconds: number };
 
 export interface Loaded {
   loadedMs: number;
@@ -187,7 +208,8 @@ export type FromMap =
   // The map stopped: a panic, or it failed to start.
   | { type: "fatal"; message: string }
   // The map didn't start: the browser's API couldn't draw it.
-  | { type: "unsupported"; message: string };
+  | { type: "unsupported"; message: string }
+  | VideoRequest;
 
 /** From the page to a tile workers' Web Worker. */
 export interface StartTileWorker {

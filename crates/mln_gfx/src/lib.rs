@@ -40,6 +40,7 @@ pub mod types;
 pub mod util_hash;
 pub mod vertex_attribute;
 pub mod vertex_vector;
+pub mod video;
 pub mod window;
 
 pub use buffer::{Buffer, BufferPtr};

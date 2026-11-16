@@ -27,6 +27,11 @@ wgpu.workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 wgpu = { workspace = true, features = ["naga-ir"] }
 
+# The browser's images that video frames hold (`Gpu::import_video_frame`).
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = ["ImageBitmap", "VideoFrame"] }
+
 [dev-dependencies]
 mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 

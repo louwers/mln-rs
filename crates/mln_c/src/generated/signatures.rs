@@ -417,6 +417,12 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(
     mln_map,
     mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_video_source_coordinates;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
     mln_lat_lng_bounds,
     *const mln_completion,
     *mut mln_diagnostic,
@@ -465,6 +471,18 @@ const _: unsafe extern "C" fn(
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::style::mln_map_move_style_layer;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_pause_video_source;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_play_video_source;
 const _: unsafe extern "C" fn(
     *const mln_map_view,
     *mut mln_map_projection,
@@ -577,6 +595,13 @@ const _: unsafe extern "C" fn(
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::map::mln_map_resize;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    f64,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_seek_video_source;
 const _: unsafe extern "C" fn(
     mln_map,
     *const mln_bound_options,
@@ -770,6 +795,14 @@ const _: unsafe extern "C" fn(
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::camera::mln_map_set_tile_options;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_lat_lng,
+    usize,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_video_source_coordinates;
 const _: unsafe extern "C" fn(
     mln_map,
     *const mln_map_viewport_options,

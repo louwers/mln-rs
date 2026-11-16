@@ -47,6 +47,22 @@ path = "tests/local_glyph_rasterizer_test.rs"
 name = "map_snapshot_test"
 path = "tests/map_snapshot_test.rs"
 
+# Video sources through Map -> HeadlessFrontend, with a player that hands
+# the map one frame.
+[[test]]
+name = "video_test"
+path = "tests/video_test.rs"
+
+# A video frame in a dmabuf, on Linux.
+[[test]]
+name = "video_dma_buf_test"
+path = "tests/video_dma_buf_test.rs"
+
+# The platform's video player (GStreamer on Linux) playing a video source.
+[[test]]
+name = "video_gstreamer_test"
+path = "tests/video_gstreamer_test.rs"
+
 # gtests-core: test/renderer/feature_tracking.test.cpp.
 [[test]]
 name = "gtest_feature_tracking"
@@ -121,6 +137,7 @@ mln_style_types.workspace = true
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 mln_text = { package = "mln-rs-text", path = "../mln_text" }
 mln_tile_id.workspace = true
+mln_video.workspace = true
 parking_lot.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
@@ -140,6 +157,19 @@ glow.workspace = true
 khronos-egl.workspace = true
 mln_gl.workspace = true
 
+# The dmabuf video test's udmabuf.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
+
+# video_test's hardware buffers, from libnativewindow.
+[target.'cfg(target_os = "android")'.dev-dependencies]
+libloading.workspace = true
+
+# video_test's native buffers.
+[target.'cfg(target_env = "ohos")'.dev-dependencies]
+ohos-sys-opaque-types.workspace = true
+ohos-window-sys.workspace = true
+
 [lints]
 workspace = true
 
@@ -148,3 +178,8 @@ mln_mtl.workspace = true
 objc2.workspace = true
 objc2-foundation.workspace = true
 objc2-metal.workspace = true
+objc2-core-foundation = { workspace = true, features = [
+  "CFDictionary",
+  "CFString",
+] }
+objc2-core-video.workspace = true

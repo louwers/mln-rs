@@ -80,6 +80,14 @@ page (main thread, no wasm)
   worker loads it the first time a style declares `font-faces`. A panic there
   drops the affected text instead of stopping the map.
 - Images decode with the browser's decoders, so the module carries none.
+- Video sources play in `<video>` elements on the page's thread
+  ([web/video.ts](web/video.ts)), since the map's Web Worker has none. The map's
+  players (mln_video's `WebPlayers`) ask the page to open each video, and the
+  page sends its frames back as ImageBitmaps, which the backend copies on the
+  GPU. The `<video>` loads the video itself, from the URLs after the runtime's
+  resource transform, so request headers, resource providers and the cache don't
+  apply to video, and a video from another origin needs CORS. A video that none
+  of its URLs plays fails with a message, where GL JS shows nothing.
 - CJK glyphs are drawn locally with an OffscreenCanvas instead of downloaded, as
   GL JS does with `localIdeographFontFamily`.
 - Resources go through `fetch` and the browser's HTTP cache. The build has no
@@ -116,9 +124,10 @@ map over a slow network first, and log the URLs it fetches again
 (`crates/mln_renderer/src/tests/fast_camera_test.rs` tests the gestures' tile
 requests on a modeled network). It also runs mln_gfx's conformance case of
 writes from JS arrays on a GPU of the map's backend, and checks that a panic
-stops the page, and that the GL JS comparison lines up. The page's frames come
-from SwiftShader and the native ones from lavapipe, which match in most views.
-check/check.mjs documents the options, and check/views.mjs lists the views.
+stops the page, that the GL JS comparison lines up, and that a video source
+plays, right side up. The page's frames come from SwiftShader and the native
+ones from lavapipe, which match in most views. check/check.mjs documents the
+options, and check/views.mjs lists the views.
 
 Before the first run, install the Chromium that the lockfile's playwright-core
 pins, and keep lavapipe installed for the native runner (`VK_DRIVER_FILES`):

@@ -132,7 +132,17 @@ impl Windows {
 /// stays the caller's.
 enum Image {
     Owned(ImageAllocation),
-    Imported { image: vk::Image, view: vk::ImageView },
+    Imported {
+        image: vk::Image,
+        view: vk::ImageView,
+    },
+    /// A plane of a video frame in a dmabuf, which this backend destroys,
+    /// and what keeps the frame alive until then.
+    #[cfg(unix)]
+    Video {
+        plane: crate::video_import::Plane,
+        keep_alive: mln_gfx::video::FrameKeepAlive,
+    },
 }
 
 impl Image {
@@ -140,6 +150,8 @@ impl Image {
         match self {
             Image::Owned(allocation) => allocation.image(),
             Image::Imported { image, .. } => *image,
+            #[cfg(unix)]
+            Image::Video { plane, .. } => plane.image,
         }
     }
 
@@ -147,6 +159,8 @@ impl Image {
         match self {
             Image::Owned(allocation) => allocation.image_view(),
             Image::Imported { view, .. } => *view,
+            #[cfg(unix)]
+            Image::Video { plane, .. } => plane.view,
         }
     }
 }
@@ -170,8 +184,15 @@ impl NativeImage {
 
 impl Drop for NativeImage {
     fn drop(&mut self) {
-        if let Some(Image::Owned(image)) = self.image.take() {
-            self.discard.push(Garbage::Image(image));
+        match self.image.take() {
+            Some(Image::Owned(image)) => self.discard.push(Garbage::Image(image)),
+            #[cfg(unix)]
+            Some(Image::Video { plane, keep_alive }) => self.discard.push(Garbage::Task(Box::new(move |device| {
+                // SAFETY: the submits that used the plane have finished.
+                unsafe { plane.destroy(device) };
+                drop(keep_alive);
+            }))),
+            Some(Image::Imported { .. }) | None => {}
         }
     }
 }
@@ -802,6 +823,120 @@ impl VulkanGpu {
         }))
     }
 
+    /// The textures of a dmabuf video frame's planes, which the next submit
+    /// acquires from the decoder after the decoder's writes.
+    #[cfg(unix)]
+    fn import_dma_buf(
+        &mut self,
+        fourcc: u32,
+        modifier: u64,
+        size: Size,
+        planes: &[mln_gfx::video::DmaBufPlane],
+        keep_alive: &mln_gfx::video::FrameKeepAlive,
+    ) -> Result<(mln_gfx::video::PlaneLayout, Vec<TextureId>), GpuError> {
+        let (layout, imported) = crate::video_import::import(self.backend.device(), fourcc, modifier, size, planes)?;
+        let mut textures = Vec::with_capacity(imported.len());
+        for plane in imported {
+            let (format, vk_format, plane_size) = (plane.format, plane.vk_format, plane.size);
+            let image = Image::Video { plane, keep_alive: std::sync::Arc::clone(keep_alive) };
+            textures.push(self.textures.insert(Texture {
+                native: Rc::new(NativeImage { image: Some(image), discard: Rc::clone(&self.discard) }),
+                format,
+                vk_format,
+                size: plane_size,
+                usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+                aspect: vk::ImageAspectFlags::COLOR,
+                layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                release_to: None,
+                released: false,
+                waits: Vec::new(),
+            }));
+        }
+        let acquired = self.acquire_video_planes(&textures, planes.first());
+        if let Err(error) = acquired {
+            for texture in textures {
+                self.destroy(ResourceId::Texture(texture));
+            }
+            return Err(error);
+        }
+        Ok((layout, textures))
+    }
+
+    /// Acquires the images of `textures` from the decoder's queue family in
+    /// the next submit, after the work that writes `plane`'s dmabuf.
+    #[cfg(unix)]
+    fn acquire_video_planes(
+        &mut self,
+        textures: &[TextureId],
+        plane: Option<&mln_gfx::video::DmaBufPlane>,
+    ) -> Result<(), GpuError> {
+        let features = self.backend.device().features();
+        if let (true, Some(loader), Some(sync_file)) = (
+            features.import_sync_fd,
+            self.backend.get_semaphore_fd_loader(),
+            plane.and_then(crate::video_import::writes_sync_file),
+        ) {
+            // SAFETY: the create info is valid for the device.
+            let semaphore = unsafe { self.device().create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
+                .map_err(vk_error("the video frame's semaphore"))?;
+            let import = vk::ImportSemaphoreFdInfoKHR::default()
+                .semaphore(semaphore)
+                .flags(vk::SemaphoreImportFlags::TEMPORARY)
+                .handle_type(vk::ExternalSemaphoreHandleTypeFlags::SYNC_FD)
+                .fd(std::os::fd::AsRawFd::as_raw_fd(&sync_file));
+            // SAFETY: the semaphore is new and unsignaled, and the import
+            // takes the sync file when it succeeds.
+            match unsafe { loader.import_semaphore_fd(&import) } {
+                Ok(()) => {
+                    let _ = std::os::fd::IntoRawFd::into_raw_fd(sync_file);
+                    self.waits.push((semaphore, 0, vk::PipelineStageFlags::ALL_COMMANDS));
+                }
+                Err(error) => mln_util::logging::Log::warning(
+                    mln_util::logging::Event::Render,
+                    format!("Waiting for a video frame's decoder failed: {error}"),
+                ),
+            }
+            self.destroy_later(move |device| {
+                // SAFETY: the submits that waited for it have finished.
+                unsafe { device.destroy_semaphore(semaphore, None) };
+            });
+        }
+        let source =
+            if features.foreign_queue_family { vk::QUEUE_FAMILY_FOREIGN_EXT } else { vk::QUEUE_FAMILY_EXTERNAL };
+        let queue = self.backend.get_graphics_queue_index();
+        let images: Vec<vk::Image> =
+            textures.iter().filter_map(|&texture| self.textures.get(texture)).map(|t| t.native.image()).collect();
+        let uploads = self.uploads()?;
+        let barriers: Vec<vk::ImageMemoryBarrier<'_>> = images
+            .into_iter()
+            .map(|image| {
+                vk::ImageMemoryBarrier::default()
+                    .image(image)
+                    .old_layout(vk::ImageLayout::GENERAL)
+                    .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                    .src_access_mask(vk::AccessFlags::empty())
+                    .dst_access_mask(vk::AccessFlags::SHADER_READ)
+                    .src_queue_family_index(source)
+                    .dst_queue_family_index(queue)
+                    .subresource_range(whole_range(vk::ImageAspectFlags::COLOR))
+            })
+            .collect();
+        // SAFETY: the uploads record outside a render pass, and the images
+        // are new, in the layout that the foreign queue leaves them in.
+        unsafe {
+            self.device().cmd_pipeline_barrier(
+                uploads,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &barriers,
+            );
+        }
+        Ok(())
+    }
+
     /// `texture`, as an import of its image would describe it.
     #[cfg(test)]
     pub(crate) fn as_imported(&self, texture: TextureId) -> Option<ImportedImage> {
@@ -959,6 +1094,7 @@ impl VulkanGpu {
     fn vk_format(&self, format: TextureFormat) -> vk::Format {
         match format {
             TextureFormat::R8Unorm | TextureFormat::A8Unorm => vk::Format::R8_UNORM,
+            TextureFormat::Rg8Unorm => vk::Format::R8G8_UNORM,
             TextureFormat::R16Float => vk::Format::R16_SFLOAT,
             TextureFormat::R32Float => vk::Format::R32_SFLOAT,
             TextureFormat::Rgba8Unorm => vk::Format::R8G8B8A8_UNORM,
@@ -1630,8 +1766,9 @@ impl VulkanGpu {
     /// The format a texture of `format` has, `None` for a format no
     /// texture has.
     pub(crate) fn texture_format(&self, format: vk::Format) -> Option<TextureFormat> {
-        const FORMATS: [TextureFormat; 14] = [
+        const FORMATS: [TextureFormat; 15] = [
             TextureFormat::R8Unorm,
+            TextureFormat::Rg8Unorm,
             TextureFormat::A8Unorm,
             TextureFormat::R16Float,
             TextureFormat::R32Float,
@@ -1934,6 +2071,22 @@ fn memory_barrier(
 }
 
 impl Gpu for VulkanGpu {
+    fn import_video_frame(
+        &mut self,
+        frame: &mln_gfx::video::GpuFrame,
+        #[cfg_attr(not(unix), expect(unused_variables, reason = "only dmabuf frames, on Unix, import"))]
+        keep_alive: mln_gfx::video::FrameKeepAlive,
+    ) -> Result<mln_gfx::video::ImportedFrame, GpuError> {
+        match frame {
+            #[cfg(unix)]
+            mln_gfx::video::GpuFrame::DmaBuf { fourcc, modifier, size, planes, color, .. } => {
+                let (layout, planes) = self.import_dma_buf(*fourcc, *modifier, *size, planes, &keep_alive)?;
+                Ok(mln_gfx::video::ImportedFrame { layout, planes, color: *color, external: false })
+            }
+            frame => Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind()))),
+        }
+    }
+
     fn caps(&self) -> &Caps {
         &self.caps
     }

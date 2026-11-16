@@ -137,7 +137,8 @@ impl WebMap {
     /// glyphs in the browser's sans-serif font rather than downloading them,
     /// as GL JS's `localIdeographFontFamily`. `on_frame()` runs in the task
     /// that rendered a frame, while the canvas still has it, and must call
-    /// `drain_frames`.
+    /// `drain_frames`. `video_host` plays the videos of the style's video
+    /// sources, on the page's thread (`mln_video::WebPlayers`).
     ///
     /// Rejects with an error named `NotSupportedError` when the browser's
     /// API can't draw the map.
@@ -154,6 +155,7 @@ impl WebMap {
         fallback_font_faces: Option<String>,
         system_fonts: bool,
         on_frame: js_sys::Function,
+        video_host: mln_video::VideoHost,
     ) -> Result<WebMap, JsValue> {
         shaper::set_loader(load_shaper);
         let runtime = Runtime::with_registry(&RuntimeOptions::default(), crate::registry()).map_err(js_error)?;
@@ -171,6 +173,7 @@ impl WebMap {
                 .with(EventType::MapRenderFrameFinished),
             fallback_font_faces,
             system_fonts,
+            video_players: Some(Arc::new(mln_video::WebPlayers::new(video_host))),
             ..Default::default()
         };
         let (map, created) = runtime.create_map(options).map_err(js_error)?;

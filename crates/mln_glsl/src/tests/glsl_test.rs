@@ -37,6 +37,7 @@ use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
+use mln_gfx::shaders::video_frame_ubo::VideoFramePropsUBO;
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -175,6 +176,7 @@ fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
             projection,
             (LayerUniform(ID_HEATMAP_EVALUATED_PROPS_UBO), size_of::<HeatmapEvaluatedPropsUBO>()),
         ],
+        "VideoFrameShader" => vec![(LayerUniform(ID_VIDEO_FRAME_PROPS_UBO), size_of::<VideoFramePropsUBO>())],
         "HeatmapTextureShader" => {
             vec![(LayerUniform(ID_HEATMAP_TEXTURE_PROPS_UBO), size_of::<HeatmapTexturePropsUBO>())]
         }

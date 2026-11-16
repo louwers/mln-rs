@@ -1023,6 +1023,16 @@ impl RenderOrchestrator {
         self.tile_store.has_fading_tiles()
     }
 
+    /// Whether the sources are still loaded after the frame's uploads, and
+    /// the enabled ones, which uploaded, drew what they show: a video source
+    /// whose frame a backend refused to import waits for the frame in memory
+    /// that replaces it to be drawn.
+    pub(crate) fn still_loaded(&self) -> bool {
+        self.render_sources
+            .values()
+            .all(|source| source.is_loaded(&self.tile_store) && (!source.is_enabled() || source.drawn()))
+    }
+
     pub(crate) fn is_loaded(&self) -> bool {
         // do the simple boolean check before iterating over all the tiles in
         // all the sources

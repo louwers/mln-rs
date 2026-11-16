@@ -807,8 +807,9 @@ impl Renderer {
         self.timings.upload = (uploaded - start) + (layers_uploaded - layers_updated);
         self.timings.draw = submitted - layers_uploaded;
 
+        let loaded = render_tree_parameters.loaded && self.orchestrator.still_loaded();
         self.orchestrator.emit(RendererEvent::RenderFrameFinished {
-            mode: if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
+            mode: if loaded { RenderMode::Full } else { RenderMode::Partial },
             needs_repaint: render_tree_parameters.needs_repaint,
             placement_changed: render_tree_parameters.placement_changed,
             still_image_request_id: if update_parameters.still_image_request {
@@ -819,7 +820,7 @@ impl Renderer {
             stats,
         });
 
-        if !render_tree_parameters.loaded {
+        if !loaded {
             self.render_state = RenderState::Partial;
         } else if self.render_state != RenderState::Fully {
             self.render_state = RenderState::Fully;

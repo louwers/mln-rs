@@ -68,6 +68,12 @@ pub struct Response {
     pub modified: Option<Timestamp>,
     pub expires: Option<Timestamp>,
     pub etag: Option<String>,
+
+    /// Port-only: the size in bytes of the whole resource, when the source
+    /// that answered knows it: the total of a ranged response's
+    /// `Content-Range`, a whole response's length, or a local file's size.
+    /// A cached response doesn't know it.
+    pub total_size: Option<u64>,
 }
 
 impl Response {

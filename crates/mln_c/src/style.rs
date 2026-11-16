@@ -43,14 +43,15 @@ use crate::generated::types::{
     MLN_STYLE_SOURCE_INFO_TILE_SIZE, MLN_STYLE_SOURCE_INFO_VECTOR_ENCODING, MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY,
     MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR, MLN_STYLE_SOURCE_TYPE_GEO_JSON, MLN_STYLE_SOURCE_TYPE_IMAGE,
     MLN_STYLE_SOURCE_TYPE_RASTER, MLN_STYLE_SOURCE_TYPE_RASTER_DEM, MLN_STYLE_SOURCE_TYPE_VECTOR,
-    MLN_STYLE_TILE_SCHEME_TMS, MLN_STYLE_TILE_SCHEME_XYZ, MLN_STYLE_TRANSITION_OPTION_DELAY,
-    MLN_STYLE_TRANSITION_OPTION_DURATION, MLN_STYLE_TRANSITION_OPTION_ENABLE_PLACEMENT_TRANSITIONS,
-    MLN_STYLE_VECTOR_TILE_ENCODING_MLT, MLN_STYLE_VECTOR_TILE_ENCODING_MVT, mln_buffer_view, mln_canonical_tile_id,
-    mln_completion, mln_custom_geometry_source_options, mln_custom_vector_source_options, mln_diagnostic,
-    mln_geo_json_source_options, mln_image_content, mln_image_stretch, mln_lat_lng, mln_lat_lng_bounds, mln_map,
-    mln_premultiplied_rgba8_image, mln_status, mln_style_image_info, mln_style_image_options, mln_style_image_text_fit,
-    mln_style_layer_info, mln_style_source_info, mln_style_source_tile_info, mln_style_source_type,
-    mln_style_transition_options, mln_style_vector_tile_encoding,
+    MLN_STYLE_SOURCE_TYPE_VIDEO, MLN_STYLE_TILE_SCHEME_TMS, MLN_STYLE_TILE_SCHEME_XYZ,
+    MLN_STYLE_TRANSITION_OPTION_DELAY, MLN_STYLE_TRANSITION_OPTION_DURATION,
+    MLN_STYLE_TRANSITION_OPTION_ENABLE_PLACEMENT_TRANSITIONS, MLN_STYLE_VECTOR_TILE_ENCODING_MLT,
+    MLN_STYLE_VECTOR_TILE_ENCODING_MVT, mln_buffer_view, mln_canonical_tile_id, mln_completion,
+    mln_custom_geometry_source_options, mln_custom_vector_source_options, mln_diagnostic, mln_geo_json_source_options,
+    mln_image_content, mln_image_stretch, mln_lat_lng, mln_lat_lng_bounds, mln_map, mln_premultiplied_rgba8_image,
+    mln_status, mln_style_image_info, mln_style_image_options, mln_style_image_text_fit, mln_style_layer_info,
+    mln_style_source_info, mln_style_source_tile_info, mln_style_source_type, mln_style_transition_options,
+    mln_style_vector_tile_encoding,
 };
 use crate::map::{self, command, query};
 use crate::{abi, buffer, geo, parse_thread};
@@ -460,6 +461,7 @@ const fn source_type(kind: SourceKind) -> mln_style_source_type {
         SourceKind::Image => MLN_STYLE_SOURCE_TYPE_IMAGE,
         SourceKind::CustomGeometry => MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY,
         SourceKind::CustomVector => MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR,
+        SourceKind::Video => MLN_STYLE_SOURCE_TYPE_VIDEO,
     }
 }
 
@@ -1587,6 +1589,121 @@ pub(crate) unsafe extern "C" fn mln_map_get_image_source_coordinates(
     })
 }
 
+// MARK: - Video sources
+
+/// `mln_map_play_video_source()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_map_play_video_source(
+    map: mln_map,
+    source_id: mln_buffer_view,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        let id = unsafe { required_text(source_id, "source_id") }?;
+        // SAFETY: the caller's contract.
+        unsafe { command(map, completion, |map| map.play_video_source(id)) }
+    })
+}
+
+/// `mln_map_pause_video_source()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_map_pause_video_source(
+    map: mln_map,
+    source_id: mln_buffer_view,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        let id = unsafe { required_text(source_id, "source_id") }?;
+        // SAFETY: the caller's contract.
+        unsafe { command(map, completion, |map| map.pause_video_source(id)) }
+    })
+}
+
+/// `mln_map_seek_video_source()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_map_seek_video_source(
+    map: mln_map,
+    source_id: mln_buffer_view,
+    position_ms: f64,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        let id = unsafe { required_text(source_id, "source_id") }?;
+        let position = Duration::try_from_secs_f64(position_ms / 1000.0)
+            .map_err(|_| Error::invalid_argument("position_ms must be finite and not negative"))?;
+        // SAFETY: the caller's contract.
+        unsafe { command(map, completion, |map| map.seek_video_source(id, position)) }
+    })
+}
+
+/// `mln_map_set_video_source_coordinates()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_map_set_video_source_coordinates(
+    map: mln_map,
+    source_id: mln_buffer_view,
+    coordinates: *const mln_lat_lng,
+    coordinate_count: usize,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract, for each input.
+        let (id, corners) =
+            unsafe { (required_text(source_id, "source_id")?, corners(coordinates, coordinate_count)?) };
+        // SAFETY: the caller's contract.
+        unsafe { command(map, completion, |map| map.set_video_source_coordinates(id, corners)) }
+    })
+}
+
+/// `mln_map_get_video_source_coordinates()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_map_get_video_source_coordinates(
+    map: mln_map,
+    source_id: mln_buffer_view,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        let id = unsafe { required_text(source_id, "source_id") }?;
+        // SAFETY: the caller's contract.
+        unsafe {
+            query(
+                map,
+                completion,
+                |map| map.video_source_coordinates(id),
+                |corners| Plain(corners.into_iter().map(geo::from_lat_lng).collect()),
+            )
+        }
+    })
+}
+
 // MARK: - Layers
 
 /// `mln_map_add_style_layer_json()`.
@@ -2065,5 +2182,72 @@ mod tests {
         assert!(check(r#"{"total":5}"#).unwrap_err().message().contains("GeoJSON source options"));
         assert!(check(r#"{"total":NaN}"#).unwrap_err().message().contains("cluster_properties"));
         assert_eq!(check("").unwrap(), GeoJsonSourceOptions::default());
+    }
+
+    #[test]
+    fn video_sources_play_pause_seek_and_move() {
+        use crate::generated::types::{MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_NOT_FOUND, MLN_STATUS_OK};
+        use crate::map::mln_map_set_style_json;
+        use crate::map::tests::{create_map, options, release_map, view};
+        use crate::runtime::tests::{Waiter, create, release};
+
+        const NO_DIAGNOSTIC: *mut mln_diagnostic = core::ptr::null_mut();
+        let style = r#"{"version":8,"sources":{
+            "drone":{"type":"video","urls":["fixture://drone.mp4"],"coordinates":[[0,1],[1,1],[1,0],[0,0]]},
+            "points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}
+        },"layers":[]}"#;
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        let await_status = |call: &dyn Fn(*const mln_completion) -> mln_status| {
+            let waiter = Waiter::new();
+            assert_eq!(call(&raw const waiter.descriptor), MLN_STATUS_OK);
+            waiter.status()
+        };
+        // SAFETY: local arguments throughout; each completion outlives its call.
+        unsafe {
+            assert_eq!(await_status(&|c| mln_map_set_style_json(map, view(style), c, NO_DIAGNOSTIC)), MLN_STATUS_OK);
+            let drone = view("drone");
+            assert_eq!(await_status(&|c| mln_map_pause_video_source(map, drone, c, NO_DIAGNOSTIC)), MLN_STATUS_OK);
+            assert_eq!(
+                await_status(&|c| mln_map_seek_video_source(map, drone, 1500.0, c, NO_DIAGNOSTIC)),
+                MLN_STATUS_OK
+            );
+            assert_eq!(await_status(&|c| mln_map_play_video_source(map, drone, c, NO_DIAGNOSTIC)), MLN_STATUS_OK);
+            let corners = [0.5, 1.5, 2.5, 3.5].map(|at| mln_lat_lng { latitude: at, longitude: at });
+            assert_eq!(
+                await_status(&|c| mln_map_set_video_source_coordinates(
+                    map,
+                    drone,
+                    corners.as_ptr(),
+                    corners.len(),
+                    c,
+                    NO_DIAGNOSTIC
+                )),
+                MLN_STATUS_OK
+            );
+            assert_eq!(
+                await_status(&|c| mln_map_get_video_source_coordinates(map, drone, c, NO_DIAGNOSTIC)),
+                MLN_STATUS_OK
+            );
+
+            // A position before the start fails at once, and the completion
+            // stays the caller's.
+            let waiter = Waiter::new();
+            let status = mln_map_seek_video_source(map, drone, -1.0, &raw const waiter.descriptor, NO_DIAGNOSTIC);
+            assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
+            waiter.unused();
+            let points = view("points");
+            assert_eq!(
+                await_status(&|c| mln_map_pause_video_source(map, points, c, NO_DIAGNOSTIC)),
+                MLN_STATUS_INVALID_ARGUMENT
+            );
+            let missing = view("missing");
+            assert_eq!(
+                await_status(&|c| mln_map_play_video_source(map, missing, c, NO_DIAGNOSTIC)),
+                MLN_STATUS_NOT_FOUND
+            );
+        }
+        release_map(map);
+        release(runtime);
     }
 }

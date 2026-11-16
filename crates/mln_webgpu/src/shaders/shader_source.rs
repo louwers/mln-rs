@@ -31,7 +31,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
     ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
+    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_VIDEO_FRAME_PLANE0_TEXTURE, ID_VIDEO_FRAME_PLANE1_TEXTURE,
+    ID_VIDEO_FRAME_PLANE2_TEXTURE, ID_VIDEO_FRAME_POS_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::shaders::shader_source::BuiltIn;
 
@@ -317,6 +318,19 @@ shader_source!(
     HEATMAP_TEXTURE_ATTRIBUTES,
     HEATMAP_TEXTURE_TEXTURES
 );
+const VIDEO_FRAME_ATTRIBUTES: &[AttributeInfo] = &[attr(5, ID_VIDEO_FRAME_POS_VERTEX_ATTRIBUTE)];
+const VIDEO_FRAME_TEXTURES: &[TextureInfo] = &[
+    tex(0, ID_VIDEO_FRAME_PLANE0_TEXTURE),
+    tex(1, ID_VIDEO_FRAME_PLANE1_TEXTURE),
+    tex(2, ID_VIDEO_FRAME_PLANE2_TEXTURE),
+];
+shader_source!(
+    VIDEO_FRAME_SHADER,
+    VIDEO_FRAME_SHADER,
+    "VideoFrameShader",
+    VIDEO_FRAME_ATTRIBUTES,
+    VIDEO_FRAME_TEXTURES
+);
 const HILLSHADE_ATTRIBUTES: &[AttributeInfo] =
     &[attr(5, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(6, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
 const HILLSHADE_TEXTURES: &[TextureInfo] = &[tex(0, ID_HILLSHADE_IMAGE_TEXTURE)];
@@ -579,6 +593,7 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::FillExtrusionPatternWallShader => Some(&FILL_EXTRUSION_PATTERN_WALL_SHADER),
         BuiltIn::HeatmapShader => Some(&HEATMAP_SHADER),
         BuiltIn::HeatmapTextureShader => Some(&HEATMAP_TEXTURE_SHADER),
+        BuiltIn::VideoFrameShader => Some(&VIDEO_FRAME_SHADER),
         BuiltIn::HillshadeShader => Some(&HILLSHADE_SHADER),
         BuiltIn::HillshadePrepareShader => Some(&HILLSHADE_PREPARE_SHADER),
         BuiltIn::ColorReliefShader => Some(&COLOR_RELIEF_SHADER),

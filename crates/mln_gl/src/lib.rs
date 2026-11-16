@@ -51,6 +51,10 @@ pub mod exported_target;
 mod overlay;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod surface_target;
+#[cfg(any(target_os = "android", target_env = "ohos"))]
+mod video_frame;
+#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+mod video_import;
 #[cfg(windows)]
 mod wgl;
 #[cfg(windows)]

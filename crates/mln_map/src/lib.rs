@@ -12,6 +12,7 @@ mod map_snapshot;
 mod map_projection;
 mod rendering_stats_view;
 pub mod transform;
+mod video;
 
 pub use map::Map;
 pub use map_event::{CameraChange, CameraChangeMode, CameraChangeSource, MapEvent, RenderFrameStatus};
@@ -32,6 +33,7 @@ pub use mln_style::StyleLoadError;
 pub use mln_util::event_queue::Waker;
 pub use mln_util::{Error, ErrorKind};
 pub use transform::{CameraCommandId, CommandEnd};
+pub use video::VideoControl;
 
 #[cfg(test)]
 mod tests;

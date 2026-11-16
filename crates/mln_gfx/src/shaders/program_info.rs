@@ -39,7 +39,8 @@ use crate::shaders::shader_defines::{
     ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
     ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
+    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_VIDEO_FRAME_PLANE0_TEXTURE, ID_VIDEO_FRAME_PLANE1_TEXTURE,
+    ID_VIDEO_FRAME_PLANE2_TEXTURE, ID_VIDEO_FRAME_POS_VERTEX_ATTRIBUTE,
 };
 use crate::shaders::shader_source::BuiltIn;
 
@@ -96,6 +97,7 @@ pub const PROGRAMS: &[BuiltIn] = &[
     BuiltIn::SkyShader,
     BuiltIn::AtmosphereShader,
     BuiltIn::LayerCompositeShader,
+    BuiltIn::VideoFrameShader,
 ];
 
 /// What `program` reads, `None` for a program no backend has.
@@ -411,6 +413,13 @@ pub fn program_info(program: BuiltIn) -> Option<&'static ProgramInfo> {
             ],
             instance_attributes: &[],
             textures: &[],
+        }),
+        BuiltIn::VideoFrameShader => Some(&ProgramInfo {
+            name: "VideoFrameShader",
+            program: BuiltIn::VideoFrameShader,
+            attributes: &[(ID_VIDEO_FRAME_POS_VERTEX_ATTRIBUTE, Short2)],
+            instance_attributes: &[],
+            textures: &[ID_VIDEO_FRAME_PLANE0_TEXTURE, ID_VIDEO_FRAME_PLANE1_TEXTURE, ID_VIDEO_FRAME_PLANE2_TEXTURE],
         }),
         BuiltIn::HeatmapTextureShader => Some(&ProgramInfo {
             name: "HeatmapTextureShader",

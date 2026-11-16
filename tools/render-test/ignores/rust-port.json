@@ -10,5 +10,6 @@
   "render-tests/fill-layer-blend/under-opaque-fill-antialiased": "The expected image is drawn with multisampling (\"antialias\": true), which mln-rs doesn't do",
   "render-tests/raster-layer-blend/under-opaque-fill-antialiased": "The expected image is drawn with multisampling (\"antialias\": true), which mln-rs doesn't do",
   "render-tests/fill-layer-blend/overdraw-inspector": "mln-rs's overdraw inspector draws differently from GL JS's, as render-tests/debug/overdraw's ignore says",
-  "render-tests/raster-layer-blend/image-beyond-tile": "mln-rs samples this image source a few levels darker than GL JS does, with or without the blend: the blended image is the unblended one multiplied by the background exactly"
+  "render-tests/raster-layer-blend/image-beyond-tile": "mln-rs samples this image source a few levels darker than GL JS does, with or without the blend: the blended image is the unblended one multiplied by the background exactly",
+  "render-tests/video/default": "runs: the runner plays video sources with a player that shows the first frame, which it has as the image tests' local://image/0.png (src/video.rs)"
 }

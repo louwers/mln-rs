@@ -34,6 +34,7 @@ objc2-foundation = { workspace = true, features = [
   "NSObject",
   "NSRange",
 ] }
+objc2-core-video.workspace = true
 objc2-io-surface.workspace = true
 objc2-metal = { workspace = true, features = ["block2", "objc2-io-surface"] }
 objc2-quartz-core.workspace = true

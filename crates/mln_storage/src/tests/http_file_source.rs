@@ -81,6 +81,7 @@ fn http206() {
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"lo Wor", data(&res));
+            assert_eq!(Some(12), res.total_size);
             assert!(res.expires.is_none());
             assert!(!res.must_revalidate);
             assert!(res.modified.is_none());

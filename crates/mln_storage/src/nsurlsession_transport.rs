@@ -48,8 +48,8 @@ const MAXIMUM_CONNECTIONS_PER_HOST: NSInteger = 8;
 
 /// The response headers a `Response` reads, in the order they go to the
 /// `Transfer`.
-const RESPONSE_HEADERS: [&str; 6] =
-    ["Last-Modified", "ETag", "Cache-Control", "Expires", "Retry-After", "X-Rate-Limit-Reset"];
+const RESPONSE_HEADERS: [&str; 7] =
+    ["Last-Modified", "ETag", "Cache-Control", "Expires", "Retry-After", "X-Rate-Limit-Reset", "Content-Range"];
 
 /// The request headers this transport sets itself. Every other header of a
 /// request is one of the host's.

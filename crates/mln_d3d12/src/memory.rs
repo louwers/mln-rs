@@ -16,6 +16,7 @@ use gpu_allocator::d3d12::{
 };
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, MemoryLocation};
 use mln_gfx::gpu::GpuError;
+use mln_gfx::video::FrameKeepAlive;
 use mln_util::logging::{Event, Log};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT, D3D12_RANGE, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER,
@@ -151,12 +152,22 @@ pub(crate) struct TextureMemory {
     /// gpu-allocator's resource, `None` for the host's.
     owner: Option<Owner>,
     freed: Rc<Freed>,
+    /// What the resource's producer lent with it, such as the video frame
+    /// it holds, which drops with the memory.
+    #[expect(dead_code, reason = "held, not read")]
+    keep_alive: Option<FrameKeepAlive>,
 }
 
 impl TextureMemory {
     /// The resource of a texture the host made, which stays the host's.
     pub(crate) fn imported(resource: ID3D12Resource, freed: &Rc<Freed>) -> TextureMemory {
-        TextureMemory { resource, owner: None, freed: Rc::clone(freed) }
+        TextureMemory { resource, owner: None, freed: Rc::clone(freed), keep_alive: None }
+    }
+
+    /// The resource of a video frame, which holds `keep_alive` until the
+    /// memory drops.
+    pub(crate) fn of_frame(resource: ID3D12Resource, freed: &Rc<Freed>, keep_alive: FrameKeepAlive) -> TextureMemory {
+        TextureMemory { resource, owner: None, freed: Rc::clone(freed), keep_alive: Some(keep_alive) }
     }
 }
 
@@ -304,6 +315,7 @@ impl Memory {
         Ok(TextureMemory {
             resource: resource.resource().clone(),
             owner: Some(Owner::Resource(resource)),
+            keep_alive: None,
             freed: Rc::clone(&self.freed),
         })
     }

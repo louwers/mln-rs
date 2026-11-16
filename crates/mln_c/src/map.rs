@@ -173,6 +173,7 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         fallback_font_faces,
         system_fonts: fields.get(MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED, options.system_fonts_enabled).unwrap_or(true),
         tile_cache_enabled: fields.get(MLN_MAP_OPTION_TILE_CACHE_ENABLED, options.tile_cache_enabled).unwrap_or(true),
+        ..MapOptions::default()
     };
     Ok((options, extent.scale_factor))
 }

@@ -73,6 +73,13 @@ pub(crate) trait RenderSource {
 
     fn is_loaded(&self, store: &TileStore) -> bool;
 
+    /// Whether, after a frame's uploads, the source's textures hold what it
+    /// shows: false for a video source that no frame was drawn of yet, while
+    /// its player hasn't failed.
+    fn drawn(&self) -> bool {
+        true
+    }
+
     fn update(
         &mut self,
         store: &mut TileStore,
@@ -156,6 +163,11 @@ pub(crate) fn create(impl_: &Arc<dyn source::Impl>, store: &mut TileStore) -> Bo
         SourceType::Image => {
             Box::new(crate::sources::render_image_source::RenderImageSource::new(source::downcast_arc::<
                 mln_style::sources::image_source::Impl,
+            >(impl_)))
+        }
+        SourceType::Video => {
+            Box::new(crate::sources::render_image_source::RenderImageSource::video(source::downcast_arc::<
+                mln_style::sources::video_source::Impl,
             >(impl_)))
         }
         SourceType::Vector

@@ -1,5 +1,7 @@
 //! The [`Gpu`] interface on D3D12.
 
+mod video;
+
 use std::any::Any;
 use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
@@ -19,6 +21,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
+use mln_gfx::video::{FrameKeepAlive, GpuFrame, ImportedFrame};
 use mln_glsl::TextureInfo as ShaderTexture;
 use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
 use mln_util::hash::{HashMap, HashSet};
@@ -1210,6 +1213,10 @@ impl Gpu for D3d12Gpu {
         keep.push(Rc::clone(&index.memory));
         let tags = GeometryTags { layout: self.layout_tags.tag(desc.shader, desc.layouts), ranges };
         Ok(self.geometries.insert(Geometry { vertex_views, index_view, keep, tags }))
+    }
+
+    fn import_video_frame(&mut self, frame: &GpuFrame, keep_alive: FrameKeepAlive) -> Result<ImportedFrame, GpuError> {
+        self.import_frame(frame, keep_alive)
     }
 
     fn destroy(&mut self, resource: ResourceId) {

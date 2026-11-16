@@ -112,6 +112,7 @@
 "crates/mln_renderer/src/renderer_event.rs" = 2
 "crates/mln_renderer/src/sky_pass.rs" = 10
 "crates/mln_renderer/src/sources/render_tile_source.rs" = 8
+"crates/mln_renderer/src/sources/video_texture.rs" = 1
 "crates/mln_renderer/src/text/placement.rs" = 6
 "crates/mln_renderer/src/tile/worker_codec/host.rs" = 5
 "crates/mln_renderer/src/tile/worker_codec/transport.rs" = 4

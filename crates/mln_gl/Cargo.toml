@@ -47,6 +47,9 @@ js-sys.workspace = true
 wasm-bindgen.workspace = true
 web-sys = { workspace = true, features = [
   "HtmlCanvasElement",
+  # The browser's images that video frames hold (`Gpu::import_video_frame`).
+  "ImageBitmap",
+  "VideoFrame",
   "WebGl2RenderingContext",
   "WebGlContextAttributes",
 ] }

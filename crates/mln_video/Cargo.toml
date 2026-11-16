@@ -1,0 +1,90 @@
+[package]
+name = "mln-rs-video"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_video"
+# The doc comments have no examples to run.
+doctest = false
+
+[dependencies]
+mln_gfx.workspace = true
+mln_storage.workspace = true
+mln_util.workspace = true
+parking_lot.workspace = true
+
+# GStreamer, loaded at run time.
+[target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_env = "ohos"), not(target_family = "wasm")))'.dependencies]
+libloading.workspace = true
+
+# The browser's players (`WebPlayers`): a host's JS object, and the frames'
+# `ImageBitmap`s, read through a canvas where a renderer refuses them.
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+mln_actor.workspace = true
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = [
+  "ImageBitmap",
+  "ImageData",
+  "OffscreenCanvas",
+  "OffscreenCanvasRenderingContext2d",
+] }
+
+# Android's player: the NDK's media API, loaded at run time.
+[target.'cfg(target_os = "android")'.dependencies]
+libloading.workspace = true
+
+# OpenHarmony's player: its AVCodec, native image and native buffer APIs,
+# and the poll that waits for a decoded frame's fence.
+[target.'cfg(target_env = "ohos")'.dependencies]
+libc.workspace = true
+ohos-media-sys.workspace = true
+ohos-sys-opaque-types.workspace = true
+ohos-window-sys.workspace = true
+
+# The Media Foundation player: its media engine, the D3D11 device it decodes
+# on, and the byte stream it reads through a ByteSource.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Media_MediaFoundation",
+  "Win32_System_Com",
+  "Win32_System_Threading",
+] }
+# For the code that windows' #[implement] generates.
+windows-core.workspace = true
+
+# The AVFoundation player of Apple platforms.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+block2.workspace = true
+dispatch2.workspace = true
+objc2.workspace = true
+objc2-av-foundation.workspace = true
+objc2-core-foundation = { workspace = true, features = [
+  "CFDictionary",
+  "CFString",
+] }
+objc2-core-media.workspace = true
+objc2-core-video.workspace = true
+objc2-foundation = { workspace = true, features = ["NSDictionary", "NSValue"] }
+# Enables the IOSurface types that objc2-core-video names.
+objc2-io-surface.workspace = true
+
+[target.'cfg(target_vendor = "apple")'.dev-dependencies]
+objc2-core-video.workspace = true
+
+# The AVFoundation player's tests run on threads while the main thread runs
+# its run loop, which AVFoundation steps players on.
+[[test]]
+name = "avfoundation"
+harness = false
+
+[lints]
+workspace = true

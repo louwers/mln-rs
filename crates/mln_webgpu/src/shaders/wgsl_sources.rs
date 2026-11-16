@@ -4886,6 +4886,82 @@ fn atlas_pos(origin: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
     ),
 };
 
+/// Port-only: a video frame's planes as the RGBA of a video source's
+/// texture (`BuiltIn::VideoFrameShader`).
+pub(crate) const VIDEO_FRAME_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "VideoFrameShader",
+    name: r"VideoFrameShader",
+    vertex: Some(
+        r"
+struct VertexInput {
+    @location(5) position: vec2<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) tex_coord: vec2<f32>,
+};
+
+struct VideoFramePropsUBO {
+    matrix: mat4x4<f32>,
+    to_r: vec4<f32>,
+    to_g: vec4<f32>,
+    to_b: vec4<f32>,
+};
+
+@group(0) @binding(5) var<uniform> props: VideoFramePropsUBO;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    out.position = props.matrix * vec4<f32>(pos, 0.0, 1.0);
+    out.tex_coord = pos;
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+struct FragmentInput {
+    @location(0) tex_coord: vec2<f32>,
+};
+
+struct VideoFramePropsUBO {
+    matrix: mat4x4<f32>,
+    to_r: vec4<f32>,
+    to_g: vec4<f32>,
+    to_b: vec4<f32>,
+};
+
+@group(0) @binding(5) var<uniform> props: VideoFramePropsUBO;
+@group(1) @binding(0) var texture_sampler: sampler;
+@group(1) @binding(1) var plane0: texture_2d<f32>;
+@group(1) @binding(2) var plane1: texture_2d<f32>;
+@group(1) @binding(3) var plane2: texture_2d<f32>;
+
+@fragment
+fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+    let luma = textureSample(plane0, texture_sampler, in.tex_coord);
+    let chroma1 = textureSample(plane1, texture_sampler, in.tex_coord);
+    let chroma2 = textureSample(plane2, texture_sampler, in.tex_coord);
+#ifdef VIDEO_NV12
+    let yuv = vec4<f32>(luma.r, chroma1.r, chroma1.g, 1.0);
+#else
+    let yuv = vec4<f32>(luma.r, chroma1.r, chroma2.r, 1.0);
+#endif
+#ifdef VIDEO_RGBA
+    return luma;
+#else
+    let rgb = vec3<f32>(dot(props.to_r, yuv), dot(props.to_g, yuv), dot(props.to_b, yuv));
+    return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+#endif
+}
+",
+    ),
+    prelude: None,
+};
+
 pub(crate) const RASTER_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "RasterShader",
     name: r"RasterShader",
@@ -6220,5 +6296,6 @@ pub(crate) const ALL: &[&WgslShaderSource] = &[
     &SYMBOL_ICON_SHADER,
     &SYMBOL_SDF_SHADER,
     &SYMBOL_TEXT_AND_ICON_SHADER,
+    &VIDEO_FRAME_SHADER,
     &WIDE_VECTOR_SHADER,
 ];
