@@ -342,7 +342,7 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("HeatmapEvaluatedPropsUBO", size_of::<heatmap_layer_ubo::HeatmapEvaluatedPropsUBO>()),
     ("HeatmapTexturePropsUBO", size_of::<heatmap_texture_layer_ubo::HeatmapTexturePropsUBO>()),
     ("LayerCompositeUBO", size_of::<layer_composite_ubo::LayerCompositeUBO>()),
-    ("VideoFramePropsUBO", size_of::<mln_gfx::shaders::video_frame_ubo::VideoFramePropsUBO>()),
+    ("VideoFramePropsUBO", size_of::<video_frame_ubo::VideoFramePropsUBO>()),
     ("HillshadeDrawableUBO", size_of::<hillshade_layer_ubo::HillshadeDrawableUBO>()),
     ("HillshadeTilePropsUBO", size_of::<hillshade_layer_ubo::HillshadeTilePropsUBO>()),
     ("HillshadeEvaluatedPropsUBO", size_of::<hillshade_layer_ubo::HillshadeEvaluatedPropsUBO>()),

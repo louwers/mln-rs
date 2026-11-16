@@ -177,6 +177,32 @@ unsafe impl Send for GpuFrame {}
 #[expect(unsafe_code, reason = "the frames' platform handles are raw pointers")]
 unsafe impl Sync for GpuFrame {}
 
+#[cfg(target_vendor = "apple")]
+impl Drop for GpuFrame {
+    fn drop(&mut self) {
+        if let GpuFrame::CvPixelBuffer { buffer, .. } = *self
+            && !buffer.is_null()
+        {
+            // SAFETY: the frame owns one retain of the buffer, which this
+            // gives back once.
+            #[expect(unsafe_code, reason = "releasing a CoreFoundation object")]
+            unsafe {
+                apple::CFRelease(buffer);
+            }
+        }
+    }
+}
+
+/// The call that gives back a frame's CVPixelBuffer.
+#[cfg(target_vendor = "apple")]
+#[expect(unsafe_code, reason = "CoreFoundation's C API")]
+mod apple {
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        pub(super) fn CFRelease(cf: *mut std::ffi::c_void);
+    }
+}
+
 /// A browser image that a frame holds: an `ImageBitmap` or a `VideoFrame`,
 /// which the frame closes when it drops.
 #[cfg(target_family = "wasm")]

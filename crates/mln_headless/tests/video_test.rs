@@ -19,8 +19,9 @@ use parking_lot::Mutex;
 #[cfg(target_os = "android")]
 mod video_android;
 
-/// The quarters' colors: top left, top right, bottom left, bottom right.
-const QUARTERS: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]];
+/// The quarters' colors: top left, top right, bottom left, bottom right. The
+/// last saturates no channel, so a wrong YUV range or matrix shows in it.
+const QUARTERS: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [64, 128, 192]];
 
 /// Hands each video the frame it holds, once.
 #[derive(Debug)]
@@ -499,5 +500,162 @@ mod d3d11 {
             color: YuvColor::default(),
         });
         assert_quarters(&render_on_d3d12(VideoFrame { size, pixels, time: None }), "shared BGRA");
+    }
+}
+
+/// Frames in IOSurface-backed `CVPixelBuffer`s, which the Metal backend
+/// imports and the others refuse.
+#[cfg(target_vendor = "apple")]
+mod pixel_buffers {
+    #![expect(unsafe_code, reason = "CoreVideo's C API")]
+
+    use std::ptr::NonNull;
+
+    use mln_gfx::video::GpuFrame;
+    use mln_video::FrameSink;
+    use objc2_core_foundation::{CFBoolean, CFDictionary, CFString, CFType};
+    use objc2_core_video::{
+        CVAttachmentMode, CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddressOfPlane,
+        CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
+        CVPixelBufferUnlockBaseAddress, kCVImageBufferYCbCrMatrix_ITU_R_601_4, kCVImageBufferYCbCrMatrixKey,
+        kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey, kCVPixelFormatType_32BGRA,
+        kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVReturnSuccess,
+    };
+
+    use super::*;
+
+    /// A retained IOSurface-backed, Metal-compatible pixel buffer of
+    /// `format` and `size`, whose planes `fill` writes: each plane's index,
+    /// bytes and stride.
+    fn pixel_buffer(size: Size, format: u32, fill: &dyn Fn(usize, &mut [u8], usize)) -> NonNull<CVPixelBuffer> {
+        let surface = CFDictionary::<CFString, CFType>::empty();
+        // SAFETY: CoreVideo's constant keys.
+        let keys = unsafe { [kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey] };
+        let values: [&CFType; 2] = [surface.as_ref(), CFBoolean::new(true).as_ref()];
+        let attributes = CFDictionary::<CFString, CFType>::from_slices(&keys, &values);
+        let mut buffer: *mut CVPixelBuffer = std::ptr::null_mut();
+        // SAFETY: the attributes map strings to CF objects, as CoreVideo
+        // reads them, and the out pointer is valid.
+        let status = unsafe {
+            CVPixelBufferCreate(
+                None,
+                size.width as usize,
+                size.height as usize,
+                format,
+                Some(attributes.as_opaque()),
+                NonNull::from(&mut buffer),
+            )
+        };
+        assert_eq!(kCVReturnSuccess, status, "CVPixelBufferCreate");
+        let buffer = NonNull::new(buffer).expect("a pixel buffer");
+        // SAFETY: CoreVideo made the buffer, which this holds a retain of.
+        let pixels = unsafe { buffer.as_ref() };
+        // SAFETY: the buffer is valid, and unlocks below.
+        assert_eq!(kCVReturnSuccess, unsafe { CVPixelBufferLockBaseAddress(pixels, CVPixelBufferLockFlags(0)) });
+        let planes = if format == kCVPixelFormatType_32BGRA { 1 } else { 2 };
+        for plane in 0..planes {
+            let stride = CVPixelBufferGetBytesPerRowOfPlane(pixels, plane);
+            let rows = if plane == 0 { size.height } else { size.height.div_ceil(2) } as usize;
+            let base = CVPixelBufferGetBaseAddressOfPlane(pixels, plane).cast::<u8>();
+            assert!(!base.is_null(), "plane {plane} has no address");
+            // SAFETY: the locked plane has `rows` rows of `stride` bytes.
+            fill(plane, unsafe { std::slice::from_raw_parts_mut(base, stride * rows) }, stride);
+        }
+        // SAFETY: locked above.
+        assert_eq!(kCVReturnSuccess, unsafe { CVPixelBufferUnlockBaseAddress(pixels, CVPixelBufferLockFlags(0)) });
+        buffer
+    }
+
+    /// Full-range NV12 quarters, whose attachment names BT.601.
+    fn nv12_buffer(size: Size) -> NonNull<CVPixelBuffer> {
+        let buffer = pixel_buffer(size, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, &|plane, data, stride| {
+            for (y, row) in data.chunks_mut(stride).enumerate() {
+                let y = y as u32;
+                if plane == 0 {
+                    for x in 0..size.width {
+                        row[x as usize] = yuv(quarter(size, x, y))[0];
+                    }
+                } else {
+                    for x in 0..size.width.div_ceil(2) {
+                        let [_, u, v] = yuv(quarter(size, x * 2, y * 2));
+                        row[x as usize * 2] = u;
+                        row[x as usize * 2 + 1] = v;
+                    }
+                }
+            }
+        });
+        // SAFETY: CoreVideo's constant strings, on a valid buffer.
+        unsafe {
+            buffer.as_ref().set_attachment(
+                kCVImageBufferYCbCrMatrixKey,
+                kCVImageBufferYCbCrMatrix_ITU_R_601_4.as_ref(),
+                CVAttachmentMode::ShouldPropagate,
+            );
+        }
+        buffer
+    }
+
+    fn bgra_buffer(size: Size) -> NonNull<CVPixelBuffer> {
+        pixel_buffer(size, kCVPixelFormatType_32BGRA, &|_, data, stride| {
+            for (y, row) in data.chunks_mut(stride).enumerate() {
+                for x in 0..size.width {
+                    let [r, g, b] = quarter(size, x, y as u32);
+                    row[x as usize * 4..x as usize * 4 + 4].copy_from_slice(&[b, g, r, 255]);
+                }
+            }
+        })
+    }
+
+    /// Hands each video one frame of the pixel buffer it holds, and keeps
+    /// the video's sink.
+    #[derive(Debug, Default)]
+    struct OneGpuFrame {
+        frame: Mutex<Option<VideoFrame>>,
+        sink: Mutex<Option<FrameSink>>,
+    }
+
+    impl VideoPlayers for OneGpuFrame {
+        fn open(&self, request: OpenRequest) -> Result<Box<dyn VideoPlayer>, String> {
+            let frame = self.frame.lock().take().ok_or("one video only")?;
+            request.frames.push(frame);
+            *self.sink.lock() = Some(request.frames);
+            Ok(Box::new(Still))
+        }
+    }
+
+    /// Draws `buffer`'s frame on Metal, whose quarters must keep their
+    /// place; other backends must refuse it.
+    fn draws_or_refuses(size: Size, buffer: NonNull<CVPixelBuffer>, what: &str) {
+        let pixels = FramePixels::Gpu(GpuFrame::CvPixelBuffer {
+            buffer: buffer.as_ptr().cast(),
+            // The import reads the range from the pixel format and the
+            // matrix from the buffer's attachment.
+            color: YuvColor::default(),
+        });
+        let players = Arc::new(OneGpuFrame {
+            frame: Mutex::new(Some(VideoFrame { size, pixels, time: None })),
+            sink: Mutex::default(),
+        });
+        let shared: Arc<dyn VideoPlayers> = Arc::<OneGpuFrame>::clone(&players);
+        let image = VideoMap::new(shared, None).render();
+        let refused = players.sink.lock().as_ref().expect("a video opened").gpu_frames_refused();
+        if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("metal")) {
+            assert!(!refused, "{what}: Metal refused the frame");
+            assert_quarters(&image, what);
+        } else {
+            assert!(refused, "{what}: a backend without an import of CVPixelBuffers took one");
+        }
+    }
+
+    #[test]
+    fn an_nv12_pixel_buffer_draws_in_place() {
+        let size = Size::new(16, 16);
+        draws_or_refuses(size, nv12_buffer(size), "NV12 CVPixelBuffer");
+    }
+
+    #[test]
+    fn a_bgra_pixel_buffer_draws_in_place() {
+        let size = Size::new(16, 16);
+        draws_or_refuses(size, bgra_buffer(size), "BGRA CVPixelBuffer");
     }
 }

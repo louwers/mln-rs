@@ -347,6 +347,34 @@ objc2-quartz-core = { version = "0.3.2", default-features = false, features = [
   "CALayer",
   "CAMetalLayer",
 ] }
+# Apple platforms: the video player of video sources (crates/mln_video), and
+# the Metal backend's import of its frames.
+objc2-av-foundation = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "block2",
+  "objc2-core-media",
+  "objc2-core-video",
+  "AVAsset",
+  "AVAssetResourceLoader",
+  "AVPlayer",
+  "AVPlayerItem",
+  "AVPlayerItemOutput",
+  "AVTime",
+] }
+objc2-core-media = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "CMTime",
+] }
+objc2-core-video = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "objc2-io-surface",
+  "CVBase",
+  "CVBuffer",
+  "CVImageBuffer",
+  "CVPixelBuffer",
+  "CVPixelBufferIOSurface",
+  "CVReturn",
+] }
 # examples/web: the browser's API through wasm-bindgen (whose CLI must be
 # this exact version).
 js-sys = { version = "0.3.107" }

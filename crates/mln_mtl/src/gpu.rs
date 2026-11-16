@@ -29,6 +29,7 @@ use mln_gfx::types::{
     StencilFunctionType, StencilOpType, TextureFilterType, TextureWrapType,
 };
 use mln_gfx::vertex_attribute::VertexAttribute;
+use mln_gfx::video::{FrameKeepAlive, GpuFrame, ImportedFrame};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use objc2::Message;
@@ -99,6 +100,9 @@ struct Texture {
     /// reads it back, waits for: of
     /// [`wait_before_using`](MetalGpu::wait_before_using).
     waits: Vec<(Retained<ProtocolObject<dyn MTLEvent>>, u64)>,
+    /// What an imported video frame's plane holds until the GPU no longer
+    /// reads it.
+    keep_alive: Option<FrameKeepAlive>,
 }
 
 /// A program's library functions, and what they read, once a pipeline of
@@ -332,6 +336,10 @@ pub struct MetalGpu {
     signals: Vec<(Retained<ProtocolObject<dyn MTLEvent>>, u64)>,
     /// The drawables the next flush presents.
     presents: Vec<Retained<ProtocolObject<dyn MTLDrawable>>>,
+    /// What destroyed video frame planes held, until the command buffers
+    /// that may read them finish: up to the number given, or, for `None`,
+    /// up to the next flush's frame, which may read them too.
+    keep_alives: Vec<(Option<u64>, FrameKeepAlive)>,
     /// Called with each command buffer just before it's committed.
     #[cfg(test)]
     before_commit: Option<BeforeCommit>,
@@ -375,6 +383,7 @@ impl MetalGpu {
             waits: Vec::new(),
             signals: Vec::new(),
             presents: Vec::new(),
+            keep_alives: Vec::new(),
             #[cfg(test)]
             before_commit: None,
         }
@@ -396,7 +405,7 @@ impl MetalGpu {
         if texture.pixelFormat() != pixel_format(format) {
             return Err(GpuError::Invalid(format!("a texture of {:?} imported as {format:?}", texture.pixelFormat())));
         }
-        Ok(self.textures.insert(Texture { texture: texture.retain(), format, waits: Vec::new() }))
+        Ok(self.textures.insert(Texture { texture: texture.retain(), format, waits: Vec::new(), keep_alive: None }))
     }
 
     /// Has the next pass that draws into `texture`, or the next readback of
@@ -433,11 +442,14 @@ impl MetalGpu {
         !(self.waits.is_empty() && self.signals.is_empty() && self.presents.is_empty())
     }
 
-    /// Forgets the command buffers whose completed handlers have run.
+    /// Forgets the command buffers whose completed handlers have run, and
+    /// drops what only they kept alive.
     fn retire(&mut self) {
         while self.in_flight.front().is_some_and(|(_, completion)| completion.is_done()) {
             self.in_flight.pop_front();
         }
+        let finished = self.finished();
+        self.keep_alives.retain(|(number, _)| number.is_none_or(|number| number > finished));
     }
 
     /// Has the next flush signal `event` with `value` once its commands are
@@ -533,6 +545,9 @@ impl MetalGpu {
             frame.presentDrawable(&drawable);
         }
         self.commit(&frame);
+        for (number, _) in &mut self.keep_alives {
+            number.get_or_insert(self.submitted);
+        }
         Ok(())
     }
 
@@ -1260,7 +1275,7 @@ impl Gpu for MetalGpu {
             .newTextureWithDescriptor(&descriptor)
             .ok_or_else(|| GpuError::Invalid(format!("{}: Metal made no texture", desc.label)))?;
         texture.setLabel(Some(&NSString::from_str(desc.label)));
-        Ok(self.textures.insert(Texture { texture, format: desc.format, waits: Vec::new() }))
+        Ok(self.textures.insert(Texture { texture, format: desc.format, waits: Vec::new(), keep_alive: None }))
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
@@ -1414,10 +1429,23 @@ impl Gpu for MetalGpu {
 
     /// Drops this backend's reference: the command buffers that use a
     /// resource keep it.
+    fn import_video_frame(&mut self, frame: &GpuFrame, keep_alive: FrameKeepAlive) -> Result<ImportedFrame, GpuError> {
+        match frame {
+            GpuFrame::CvPixelBuffer { buffer, color } => self.import_pixel_buffer(*buffer, *color, &keep_alive),
+            _ => Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind()))),
+        }
+    }
+
     fn destroy(&mut self, resource: ResourceId) {
         match resource {
             ResourceId::Buffer(id) => drop(self.buffers.remove(id)),
-            ResourceId::Texture(id) => drop(self.textures.remove(id)),
+            ResourceId::Texture(id) => {
+                if let Some(keep_alive) = self.textures.remove(id).and_then(|texture| texture.keep_alive) {
+                    // The frame's command buffer, uncommitted, may read it.
+                    let number = self.frame.is_none().then_some(self.submitted);
+                    self.keep_alives.push((number, keep_alive));
+                }
+            }
             ResourceId::Sampler(id) => drop(self.samplers.remove(id)),
             ResourceId::Shader(id) => drop(self.shaders.remove(id)),
             ResourceId::Pipeline(id) => drop(self.pipelines.remove(id)),
@@ -1707,3 +1735,4 @@ impl Drop for MetalGpu {
 
 #[cfg(test)]
 mod tests;
+mod video;
