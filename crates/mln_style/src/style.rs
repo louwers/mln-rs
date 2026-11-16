@@ -12,7 +12,7 @@ use crate::projection::Projection;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source::Source;
-pub(crate) use crate::style_impl::{Impl, LayerRefMut};
+pub(crate) use crate::style_impl::Impl;
 use crate::transition_options::TransitionOptions;
 
 /// Why a style failed to load.
@@ -224,9 +224,15 @@ impl Style {
     }
 
     // Layers
+    /// The layers, bottom first.
+    pub fn get_layers(&self) -> impl DoubleEndedIterator<Item = &Layer> + ExactSizeIterator {
+        self.impl_.get_layer_list().iter()
+    }
+
+    /// The place of the layer `id` in drawing order, bottom first.
     #[must_use]
-    pub fn get_layers(&self) -> Vec<&Layer> {
-        self.impl_.get_layers()
+    pub fn layer_index(&self, layer_id: &str) -> Option<usize> {
+        self.impl_.get_layer_list().index_of(layer_id)
     }
 
     #[must_use]
@@ -234,11 +240,13 @@ impl Style {
         self.impl_.get_layer(layer_id)
     }
 
-    /// The non-const `getLayer` (marks the style mutated). The guard notifies
-    /// the style of changes when dropped.
-    pub fn get_layer_mut(&mut self, layer_id: &str) -> Option<LayerRefMut<'_>> {
+    /// Calls `f` with the layer `layer_id` to change it, and returns what `f`
+    /// returns, or `None` when the style has no such layer. Marks the style
+    /// mutated. A change to the layer replaces it in the next version of the
+    /// layer list; a call that changes nothing leaves the list as it was.
+    pub fn update_layer<R>(&mut self, layer_id: &str, f: impl FnOnce(&mut Layer) -> R) -> Option<R> {
         self.impl_.mutated = true;
-        self.impl_.get_layer_mut(layer_id)
+        self.impl_.update_layer(layer_id, f)
     }
 
     /// Fails with [`ErrorKind::AlreadyExists`](mln_util::ErrorKind) if the
@@ -247,7 +255,7 @@ impl Style {
     /// type doesn't fit its source.
     pub fn add_layer(&mut self, layer: Layer, before_layer_id: Option<&str>) -> Result<(), Error> {
         self.impl_.mutated = true;
-        self.impl_.add_layer(layer, before_layer_id).map(|_| ())
+        self.impl_.add_layer(layer, before_layer_id)
     }
 
     pub fn remove_layer(&mut self, id: &str) -> Option<Layer> {

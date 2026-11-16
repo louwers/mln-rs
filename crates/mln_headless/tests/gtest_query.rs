@@ -168,8 +168,8 @@ fn global_state_change_relayouts_source_filter() {
     {
         let mut map = test.map();
         let style = map.style_mut();
-        let mut layer = style.get_layer_mut("layer4").expect("layer4");
-        layer.set_filter(&parse_filter(r#"["==", ["get", "key1"], ["global-state", "filterValue"]]"#));
+        let filter = parse_filter(r#"["==", ["get", "key1"], ["global-state", "filterValue"]]"#);
+        style.update_layer("layer4", |layer| layer.set_filter(&filter)).expect("layer4");
     }
 
     let point = test.map().pixel_for_lat_lng(&ll(0.0, 0.0));
@@ -341,7 +341,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
         for layer_id in ["layer1", "circle_layer"] {
             let mut map = test.map();
             let style = map.style_mut();
-            style.get_layer_mut(layer_id).expect("layer").set_filter(&equal_zoom);
+            style.update_layer(layer_id, |layer| layer.set_filter(&equal_zoom)).expect("layer");
         }
         test.map().jump_to(&CameraOptions {
             center: Some(ll(1.003, 1.003)),

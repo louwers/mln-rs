@@ -446,10 +446,10 @@ fn source_info(source: &dyn Source) -> SourceInfo {
 
 fn layer_info(layer: &mln_style::Layer) -> LayerInfo {
     LayerInfo {
-        id: layer.get_id(),
+        id: layer.get_id().to_owned(),
         layer_type: layer.info().name,
-        source_id: Some(layer.get_source_id()).filter(|id| !id.is_empty()),
-        source_layer: Some(layer.get_source_layer()).filter(|id| !id.is_empty()),
+        source_id: Some(layer.get_source_id()).filter(|id| !id.is_empty()).map(str::to_owned),
+        source_layer: Some(layer.get_source_layer()).filter(|id| !id.is_empty()).map(str::to_owned),
         min_zoom: Some(f64::from(layer.get_min_zoom())).filter(|zoom| zoom.is_finite()),
         max_zoom: Some(f64::from(layer.get_max_zoom())).filter(|zoom| zoom.is_finite()),
         visible: layer.get_visibility() != mln_style_types::VisibilityType::None,
@@ -952,7 +952,7 @@ impl Map {
 
     /// The style's layers, from bottom to top.
     pub fn style_layers(&self) -> Result<Completion<Vec<LayerInfo>>, Error> {
-        self.query(|map| Ok(map.style().get_layers().into_iter().map(layer_info).collect()))
+        self.query(|map| Ok(map.style().get_layers().map(layer_info).collect()))
     }
 
     /// Moves a layer below `before_layer_id`, or above every layer. See

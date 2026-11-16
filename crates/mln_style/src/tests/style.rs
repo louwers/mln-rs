@@ -190,18 +190,17 @@ fn layer_transition_refreshes_immutable_collection() {
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     style.add_layer(new_layer("line", "line", "source"), None).unwrap();
-    let before = style.get_layer_impls();
+    let before = Arc::clone(style.get_layer_list());
 
-    {
-        let mut layer = style.get_layer_mut("line").unwrap();
-        let transition = serde_json::json!({"duration": 123, "delay": 45});
-        assert!(layer.set_property("line-color-transition", &Convertible::from(&transition), None).is_none());
-    }
-    let after = style.get_layer_impls();
+    let transition = serde_json::json!({"duration": 123, "delay": 45});
+    let error = style.update_layer("line", |layer| {
+        layer.set_property("line-color-transition", &Convertible::from(&transition), None)
+    });
+    assert!(error.unwrap().is_none());
+    let after = Arc::clone(style.get_layer_list());
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(1, after.len());
-    assert!(Arc::ptr_eq(style.get_layer("line").unwrap().style(), &after[0]));
-    let impl_ = LayerStyle::<Line>::recover_ref(&*after[0]).unwrap();
+    let impl_ = LayerStyle::<Line>::recover_ref(&**after.first().unwrap().style()).unwrap();
     assert_eq!(Some(Duration::from_millis(123)), impl_.paint.line_color.options.duration);
     assert_eq!(Some(Duration::from_millis(45)), impl_.paint.line_color.options.delay);
 }
@@ -307,28 +306,23 @@ fn transition_options_publish_updates() {
 
 #[test]
 fn layer_mut_guard_notifies_once_per_change() {
-    // Not a C++ test: the LayerRefMut guard stands in for
+    // Not a C++ test: `update_layer` stands in for
     // Layer::observer->onLayerChanged (see layer.rs).
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background"}]}"#);
     let observer = Rc::new(CountingObserver::default());
     style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
 
-    let before = style.get_layer_impls();
-    {
-        let layer = style.get_layer_mut("bg").unwrap();
-        let _ = layer.get_id();
-    }
+    let before = Arc::clone(style.get_layer_list());
+    style.update_layer("bg", |layer| layer.get_id().len());
     assert_eq!(0, observer.updates.get());
-    assert!(Arc::ptr_eq(&before, &style.get_layer_impls()));
+    assert!(Arc::ptr_eq(&before, style.get_layer_list()));
 
-    {
-        let json = serde_json::json!("white");
-        let mut layer = style.get_layer_mut("bg").unwrap();
-        assert!(layer.set_property("background-color", &(&json).into(), None).is_none());
-    }
+    let json = serde_json::json!("white");
+    let error = style.update_layer("bg", |layer| layer.set_property("background-color", &(&json).into(), None));
+    assert!(error.unwrap().is_none());
     assert_eq!(1, observer.updates.get());
-    assert!(!Arc::ptr_eq(&before, &style.get_layer_impls()));
+    assert!(!Arc::ptr_eq(&before, style.get_layer_list()));
 }
 
 #[test]
@@ -345,10 +339,8 @@ fn layer_changes_leave_earlier_snapshots_unchanged() {
     );
     // An update for each layer.
     assert_eq!(without_layers + 2, observer.updates.replace(0));
-    let ids = |impls: &[Arc<dyn crate::layer_type::ErasedLayerStyle>]| {
-        impls.iter().map(|impl_| impl_.base().id.clone()).collect::<Vec<_>>()
-    };
-    let loaded = style.get_layer_impls();
+    let ids = |layers: &crate::LayerList| layers.iter().map(|layer| layer.get_id().to_owned()).collect::<Vec<_>>();
+    let loaded = Arc::clone(style.get_layer_list());
     assert_eq!(["a", "b"], *ids(&loaded));
 
     style.add_layer(new_layer("line", "c", "source"), Some("b")).unwrap();
@@ -356,11 +348,11 @@ fn layer_changes_leave_earlier_snapshots_unchanged() {
     assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
     assert_eq!("Layer a already exists", error.message);
     assert_eq!(1, observer.updates.get());
-    let added = style.get_layer_impls();
+    let added = Arc::clone(style.get_layer_list());
     assert_eq!(["a", "c", "b"], *ids(&added));
 
     assert!(style.remove_layer("a").is_some());
-    assert_eq!(["c", "b"], *ids(&style.get_layer_impls()));
+    assert_eq!(["c", "b"], *ids(style.get_layer_list()));
     assert_eq!(["a", "b"], *ids(&loaded));
     assert_eq!(["a", "c", "b"], *ids(&added));
 }
@@ -489,7 +481,7 @@ fn global_state_visibility() {
 
     // Setting a constant visibility replaces the expression: further state
     // changes no longer apply.
-    style.get_layer_mut("background").unwrap().set_visibility(VisibilityType::None);
+    style.update_layer("background", |layer| layer.set_visibility(VisibilityType::None)).unwrap();
     style.set_global_state_property("showBackground", &Value::Bool(true));
     assert_eq!(VisibilityType::None, style.get_layer("background").unwrap().get_visibility());
 }
@@ -515,7 +507,9 @@ fn visibility_expression_set_at_runtime() {
     // A visibility expression set after the style has loaded must be
     // evaluated against the current global state right away.
     let json = parse_json(r#"["case", ["to-boolean", ["global-state", "showBackground"]], "visible", "none"]"#);
-    let error = style.get_layer_mut("background").unwrap().set_property("visibility", &Convertible::from(&json), None);
+    let error = style
+        .update_layer("background", |layer| layer.set_property("visibility", &Convertible::from(&json), None))
+        .unwrap();
     assert!(error.is_none());
     assert_eq!(VisibilityType::None, style.get_layer("background").unwrap().get_visibility());
 
@@ -524,7 +518,9 @@ fn visibility_expression_set_at_runtime() {
     assert_eq!(VisibilityType::Visible, style.get_layer("background").unwrap().get_visibility());
 
     let json = parse_json(r#"["case", ["to-boolean", ["global-state", "showBackground"]], "none", "visible"]"#);
-    let error = style.get_layer_mut("background").unwrap().set_property("visibility", &Convertible::from(&json), None);
+    let error = style
+        .update_layer("background", |layer| layer.set_property("visibility", &Convertible::from(&json), None))
+        .unwrap();
     assert!(error.is_none());
     assert_eq!(VisibilityType::None, style.get_layer("background").unwrap().get_visibility());
     assert!(log.is_empty(), "{:?}", log.messages());
@@ -542,8 +538,8 @@ fn layer_added_after_global_state_update_uses_current_state() {
     assert!(layer.set_property("visibility", &Convertible::from(&json), None).is_none());
     assert_eq!(VisibilityType::Visible, layer.get_visibility());
 
-    let added_layer = style.add_layer(layer, None).unwrap();
-    assert_eq!(VisibilityType::None, added_layer.get_visibility());
+    style.add_layer(layer, None).unwrap();
+    assert_eq!(VisibilityType::None, style.get_layer("line").unwrap().get_visibility());
 }
 
 // gtest: Style.VisibilityExpressionRejectsOtherDependencies
@@ -561,7 +557,9 @@ fn visibility_expression_rejects_other_dependencies() {
 
     // Visibility expressions may only depend on the global state.
     let json = parse_json(r#"["case", [">", ["zoom"], 10], "visible", "none"]"#);
-    let error = style.get_layer_mut("background").unwrap().set_property("visibility", &Convertible::from(&json), None);
+    let error = style
+        .update_layer("background", |layer| layer.set_property("visibility", &Convertible::from(&json), None))
+        .unwrap();
     assert!(error.is_some());
     assert_eq!(VisibilityType::Visible, style.get_layer("background").unwrap().get_visibility());
 }

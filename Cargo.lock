@@ -3064,6 +3064,7 @@ version = "0.0.12"
 dependencies = [
  "geo-types",
  "geojson",
+ "indexmap",
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-expression",

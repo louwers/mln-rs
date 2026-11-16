@@ -26,11 +26,11 @@ pub(crate) fn set_layer_property(
     property_name: &str,
     value: &serde_json::Value,
 ) -> Result<(), MapError> {
-    let Some(mut layer) = style.get_layer_mut(layer_name) else {
-        return Err(MapError::LayerNotFound);
-    };
-    let _ = layer.set_property(property_name, &Convertible::from(value), None);
-    Ok(())
+    style
+        .update_layer(layer_name, |layer| {
+            let _ = layer.set_property(property_name, &Convertible::from(value), None);
+        })
+        .ok_or(MapError::LayerNotFound)
 }
 
 /// Sets the zoom range of the layer `layer_name`.
@@ -40,12 +40,12 @@ pub(crate) fn set_layer_zoom_range(
     min_zoom: f32,
     max_zoom: f32,
 ) -> Result<(), MapError> {
-    let Some(mut layer) = style.get_layer_mut(layer_name) else {
-        return Err(MapError::LayerNotFound);
-    };
-    layer.set_min_zoom(min_zoom);
-    layer.set_max_zoom(max_zoom);
-    Ok(())
+    style
+        .update_layer(layer_name, |layer| {
+            layer.set_min_zoom(min_zoom);
+            layer.set_max_zoom(max_zoom);
+        })
+        .ok_or(MapError::LayerNotFound)
 }
 
 /// Parses a layer from `json` and adds it to the style.
@@ -76,11 +76,7 @@ pub(crate) fn set_layer_filter(
     else {
         return Err(MapError::Conversion(error.message));
     };
-    let Some(mut layer) = style.get_layer_mut(layer_name) else {
-        return Err(MapError::LayerNotFound);
-    };
-    layer.set_filter(&filter);
-    Ok(())
+    style.update_layer(layer_name, |layer| layer.set_filter(&filter)).ok_or(MapError::LayerNotFound)
 }
 
 /// Sets the global state property `name`. Its error (style not loaded) is

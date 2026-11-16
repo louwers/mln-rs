@@ -1,27 +1,20 @@
-// C++ keeps added/removed/changed in `std::unordered_map`s; iteration order
-// of those maps is unspecified there. The port uses `VecMap` (ordered by
-// id); where the renderer iterates them (creating/removing render layers),
-// the order has no observable effect.
+// The images and sources that differ between two of the style's id-sorted
+// vectors, in `VecMap`s ordered by id. The layers' changes are
+// `mln_style::diff::LayerChanges`.
 
 use std::sync::Arc;
 
 use mln_style::collection::ImmutableVector;
-use mln_style::layer_type::ErasedLayerStyle;
 use mln_style::{image, source};
 use mln_util::longest_common_subsequence::longest_common_subsequence;
 use mln_vec_map::VecMap;
 
 #[derive(Clone, Debug)]
-pub(crate) struct StyleChange<T: ?Sized> {
-    pub(crate) before: Arc<T>,
-    pub(crate) after: Arc<T>,
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct StyleDifference<T: ?Sized> {
     pub(crate) added: VecMap<String, Arc<T>>,
     pub(crate) removed: VecMap<String, Arc<T>>,
-    pub(crate) changed: VecMap<String, StyleChange<T>>,
+    /// The new values of the items in both whose values differ.
+    pub(crate) changed: VecMap<String, Arc<T>>,
 }
 
 impl<T: ?Sized> Default for StyleDifference<T> {
@@ -58,10 +51,7 @@ fn diff<T: ?Sized>(
             b_it += 1;
         } else {
             if !Arc::ptr_eq(&a[a_it], &b[b_it]) {
-                result
-                    .changed
-                    .entry(id(&b[b_it]))
-                    .or_insert_with(|| StyleChange { before: Arc::clone(&a[a_it]), after: Arc::clone(&b[b_it]) });
+                result.changed.entry(id(&b[b_it])).or_insert_with(|| Arc::clone(&b[b_it]));
             }
             a_it += 1;
             b_it += 1;
@@ -74,7 +64,6 @@ fn diff<T: ?Sized>(
 
 pub(crate) type ImageDifference = StyleDifference<image::Impl>;
 pub(crate) type SourceDifference = StyleDifference<dyn source::Impl>;
-pub(crate) type LayerDifference = StyleDifference<dyn ErasedLayerStyle>;
 
 #[must_use]
 pub(crate) fn diff_images(a: &Arc<Vec<Arc<image::Impl>>>, b: &Arc<Vec<Arc<image::Impl>>>) -> ImageDifference {
@@ -92,23 +81,4 @@ pub(crate) fn diff_sources(
         |s| s.base().id.clone(),
         |lhs, rhs| lhs.base().id == rhs.base().id && lhs.base().type_ == rhs.base().type_,
     )
-}
-
-#[must_use]
-pub(crate) fn diff_layers(
-    a: &ImmutableVector<dyn ErasedLayerStyle>,
-    b: &ImmutableVector<dyn ErasedLayerStyle>,
-) -> LayerDifference {
-    diff(a, b, |l| l.base().id.clone(), |lhs, rhs| lhs.base().id == rhs.base().id && lhs.info().name == rhs.info().name)
-}
-
-#[must_use]
-pub(crate) fn has_layout_difference(layer_diff: &LayerDifference, layer_id: &str) -> bool {
-    if layer_diff.added.contains_key(layer_id) {
-        return true;
-    }
-    match layer_diff.changed.get(layer_id) {
-        None => false,
-        Some(change) => change.before.layout_difference(&*change.after),
-    }
 }

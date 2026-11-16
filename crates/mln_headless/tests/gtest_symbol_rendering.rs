@@ -364,9 +364,8 @@ fn fully_hidden_layer_can_reappear() {
     test.map
         .borrow_mut()
         .style_mut()
-        .get_layer_mut("blocker")
-        .expect("the blocker layer")
-        .set_visibility(VisibilityType::None);
+        .update_layer("blocker", |layer| layer.set_visibility(VisibilityType::None))
+        .expect("the blocker layer");
     let visible = test.render();
     assert_eq!(visible.stats.num_draw_calls, 1);
     assert_eq!(initial.image, visible.image);

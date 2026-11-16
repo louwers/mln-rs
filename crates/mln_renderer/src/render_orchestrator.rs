@@ -11,11 +11,13 @@ use mln_gfx::ShaderRegistry;
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_map_types::{MapMode, TransformState};
 use mln_style::collection::ImmutableVector;
+use mln_style::diff::{LayerChange, LayerChanges};
 use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
-    GlobalStateChange, PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image, layer, source,
+    GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image,
+    layer, source,
 };
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
@@ -42,7 +44,7 @@ use crate::render_source::{self, RenderSource, SourcePrepareParameters};
 use crate::render_tree::{DebugType, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::{EventSink, RendererEvent, RendererEvents};
 use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
-use crate::style_diff::{diff_images, diff_layers, diff_sources, has_layout_difference};
+use crate::style_diff::{diff_images, diff_sources};
 use crate::text::cross_tile_symbol_index::AddLayerResult;
 use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver};
 use crate::text::placement::Placement;
@@ -181,7 +183,7 @@ pub(crate) struct RenderOrchestrator {
 
     image_impls: Arc<Vec<Arc<image::Impl>>>,
     source_impls: ImmutableVector<dyn source::Impl>,
-    layer_impls: ImmutableVector<dyn ErasedLayerStyle>,
+    layers: Arc<LayerList>,
 
     render_sources: HashMap<String, Box<dyn RenderSource>>,
     render_layers: HashMap<String, RenderLayerPtr>,
@@ -296,7 +298,7 @@ impl RenderOrchestrator {
             pattern_atlas: Rc::new(RefCell::new(PatternAtlas::new())),
             image_impls: Arc::new(Vec::new()),
             source_impls: Arc::new(Vec::new()),
-            layer_impls: Arc::new(Vec::new()),
+            layers: Arc::default(),
             render_sources: HashMap::default(),
             render_layers: HashMap::default(),
             // conformance: renderLight(makeMutable<Light::Impl>())
@@ -501,12 +503,12 @@ impl RenderOrchestrator {
             relayout_images.insert(image.id.clone());
         }
         let mut patched = Vec::new();
-        for change in image_diff.changed.values() {
-            if images.update_image(Arc::clone(&change.after)) {
-                self.pattern_atlas.borrow_mut().remove_pattern(&change.after.id);
-                relayout_images.insert(change.after.id.clone());
+        for image in image_diff.changed.values() {
+            if images.update_image(Arc::clone(image)) {
+                self.pattern_atlas.borrow_mut().remove_pattern(&image.id);
+                relayout_images.insert(image.id.clone());
             }
-            patched.push(Arc::clone(&change.after));
+            patched.push(Arc::clone(image));
         }
         images.set_loaded(update_parameters.sprite_loaded);
         for image in patched {
@@ -516,8 +518,8 @@ impl RenderOrchestrator {
             self.tile_store.images_changed(&relayout_images);
         }
 
-        let layer_diff = diff_layers(&self.layer_impls, &update_parameters.layers);
-        self.layer_impls = Arc::clone(&update_parameters.layers);
+        let layer_changes = LayerChanges::between(&self.layers, &update_parameters.layers);
+        self.layers = Arc::clone(&update_parameters.layers);
 
         let mut changes: UniqueChangeRequestVec = Vec::new();
 
@@ -535,29 +537,29 @@ impl RenderOrchestrator {
                 *render_layer = new_layer;
             }
         }
-        let layers_added_or_removed =
-            render_layers_remade || !layer_diff.added.is_empty() || !layer_diff.removed.is_empty();
+        let layers_added_or_removed = render_layers_remade || layer_changes.order_changed;
 
         // Remove render layers for removed layers.
-        for id in layer_diff.removed.keys() {
-            if let Some(layer) = self.render_layers.remove(id) {
+        for (id, _) in layer_changes.iter().filter(|(_, change)| change.removes()) {
+            if let Some(layer) = self.render_layers.remove(&**id) {
                 layer.borrow_mut().layer_removed(&mut changes);
             }
         }
 
         // Create render layers for newly added layers.
-        for (id, impl_) in &layer_diff.added {
-            if let Some(render_layer) = create_render_layer(&self.registry, impl_) {
+        for (id, _) in layer_changes.iter().filter(|(_, change)| change.adds()) {
+            let Some(layer) = self.layers.get(id) else { continue };
+            if let Some(render_layer) = create_render_layer(&self.registry, layer.style()) {
                 render_layer.borrow_mut().transition(&added_layer_transition_parameters);
                 // `emplace` keeps an existing entry.
-                self.render_layers.entry(id.clone()).or_insert(render_layer);
+                self.render_layers.entry(id.to_string()).or_insert(render_layer);
             }
         }
 
         // Update render layers for changed layers.
-        for (id, change) in &layer_diff.changed {
-            if let Some(render_layer) = self.render_layers.get(id) {
-                let new_layer = &change.after;
+        for (id, _) in layer_changes.iter().filter(|(_, change)| change.restyles()) {
+            if let (Some(render_layer), Some(layer)) = (self.render_layers.get(&**id), self.layers.get(id)) {
+                let new_layer = layer.style();
 
                 let mut render_layer = render_layer.borrow_mut();
                 render_layer.layer_changed(&transition_parameters, new_layer, &mut changes);
@@ -567,12 +569,12 @@ impl RenderOrchestrator {
 
         if layers_added_or_removed {
             self.ordered_layers.clear();
-            self.ordered_layers.reserve(self.layer_impls.len());
+            self.ordered_layers.reserve(self.layers.len());
             let mut layer_index: i32 = 0;
-            for layer_impl in self.layer_impls.iter() {
+            for style_layer in self.layers.iter() {
                 // C++ uses renderLayers.at(id); a layer type without a
                 // render layer is skipped.
-                let Some(layer) = self.render_layers.get(&layer_impl.base().id) else {
+                let Some(layer) = self.render_layers.get(style_layer.get_id()) else {
                     continue;
                 };
                 self.ordered_layers.push(Rc::clone(layer));
@@ -585,8 +587,8 @@ impl RenderOrchestrator {
         }
         debug_assert_eq!(self.ordered_layers.len(), self.render_layers.len());
 
-        if layers_added_or_removed || !layer_diff.changed.is_empty() {
-            self.tile_store.glyphs().evict(&layer::font_stacks(self.layer_impls.iter()));
+        if layers_added_or_removed || !layer_changes.is_empty() {
+            self.tile_store.glyphs().evict(&layer::font_stacks(self.layers.iter().map(Layer::style)));
         }
 
         // Update layers for class and zoom changes.
@@ -595,7 +597,7 @@ impl RenderOrchestrator {
             let mut layer = layer.borrow_mut();
             let id = layer.get_id().to_owned();
             let layer_added_or_changed =
-                render_layers_remade || layer_diff.added.contains_key(&id) || layer_diff.changed.contains_key(&id);
+                render_layers_remade || layer_changes.get(&id).is_some_and(|change| change != LayerChange::Removed);
             evaluation_parameters.layer_changed = layer_added_or_changed;
             evaluation_parameters.has_crossfade = layer.has_crossfade();
 
@@ -698,7 +700,7 @@ impl RenderOrchestrator {
 
         // Reserve size for filteredLayersForSource if there are sources.
         if !self.source_impls.is_empty() {
-            self.filtered_layers_for_source.reserve(self.layer_impls.len());
+            self.filtered_layers_for_source.reserve(self.layers.len());
         }
 
         // Track which layers are flagged for rendering
@@ -766,7 +768,7 @@ impl RenderOrchestrator {
                         };
                         source_needs_relayout = source_needs_relayout
                             || constants_mask_changed.contains(&layer_id)
-                            || has_layout_difference(&layer_diff, &layer_id)
+                            || layer_changes.get(&layer_id).is_some_and(LayerChange::relayouts)
                             || global_state_requires_relayout;
                         if layer_is_visible {
                             self.filtered_layers_for_source.push(Arc::clone(&layer.base().evaluated_properties));
@@ -794,7 +796,7 @@ impl RenderOrchestrator {
                     if self.background_layer_as_color
                         && render_tree_parameters.sky.is_none()
                         && !update_parameters.transform_state.is_globe_rendering()
-                        && Arc::ptr_eq(style, &self.layer_impls[0])
+                        && self.layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
                     {
                         let solid_background = layer.get_solid_background();
                         if let Some(solid_background) = solid_background {
@@ -1043,8 +1045,8 @@ impl RenderOrchestrator {
         if !self.source_impls.is_empty() {
             self.source_impls = Arc::new(Vec::new());
         }
-        if !self.layer_impls.is_empty() {
-            self.layer_impls = Arc::new(Vec::new());
+        if !self.layers.is_empty() {
+            self.layers = Arc::default();
         }
         if !self.image_impls.is_empty() {
             self.image_impls = Arc::new(Vec::new());
@@ -1526,13 +1528,14 @@ impl RenderOrchestrator {
         // DEVIATION: C++ iterates `filteredLayers`, an unordered_map (libstdc++
         // hash order); the port goes from the topmost style layer down, the
         // order GL JS (which wrote the expectations) returns.
-        for layer_impl in self.layer_impls.iter().rev() {
-            if !filtered_layers.contains_key(&layer_impl.base().id) {
+        for style_layer in self.layers.iter().rev() {
+            let id = style_layer.get_id();
+            if !filtered_layers.contains_key(id) {
                 continue;
             }
-            if let Some(mut features) = results_by_layer.remove(&layer_impl.base().id) {
+            if let Some(mut features) = results_by_layer.remove(id) {
                 for feature in &mut features {
-                    feature.layer.clone_from(&layer_impl.base().id);
+                    id.clone_into(&mut feature.layer);
                 }
                 result.extend(features);
             }

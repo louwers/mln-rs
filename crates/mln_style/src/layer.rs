@@ -1,10 +1,8 @@
-// A layer cannot point back at the style that owns it, so `Style::Impl` hands
-// out layers through `LayerRefMut` guards, which run
-// `Style::Impl::on_layer_changed` when the guard is dropped if the layer's
-// style changed. A change copies the style when it is shared, as it is
-// while the guard holds the style from before, and leaves it alone when the
-// value doesn't change. Several changes through one guard therefore notify
-// once.
+// A layer cannot point back at the style that owns it, so a style edits a
+// copy of its layer (`Style::update_layer`) and keeps the copy if the
+// layer's style data changed. A change copies the style data when it is
+// shared, as it is while the style still holds the original, and leaves it
+// alone when the value doesn't change.
 
 use std::sync::Arc;
 
@@ -45,7 +43,9 @@ pub enum PropertyScope {
 }
 
 /// A layer from the MapLibre Style Spec, of any layer type: its style data,
-/// and the expression functions its property values parse against.
+/// and the expression functions its property values parse against. A clone
+/// shares them until either changes.
+#[derive(Clone)]
 pub struct Layer {
     style: Arc<dyn ErasedLayerStyle>,
     functions: Arc<Functions>,
@@ -115,17 +115,17 @@ impl Layer {
     #[must_use]
     pub fn serialize(&self) -> Value {
         let mut result = ValueObject::new();
-        result.insert("id".to_owned(), Value::String(self.get_id()));
+        result.insert("id".to_owned(), Value::String(self.get_id().to_owned()));
         result.insert("type".to_owned(), Value::String(self.info().name.to_owned()));
 
         let source = self.get_source_id();
         if !source.is_empty() {
-            result.insert("source".to_owned(), Value::String(source));
+            result.insert("source".to_owned(), Value::String(source.to_owned()));
         }
 
         let source_layer = self.get_source_layer();
         if !source_layer.is_empty() {
-            result.insert("source-layer".to_owned(), Value::String(source_layer));
+            result.insert("source-layer".to_owned(), Value::String(source_layer.to_owned()));
         }
 
         if self.get_filter().is_set() {
@@ -248,7 +248,7 @@ impl Layer {
 
             // The layer may not belong to a style yet, so its global state is not
             // available here. The style reevaluates the expression when the layer
-            // is added or when this change reaches its observer.
+            // is added or changed.
             let expression: Arc<Expr> = Arc::from(parsed);
             self.mutate_base(&mut |impl_| impl_.visibility_expression = Some(Arc::clone(&expression)));
             return None;
@@ -266,18 +266,18 @@ impl Layer {
     }
 
     #[must_use]
-    pub fn get_id(&self) -> String {
-        self.style.base().id.clone()
+    pub fn get_id(&self) -> &str {
+        &self.style.base().id
     }
 
     #[must_use]
-    pub fn get_source_id(&self) -> String {
-        self.style.base().source.clone()
+    pub fn get_source_id(&self) -> &str {
+        &self.style.base().source
     }
 
     #[must_use]
-    pub fn get_source_layer(&self) -> String {
-        self.style.base().source_layer.clone()
+    pub fn get_source_layer(&self) -> &str {
+        &self.style.base().source_layer
     }
 
     pub fn set_source_layer(&mut self, source_layer: &str) {

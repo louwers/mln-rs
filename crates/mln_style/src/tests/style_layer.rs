@@ -252,7 +252,7 @@ fn duplicate_layer() {
 
     // Try to add duplicate
     match style.add_layer(new_layer("line", "line", "unusedsource"), None) {
-        Ok(_) => panic!("Should not have been allowed to add a duplicate layer id"),
+        Ok(()) => panic!("Should not have been allowed to add a duplicate layer id"),
         // Expected
         Err(e) => assert_eq!(mln_util::Error::already_exists("Layer line already exists"), e),
     }
@@ -268,7 +268,7 @@ fn incompatible_layer() {
 
     // Try to add duplicate
     match style.add_layer(new_layer("raster", "raster", "unusedsource"), None) {
-        Ok(_) => panic!("Should not have been allowed to add an incompatible layer to the source"),
+        Ok(()) => panic!("Should not have been allowed to add an incompatible layer to the source"),
         // Expected
         Err(e) => assert_eq!(
             mln_util::Error::invalid_argument("Layer 'raster' is not compatible with source 'unusedsource'"),

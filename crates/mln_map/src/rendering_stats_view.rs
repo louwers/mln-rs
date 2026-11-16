@@ -135,10 +135,10 @@ impl RenderingStatsView {
         }
 
         let text = self.text(stats);
-        if let Some(mut layer) = style.get_layer_mut(RENDERING_STATS_LAYER_ID) {
-            let error = layer.set_property("text-field", &Convertible::from(&Value::String(text)), None);
-            debug_assert!(error.is_none(), "text-field: {error:?}");
-        }
+        let error = style.update_layer(RENDERING_STATS_LAYER_ID, |layer| {
+            layer.set_property("text-field", &Convertible::from(&Value::String(text)), None)
+        });
+        debug_assert!(matches!(error, None | Some(None)), "text-field: {error:?}");
 
         self.frame_count = 0;
         self.encoding_time = 0.0;

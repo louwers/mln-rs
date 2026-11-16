@@ -1920,8 +1920,7 @@ fn reduce_memory_use_removes_unused_requested_images() {
 
     for layer in ["kept", "dropped"] {
         let mut map = test.map();
-        let mut layer = map.style_mut().get_layer_mut(layer).expect("the layer");
-        set(&mut layer, "icon-image", &json!("other-icon"));
+        map.style_mut().update_layer(layer, |layer| set(layer, "icon-image", &json!("other-icon"))).expect("the layer");
     }
     test.render();
     assert_eq!(reduce_memory_use(), [true, false, true]);
@@ -1959,8 +1958,9 @@ fn rendering_trims_unused_requested_images_past_the_cache_limit() {
 
     {
         let mut map = test.map();
-        let mut layer = map.style_mut().get_layer_mut("unused").expect("the layer");
-        set(&mut layer, "icon-image", &json!("used-icon"));
+        map.style_mut()
+            .update_layer("unused", |layer| set(layer, "icon-image", &json!("used-icon")))
+            .expect("the layer");
     }
     test.render();
     assert_eq!(images(), [true, false]);
@@ -2567,9 +2567,8 @@ fn disabled_placed_symbol_data() {
         .map()
         .style()
         .get_layers()
-        .iter()
         .filter(|l| l.style().info().name == "symbol")
-        .map(|l| l.get_id())
+        .map(|l| l.get_id().to_owned())
         .collect();
 
     for placed_symbol in &placed_symbols {
@@ -3178,8 +3177,9 @@ fn empty_placement_does_not_request_repaint() {
     {
         let mut map = test.map();
         let style = map.style_mut();
-        let mut layer = style.get_layer_mut("background").expect("background");
-        set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
+        style
+            .update_layer("background", |layer| set(layer, "background-color", &json!("rgba(255,0,0,1)")))
+            .expect("background");
     }
     test.run_loop.run_once();
     status.set(None);
@@ -3231,8 +3231,7 @@ fn switches_between_solid_and_patterned_drawables() {
     let set_pattern = |value: serde_json::Value| {
         let mut map = test.map();
         let style = map.style_mut();
-        let mut layer = style.get_layer_mut("background").expect("background");
-        set(&mut layer, "background-pattern", &value);
+        style.update_layer("background", |layer| set(layer, "background-pattern", &value)).expect("background");
     };
     let expect_color = |red: u8, blue_channel: u8| {
         let image = test.render().image;
@@ -3260,12 +3259,8 @@ fn style_update_zoom_dependency() {
     {
         let mut map = test.map();
         let style = map.style_mut();
-        let mut layer = style.get_layer_mut("background").expect("background");
-        set(
-            &mut layer,
-            "background-color",
-            &json!(["interpolate", ["linear"], ["zoom"], 0, "rgba(255,0,0,1)", 14, "rgba(0,255,0,1)"]),
-        );
+        let color = json!(["interpolate", ["linear"], ["zoom"], 0, "rgba(255,0,0,1)", 14, "rgba(0,255,0,1)"]);
+        style.update_layer("background", |layer| set(layer, "background-color", &color)).expect("background");
     }
 
     test.render();
@@ -4190,7 +4185,10 @@ fn rendering_statistics_track_draws_across_frames() {
     assert!(second.num_draw_calls > 0);
     assert_eq!(first.total_draw_calls + second.num_draw_calls, second.total_draw_calls);
 
-    test.map().style_mut().get_layer_mut("circle").expect("circle layer").set_visibility(VisibilityType::None);
+    test.map()
+        .style_mut()
+        .update_layer("circle", |layer| layer.set_visibility(VisibilityType::None))
+        .expect("circle layer");
     let empty = test.render().stats;
     assert_eq!(second.num_frames + 1, empty.num_frames);
     assert_eq!(0, empty.num_draw_calls);
@@ -4587,8 +4585,9 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
         let value: serde_json::Value = serde_json::from_str(&ramp(color)).unwrap();
         let mut map = test.map();
         let style = map.style_mut();
-        let mut layer = style.get_layer_mut("ramp").unwrap();
-        assert!(layer.set_property(&ramp_property, &Convertible::from(&value), None).is_none());
+        let error =
+            style.update_layer("ramp", |layer| layer.set_property(&ramp_property, &Convertible::from(&value), None));
+        assert!(error.unwrap().is_none());
     };
     let set_state = |name: &str, value: Value| {
         test.map().style_mut().set_global_state_property(name, &value).unwrap();

@@ -15,7 +15,6 @@ use mln_style::filter::Filter;
 use mln_style::layer::Layer;
 use mln_style::projection::Projection;
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
-use mln_style::style_impl::LayerRefMut;
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
@@ -170,9 +169,8 @@ impl FeatureTrackingTest {
         result
     }
 
-    fn with_layer(&mut self, id: &str, f: impl FnOnce(&mut LayerRefMut<'_>)) {
-        let style = self.map.style_mut();
-        f(&mut style.get_layer_mut(id).expect("layer"));
+    fn with_layer(&mut self, id: &str, f: impl FnOnce(&mut Layer)) {
+        self.map.style_mut().update_layer(id, f).expect("layer");
     }
 
     fn with_symbol_layer(&mut self, f: impl FnOnce(&mut Layer)) {

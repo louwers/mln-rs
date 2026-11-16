@@ -525,14 +525,13 @@ impl Scene {
             .map
             .style()
             .get_layers()
-            .iter()
             .filter(|layer| layer.get_source_id() == source)
-            .map(|layer| layer.get_id())
+            .map(|layer| layer.get_id().to_owned())
             .collect();
         assert!(!ids.is_empty(), "no layer draws {source}");
         let visibility = if visible { VisibilityType::Visible } else { VisibilityType::None };
         for id in ids {
-            self.map.style_mut().get_layer_mut(&id).expect("the layer").set_visibility(visibility);
+            self.map.style_mut().update_layer(&id, |layer| layer.set_visibility(visibility)).expect("the layer");
         }
     }
 
@@ -543,12 +542,11 @@ impl Scene {
             .map
             .style()
             .get_layers()
-            .iter()
             .filter(|layer| !layer.get_source_id().is_empty())
-            .map(|layer| layer.get_id())
+            .map(|layer| layer.get_id().to_owned())
             .collect();
         for id in &ids {
-            self.map.style_mut().get_layer_mut(id).expect("the layer").set_min_zoom(min_zoom);
+            self.map.style_mut().update_layer(id, |layer| layer.set_min_zoom(min_zoom)).expect("the layer");
         }
         ids.len()
     }

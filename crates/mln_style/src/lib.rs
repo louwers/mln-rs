@@ -27,12 +27,14 @@ pub mod color_ramp_property_value;
 pub mod conversion;
 mod conversion_impl;
 pub mod custom_tile_loader;
+pub mod diff;
 pub mod evaluated;
 pub mod expression;
 pub mod filter;
 pub mod format_section_override;
 pub mod image;
 pub mod layer;
+pub mod layer_list;
 pub mod layer_type;
 pub mod layers;
 pub mod light;
@@ -64,6 +66,7 @@ pub mod style_property;
 pub mod transition_options;
 
 pub use layer::Layer;
+pub use layer_list::LayerList;
 pub use layer_type::LayerTypeInfo;
 // The property macros, at the root so that the generated code and the
 // macros themselves name them as `crate::name!`.

@@ -1,8 +1,7 @@
 // Deviations (structural; see also layer.rs):
-// - C++ `Style::Impl` is the `LayerObserver` of its layers. Here
-//   `get_layer_mut` returns a guard that calls `on_layer_changed` when
-//   dropped, if the layer's impl was replaced. The light, sky and projection
-//   are values behind `Arc`s, which the style replaces when they change.
+// - The layers, light, sky and projection are values behind `Arc`s, which
+//   the style replaces when they change. `update_layer` edits a copy of a
+//   layer and keeps it if the layer changed.
 // - The observer is an `Rc<dyn Observer>` (C++: `Observer*`, default
 //   `&nullObserver`).
 // - C++ `Style::Impl` is the SpriteLoaderObserver of its sprite loader,
@@ -39,11 +38,11 @@ use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 
-use crate::collection::{Collection, CollectionWithPersistentOrder, ImmutableVector};
+use crate::collection::{CollectionWithPersistentOrder, ImmutableVector};
 use crate::expression::GlobalStateMap;
 use crate::image;
 use crate::layer::Layer;
-use crate::layer_type::ErasedLayerStyle;
+use crate::layer_list::LayerList;
 use crate::light::Light;
 use crate::map::camera::CameraOptions;
 use crate::observer::{NullObserver, Observer, SourceObserver};
@@ -237,7 +236,7 @@ pub struct Impl {
     source_observer: Rc<dyn SourceObserver>,
     /// The loop that the style's requests and background work answer on.
     run_loop: RunLoop,
-    layers: Collection<Layer>,
+    layers: Arc<LayerList>,
     transition_options: TransitionOptions,
     light: Arc<Light>,
     sky: Option<Arc<Sky>>,
@@ -267,7 +266,7 @@ impl std::fmt::Debug for Impl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("style::Impl")
             .field("url", &self.url)
-            .field("layers", &self.layers.get_impls())
+            .field("layers", &self.layers)
             .field("loaded", &self.loaded)
             .finish_non_exhaustive()
     }
@@ -321,7 +320,7 @@ impl Impl {
             source_impls_cache: RefCell::new(None),
             source_observer,
             run_loop: run_loop.clone(),
-            layers: Collection::default(),
+            layers: Arc::default(),
             transition_options: TransitionOptions::default(),
             light: Arc::default(),
             sky: None,
@@ -459,7 +458,7 @@ impl Impl {
         self.json = json.to_owned();
 
         self.sources.clear();
-        self.layers.clear();
+        self.layers = Arc::default();
         self.shared.borrow_mut().images = Arc::new(Vec::new());
 
         self.transition_options = parser.transition;
@@ -480,18 +479,20 @@ impl Impl {
         // is logged and skipped (C++ throws).
         let global_state = Arc::clone(&self.global_state);
         let sources = &self.sources;
-        let existing = self.layers.size();
-        self.layers.extend(std::mem::take(&mut parser.layers).into_iter().filter_map(|mut layer| {
+        let mut layers = LayerList::default();
+        layers.extend(std::mem::take(&mut parser.layers).into_iter().filter_map(|mut layer| {
             if let Err(error) = check_layer_source(sources, &layer) {
                 Log::error(Event::ParseStyle, error.to_string());
                 return None;
             }
             layer.reevaluate_visibility(&global_state);
-            Some(Box::new(layer))
+            Some(layer)
         }));
+        let count = layers.len();
+        self.layers = Arc::new(layers);
         // An update for each layer, as `add_layer` publishes.
         let observer = self.observer();
-        for _ in existing..self.layers.size() {
+        for _ in 0..count {
             observer.on_update();
         }
 
@@ -615,18 +616,23 @@ impl Impl {
     /// Re-evaluate the visibility expressions of all layers against the
     /// current global state.
     pub(crate) fn reevaluate_layer_visibilities(&mut self) {
-        let global_state = Arc::clone(&self.global_state);
         let mut changed = Vec::new();
-        for layer in self.layers.get_wrappers_mut() {
-            let before = Arc::clone(layer.style());
-            layer.reevaluate_visibility(&global_state);
-            if !Arc::ptr_eq(&before, layer.style()) {
-                changed.push(layer.get_id());
+        for (index, layer) in self.layers.iter().enumerate() {
+            let mut copy = layer.clone();
+            copy.reevaluate_visibility(&self.global_state);
+            if !Arc::ptr_eq(layer.style(), copy.style()) {
+                changed.push((index, copy));
             }
         }
-        // C++: each change reaches onLayerChanged through the observer.
-        for id in changed {
-            self.on_layer_changed(&id);
+        if changed.is_empty() {
+            return;
+        }
+        let observer = self.observer();
+        let layers = Arc::make_mut(&mut self.layers);
+        for (index, layer) in changed {
+            layers.replace(index, layer);
+            // An update for each layer that changed.
+            observer.on_update();
         }
     }
 
@@ -684,47 +690,59 @@ impl Impl {
 
     // Layers
 
-    pub(crate) fn get_layers(&self) -> Vec<&Layer> {
-        self.layers.get_wrappers()
+    /// The layers, in drawing order.
+    pub fn get_layer_list(&self) -> &Arc<LayerList> {
+        &self.layers
     }
 
     pub(crate) fn get_layer(&self, id: &str) -> Option<&Layer> {
         self.layers.get(id)
     }
 
-    /// The layer `id`, for mutation: the guard notifies this style
-    /// (`on_layer_changed`) when dropped if the layer changed.
-    pub(crate) fn get_layer_mut(&mut self, id: &str) -> Option<LayerRefMut<'_>> {
-        let before = Arc::clone(self.layers.get(id)?.style());
-        Some(LayerRefMut { style: self, id: id.to_owned(), before })
+    /// Calls `f` with a copy of the layer `id`, and keeps the copy if `f`
+    /// changed the layer's style data: the style re-evaluates its visibility
+    /// and publishes an update. `None` when the style has no layer `id`.
+    pub(crate) fn update_layer<R>(&mut self, id: &str, f: impl FnOnce(&mut Layer) -> R) -> Option<R> {
+        let (index, layer) = self.layers.get_full(id)?;
+        let mut copy = layer.clone();
+        let result = f(&mut copy);
+        if !Arc::ptr_eq(layer.style(), copy.style()) {
+            copy.reevaluate_visibility(&self.global_state);
+            Arc::make_mut(&mut self.layers).replace(index, copy);
+            self.observer().on_update();
+        }
+        Some(result)
     }
 
     /// Adds a layer before the layer `before`, or on top. See
     /// [`Style::add_layer`](crate::Style::add_layer).
-    pub(crate) fn add_layer(&mut self, mut layer: Layer, before: Option<&str>) -> Result<&mut Layer, Error> {
+    pub(crate) fn add_layer(&mut self, mut layer: Layer, before: Option<&str>) -> Result<(), Error> {
         check_layer_source(&self.sources, &layer)?;
+        if self.layers.get(layer.get_id()).is_some() {
+            return Err(Error::already_exists(format!("Layer {} already exists", layer.get_id())));
+        }
         // The global state is not available while the layer itself is parsed.
         layer.reevaluate_visibility(&self.global_state);
-        let observer = self.observer();
-        let result = self
-            .layers
-            .add_unique(Box::new(layer), before)
-            .map_err(|layer| Error::already_exists(format!("Layer {} already exists", layer.get_id())))?;
-        observer.on_update();
-        Ok(result)
+        let inserted = Arc::make_mut(&mut self.layers).insert_before(layer, before);
+        debug_assert!(inserted.is_ok());
+        self.observer().on_update();
+        Ok(())
     }
 
     /// Moves the layer `id` below the layer `before`, or above every layer,
     /// as one change. Returns false when the style has no layer `id`.
     pub(crate) fn move_layer(&mut self, id: &str, before: Option<&str>) -> bool {
-        let Some(layer) = self.layers.remove(id) else { return false };
-        self.layers.add(layer, before);
+        if self.layers.get(id).is_none() {
+            return false;
+        }
+        Arc::make_mut(&mut self.layers).move_before(id, before);
         self.observer().on_update();
         true
     }
 
     pub(crate) fn remove_layer(&mut self, id: &str) -> Option<Layer> {
-        let layer = self.layers.remove(id).map(|layer| *layer);
+        self.layers.get(id)?;
+        let layer = Arc::make_mut(&mut self.layers).remove(id);
 
         if layer.is_some() {
             self.observer().on_update();
@@ -861,10 +879,6 @@ impl Impl {
         refreshed
     }
 
-    pub fn get_layer_impls(&self) -> ImmutableVector<dyn ErasedLayerStyle> {
-        self.layers.get_impls()
-    }
-
     pub fn dump_debug_logs(&self) {
         Log::info(Event::General, format!("styleURL: {}", self.url));
         for source in self.sources.iter() {
@@ -916,17 +930,6 @@ impl Impl {
     }
 
     // The SourceObserver implementation is StyleSourceObserver.
-
-    // LayerObserver implementation.
-
-    pub(crate) fn on_layer_changed(&mut self, id: &str) {
-        let global_state = Arc::clone(&self.global_state);
-        if let Some(layer) = self.layers.get_mut(id) {
-            layer.reevaluate_visibility(&global_state);
-        }
-        self.layers.update(id);
-        self.observer().on_update();
-    }
 
     // LightObserver implementation.
 
@@ -991,38 +994,5 @@ fn state_values_equal(a: &Value, b: &Value) -> bool {
             })
         }
         _ => a == b,
-    }
-}
-
-/// A mutable layer of a style; notifies the style when dropped (see
-/// `Impl::get_layer_mut`).
-pub struct LayerRefMut<'a> {
-    style: &'a mut Impl,
-    id: String,
-    before: Arc<dyn ErasedLayerStyle>,
-}
-
-impl std::ops::Deref for LayerRefMut<'_> {
-    type Target = Layer;
-    fn deref(&self) -> &Layer {
-        self.style.layers.get(&self.id).expect("LayerRefMut: layer removed")
-    }
-}
-
-impl std::ops::DerefMut for LayerRefMut<'_> {
-    fn deref_mut(&mut self) -> &mut Layer {
-        self.style.layers.get_mut(&self.id).expect("LayerRefMut: layer removed")
-    }
-}
-
-impl Drop for LayerRefMut<'_> {
-    fn drop(&mut self) {
-        let Some(layer) = self.style.layers.get(&self.id) else {
-            return;
-        };
-        if !Arc::ptr_eq(&self.before, layer.style()) {
-            let id = std::mem::take(&mut self.id);
-            self.style.on_layer_changed(&id);
-        }
     }
 }

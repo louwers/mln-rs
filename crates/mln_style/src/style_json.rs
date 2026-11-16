@@ -70,25 +70,25 @@ impl Style {
         };
 
         let id = layer.get_id();
-        if self.get_layer(&id).is_some() {
-            return Err(Error::already_exists(format!("layer {} already exists", quote(&id))));
+        if self.get_layer(id).is_some() {
+            return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
         }
         let type_info = layer.info();
         if type_info.source != SourceKind::None {
             let source_id = layer.get_source_id();
-            let Some(source) = self.get_source(&source_id) else {
+            let Some(source) = self.get_source(source_id) else {
                 return Err(Error::not_found(format!(
                     "layer {} uses source {}, which does not exist",
-                    quote(&id),
-                    quote(&source_id)
+                    quote(id),
+                    quote(source_id)
                 )));
             };
             if !source.supports_layer_type(type_info) {
                 return Err(Error::invalid_argument(format!(
                     "source {} does not support {} layer {}",
-                    quote(&source_id),
+                    quote(source_id),
                     type_info.name,
-                    quote(&id)
+                    quote(id)
                 )));
             }
         }
@@ -171,30 +171,29 @@ impl Style {
         self.require_loaded()?;
         let context = format!("property {} of layer {}", quote(name), quote(layer_id));
         let value = parse(json, &context)?;
-        let Some(mut layer) = self.get_layer_mut(layer_id) else {
-            return Err(layer_not_found(layer_id));
-        };
-
-        let type_info = layer.info();
-        if (name == "source" || name == "source-layer") && type_info.source == SourceKind::None {
-            // A layer that takes no source would ignore the value.
-            return Err(Error::invalid_argument(format!(
-                "{} layer {} does not take a {name}",
-                type_info.name,
-                quote(layer_id)
-            )));
-        }
-        match name {
-            "filter" if value.is_null() => layer.set_filter(&Filter::default()),
-            "minzoom" if value.is_null() => layer.set_min_zoom(f32::NEG_INFINITY),
-            "maxzoom" if value.is_null() => layer.set_max_zoom(f32::INFINITY),
-            _ => {
-                if let Some(error) = layer.set_property(name, &Convertible::from(&value), None) {
-                    return Err(conversion_error(&context, &error));
+        let result = self.update_layer(layer_id, |layer| {
+            let type_info = layer.info();
+            if (name == "source" || name == "source-layer") && type_info.source == SourceKind::None {
+                // A layer that takes no source would ignore the value.
+                return Err(Error::invalid_argument(format!(
+                    "{} layer {} does not take a {name}",
+                    type_info.name,
+                    quote(layer_id)
+                )));
+            }
+            match name {
+                "filter" if value.is_null() => layer.set_filter(&Filter::default()),
+                "minzoom" if value.is_null() => layer.set_min_zoom(f32::NEG_INFINITY),
+                "maxzoom" if value.is_null() => layer.set_max_zoom(f32::INFINITY),
+                _ => {
+                    if let Some(error) = layer.set_property(name, &Convertible::from(&value), None) {
+                        return Err(conversion_error(&context, &error));
+                    }
                 }
             }
-        }
-        Ok(())
+            Ok(())
+        });
+        result.unwrap_or_else(|| Err(layer_not_found(layer_id)))
     }
 
     /// The JSON value of the property `name` of the layer named `layer_id`,
@@ -216,7 +215,7 @@ impl Style {
             }
             "source" | "source-layer" => {
                 let source = if name == "source" { layer.get_source_id() } else { layer.get_source_layer() };
-                (!source.is_empty()).then_some(Value::String(source))
+                (!source.is_empty()).then(|| Value::String(source.to_owned()))
             }
             "minzoom" => {
                 let zoom = layer.get_min_zoom();

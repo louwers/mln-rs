@@ -11,6 +11,7 @@ mod conversion_projection;
 mod conversion_property_value;
 mod conversion_source_options;
 mod conversion_tileset;
+mod diff;
 mod expression_global_state;
 mod filter;
 mod format_section_override_test;

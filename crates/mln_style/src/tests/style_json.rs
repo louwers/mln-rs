@@ -54,7 +54,7 @@ fn edits_fail_while_the_style_is_not_loaded() {
     assert_fails(style.set_layer_property_json("dots", "circle-radius", "4"), ErrorKind::InvalidState, not_loaded);
     assert_fails(style.set_root_property_json("light", r#"{"intensity":0.5}"#), ErrorKind::InvalidState, not_loaded);
     assert_fails(style.set_light_property_json("intensity", "0.5"), ErrorKind::InvalidState, not_loaded);
-    assert!(style.get_sources().is_empty() && style.get_layers().is_empty());
+    assert!(style.get_sources().is_empty() && style.get_layers().len() == 0);
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn missing_style_ids_report_not_found() {
         ErrorKind::NotFound,
         r#"layer "hillshade" uses source "absent-source", which does not exist"#,
     );
-    assert!(style.get_layers().is_empty());
+    assert_eq!(style.get_layers().len(), 0);
     assert_eq!(style.layer_json("absent-layer"), None);
 }
 
@@ -117,7 +117,7 @@ fn layers_go_below_the_before_layer() {
     let mut style = style_with_dots();
     style.add_layer_json(r#"{"id":"paper","type":"background"}"#, Some("dots")).unwrap();
     style.add_layer_json(r#"{"id":"top","type":"background"}"#, None).unwrap();
-    let ids: Vec<String> = style.get_layers().iter().map(|layer| layer.get_id()).collect();
+    let ids: Vec<String> = style.get_layers().map(|layer| layer.get_id().to_owned()).collect();
     assert_eq!(ids, ["paper", "dots", "top"]);
 }
 

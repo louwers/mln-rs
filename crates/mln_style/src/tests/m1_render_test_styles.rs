@@ -61,8 +61,8 @@ fn load(test: &str) -> Impl {
 }
 
 fn background_impl(style: &Impl, id: &str) -> Arc<LayerStyle<Background>> {
-    let impls = style.get_layer_impls();
-    let impl_ = impls.iter().find(|impl_| impl_.base().id == id).unwrap_or_else(|| panic!("no layer {id}"));
+    let layer = style.get_layer(id).unwrap_or_else(|| panic!("no layer {id}"));
+    let impl_ = layer.style();
     assert_eq!(impl_.info().name, "background");
     LayerStyle::recover(impl_).unwrap()
 }
@@ -122,7 +122,7 @@ fn background_color_default() {
     let style = load("background-color/default");
     let evaluated = evaluate_static(&style, "background");
     assert_background(&evaluated, Color::black(), 1.0);
-    assert_eq!(style.get_layer_impls()[0].base().visibility, VisibilityType::Visible);
+    assert_eq!(style.get_layer_list().first().unwrap().get_visibility(), VisibilityType::Visible);
 }
 
 #[test]
@@ -190,11 +190,10 @@ fn background_color_transition() {
     );
     assert_background(&evaluated, Color::parse("red").unwrap(), 1.0);
 
-    {
-        let white = serde_json::json!("white");
-        let mut layer = style.get_layer_mut("background").unwrap();
-        assert!(layer.set_property("background-color", &Convertible::from(&white), None).is_none());
-    }
+    let white = serde_json::json!("white");
+    let error = style
+        .update_layer("background", |layer| layer.set_property("background-color", &Convertible::from(&white), None));
+    assert!(error.unwrap().is_none());
     let impl1 = background_impl(&style, "background");
     assert!(!Arc::ptr_eq(&impl0, &impl1));
 
@@ -241,7 +240,7 @@ fn background_opacity_overlay() {
     // is registered (generated layers), so both layers and the source parse.
     let log = FixtureLog::new();
     let style = load("background-opacity/overlay");
-    assert_eq!(2, style.get_layer_impls().len());
+    assert_eq!(2, style.get_layer_list().len());
     assert_eq!(1, style.get_source_impls().len());
     assert_eq!(
         0,
@@ -254,7 +253,7 @@ fn background_opacity_overlay() {
 #[test]
 fn background_visibility_none() {
     let style = load("background-visibility/none");
-    assert_eq!(style.get_layer_impls()[0].base().visibility, VisibilityType::None);
+    assert_eq!(style.get_layer_list().first().unwrap().get_visibility(), VisibilityType::None);
     let evaluated = evaluate_static(&style, "background");
     assert_background(&evaluated, Color::black(), 1.0);
 }
@@ -262,7 +261,7 @@ fn background_visibility_none() {
 #[test]
 fn background_visibility_visible() {
     let style = load("background-visibility/visible");
-    assert_eq!(style.get_layer_impls()[0].base().visibility, VisibilityType::Visible);
+    assert_eq!(style.get_layer_list().first().unwrap().get_visibility(), VisibilityType::Visible);
     let evaluated = evaluate_static(&style, "background");
     assert_background(&evaluated, Color::black(), 1.0);
 }

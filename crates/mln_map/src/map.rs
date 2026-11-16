@@ -609,7 +609,7 @@ impl Map {
             sky: style_impl.get_sky().cloned(),
             images: style_impl.get_image_impls(),
             sources: style_impl.get_source_impls(),
-            layers: style_impl.get_layer_impls(),
+            layers: Arc::clone(style_impl.get_layer_list()),
             global_state: Some(style_impl.get_global_state_shared()),
             feature_states: self.feature_state.shared(),
             file_source: self.file_source.clone(),
