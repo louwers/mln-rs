@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use mln_storage::FileSource;
+use mln_storage::resource_transform::ResourceTransform;
 
 use crate::slot::FrameSink;
 
@@ -16,6 +17,11 @@ pub struct OpenRequest {
     /// options, transforms and cache apply to them. `None` for a map without
     /// one.
     pub file_source: Option<Arc<dyn FileSource>>,
+    /// The map's resource transform, for a player that loads the URLs
+    /// itself instead of through `file_source` (the browser's `<video>`),
+    /// which rewrites each one as a [`Kind::Source`](mln_storage::Kind)
+    /// resource first. `None` without one.
+    pub url_transform: Option<ResourceTransform>,
     /// Where the player sends the frames, and any failure.
     pub frames: FrameSink,
 }

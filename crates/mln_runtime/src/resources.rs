@@ -6,9 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_storage::http_header_transform::HttpHeaders;
 use mln_storage::resource::Kind;
+use mln_storage::resource_transform::ResourceTransform;
 use mln_storage::response::Reason;
 use mln_storage::{FileSource, OnlineFileSource, Resource, ResourceError, Responder, Response};
 use mln_util::error::Error;
+use mln_video::{OpenRequest, VideoPlayer, VideoPlayers};
 use parking_lot::{Mutex, RwLock};
 
 /// Serves a runtime's network requests in place of the library.
@@ -65,6 +67,8 @@ pub(crate) struct ResourceHooks {
     /// Whether a resource transform is set, which may rewrite a URL of any
     /// scheme into one that the library loads.
     transform_set: AtomicBool,
+    /// The transform, for the video players that load URLs themselves.
+    transform: Mutex<Option<ResourceTransform>>,
 }
 
 impl ResourceHooks {
@@ -77,8 +81,31 @@ impl ResourceHooks {
         std::mem::replace(&mut *self.provider.write(), provider)
     }
 
-    pub(crate) fn set_transform_set(&self, set: bool) {
-        self.transform_set.store(set, Ordering::Release);
+    /// Keeps the resource transform that the online file source applies,
+    /// for the routing of requests and for the video players.
+    pub(crate) fn set_transform(&self, transform: Option<ResourceTransform>) {
+        self.transform_set.store(transform.is_some(), Ordering::Release);
+        *self.transform.lock() = transform;
+    }
+}
+
+/// A map's video players, which get the runtime's resource transform with
+/// each video they open, for those that load its URLs themselves.
+pub(crate) struct TransformedPlayers {
+    pub(crate) players: Arc<dyn VideoPlayers>,
+    pub(crate) hooks: Arc<ResourceHooks>,
+}
+
+impl std::fmt::Debug for TransformedPlayers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransformedPlayers").field("players", &self.players).finish_non_exhaustive()
+    }
+}
+
+impl VideoPlayers for TransformedPlayers {
+    fn open(&self, mut request: OpenRequest) -> Result<Box<dyn VideoPlayer>, String> {
+        request.url_transform = self.hooks.transform.lock().clone();
+        self.players.open(request)
     }
 }
 

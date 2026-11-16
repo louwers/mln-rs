@@ -84,6 +84,7 @@ import {
   type ToMap,
 } from "./protocol.ts";
 import { STYLES, type Style, styleFor } from "./styles.ts";
+import { serveVideos } from "./video.ts";
 import { wheelDelta } from "./wheel.ts";
 
 declare global {
@@ -205,6 +206,9 @@ const toMap = (message: ToMap, transfer: Transferable[] = []) => {
   sendInputs();
   map.postMessage(message, transfer);
 };
+// The videos of the map's video sources, which the map's Web Worker can't
+// play itself.
+const videos = serveVideos(toMap);
 const camera: Camera = cameraFromHash(location.hash) ?? [
   number("lat", 52.37),
   number("lon", 4.89),
@@ -377,6 +381,11 @@ map.onmessage = ({ data }: MessageEvent<FromMap>) => {
     case "stats":
       debug.stats(data.stats);
       break;
+    case "videoOpen":
+    case "videoControl":
+    case "videoSeek":
+      videos.handle(data);
+      break;
   }
 };
 
@@ -384,6 +393,7 @@ function stop(message: string) {
   const error = new Error(message);
   fatal = error;
   console.error(`the map stopped: ${message}`);
+  videos.closeAll();
   showBanner(`The map stopped: ${message}`);
   status.textContent = "stopped";
   showStyle();

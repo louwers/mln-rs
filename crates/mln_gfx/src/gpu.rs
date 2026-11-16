@@ -603,12 +603,14 @@ pub trait Gpu {
     /// buffer for each layout but not one.
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError>;
 
-    /// Wraps the planes of `frame`, a video frame in GPU memory, as sampled
-    /// textures, without copying them. The backend holds `keep_alive` until
-    /// it has destroyed every plane texture and the GPU no longer reads
-    /// them. Fails with [`GpuError::Unsupported`] for a kind of frame, or a
-    /// format of one, that the backend doesn't import, which the default
-    /// does for every frame.
+    /// Takes the planes of `frame`, a video frame in GPU memory, as sampled
+    /// textures: the frame's own memory, wrapped without a copy, or a copy
+    /// on the GPU where the platform only copies (a browser's images). The
+    /// backend holds `keep_alive` until it has destroyed every plane texture
+    /// and the GPU no longer reads the frame's memory. Fails with
+    /// [`GpuError::Unsupported`] for a kind of frame, or a format of one,
+    /// that the backend doesn't import, which the default does for every
+    /// frame.
     fn import_video_frame(&mut self, frame: &GpuFrame, keep_alive: FrameKeepAlive) -> Result<ImportedFrame, GpuError> {
         let _ = keep_alive;
         Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind())))

@@ -1487,7 +1487,7 @@ pub(crate) fn create(
     } else if options.system_fonts {
         map.style_mut().set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
     }
-    map.set_video_players(options.video_players.clone());
+    map.set_video_players(options.video_players.clone().map(|players| core.video_players(players)));
     let _ = published.updates.set(map.update_reader());
     let flush_task = async_task(&core.run_loop, &core.queue, move |core, outbox| flush(core, id, outbox));
     let flush_sender = flush_task.sender();

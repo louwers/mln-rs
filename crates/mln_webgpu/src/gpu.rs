@@ -827,6 +827,73 @@ impl Gpu for WebGpu {
         }))
     }
 
+    /// Copies a browser image (`GpuFrame::Web`) into a new RGBA texture with
+    /// `GPUQueue.copyExternalImageToTexture`, premultiplied and with its
+    /// rows from the top, as the frame's one plane. The copy goes to the
+    /// queue ahead of the commands that read it, so nothing holds the image
+    /// after the call.
+    #[cfg(target_family = "wasm")]
+    fn import_video_frame(
+        &mut self,
+        frame: &mln_gfx::video::GpuFrame,
+        keep_alive: mln_gfx::video::FrameKeepAlive,
+    ) -> Result<mln_gfx::video::ImportedFrame, GpuError> {
+        use mln_gfx::video::{GpuFrame, ImportedFrame, PlaneLayout, WebImage, YuvColor};
+        use wasm_bindgen::JsCast;
+
+        drop(keep_alive);
+        let GpuFrame::Web(WebImage(image)) = frame else {
+            return Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind())));
+        };
+        let source = if let Some(bitmap) = image.dyn_ref::<web_sys::ImageBitmap>() {
+            wgpu::ExternalImageSource::ImageBitmap(bitmap.clone())
+        } else if let Some(video_frame) = image.dyn_ref::<web_sys::VideoFrame>() {
+            // `VideoFrame::clone` is JS's, which copies the frame.
+            wgpu::ExternalImageSource::VideoFrame(Clone::clone(video_frame))
+        } else {
+            return Err(GpuError::Invalid("a browser video frame that is no ImageBitmap or VideoFrame".to_owned()));
+        };
+        let size = Size::new(source.width(), source.height());
+        let max = self.caps.max_texture_size;
+        if size.is_empty() || size.width > max || size.height > max {
+            return Err(GpuError::Invalid(format!("a browser video frame of {size:?}")));
+        }
+        let extent = wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 };
+        let texture = self.device.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("video frame"),
+            size: extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            // The copy's destination must be a render attachment too.
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        self.device.queue().copy_external_image_to_texture(
+            &wgpu::CopyExternalImageSourceInfo { source, origin: wgpu::Origin2d::ZERO, flip_y: false },
+            wgpu::CopyExternalImageDestInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+                color_space: wgpu::PredefinedColorSpace::Srgb,
+                premultiplied_alpha: true,
+            },
+            extent,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let plane = self.textures.insert(Texture { texture, view });
+        Ok(ImportedFrame {
+            layout: PlaneLayout::Rgba,
+            planes: vec![plane],
+            color: YuvColor::default(),
+            external: false,
+        })
+    }
+
     /// Drops this backend's references: wgpu keeps a resource while
     /// bindings, geometry or recorded commands hold it.
     fn destroy(&mut self, resource: ResourceId) {

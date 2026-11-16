@@ -1216,6 +1216,7 @@ pub(crate) fn read_pixels(gl: &Gl, state: &State, height: u32, region: TextureRe
 }
 
 impl Gpu for GlGpu {
+    #[cfg(not(target_family = "wasm"))]
     fn import_video_frame(
         &mut self,
         frame: &mln_gfx::video::GpuFrame,
@@ -1563,6 +1564,74 @@ impl Gpu for GlGpu {
             deleted: Rc::clone(&self.deleted),
             tags,
         }))
+    }
+
+    /// Uploads a browser image (`GpuFrame::Web`) to a new RGBA texture with
+    /// `texSubImage2D`, premultiplied and with its rows from the top, as the
+    /// frame's one plane. The upload copies the image, so nothing holds it
+    /// after the call.
+    #[cfg(target_family = "wasm")]
+    fn import_video_frame(
+        &mut self,
+        frame: &mln_gfx::video::GpuFrame,
+        keep_alive: mln_gfx::video::FrameKeepAlive,
+    ) -> Result<mln_gfx::video::ImportedFrame, GpuError> {
+        use mln_gfx::video::{GpuFrame, ImportedFrame, PlaneLayout, WebImage, YuvColor};
+        use wasm_bindgen::JsCast;
+        use web_sys::WebGl2RenderingContext as Gl2;
+
+        drop(keep_alive);
+        let GpuFrame::Web(WebImage(image)) = frame else {
+            return Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind())));
+        };
+        let bitmap = image.dyn_ref::<web_sys::ImageBitmap>();
+        let video_frame = image.dyn_ref::<web_sys::VideoFrame>();
+        let size = match (bitmap, video_frame) {
+            (Some(bitmap), _) => Size::new(bitmap.width(), bitmap.height()),
+            (None, Some(frame)) => Size::new(frame.display_width(), frame.display_height()),
+            (None, None) => {
+                return Err(GpuError::Invalid("a browser video frame that is no ImageBitmap or VideoFrame".to_owned()));
+            }
+        };
+        let plane = self.create_texture(&TextureDesc {
+            label: "video frame",
+            size,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+        })?;
+        let object = self.textures.get(plane).and_then(|texture| texture.native.name());
+        let uploaded = self.current(|gpu| {
+            let (gl, webgl2) = (gpu.context.gl(), gpu.context.webgl2());
+            gpu.context.state().activate_texture(gl, 0, object);
+            // The image's top row goes to the texture's first, as the other
+            // uploads' rows do. These settings apply to a `VideoFrame`; an
+            // `ImageBitmap` keeps the orientation and alpha it was made with.
+            webgl2.pixel_storei(Gl2::UNPACK_FLIP_Y_WEBGL, 0);
+            webgl2.pixel_storei(Gl2::UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
+            let (target, format, type_) = (Gl2::TEXTURE_2D, Gl2::RGBA, Gl2::UNSIGNED_BYTE);
+            let uploaded = match (bitmap, video_frame) {
+                (Some(bitmap), _) => {
+                    webgl2.tex_sub_image_2d_with_u32_and_u32_and_image_bitmap(target, 0, 0, 0, format, type_, bitmap)
+                }
+                (None, Some(frame)) => {
+                    webgl2.tex_sub_image_2d_with_u32_and_u32_and_video_frame(target, 0, 0, 0, format, type_, frame)
+                }
+                (None, None) => Ok(()),
+            };
+            // Byte uploads read their bytes as they are.
+            webgl2.pixel_storei(Gl2::UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+            uploaded
+        });
+        if let Err(error) = uploaded {
+            self.destroy(ResourceId::Texture(plane));
+            return Err(GpuError::Invalid(format!("uploading a browser video frame: {error:?}")));
+        }
+        Ok(ImportedFrame {
+            layout: PlaneLayout::Rgba,
+            planes: vec![plane],
+            color: YuvColor::default(),
+            external: false,
+        })
     }
 
     /// Lets go of `resource`. A GL object that nothing else holds is deleted

@@ -25,5 +25,18 @@ parking_lot.workspace = true
 [target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))'.dependencies]
 libloading.workspace = true
 
+# The browser's players (`WebPlayers`): a host's JS object, and the frames'
+# `ImageBitmap`s, read through a canvas where a renderer refuses them.
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+mln_actor.workspace = true
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = [
+  "ImageBitmap",
+  "ImageData",
+  "OffscreenCanvas",
+  "OffscreenCanvasRenderingContext2d",
+] }
+
 [lints]
 workspace = true

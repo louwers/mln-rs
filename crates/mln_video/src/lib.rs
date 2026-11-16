@@ -7,13 +7,17 @@
 //! renderer draws the newest frame of each slot.
 //!
 //! [`platform_players`] are the platform's players. An app or a test can
-//! bring its own.
+//! bring its own. In the browser, the host brings them, as `WebPlayers`.
 
 mod bytes;
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))]
 mod gstreamer;
 mod player;
 mod slot;
+#[cfg(any(target_family = "wasm", test))]
+mod urls;
+#[cfg(target_family = "wasm")]
+mod web;
 
 use std::sync::Arc;
 
@@ -23,15 +27,28 @@ pub use mln_gfx::video::{
 };
 pub use player::{NoPlayers, OpenRequest, VideoPlayer, VideoPlayers};
 pub use slot::{FrameSink, FrameSlot, Newest};
+#[cfg(target_family = "wasm")]
+pub use web::{VideoHost, WebPlayers};
 
 /// The players of the platform the library runs on: GStreamer's on Linux and
 /// the BSDs, which fail to open each video, saying so, where GStreamer 1.x
 /// isn't installed. A platform without players fails to open each video
 /// too.
+#[cfg(not(target_family = "wasm"))]
 #[must_use]
 pub fn platform_players() -> Arc<dyn VideoPlayers> {
     #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))]
     return Arc::new(gstreamer::GstreamerPlayers);
     #[cfg(not(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm"))))]
     Arc::new(NoPlayers)
+}
+
+/// The players of the platform the library runs on. In the browser, where
+/// the map may run in a Web Worker without `<video>` elements, the host
+/// supplies them ([`WebPlayers`]), so these fail to open each video, saying
+/// so.
+#[cfg(target_family = "wasm")]
+#[must_use]
+pub fn platform_players() -> Arc<dyn VideoPlayers> {
+    web::platform_players()
 }

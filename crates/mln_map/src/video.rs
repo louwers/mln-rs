@@ -87,7 +87,8 @@ impl Videos {
             let sender = wake.sender();
             frames.set_waker(Some(Arc::new(move || sender.send())));
             let sink = FrameSink::new(Arc::clone(&frames));
-            let request = OpenRequest { urls, file_source: file_source.cloned(), frames: sink.clone() };
+            let request =
+                OpenRequest { urls, file_source: file_source.cloned(), url_transform: None, frames: sink.clone() };
             let player = if let Some(players) = &self.players {
                 players.open(request).map_err(|error| sink.fail(error)).ok()
             } else {

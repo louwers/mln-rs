@@ -262,6 +262,55 @@ fn a_resource_transform_rewrites_or_fails_requests() {
     assert_eq!(ErrorKind::Native, wait_err(map.set_style_url("http://nowhere.invalid/style.json?2")).kind);
 }
 
+/// Players that keep each request's URLs as the request's transform
+/// rewrites them, and play nothing.
+#[derive(Debug, Default)]
+struct TransformingPlayers {
+    urls: Arc<parking_lot::Mutex<Vec<String>>>,
+}
+
+struct Silent;
+
+impl mln_video::VideoPlayer for Silent {
+    fn play(&mut self) {}
+    fn pause(&mut self) {}
+    fn seek(&mut self, _seconds: f64) {}
+}
+
+impl mln_video::VideoPlayers for TransformingPlayers {
+    fn open(&self, request: mln_video::OpenRequest) -> Result<Box<dyn mln_video::VideoPlayer>, String> {
+        for url in request.urls {
+            let Some(transform) = &request.url_transform else {
+                self.urls.lock().push(url);
+                continue;
+            };
+            let urls = Arc::clone(&self.urls);
+            transform(Kind::Source, &url, Box::new(move |result| urls.lock().push(result.unwrap())));
+        }
+        Ok(Box::new(Silent))
+    }
+}
+
+#[test]
+fn video_players_get_the_resource_transform() {
+    let runtime = runtime();
+    wait(runtime.set_resource_transform(|kind, url, done| {
+        assert_eq!(Kind::Source, kind);
+        done(Ok(url.replace("nowhere.invalid", "example.com")));
+    }));
+    let players = TransformingPlayers::default();
+    let urls = Arc::clone(&players.urls);
+    let options = mln_runtime::MapOptions { video_players: Some(Arc::new(players)), ..support::map_options() };
+    let (map, created) = runtime.create_map(options).unwrap();
+    created.wait().unwrap();
+    let style = r#"{"version": 8, "sources": {"video": {"type": "video",
+        "urls": ["https://nowhere.invalid/a.webm"],
+        "coordinates": [[0, 1], [1, 1], [1, 0], [0, 0]]}}, "layers": []}"#;
+    wait(map.set_style_json(style));
+    assert!(support::eventually(|| !urls.lock().is_empty()));
+    assert_eq!(vec!["https://example.com/a.webm".to_owned()], *urls.lock());
+}
+
 #[test]
 fn a_header_transform_adds_headers() {
     let server = MockServer::start();

@@ -160,10 +160,31 @@ unsafe impl Send for GpuFrame {}
 #[expect(unsafe_code, reason = "the frames' platform handles are raw pointers")]
 unsafe impl Sync for GpuFrame {}
 
-/// A browser image that a frame holds: an `ImageBitmap` or a `VideoFrame`.
+/// A browser image that a frame holds: an `ImageBitmap` or a `VideoFrame`,
+/// which the frame closes when it drops.
 #[cfg(target_family = "wasm")]
 #[derive(Debug)]
 pub struct WebImage(pub wasm_bindgen::JsValue);
+
+#[cfg(target_family = "wasm")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+extern "C" {
+    /// An `ImageBitmap` or a `VideoFrame`, as what closes.
+    type Closable;
+    #[wasm_bindgen(method, catch)]
+    fn close(this: &Closable) -> Result<(), wasm_bindgen::JsValue>;
+}
+
+#[cfg(target_family = "wasm")]
+impl Drop for WebImage {
+    /// Lets go of the image's pixels now, rather than when JS collects it:
+    /// a video's frames would otherwise pile up in GPU memory.
+    fn drop(&mut self) {
+        use wasm_bindgen::JsCast;
+        // Something without a `close` has nothing to let go of.
+        let _ = self.0.unchecked_ref::<Closable>().close();
+    }
+}
 
 // SAFETY: the browser build runs the map and its renderer on one thread, so
 // the image never leaves it.

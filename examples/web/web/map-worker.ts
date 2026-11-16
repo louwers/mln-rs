@@ -24,7 +24,7 @@
 // then runs that build of the module (pkg/webgl). When the browser's API
 // can't start the map, the worker says `unsupported` rather than `fatal`.
 
-import type { WebMap } from "./pkg/mln_web.js";
+import type { VideoHandle, VideoHost, WebMap } from "./pkg/mln_web.js";
 import type {
   Bindings,
   Box,
@@ -110,6 +110,32 @@ onmessage = ({ data }: MessageEvent<ToMap>) => {
 
 const post = (message: FromMap, transfer: Transferable[] = []) =>
   postMessage(message, transfer);
+
+// The map's video players (mln_video's WebPlayers): this worker has no
+// `<video>`, so the page plays each video (video.ts) and sends its frames
+// and failures back here, by the id this worker gave it.
+type Callbacks = Parameters<VideoHost["open"]>;
+const videos = new Map<
+  number,
+  { onFrame: Callbacks[1]; onError: Callbacks[2] }
+>();
+let nextVideo = 0;
+const videoHost: VideoHost = {
+  open(urls, onFrame, onError): VideoHandle {
+    const id = nextVideo++;
+    videos.set(id, { onFrame, onError });
+    post({ type: "videoOpen", id, urls });
+    return {
+      play: () => post({ type: "videoControl", id, control: "play" }),
+      pause: () => post({ type: "videoControl", id, control: "pause" }),
+      seek: (seconds) => post({ type: "videoSeek", id, seconds }),
+      close: () => {
+        videos.delete(id);
+        post({ type: "videoControl", id, control: "close" });
+      },
+    };
+  },
+};
 
 let stopped = false;
 // Stops the instance's work between frames, once it has started.
@@ -377,6 +403,7 @@ async function run({
       fallbackFontFaces,
       systemFonts,
       onFrame,
+      videoHost,
     );
   } catch (error) {
     if (self.mlnPanic !== undefined) throw error;
@@ -584,6 +611,16 @@ async function run({
         case "debug":
           debug = data.on;
           report(true);
+          break;
+        case "videoFrame": {
+          const video = videos.get(data.id);
+          if (video)
+            video.onFrame(data.frame, data.width, data.height, data.time);
+          else data.frame.close(); // closed since the page sent it
+          break;
+        }
+        case "videoError":
+          videos.get(data.id)?.onError(data.message);
           break;
         case "preload":
         case "start":

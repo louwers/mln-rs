@@ -12,8 +12,9 @@
 // panic (the page's `panic`), and fails unless the page stops and shows the
 // panic, and opens a comparison with GL JS (the page's `compare`), and
 // fails unless GL JS's map covers the page's and takes the input right of
-// the divider. CI runs it (the
-// `web` job); see ../README.md.
+// the divider. It plays a video source of four colored quarters (video.mjs),
+// and fails unless each keeps its color and place and the video moves on.
+// CI runs it (the `web` job); see ../README.md.
 //
 //   node examples/web/check/check.mjs [options]
 //
@@ -57,6 +58,7 @@ import {
   webgpuAdapter,
 } from "./page.mjs";
 import { startServer } from "./server.mjs";
+import { checkVideo } from "./video.mjs";
 import { selectViews } from "./views.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -119,6 +121,11 @@ try {
     `a comparison with GL JS: ${comparing ?? "GL JS's map covers the page's, right of the divider"}`,
   );
   if (comparing) failures.push(`a comparison with GL JS: ${comparing}`);
+  const video = await checkVideo(context);
+  console.log(
+    `a video source: ${video ?? "its quarters keep their colors and places, and it moves on"}`,
+  );
+  if (video) failures.push(`a video source: ${video}`);
 } finally {
   await browser.close();
   server.close();

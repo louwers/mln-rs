@@ -5,8 +5,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { SOURCE } from "./fixtures.mjs";
+import { videoStyle } from "./video.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 // In a slow view every fixture comes this late, and fresh for an hour, as
 // over a network, so the map fetches each URL once unless it drops what it
@@ -26,7 +30,8 @@ const types = {
 
 /**
  * Serves `root` (the built page), the styles of `views` and `fixtures` on a
- * free port of 127.0.0.1, and `/blank`, an empty page.
+ * free port of 127.0.0.1, `/blank`, an empty page, and the style and video
+ * of the video check (video.mjs) under `/video/`.
  *
  * `beginView({ slow })` starts a view: it returns the list that the server
  * fills with the fixtures the view asks for that the cache doesn't have,
@@ -109,6 +114,17 @@ export async function startServer({ root, views, fixtures }) {
     if (style) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(served(views[Number(style[1])].style)));
+      return;
+    }
+    if (url.pathname === "/video/style") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(videoStyle(origin)));
+      return;
+    }
+    if (url.pathname === "/video/quarters.webm") {
+      response
+        .writeHead(200, { "content-type": "video/webm" })
+        .end(readFileSync(path.join(here, "quarters.webm")));
       return;
     }
     if (url.pathname === "/blank") {

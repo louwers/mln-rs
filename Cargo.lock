@@ -3246,11 +3246,15 @@ dependencies = [
 name = "mln-rs-video"
 version = "0.0.12"
 dependencies = [
+ "js-sys",
  "libloading",
+ "mln-rs-actor",
  "mln-rs-gfx",
  "mln-rs-storage",
  "mln-rs-util",
  "parking_lot",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -3291,6 +3295,7 @@ dependencies = [
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-util",
+ "mln-rs-video",
  "mln-rs-web-host",
  "mln-rs-webgpu",
  "parking_lot",
@@ -3332,6 +3337,8 @@ dependencies = [
  "mln-rs-vec-map",
  "parking_lot",
  "pollster",
+ "wasm-bindgen",
+ "web-sys",
  "wgpu",
 ]
 

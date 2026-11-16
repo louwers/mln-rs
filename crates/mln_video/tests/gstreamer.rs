@@ -75,6 +75,7 @@ fn open(file_source: Arc<dyn FileSource>, urls: &[&str], gpu: bool) -> Option<(B
         urls: urls.iter().map(|url| (*url).to_owned()).collect(),
         file_source: Some(file_source),
         frames: FrameSink::new(Arc::clone(&slot)),
+        url_transform: None,
     };
     match platform_players().open(request) {
         Ok(player) => Some((player, slot)),
@@ -206,8 +207,12 @@ fn a_video_without_a_url_that_plays_fails_through_the_sink() {
 
 #[test]
 fn a_map_without_a_file_source_fails_to_open() {
-    let request =
-        OpenRequest { urls: vec!["v".to_owned()], file_source: None, frames: FrameSink::new(FrameSlot::new()) };
+    let request = OpenRequest {
+        urls: vec!["v".to_owned()],
+        file_source: None,
+        frames: FrameSink::new(FrameSlot::new()),
+        url_transform: None,
+    };
     assert!(platform_players().open(request).is_err());
 }
 

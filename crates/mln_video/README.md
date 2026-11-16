@@ -10,8 +10,9 @@ Plays the videos of a style's `video` sources. The map never decodes video: a
 player of the platform's (GStreamer on Linux, `MediaCodec` on Android,
 AVFoundation on Apple's platforms, Media Foundation on Windows, the page's
 `<video>` in the browser) decodes each video, reading its bytes through the
-map's storage, and hands the frames to the map, in memory or on the GPU. Apps
-and tests can bring their own player through the same traits.
+map's storage (in the browser, the `<video>` loads them itself), and hands the
+frames to the map, in memory or on the GPU. Apps and tests can bring their own
+player through the same traits.
 
 Licensed under the BSD 2-Clause License, as the rest of mln-rs is
 ([LICENSE.md](../../LICENSE.md)).
