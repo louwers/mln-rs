@@ -1,4 +1,4 @@
-//! `OpenHarmony`'s player: its `AVCodec` API, loaded at run time. A source
+//! `OpenHarmony`'s player: its `AVCodec` API, from API level 20. A source
 //! reads the video through a [`ByteSource`], a demuxer feeds its first video
 //! track to a decoder in synchronous mode, and the decoder renders each frame
 //! at its time into a consumer surface, whose native buffers go to the map,
@@ -21,7 +21,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use parking_lot::{Condvar, Mutex};
 
-use self::ffi::{AvSource, BufferAttr, Demuxer, Format, Key, Ohos, Output, Surface, SurfaceBuffer};
+use self::ffi::{AvSource, BufferAttr, Demuxer, Format, Key, Output, Surface, SurfaceBuffer};
 use crate::bytes::ByteSource;
 use crate::player::{OpenRequest, VideoPlayer, VideoPlayers};
 use crate::slot::FrameSink;
@@ -122,16 +122,9 @@ fn run(request: OpenRequest, shared: &Shared) {
         frames.fail("the map has no file source to read the video from");
         return;
     };
-    let ohos = match Ohos::get() {
-        Ok(ohos) => ohos,
-        Err(error) => {
-            frames.fail(error);
-            return;
-        }
-    };
     let mut errors = Vec::new();
     for url in urls {
-        let video = match Video::open(ohos, &file_source, &url, shared) {
+        let video = match Video::open(&file_source, &url, shared) {
             Ok(video) => video,
             Err(error) => {
                 if shared.closed() {
@@ -167,34 +160,28 @@ struct Video {
     // Before the source, which it reads.
     demuxer: Demuxer,
     source: AvSource,
-    ohos: &'static Ohos,
     format: Format,
     width: i32,
     height: i32,
 }
 
 impl Video {
-    fn open(
-        ohos: &'static Ohos,
-        file_source: &Arc<dyn FileSource>,
-        url: &str,
-        shared: &Shared,
-    ) -> Result<Video, String> {
+    fn open(file_source: &Arc<dyn FileSource>, url: &str, shared: &Shared) -> Result<Video, String> {
         let bytes = Arc::new(ByteSource::new(Arc::clone(file_source), url));
         *shared.bytes.lock() = Some(Arc::clone(&bytes));
         // A close before the source was shared doesn't reach it.
         if shared.closed() {
             bytes.cancel();
         }
-        let source = AvSource::new(ohos, bytes)?;
+        let source = AvSource::new(bytes)?;
         let (track, format) = source.video_track().ok_or_else(|| match source.take_error() {
             Some(error) => format!("reading the video failed: {error}"),
             None => "the file has no video track".to_owned(),
         })?;
         let width = format.int(Key::Width).ok_or("the video track has no width")?;
         let height = format.int(Key::Height).ok_or("the video track has no height")?;
-        let demuxer = Demuxer::new(ohos, &source, track)?;
-        Ok(Video { demuxer, source, ohos, format, width, height })
+        let demuxer = Demuxer::new(&source, track)?;
+        Ok(Video { demuxer, source, format, width, height })
     }
 
     /// Why the source failed to read last, after `error`.
@@ -282,8 +269,8 @@ impl Decoder {
                 // in, or RGBA, where the system allocates no surface buffers
                 // of it, such as the emulator's.
                 let attempt = |pixel_format| {
-                    let surface = Surface::new(video.ohos, video.width, video.height)?;
-                    let codec = ffi::Decoder::new(video.ohos, &video.format, pixel_format, Some(surface.window()))?;
+                    let surface = Surface::new(video.width, video.height)?;
+                    let codec = ffi::Decoder::new(&video.format, pixel_format, Some(surface.window()))?;
                     Ok::<_, String>((Some(surface), codec))
                 };
                 attempt(None).or_else(|error| {
@@ -291,8 +278,8 @@ impl Decoder {
                 })?
             }
             Mode::Cpu => {
-                let nv12 = ffi::Decoder::new(video.ohos, &video.format, Some(ffi::PIXEL_FORMAT_NV12), None);
-                let codec = nv12.or_else(|_| ffi::Decoder::new(video.ohos, &video.format, None, None))?;
+                let nv12 = ffi::Decoder::new(&video.format, Some(ffi::PIXEL_FORMAT_NV12), None);
+                let codec = nv12.or_else(|_| ffi::Decoder::new(&video.format, None, None))?;
                 (None, codec)
             }
         };
@@ -529,7 +516,7 @@ impl<'a> Playback<'a> {
                 // decoder doesn't write into it while a renderer reads it.
                 let lease: FrameLease = Box::new(SurfaceLease { _buffer: buffer, _surface: Arc::clone(surface) });
                 let pixels = FramePixels::Gpu(GpuFrame::OhosNativeBuffer {
-                    buffer: native.as_ptr(),
+                    buffer: native.as_ptr().cast(),
                     color: self.color,
                     lease: Some(lease),
                 });

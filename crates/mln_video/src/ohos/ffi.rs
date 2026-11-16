@@ -1,275 +1,83 @@
-//! The parts of `OpenHarmony`'s `AVCodec` (its media core, demuxer, source and
-//! video decoder libraries), native image and native buffer APIs that the
-//! player uses, looked up at run time, and owners of the objects they make,
-//! which destroy them when dropped. Data sources with user data and decoders
-//! in synchronous mode need API level 20, so the library still loads on older
-//! versions, where each video fails to open.
+//! Owners of the `OpenHarmony` `AVCodec` (source, demuxer and video decoder),
+//! native image and native buffer objects that the player uses, which destroy
+//! them when dropped.
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::io;
 use std::ptr::NonNull;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use libloading::Library;
+use ohos_media_sys::avbuffer::{OH_AVBuffer, OH_AVBuffer_GetAddr, OH_AVBuffer_GetBufferAttr, OH_AVBuffer_GetCapacity};
+use ohos_media_sys::avbuffer_info::{OH_AVCodecBufferAttr, OH_AVCodecBufferFlags};
+use ohos_media_sys::avcodec_base::{
+    OH_AVCodec, OH_AVDataSourceExt, OH_AVSeekMode, OH_MD_KEY_CODEC_MIME, OH_MD_KEY_DURATION,
+    OH_MD_KEY_ENABLE_SYNC_MODE, OH_MD_KEY_HEIGHT, OH_MD_KEY_MATRIX_COEFFICIENTS, OH_MD_KEY_PIXEL_FORMAT,
+    OH_MD_KEY_RANGE_FLAG, OH_MD_KEY_TRACK_COUNT, OH_MD_KEY_TRACK_TYPE, OH_MD_KEY_VIDEO_CROP_LEFT,
+    OH_MD_KEY_VIDEO_CROP_TOP, OH_MD_KEY_VIDEO_PIC_HEIGHT, OH_MD_KEY_VIDEO_PIC_WIDTH, OH_MD_KEY_VIDEO_SLICE_HEIGHT,
+    OH_MD_KEY_VIDEO_STRIDE, OH_MD_KEY_WIDTH, OH_MediaType,
+};
+use ohos_media_sys::avcodec_videodecoder::{
+    OH_VideoDecoder_Configure, OH_VideoDecoder_CreateByMime, OH_VideoDecoder_Destroy, OH_VideoDecoder_Flush,
+    OH_VideoDecoder_FreeOutputBuffer, OH_VideoDecoder_GetInputBuffer, OH_VideoDecoder_GetOutputBuffer,
+    OH_VideoDecoder_GetOutputDescription, OH_VideoDecoder_Prepare, OH_VideoDecoder_PushInputBuffer,
+    OH_VideoDecoder_QueryInputBuffer, OH_VideoDecoder_QueryOutputBuffer, OH_VideoDecoder_RenderOutputBuffer,
+    OH_VideoDecoder_SetSurface, OH_VideoDecoder_Start, OH_VideoDecoder_Stop,
+};
+use ohos_media_sys::avdemuxer::{
+    OH_AVDemuxer, OH_AVDemuxer_CreateWithSource, OH_AVDemuxer_Destroy, OH_AVDemuxer_ReadSampleBuffer,
+    OH_AVDemuxer_SeekToTime, OH_AVDemuxer_SelectTrackByID,
+};
+use ohos_media_sys::averrors::OH_AVErrCode;
+use ohos_media_sys::avformat::{
+    OH_AVFormat, OH_AVFormat_Copy, OH_AVFormat_Create, OH_AVFormat_Destroy, OH_AVFormat_GetIntValue,
+    OH_AVFormat_GetLongValue, OH_AVFormat_GetStringValue, OH_AVFormat_SetIntValue, OH_AVPixelFormat,
+};
+use ohos_media_sys::avsource::{
+    OH_AVSource, OH_AVSource_CreateWithDataSourceExt, OH_AVSource_Destroy, OH_AVSource_GetSourceFormat,
+    OH_AVSource_GetTrackFormat,
+};
+use ohos_sys_opaque_types::{OH_NativeBuffer, OH_NativeImage, OHNativeWindow, OHNativeWindowBuffer};
+use ohos_window_sys::OHNativeErrorCode;
+use ohos_window_sys::native_buffer::native_buffer::{
+    OH_NativeBuffer_Config, OH_NativeBuffer_FromNativeWindowBuffer, OH_NativeBuffer_GetConfig,
+    OH_NativeBuffer_Reference, OH_NativeBuffer_Usage,
+};
+use ohos_window_sys::native_image::{
+    OH_ConsumerSurface_Create, OH_ConsumerSurface_SetDefaultSize, OH_ConsumerSurface_SetDefaultUsage,
+    OH_NativeImage_AcquireNativeWindow, OH_NativeImage_AcquireNativeWindowBuffer, OH_NativeImage_Destroy,
+    OH_NativeImage_ReleaseNativeWindowBuffer, OH_NativeImage_SetOnFrameAvailableListener, OH_OnFrameAvailableListener,
+};
 use parking_lot::{Condvar, Mutex};
 
 use crate::bytes::ByteSource;
 
-/// `OH_AVErrCode`: `AV_ERR_OK`, or an error.
-type AvError = c_int;
-
-/// `AV_ERR_OK`.
-const OK: AvError = 0;
-/// `AV_ERR_STREAM_CHANGED`.
-const STREAM_CHANGED: AvError = 5_410_005;
-/// `AV_ERR_TRY_AGAIN_LATER`.
-const TRY_AGAIN_LATER: AvError = 5_410_006;
-/// `AVCODEC_BUFFER_FLAGS_EOS`.
-pub(super) const END_OF_STREAM: u32 = 1;
-/// `MEDIA_TYPE_VID`.
-const MEDIA_TYPE_VIDEO: i32 = 1;
-/// `SEEK_MODE_PREVIOUS_SYNC`.
-const SEEK_PREVIOUS_SYNC: c_int = 1;
-/// `AV_PIXEL_FORMAT_YUVI420`.
-pub(super) const PIXEL_FORMAT_I420: i32 = 1;
-/// `AV_PIXEL_FORMAT_NV12`.
-pub(super) const PIXEL_FORMAT_NV12: i32 = 2;
-/// `AV_PIXEL_FORMAT_NV21`.
-pub(super) const PIXEL_FORMAT_NV21: i32 = 3;
-/// `AV_PIXEL_FORMAT_RGBA`.
-pub(super) const PIXEL_FORMAT_RGBA: i32 = 5;
-/// `NATIVE_ERROR_OK`.
-const NATIVE_OK: i32 = 0;
-/// `NATIVE_ERROR_NO_BUFFER`.
-const NATIVE_NO_BUFFER: i32 = 40_601_000;
-/// `NATIVEBUFFER_USAGE_MEM_DMA`.
-const USAGE_MEM_DMA: u64 = 1 << 3;
-/// `NATIVEBUFFER_USAGE_HW_TEXTURE`.
-const USAGE_HW_TEXTURE: u64 = 1 << 9;
+pub(super) const END_OF_STREAM: u32 = OH_AVCodecBufferFlags::EOS.0;
+const MEDIA_TYPE_VIDEO: i32 = OH_MediaType::MEDIA_TYPE_VID.0.cast_signed();
+pub(super) const PIXEL_FORMAT_I420: i32 = OH_AVPixelFormat::AV_PIXEL_FORMAT_YUVI420.0.cast_signed();
+pub(super) const PIXEL_FORMAT_NV12: i32 = OH_AVPixelFormat::AV_PIXEL_FORMAT_NV12.0.cast_signed();
+pub(super) const PIXEL_FORMAT_NV21: i32 = OH_AVPixelFormat::AV_PIXEL_FORMAT_NV21.0.cast_signed();
+pub(super) const PIXEL_FORMAT_RGBA: i32 = OH_AVPixelFormat::AV_PIXEL_FORMAT_RGBA.0.cast_signed();
+const NATIVE_OK: i32 = OHNativeErrorCode::NATIVE_ERROR_OK.0.cast_signed();
+const NATIVE_NO_BUFFER: i32 = OHNativeErrorCode::NATIVE_ERROR_NO_BUFFER.0.cast_signed();
 /// What a readAt callback returns for the end of the data.
 const READ_END: i32 = -1;
 /// What a readAt callback returns for a read that failed.
 const READ_FAILED: i32 = -2;
 
-macro_rules! opaque {
-    ($($name:ident),*) => {
-        $(
-            #[repr(C)]
-            pub(super) struct $name {
-                _private: [u8; 0],
-            }
-        )*
-    };
-}
+pub(super) type BufferAttr = OH_AVCodecBufferAttr;
+pub(super) type NativeBuffer = OH_NativeBuffer;
 
-opaque!(
-    OH_AVFormat,
-    OH_AVBuffer,
-    OH_AVSource,
-    OH_AVDemuxer,
-    OH_AVCodec,
-    OH_NativeImage,
-    OHNativeWindow,
-    OHNativeWindowBuffer
-);
-
-/// `OH_NativeBuffer`.
-pub(super) type NativeBuffer = c_void;
-
-/// `OH_AVCodecBufferAttr`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct BufferAttr {
-    pub(super) pts: i64,
-    pub(super) size: i32,
-    pub(super) offset: i32,
-    pub(super) flags: u32,
-}
-
-type ReadAt = unsafe extern "C" fn(*mut OH_AVBuffer, i32, i64, *mut c_void) -> i32;
-
-/// `OH_AVDataSourceExt`.
-#[repr(C)]
-struct DataSourceDesc {
-    size: i64,
-    read_at: ReadAt,
-}
-
-/// `OH_OnFrameAvailableListener`.
-#[repr(C)]
-struct FrameListener {
-    context: *mut c_void,
-    on_frame_available: unsafe extern "C" fn(*mut c_void),
-}
-
-/// Declares a table of functions that `load` looks up in a library, each
-/// field by its symbol's name.
-macro_rules! functions {
-    ($table:ident from $library:literal { $($field:ident = $symbol:literal: fn($($arg:ty),*) $(-> $ret:ty)?;)* }) => {
-        struct $table {
-            _library: Library,
-            $($field: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
-        }
-
-        impl $table {
-            fn load() -> Result<$table, String> {
-                // SAFETY: a system library, whose initializers any process
-                // may run, and the symbols have the SDK's signatures.
-                unsafe {
-                    let library = Library::new($library).map_err(|error| format!("{}: {error}", $library))?;
-                    $(
-                        let $field = *library
-                            .get::<unsafe extern "C" fn($($arg),*) $(-> $ret)?>(concat!($symbol, "\0").as_bytes())
-                            .map_err(|error| format!("{}: {error}", $symbol))?;
-                    )*
-                    Ok($table { _library: library, $($field),* })
-                }
-            }
-        }
-    };
-}
-
-functions!(Core from "libnative_media_core.so" {
-    format_create = "OH_AVFormat_Create": fn() -> *mut OH_AVFormat;
-    format_destroy = "OH_AVFormat_Destroy": fn(*mut OH_AVFormat);
-    format_copy = "OH_AVFormat_Copy": fn(*mut OH_AVFormat, *mut OH_AVFormat) -> bool;
-    format_get_int = "OH_AVFormat_GetIntValue": fn(*mut OH_AVFormat, *const c_char, *mut i32) -> bool;
-    format_get_long = "OH_AVFormat_GetLongValue": fn(*mut OH_AVFormat, *const c_char, *mut i64) -> bool;
-    format_get_string = "OH_AVFormat_GetStringValue": fn(*mut OH_AVFormat, *const c_char, *mut *const c_char) -> bool;
-    format_set_int = "OH_AVFormat_SetIntValue": fn(*mut OH_AVFormat, *const c_char, i32) -> bool;
-
-    buffer_addr = "OH_AVBuffer_GetAddr": fn(*mut OH_AVBuffer) -> *mut u8;
-    buffer_capacity = "OH_AVBuffer_GetCapacity": fn(*mut OH_AVBuffer) -> i32;
-    buffer_attr = "OH_AVBuffer_GetBufferAttr": fn(*mut OH_AVBuffer, *mut BufferAttr) -> AvError;
-});
-
-functions!(Source from "libnative_media_avsource.so" {
-    create = "OH_AVSource_CreateWithDataSourceExt": fn(*mut DataSourceDesc, *mut c_void) -> *mut OH_AVSource;
-    destroy = "OH_AVSource_Destroy": fn(*mut OH_AVSource) -> AvError;
-    source_format = "OH_AVSource_GetSourceFormat": fn(*mut OH_AVSource) -> *mut OH_AVFormat;
-    track_format = "OH_AVSource_GetTrackFormat": fn(*mut OH_AVSource, u32) -> *mut OH_AVFormat;
-});
-
-functions!(Demux from "libnative_media_avdemuxer.so" {
-    create = "OH_AVDemuxer_CreateWithSource": fn(*mut OH_AVSource) -> *mut OH_AVDemuxer;
-    destroy = "OH_AVDemuxer_Destroy": fn(*mut OH_AVDemuxer) -> AvError;
-    select_track = "OH_AVDemuxer_SelectTrackByID": fn(*mut OH_AVDemuxer, u32) -> AvError;
-    read_sample = "OH_AVDemuxer_ReadSampleBuffer": fn(*mut OH_AVDemuxer, u32, *mut OH_AVBuffer) -> AvError;
-    seek = "OH_AVDemuxer_SeekToTime": fn(*mut OH_AVDemuxer, i64, c_int) -> AvError;
-});
-
-functions!(Vdec from "libnative_media_vdec.so" {
-    create = "OH_VideoDecoder_CreateByMime": fn(*const c_char) -> *mut OH_AVCodec;
-    destroy = "OH_VideoDecoder_Destroy": fn(*mut OH_AVCodec) -> AvError;
-    configure = "OH_VideoDecoder_Configure": fn(*mut OH_AVCodec, *mut OH_AVFormat) -> AvError;
-    set_surface = "OH_VideoDecoder_SetSurface": fn(*mut OH_AVCodec, *mut OHNativeWindow) -> AvError;
-    prepare = "OH_VideoDecoder_Prepare": fn(*mut OH_AVCodec) -> AvError;
-    start = "OH_VideoDecoder_Start": fn(*mut OH_AVCodec) -> AvError;
-    stop = "OH_VideoDecoder_Stop": fn(*mut OH_AVCodec) -> AvError;
-    flush = "OH_VideoDecoder_Flush": fn(*mut OH_AVCodec) -> AvError;
-    output_description = "OH_VideoDecoder_GetOutputDescription": fn(*mut OH_AVCodec) -> *mut OH_AVFormat;
-    query_input = "OH_VideoDecoder_QueryInputBuffer": fn(*mut OH_AVCodec, *mut u32, i64) -> AvError;
-    input_buffer = "OH_VideoDecoder_GetInputBuffer": fn(*mut OH_AVCodec, u32) -> *mut OH_AVBuffer;
-    push_input = "OH_VideoDecoder_PushInputBuffer": fn(*mut OH_AVCodec, u32) -> AvError;
-    query_output = "OH_VideoDecoder_QueryOutputBuffer": fn(*mut OH_AVCodec, *mut u32, i64) -> AvError;
-    output_buffer = "OH_VideoDecoder_GetOutputBuffer": fn(*mut OH_AVCodec, u32) -> *mut OH_AVBuffer;
-    render_output = "OH_VideoDecoder_RenderOutputBuffer": fn(*mut OH_AVCodec, u32) -> AvError;
-    free_output = "OH_VideoDecoder_FreeOutputBuffer": fn(*mut OH_AVCodec, u32) -> AvError;
-});
-
-functions!(Image from "libnative_image.so" {
-    consumer_create = "OH_ConsumerSurface_Create": fn() -> *mut OH_NativeImage;
-    consumer_set_usage = "OH_ConsumerSurface_SetDefaultUsage": fn(*mut OH_NativeImage, u64) -> i32;
-    consumer_set_size = "OH_ConsumerSurface_SetDefaultSize": fn(*mut OH_NativeImage, i32, i32) -> i32;
-    window = "OH_NativeImage_AcquireNativeWindow": fn(*mut OH_NativeImage) -> *mut OHNativeWindow;
-    set_listener = "OH_NativeImage_SetOnFrameAvailableListener": fn(*mut OH_NativeImage, FrameListener) -> i32;
-    acquire = "OH_NativeImage_AcquireNativeWindowBuffer":
-        fn(*mut OH_NativeImage, *mut *mut OHNativeWindowBuffer, *mut c_int) -> i32;
-    release = "OH_NativeImage_ReleaseNativeWindowBuffer": fn(*mut OH_NativeImage, *mut OHNativeWindowBuffer, c_int) -> i32;
-    destroy = "OH_NativeImage_Destroy": fn(*mut *mut OH_NativeImage);
-});
-
-functions!(Buffer from "libnative_buffer.so" {
-    from_window_buffer = "OH_NativeBuffer_FromNativeWindowBuffer":
-        fn(*mut OHNativeWindowBuffer, *mut *mut NativeBuffer) -> i32;
-    reference = "OH_NativeBuffer_Reference": fn(*mut NativeBuffer) -> i32;
-    config = "OH_NativeBuffer_GetConfig": fn(*mut NativeBuffer, *mut BufferConfig);
-});
-
-/// `OH_NativeBuffer_Config`.
-#[repr(C)]
-#[derive(Default)]
-pub(super) struct BufferConfig {
-    width: i32,
-    height: i32,
-    format: i32,
-    usage: i32,
-    stride: i32,
-}
-
-/// The format keys, the values of the codec base library's `OH_MD_KEY_*`.
-struct Keys {
-    track_count: CString,
-    track_type: CString,
-    duration: CString,
-    codec_mime: CString,
-    width: CString,
-    height: CString,
-    pixel_format: CString,
-    stride: CString,
-    slice_height: CString,
-    picture_width: CString,
-    picture_height: CString,
-    crop_left: CString,
-    crop_top: CString,
-    range_flag: CString,
-    matrix_coefficients: CString,
-    enable_sync_mode: CString,
-}
-
-impl Keys {
-    fn load() -> Result<Keys, String> {
-        const LIBRARY: &str = "libnative_media_codecbase.so";
-        // SAFETY: a system library, as in `functions!`; each symbol is a
-        // `const char *` that names a key, which is copied.
-        unsafe {
-            let library = Library::new(LIBRARY).map_err(|error| format!("{LIBRARY}: {error}"))?;
-            let key = |name: &str| -> Result<CString, String> {
-                let symbol = format!("OH_MD_KEY_{name}\0");
-                let variable = *library
-                    .get::<*const *const c_char>(symbol.as_bytes())
-                    .map_err(|error| format!("OH_MD_KEY_{name}: {error}"))?;
-                if variable.is_null() || (*variable).is_null() {
-                    return Err(format!("OH_MD_KEY_{name} is null"));
-                }
-                Ok(CStr::from_ptr(*variable).to_owned())
-            };
-            Ok(Keys {
-                track_count: key("TRACK_COUNT")?,
-                track_type: key("TRACK_TYPE")?,
-                duration: key("DURATION")?,
-                codec_mime: key("CODEC_MIME")?,
-                width: key("WIDTH")?,
-                height: key("HEIGHT")?,
-                pixel_format: key("PIXEL_FORMAT")?,
-                stride: key("VIDEO_STRIDE")?,
-                slice_height: key("VIDEO_SLICE_HEIGHT")?,
-                picture_width: key("VIDEO_PIC_WIDTH")?,
-                picture_height: key("VIDEO_PIC_HEIGHT")?,
-                crop_left: key("VIDEO_CROP_LEFT")?,
-                crop_top: key("VIDEO_CROP_TOP")?,
-                range_flag: key("RANGE_FLAG")?,
-                matrix_coefficients: key("MATRIX_COEFFICIENTS")?,
-                enable_sync_mode: key("ENABLE_SYNC_MODE")?,
-            })
-        }
-    }
+/// A buffer's attributes before a call fills them.
+fn empty_attr() -> BufferAttr {
+    BufferAttr { pts: 0, size: 0, offset: 0, flags: 0 }
 }
 
 /// The format keys that the player reads.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Key {
+    TrackCount,
+    TrackType,
     Width,
     Height,
     PixelFormat,
@@ -283,67 +91,38 @@ pub(super) enum Key {
     MatrixCoefficients,
 }
 
-/// The functions and keys.
-pub(super) struct Ohos {
-    core: Core,
-    source: Source,
-    demux: Demux,
-    vdec: Vdec,
-    image: Image,
-    buffer: Buffer,
-    keys: Keys,
-}
-
-impl Ohos {
-    /// The functions, looked up once.
-    ///
-    /// # Errors
-    ///
-    /// Before API level 20, a function isn't there.
-    pub(super) fn get() -> Result<&'static Ohos, String> {
-        static OHOS: OnceLock<Result<Ohos, String>> = OnceLock::new();
-        OHOS.get_or_init(|| {
-            Ok(Ohos {
-                core: Core::load()?,
-                source: Source::load()?,
-                demux: Demux::load()?,
-                vdec: Vdec::load()?,
-                image: Image::load()?,
-                buffer: Buffer::load()?,
-                keys: Keys::load()?,
-            })
-        })
-        .as_ref()
-        .map_err(|error| format!("OpenHarmony's AVCodec API isn't there (it needs API level 20): {error}"))
-    }
-
-    fn key(&self, key: Key) -> &CStr {
-        let keys = &self.keys;
-        match key {
-            Key::Width => &keys.width,
-            Key::Height => &keys.height,
-            Key::PixelFormat => &keys.pixel_format,
-            Key::Stride => &keys.stride,
-            Key::SliceHeight => &keys.slice_height,
-            Key::PictureWidth => &keys.picture_width,
-            Key::PictureHeight => &keys.picture_height,
-            Key::CropLeft => &keys.crop_left,
-            Key::CropTop => &keys.crop_top,
-            Key::RangeFlag => &keys.range_flag,
-            Key::MatrixCoefficients => &keys.matrix_coefficients,
+impl Key {
+    fn name(self) -> *const c_char {
+        // SAFETY: the codec base library's key names, which it sets before
+        // any code runs and never changes.
+        unsafe {
+            match self {
+                Key::TrackCount => OH_MD_KEY_TRACK_COUNT,
+                Key::TrackType => OH_MD_KEY_TRACK_TYPE,
+                Key::Width => OH_MD_KEY_WIDTH,
+                Key::Height => OH_MD_KEY_HEIGHT,
+                Key::PixelFormat => OH_MD_KEY_PIXEL_FORMAT,
+                Key::Stride => OH_MD_KEY_VIDEO_STRIDE,
+                Key::SliceHeight => OH_MD_KEY_VIDEO_SLICE_HEIGHT,
+                Key::PictureWidth => OH_MD_KEY_VIDEO_PIC_WIDTH,
+                Key::PictureHeight => OH_MD_KEY_VIDEO_PIC_HEIGHT,
+                Key::CropLeft => OH_MD_KEY_VIDEO_CROP_LEFT,
+                Key::CropTop => OH_MD_KEY_VIDEO_CROP_TOP,
+                Key::RangeFlag => OH_MD_KEY_RANGE_FLAG,
+                Key::MatrixCoefficients => OH_MD_KEY_MATRIX_COEFFICIENTS,
+            }
         }
     }
 }
 
 /// Describes a failed call.
-fn check(status: AvError, what: &str) -> Result<(), String> {
-    if status == OK { Ok(()) } else { Err(format!("{what} failed: {status}")) }
+fn check(status: OH_AVErrCode, what: &str) -> Result<(), String> {
+    if status == OH_AVErrCode::AV_ERR_OK { Ok(()) } else { Err(format!("{what} failed: {}", status.0)) }
 }
 
 /// What a data source's callback reads: the video's bytes, and why a read
 /// failed last.
 struct Reader {
-    ohos: &'static Ohos,
     bytes: Arc<ByteSource>,
     error: Mutex<Option<io::Error>>,
 }
@@ -352,12 +131,11 @@ unsafe extern "C" fn read_at(buffer: *mut OH_AVBuffer, length: i32, offset: i64,
     // SAFETY: the source's reader, which outlives it.
     let reader = unsafe { &*userdata.cast::<Reader>() };
     let (Ok(offset), Ok(length)) = (u64::try_from(offset), usize::try_from(length)) else { return READ_FAILED };
-    let core = &reader.ohos.core;
     // SAFETY: the buffer the source reads into, which it doesn't touch
     // until the call returns, of at least `length` bytes.
     let data = unsafe {
-        let address = (core.buffer_addr)(buffer);
-        let capacity = usize::try_from((core.buffer_capacity)(buffer)).unwrap_or(0);
+        let address = OH_AVBuffer_GetAddr(buffer);
+        let capacity = usize::try_from(OH_AVBuffer_GetCapacity(buffer)).unwrap_or(0);
         if address.is_null() {
             return READ_FAILED;
         }
@@ -377,10 +155,9 @@ unsafe extern "C" fn read_at(buffer: *mut OH_AVBuffer, length: i32, offset: i64,
 
 /// An `OH_AVSource` that reads a [`ByteSource`].
 pub(super) struct AvSource {
-    ohos: &'static Ohos,
     raw: NonNull<OH_AVSource>,
     /// What the source reads through, which outlives it.
-    _desc: Box<DataSourceDesc>,
+    _desc: Box<OH_AVDataSourceExt>,
     reader: Box<Reader>,
 }
 
@@ -390,14 +167,15 @@ unsafe impl Send for AvSource {}
 impl AvSource {
     /// A source of `bytes`' video. Blocks while it reads the container's
     /// header.
-    pub(super) fn new(ohos: &'static Ohos, bytes: Arc<ByteSource>) -> Result<AvSource, String> {
+    pub(super) fn new(bytes: Arc<ByteSource>) -> Result<AvSource, String> {
         let size = bytes.size().map_err(|error| error.to_string())?;
         // An unknown size is a stream's.
         let size = size.and_then(|size| i64::try_from(size).ok()).unwrap_or(-1);
-        let reader = Box::new(Reader { ohos, bytes, error: Mutex::new(None) });
-        let mut desc = Box::new(DataSourceDesc { size, read_at });
+        let reader = Box::new(Reader { bytes, error: Mutex::new(None) });
+        let mut desc = Box::new(OH_AVDataSourceExt { size, readAt: Some(read_at) });
         // SAFETY: the description and the reader outlive the source.
-        let raw = unsafe { (ohos.source.create)(&raw mut *desc, (&raw const *reader).cast_mut().cast()) };
+        let raw =
+            unsafe { OH_AVSource_CreateWithDataSourceExt(&raw mut *desc, (&raw const *reader).cast_mut().cast()) };
         let Some(raw) = NonNull::new(raw) else {
             let error = reader.error.lock().take();
             return Err(match error {
@@ -405,7 +183,7 @@ impl AvSource {
                 None => "reading the video's container failed".to_owned(),
             });
         };
-        Ok(AvSource { ohos, raw, _desc: desc, reader })
+        Ok(AvSource { raw, _desc: desc, reader })
     }
 
     /// Why a read failed last.
@@ -415,12 +193,12 @@ impl AvSource {
 
     fn source_format(&self) -> Option<Format> {
         // SAFETY: the source is alive; the format is the caller's.
-        let raw = NonNull::new(unsafe { (self.ohos.source.source_format)(self.raw.as_ptr()) })?;
-        Some(Format { ohos: self.ohos, raw })
+        let raw = NonNull::new(unsafe { OH_AVSource_GetSourceFormat(self.raw.as_ptr()) })?;
+        Some(Format { raw })
     }
 
     fn track_count(&self) -> u32 {
-        let count = self.source_format().and_then(|format| format.int_key(&self.ohos.keys.track_count));
+        let count = self.source_format().and_then(|format| format.int(Key::TrackCount));
         count.and_then(|count| u32::try_from(count).ok()).unwrap_or(0)
     }
 
@@ -429,9 +207,7 @@ impl AvSource {
         let format = self.source_format()?;
         let mut value = 0;
         // SAFETY: the format is alive, and the key a C string.
-        let found = unsafe {
-            (self.ohos.core.format_get_long)(format.raw.as_ptr(), self.ohos.keys.duration.as_ptr(), &raw mut value)
-        };
+        let found = unsafe { OH_AVFormat_GetLongValue(format.raw.as_ptr(), OH_MD_KEY_DURATION, &raw mut value) };
         found.then_some(value).filter(|duration| *duration > 0)
     }
 
@@ -439,9 +215,9 @@ impl AvSource {
     pub(super) fn video_track(&self) -> Option<(u32, Format)> {
         (0..self.track_count()).find_map(|track| {
             // SAFETY: the source is alive; the format is the caller's.
-            let raw = NonNull::new(unsafe { (self.ohos.source.track_format)(self.raw.as_ptr(), track) })?;
-            let format = Format { ohos: self.ohos, raw };
-            (format.int_key(&self.ohos.keys.track_type) == Some(MEDIA_TYPE_VIDEO)).then_some((track, format))
+            let raw = NonNull::new(unsafe { OH_AVSource_GetTrackFormat(self.raw.as_ptr(), track) })?;
+            let format = Format { raw };
+            (format.int(Key::TrackType) == Some(MEDIA_TYPE_VIDEO)).then_some((track, format))
         })
     }
 }
@@ -449,13 +225,12 @@ impl AvSource {
 impl Drop for AvSource {
     fn drop(&mut self) {
         // SAFETY: the source is this one's, and no demuxer reads it any more.
-        unsafe { (self.ohos.source.destroy)(self.raw.as_ptr()) };
+        unsafe { OH_AVSource_Destroy(self.raw.as_ptr()) };
     }
 }
 
 /// An `OH_AVFormat`.
 pub(super) struct Format {
-    ohos: &'static Ohos,
     raw: NonNull<OH_AVFormat>,
 }
 
@@ -463,14 +238,15 @@ pub(super) struct Format {
 unsafe impl Send for Format {}
 
 impl Format {
-    fn int_key(&self, key: &CStr) -> Option<i32> {
+    /// `key`'s value, of a key whose name the codec base library holds.
+    fn int_key(&self, key: *const c_char) -> Option<i32> {
         let mut value = 0;
         // SAFETY: the format is alive, and the key a C string.
-        unsafe { (self.ohos.core.format_get_int)(self.raw.as_ptr(), key.as_ptr(), &raw mut value) }.then_some(value)
+        unsafe { OH_AVFormat_GetIntValue(self.raw.as_ptr(), key, &raw mut value) }.then_some(value)
     }
 
     pub(super) fn int(&self, key: Key) -> Option<i32> {
-        self.int_key(self.ohos.key(key))
+        self.int_key(key.name())
     }
 
     pub(super) fn mime(&self) -> Option<String> {
@@ -478,8 +254,7 @@ impl Format {
         // SAFETY: as for `int`; the string is the format's, and copied
         // before it goes.
         unsafe {
-            let key = self.ohos.keys.codec_mime.as_ptr();
-            if !(self.ohos.core.format_get_string)(self.raw.as_ptr(), key, &raw mut value) || value.is_null() {
+            if !OH_AVFormat_GetStringValue(self.raw.as_ptr(), OH_MD_KEY_CODEC_MIME, &raw mut value) || value.is_null() {
                 return None;
             }
             Some(CStr::from_ptr(value).to_string_lossy().into_owned())
@@ -490,31 +265,31 @@ impl Format {
     fn copy(&self) -> Result<Format, String> {
         // SAFETY: no preconditions; then both formats are alive.
         unsafe {
-            let raw = NonNull::new((self.ohos.core.format_create)()).ok_or("OH_AVFormat_Create failed")?;
-            let copy = Format { ohos: self.ohos, raw };
-            if !(self.ohos.core.format_copy)(raw.as_ptr(), self.raw.as_ptr()) {
+            let raw = NonNull::new(OH_AVFormat_Create()).ok_or("OH_AVFormat_Create failed")?;
+            let copy = Format { raw };
+            if !OH_AVFormat_Copy(raw.as_ptr(), self.raw.as_ptr()) {
                 return Err("copying a format failed".to_owned());
             }
             Ok(copy)
         }
     }
 
-    fn set_int(&self, key: &CStr, value: i32) {
+    /// Sets `key`, of a key whose name the codec base library holds.
+    fn set_int(&self, key: *const c_char, value: i32) {
         // SAFETY: the format is alive, and the key a C string.
-        unsafe { (self.ohos.core.format_set_int)(self.raw.as_ptr(), key.as_ptr(), value) };
+        unsafe { OH_AVFormat_SetIntValue(self.raw.as_ptr(), key, value) };
     }
 }
 
 impl Drop for Format {
     fn drop(&mut self) {
         // SAFETY: the format is this one's.
-        unsafe { (self.ohos.core.format_destroy)(self.raw.as_ptr()) };
+        unsafe { OH_AVFormat_Destroy(self.raw.as_ptr()) };
     }
 }
 
 /// An `OH_AVDemuxer` of one track.
 pub(super) struct Demuxer {
-    ohos: &'static Ohos,
     raw: NonNull<OH_AVDemuxer>,
     track: u32,
     /// The video's duration in microseconds, past which seeks fail.
@@ -526,13 +301,13 @@ unsafe impl Send for Demuxer {}
 
 impl Demuxer {
     /// A demuxer of `source`'s `track`; the source must outlive it.
-    pub(super) fn new(ohos: &'static Ohos, source: &AvSource, track: u32) -> Result<Demuxer, String> {
+    pub(super) fn new(source: &AvSource, track: u32) -> Result<Demuxer, String> {
         // SAFETY: the source is alive, and the caller keeps it.
-        let raw = NonNull::new(unsafe { (ohos.demux.create)(source.raw.as_ptr()) })
+        let raw = NonNull::new(unsafe { OH_AVDemuxer_CreateWithSource(source.raw.as_ptr()) })
             .ok_or("OH_AVDemuxer_CreateWithSource failed")?;
-        let demuxer = Demuxer { ohos, raw, track, duration_us: source.duration_us() };
+        let demuxer = Demuxer { raw, track, duration_us: source.duration_us() };
         // SAFETY: the demuxer is alive.
-        check(unsafe { (ohos.demux.select_track)(raw.as_ptr(), track) }, "selecting the video track")?;
+        check(unsafe { OH_AVDemuxer_SelectTrackByID(raw.as_ptr(), track) }, "selecting the video track")?;
         Ok(demuxer)
     }
 
@@ -540,7 +315,7 @@ impl Demuxer {
     /// its time and flags, the end of the track's among them.
     fn read_sample(&self, buffer: NonNull<OH_AVBuffer>) -> Result<(), String> {
         // SAFETY: the demuxer is alive, and the buffer is the caller's.
-        let status = unsafe { (self.ohos.demux.read_sample)(self.raw.as_ptr(), self.track, buffer.as_ptr()) };
+        let status = unsafe { OH_AVDemuxer_ReadSampleBuffer(self.raw.as_ptr(), self.track, buffer.as_ptr()) };
         check(status, "reading a sample")
     }
 
@@ -549,7 +324,8 @@ impl Demuxer {
     pub(super) fn seek_to(&self, time_us: i64) -> Result<(), String> {
         let time_us = self.duration_us.map_or(time_us, |duration| time_us.min(duration - 1));
         // SAFETY: the demuxer is alive.
-        let status = unsafe { (self.ohos.demux.seek)(self.raw.as_ptr(), time_us / 1000, SEEK_PREVIOUS_SYNC) };
+        let mode = OH_AVSeekMode::SEEK_MODE_PREVIOUS_SYNC;
+        let status = unsafe { OH_AVDemuxer_SeekToTime(self.raw.as_ptr(), time_us / 1000, mode) };
         check(status, "seeking")
     }
 }
@@ -557,7 +333,7 @@ impl Demuxer {
 impl Drop for Demuxer {
     fn drop(&mut self) {
         // SAFETY: the demuxer is this one's.
-        unsafe { (self.ohos.demux.destroy)(self.raw.as_ptr()) };
+        unsafe { OH_AVDemuxer_Destroy(self.raw.as_ptr()) };
     }
 }
 
@@ -574,7 +350,6 @@ pub(super) enum Output {
 
 /// A started `OH_AVCodec` video decoder in synchronous mode.
 pub(super) struct Decoder {
-    ohos: &'static Ohos,
     raw: NonNull<OH_AVCodec>,
 }
 
@@ -587,36 +362,35 @@ impl Decoder {
     /// `window`, which must outlive it, or, without one, decodes into
     /// memory.
     pub(super) fn new(
-        ohos: &'static Ohos,
         format: &Format,
         pixel_format: Option<i32>,
         window: Option<NonNull<OHNativeWindow>>,
     ) -> Result<Decoder, String> {
-        let vdec = &ohos.vdec;
         let mime = format.mime().ok_or("the video track has no MIME type")?;
         let mime_c = CString::new(mime.clone()).map_err(|error| error.to_string())?;
         // SAFETY: a C string.
-        let raw =
-            NonNull::new(unsafe { (vdec.create)(mime_c.as_ptr()) }).ok_or_else(|| format!("no decoder of {mime}"))?;
-        let decoder = Decoder { ohos, raw };
+        let raw = NonNull::new(unsafe { OH_VideoDecoder_CreateByMime(mime_c.as_ptr()) })
+            .ok_or_else(|| format!("no decoder of {mime}"))?;
+        let decoder = Decoder { raw };
         let config = format.copy()?;
-        config.set_int(&ohos.keys.enable_sync_mode, 1);
+        // SAFETY: as for `Key::name`.
+        config.set_int(unsafe { OH_MD_KEY_ENABLE_SYNC_MODE }, 1);
         if let Some(pixel_format) = pixel_format {
-            config.set_int(&ohos.keys.pixel_format, pixel_format);
+            config.set_int(Key::PixelFormat.name(), pixel_format);
         }
         // SAFETY: the decoder is new, and the format alive.
-        let configured = unsafe { (vdec.configure)(raw.as_ptr(), config.raw.as_ptr()) };
+        let configured = unsafe { OH_VideoDecoder_Configure(raw.as_ptr(), config.raw.as_ptr()) };
         check(configured, &format!("configuring the {mime} decoder"))?;
         if let Some(window) = window {
             // SAFETY: the decoder is configured, and the caller keeps the
             // window.
-            let set = unsafe { (vdec.set_surface)(raw.as_ptr(), window.as_ptr()) };
+            let set = unsafe { OH_VideoDecoder_SetSurface(raw.as_ptr(), window.as_ptr()) };
             check(set, "setting the decoder's surface")?;
         }
         // SAFETY: the decoder is configured.
         unsafe {
-            check((vdec.prepare)(raw.as_ptr()), &format!("preparing the {mime} decoder"))?;
-            check((vdec.start)(raw.as_ptr()), &format!("starting the {mime} decoder"))?;
+            check(OH_VideoDecoder_Prepare(raw.as_ptr()), &format!("preparing the {mime} decoder"))?;
+            check(OH_VideoDecoder_Start(raw.as_ptr()), &format!("starting the {mime} decoder"))?;
         }
         Ok(decoder)
     }
@@ -626,55 +400,53 @@ impl Decoder {
     pub(super) fn flush(&self) -> Result<(), String> {
         // SAFETY: the decoder is alive.
         unsafe {
-            check((self.ohos.vdec.flush)(self.raw.as_ptr()), "flushing the decoder")?;
-            check((self.ohos.vdec.start)(self.raw.as_ptr()), "starting the decoder again")
+            check(OH_VideoDecoder_Flush(self.raw.as_ptr()), "flushing the decoder")?;
+            check(OH_VideoDecoder_Start(self.raw.as_ptr()), "starting the decoder again")
         }
     }
 
     /// Fills a free input buffer with `demuxer`'s next sample: whether one
     /// was free, and whether the sample ended the track.
     pub(super) fn queue_input(&self, demuxer: &Demuxer) -> Result<Option<bool>, String> {
-        let vdec = &self.ohos.vdec;
         let mut index = 0;
         // SAFETY: the decoder is alive.
-        let status = unsafe { (vdec.query_input)(self.raw.as_ptr(), &raw mut index, 0) };
-        if status == TRY_AGAIN_LATER {
+        let status = unsafe { OH_VideoDecoder_QueryInputBuffer(self.raw.as_ptr(), &raw mut index, 0) };
+        if status == OH_AVErrCode::AV_ERR_TRY_AGAIN_LATER {
             return Ok(None);
         }
         check(status, "querying an input buffer")?;
         // SAFETY: an input buffer the decoder gave, which is the caller's
         // until it is pushed.
-        let buffer = NonNull::new(unsafe { (vdec.input_buffer)(self.raw.as_ptr(), index) })
+        let buffer = NonNull::new(unsafe { OH_VideoDecoder_GetInputBuffer(self.raw.as_ptr(), index) })
             .ok_or("the decoder has no input buffer")?;
         demuxer.read_sample(buffer)?;
-        let mut attr = BufferAttr::default();
+        let mut attr = empty_attr();
         // SAFETY: as above.
         unsafe {
-            check((self.ohos.core.buffer_attr)(buffer.as_ptr(), &raw mut attr), "reading a sample's attributes")?;
-            check((vdec.push_input)(self.raw.as_ptr(), index), "queueing a sample")?;
+            check(OH_AVBuffer_GetBufferAttr(buffer.as_ptr(), &raw mut attr), "reading a sample's attributes")?;
+            check(OH_VideoDecoder_PushInputBuffer(self.raw.as_ptr(), index), "queueing a sample")?;
         }
         Ok(Some(attr.flags & END_OF_STREAM != 0))
     }
 
     /// The next output, waiting up to `timeout` for one.
     pub(super) fn dequeue_output(&self, timeout: Duration) -> Result<Output, String> {
-        let vdec = &self.ohos.vdec;
         let mut index = 0;
         let timeout = i64::try_from(timeout.as_micros()).unwrap_or(i64::MAX);
         // SAFETY: the decoder is alive.
-        let status = unsafe { (vdec.query_output)(self.raw.as_ptr(), &raw mut index, timeout) };
+        let status = unsafe { OH_VideoDecoder_QueryOutputBuffer(self.raw.as_ptr(), &raw mut index, timeout) };
         match status {
-            OK => {}
-            TRY_AGAIN_LATER => return Ok(Output::None),
-            STREAM_CHANGED => return Ok(Output::FormatChanged),
-            status => return Err(format!("decoding failed: {status}")),
+            OH_AVErrCode::AV_ERR_OK => {}
+            OH_AVErrCode::AV_ERR_TRY_AGAIN_LATER => return Ok(Output::None),
+            OH_AVErrCode::AV_ERR_STREAM_CHANGED => return Ok(Output::FormatChanged),
+            status => return Err(format!("decoding failed: {}", status.0)),
         }
-        let mut attr = BufferAttr::default();
+        let mut attr = empty_attr();
         // SAFETY: an output buffer the decoder gave.
         unsafe {
-            let buffer = NonNull::new((vdec.output_buffer)(self.raw.as_ptr(), index))
+            let buffer = NonNull::new(OH_VideoDecoder_GetOutputBuffer(self.raw.as_ptr(), index))
                 .ok_or("the decoder has no output buffer")?;
-            check((self.ohos.core.buffer_attr)(buffer.as_ptr(), &raw mut attr), "reading a frame's attributes")?;
+            check(OH_AVBuffer_GetBufferAttr(buffer.as_ptr(), &raw mut attr), "reading a frame's attributes")?;
         }
         Ok(Output::Buffer(index, attr))
     }
@@ -685,13 +457,13 @@ impl Decoder {
         // SAFETY: an output buffer the decoder gave, whose bytes are the
         // caller's until it goes back.
         unsafe {
-            let buffer = NonNull::new((self.ohos.vdec.output_buffer)(self.raw.as_ptr(), index))
+            let buffer = NonNull::new(OH_VideoDecoder_GetOutputBuffer(self.raw.as_ptr(), index))
                 .ok_or("the decoder has no output buffer")?;
-            let address = (self.ohos.core.buffer_addr)(buffer.as_ptr());
+            let address = OH_AVBuffer_GetAddr(buffer.as_ptr());
             if address.is_null() {
                 return Err("a decoded frame has no memory".to_owned());
             }
-            let capacity = usize::try_from((self.ohos.core.buffer_capacity)(buffer.as_ptr())).unwrap_or(0);
+            let capacity = usize::try_from(OH_AVBuffer_GetCapacity(buffer.as_ptr())).unwrap_or(0);
             let offset = usize::try_from(attr.offset).unwrap_or(0).min(capacity);
             let size = usize::try_from(attr.size).unwrap_or(0).min(capacity - offset);
             Ok(std::slice::from_raw_parts(address.add(offset), size))
@@ -700,20 +472,20 @@ impl Decoder {
 
     pub(super) fn output_format(&self) -> Option<Format> {
         // SAFETY: the decoder is alive; the format is the caller's.
-        let raw = NonNull::new(unsafe { (self.ohos.vdec.output_description)(self.raw.as_ptr()) })?;
-        Some(Format { ohos: self.ohos, raw })
+        let raw = NonNull::new(unsafe { OH_VideoDecoder_GetOutputDescription(self.raw.as_ptr()) })?;
+        Some(Format { raw })
     }
 
     /// Sends output buffer `index` to the decoder's surface.
     pub(super) fn render_output(&self, index: u32) -> Result<(), String> {
         // SAFETY: an output buffer the decoder gave.
-        check(unsafe { (self.ohos.vdec.render_output)(self.raw.as_ptr(), index) }, "rendering a decoded frame")
+        check(unsafe { OH_VideoDecoder_RenderOutputBuffer(self.raw.as_ptr(), index) }, "rendering a decoded frame")
     }
 
     /// Gives output buffer `index` back unseen.
     pub(super) fn free_output(&self, index: u32) -> Result<(), String> {
         // SAFETY: an output buffer the decoder gave.
-        check(unsafe { (self.ohos.vdec.free_output)(self.raw.as_ptr(), index) }, "releasing a decoded frame")
+        check(unsafe { OH_VideoDecoder_FreeOutputBuffer(self.raw.as_ptr(), index) }, "releasing a decoded frame")
     }
 }
 
@@ -721,8 +493,8 @@ impl Drop for Decoder {
     fn drop(&mut self) {
         // SAFETY: the decoder is this one's.
         unsafe {
-            (self.ohos.vdec.stop)(self.raw.as_ptr());
-            (self.ohos.vdec.destroy)(self.raw.as_ptr());
+            OH_VideoDecoder_Stop(self.raw.as_ptr());
+            OH_VideoDecoder_Destroy(self.raw.as_ptr());
         }
     }
 }
@@ -744,7 +516,6 @@ unsafe extern "C" fn on_frame_available(context: *mut c_void) {
 /// A consumer surface of native buffers that the GPU samples, and the window
 /// a decoder renders into.
 pub(super) struct Surface {
-    ohos: &'static Ohos,
     raw: NonNull<OH_NativeImage>,
     window: NonNull<OHNativeWindow>,
     /// The listener's context, which outlives the surface.
@@ -759,20 +530,25 @@ unsafe impl Send for Surface {}
 unsafe impl Sync for Surface {}
 
 impl Surface {
-    pub(super) fn new(ohos: &'static Ohos, width: i32, height: i32) -> Result<Surface, String> {
-        let image = &ohos.image;
+    pub(super) fn new(width: i32, height: i32) -> Result<Surface, String> {
         // SAFETY: no preconditions.
-        let raw = NonNull::new(unsafe { (image.consumer_create)() }).ok_or("OH_ConsumerSurface_Create failed")?;
-        let mut surface = Surface { ohos, raw, window: NonNull::dangling(), signal: Box::default() };
-        let listener = FrameListener { context: (&raw const *surface.signal).cast_mut().cast(), on_frame_available };
+        let raw = NonNull::new(unsafe { OH_ConsumerSurface_Create() }).ok_or("OH_ConsumerSurface_Create failed")?;
+        let mut surface = Surface { raw, window: NonNull::dangling(), signal: Box::default() };
+        let listener = OH_OnFrameAvailableListener {
+            context: (&raw const *surface.signal).cast_mut().cast(),
+            onFrameAvailable: Some(on_frame_available),
+        };
+        let usage = OH_NativeBuffer_Usage::NATIVEBUFFER_USAGE_HW_TEXTURE.0
+            | OH_NativeBuffer_Usage::NATIVEBUFFER_USAGE_MEM_DMA.0;
         // SAFETY: the surface is alive, and the listener's context outlives
         // it; the window is the surface's.
         unsafe {
-            let status = (image.consumer_set_usage)(raw.as_ptr(), USAGE_HW_TEXTURE | USAGE_MEM_DMA);
+            let status = OH_ConsumerSurface_SetDefaultUsage(raw.as_ptr(), u64::from(usage));
             native_check(status, "setting the surface's usage")?;
-            native_check((image.consumer_set_size)(raw.as_ptr(), width, height), "setting the surface's size")?;
-            native_check((image.set_listener)(raw.as_ptr(), listener), "listening for frames")?;
-            surface.window = NonNull::new((image.window)(raw.as_ptr())).ok_or("the surface has no window")?;
+            native_check(OH_ConsumerSurface_SetDefaultSize(raw.as_ptr(), width, height), "setting the surface's size")?;
+            native_check(OH_NativeImage_SetOnFrameAvailableListener(raw.as_ptr(), listener), "listening for frames")?;
+            let window = OH_NativeImage_AcquireNativeWindow(raw.as_ptr());
+            surface.window = NonNull::new(window).ok_or("the surface has no window")?;
         }
         Ok(surface)
     }
@@ -790,11 +566,12 @@ impl Surface {
             *self.signal.ready.lock() = false;
             let (mut buffer, mut fence) = (std::ptr::null_mut(), -1);
             // SAFETY: the surface is alive.
-            let status = unsafe { (self.ohos.image.acquire)(self.raw.as_ptr(), &raw mut buffer, &raw mut fence) };
+            let status =
+                unsafe { OH_NativeImage_AcquireNativeWindowBuffer(self.raw.as_ptr(), &raw mut buffer, &raw mut fence) };
             match status {
                 NATIVE_OK => {
                     let window_buffer = NonNull::new(buffer).ok_or("the surface gave no buffer")?;
-                    let acquired = SurfaceBuffer { surface: self.raw, ohos: self.ohos, window_buffer };
+                    let acquired = SurfaceBuffer { surface: self.raw, window_buffer };
                     wait_for_fence(fence, deadline.saturating_duration_since(Instant::now()))?;
                     return Ok(Some(acquired));
                 }
@@ -814,7 +591,7 @@ impl Drop for Surface {
     fn drop(&mut self) {
         let mut raw = self.raw.as_ptr();
         // SAFETY: the surface is this one's, and its buffers went back.
-        unsafe { (self.ohos.image.destroy)(&raw mut raw) };
+        unsafe { OH_NativeImage_Destroy(&raw mut raw) };
     }
 }
 
@@ -842,7 +619,6 @@ fn wait_for_fence(fence: c_int, timeout: Duration) -> Result<(), String> {
 /// A frame that a surface gave, which goes back to it when dropped, from any
 /// thread. It must drop before its surface.
 pub(super) struct SurfaceBuffer {
-    ohos: &'static Ohos,
     surface: NonNull<OH_NativeImage>,
     window_buffer: NonNull<OHNativeWindowBuffer>,
 }
@@ -854,13 +630,13 @@ impl SurfaceBuffer {
     /// The frame's native buffer's size in pixels.
     pub(super) fn size(&self) -> Result<(u32, u32), String> {
         let mut buffer = std::ptr::null_mut();
-        let mut config = BufferConfig::default();
+        let mut config = OH_NativeBuffer_Config { width: 0, height: 0, format: 0, usage: 0, stride: 0 };
         // SAFETY: the window buffer is alive, and its native buffer with it.
         unsafe {
-            let status = (self.ohos.buffer.from_window_buffer)(self.window_buffer.as_ptr(), &raw mut buffer);
+            let status = OH_NativeBuffer_FromNativeWindowBuffer(self.window_buffer.as_ptr(), &raw mut buffer);
             native_check(status, "OH_NativeBuffer_FromNativeWindowBuffer")?;
             let buffer = NonNull::new(buffer).ok_or("the frame has no native buffer")?;
-            (self.ohos.buffer.config)(buffer.as_ptr(), &raw mut config);
+            OH_NativeBuffer_GetConfig(buffer.as_ptr(), &raw mut config);
         }
         Ok((config.width.max(0) as u32, config.height.max(0) as u32))
     }
@@ -872,10 +648,10 @@ impl SurfaceBuffer {
         // SAFETY: the window buffer is alive; the native buffer is the
         // window buffer's until the reference taken here.
         unsafe {
-            let status = (self.ohos.buffer.from_window_buffer)(self.window_buffer.as_ptr(), &raw mut buffer);
+            let status = OH_NativeBuffer_FromNativeWindowBuffer(self.window_buffer.as_ptr(), &raw mut buffer);
             native_check(status, "OH_NativeBuffer_FromNativeWindowBuffer")?;
             let buffer = NonNull::new(buffer).ok_or("the frame has no native buffer")?;
-            native_check((self.ohos.buffer.reference)(buffer.as_ptr()), "OH_NativeBuffer_Reference")?;
+            native_check(OH_NativeBuffer_Reference(buffer.as_ptr()), "OH_NativeBuffer_Reference")?;
             Ok(buffer)
         }
     }
@@ -884,6 +660,6 @@ impl SurfaceBuffer {
 impl Drop for SurfaceBuffer {
     fn drop(&mut self) {
         // SAFETY: a buffer the surface gave, which goes back once.
-        unsafe { (self.ohos.image.release)(self.surface.as_ptr(), self.window_buffer.as_ptr(), -1) };
+        unsafe { OH_NativeImage_ReleaseNativeWindowBuffer(self.surface.as_ptr(), self.window_buffer.as_ptr(), -1) };
     }
 }

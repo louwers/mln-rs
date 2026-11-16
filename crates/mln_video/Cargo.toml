@@ -43,10 +43,12 @@ web-sys = { workspace = true, features = [
 libloading.workspace = true
 
 # OpenHarmony's player: its AVCodec, native image and native buffer APIs,
-# loaded at run time, and the poll that waits for a decoded frame's fence.
+# and the poll that waits for a decoded frame's fence.
 [target.'cfg(target_env = "ohos")'.dependencies]
 libc.workspace = true
-libloading.workspace = true
+ohos-media-sys.workspace = true
+ohos-sys-opaque-types.workspace = true
+ohos-window-sys.workspace = true
 
 # The Media Foundation player: its media engine, the D3D11 device it decodes
 # on, and the byte stream it reads through a ByteSource.

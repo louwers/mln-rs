@@ -35,10 +35,9 @@ thiserror.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 libloading.workspace = true
 
-# The function that unreferences a video frame's OpenHarmony native buffer,
-# loaded at run time.
+# The function that unreferences a video frame's OpenHarmony native buffer.
 [target.'cfg(target_env = "ohos")'.dependencies]
-libloading.workspace = true
+ohos-window-sys.workspace = true
 
 # The browser's images that video frames hold (`video::WebImage`).
 [target.'cfg(target_family = "wasm")'.dependencies]

@@ -278,6 +278,12 @@ rustls = { version = "0.23.46", default-features = false, features = ["ring"] }
 # and android.icu for the locale-sensitive expressions, in the Java VM that
 # mln_android_init() gives, through JNI.
 jni = { version = "0.22.4", default-features = false }
+# OpenHarmony: AVCodec, native images and native buffers for the video player
+# of video sources (crates/mln_video) and the frames it hands over. API level
+# 20 has the data sources and synchronous decoders the player needs.
+ohos-media-sys = { version = "0.1.2", features = ["api-20"] }
+ohos-sys-opaque-types = { version = "0.1.12" }
+ohos-window-sys = { version = "0.1.8", features = ["api-20"] }
 # Apple platforms: Foundation's NSURLSession for the online file source.
 block2 = { version = "0.6.2" }
 objc2 = { version = "0.6.5" }

@@ -2721,6 +2721,7 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-wire",
+ "ohos-window-sys",
  "raw-window-handle",
  "slotmap",
  "thiserror 2.0.21",
@@ -2794,6 +2795,8 @@ dependencies = [
  "objc2-core-video",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
+ "ohos-sys-opaque-types",
+ "ohos-window-sys",
  "parking_lot",
  "serde_json",
  "wgpu",
@@ -3268,6 +3271,9 @@ dependencies = [
  "objc2-core-video",
  "objc2-foundation 0.3.2",
  "objc2-io-surface",
+ "ohos-media-sys",
+ "ohos-sys-opaque-types",
+ "ohos-window-sys",
  "parking_lot",
  "wasm-bindgen",
  "web-sys",
@@ -3981,6 +3987,30 @@ dependencies = [
  "objc2 0.5.3",
  "objc2-core-location",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "ohos-media-sys"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9679c0e43cbdab8a67180faaffceaa6afdf8d514ce114279a047a4687fa084cf"
+dependencies = [
+ "ohos-sys-opaque-types",
+]
+
+[[package]]
+name = "ohos-sys-opaque-types"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9bcb2b286419c28f51401c39807cd035999472e8fd07b23878209eebd990851"
+
+[[package]]
+name = "ohos-window-sys"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6263766ab027f14250d6e8a42dd4686a6c22b23e9ca40a8c643837b137bb7b6f"
+dependencies = [
+ "ohos-sys-opaque-types",
 ]
 
 [[package]]
