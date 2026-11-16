@@ -10,6 +10,11 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_android_hardware_buffer;
 const _: unsafe extern "C" fn(
     mln_acquired_frame,
+    *mut mln_d3d12_texture_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_d3d12_texture;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
     *mut mln_dma_buf_frame,
     *mut mln_diagnostic,
 ) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_dma_buf;
@@ -125,10 +130,20 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::gpu_device::mln_gpu_device_get_capabilities;
 const _: unsafe extern "C" fn(
     mln_gpu_device,
+    *mut mln_gpu_device_d3d12_context_result,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gpu_device::mln_gpu_device_get_d3d12_context;
+const _: unsafe extern "C" fn(
+    mln_gpu_device,
     *mut mln_gpu_device_vulkan_context_result,
     *mut mln_diagnostic,
 ) -> mln_status = crate::gpu_device::mln_gpu_device_get_vulkan_context;
 const _: unsafe extern "C" fn(mln_gpu_device) = crate::gpu_device::mln_gpu_device_release;
+const _: unsafe extern "C" fn(
+    *const mln_d3d12_device_descriptor,
+    *mut mln_gpu_device,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gpu_device::mln_gpu_device_wrap_d3d12;
 const _: unsafe extern "C" fn(
     *const mln_metal_device_descriptor,
     *mut mln_gpu_device,

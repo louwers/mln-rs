@@ -44,6 +44,7 @@ pub const MLN_RENDER_BACKEND_FLAG_METAL: mln_render_backend_flag = 1;
 pub const MLN_RENDER_BACKEND_FLAG_VULKAN: mln_render_backend_flag = 2;
 pub const MLN_RENDER_BACKEND_FLAG_OPEN_GL: mln_render_backend_flag = 4;
 pub const MLN_RENDER_BACKEND_FLAG_WEB_GPU: mln_render_backend_flag = 8;
+pub const MLN_RENDER_BACKEND_FLAG_D3D12: mln_render_backend_flag = 16;
 /// A render backend, as a bit in a set.
 pub type mln_render_backend_flag = u32;
 /// A set of mln_render_backend_flag bits.
@@ -52,6 +53,7 @@ pub const MLN_RENDER_BACKEND_METAL: mln_render_backend = 1;
 pub const MLN_RENDER_BACKEND_VULKAN: mln_render_backend = 2;
 pub const MLN_RENDER_BACKEND_OPEN_GL: mln_render_backend = 3;
 pub const MLN_RENDER_BACKEND_WEB_GPU: mln_render_backend = 4;
+pub const MLN_RENDER_BACKEND_D3D12: mln_render_backend = 5;
 /// A render backend.
 pub type mln_render_backend = u32;
 /// A runtime owns maps and the network and cache settings that they share.
@@ -2059,16 +2061,16 @@ pub struct mln_render_session_attach_options {
 
  - MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD for a borrowed ring of WebGPU
    textures.
- - MLN_RENDER_DRIVER_CORE_WORKER for an offscreen target, a window, or an
-   exported ring.
+ - MLN_RENDER_DRIVER_CORE_WORKER for an offscreen target, a window, a D3D12
+   composition swap chain, or an exported ring.
  - Either one for a web canvas. In a browser both run on the thread that
    loaded the library: MLN_RENDER_DRIVER_CORE_WORKER in the library's own
    tasks, and MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD when you service the
    session.
  - Either one for a Metal layer, a Vulkan surface, an OpenGL surface, or a
-   borrowed ring of Metal, Vulkan, or OpenGL textures. A build may drive
-   these on MLN_RENDER_DRIVER_CORE_WORKER only, and fails an attach with
-   MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD then.
+   borrowed ring of Metal, Vulkan, D3D12, or OpenGL textures. A build may
+   drive these on MLN_RENDER_DRIVER_CORE_WORKER only, and fails an attach
+   with MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD then.
 
  An attach with another driver fails with MLN_STATUS_UNSUPPORTED.*/
     pub driver: mln_render_driver_kind,
@@ -2265,6 +2267,11 @@ pub const MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES: mln_render_target_ki
 pub const MLN_RENDER_TARGET_KIND_EXPORTED_RING: mln_render_target_kind = 16;
 /// A canvas to present to, with the device's backend.
 pub const MLN_RENDER_TARGET_KIND_WEB_CANVAS: mln_render_target_kind = 17;
+/// A ring of your D3D12 textures.
+pub const MLN_RENDER_TARGET_KIND_D3D12_BORROWED_TEXTURES: mln_render_target_kind = 18;
+/** A DirectComposition visual or XAML `SwapChainPanel` that shows a D3D12
+ swap chain.*/
+pub const MLN_RENDER_TARGET_KIND_D3D12_COMPOSITION: mln_render_target_kind = 19;
 /// The kind of a render target, which says what its descriptor holds.
 pub type mln_render_target_kind = u32;
 pub const MLN_RENDER_TARGET_KIND_FLAG_OFFSCREEN: mln_render_target_kind_flag = 1;
@@ -2282,6 +2289,8 @@ pub const MLN_RENDER_TARGET_KIND_FLAG_OPEN_GL_BORROWED_TEXTURES: mln_render_targ
 pub const MLN_RENDER_TARGET_KIND_FLAG_WEB_GPU_BORROWED_TEXTURES: mln_render_target_kind_flag = 16384;
 pub const MLN_RENDER_TARGET_KIND_FLAG_EXPORTED_RING: mln_render_target_kind_flag = 32768;
 pub const MLN_RENDER_TARGET_KIND_FLAG_WEB_CANVAS: mln_render_target_kind_flag = 65536;
+pub const MLN_RENDER_TARGET_KIND_FLAG_D3D12_BORROWED_TEXTURES: mln_render_target_kind_flag = 131072;
+pub const MLN_RENDER_TARGET_KIND_FLAG_D3D12_COMPOSITION: mln_render_target_kind_flag = 262144;
 /// A render target kind, as a bit in a set.
 pub type mln_render_target_kind_flag = u32;
 /// A set of mln_render_target_kind_flag bits.
@@ -2587,6 +2596,77 @@ pub struct mln_web_gpu_borrowed_textures_target {
  mln_gpu_device_capabilities.depth_stencil_formats.*/
     pub depth_format: mln_buffer_view,
 }
+/// A D3D12 texture of a borrowed ring.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_d3d12_borrowed_texture {
+    /// Your `ID3D12Resource`.
+    pub resource: *mut ::core::ffi::c_void,
+}
+/** A ring of your D3D12 textures to render into, on the D3D12 device that you
+ attach on.
+
+ `physical_width` and `physical_height` give the textures' size in pixels,
+ which is usually `logical_size` times the map's scale factor. Each texture
+ must be a 2D resource of the device with that size, one mip level, one array
+ slice, one sample, `D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET`, and one typed
+ color format that the device renders into, such as
+ DXGI_FORMAT_R8G8B8A8_UNORM or DXGI_FORMAT_B8G8R8A8_UNORM. The ring holds up
+ to MLN_TEXTURE_RING_MAX_DEPTH distinct textures, and references each.
+
+ Each texture is in `state` when the session has it, and each frame leaves it
+ there.
+
+ Give the ring `depth_textures` to draw into each frame depth-tested against
+ the map, as mln_frame_projection says: one for each of `textures`, at the
+ same index, or none. Each frame clears the one at its slot, renders the
+ map's depth and stencil into it, stores them, and leaves it in
+ `depth_state`. They must have the size of `textures`, one format of
+ mln_gpu_device_capabilities.depth_stencil_formats
+ (DXGI_FORMAT_D24_UNORM_S8_UINT or DXGI_FORMAT_D32_FLOAT_S8X24_UINT), one
+ sample, and `D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL`.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_d3d12_borrowed_textures_target {
+    pub logical_size: mln_logical_size,
+    pub physical_width: u32,
+    pub physical_height: u32,
+    pub textures: *const mln_d3d12_borrowed_texture,
+    pub texture_count: usize,
+    /// The textures' `D3D12_RESOURCE_STATES`.
+    pub state: u32,
+    pub depth_textures: *const mln_d3d12_borrowed_texture,
+    pub depth_texture_count: usize,
+    /// The depth textures' `D3D12_RESOURCE_STATES`.
+    pub depth_state: u32,
+}
+/** An `IDCompositionVisual`, whose content the session sets to its swap
+ chain.*/
+pub const MLN_D3D12_COMPOSITION_KIND_VISUAL: mln_d3d12_composition_kind = 1;
+/** A XAML `SwapChainPanel`'s `ISwapChainPanelNative`, of WinUI or UWP, whose
+ swap chain the session sets.*/
+pub const MLN_D3D12_COMPOSITION_KIND_SWAP_CHAIN_PANEL: mln_d3d12_composition_kind = 2;
+/// What shows a D3D12 composition swap chain.
+pub type mln_d3d12_composition_kind = u32;
+/** A composition swap chain to present to, which your DirectComposition visual
+ or XAML `SwapChainPanel` shows.
+
+ The session renders on D3D12: on the D3D12 device that you attach on, or on
+ one that it makes without a device. It makes a flip-model swap chain for
+ composition of `logical_size` at the map's scale factor, with premultiplied
+ alpha, and sets it as the visual's content or the panel's swap chain. Commit
+ your DirectComposition device once the attach completes. Scale the visual or
+ the panel to show the swap chain at the display's scale. The session
+ references `object` until a replacement or release of the target completes,
+ or the session ends.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_d3d12_composition_target {
+    pub logical_size: mln_logical_size,
+    pub kind: mln_d3d12_composition_kind,
+    /// Your `IDCompositionVisual*` or `ISwapChainPanelNative*`.
+    pub object: *mut ::core::ffi::c_void,
+}
 /// A DRM format and modifier that you can import.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -2617,11 +2697,15 @@ pub struct mln_dma_buf_format {
    AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE, and the bits of
    `android_hardware_buffer_usage`. Get each frame's buffer with
    mln_acquired_frame_get_android_hardware_buffer().
- - MLN_GPU_EXPORT_KIND_DXGI_SHARED_HANDLE: D3D11 textures of the format
+ - MLN_GPU_EXPORT_KIND_DXGI_SHARED_HANDLE: textures of the format
    DXGI_FORMAT_B8G8R8A8_UNORM on the device's GPU, which bind as shader
-   resources and render targets. Open them on a D3D11 or D3D12 device of the
-   same adapter, which you pick with mln_gpu_device_options.adapter_luid.
-   Get each frame's texture with mln_acquired_frame_get_dxgi_shared_texture().
+   resources and render targets: D3D11 textures on a Vulkan device, and
+   committed D3D12 resources in a shared heap on a D3D12 device, which each
+   frame leaves in D3D12_RESOURCE_STATE_COMMON. Open them on a D3D11 or D3D12
+   device of the same adapter, which you pick with
+   mln_gpu_device_options.adapter_luid. Get each frame's texture with
+   mln_acquired_frame_get_dxgi_shared_texture(), and on a D3D12 device its
+   resource with mln_acquired_frame_get_d3d12_texture().
  - MLN_GPU_EXPORT_KIND_DMA_BUF: dmabufs of a format and modifier from
    `dma_buf_formats`. Get each frame's buffer with
    mln_acquired_frame_get_dma_buf().
@@ -2639,11 +2723,12 @@ pub struct mln_dma_buf_format {
 
  Each frame hands over with MLN_GPU_SYNC_CPU_COMPLETE or with the sync kind
  that crosses APIs on its platform: MLN_GPU_SYNC_METAL_SHARED_EVENT for an
- IOSurface, and MLN_GPU_SYNC_SYNC_FD for the others, where the device has
- them. For a reader that waits on neither, such as a Wayland compositor
- without explicit synchronization or Flutter's `copyPixelBuffer`, leave them
- out of mln_render_session_attach_options.producer_sync_kinds, so that each
- frame finishes before you acquire it, and release each frame only once the
+ IOSurface, MLN_GPU_SYNC_D3D12_FENCE for a DXGI shared texture, and
+ MLN_GPU_SYNC_SYNC_FD for the others, where the device has them. For a reader
+ that waits on neither, such as a Wayland compositor without explicit
+ synchronization or Flutter's `copyPixelBuffer`, leave them out of
+ mln_render_session_attach_options.producer_sync_kinds, so that each frame
+ finishes before you acquire it, and release each frame only once the
  reader is done with its texture. Give the ring 3 textures, so the session
  can render while you hold two frames.*/
 #[repr(C)]
@@ -2687,6 +2772,8 @@ pub union mln_render_target_data {
     pub web_gpu_borrowed_textures: mln_web_gpu_borrowed_textures_target,
     pub exported_ring: mln_exported_ring_target,
     pub web_canvas: mln_web_canvas_target,
+    pub d3d12_borrowed_textures: mln_d3d12_borrowed_textures_target,
+    pub d3d12_composition: mln_d3d12_composition_target,
 }
 /** What a render session renders into: one kind of target, and its
  descriptor.
@@ -3092,6 +3179,20 @@ pub struct mln_vulkan_custom_layer_encoder {
     /// The frame's `VkCommandBuffer`, recording outside a render pass.
     pub command_buffer: *mut ::core::ffi::c_void,
 }
+/** The frame's D3D12 command list, outside the map's render pass.
+
+ Record work such as copies and render passes of your own, with the barriers
+ that it needs, and leave the resources that you use in the states that you
+ found them in. Don't close or execute `command_list`. After the callback
+ returns, the map sets its own descriptor heaps and root signature again.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_d3d12_custom_layer_encoder {
+    /// The `ID3D12Device` that the session renders on, to make objects with.
+    pub device: *mut ::core::ffi::c_void,
+    /// The frame's `ID3D12GraphicsCommandList`, outside a render pass.
+    pub command_list: *mut ::core::ffi::c_void,
+}
 /** The frame's WebGPU command encoder, outside the map's render pass.
 
  End each pass that you begin on `encoder` before the callback returns, and
@@ -3115,6 +3216,7 @@ pub union mln_custom_layer_encoder_data {
     pub metal: mln_metal_custom_layer_encoder,
     pub vulkan: mln_vulkan_custom_layer_encoder,
     pub web_gpu: mln_web_gpu_custom_layer_encoder,
+    pub d3d12: mln_d3d12_custom_layer_encoder,
 }
 /// What a custom layer's prerender callback gets.
 #[repr(C)]
@@ -3179,6 +3281,34 @@ pub struct mln_vulkan_custom_layer_pass {
  `VK_FORMAT_UNDEFINED` when it has none.*/
     pub depth_stencil_format: u32,
 }
+/** The map's D3D12 render pass, at a custom layer's place in the style.
+
+ Set your own pipeline state, root signature, descriptor heaps, vertex and
+ index buffers, primitive topology, viewport, scissor rectangle, and stencil
+ reference, with pipeline states for `color_format` and
+ `depth_stencil_format`, and draw. After the callback returns, the map sets
+ again what its own draws need. Record nothing that a render pass can't
+ hold, such as barriers, copies, or other render targets, and don't end the
+ pass.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_d3d12_custom_layer_pass {
+    /// The `ID3D12Device` that the session renders on, to make objects with.
+    pub device: *mut ::core::ffi::c_void,
+    /** The frame's `ID3D12GraphicsCommandList`, in the render pass that
+ `BeginRenderPass` began.*/
+    pub command_list: *mut ::core::ffi::c_void,
+    /// The `D3D12_CPU_DESCRIPTOR_HANDLE` of the pass's render target view.
+    pub render_target_view: u64,
+    /// The `DXGI_FORMAT` of the pass's color attachment.
+    pub color_format: u32,
+    /** The `D3D12_CPU_DESCRIPTOR_HANDLE` of the pass's depth-stencil view, or 0
+ when it has none.*/
+    pub depth_stencil_view: u64,
+    /** The `DXGI_FORMAT` of the pass's depth-stencil attachment, or
+ `DXGI_FORMAT_UNKNOWN` when it has none.*/
+    pub depth_stencil_format: u32,
+}
 /** The map's OpenGL framebuffer, at a custom layer's place in the style.
 
  The session's context is current, with `framebuffer` bound and the
@@ -3227,6 +3357,7 @@ pub union mln_custom_layer_pass_data {
     pub vulkan: mln_vulkan_custom_layer_pass,
     pub open_gl: mln_open_gl_custom_layer_pass,
     pub web_gpu: mln_web_gpu_custom_layer_pass,
+    pub d3d12: mln_d3d12_custom_layer_pass,
 }
 /// What a custom layer's render callback gets.
 #[repr(C)]
@@ -3359,9 +3490,9 @@ pub struct mln_gpu_device_options {
     pub size: u32,
     pub fields: mln_gpu_device_option_fields,
     /** The backend that the device renders with. By default, the platform's own:
- Metal on Apple platforms, Vulkan elsewhere, or OpenGL where the system has
- no Vulkan driver, and in a browser the build's one backend: WebGPU or
- OpenGL (WebGL2).*/
+ Metal on Apple platforms, Vulkan elsewhere, then D3D12 on Windows, or
+ OpenGL where the system has neither, and in a browser the build's one
+ backend: WebGPU or OpenGL (WebGL2).*/
     pub backend: mln_render_backend,
     /** The GPU to use, as an index into the backend's list of GPUs. OpenGL's
  list holds one GPU: the one that its display renders on.*/
@@ -3370,8 +3501,9 @@ pub struct mln_gpu_device_options {
  `VkPhysicalDeviceIDProperties.deviceUUID`. Only a Vulkan device takes one.*/
     pub adapter_uuid: mln_buffer_view,
     /** The 8-byte LUID of the GPU to use: on Windows, its DXGI adapter LUID,
- which Vulkan reports as `VkPhysicalDeviceIDProperties.deviceLUID`. Only a
- Vulkan device takes one.*/
+ which Vulkan reports as `VkPhysicalDeviceIDProperties.deviceLUID` and
+ D3D12 as `ID3D12Device::GetAdapterLuid`. Only a Vulkan or D3D12 device
+ takes one.*/
     pub adapter_luid: mln_buffer_view,
     /** The OpenGL API that an OpenGL device renders with. An EGL device
  defaults to MLN_OPEN_GL_CLIENT_API_GLES, and takes
@@ -3447,6 +3579,30 @@ pub struct mln_metal_device_descriptor {
     pub device: *mut ::core::ffi::c_void,
     /** Your `MTLCommandQueue` on `device`, or null for a queue of the library's.
  With your queue, borrowed rings can use MLN_GPU_SYNC_QUEUE_ORDER.*/
+    pub command_queue: *mut ::core::ffi::c_void,
+}
+/** Your D3D12 device and direct command queue, for
+ mln_gpu_device_wrap_d3d12().*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_d3d12_device_descriptor {
+    pub size: u32,
+    /// Your `ID3D12Device`.
+    pub device: *mut ::core::ffi::c_void,
+    /** Your `ID3D12CommandQueue` of `D3D12_COMMAND_LIST_TYPE_DIRECT` on `device`,
+ which sessions on the device submit to. Submit your reads of a borrowed
+ ring's textures to it for MLN_GPU_SYNC_QUEUE_ORDER.*/
+    pub command_queue: *mut ::core::ffi::c_void,
+}
+/** The D3D12 objects of a device, as mln_gpu_device_get_d3d12_context()
+ reports them.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_gpu_device_d3d12_context_result {
+    pub size: u32,
+    /// The `ID3D12Device`.
+    pub device: *mut ::core::ffi::c_void,
+    /// The direct `ID3D12CommandQueue` that sessions on the device submit to.
     pub command_queue: *mut ::core::ffi::c_void,
 }
 /** The Vulkan objects of a device, as mln_gpu_device_get_vulkan_context()
@@ -4003,6 +4159,34 @@ pub struct mln_android_hardware_buffer_frame {
     pub slot: u32,
     /// The `AHardwareBuffer*`.
     pub buffer: *mut ::core::ffi::c_void,
+}
+/** The D3D12 texture of an acquired frame.
+
+ The depth members are set when the frame has a depth texture, as for
+ mln_metal_texture_frame. Otherwise they are zero.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_d3d12_texture_frame {
+    pub size: u32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    /// The texture's index in the descriptor's `textures`, or in the ring.
+    pub slot: u32,
+    /// The `ID3D12Resource`.
+    pub resource: *mut ::core::ffi::c_void,
+    /// The resource's `ID3D12Device`.
+    pub device: *mut ::core::ffi::c_void,
+    /// The resource's `DXGI_FORMAT`.
+    pub format: u32,
+    /// The `D3D12_RESOURCE_STATES` that the frame left the resource in.
+    pub state: u32,
+    /// The `ID3D12Resource` that holds the frame's depth and stencil.
+    pub depth_resource: *mut ::core::ffi::c_void,
+    /// The depth resource's `DXGI_FORMAT`.
+    pub depth_format: u32,
+    /// The `D3D12_RESOURCE_STATES` that the frame left the depth resource in.
+    pub depth_state: u32,
 }
 /// The DXGI shared texture of an exported ring's acquired frame.
 #[repr(C)]

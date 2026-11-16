@@ -191,15 +191,54 @@ impl Device {
         if validation != Validation::Off {
             log_messages(&device, validation == Validation::Abort);
         }
+        let queue_desc = D3D12_COMMAND_QUEUE_DESC { Type: D3D12_COMMAND_LIST_TYPE_DIRECT, ..Default::default() };
+        // SAFETY: plain calls.
+        let queue: ID3D12CommandQueue =
+            unsafe { device.CreateCommandQueue(&raw const queue_desc) }.map_err(native("CreateCommandQueue"))?;
+        Self::finish(device, queue, factory, &adapter)
+    }
+
+    /// The host's `device` and direct `queue` on it, which the device keeps
+    /// references to. The debug layer is the host's to turn on.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// device that runs no shader model 6.0, a queue that isn't a direct
+    /// queue of the device, or without DXC (`dxcompiler.dll`), and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when a D3D12 or DXGI call
+    /// fails.
+    pub fn wrap(device: ID3D12Device, queue: ID3D12CommandQueue) -> Result<Device, Error> {
+        ShaderCompiler::new().map_err(|error| Error::unsupported(error.to_string()))?;
+        check_shader_model(&device)?;
+        // SAFETY: plain queries.
+        let (queue_desc, queue_device) = unsafe {
+            let mut owner: Option<ID3D12Device> = None;
+            let _ = queue.GetDevice(&raw mut owner);
+            (queue.GetDesc(), owner)
+        };
+        if queue_device.as_ref() != Some(&device) || queue_desc.Type != D3D12_COMMAND_LIST_TYPE_DIRECT {
+            return Err(Error::unsupported("a D3D12 device's queue is a direct queue of the device"));
+        }
+        // SAFETY: plain calls.
+        let factory: IDXGIFactory4 =
+            unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }.map_err(native("CreateDXGIFactory2"))?;
+        // SAFETY: plain calls.
+        let adapter: IDXGIAdapter1 = unsafe { factory.EnumAdapterByLuid(device.GetAdapterLuid()) }
+            .map_err(native("finding the device's DXGI adapter"))?;
+        Self::finish(device, queue, factory, &adapter)
+    }
+
+    /// A device on `adapter`, with its root signature.
+    fn finish(
+        device: ID3D12Device,
+        queue: ID3D12CommandQueue,
+        factory: IDXGIFactory4,
+        adapter: &IDXGIAdapter1,
+    ) -> Result<Device, Error> {
         // SAFETY: plain calls.
         let desc = unsafe { adapter.GetDesc1() }.map_err(native("IDXGIAdapter1::GetDesc1"))?;
         let name_len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
         let name = String::from_utf16_lossy(&desc.Description[..name_len]);
         let software = desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0;
-        let queue_desc = D3D12_COMMAND_QUEUE_DESC { Type: D3D12_COMMAND_LIST_TYPE_DIRECT, ..Default::default() };
-        // SAFETY: plain calls.
-        let queue: ID3D12CommandQueue =
-            unsafe { device.CreateCommandQueue(&raw const queue_desc) }.map_err(native("CreateCommandQueue"))?;
         Log::info(Event::Render, format!("graphics device uses D3D12 adapter {name}"));
         let root_signature = root_signature::create(&device).map_err(|error| Error::native(error.to_string()))?;
         Ok(Device {
@@ -279,6 +318,12 @@ fn create_device(adapter: &IDXGIAdapter1) -> Result<ID3D12Device, Error> {
     unsafe { D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, &raw mut device) }
         .map_err(|error| Error::unsupported(format!("D3D12CreateDevice: {error}")))?;
     let device = device.ok_or_else(|| Error::unsupported("D3D12CreateDevice made no device"))?;
+    check_shader_model(&device)?;
+    Ok(device)
+}
+
+/// Fails with `Unsupported` for a device that runs no shader model 6.0.
+fn check_shader_model(device: &ID3D12Device) -> Result<(), Error> {
     let mut model = D3D12_FEATURE_DATA_SHADER_MODEL { HighestShaderModel: D3D_SHADER_MODEL_6_0 };
     // SAFETY: the data is of the feature's type and size.
     let supported = unsafe {
@@ -292,7 +337,7 @@ fn create_device(adapter: &IDXGIAdapter1) -> Result<ID3D12Device, Error> {
     if !supported || model.HighestShaderModel.0 < D3D_SHADER_MODEL_6_0.0 {
         return Err(Error::unsupported("the D3D12 device runs no shader model 6.0"));
     }
-    Ok(device)
+    Ok(())
 }
 
 impl Device {

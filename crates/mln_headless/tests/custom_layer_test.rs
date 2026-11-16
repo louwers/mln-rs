@@ -616,3 +616,150 @@ fragment float4 fs() { return float4(0.0, 1.0, 0.0, 1.0); }
         });
     }
 }
+
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "the host draws through the windows crate's D3D12")]
+mod d3d12 {
+    use std::mem::ManuallyDrop;
+
+    use mln_d3d12::windows::Win32::Foundation::RECT;
+    use mln_d3d12::windows::Win32::Graphics::Direct3D::{D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob};
+    use mln_d3d12::windows::Win32::Graphics::Direct3D12::{
+        D3D_ROOT_SIGNATURE_VERSION_1, D3D12_BLEND_DESC, D3D12_COLOR_WRITE_ENABLE_ALL, D3D12_CULL_MODE_NONE,
+        D3D12_DEPTH_STENCIL_DESC, D3D12_FILL_MODE_SOLID, D3D12_GRAPHICS_PIPELINE_STATE_DESC,
+        D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, D3D12_RASTERIZER_DESC, D3D12_RENDER_TARGET_BLEND_DESC,
+        D3D12_ROOT_SIGNATURE_DESC, D3D12_SHADER_BYTECODE, D3D12_VIEWPORT, D3D12SerializeRootSignature,
+        ID3D12GraphicsCommandList, ID3D12PipelineState, ID3D12RootSignature,
+    };
+    use mln_d3d12::windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC};
+    use mln_d3d12::{ShaderCompiler, ShaderStage};
+    use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+
+    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check};
+
+    /// The quad's corners in clip space, the middle half of the frame, as
+    /// `QUAD_WGSL` draws it.
+    const QUAD_HLSL: &str = "
+float4 vs(uint index : SV_VertexID) : SV_Position {
+    const float2 corners[6] = {
+        float2(-0.5, -0.5), float2(0.5, -0.5), float2(-0.5, 0.5),
+        float2(-0.5, 0.5), float2(0.5, -0.5), float2(0.5, 0.5),
+    };
+    return float4(corners[index], 0.0, 1.0);
+}
+
+float4 ps() : SV_Target {
+    return float4(0.0, 1.0, 0.0, 1.0);
+}
+";
+
+    /// The host's objects, made on the session's device.
+    struct Objects {
+        root_signature: ID3D12RootSignature,
+        pipeline: ID3D12PipelineState,
+    }
+
+    #[derive(Default)]
+    struct Host {
+        calls: Arc<Calls>,
+        objects: Mutex<Option<Objects>>,
+    }
+
+    fn make(pass: &mln_d3d12::CustomLayerPass) -> Objects {
+        let compiler = ShaderCompiler::new().expect("DXC");
+        let vertex = compiler.compile_hlsl(ShaderStage::Vertex, QUAD_HLSL, "vs").expect("the vertex shader");
+        let fragment = compiler.compile_hlsl(ShaderStage::Fragment, QUAD_HLSL, "ps").expect("the pixel shader");
+        // SAFETY: valid descriptions for the session's device, which outlive
+        // the calls; the objects go in `deinitialize`.
+        unsafe {
+            let mut blob: Option<ID3DBlob> = None;
+            let empty = D3D12_ROOT_SIGNATURE_DESC::default();
+            D3D12SerializeRootSignature(&raw const empty, D3D_ROOT_SIGNATURE_VERSION_1, &raw mut blob, None)
+                .expect("a root signature");
+            let blob = blob.unwrap();
+            let bytes = std::slice::from_raw_parts(blob.GetBufferPointer().cast::<u8>(), blob.GetBufferSize());
+            let root_signature: ID3D12RootSignature = pass.device.CreateRootSignature(0, bytes).unwrap();
+            let bytecode = |code: &[u8]| D3D12_SHADER_BYTECODE {
+                pShaderBytecode: code.as_ptr().cast(),
+                BytecodeLength: code.len(),
+            };
+            let mut blend = D3D12_BLEND_DESC::default();
+            blend.RenderTarget[0] = D3D12_RENDER_TARGET_BLEND_DESC {
+                RenderTargetWriteMask: D3D12_COLOR_WRITE_ENABLE_ALL.0 as u8,
+                ..Default::default()
+            };
+            let mut formats = [DXGI_FORMAT_UNKNOWN; 8];
+            formats[0] = pass.color_format;
+            let desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
+                pRootSignature: ManuallyDrop::new(Some(root_signature.clone())),
+                VS: bytecode(&vertex),
+                PS: bytecode(&fragment),
+                BlendState: blend,
+                SampleMask: u32::MAX,
+                RasterizerState: D3D12_RASTERIZER_DESC {
+                    FillMode: D3D12_FILL_MODE_SOLID,
+                    CullMode: D3D12_CULL_MODE_NONE,
+                    DepthClipEnable: true.into(),
+                    ..Default::default()
+                },
+                DepthStencilState: D3D12_DEPTH_STENCIL_DESC::default(),
+                PrimitiveTopologyType: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+                NumRenderTargets: 1,
+                RTVFormats: formats,
+                DSVFormat: pass.depth_stencil_format,
+                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                ..Default::default()
+            };
+            let pipeline = pass.device.CreateGraphicsPipelineState(&raw const desc);
+            drop(ManuallyDrop::into_inner(desc.pRootSignature));
+            Objects { root_signature, pipeline: pipeline.expect("a pipeline state") }
+        }
+    }
+
+    impl CustomLayerHost for Host {
+        fn prerender(&self, parameters: &mut CustomLayerPrerenderParameters<'_>) {
+            let encoder = parameters.encoder.downcast_ref::<mln_d3d12::CustomLayerEncoder>().expect("D3D12");
+            let _: &ID3D12GraphicsCommandList = &encoder.command_list;
+            self.calls.prerender(parameters);
+        }
+
+        fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
+            self.calls.render(parameters);
+            let (width, height) = (parameters.frame.width, parameters.frame.height);
+            let pass = parameters.pass.downcast_ref::<mln_d3d12::CustomLayerPass>().expect("a D3D12 pass");
+            let mut objects = self.objects.lock();
+            let objects = objects.get_or_insert_with(|| make(pass));
+            let list = &pass.command_list;
+            // SAFETY: the command list records in the map's render pass, with
+            // the pipeline of its formats.
+            unsafe {
+                list.SetPipelineState(&objects.pipeline);
+                list.SetGraphicsRootSignature(&objects.root_signature);
+                list.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                list.RSSetViewports(&[D3D12_VIEWPORT {
+                    TopLeftX: 0.0,
+                    TopLeftY: 0.0,
+                    Width: width as f32,
+                    Height: height as f32,
+                    MinDepth: 0.0,
+                    MaxDepth: 1.0,
+                }]);
+                list.RSSetScissorRects(&[RECT { left: 0, top: 0, right: width as i32, bottom: height as i32 }]);
+                list.DrawInstanced(6, 1, 0, 0);
+            }
+        }
+
+        fn deinitialize(&self) {
+            self.objects.lock().take();
+            self.calls.deinitializations.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn a_quad_draws_at_its_place_among_the_layers() {
+        check(BackendType::D3D12, || {
+            let host = Arc::new(Host::default());
+            (Arc::<Host>::clone(&host), Arc::clone(&host.calls))
+        });
+    }
+}

@@ -132,6 +132,9 @@ wgpu.workspace = true
 mln_vulkan.workspace = true
 naga.workspace = true
 
+[target.'cfg(windows)'.dev-dependencies]
+mln_d3d12.workspace = true
+
 [target.'cfg(all(unix, not(target_vendor = "apple")))'.dev-dependencies]
 glow.workspace = true
 khronos-egl.workspace = true

@@ -18,8 +18,9 @@ use crate::generated::types::{
     MLN_RENDER_BACKEND_OPEN_GL, MLN_RENDER_BACKEND_VULKAN, MLN_RENDER_BACKEND_WEB_GPU,
     MLN_RENDER_TARGET_KIND_FLAG_METAL_LAYER, MLN_RENDER_TARGET_KIND_FLAG_OFFSCREEN,
     MLN_RENDER_TARGET_KIND_FLAG_WAYLAND_SURFACE, MLN_RENDER_TARGET_KIND_FLAG_WIN32_WINDOW,
-    MLN_RENDER_TARGET_KIND_FLAG_XLIB_WINDOW, mln_diagnostic, mln_gpu_device, mln_gpu_device_capabilities,
-    mln_gpu_device_options, mln_gpu_device_vulkan_context_result, mln_gpu_sync_kind_flags, mln_metal_device_descriptor,
+    MLN_RENDER_TARGET_KIND_FLAG_XLIB_WINDOW, mln_d3d12_device_descriptor, mln_diagnostic, mln_gpu_device,
+    mln_gpu_device_capabilities, mln_gpu_device_d3d12_context_result, mln_gpu_device_options,
+    mln_gpu_device_vulkan_context_result, mln_gpu_sync_kind_flags, mln_metal_device_descriptor,
     mln_open_gl_context_descriptor, mln_queue_lock, mln_render_backend, mln_render_backend_flags,
     mln_render_target_kind_flags, mln_status, mln_user_data_release, mln_vulkan_device_descriptor,
     mln_web_gpu_context_descriptor,
@@ -31,7 +32,9 @@ abi::versioned!(
     mln_gpu_device_capabilities,
     mln_vulkan_device_descriptor,
     mln_metal_device_descriptor,
-    mln_gpu_device_vulkan_context_result
+    mln_d3d12_device_descriptor,
+    mln_gpu_device_vulkan_context_result,
+    mln_gpu_device_d3d12_context_result
 );
 
 static DEVICES: HandleTable<Device> = HandleTable::new(HandleKind::GpuDevice);
@@ -43,6 +46,8 @@ pub(crate) const BACKENDS: &[(BackendType, mln_render_backend, mln_render_backen
     (BackendType::Metal, types::MLN_RENDER_BACKEND_METAL, types::MLN_RENDER_BACKEND_FLAG_METAL),
     #[cfg(backend_vulkan)]
     (BackendType::Vulkan, MLN_RENDER_BACKEND_VULKAN, types::MLN_RENDER_BACKEND_FLAG_VULKAN),
+    #[cfg(backend_d3d12)]
+    (BackendType::D3D12, types::MLN_RENDER_BACKEND_D3D12, types::MLN_RENDER_BACKEND_FLAG_D3D12),
     // OpenGL comes through EGL, and on Windows through WGL.
     #[cfg(backend_gl)]
     (BackendType::OpenGL, MLN_RENDER_BACKEND_OPEN_GL, types::MLN_RENDER_BACKEND_FLAG_OPEN_GL),
@@ -206,6 +211,7 @@ unsafe fn request(options: *const mln_gpu_device_options) -> Result<Request, Err
             MLN_RENDER_BACKEND_VULKAN => Ok(BackendType::Vulkan),
             MLN_RENDER_BACKEND_OPEN_GL => Ok(BackendType::OpenGL),
             MLN_RENDER_BACKEND_WEB_GPU => Ok(BackendType::WebGPU),
+            types::MLN_RENDER_BACKEND_D3D12 => Ok(BackendType::D3D12),
             _ => Err(Error::invalid_argument("mln_gpu_device_options.backend is invalid")),
         })
         .transpose()?;
@@ -394,6 +400,13 @@ fn capabilities(device: &Device) -> mln_gpu_device_capabilities {
         target_kinds |= types::MLN_RENDER_TARGET_KIND_FLAG_OPEN_GL_SURFACE
             | types::MLN_RENDER_TARGET_KIND_FLAG_OPEN_GL_BORROWED_TEXTURES;
         let (producer, consumer) = mln_gl::BorrowedTextures::sync_kinds();
+        sync = producer.union(consumer);
+    }
+    #[cfg(backend_d3d12)]
+    if let Device::D3d12(_) = device {
+        target_kinds |= types::MLN_RENDER_TARGET_KIND_FLAG_D3D12_BORROWED_TEXTURES
+            | types::MLN_RENDER_TARGET_KIND_FLAG_D3D12_COMPOSITION;
+        let (producer, consumer) = mln_d3d12::BorrowedTextures::sync_kinds();
         sync = producer.union(consumer);
     }
     #[cfg(target_vendor = "apple")]
@@ -622,6 +635,56 @@ pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_metal(
     })
 }
 
+/// `mln_gpu_device_wrap_d3d12()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_d3d12(
+    descriptor: *const mln_d3d12_device_descriptor,
+    out_device: *mut mln_gpu_device,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        let descriptor = unsafe { abi::read_sized(descriptor) }?;
+        for (pointer, field) in [(descriptor.device, "device"), (descriptor.command_queue, "command_queue")] {
+            if pointer.is_null() {
+                return Err(Error::invalid_argument(format!("mln_d3d12_device_descriptor.{field} must not be null")));
+            }
+        }
+        // SAFETY: the caller's contract.
+        let out_device = unsafe { handles::out_handle(out_device, "out_device") }?;
+        #[cfg(backend_d3d12)]
+        {
+            use mln_d3d12::windows::Win32::Graphics::Direct3D12::{ID3D12CommandQueue, ID3D12Device};
+            use mln_d3d12::windows::core::{IUnknown, Interface};
+            // SAFETY: the host's live COM objects, as the header promises;
+            // the casts add the device's references.
+            let (device, queue) = unsafe {
+                let device = IUnknown::from_raw_borrowed(&descriptor.device).map(Interface::cast::<ID3D12Device>);
+                let queue =
+                    IUnknown::from_raw_borrowed(&descriptor.command_queue).map(Interface::cast::<ID3D12CommandQueue>);
+                (device, queue)
+            };
+            let (Some(Ok(device)), Some(Ok(queue))) = (device, queue) else {
+                return Err(Error::invalid_argument(
+                    "mln_d3d12_device_descriptor names no ID3D12Device and ID3D12CommandQueue",
+                ));
+            };
+            let device = mln_d3d12::Device::wrap(device, queue)?;
+            *out_device = DEVICES.insert(Device::D3d12(device).into())?;
+            Ok(())
+        }
+        #[cfg(not(backend_d3d12))]
+        {
+            let _ = out_device;
+            Err(Error::new(ErrorKind::Unsupported, "D3D12 devices are not supported by this build"))
+        }
+    })
+}
+
 /// `mln_gpu_device_wrap_open_gl()`: the share group of the host's EGL
 /// context, of OpenGL ES 3, or of desktop OpenGL on Linux and FreeBSD.
 ///
@@ -763,6 +826,36 @@ pub(crate) unsafe extern "C" fn mln_gpu_device_get_vulkan_context(
                 unsafe { abi::write_sized(out_result, &result) }
             }
             _ => Err(Error::new(ErrorKind::Unsupported, "the device doesn't render with Vulkan")),
+        }
+    })
+}
+
+/// `mln_gpu_device_get_d3d12_context()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_gpu_device_get_d3d12_context(
+    device: mln_gpu_device,
+    out_result: *mut mln_gpu_device_d3d12_context_result,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, non_null(out_result), {
+        let device = DEVICES.get(device)?;
+        match &*device {
+            #[cfg(backend_d3d12)]
+            Device::D3d12(d3d12) => {
+                use mln_d3d12::windows::core::Interface as _;
+                let result = mln_gpu_device_d3d12_context_result {
+                    size: size_of::<mln_gpu_device_d3d12_context_result>() as u32,
+                    device: d3d12.device().as_raw(),
+                    command_queue: d3d12.queue().as_raw(),
+                };
+                // SAFETY: the caller's contract.
+                unsafe { abi::write_sized(out_result, &result) }
+            }
+            _ => Err(Error::new(ErrorKind::Unsupported, "the device doesn't render with D3D12")),
         }
     })
 }

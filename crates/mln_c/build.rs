@@ -7,6 +7,7 @@
 //! backend's feature, on a platform that has the backend.
 //!
 //! - `backend_vulkan`: Vulkan, everywhere but Apple platforms and the browser.
+//! - `backend_d3d12`: D3D12, on Windows.
 //! - `backend_gl`: OpenGL through EGL on Linux, FreeBSD, Android and
 //!   `OpenHarmony`, and through WGL on Windows.
 
@@ -19,9 +20,12 @@ fn main() {
     let wasm = families.contains(&"wasm");
     let windows = families.contains(&"windows");
     let unix = families.contains(&"unix");
-    println!("cargo::rustc-check-cfg=cfg(backend_vulkan, backend_gl)");
+    println!("cargo::rustc-check-cfg=cfg(backend_vulkan, backend_d3d12, backend_gl)");
     if feature("vulkan") && !apple && !wasm {
         println!("cargo::rustc-cfg=backend_vulkan");
+    }
+    if feature("d3d12") && windows {
+        println!("cargo::rustc-cfg=backend_d3d12");
     }
     if feature("gl") && (windows || (unix && !apple)) {
         println!("cargo::rustc-cfg=backend_gl");

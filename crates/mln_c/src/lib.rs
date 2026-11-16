@@ -47,6 +47,8 @@ mod callback;
 mod camera;
 mod completion;
 mod custom_layer;
+#[cfg(all(test, backend_d3d12))]
+mod d3d12_tests;
 mod delivery;
 mod diagnostic;
 mod error;
