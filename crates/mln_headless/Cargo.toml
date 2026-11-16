@@ -53,6 +53,11 @@ path = "tests/map_snapshot_test.rs"
 name = "video_test"
 path = "tests/video_test.rs"
 
+# A video frame in a dmabuf, on Linux.
+[[test]]
+name = "video_dma_buf_test"
+path = "tests/video_dma_buf_test.rs"
+
 # gtests-core: test/renderer/feature_tracking.test.cpp.
 [[test]]
 name = "gtest_feature_tracking"
@@ -146,6 +151,10 @@ mln_d3d12.workspace = true
 glow.workspace = true
 khronos-egl.workspace = true
 mln_gl.workspace = true
+
+# The dmabuf video test's udmabuf.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
 
 [lints]
 workspace = true

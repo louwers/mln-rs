@@ -124,10 +124,12 @@ pub enum PlaneLayout {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum GpuFrame {
-    /// A Linux dmabuf of `fourcc` (a `DRM_FORMAT_*`) with `modifier`, its
-    /// planes in order. The descriptors stay open while the frame lives.
+    /// A Linux dmabuf of `fourcc` (a `DRM_FORMAT_*`) with `modifier`
+    /// (`DRM_FORMAT_MOD_INVALID` for a layout only the driver knows), of
+    /// `size` pixels, its planes in order. The descriptors stay open while
+    /// the frame lives.
     #[cfg(unix)]
-    DmaBuf { fourcc: u32, modifier: u64, planes: Vec<DmaBufPlane>, color: YuvColor },
+    DmaBuf { fourcc: u32, modifier: u64, size: Size, planes: Vec<DmaBufPlane>, color: YuvColor },
     /// An `AHardwareBuffer*`, which the frame holds a reference on.
     AndroidHardwareBuffer { buffer: *mut std::ffi::c_void, color: YuvColor },
     /// A `CVPixelBufferRef` backed by an IOSurface, which the frame

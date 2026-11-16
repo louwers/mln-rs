@@ -119,6 +119,24 @@ enum Object {
 struct NativeTexture {
     object: Object,
     deleted: Rc<Deleted>,
+    /// A video frame's plane that the texture samples, which goes with it.
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    _video: Option<VideoPlane>,
+}
+
+/// The `EGLImage` of a video frame's plane, and what keeps the frame alive.
+#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+struct VideoPlane {
+    image: *mut std::ffi::c_void,
+    images: Rc<crate::video_import::DmaBufImages>,
+    _keep_alive: mln_gfx::video::FrameKeepAlive,
+}
+
+#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+impl Drop for VideoPlane {
+    fn drop(&mut self) {
+        self.images.destroy(self.image);
+    }
 }
 
 impl NativeTexture {
@@ -413,6 +431,9 @@ pub(crate) struct GlGpu {
     pass: Option<OpenPass>,
     /// The texels each readback read.
     readbacks: SlotMap<ReadbackId, Vec<u8>>,
+    /// The display's dmabuf imports, loaded by the first video frame.
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    dma_buf_images: std::cell::OnceCell<Option<Rc<crate::video_import::DmaBufImages>>>,
 }
 
 impl GlGpu {
@@ -486,6 +507,8 @@ impl GlGpu {
             framebuffers: HashMap::default(),
             pass: None,
             readbacks: SlotMap::with_key(),
+            #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            dma_buf_images: std::cell::OnceCell::new(),
         }
     }
 
@@ -562,6 +585,71 @@ impl GlGpu {
         });
     }
 
+    /// The textures of a dmabuf video frame's planes, each an `EGLImage` of
+    /// a one- or two-channel DRM format that a `GL_TEXTURE_2D` samples.
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    fn import_dma_buf(
+        &mut self,
+        fourcc: u32,
+        modifier: u64,
+        size: Size,
+        planes: &[mln_gfx::video::DmaBufPlane],
+        keep_alive: &mln_gfx::video::FrameKeepAlive,
+    ) -> Result<(mln_gfx::video::PlaneLayout, Vec<TextureId>), GpuError> {
+        use crate::video_import::{DmaBufImages, plane_formats};
+        let (layout, formats) =
+            plane_formats(fourcc).ok_or_else(|| GpuError::Unsupported(format!("dmabufs of the fourcc {fourcc:#x}")))?;
+        if planes.len() < formats.len() {
+            return Err(GpuError::Invalid(format!("a dmabuf of {} planes for {fourcc:#x}", planes.len())));
+        }
+        let images = if let Some(images) = self.dma_buf_images.get() {
+            images.clone()
+        } else {
+            let loaded = self.current(|_| DmaBufImages::load().map(Rc::new));
+            self.dma_buf_images.get_or_init(|| loaded.clone()).clone()
+        }
+        .ok_or_else(|| GpuError::Unsupported("dmabufs on this EGL display".to_owned()))?;
+        let mut textures = Vec::with_capacity(formats.len());
+        for (index, (plane, &(format, divisor))) in planes.iter().zip(&formats).enumerate() {
+            let plane_size = Size::new(size.width.div_ceil(divisor), size.height.div_ceil(divisor));
+            let image = images.create(plane, format, modifier, plane_size.width, plane_size.height)?;
+            let video = VideoPlane { image, images: Rc::clone(&images), _keep_alive: Arc::clone(keep_alive) };
+            let name = self.current(|gpu| {
+                let gl = gpu.context.gl();
+                // SAFETY: the context is current, the texture is new and
+                // bound, and the image is of the current display.
+                unsafe {
+                    let texture = gl.create_texture().map_err(GpuError::Invalid)?;
+                    gpu.context.state().activate_texture(gl, 0, Some(texture));
+                    images.bind(image);
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
+                    let error = gl.get_error();
+                    if error != glow::NO_ERROR {
+                        gpu.context.state().activate_texture(gl, 0, None);
+                        gl.delete_texture(texture);
+                        return Err(GpuError::Unsupported(format!(
+                            "sampling a dmabuf plane of {format:#x}: OpenGL error {error:#x}"
+                        )));
+                    }
+                    Ok(texture)
+                }
+            })?;
+            let format = match (layout, index) {
+                (mln_gfx::video::PlaneLayout::Nv12, 0) => TextureFormat::R8Unorm,
+                (mln_gfx::video::PlaneLayout::Nv12, _) => TextureFormat::Rg8Unorm,
+                _ => TextureFormat::Rgba8Unorm,
+            };
+            let native = Rc::new(NativeTexture {
+                object: Object::Texture { name, owned: true },
+                deleted: Rc::clone(&self.deleted),
+                _video: Some(video),
+            });
+            let usage = TextureUsage { sampled: true, ..TextureUsage::default() };
+            textures.push(self.textures.insert(Texture { native, size: plane_size, format, usage }));
+        }
+        Ok((layout, textures))
+    }
+
     #[cfg(not(target_family = "wasm"))]
     /// Takes a `GL_TEXTURE_2D` texture made elsewhere, such as a host's in
     /// the context's share group, of `desc`'s size, format and usage, as a
@@ -571,6 +659,8 @@ impl GlGpu {
         let native = Rc::new(NativeTexture {
             object: Object::Texture { name: texture, owned: false },
             deleted: Rc::clone(&self.deleted),
+            #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            _video: None,
         });
         self.textures.insert(Texture { native, size: desc.size, format: desc.format, usage: desc.usage })
     }
@@ -590,8 +680,12 @@ impl GlGpu {
         depth_stencil: Option<TextureFormat>,
     ) -> FramebufferTextures {
         let mut attachment = |format, copy_src| {
-            let native =
-                Rc::new(NativeTexture { object: Object::Framebuffer(framebuffer), deleted: Rc::clone(&self.deleted) });
+            let native = Rc::new(NativeTexture {
+                object: Object::Framebuffer(framebuffer),
+                deleted: Rc::clone(&self.deleted),
+                #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+                _video: None,
+            });
             self.textures.insert(Texture {
                 native,
                 size,
@@ -1122,6 +1216,21 @@ pub(crate) fn read_pixels(gl: &Gl, state: &State, height: u32, region: TextureRe
 }
 
 impl Gpu for GlGpu {
+    fn import_video_frame(
+        &mut self,
+        frame: &mln_gfx::video::GpuFrame,
+        keep_alive: mln_gfx::video::FrameKeepAlive,
+    ) -> Result<mln_gfx::video::ImportedFrame, GpuError> {
+        match frame {
+            #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            mln_gfx::video::GpuFrame::DmaBuf { fourcc, modifier, size, planes, color } => {
+                let (layout, planes) = self.import_dma_buf(*fourcc, *modifier, *size, planes, &keep_alive)?;
+                Ok(mln_gfx::video::ImportedFrame { layout, planes, color: *color, external: false })
+            }
+            frame => Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind()))),
+        }
+    }
+
     fn caps(&self) -> &Caps {
         &self.caps
     }
@@ -1265,6 +1374,8 @@ impl Gpu for GlGpu {
         let native = Rc::new(NativeTexture {
             object: Object::Texture { name: object, owned: true },
             deleted: Rc::clone(&self.deleted),
+            #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            _video: None,
         });
         Ok(self.textures.insert(Texture { native, size: desc.size, format: desc.format, usage: desc.usage }))
     }
