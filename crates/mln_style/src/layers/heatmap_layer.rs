@@ -1,5 +1,4 @@
-use crate::layer::{LayerTypeInfo, SourceKind};
-use crate::layer_type::{LayerStyle, NoProperties, StyleLayerType};
+use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use crate::layers::heatmap_layer_properties::{self, HeatmapPaintProperties};
 use crate::property_table::{PropertyTable, PropertyVisitor};
 

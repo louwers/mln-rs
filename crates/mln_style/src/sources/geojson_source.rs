@@ -18,7 +18,7 @@ use super::geojson_source_impl::{self, Impl};
 use crate::conversion::Error;
 use crate::conversion::geojson::convert_json_geojson;
 use crate::expression::Expr;
-use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl;
 

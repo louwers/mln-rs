@@ -66,7 +66,8 @@ mod style_json;
 pub mod style_property;
 pub mod transition_options;
 
-pub use layer::{Layer, LayerTypeInfo};
+pub use layer::Layer;
+pub use layer_type::LayerTypeInfo;
 // The property macros, at the root so that the generated code and the
 // macros themselves name them as `crate::name!`.
 pub(crate) use properties::{

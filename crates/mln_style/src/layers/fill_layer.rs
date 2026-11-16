@@ -1,5 +1,4 @@
-use crate::layer::{LayerTypeInfo, SourceKind};
-use crate::layer_type::{LayerStyle, StyleLayerType};
+use crate::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use crate::layers::fill_layer_properties::{self, FillLayoutProperties, FillPaintProperties};
 use crate::property_table::{PropertyTable, PropertyVisitor};
 

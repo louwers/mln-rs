@@ -10,8 +10,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mln_style::expression::Expr;
-use mln_style::layer::LayerTypeInfo;
-use mln_style::layer_type::ErasedLayerStyle;
+use mln_style::layer_type::{ErasedLayerStyle, LayerTypeInfo};
 use mln_style_types::VisibilityType;
 use mln_util::hash::{HashMap, RandomState};
 
@@ -29,10 +28,10 @@ pub(crate) struct LayoutGroupKey {
     // Filter - compared by pointer, then by expression
     pub(crate) filter_expression: Option<Arc<Expr>>,
 
-    // Reference to impl for layout comparison
-    pub(crate) impl_: Arc<dyn ErasedLayerStyle>,
+    // The style, for the layout comparison
+    pub(crate) style: Arc<dyn ErasedLayerStyle>,
 
-    /// A hash of the fields above but the impl: keys that are equal hash
+    /// A hash of the fields above but the style: keys that are equal hash
     /// alike.
     hash: u64,
 }
@@ -79,30 +78,30 @@ impl PartialEq for LayoutGroupKey {
             }
         }
 
-        !self.impl_.layout_difference(&*other.impl_)
+        !self.style.layout_difference(&*other.style)
     }
 }
 
-fn create_group_key(impl_: &Arc<dyn ErasedLayerStyle>) -> LayoutGroupKey {
+fn create_group_key(style: &Arc<dyn ErasedLayerStyle>) -> LayoutGroupKey {
     // 0.0 == -0.0.
     let zoom_bits = |zoom: f32| if zoom == 0.0 { 0 } else { zoom.to_bits() };
     let mut state = std::hash::DefaultHasher::new();
-    impl_.info().name.hash(&mut state);
-    impl_.base().source.hash(&mut state);
-    impl_.base().source_layer.hash(&mut state);
-    zoom_bits(impl_.base().min_zoom).hash(&mut state);
-    zoom_bits(impl_.base().max_zoom).hash(&mut state);
-    impl_.base().visibility.hash(&mut state);
-    impl_.base().filter.expression_hash().hash(&mut state);
+    style.info().name.hash(&mut state);
+    style.base().source.hash(&mut state);
+    style.base().source_layer.hash(&mut state);
+    zoom_bits(style.base().min_zoom).hash(&mut state);
+    zoom_bits(style.base().max_zoom).hash(&mut state);
+    style.base().visibility.hash(&mut state);
+    style.base().filter.expression_hash().hash(&mut state);
     LayoutGroupKey {
-        type_info: impl_.info(),
-        source: impl_.base().source.clone(),
-        source_layer: impl_.base().source_layer.clone(),
-        min_zoom: impl_.base().min_zoom,
-        max_zoom: impl_.base().max_zoom,
-        visibility: impl_.base().visibility,
-        filter_expression: impl_.base().filter.expression.clone(),
-        impl_: Arc::clone(impl_),
+        type_info: style.info(),
+        source: style.base().source.clone(),
+        source_layer: style.base().source_layer.clone(),
+        min_zoom: style.base().min_zoom,
+        max_zoom: style.base().max_zoom,
+        visibility: style.base().visibility,
+        filter_expression: style.base().filter.expression.clone(),
+        style: Arc::clone(style),
         hash: state.finish(),
     }
 }

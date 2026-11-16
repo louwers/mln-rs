@@ -307,7 +307,7 @@ fn every_geometry_layer_type_crosses() {
     ];
     for type_ in types {
         let layer = convert(&format!(r#"{{"id": "l", "type": "{type_}", "source": "s", "source-layer": "sl"}}"#));
-        let takes_geometry_tiles = layer.info().source == mln_style::layer::SourceKind::Geometry;
+        let takes_geometry_tiles = layer.info().source == mln_style::layer_type::SourceKind::Geometry;
         assert_eq!(
             takes_geometry_tiles,
             layers_of_type.iter().any(|(t, _)| *t == type_),

@@ -19,7 +19,7 @@ use mln_util::range::Range;
 
 use super::geojson_source::TileFeatures;
 use crate::custom_tile_loader::{CustomTileLoader, TileFunction};
-use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 

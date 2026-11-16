@@ -10,8 +10,8 @@ use mln_vec_map::VecSet;
 
 use crate::evaluated::Evaluated;
 use crate::expression::{Expr, Formatted, FormattedSection, Type};
-use crate::layer::{FontStack, LayerTypeInfo, SourceKind};
-use crate::layer_type::{LayerStyle, StyleLayerType};
+use crate::layer::FontStack;
+use crate::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use crate::layers::symbol_layer_properties::{self, SymbolLayoutProperties, SymbolPaintProperties};
 use crate::properties::OverridableSection;
 use crate::property_expression::PropertyExpression;

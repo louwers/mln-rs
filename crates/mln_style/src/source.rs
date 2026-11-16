@@ -22,7 +22,7 @@ use mln_storage::FileSource;
 use mln_style_types::SourceType;
 use mln_util::logging::{Event, Log};
 
-use crate::layer::LayerTypeInfo;
+use crate::layer_type::LayerTypeInfo;
 use crate::observer::SourceObserver;
 pub use crate::source_impl::{Impl, downcast_arc};
 

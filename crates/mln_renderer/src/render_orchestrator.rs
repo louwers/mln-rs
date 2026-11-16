@@ -12,8 +12,7 @@ use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_la
 use mln_map_types::{MapMode, TransformState};
 use mln_style::collection::ImmutableVector;
 use mln_style::expression::{Dependency, GlobalStateMap};
-use mln_style::layer::SourceKind;
-use mln_style::layer_type::ErasedLayerStyle;
+use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
     GlobalStateChange, PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image, layer, source,

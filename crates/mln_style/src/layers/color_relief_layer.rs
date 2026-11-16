@@ -1,5 +1,4 @@
-use crate::layer::{LayerTypeInfo, SourceKind};
-use crate::layer_type::{LayerStyle, NoProperties, StyleLayerType};
+use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use crate::layers::color_relief_layer_properties::{self, ColorReliefPaintProperties};
 use crate::property_table::{PropertyTable, PropertyVisitor};
 

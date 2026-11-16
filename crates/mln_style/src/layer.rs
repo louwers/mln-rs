@@ -19,8 +19,7 @@ use crate::expression::{
     Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
 use crate::filter::Filter;
-use crate::layer_type::{ErasedLayerStyle, LayerBase, LayerStyle};
-pub use crate::layer_type::{LayerTypeInfo, SourceKind};
+use crate::layer_type::{ErasedLayerStyle, LayerBase, LayerStyle, LayerTypeInfo, SourceKind};
 use crate::layers::Custom;
 use crate::layers::custom_layer::CustomLayerHost;
 use crate::property_table::SetPropertyError;

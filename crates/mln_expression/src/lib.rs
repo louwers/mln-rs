@@ -5,8 +5,9 @@
 //! expression forms (`let`, `match`, `interpolate` and the others that parse
 //! their own arguments) are a closed set of nodes; every other operator is a
 //! function, which parsing resolves by name against a [`Functions`] value
-//! (see [`functions`]). Each kind of node has its own module. `type`, `match`, `let` and `in` are Rust
-//! keywords, so those modules are `type_`, `match_`, `let_` and `in_`.
+//! (see [`functions`]). Each kind of node has its own module. `type`,
+//! `match`, `let` and `in` are Rust keywords, so those modules are `type_`,
+//! `match_`, `let_` and `in_`.
 
 mod assertion;
 mod at;

@@ -9,8 +9,8 @@ use mln_conversion::{Convertible, Error};
 use mln_vec_map::VecMap;
 
 use crate::expression::{Functions, functions};
-use crate::layer::{Layer, SourceKind};
-use crate::layer_type::{BUILTIN_STYLE_TYPES, ErasedStyleLayerType};
+use crate::layer::Layer;
+use crate::layer_type::{BUILTIN_STYLE_TYPES, ErasedStyleLayerType, SourceKind};
 
 /// The expression functions and layer types that a style's JSON, its layers'
 /// property values and its filters parse against.

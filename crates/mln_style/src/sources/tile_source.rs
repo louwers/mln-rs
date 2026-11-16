@@ -13,7 +13,7 @@ use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
 
 use crate::conversion::Convertible;
 use crate::conversion::tileset::convert_tileset;
-use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 

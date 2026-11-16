@@ -12,7 +12,7 @@ use mln_util::LatLng;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 
-use crate::layer::{LayerTypeInfo, SourceKind};
+use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
