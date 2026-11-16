@@ -20,8 +20,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_UBO,
     ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER,
 };
-use mln_gfx::texture2d::texture_format;
-use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
 use mln_gfx::{
     AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawModeType, ShaderProgramPtr, ShaderRegistry,
     StencilMode,
@@ -157,7 +155,7 @@ impl LayerComposite {
             self.bindings_made = None;
             let mut color = Texture2D::new(Rc::clone(context.released()));
             color.set_size(size);
-            color.set_format(texture_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte));
+            color.set_format(COLOR);
             color.set_render_target();
             let (texture, sampler) = color.binding(&mut *context.gpu(), context)?;
             let depth_stencil = Attachment::new(context, "layer composite depth and stencil", size, DEPTH_STENCIL)?;
