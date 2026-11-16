@@ -147,7 +147,7 @@ impl Default for Kind {
 
 /// The window that sessions make their surfaces of, off the window's thread:
 /// on Windows with the handles that the window's thread took
-/// (win32_window.rs).
+/// (`win32_window.rs`).
 #[cfg(all(not(target_os = "macos"), not(windows)))]
 pub(crate) type SessionWindow = Arc<winit::window::Window>;
 #[cfg(windows)]
