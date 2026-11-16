@@ -815,7 +815,7 @@ impl RenderOrchestrator {
                 }
             }
             if let Some(style_source) = &style_source {
-                tile_parameters.is_update_synchronous = style_source.is_update_synchronous();
+                tile_parameters.is_update_synchronous = style_source.data().is_update_synchronous();
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
                 // C++ `renderSources.at(sourceImpl->id)`; a source type
                 // without a render source has none.

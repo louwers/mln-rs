@@ -65,14 +65,14 @@ fn loading_corrupt() {
 fn geojson_source_synchronous_update_override_replaces_the_option() {
     let options = GeoJSONOptions { synchronous_update: true, ..Default::default() };
     let mut style = style_with(geojson_source("source", Arc::new(options)));
-    let synchronous = |style: &Style, id: &str| style.get_source(id).unwrap().is_update_synchronous();
+    let synchronous = |style: &Style, id: &str| style.get_source(id).unwrap().data().is_update_synchronous();
     assert!(synchronous(&style, "source"));
 
     let published = style.get_source("source").unwrap().clone();
     style.apply(Edit::SetGeoJsonSynchronous { id: "source".to_owned(), synchronous: false }).unwrap();
     assert!(!synchronous(&style, "source"));
     // The version the renderer may hold keeps its mode.
-    assert!(published.is_update_synchronous());
+    assert!(published.data().is_update_synchronous());
 
     // Setting the mode the source has changes nothing.
     let before = style.get_source("source").unwrap().clone();
@@ -95,18 +95,18 @@ fn geojson_source_keeps_the_style_attribution() {
         r#"{"type": "geojson", "attribution": "Fixture data", "data": {"type": "FeatureCollection", "features": []}}"#,
     )
     .unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
+    assert_eq!(Some("Fixture data".to_owned()), source.data().attribution());
 
     let mut style = style_with(source);
     let options = crate::sources::geojson::GeoJsonSourceOptions::new(GeoJSONOptions::default_options());
     let data = options.data_builder().build(r#"{"type": "Point", "coordinates": [1.1, 1.1]}"#.parse().unwrap());
     style.apply(Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(data.unwrap()) }).unwrap();
-    assert_eq!(Some("Fixture data".to_owned()), style.get_source("source").unwrap().get_attribution());
+    assert_eq!(Some("Fixture data".to_owned()), style.get_source("source").unwrap().data().attribution());
 
     style.apply(Edit::SetGeoJsonUrl { id: "source".to_owned(), url: "url".to_owned() }).unwrap();
     let source = described(style.get_source("source").unwrap(), br#"{"type": "Point", "coordinates": [2.2, 2.2]}"#);
     assert!(crate::sources::geojson::geojson_data(&source).is_some());
-    assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
+    assert_eq!(Some("Fixture data".to_owned()), source.data().attribution());
 }
 
 #[test]

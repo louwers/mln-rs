@@ -285,7 +285,7 @@ fn each_reader_wakes_until_it_drops() {
 
 /// Whether `update`'s only source updates synchronously.
 fn publishes_synchronous(update: &Update) -> bool {
-    update.parameters.style.get_sources().iter().next().expect("a source").is_update_synchronous()
+    update.parameters.style.get_sources().iter().next().expect("a source").data().is_update_synchronous()
 }
 
 fn set_override_synchronous_update(map: &mut Map, value: bool) {

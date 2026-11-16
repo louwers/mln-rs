@@ -420,12 +420,12 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
 /// runtime doesn't name.
 fn source_info(source: &Source) -> Option<SourceInfo> {
     let kind = source_kind(source.info().name)?;
-    let summary = source.summary();
+    let summary = source.data().summary();
     Some(SourceInfo {
         id: source.id().to_owned(),
         kind,
-        is_volatile: source.common().is_volatile(),
-        attribution: source.get_attribution().filter(|attribution| !attribution.is_empty()),
+        is_volatile: source.common().volatile,
+        attribution: source.data().attribution().filter(|attribution| !attribution.is_empty()),
         url: summary.url,
         tiles: summary.inline_tileset.map(|tileset| SourceTiles {
             urls: tileset.tiles,
@@ -536,7 +536,7 @@ impl Map {
         self.command(move |map| {
             require_loaded(map)?;
             let mut common = *find_source(map, &source_id)?.common();
-            common.set_volatile(is_volatile);
+            common.volatile = is_volatile;
             map.edit_style(|style| style.apply(Edit::SetSourceCommon { id: source_id, common }))
         })
     }

@@ -579,10 +579,10 @@ fn sources_keep_the_order_they_were_added_in() {
     // A changed source keeps its place.
     let before = style.clone();
     let mut common = *style.get_source("b").unwrap().common();
-    common.set_volatile(true);
+    common.volatile = true;
     edit(&mut style, Edit::SetSourceCommon { id: "b".to_owned(), common });
     assert_eq!(["c", "b", "a"], *ids_of(style.get_sources()));
-    assert!(style.get_source("b").unwrap().common().is_volatile());
+    assert!(style.get_source("b").unwrap().common().volatile);
     assert_eq!(Parts::SOURCES, Parts::between(&before, &style));
     // The same members change nothing.
     let after = style.clone();

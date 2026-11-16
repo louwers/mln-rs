@@ -2140,8 +2140,7 @@ fn prefetch_delta_override() {
     );
 
     // Vector source
-    let vector =
-        with_common(&vector_source("vector", "a/{z}/{x}/{y}"), |common| common.set_prefetch_zoom_delta(Some(0)));
+    let vector = with_common(&vector_source("vector", "a/{z}/{x}/{y}"), |common| common.prefetch_zoom_delta = Some(0));
     test.map().add_source(vector).unwrap();
 
     let requested_tiles = Arc::new(AtomicI32::new(0));
@@ -2173,7 +2172,7 @@ fn prefetch_delta_override() {
     for id in ["vector", "custom"] {
         let mut map = test.map();
         let mut common = *map.source(id).unwrap().common();
-        common.set_prefetch_zoom_delta(None);
+        common.prefetch_zoom_delta = None;
         map.edit_style(|style| style.apply(Edit::SetSourceCommon { id: id.to_owned(), common })).unwrap();
     }
     test.run_loop.run();
@@ -2208,7 +2207,7 @@ fn counted_custom_source(
     let custom = custom_geometry_source::create("custom", options, run_loop.pool()).unwrap();
     handle.set(CustomGeometrySourceHandle::of(&custom).unwrap()).unwrap();
     if prefetch_zoom_delta.is_some() {
-        return with_common(&custom, |common| common.set_prefetch_zoom_delta(prefetch_zoom_delta));
+        return with_common(&custom, |common| common.prefetch_zoom_delta = prefetch_zoom_delta);
     }
     custom
 }
@@ -2486,7 +2485,7 @@ fn source_minimum_update_interval_override() {
 
     // Vector source
     let vector_source_a = with_common(&vector_source("source-a", "a/{z}/{x}/{y}"), |common| {
-        common.set_minimum_tile_update_interval(Duration::from_secs(1));
+        common.minimum_tile_update_interval = Duration::from_secs(1);
     });
     test.map().add_source(vector_source_a).unwrap();
 
@@ -2696,7 +2695,7 @@ fn volatile_source() {
       }]
     }"#,
     );
-    let source = with_common(&vector_source("vector", "a/{z}/{x}/{y}"), |common| common.set_volatile(is_volatile));
+    let source = with_common(&vector_source("vector", "a/{z}/{x}/{y}"), |common| common.volatile = is_volatile);
     test.map().add_source(source).unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });

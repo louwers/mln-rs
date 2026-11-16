@@ -462,10 +462,10 @@ impl SourceTiles {
         let mut tile_zoom: i32 = overscaled_zoom;
         let mut pan_zoom: i32 = i32::from(zoom_range.max);
 
-        let source_prefetch_zoom_delta = style_source.common().get_prefetch_zoom_delta();
-        let max_parent_tile_overscale_factor = style_source.common().get_max_overscale_factor_for_parent_tiles();
-        let minimum_update_interval = style_source.common().get_minimum_tile_update_interval();
-        let is_volatile = style_source.common().is_volatile();
+        let source_prefetch_zoom_delta = style_source.common().prefetch_zoom_delta;
+        let max_parent_tile_overscale_factor = style_source.common().max_overscale_factor;
+        let minimum_update_interval = style_source.common().minimum_tile_update_interval;
+        let is_volatile = style_source.common().volatile;
 
         let mut ideal_tiles: Vec<OverscaledTileID> = Vec::new();
         let mut pan_tiles: Vec<OverscaledTileID> = Vec::new();

@@ -612,7 +612,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
         test.run_with(&mut store, |_, _| {});
     }
     let described = described.take().expect("a description");
-    assert_eq!(Some(attribution.to_owned()), described.get_attribution());
+    assert_eq!(Some(attribution.to_owned()), described.data().attribution());
     assert!(described.metadata_changed_from(&source));
 }
 
@@ -866,7 +866,7 @@ impl SynchronousUpdateSource {
         let data = Some(create_geojson_data(geojson, scheduler::get_sequenced(), &self.options).unwrap());
         self.source = edited(&self.source, Edit::SetGeoJsonData { id: "source".to_owned(), data });
         let mut parameters = test.tile_parameters(MapMode::Continuous);
-        parameters.is_update_synchronous = self.source.is_update_synchronous();
+        parameters.is_update_synchronous = self.source.data().is_update_synchronous();
         self.render_source.update(&mut self.store, self.source.clone(), &self.layers, true, true, &parameters);
         // The end of the renderer's update.
         self.store.drive();
@@ -938,7 +938,7 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     let layers = circle_layers();
     let update = |render_source: &mut Box<dyn RenderSource>, store: &mut TileStore, source: &Source| {
         let mut parameters = test.tile_parameters(MapMode::Continuous);
-        parameters.is_update_synchronous = source.is_update_synchronous();
+        parameters.is_update_synchronous = source.data().is_update_synchronous();
         render_source.update(store, source.clone(), &layers, true, true, &parameters);
         store.drive();
     };
@@ -1042,8 +1042,8 @@ fn set_max_parent_overscale_factor() {
     let layers = Tiled::Raster.layers();
     let source = Tiled::Raster.source(None, tiles_tileset());
     let mut common = *source.common();
-    assert_eq!(None, common.get_max_overscale_factor_for_parent_tiles());
-    common.set_max_overscale_factor_for_parent_tiles(Some(3));
+    assert_eq!(None, common.max_overscale_factor);
+    common.max_overscale_factor = Some(3);
     let style_source = crate::tests::ready(source.with_common(common));
 
     let mut store = test.store();
@@ -1129,7 +1129,7 @@ struct TurningSource {
 impl TurningSource {
     fn set_max_overscale_factor(&mut self, factor: Option<u8>) {
         let mut common = *self.source.common();
-        common.set_max_overscale_factor_for_parent_tiles(factor);
+        common.max_overscale_factor = factor;
         self.source = self.source.with_common(common);
     }
 

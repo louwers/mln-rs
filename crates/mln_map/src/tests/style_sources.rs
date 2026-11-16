@@ -208,7 +208,7 @@ fn a_tilejson_describes_its_source() {
     map.add_source(tileset_vector_source("source", Some("url".to_owned()), PartialTileset::default())).unwrap();
     assert!(!map.style_loaded());
     run_until(&mut map, &run_loop, Map::style_loaded);
-    assert_eq!(Some("a".to_owned()), map.source("source").unwrap().get_attribution());
+    assert_eq!(Some("a".to_owned()), map.source("source").unwrap().data().attribution());
     assert_eq!(["source"], *source_changes(&map.drain_events()));
 }
 
@@ -319,7 +319,7 @@ fn a_geojson_build_keeps_the_synchronous_update_override() {
 
     run_until(&mut map, &run_loop, Map::style_loaded);
     assert_eq!(1, feature_count(&map, "source"));
-    assert!(!map.source("source").unwrap().is_update_synchronous());
+    assert!(!map.source("source").unwrap().data().is_update_synchronous());
 }
 
 // gtest: Source.ImageSourceImageUpdate

@@ -195,50 +195,16 @@ fn warn_if_overscale_factor_caps_prefetch_delta(overscale: Option<u8>, prefetch:
 /// The members every source has, which tune how its tiles load.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SourceCommon {
-    prefetch_zoom_delta: Option<u8>,
-    max_overscale_factor: Option<u8>,
-    minimum_tile_update_interval: Duration,
-    volatile: bool,
-}
-
-impl SourceCommon {
-    pub fn set_prefetch_zoom_delta(&mut self, delta: Option<u8>) {
-        self.prefetch_zoom_delta = delta;
-        warn_if_overscale_factor_caps_prefetch_delta(self.max_overscale_factor, self.prefetch_zoom_delta);
-    }
-
-    #[must_use]
-    pub fn get_prefetch_zoom_delta(&self) -> Option<u8> {
-        self.prefetch_zoom_delta
-    }
-
-    pub fn set_minimum_tile_update_interval(&mut self, interval: Duration) {
-        self.minimum_tile_update_interval = interval;
-    }
-
-    #[must_use]
-    pub fn get_minimum_tile_update_interval(&self) -> Duration {
-        self.minimum_tile_update_interval
-    }
-
-    pub fn set_max_overscale_factor_for_parent_tiles(&mut self, overscale_factor: Option<u8>) {
-        self.max_overscale_factor = overscale_factor;
-        warn_if_overscale_factor_caps_prefetch_delta(self.max_overscale_factor, self.prefetch_zoom_delta);
-    }
-
-    #[must_use]
-    pub fn get_max_overscale_factor_for_parent_tiles(&self) -> Option<u8> {
-        self.max_overscale_factor
-    }
-
-    #[must_use]
-    pub fn is_volatile(&self) -> bool {
-        self.volatile
-    }
-
-    pub fn set_volatile(&mut self, set: bool) {
-        self.volatile = set;
-    }
+    /// How many zoom levels below the ideal ones to load tiles of first;
+    /// `None` uses the map's.
+    pub prefetch_zoom_delta: Option<u8>,
+    /// How many zoom levels a parent tile may stand in for its children
+    /// while they load; `None` doesn't limit it.
+    pub max_overscale_factor: Option<u8>,
+    /// How long a tile waits before it reloads after its data expires.
+    pub minimum_tile_update_interval: Duration,
+    /// Whether the source's tiles stay out of the offline cache.
+    pub volatile: bool,
 }
 
 /// The data of a source of the type `T`: its options and what loading them
@@ -462,9 +428,11 @@ impl Source {
         Some(self.with_data(data))
     }
 
-    /// This source with `common` in place of its common members.
+    /// This source with `common` in place of its common members. Logs a
+    /// warning when its overscale factor caps its prefetch delta.
     #[must_use]
     pub fn with_common(&self, common: SourceCommon) -> Self {
+        warn_if_overscale_factor_caps_prefetch_delta(common.max_overscale_factor, common.prefetch_zoom_delta);
         Source { id: Arc::clone(&self.id), instance: self.instance, common, data: Arc::clone(&self.data) }
     }
 
@@ -502,21 +470,6 @@ impl Source {
     #[must_use]
     pub fn data(&self) -> &dyn ErasedSource {
         &*self.data
-    }
-
-    #[must_use]
-    pub fn get_attribution(&self) -> Option<String> {
-        self.data.attribution()
-    }
-
-    #[must_use]
-    pub fn summary(&self) -> SourceSummary {
-        self.data.summary()
-    }
-
-    #[must_use]
-    pub fn is_update_synchronous(&self) -> bool {
-        self.data.is_update_synchronous()
     }
 
     /// Whether `a` and `b` are the same source: the same id, instance and
