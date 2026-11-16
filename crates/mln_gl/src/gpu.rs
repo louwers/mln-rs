@@ -623,44 +623,73 @@ impl GlGpu {
         .ok_or_else(|| GpuError::Unsupported("dmabufs on this EGL display".to_owned()))?;
         let mut textures = Vec::with_capacity(formats.len());
         for (index, (plane, &(format, divisor))) in planes.iter().zip(&formats).enumerate() {
-            let plane_size = Size::new(size.width.div_ceil(divisor), size.height.div_ceil(divisor));
-            let image = images.create(plane, format, modifier, plane_size.width, plane_size.height)?;
-            let video = VideoPlane { image, images: Rc::clone(&images), _keep_alive: Arc::clone(keep_alive) };
-            let name = self.current(|gpu| {
-                let gl = gpu.context.gl();
-                // SAFETY: the context is current, the texture is new and
-                // bound, and the image is of the current display.
-                unsafe {
-                    let texture = gl.create_texture().map_err(GpuError::Invalid)?;
-                    gpu.context.state().activate_texture(gl, 0, Some(texture));
-                    images.bind(image);
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
-                    let error = gl.get_error();
-                    if error != glow::NO_ERROR {
-                        gpu.context.state().activate_texture(gl, 0, None);
-                        gl.delete_texture(texture);
-                        return Err(GpuError::Unsupported(format!(
-                            "sampling a dmabuf plane of {format:#x}: OpenGL error {error:#x}"
-                        )));
+            match self.import_dma_buf_plane(&images, plane, format, modifier, size, divisor, layout, index, keep_alive)
+            {
+                Ok(texture) => textures.push(texture),
+                Err(error) => {
+                    // The planes imported so far, with their images.
+                    for texture in textures {
+                        self.textures.remove(texture);
                     }
-                    Ok(texture)
+                    return Err(error);
                 }
-            })?;
-            let format = match (layout, index) {
-                (mln_gfx::video::PlaneLayout::Nv12, 0) => TextureFormat::R8Unorm,
-                (mln_gfx::video::PlaneLayout::Nv12, _) => TextureFormat::Rg8Unorm,
-                _ => TextureFormat::Rgba8Unorm,
-            };
-            let native = Rc::new(NativeTexture {
-                object: Object::Texture { name, owned: true },
-                external: false,
-                held: Some(Box::new(video)),
-                deleted: Rc::clone(&self.deleted),
-            });
-            let usage = TextureUsage { sampled: true, ..TextureUsage::default() };
-            textures.push(self.textures.insert(Texture { native, size: plane_size, format, usage }));
+            }
         }
         Ok((layout, textures))
+    }
+
+    /// Imports plane `index` of a dmabuf frame of `layout` and `size`, of
+    /// `format` at `divisor` of its size, as a texture of the backend.
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    #[expect(clippy::too_many_arguments, reason = "the plane and the frame it belongs to")]
+    fn import_dma_buf_plane(
+        &mut self,
+        images: &Rc<crate::video_import::DmaBufImages>,
+        plane: &mln_gfx::video::DmaBufPlane,
+        format: u32,
+        modifier: u64,
+        size: Size,
+        divisor: u32,
+        layout: mln_gfx::video::PlaneLayout,
+        index: usize,
+        keep_alive: &FrameKeepAlive,
+    ) -> Result<TextureId, GpuError> {
+        let plane_size = Size::new(size.width.div_ceil(divisor), size.height.div_ceil(divisor));
+        let image = images.create(plane, format, modifier, plane_size.width, plane_size.height)?;
+        let video = VideoPlane { image, images: Rc::clone(images), _keep_alive: Arc::clone(keep_alive) };
+        let name = self.current(|gpu| {
+            let gl = gpu.context.gl();
+            // SAFETY: the context is current, the texture is new and
+            // bound, and the image is of the current display.
+            unsafe {
+                let texture = gl.create_texture().map_err(GpuError::Invalid)?;
+                gpu.context.state().activate_texture(gl, 0, Some(texture));
+                images.bind(image);
+                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
+                let error = gl.get_error();
+                if error != glow::NO_ERROR {
+                    gpu.context.state().activate_texture(gl, 0, None);
+                    gl.delete_texture(texture);
+                    return Err(GpuError::Unsupported(format!(
+                        "sampling a dmabuf plane of {format:#x}: OpenGL error {error:#x}"
+                    )));
+                }
+                Ok(texture)
+            }
+        })?;
+        let format = match (layout, index) {
+            (mln_gfx::video::PlaneLayout::Nv12, 0) => TextureFormat::R8Unorm,
+            (mln_gfx::video::PlaneLayout::Nv12, _) => TextureFormat::Rg8Unorm,
+            _ => TextureFormat::Rgba8Unorm,
+        };
+        let native = Rc::new(NativeTexture {
+            object: Object::Texture { name, owned: true },
+            external: false,
+            held: Some(Box::new(video)),
+            deleted: Rc::clone(&self.deleted),
+        });
+        let usage = TextureUsage { sampled: true, ..TextureUsage::default() };
+        Ok(self.textures.insert(Texture { native, size: plane_size, format, usage }))
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -1242,7 +1271,7 @@ impl Gpu for GlGpu {
     fn import_video_frame(&mut self, frame: &GpuFrame, keep_alive: FrameKeepAlive) -> Result<ImportedFrame, GpuError> {
         match frame {
             #[cfg(all(unix, not(target_vendor = "apple")))]
-            GpuFrame::DmaBuf { fourcc, modifier, size, planes, color } => {
+            GpuFrame::DmaBuf { fourcc, modifier, size, planes, color, .. } => {
                 let (layout, planes) = self.import_dma_buf(*fourcc, *modifier, *size, planes, &keep_alive)?;
                 Ok(ImportedFrame { layout, planes, color: *color, external: false })
             }
@@ -1564,7 +1593,7 @@ impl Gpu for GlGpu {
     /// them as RGB.
     #[cfg(target_os = "android")]
     fn import_video_frame(&mut self, frame: &GpuFrame, keep_alive: FrameKeepAlive) -> Result<ImportedFrame, GpuError> {
-        let GpuFrame::AndroidHardwareBuffer { buffer, color } = *frame else {
+        let GpuFrame::AndroidHardwareBuffer { buffer, color, .. } = *frame else {
             return Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind())));
         };
         if self.desktop {

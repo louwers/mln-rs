@@ -4,7 +4,9 @@
 use std::ffi::{CStr, c_void};
 use std::os::fd::BorrowedFd;
 
-use mln_gfx::video::{CpuPlane, DmaBufPlane, FramePixels, GpuFrame, VideoFrame, YuvColor, YuvMatrix, YuvRange};
+use mln_gfx::video::{
+    CpuPlane, DmaBufPlane, FrameLease, FramePixels, GpuFrame, VideoFrame, YuvColor, YuvMatrix, YuvRange,
+};
 use mln_util::size::Size;
 
 use super::ffi::{self, Api, MiniRef};
@@ -21,13 +23,14 @@ pub(super) enum Converted {
     Unshareable(String),
 }
 
-/// The frame of `sample`.
+/// The frame of `sample`. A frame in a dmabuf keeps the sample, so that the
+/// decoder doesn't decode into its buffer again while the frame lives.
 ///
 /// # Errors
 ///
 /// The sample isn't a frame of the formats that the appsink's caps allow,
 /// or its buffer is shorter than its layout.
-pub(super) fn convert(api: &Api, sample: &MiniRef) -> Result<Converted, String> {
+pub(super) fn convert(api: &Api, sample: MiniRef) -> Result<Converted, String> {
     // SAFETY: the sample is live, and its caps, buffer and segment are its
     // own while it lives.
     unsafe {
@@ -54,7 +57,7 @@ pub(super) fn convert(api: &Api, sample: &MiniRef) -> Result<Converted, String> 
         let features = (api.caps_get_features)(caps, 0);
         let pixels = if !features.is_null() && (api.caps_features_contains)(features, c"memory:DMABuf".as_ptr()) != 0 {
             let drm_format = api.structure_string(structure, c"drm-format").unwrap_or_default();
-            match dma_buf(api, buffer, &drm_format, color) {
+            match dma_buf(api, sample, buffer, &drm_format, color) {
                 Ok(frame) => FramePixels::Gpu(frame),
                 Err(why) => return Ok(Converted::Unshareable(why)),
             }
@@ -254,12 +257,19 @@ fn parse_drm_format(text: &str) -> Option<(u32, u64)> {
 }
 
 /// The dmabuf of `buffer`, its descriptors duplicated so that the frame
-/// owns them.
+/// owns them, and its sample the frame's lease, which keeps the decoder from
+/// decoding into the buffer again.
 ///
 /// # Safety
 ///
-/// `buffer` is a live `GstBuffer`.
-unsafe fn dma_buf(api: &Api, buffer: *mut c_void, drm_format: &str, color: YuvColor) -> Result<GpuFrame, String> {
+/// `buffer` is a live `GstBuffer`, the buffer of `sample`.
+unsafe fn dma_buf(
+    api: &Api,
+    sample: MiniRef,
+    buffer: *mut c_void,
+    drm_format: &str,
+    color: YuvColor,
+) -> Result<GpuFrame, String> {
     let (fourcc, modifier) =
         parse_drm_format(drm_format).ok_or_else(|| format!("a dmabuf of drm-format \"{drm_format}\""))?;
     // SAFETY: as the caller says; the meta is the buffer's.
@@ -308,7 +318,8 @@ unsafe fn dma_buf(api: &Api, buffer: *mut c_void, drm_format: &str, color: YuvCo
         return Err("a dmabuf without planes".to_owned());
     }
     let size = Size::new(meta.width, meta.height);
-    Ok(GpuFrame::DmaBuf { fourcc, modifier, size, planes, color })
+    let lease: FrameLease = Box::new(sample);
+    Ok(GpuFrame::DmaBuf { fourcc, modifier, size, planes, color, lease: Some(lease) })
 }
 
 /// Whether caps' first structure is video, for a decoder's pad.

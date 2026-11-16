@@ -1023,11 +1023,11 @@ impl RenderOrchestrator {
         self.tile_store.has_fading_tiles()
     }
 
-    /// Whether the sources are still loaded after the frame's uploads: a
-    /// video source whose frame a backend refused to import waits for the
-    /// frame in memory that replaces it.
+    /// Whether the sources are still loaded after the frame's uploads, and
+    /// drew what they show: a video source whose frame a backend refused to
+    /// import waits for the frame in memory that replaces it to be drawn.
     pub(crate) fn still_loaded(&self) -> bool {
-        self.render_sources.values().all(|source| source.is_loaded(&self.tile_store))
+        self.render_sources.values().all(|source| source.is_loaded(&self.tile_store) && source.drawn())
     }
 
     pub(crate) fn is_loaded(&self) -> bool {

@@ -215,6 +215,7 @@ mod tests {
                 size: Size::new(1, 1),
                 planes: Vec::new(),
                 color: mln_gfx::video::YuvColor::default(),
+                lease: None,
             }),
             time: None,
         };

@@ -11,12 +11,11 @@ mod ndk;
 #[cfg(test)]
 mod tests;
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use mln_gfx::video::{CpuPlane, FramePixels, GpuFrame, VideoFrame, YuvColor, YuvMatrix, YuvRange};
+use mln_gfx::video::{CpuPlane, FrameLease, FramePixels, GpuFrame, VideoFrame, YuvColor, YuvMatrix, YuvRange};
 use mln_storage::FileSource;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -27,10 +26,10 @@ use crate::bytes::ByteSource;
 use crate::player::{OpenRequest, VideoPlayer, VideoPlayers};
 use crate::slot::FrameSink;
 
-/// The hardware buffer frames that the map may still read: the player keeps
-/// their images from the reader that long, so that the decoder doesn't
-/// write into a buffer that a renderer draws. A renderer reads a frame only
-/// while it draws it into the source's texture, soon after it comes.
+/// The hardware buffer frames that the map may hold at once: the newest
+/// frame, and those that renderers still draw into their textures. Each
+/// frame keeps its image from the reader, so that the decoder doesn't write
+/// into a buffer that a renderer draws.
 const FRAMES_IN_FLIGHT: usize = 3;
 /// How long the decoder waits for an output buffer before the player looks
 /// at its controls again.
@@ -213,14 +212,24 @@ enum Mode {
     Cpu,
 }
 
+/// A GPU frame's image, which goes back to its reader, for the decoder to
+/// write again, when the frame drops; and the reader, which outlives it.
+struct ImageLease {
+    // Dropped before the reader: deleting a reader takes back its images.
+    _image: Image,
+    _reader: Arc<ImageReader>,
+}
+
+// SAFETY: a shared lease does nothing; it is only moved and dropped.
+unsafe impl Sync for ImageLease {}
+
 /// A decoder that renders into an image reader.
 struct Decoder {
     // Before the reader, whose window it renders into.
     codec: Codec,
-    /// The images of the frames in flight, oldest first, which go back to
-    /// the reader before it goes.
-    images: VecDeque<Image>,
-    reader: ImageReader,
+    /// Shared with the leases of the frames in flight, whose images go back
+    /// to the reader before it goes.
+    reader: Arc<ImageReader>,
     mode: Mode,
 }
 
@@ -234,7 +243,7 @@ impl Decoder {
         };
         let reader = ImageReader::new(video.ndk, video.width, video.height, usage, max_images as i32)?;
         let codec = Codec::decoder(video.ndk, &video.format, reader.window())?;
-        Ok(Decoder { codec, images: VecDeque::new(), reader, mode })
+        Ok(Decoder { codec, reader: Arc::new(reader), mode })
     }
 }
 
@@ -449,12 +458,13 @@ impl<'a> Playback<'a> {
         let frame = match self.decoder.mode {
             Mode::Gpu => {
                 let buffer = image.acquire_hardware_buffer()?;
-                self.decoder.images.push_back(image);
-                while self.decoder.images.len() > FRAMES_IN_FLIGHT {
-                    self.decoder.images.pop_front();
-                }
-                let pixels =
-                    FramePixels::Gpu(GpuFrame::AndroidHardwareBuffer { buffer: buffer.as_ptr(), color: self.color });
+                let lease: FrameLease =
+                    Box::new(ImageLease { _image: image, _reader: Arc::clone(&self.decoder.reader) });
+                let pixels = FramePixels::Gpu(GpuFrame::AndroidHardwareBuffer {
+                    buffer: buffer.as_ptr(),
+                    color: self.color,
+                    lease: Some(lease),
+                });
                 VideoFrame { size, pixels, time }
             }
             Mode::Cpu => VideoFrame { size, pixels: copy_planes(&image, size, self.color)?, time },

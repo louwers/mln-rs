@@ -159,6 +159,7 @@ fn an_nv12_dmabuf_frame_draws_in_place() {
             size: frame_size,
             planes,
             color: FULL_BT601,
+            lease: None,
         }),
         time: None,
     };

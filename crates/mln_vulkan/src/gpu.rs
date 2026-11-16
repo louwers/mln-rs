@@ -2079,7 +2079,7 @@ impl Gpu for VulkanGpu {
     ) -> Result<mln_gfx::video::ImportedFrame, GpuError> {
         match frame {
             #[cfg(unix)]
-            mln_gfx::video::GpuFrame::DmaBuf { fourcc, modifier, size, planes, color } => {
+            mln_gfx::video::GpuFrame::DmaBuf { fourcc, modifier, size, planes, color, .. } => {
                 let (layout, planes) = self.import_dma_buf(*fourcc, *modifier, *size, planes, &keep_alive)?;
                 Ok(mln_gfx::video::ImportedFrame { layout, planes, color: *color, external: false })
             }

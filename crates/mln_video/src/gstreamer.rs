@@ -22,7 +22,6 @@
 mod ffi;
 mod frames;
 
-use std::collections::VecDeque;
 use std::ffi::{CStr, c_int, c_uint, c_void};
 use std::io;
 use std::ptr::{self, NonNull};
@@ -30,7 +29,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 
-use mln_gfx::video::FramePixels;
 use mln_storage::FileSource;
 use mln_util::logging::{Event, Log};
 use parking_lot::Mutex;
@@ -40,16 +38,6 @@ use self::frames::Converted;
 use crate::bytes::ByteSource;
 use crate::player::{OpenRequest, VideoPlayer, VideoPlayers};
 use crate::slot::FrameSink;
-
-/// The GPU frames that a player keeps alive after handing them over.
-///
-/// A [`GpuFrame::DmaBuf`](mln_gfx::video::GpuFrame::DmaBuf) owns duplicates
-/// of its dmabuf's descriptors, which keep the memory allocated but not
-/// unchanged: once its sample is released, the decoder's pool may decode the
-/// next frame into the same memory while a renderer still reads it. Holding
-/// the last few samples keeps the newest frames' memory out of the pool for
-/// the frames that renderers may still draw.
-const HELD_GPU_FRAMES: usize = 3;
 
 /// How long the driver waits for a message before it checks whether
 /// renderers refused its GPU frames.
@@ -415,7 +403,6 @@ impl Pipeline {
             unshareable: AtomicBool::new(false),
             failed: AtomicBool::new(false),
             last: Mutex::new(None),
-            held: Mutex::new(VecDeque::new()),
         });
         let decoding = Arc::new(Decoding {
             decodebin: decode.as_ptr() as usize,
@@ -645,8 +632,6 @@ struct SinkState {
     /// The buffer and time of the last frame handed over: a pipeline that
     /// starts playing renders the frame it prerolled with again.
     last: Mutex<Option<(usize, u64)>>,
-    /// The samples of the last GPU frames, as [`HELD_GPU_FRAMES`] says.
-    held: Mutex<VecDeque<MiniRef>>,
 }
 
 impl SinkState {
@@ -667,17 +652,8 @@ impl SinkState {
             }
             *last = key;
         }
-        match frames::convert(self.api, &sample) {
-            Ok(Converted::Frame(frame)) => {
-                if matches!(frame.pixels, FramePixels::Gpu(_)) {
-                    let mut held = self.held.lock();
-                    held.push_back(sample);
-                    if held.len() > HELD_GPU_FRAMES {
-                        held.pop_front();
-                    }
-                }
-                self.shared.frames.push(frame);
-            }
+        match frames::convert(self.api, sample) {
+            Ok(Converted::Frame(frame)) => self.shared.frames.push(frame),
             Ok(Converted::Unshareable(why)) => {
                 Log::info(Event::Render, format!("Video frames go through memory: {why}"));
                 self.unshareable.store(true, Ordering::Relaxed);

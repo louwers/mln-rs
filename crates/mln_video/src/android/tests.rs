@@ -169,39 +169,46 @@ fn frames_on_the_gpu_are_hardware_buffers_until_refused() {
 #[test]
 fn a_paused_seek_shows_the_frame_there() {
     for cpu in [true, false] {
+        // The test keeps no more frames than the map does, which hold the
+        // image reader's images.
         let (mut player, slot) = open(Bytes(Some(VIDEO)), cpu);
-        let first = wait_for(&slot, 0, |_| true);
+        let first = wait_for(&slot, 0, |_| true).generation;
         player.pause();
         // Frames stop.
         std::thread::sleep(Duration::from_millis(100));
         let paused = slot.newest().unwrap().generation;
         std::thread::sleep(Duration::from_millis(300));
         assert_eq!(paused, slot.newest().unwrap().generation, "frames came while paused");
-        assert!(paused >= first.generation);
+        assert!(paused >= first);
 
         player.seek(0.75);
-        let seeked = wait_for(&slot, paused, |_| true);
-        let time = seeked.frame.time.unwrap();
-        assert!((0.74..0.8).contains(&time), "the seek showed the frame at {time}");
-        if cpu {
-            assert!(shows(&seeked.frame, SECOND_HALF), "the seek showed {:?}", quarters(&seeked.frame));
-        }
+        let seeked = {
+            let seeked = wait_for(&slot, paused, |_| true);
+            let time = seeked.frame.time.unwrap();
+            assert!((0.74..0.8).contains(&time), "the seek showed the frame at {time}");
+            if cpu {
+                assert!(shows(&seeked.frame, SECOND_HALF), "the seek showed {:?}", quarters(&seeked.frame));
+            }
+            seeked.generation
+        };
         std::thread::sleep(Duration::from_millis(300));
-        assert_eq!(seeked.generation, slot.newest().unwrap().generation, "frames came after a paused seek");
+        assert_eq!(seeked, slot.newest().unwrap().generation, "frames came after a paused seek");
 
         // A seek past the end shows the last frame.
         player.seek(5.0);
-        let last = wait_for(&slot, seeked.generation, |_| true);
+        let last = wait_for(&slot, seeked, |_| true);
         let time = last.frame.time.unwrap();
         assert!((0.95..1.0).contains(&time), "the seek past the end showed the frame at {time}");
+        let last = last.generation;
 
         player.play();
-        let first_again = wait_for(&slot, last.generation, |_| true);
+        let first_again = wait_for(&slot, last, |_| true);
         let start = Instant::now();
         let time = first_again.frame.time.unwrap();
         assert!(time < 0.1, "the video didn't start over: it showed the frame at {time}");
+        let first_again = first_again.generation;
         // And plays on time from there.
-        wait_for(&slot, first_again.generation, |frame| frame.time.is_some_and(|time| time >= 0.5));
+        wait_for(&slot, first_again, |frame| frame.time.is_some_and(|time| time >= 0.5));
         assert!(start.elapsed() >= Duration::from_millis(400), "half a second played in {:?}", start.elapsed());
     }
 }

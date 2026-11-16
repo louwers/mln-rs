@@ -37,6 +37,12 @@ impl VideoTexture {
         &self.frames
     }
 
+    /// Whether the texture holds a frame, or the player failed and none
+    /// comes.
+    pub(crate) fn drawn(&self) -> bool {
+        self.seen.get() != 0 || self.frames.failure().is_some()
+    }
+
     /// The texture, once it holds a frame.
     pub(crate) fn texture(&self) -> Option<Texture2DPtr> {
         self.texture.get().filter(|_| self.seen.get() != 0).map(Rc::clone)

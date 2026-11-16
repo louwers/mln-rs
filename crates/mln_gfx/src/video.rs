@@ -129,13 +129,21 @@ pub enum PlaneLayout {
 pub enum GpuFrame {
     /// A Linux dmabuf of `fourcc` (a `DRM_FORMAT_*`) with `modifier`
     /// (`DRM_FORMAT_MOD_INVALID` for a layout only the driver knows), of
-    /// `size` pixels, its planes in order. The descriptors stay open while
-    /// the frame lives.
+    /// `size` pixels, its planes in order. The descriptors stay open, and
+    /// the producer doesn't write the memory again, while the frame lives.
     #[cfg(unix)]
-    DmaBuf { fourcc: u32, modifier: u64, size: Size, planes: Vec<DmaBufPlane>, color: YuvColor },
+    DmaBuf {
+        fourcc: u32,
+        modifier: u64,
+        size: Size,
+        planes: Vec<DmaBufPlane>,
+        color: YuvColor,
+        lease: Option<FrameLease>,
+    },
     /// An `AHardwareBuffer*`, which the frame holds a reference on and
-    /// releases when it drops.
-    AndroidHardwareBuffer { buffer: *mut std::ffi::c_void, color: YuvColor },
+    /// releases when it drops. The producer doesn't write the buffer again
+    /// while the frame lives.
+    AndroidHardwareBuffer { buffer: *mut std::ffi::c_void, color: YuvColor, lease: Option<FrameLease> },
     /// A `CVPixelBufferRef` backed by an IOSurface, which the frame
     /// retains: BGRA, or biplanar 4:2:0 YUV.
     CvPixelBuffer { buffer: *mut std::ffi::c_void, color: YuvColor },
@@ -252,6 +260,12 @@ pub struct ImportedFrame {
     /// which only `samplerExternalOES` samples.
     pub external: bool,
 }
+
+/// What keeps a producer from reusing a frame's memory for another frame,
+/// such as the decoder's buffer that the frame is in: dropped with the
+/// frame. A reference on the memory alone keeps it allocated, not
+/// unchanged.
+pub type FrameLease = Box<dyn Any + Send + Sync>;
 
 /// What a backend holds while it reads an imported frame: dropped once the
 /// GPU no longer reads it, which gives the frame back to its decoder.

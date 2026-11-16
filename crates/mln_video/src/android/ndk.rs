@@ -22,6 +22,8 @@ type Status = c_int;
 const OK: Status = 0;
 /// `AMEDIA_IMGREADER_NO_BUFFER_AVAILABLE`.
 const NO_BUFFER_AVAILABLE: Status = -30001;
+/// `AMEDIA_IMGREADER_MAX_IMAGES_ACQUIRED`.
+const MAX_IMAGES_ACQUIRED: Status = -30002;
 /// `AMEDIACODEC_INFO_TRY_AGAIN_LATER`.
 const TRY_AGAIN_LATER: isize = -1;
 /// `AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED`.
@@ -554,6 +556,9 @@ pub(super) struct ImageReader {
 
 // SAFETY: as for `Extractor`.
 unsafe impl Send for ImageReader {}
+// SAFETY: the NDK's reader locks itself in each call, and the listener's
+// signal is a mutex and a condition variable.
+unsafe impl Sync for ImageReader {}
 
 impl ImageReader {
     /// A reader of images of `width` by `height` pixels that holds up to
@@ -589,7 +594,8 @@ impl ImageReader {
         self.window
     }
 
-    /// The newest image, waiting up to `timeout` for one.
+    /// The newest image, waiting up to `timeout` for one, and for one of the
+    /// images held to go back if the reader holds as many as it may.
     pub(super) fn acquire_latest(&self, timeout: Duration) -> Result<Option<Image>, String> {
         let deadline = std::time::Instant::now() + timeout;
         loop {
@@ -607,6 +613,13 @@ impl ImageReader {
                     if !*ready && self.signal.changed.wait_until(&mut ready, deadline).timed_out() {
                         return Ok(None);
                     }
+                }
+                // No listener tells when an image goes back.
+                MAX_IMAGES_ACQUIRED => {
+                    if std::time::Instant::now() >= deadline {
+                        return Ok(None);
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
                 }
                 status => return Err(format!("acquiring an image failed: {status}")),
             }

@@ -272,6 +272,10 @@ impl RenderSource for RenderImageSource {
         self.loaded()
     }
 
+    fn drawn(&self) -> bool {
+        self.video.as_ref().is_none_or(|video| video.drawn())
+    }
+
     fn update(
         &mut self,
         _store: &mut TileStore,

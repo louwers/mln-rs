@@ -118,7 +118,7 @@ fn rgba_buffer_frame(size: Size) -> VideoFrame {
     let color = YuvColor::default();
     VideoFrame {
         size,
-        pixels: FramePixels::Gpu(GpuFrame::AndroidHardwareBuffer { buffer: buffer.as_ptr(), color }),
+        pixels: FramePixels::Gpu(GpuFrame::AndroidHardwareBuffer { buffer: buffer.as_ptr(), color, lease: None }),
         time: None,
     }
 }
@@ -165,7 +165,7 @@ fn yuv_buffer_frame(size: Size) -> Option<VideoFrame> {
     let color = YuvColor { matrix: YuvMatrix::Bt601, range: YuvRange::Limited };
     Some(VideoFrame {
         size,
-        pixels: FramePixels::Gpu(GpuFrame::AndroidHardwareBuffer { buffer: buffer.as_ptr(), color }),
+        pixels: FramePixels::Gpu(GpuFrame::AndroidHardwareBuffer { buffer: buffer.as_ptr(), color, lease: None }),
         time: None,
     })
 }

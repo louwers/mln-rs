@@ -73,6 +73,13 @@ pub(crate) trait RenderSource {
 
     fn is_loaded(&self, store: &TileStore) -> bool;
 
+    /// Whether, after a frame's uploads, the source's textures hold what it
+    /// shows: false for a video source that no frame was drawn of yet, while
+    /// its player hasn't failed.
+    fn drawn(&self) -> bool {
+        true
+    }
+
     fn update(
         &mut self,
         store: &mut TileStore,

@@ -289,8 +289,21 @@ impl<'a> Player<'a> {
             sent_any: false,
             failed: false,
         };
-        player.open(0)?;
+        player.open_from(0)?;
         Ok(player)
+    }
+
+    /// Has the engine play the first of `urls[first..]` that opens; fails
+    /// with the last URL's error if none does.
+    fn open_from(&mut self, first: usize) -> Result<(), String> {
+        let mut result = Err("no URL left to play".to_owned());
+        for index in first..self.urls.len() {
+            result = self.open(index);
+            if result.is_ok() {
+                break;
+            }
+        }
+        result
     }
 
     /// Has the engine play `urls[index]`.
@@ -355,7 +368,7 @@ impl<'a> Player<'a> {
             event if event == MF_MEDIA_ENGINE_EVENT_ERROR.0 => {
                 // A URL that never played gives way to the next.
                 if !self.sent_any && self.url + 1 < self.urls.len() {
-                    if let Err(message) = self.open(self.url + 1) {
+                    if let Err(message) = self.open_from(self.url + 1) {
                         self.fail(message);
                     }
                     return;
