@@ -19,8 +19,9 @@ use mln_gfx::gpu::GpuError;
 use mln_util::logging::{Event, Log};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_RANGE, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_FLAG_NONE,
-    D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATES, D3D12_SMALL_RESOURCE_PLACEMENT_ALIGNMENT,
-    D3D12_TEXTURE_LAYOUT_ROW_MAJOR, ID3D12Device, ID3D12Resource,
+    D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_GENERIC_READ,
+    D3D12_RESOURCE_STATES, D3D12_SMALL_RESOURCE_PLACEMENT_ALIGNMENT, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, ID3D12Device,
+    ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC};
 
@@ -110,6 +111,15 @@ impl BufferMemory {
         debug_assert!(!self.mapped.is_null());
         // SAFETY: the mapping covers the range, as long as the memory lives.
         unsafe { std::slice::from_raw_parts_mut(self.mapped, self.size as usize) }
+    }
+
+    /// The bytes of the range, in upload memory.
+    #[cfg(test)]
+    pub(crate) fn read(&self) -> Vec<u8> {
+        assert!(!self.mapped.is_null(), "a read of memory the CPU doesn't reach");
+        // SAFETY: the mapping covers the range; the tests read it with no
+        // work in flight.
+        unsafe { std::slice::from_raw_parts(self.mapped, self.size as usize).to_vec() }
     }
 
     /// Copies `data` to `at` bytes into the range, in upload memory.
@@ -225,8 +235,15 @@ impl Memory {
         let size = size.max(MIN_SLAB);
         let slab = (size.next_power_of_two().trailing_zeros() - MIN_SLAB.trailing_zeros()) as usize;
         let index = location_index(location);
+        // Upload memory starts in the state that reads it, readback memory in
+        // the state that copies to it.
+        let state = match location {
+            MemoryLocation::CpuToGpu => D3D12_RESOURCE_STATE_GENERIC_READ,
+            MemoryLocation::GpuToCpu => D3D12_RESOURCE_STATE_COPY_DEST,
+            _ => D3D12_RESOURCE_STATE_COMMON,
+        };
         if slab >= SLAB_SIZES {
-            let resource = self.place("buffer", location, &buffer_desc(size), D3D12_RESOURCE_STATE_COMMON)?;
+            let resource = self.place("buffer", location, &buffer_desc(size), state)?;
             let mapped = map(resource.resource(), location)?;
             return Ok(BufferMemory {
                 resource: resource.resource().clone(),
@@ -238,7 +255,7 @@ impl Memory {
             });
         }
         if self.slabs[index].free[slab].is_empty() {
-            let resource = self.place("slabs", location, &buffer_desc(SLAB_PAGE), D3D12_RESOURCE_STATE_COMMON)?;
+            let resource = self.place("slabs", location, &buffer_desc(SLAB_PAGE), state)?;
             let mapped = map(resource.resource(), location)?;
             let slabs = &mut self.slabs[index];
             let page = slabs.pages.len();

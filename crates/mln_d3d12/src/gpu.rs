@@ -256,6 +256,9 @@ pub struct D3d12Gpu {
     buffers: SlotMap<BufferId, Buffer>,
     /// The buffers that some window doesn't hold the contents of.
     stale: Vec<BufferId>,
+    /// The windows of destroyed buffers that bindings still bind, which
+    /// each batch brings up to date until they all hold the last contents.
+    retired: Vec<(Rc<BufferMemory>, Windows)>,
     upload: UploadRing,
     /// The resources of the vertex and index buffers that the copies of the
     /// batch write, which they transition to and from the copy state.
@@ -419,6 +422,7 @@ impl D3d12Gpu {
             window: (0, 0),
             buffers: SlotMap::with_key(),
             stale: Vec::new(),
+            retired: Vec::new(),
             upload: UploadRing::default(),
             copied: HashSet::default(),
             copied_resources: Vec::new(),
@@ -479,6 +483,16 @@ impl D3d12Gpu {
         let size = Size::new(desc.Width as u32, desc.Height);
         let memory = TextureMemory::imported(resource.clone(), self.memory.freed());
         self.insert_texture(memory, desc.Format, TextureInfo { format, size, usage }, state)
+    }
+
+    /// Each window of the uniform or storage buffer `buffer`.
+    #[cfg(test)]
+    pub(crate) fn windows(&self, buffer: BufferId) -> Vec<Vec<u8>> {
+        let Some(Buffer { memory, windows: Some(windows), size, .. }) = self.buffers.get(buffer) else {
+            return Vec::new();
+        };
+        let bytes = memory.read();
+        (0..WINDOWS).map(|window| bytes[window * windows.stride as usize..][..*size as usize].to_vec()).collect()
     }
 
     /// How many pages the slabs of small buffers have.
@@ -570,6 +584,18 @@ impl D3d12Gpu {
             }
             windows.current != all
         });
+        for (memory, windows) in &mut self.retired {
+            if windows.current & (1 << window) == 0 {
+                windows.copy(memory, window, 0, windows.contents.len());
+                windows.current |= 1 << window;
+            }
+        }
+        // Up to date, they wait for the work that reads them as destroyed
+        // buffers do.
+        let (done, retired): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.retired).into_iter().partition(|(_, windows)| windows.current == all);
+        self.retired = retired;
+        self.garbage.extend(done.into_iter().map(|(memory, _)| (serial, Garbage::Held(Box::new(memory)))));
         self.window = (serial, window);
         Ok(window)
     }
@@ -765,6 +791,10 @@ impl Gpu for D3d12Gpu {
             BufferUsage::Uniform | BufferUsage::Storage => {
                 let stride = size.next_multiple_of(BUFFER_ALIGNMENT);
                 let memory = self.memory.buffer(MemoryLocation::CpuToGpu, stride * WINDOWS as u64)?;
+                // Every window holds the contents, zeros, as reused memory
+                // holds another buffer's bytes.
+                // SAFETY: no work reads the new memory.
+                unsafe { memory.write(0, &vec![0; (stride * WINDOWS as u64) as usize]) };
                 let windows = Windows { contents: vec![0; size as usize], stride, current: (1 << WINDOWS) - 1 };
                 (memory, Some(windows))
             }
@@ -1142,7 +1172,14 @@ impl Gpu for D3d12Gpu {
             value.map(|value| Garbage::Held(Box::new(value)))
         }
         let garbage = match resource {
-            ResourceId::Buffer(id) => held(self.buffers.remove(id).map(|buffer| buffer.memory)),
+            ResourceId::Buffer(id) => match self.buffers.remove(id) {
+                // Bindings may still read the buffer in each window.
+                Some(Buffer { memory, windows: Some(windows), .. }) if windows.current != (1 << WINDOWS) - 1 => {
+                    self.retired.push((memory, windows));
+                    None
+                }
+                buffer => held(buffer.map(|buffer| buffer.memory)),
+            },
             ResourceId::Texture(id) => self.textures.remove(id).map(Garbage::Texture),
             ResourceId::Sampler(id) => {
                 self.samplers.remove(id);
@@ -1460,9 +1497,13 @@ impl Gpu for D3d12Gpu {
         let rows = region.size.height as usize;
         let size = (row_pitch * rows) as u64;
         let buffer = match self.spare_readback.take() {
-            Some(spare) if spare.size >= size && spare.size <= size.next_power_of_two().max(256) => spare,
-            _ => self.memory.buffer(MemoryLocation::GpuToCpu, size)?,
+            Some(spare) if spare.size >= size && spare.size <= size.next_power_of_two().max(512) => spare,
+            // A copy from a texture writes from an offset of 512 bytes.
+            _ => self
+                .memory
+                .buffer(MemoryLocation::GpuToCpu, size.max(u64::from(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT)))?,
         };
+        debug_assert!(buffer.offset.is_multiple_of(u64::from(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT)));
         let list = self.frame_list()?;
         let resource = &memory.resource;
         let dst = D3D12_TEXTURE_COPY_LOCATION {

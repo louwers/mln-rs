@@ -136,3 +136,63 @@ fn destroyed_buffers_memory_is_reused() {
     assert!(first > 0);
     assert_eq!(round(&mut gpu), first, "the second round takes the first's slabs");
 }
+
+// A uniform buffer in reused memory holds zeros in every window, so a write
+// of zeros, which matches its contents, leaves zeros there.
+#[test]
+fn a_uniform_buffer_in_reused_memory_starts_zeroed() {
+    use mln_gfx::gpu::{
+        BufferDesc, BufferUsage, ColorAttachment, LoadOp, PassDesc, ResourceId, TextureDesc, TextureFormat,
+        TextureUsage,
+    };
+
+    let mut gpu = gpu();
+    let desc = BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 256 };
+    let first = gpu.create_buffer(&desc).expect("a buffer");
+    gpu.write_buffer(first, 0, &[0xAB; 256]).expect("the write");
+    gpu.flush(true).expect("the flush");
+    // A pass in the next batch brings its window up to date, so the buffer
+    // goes once its work finishes.
+    let size = mln_util::size::Size::new(4, 4);
+    let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
+    let target = gpu
+        .create_texture(&TextureDesc { label: "target", size, format: TextureFormat::Rgba8Unorm, usage })
+        .expect("a texture");
+    let color = Some(ColorAttachment { texture: target, load: LoadOp::Load });
+    gpu.begin_pass(&PassDesc { label: "pass", color, depth_stencil: None }).expect("the pass");
+    gpu.end_pass().expect("the pass's end");
+    gpu.flush(true).expect("the flush");
+    assert!(gpu.windows(first).iter().all(|window| window.iter().all(|&byte| byte == 0xAB)));
+    gpu.destroy(ResourceId::Buffer(first));
+    gpu.flush(true).expect("the flush");
+    let pages = gpu.slab_pages();
+    let second = gpu.create_buffer(&desc).expect("a buffer");
+    assert_eq!(gpu.slab_pages(), pages, "the second buffer takes the first's memory");
+    gpu.write_buffer(second, 0, &[0; 256]).expect("the write");
+    for window in gpu.windows(second) {
+        assert!(window.iter().all(|&byte| byte == 0));
+    }
+}
+
+// Readbacks waiting at once each copy into memory that a texture copy can
+// write to, from an offset of 512 bytes.
+#[test]
+fn small_readbacks_waiting_at_once_read_their_rows() {
+    use mln_gfx::gpu::{TextureDesc, TextureFormat, TextureRegion, TextureUsage};
+    use mln_util::size::Size;
+
+    let mut gpu = gpu();
+    let size = Size::new(4, 4);
+    let usage = TextureUsage { sampled: true, copy_src: true, ..TextureUsage::default() };
+    let texture = gpu
+        .create_texture(&TextureDesc { label: "rows", size, format: TextureFormat::Rgba8Unorm, usage })
+        .expect("a texture");
+    let texels: Vec<u8> = (0..64).collect();
+    gpu.write_texture(texture, TextureRegion::whole(size), &texels).expect("the write");
+    let row = |y| TextureRegion { x: 0, y, size: Size::new(4, 1) };
+    let readbacks: Vec<_> = (0..4).map(|y| gpu.read_texture(texture, row(y)).expect("a readback")).collect();
+    for (y, readback) in readbacks.into_iter().enumerate() {
+        let read = gpu.take_readback(readback, true).expect("the texels").expect("waited for");
+        assert_eq!(read, texels[y * 16..(y + 1) * 16], "row {y}");
+    }
+}
