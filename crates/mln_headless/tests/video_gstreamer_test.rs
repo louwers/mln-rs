@@ -3,7 +3,9 @@
 // fixture over the whole view, and the still shows its first frame, red.
 // Where GStreamer isn't installed the test passes, saying it was skipped.
 // With a VA-API decoder the frames come as dmabufs, which the backends that
-// import them draw without a copy through memory.
+// import them draw without a copy through memory: with
+// MLN_VIDEO_EXPECT_GPU_FRAMES set, the test fails if the renderer refused
+// them.
 #![cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
 
 use std::sync::Arc;
@@ -97,7 +99,11 @@ fn gstreamer_plays_a_video_source() {
     let refused = frames.is_some_and(|frames| frames.gpu_frames_refused());
     let backend = std::env::var("MLN_RENDER_BACKEND").unwrap_or_default();
     eprintln!("{backend}: GPU frames refused: {refused}");
-    if va_decoder_installed() && (backend.starts_with("gl") || backend == "vulkan") {
+    // A renderer on another GPU than the decoder's, such as lavapipe, may
+    // not import its dmabufs and draws the frames from memory instead: the
+    // check that it imports them is for a machine whose decoder and
+    // renderer share a GPU.
+    if std::env::var_os("MLN_VIDEO_EXPECT_GPU_FRAMES").is_some() && va_decoder_installed() {
         assert!(!refused, "{backend} imports VA-API's dmabufs");
     }
 }
