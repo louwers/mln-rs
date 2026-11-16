@@ -22,10 +22,7 @@
 //! - Trait objects cross as the types they can be (fields.rs): layers'
 //!   style data and evaluated properties, and compound expressions, as
 //!   their layer type's or function's name, which the reading side resolves
-//!   against its own [`Registry`]; buckets as their bucket type's. The first
-//!   frame of a map side carries its registry's digest, and an instance
-//!   whose registry differs fails every job instead of decoding them against
-//!   other registrations.
+//!   against its own [`Registry`]; buckets as their bucket type's.
 //!
 //! Glyphs and images stay on the map side: a job gets where they are in the
 //! map's atlas (`Resolved`), never their pixels.

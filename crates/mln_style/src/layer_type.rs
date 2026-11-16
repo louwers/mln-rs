@@ -34,7 +34,7 @@ use crate::serialization::shared_expression;
 use crate::style_property::StyleProperty;
 
 /// Where a layer type's layers get their data.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceKind {
     /// No source: the layer draws without one.
     None,
@@ -49,7 +49,7 @@ pub enum SourceKind {
 /// What the engine needs to know about a layer type besides its properties.
 /// The name identifies the type: two registries that agree on a name agree
 /// on the type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LayerTypeInfo {
     /// The layer type as style JSON names it.
     pub name: &'static str,

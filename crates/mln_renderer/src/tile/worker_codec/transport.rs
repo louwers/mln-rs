@@ -101,7 +101,7 @@ pub struct RemoteWorkers {
 struct State {
     instances: Box<dyn WorkerInstances>,
     lanes: Vec<RemoteLane>,
-    /// What the jobs name, which each lane's codec sends its instance.
+    /// What the jobs name.
     registry: Arc<Registry>,
 }
 
@@ -115,8 +115,7 @@ struct RemoteLane {
 }
 
 impl RemoteLane {
-    /// The lane of its `instance`th instance, with tables of its own: its
-    /// first frame carries `registry`'s digest.
+    /// The lane of its `instance`th instance, with tables of its own.
     fn new(registry: &Arc<Registry>, instance: u64) -> Self {
         RemoteLane { codec: MapCodec::new(Arc::clone(registry)), in_flight: HashSet::default(), instance }
     }

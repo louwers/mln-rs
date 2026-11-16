@@ -2,7 +2,6 @@
 //! and its layer types.
 
 use std::cell::Cell;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock};
 
 use mln_conversion::{Convertible, Error};
@@ -59,17 +58,6 @@ impl StyleRegistry {
     /// The layer types, by name.
     pub fn layer_types(&self) -> impl Iterator<Item = &'static dyn ErasedStyleLayerType> + '_ {
         self.layer_types.values().copied()
-    }
-
-    /// Feeds `hasher` what parsing and decoding resolve against: the
-    /// functions' [`digest`](Functions::digest), then the layer types'
-    /// infos, by name.
-    pub fn digest(&self, hasher: &mut impl Hasher) {
-        self.functions.digest(hasher);
-        self.layer_types.len().hash(hasher);
-        for layer_type in self.layer_types.values() {
-            layer_type.info().hash(hasher);
-        }
     }
 
     /// A layer of the type `type_` from its style JSON `value`, without its

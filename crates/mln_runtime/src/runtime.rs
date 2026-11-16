@@ -507,8 +507,7 @@ impl Runtime {
     /// Starts a runtime and its thread, whose maps parse their styles
     /// against `registry`, and whose renderers and tile workers use it. In
     /// the browser, the tile workers' Web Workers must serve with registries
-    /// filled by the same calls (`mln_web_host::tile_worker::serve`), or
-    /// their jobs fail.
+    /// filled by the same calls (`mln_web_host::tile_worker::serve`).
     ///
     /// Fails as [`new`](Self::new) does.
     pub fn with_registry(options: &RuntimeOptions, registry: Arc<Registry>) -> Result<Runtime, Error> {

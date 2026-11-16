@@ -19,9 +19,6 @@ pub(crate) struct WorkerCodec {
     tables: shared::Tables,
     /// What the jobs' registrations resolve against.
     registry: Arc<Registry>,
-    /// Whether the map side's registry has `registry`'s digest, once its
-    /// first frame told.
-    same_registry: Option<bool>,
 }
 
 impl WorkerCodec {
@@ -34,22 +31,13 @@ impl WorkerCodec {
             .copies::<SharedLayer>()
             .copies::<SharedEvaluatedLayer>()
             .copies::<SharedExpression>();
-        WorkerCodec { tables, registry, same_registry: None }
+        WorkerCodec { tables, registry }
     }
 
-    /// Decodes a job's body: checks the map side's registry digest, forgets
-    /// what the map side lists as gone, then reads the job. Fails every job
-    /// once the digest differs from this side's.
+    /// Decodes a job's body: forgets what the map side lists as gone, then
+    /// reads the job. Fails for a job that names a registration this side's
+    /// registry lacks.
     pub(crate) fn decode_job(&mut self, body: &[u8]) -> Result<Job, String> {
-        let (digest, body): (Option<u64>, &[u8]) = envelope::take(body)?;
-        if let Some(digest) = digest {
-            self.same_registry = Some(digest == self.registry.digest());
-        }
-        match self.same_registry {
-            Some(true) => {}
-            Some(false) => return Err("the tile worker's registrations differ from the map's".to_owned()),
-            None => return Err("a job before the map's registry digest".to_owned()),
-        }
         let (forget, job): (Vec<(String, Vec<u64>)>, &[u8]) = envelope::take(body)?;
         self.tables.forget(&forget);
         session(&self.registry, || self.tables.open(|| envelope::decode(job)))

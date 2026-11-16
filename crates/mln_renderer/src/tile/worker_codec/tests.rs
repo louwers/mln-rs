@@ -528,7 +528,6 @@ fn layouts_have_the_layers_they_answer() {
 /// The keys of each table that a job's frame tells the worker to forget.
 fn forgotten(request: &[u8]) -> Vec<(String, Vec<u64>)> {
     let (_, body) = envelope::read_job_id(request).unwrap();
-    let (_digest, body): (Option<u64>, _) = envelope::take(body).unwrap();
     envelope::take(body).unwrap().0
 }
 
@@ -640,26 +639,22 @@ fn failed_jobs_define_nothing() {
     assert_eq!(job.style.layers[0].style().base().id, "water");
 }
 
-/// A map side's first frame carries its registry's digest, and an instance
-/// whose registry has another fails that job and every one after.
+/// A worker whose registry lacks a layer type that a job names fails that
+/// job's decoding.
 #[test]
-fn other_registrations_fail_every_job() {
-    let registry = Registry::with_builtins();
-    let mut map = MapCodec::new(Arc::clone(&registry));
-    let style = style(&layers(&[FILL]));
-    let requests: Vec<Vec<u8>> =
-        (0..2).map(|_| map.encode_run(&job(&style, DataInput::Cached(key(1)), Resolved::default())).unwrap()).collect();
-    let bodies: Vec<&[u8]> = requests.iter().map(|request| envelope::read_job_id(request).unwrap().1).collect();
-    let digests: Vec<Option<u64>> = bodies.iter().map(|body| envelope::take(body).unwrap().0).collect();
-    assert_eq!(digests, [Some(registry.digest()), None]);
+fn a_missing_layer_type_fails_its_job() {
+    let mut map = MapCodec::new(Registry::with_builtins());
+    let request =
+        map.encode_run(&job(&style(&layers(&[FILL])), DataInput::Cached(key(1)), Resolved::default())).unwrap();
+    let (_, body) = envelope::read_job_id(&request).unwrap();
 
-    let mut other = WorkerCodec::new(crate::RegistryBuilder::new().build());
-    for body in &bodies {
-        let Err(error) = other.decode_job(body) else { panic!("decoded with other registrations") };
-        assert!(error.contains("registrations differ"), "{error}");
-    }
-    let mut same = WorkerCodec::new(Registry::with_builtins());
-    assert!(bodies.iter().all(|body| same.decode_job(body).is_ok()));
+    let mut builder = crate::RegistryBuilder::new();
+    mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
+    builder.add_layer_type::<mln_style::layers::Line>().unwrap();
+    let Err(error) = WorkerCodec::new(builder.build()).decode_job(body) else {
+        panic!("decoded a fill layer without its type");
+    };
+    assert!(error.contains("unknown layer type"), "{error}");
 }
 
 /// A host that can't decode a job's body replies `Failed` with the job's

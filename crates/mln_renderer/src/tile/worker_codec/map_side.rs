@@ -20,8 +20,6 @@ pub(crate) struct MapCodec {
     tables: shared::Tables,
     /// What the jobs name and the replies resolve against.
     registry: Arc<Registry>,
-    /// Whether a frame carried the registry's digest to the instance.
-    digest_sent: bool,
 }
 
 impl MapCodec {
@@ -36,13 +34,11 @@ impl MapCodec {
                 .origin::<SharedEvaluatedLayer>()
                 .origin::<SharedExpression>(),
             registry,
-            digest_sent: false,
         }
     }
 
-    /// The frame of `run`: its header, then the registry's digest in the
-    /// first frame (`None` after), then the keys of the shared values that
-    /// are gone on this side, then the job. Fails for what can't cross,
+    /// The frame of `run`: its header, then the keys of the shared values
+    /// that are gone on this side, then the job. Fails for what can't cross,
     /// which then defines nothing.
     pub(crate) fn encode_run(&mut self, run: &Run) -> Result<Vec<u8>, String> {
         let job = self.tables.open(|| {
@@ -54,10 +50,8 @@ impl MapCodec {
         let forget = self.tables.forget_dead();
         let mut bytes = Vec::new();
         envelope::write_job_header(&mut bytes, &run.id);
-        envelope::append(&mut bytes, &(!self.digest_sent).then(|| self.registry.digest()))?;
         envelope::append(&mut bytes, &forget)?;
         bytes.extend_from_slice(&job);
-        self.digest_sent = true;
         Ok(bytes)
     }
 
@@ -65,7 +59,7 @@ impl MapCodec {
     /// `Failed`.
     pub(crate) fn decode_result(&mut self, body: Encoded) -> JobResult {
         let Encoded { bytes, payloads } = body;
-        let Self { tables, registry, .. } = self;
+        let Self { tables, registry } = self;
         let decode = || tables.open(|| envelope::decode::<JobResult>(&bytes));
         payload::decode(payloads, || session(registry, decode))
             .unwrap_or_else(|error| JobResult::Failed(Error::native(format!("a tile worker's reply: {error}"))))

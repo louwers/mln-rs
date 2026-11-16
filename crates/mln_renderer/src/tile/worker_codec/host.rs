@@ -44,8 +44,8 @@ struct Jobs {
 impl TileWorkerHost {
     /// A host that resolves the registrations its jobs name against
     /// `registry` and sends its replies to `replies`. `registry` must be
-    /// filled by the same calls as the map side's, or the host fails every
-    /// job. Its data cache keeps 32 MiB.
+    /// filled by the same calls as the map side's. Its data cache keeps
+    /// 32 MiB.
     pub fn new(registry: Arc<Registry>, replies: impl Fn(Encoded) + Send + Sync + 'static) -> Self {
         TileWorkerHost {
             jobs: RefCell::new(Jobs {

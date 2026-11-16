@@ -17,7 +17,6 @@ pub(crate) mod builtin;
 
 use std::borrow::Cow;
 use std::cell::Cell;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock};
 
 use mln_util::Color;
@@ -30,7 +29,7 @@ use crate::type_::Type;
 
 /// The parameter list of an overload: fixed types, or any number of
 /// arguments of one type.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Params {
     Fixed(Vec<Type>),
     Varargs(Type),
@@ -49,7 +48,7 @@ impl Params {
 /// What the built-in static analyses may assume about a function. `Plain`
 /// for all but six built-ins. Only one function may claim `Zoom` and only
 /// one `GlobalState` ([`Functions::add`] rejects a second).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
     Plain,
     /// Reads the feature property whose key is the literal first argument
@@ -249,22 +248,6 @@ impl Functions {
 
     pub(crate) fn contains(&self, name: &str) -> bool {
         self.by_name.contains_key(name)
-    }
-
-    /// Feeds `hasher` what parsing and decoding resolve against: each
-    /// function's name and its overloads' parameter and result types,
-    /// dependencies and roles, in the order they were added. Two values
-    /// filled by the same calls hash alike with a deterministic hasher.
-    pub fn digest(&self, hasher: &mut impl Hasher) {
-        self.defs.len().hash(hasher);
-        for def in &self.defs {
-            def.name.hash(hasher);
-            def.overloads.len().hash(hasher);
-            for overload in &def.overloads {
-                let Overload { name: _, index: _, result, params, dependencies, role, eval: _ } = &**overload;
-                (result, params, dependencies, role).hash(hasher);
-            }
-        }
     }
 }
 

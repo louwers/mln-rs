@@ -38,7 +38,8 @@ thread_local! {
 
 /// Runs tile workers for the map side at the other end of `port`, until it
 /// disconnects, laying out with `registry`, which must be filled by the
-/// same calls as the map side's (its jobs fail otherwise). Call it on the
+/// same calls as the map side's: a job that names a registration it lacks
+/// fails. Call it on the
 /// instance of a Web Worker, once for each port that a map side sends it.
 /// The app's module exports it as `mlnWebServeTileWorker`, which the Web
 /// Worker's script calls after the module's `init`.
