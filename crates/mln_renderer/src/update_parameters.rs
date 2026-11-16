@@ -3,8 +3,9 @@ use std::sync::Arc;
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_style::collection::ImmutableVector;
 use mln_style::expression::GlobalStateMap;
+use mln_style::layer_type::ErasedLayerStyle;
 use mln_style::transition_options::TransitionOptions;
-use mln_style::{image, layer, light, sky, source};
+use mln_style::{image, light, sky, source};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
 
@@ -28,7 +29,7 @@ pub struct UpdateParameters {
     pub sky: Option<Arc<sky::Impl>>,
     pub images: Arc<Vec<Arc<image::Impl>>>,
     pub sources: ImmutableVector<dyn source::Impl>,
-    pub layers: ImmutableVector<dyn layer::Impl>,
+    pub layers: ImmutableVector<dyn ErasedLayerStyle>,
     /// The style's global state, used by "global-state" expressions.
     pub global_state: Option<Arc<GlobalStateMap>>,
     /// The map's feature state. Each render source takes its own, in place

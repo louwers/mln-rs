@@ -157,7 +157,7 @@ fn invoke_tile_changed() {
 
     let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(&layer.base_impl()).unwrap()));
+        Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
 
     tiles.set_style(&crate::tests::style(std::slice::from_ref(&layer_properties)));
     assert!(tiles.tile().contents.is_none());

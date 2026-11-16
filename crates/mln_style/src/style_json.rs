@@ -72,7 +72,7 @@ impl Style {
         if self.get_layer(&id).is_some() {
             return Err(Error::already_exists(format!("layer {} already exists", quote(&id))));
         }
-        let type_info = layer.get_type_info();
+        let type_info = layer.info();
         if type_info.source != SourceKind::None {
             let source_id = layer.get_source_id();
             let Some(source) = self.get_source(&source_id) else {
@@ -174,7 +174,7 @@ impl Style {
             return Err(layer_not_found(layer_id));
         };
 
-        let type_info = layer.get_type_info();
+        let type_info = layer.info();
         if (name == "source" || name == "source-layer") && type_info.source == SourceKind::None {
             // A layer that takes no source would ignore the value.
             return Err(Error::invalid_argument(format!(

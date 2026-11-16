@@ -693,7 +693,7 @@ impl SourceTiles {
             tile.used_by_rendered_layers = false;
             let hold_for_fade = tile.hold_for_fade();
             for layer_properties in update.layers {
-                let type_info = layer_properties.style().get_type_info();
+                let type_info = layer_properties.style().info();
                 if hold_for_fade && !type_info.fading_tiles {
                     continue;
                 }

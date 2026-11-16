@@ -24,8 +24,9 @@ use mln_vec_map::{VecMap, VecSet};
 use crate::evaluated::Evaluated;
 use crate::expression::Functions;
 use crate::format_section_override::{format_section_override as new_override, set_overrides};
-use crate::layers::symbol_layer_impl::{Impl as SymbolLayerImpl, SymbolLayerPaintPropertyOverrides as MockOverrides};
-use crate::layers::{SymbolLayoutProperties, SymbolPaintProperties};
+use crate::layer_type::LayerStyle;
+use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides as MockOverrides;
+use crate::layers::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
 use crate::properties::{Transitionable, Transitioning};
 use crate::property_expression::PropertyExpression;
 use crate::property_table::layout_properties_differ;
@@ -256,7 +257,7 @@ fn symbol_layer_overrides() {
 
         // A constant overridable property's change counts while a section
         // overrides it.
-        let mut current = SymbolLayerImpl::new(String::new(), String::new());
+        let mut current = LayerStyle::<Symbol>::new(String::new(), String::new());
         let mut updated = current.clone();
         current.paint.text_color =
             Transitionable { value: PropertyValue::Constant(Color::green()), options: TransitionOptions::default() };

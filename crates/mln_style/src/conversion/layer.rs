@@ -107,8 +107,7 @@ pub(crate) fn convert_layer_with(
     if !set_object_member(&mut layer, value, "filter", error) {
         return None;
     }
-    if layer.get_type_info().source != SourceKind::None && !set_object_member(&mut layer, value, "source-layer", error)
-    {
+    if layer.info().source != SourceKind::None && !set_object_member(&mut layer, value, "source-layer", error) {
         return None;
     }
 

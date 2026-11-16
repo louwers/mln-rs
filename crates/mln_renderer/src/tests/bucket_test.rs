@@ -183,7 +183,7 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         .unwrap_or_else(|| panic!("{}", error.message));
     let evaluated = FillPaintProperties::PossiblyEvaluated {
         fill_color: Evaluated::PerFeature {
-            expression: LayerStyle::<Fill>::recover_ref(layer.base_impl_ref())
+            expression: LayerStyle::<Fill>::recover_ref(&**layer.style())
                 .expect("fill layer")
                 .paint
                 .fill_color
@@ -195,7 +195,7 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         ..FillPaintProperties::PossiblyEvaluated::default()
     };
     let properties =
-        Arc::new(EvaluatedLayer::<Fill>::with_paint(LayerStyle::recover(&layer.base_impl()).unwrap(), evaluated));
+        Arc::new(EvaluatedLayer::<Fill>::with_paint(LayerStyle::recover(layer.style()).unwrap(), evaluated));
     let mut bucket = FillBucket::new(
         &FillLayoutProperties::PossiblyEvaluated::default(),
         &VecMap::from_iter([("fill".to_owned(), properties)]),
@@ -702,7 +702,7 @@ fn line_bucket_vertices(
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    let layout = LayerStyle::<Line>::recover_ref(layer.base_impl_ref())
+    let layout = LayerStyle::<Line>::recover_ref(&**layer.style())
         .expect("line layer")
         .layout
         .evaluate(&PropertyEvaluationParameters::new(10.0));

@@ -45,7 +45,8 @@ use mln_util::logging::{Event, Log};
 use crate::collection::{Collection, CollectionWithPersistentOrder, ImmutableVector};
 use crate::expression::GlobalStateMap;
 use crate::image;
-use crate::layer::{self, Layer};
+use crate::layer::Layer;
+use crate::layer_type::ErasedLayerStyle;
 use crate::light::{self, Light};
 use crate::map::camera::CameraOptions;
 use crate::observer::{NullObserver, Observer, SourceObserver};
@@ -622,9 +623,9 @@ impl Impl {
         let global_state = Arc::clone(&self.global_state);
         let mut changed = Vec::new();
         for layer in self.layers.get_wrappers_mut() {
-            let before = layer.base_impl();
+            let before = Arc::clone(layer.style());
             layer.reevaluate_visibility(&global_state);
-            if !Arc::ptr_eq(&before, &layer.base_impl()) {
+            if !Arc::ptr_eq(&before, layer.style()) {
                 changed.push(layer.get_id());
             }
         }
@@ -699,7 +700,7 @@ impl Impl {
     /// The layer `id`, for mutation: the guard notifies this style
     /// (`on_layer_changed`) when dropped if the layer changed.
     pub(crate) fn get_layer_mut(&mut self, id: &str) -> Option<LayerRefMut<'_>> {
-        let before = self.layers.get(id)?.base_impl();
+        let before = Arc::clone(self.layers.get(id)?.style());
         Some(LayerRefMut { style: self, id: id.to_owned(), before })
     }
 
@@ -861,7 +862,7 @@ impl Impl {
         refreshed
     }
 
-    pub fn get_layer_impls(&self) -> ImmutableVector<dyn layer::Impl> {
+    pub fn get_layer_impls(&self) -> ImmutableVector<dyn ErasedLayerStyle> {
         self.layers.get_impls()
     }
 
@@ -960,11 +961,11 @@ impl Impl {
 /// layer's type.
 fn check_layer_source(sources: &CollectionWithPersistentOrder<dyn Source>, layer: &Layer) -> Result<(), Error> {
     // TODO: verify source
-    let impl_ = layer.base_impl_ref();
-    if let Some(source) = sources.get(&impl_.source)
-        && !source.supports_layer_type(impl_.get_type_info())
+    let impl_ = layer.style();
+    if let Some(source) = sources.get(&impl_.base().source)
+        && !source.supports_layer_type(impl_.info())
     {
-        let message = format!("Layer '{}' is not compatible with source '{}'", impl_.id, impl_.source);
+        let message = format!("Layer '{}' is not compatible with source '{}'", impl_.base().id, impl_.base().source);
         return Err(Error::invalid_argument(message));
     }
     Ok(())
@@ -1010,7 +1011,7 @@ fn state_values_equal(a: &Value, b: &Value) -> bool {
 pub struct LayerRefMut<'a> {
     style: &'a mut Impl,
     id: String,
-    before: Arc<dyn layer::Impl>,
+    before: Arc<dyn ErasedLayerStyle>,
 }
 
 impl std::ops::Deref for LayerRefMut<'_> {
@@ -1031,7 +1032,7 @@ impl Drop for LayerRefMut<'_> {
         let Some(layer) = self.style.layers.get(&self.id) else {
             return;
         };
-        if !Arc::ptr_eq(&self.before, &layer.base_impl()) {
+        if !Arc::ptr_eq(&self.before, layer.style()) {
             let id = std::mem::take(&mut self.id);
             self.style.on_layer_changed(&id);
         }

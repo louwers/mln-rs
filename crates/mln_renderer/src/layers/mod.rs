@@ -30,6 +30,7 @@ use std::sync::Arc;
 
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_style::CrossfadeParameters;
+use mln_style::layer_type::ErasedLayerStyle;
 use mln_style::layers::{Background, BackgroundPaintProperties};
 
 use crate::bucket::{Bucket, BucketPtr};
@@ -147,11 +148,11 @@ pub(crate) fn check_tweak_drawable_ptr<T: ?Sized>(drawable: &Drawable, self_ptr:
 /// borrows only the tile (the layers mutate themselves while they hold it).
 pub(crate) fn render_data_for_pass<'a>(
     tile: &'a RenderTile,
-    base_impl: &dyn mln_style::layer::Impl,
+    style: &dyn ErasedLayerStyle,
     pass: crate::render_pass::RenderPass,
 ) -> Option<&'a crate::render_layer::LayerRenderData> {
-    let render_data = tile.get_layer_render_data(base_impl)?;
-    if (render_data.layer_properties.render_passes() & pass.underlying_type()) != 0 { Some(render_data) } else { None }
+    let render_data = tile.get_layer_render_data(style)?;
+    if (render_data.layer.render_passes() & pass.underlying_type()) != 0 { Some(render_data) } else { None }
 }
 
 #[must_use]

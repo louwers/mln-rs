@@ -14,7 +14,8 @@ use mln_util::{Color, LatLng};
 
 use super::util::{FixtureLog, new_layer, parse_json, read_file};
 use crate::expression::Functions;
-use crate::layers::line_layer::Impl as LineLayerImpl;
+use crate::layer_type::LayerStyle;
+use crate::layers::Line;
 use crate::observer::{Observer, SourceObserver};
 use crate::projection::Projection;
 use crate::property_value::PropertyValue;
@@ -199,8 +200,8 @@ fn layer_transition_refreshes_immutable_collection() {
     let after = style.get_layer_impls();
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(1, after.len());
-    assert!(Arc::ptr_eq(&style.get_layer("line").unwrap().base_impl(), &after[0]));
-    let impl_ = LineLayerImpl::recover_ref(&*after[0]).unwrap();
+    assert!(Arc::ptr_eq(style.get_layer("line").unwrap().style(), &after[0]));
+    let impl_ = LayerStyle::<Line>::recover_ref(&*after[0]).unwrap();
     assert_eq!(Some(Duration::from_millis(123)), impl_.paint.line_color.options.duration);
     assert_eq!(Some(Duration::from_millis(45)), impl_.paint.line_color.options.delay);
 }
@@ -344,7 +345,9 @@ fn layer_changes_leave_earlier_snapshots_unchanged() {
     );
     // An update for each layer.
     assert_eq!(without_layers + 2, observer.updates.replace(0));
-    let ids = |impls: &[Arc<dyn crate::layer::Impl>]| impls.iter().map(|impl_| impl_.id.clone()).collect::<Vec<_>>();
+    let ids = |impls: &[Arc<dyn crate::layer_type::ErasedLayerStyle>]| {
+        impls.iter().map(|impl_| impl_.base().id.clone()).collect::<Vec<_>>()
+    };
     let loaded = style.get_layer_impls();
     assert_eq!(["a", "b"], *ids(&loaded));
 

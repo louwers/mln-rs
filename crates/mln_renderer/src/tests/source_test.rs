@@ -198,16 +198,16 @@ impl Tiled {
         let properties: Arc<dyn ErasedEvaluatedLayer> = match self {
             Tiled::Raster => {
                 let layer = Layer::new(&StyleRegistry::with_builtins(), "raster", "id", "source").unwrap();
-                Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(&layer.base_impl()).unwrap()))
+                Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::RasterDEM => {
                 let layer = Layer::new(&StyleRegistry::with_builtins(), "hillshade", "id", "source").unwrap();
-                Arc::new(EvaluatedLayer::<Hillshade>::new(LayerStyle::recover(&layer.base_impl()).unwrap()))
+                Arc::new(EvaluatedLayer::<Hillshade>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::Vector => {
                 let mut layer = Layer::new(&StyleRegistry::with_builtins(), "line", "id", "source").unwrap();
                 layer.set_source_layer("water");
-                Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(&layer.base_impl()).unwrap()))
+                Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
         };
         vec![properties]
@@ -647,7 +647,7 @@ fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (CustomGeom
     let mut layer = Layer::new(&StyleRegistry::with_builtins(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(&layer.base_impl()).unwrap()));
+        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
     let mut render_source = render_source::create(&source.base_impl(), store);
@@ -723,7 +723,7 @@ fn custom_vector_source_set_tile_data() {
     let mut layer = Layer::new(&StyleRegistry::with_builtins(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(&layer.base_impl()).unwrap()));
+        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
 
     let mut store = test.store();
     let mut render_source = render_source::create(&source.base_impl(), &mut store);
@@ -815,7 +815,7 @@ fn geojson_source_tiles_after_data_reset() {
 
     let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "id", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(&layer.base_impl()).unwrap()));
+        Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
     let continuous = test.tile_parameters(MapMode::Continuous);
@@ -839,7 +839,7 @@ fn geojson_source_tiles_after_data_reset() {
 /// A circle layer "id" on "source", as evaluated values.
 fn circle_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
     let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "id", "source").unwrap();
-    vec![Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(&layer.base_impl()).unwrap()))]
+    vec![Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))]
 }
 
 /// A GeoJSON source rendered with a circle layer. Its data is clustered,

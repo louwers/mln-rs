@@ -14,8 +14,8 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::expression::Dependency;
-use mln_style::layer_type::{LayerStyle, StyleLayerType};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, StyleLayerType};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -46,7 +46,8 @@ pub(crate) type RenderLayerPtr = Rc<RefCell<dyn RenderLayer>>;
 #[derive(Clone)]
 pub(crate) struct LayerRenderData {
     pub(crate) bucket: BucketPtr,
-    pub(crate) layer_properties: Arc<dyn ErasedEvaluatedLayer>,
+    /// The values of the layer that the bucket was laid out with.
+    pub(crate) layer: Arc<dyn ErasedEvaluatedLayer>,
 }
 
 // symbols: `BucketPlacementData`. C++ holds `reference_wrapper`s to the
@@ -446,7 +447,8 @@ pub(crate) fn compute_globe_feature_ndc_bound(
 /// The data members of `RenderLayer`.
 pub(crate) struct RenderLayerBase {
     pub(crate) evaluated_properties: Arc<dyn ErasedEvaluatedLayer>,
-    pub(crate) base_impl: Arc<dyn layer::Impl>,
+    /// The layer's style data.
+    pub(crate) style: Arc<dyn ErasedLayerStyle>,
 
     pub(crate) passes: RenderPass,
     pub(crate) layer_group: Option<LayerGroupPtr>,
@@ -475,10 +477,10 @@ pub(crate) struct RenderLayerBase {
 
 impl RenderLayerBase {
     pub(crate) fn new(properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
-        let base_impl = properties.shared_style();
+        let style = properties.shared_style();
         RenderLayerBase {
             evaluated_properties: properties,
-            base_impl,
+            style,
             passes: RenderPass::None,
             layer_group: None,
             layer_tweaker: None,
@@ -567,7 +569,7 @@ pub(crate) trait RenderLayer {
     fn layer_changed(
         &mut self,
         _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn layer::Impl>,
+        _new_layer: &Arc<dyn ErasedLayerStyle>,
         _changes: &mut UniqueChangeRequestVec,
     ) {
         // When a layer changes, the bucket won't be replaced until the new
@@ -636,8 +638,8 @@ pub(crate) trait RenderLayer {
         let base = self.base_mut();
         let render_tiles = base.render_tiles.clone().expect("renderTiles");
         for tile in render_tiles.iter() {
-            if let Some(render_data) = tile.get_layer_render_data(&*base.base_impl) {
-                base.passes |= RenderPass(render_data.layer_properties.render_passes());
+            if let Some(render_data) = tile.get_layer_render_data(&*base.style) {
+                base.passes |= RenderPass(render_data.layer.render_passes());
             }
         }
     }
@@ -686,17 +688,17 @@ pub(crate) trait RenderLayer {
     }
 
     fn get_id(&self) -> &str {
-        &self.base().base_impl.id
+        &self.base().style.base().id
     }
 
     /// Makes `style`, the changed style of the layer, the layer's, and
     /// transitions to it. Through [`set_style`], a style of another type
     /// leaves the layer's.
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>);
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>);
 
     /// Returns true if the layer has to be placed.
     fn needs_placement(&self) -> bool {
-        self.base().base_impl.get_type_info().cross_tile_index && !self.base().placement_data.is_empty()
+        self.base().style.info().cross_tile_index && !self.base().placement_data.is_empty()
     }
 
     // symbols: `getPlacementData()`.
@@ -713,7 +715,7 @@ pub(crate) trait RenderLayer {
     /// Checks whether this layer needs to be rendered in the given render
     /// pass.
     fn needs_rendering(&self) -> bool {
-        self.base().passes != RenderPass::None && self.base().base_impl.visibility != VisibilityType::None
+        self.base().passes != RenderPass::None && self.base().style.base().visibility != VisibilityType::None
     }
 
     /// Checks whether this layer can be rendered.
@@ -722,7 +724,7 @@ pub(crate) trait RenderLayer {
         // A minimum of 0 is "no minimum": the globe zooms below 0 toward the
         // poles. (`std::max(zoom, 0.0f)`.)
         let zoom_or_zero = if zoom < 0.0 { 0.0 } else { zoom };
-        self.base().base_impl.min_zoom <= zoom_or_zero && zoom < self.base().base_impl.max_zoom
+        self.base().style.base().min_zoom <= zoom_or_zero && zoom < self.base().style.base().max_zoom
     }
 
     fn is_layer_renderable(&self) -> bool {
@@ -774,11 +776,11 @@ pub(crate) trait RenderLayer {
 pub(crate) fn set_style<T: StyleLayerType>(
     base: &mut RenderLayerBase,
     typed: &mut Arc<LayerStyle<T>>,
-    style: &Arc<dyn layer::Impl>,
+    style: &Arc<dyn ErasedLayerStyle>,
 ) {
     if let Some(recovered) = LayerStyle::recover(style) {
         *typed = recovered;
-        base.base_impl = Arc::clone(style);
+        base.style = Arc::clone(style);
     }
 }
 

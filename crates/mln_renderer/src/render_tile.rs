@@ -8,7 +8,7 @@ use std::rc::Rc;
 use glam::Vec2;
 use mln_actor::TaggedScheduler;
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
-use mln_style::layer;
+use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::TranslateAnchorType;
 use mln_style_types::image::ImagePosition;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
@@ -88,7 +88,7 @@ impl RenderTile {
         self.render_data.as_ref().and_then(TileRenderData::contents)
     }
 
-    pub(crate) fn get_bucket(&self, impl_: &dyn layer::Impl) -> Option<&BucketPtr> {
+    pub(crate) fn get_bucket(&self, impl_: &dyn ErasedLayerStyle) -> Option<&BucketPtr> {
         self.shared_bucket.as_ref().or_else(|| self.contents()?.get_bucket(impl_))
     }
 
@@ -105,7 +105,7 @@ impl RenderTile {
         self.contents()?.geometry().map(|contents| &*contents.bucket_geometry)
     }
 
-    pub(crate) fn get_layer_render_data(&self, impl_: &dyn layer::Impl) -> Option<&LayerRenderData> {
+    pub(crate) fn get_layer_render_data(&self, impl_: &dyn ErasedLayerStyle) -> Option<&LayerRenderData> {
         self.contents()?.geometry()?.result.get_layer_render_data(impl_)
     }
 

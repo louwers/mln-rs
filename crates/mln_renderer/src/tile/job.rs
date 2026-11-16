@@ -271,7 +271,7 @@ fn layout(
     let layers: Vec<Arc<dyn ErasedEvaluatedLayer>> = style
         .layers
         .iter()
-        .filter(|layer| zoom >= layer.style().min_zoom.floor() && zoom < layer.style().max_zoom.ceil())
+        .filter(|layer| zoom >= layer.style().base().min_zoom.floor() && zoom < layer.style().base().max_zoom.ceil())
         .cloned()
         .collect();
     let input = LayoutInput {

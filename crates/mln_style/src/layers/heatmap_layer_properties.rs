@@ -4,7 +4,8 @@
 use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::conversion::convert_color_ramp_property_value;
 use crate::expression::Functions;
-use crate::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
+use crate::layer_type::LayerStyle;
+use crate::layers::Heatmap;
 use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 use mln_conversion::{Convertible, Error};
 
@@ -34,7 +35,7 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
 );
 
 /// Calls `visitor` with the field of the property in `slot`.
-pub(crate) fn visit<V: PropertyVisitor<HeatmapLayerImpl>>(slot: usize, visitor: V) -> Option<V::Output> {
+pub(crate) fn visit<V: PropertyVisitor<LayerStyle<Heatmap>>>(slot: usize, visitor: V) -> Option<V::Output> {
     Some(match slot {
         0 => visitor.paint(|s| &s.paint.heatmap_color, |s| &mut s.paint.heatmap_color),
         1 => visitor.paint(|s| &s.paint.heatmap_intensity, |s| &mut s.paint.heatmap_intensity),

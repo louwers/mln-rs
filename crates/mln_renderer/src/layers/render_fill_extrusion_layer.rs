@@ -30,10 +30,10 @@ use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry};
 use mln_map_types::TransformState;
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::FillExtrusion;
-use mln_style::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::AlignmentType;
 use mln_util::error::Error;
 use mln_util::hash::HashSet;
@@ -329,14 +329,14 @@ impl LayerType for FillExtrusion {
         (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 
-    fn render_layer(style: Arc<FillExtrusionLayerImpl>) -> RenderLayerPtr {
+    fn render_layer(style: Arc<LayerStyle<FillExtrusion>>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderFillExtrusionLayer::new(style)))
     }
 }
 
 pub(crate) struct RenderFillExtrusionLayer {
     base: RenderLayerBase,
-    style: Arc<FillExtrusionLayerImpl>,
+    style: Arc<LayerStyle<FillExtrusion>>,
     // Paint properties
     unevaluated: FillExtrusionPaintProperties::Unevaluated,
 
@@ -356,7 +356,7 @@ pub(crate) struct RenderFillExtrusionLayer {
 }
 
 impl RenderFillExtrusionLayer {
-    pub(crate) fn new(impl_: Arc<FillExtrusionLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<FillExtrusion>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn ErasedEvaluatedLayer> =
             Arc::new(EvaluatedLayer::<FillExtrusion>::new(Arc::clone(&impl_)));
@@ -385,7 +385,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         &mut self.base
     }
 
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         set_style(&mut self.base, &mut self.style, style);
         self.transition(parameters);
     }
@@ -574,8 +574,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let render_data = super::render_data_for_pass(tile, &*base_impl, draw_pass);
+            let style = Arc::clone(&self.base.style);
+            let render_data = super::render_data_for_pass(tile, &*style, draw_pass);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.remove_tile(draw_pass, &tile_id);
                 continue;

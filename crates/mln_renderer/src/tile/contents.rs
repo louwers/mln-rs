@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use mln_actor::TaggedScheduler;
 use mln_style::expression::GlobalStateMap;
-use mln_style::layer;
+use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::image::{ImagePosition, ImagePositions, ImageType};
 use mln_text::glyph::{GlyphID, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
@@ -55,9 +55,9 @@ impl LayoutResult {
     /// of the same type. A tile shows its contents until a relayout for a
     /// changed layer arrives, so a layer that changed type meanwhile finds
     /// nothing.
-    pub(crate) fn get_layer_render_data(&self, layer_impl: &dyn layer::Impl) -> Option<&LayerRenderData> {
-        let result = self.layer_render_data.get(&layer_impl.id)?;
-        if result.layer_properties.style().get_type_info().name != layer_impl.get_type_info().name {
+    pub(crate) fn get_layer_render_data(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<&LayerRenderData> {
+        let result = self.layer_render_data.get(&layer_impl.base().id)?;
+        if result.layer.style().info().name != layer_impl.info().name {
             return None;
         }
         Some(result)
@@ -227,7 +227,7 @@ impl GeometryContents {
         let no_patterns = ImagePositions::default();
         let pattern_positions = self.pattern_positions().unwrap_or(&no_patterns);
         for (layer_id, render_data) in &self.result.layer_render_data {
-            let source_layer_id = &render_data.layer_properties.style().source_layer;
+            let source_layer_id = &render_data.layer.style().base().source_layer;
             // The worker got the layer from the same data.
             if let Ok(Some(source_layer)) = layers.layer(source_layer_id) {
                 let Some(feature_states) = states.get(source_layer_id) else {
@@ -247,7 +247,7 @@ impl GeometryContents {
     pub(crate) fn query_padding(&self, layers: &QueryLayers<'_>) -> f32 {
         let mut query_padding: f32 = 0.0;
         for layer in layers.values() {
-            let Some(data) = self.result.get_layer_render_data(&*layer.base().base_impl) else {
+            let Some(data) = self.result.get_layer_render_data(&*layer.base().style) else {
                 continue;
             };
             if data.bucket.has_data() {
@@ -389,7 +389,7 @@ impl Contents {
     }
 
     /// The bucket of `layer_impl`'s layer.
-    pub(crate) fn get_bucket(&self, layer_impl: &dyn layer::Impl) -> Option<&BucketPtr> {
+    pub(crate) fn get_bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<&BucketPtr> {
         match self {
             Contents::Geometry(contents) => contents.result.get_layer_render_data(layer_impl).map(|data| &data.bucket),
             Contents::Raster(_) | Contents::Dem(_) | Contents::Empty => None,
@@ -429,15 +429,15 @@ impl Contents {
         let Some(render_data) = contents.result.get_layer_render_data(layer_impl) else {
             return false;
         };
-        if !Arc::ptr_eq(&render_data.layer_properties, layer_properties)
-            && render_data.layer_properties.constants_mask() == layer_properties.constants_mask()
+        if !Arc::ptr_eq(&render_data.layer, layer_properties)
+            && render_data.layer.constants_mask() == layer_properties.constants_mask()
         {
             // The contents a frame drew keep the properties it drew them
             // with: shared, they are copied.
             if let Contents::Geometry(contents) = Rc::make_mut(this)
-                && let Some(render_data) = contents.result.layer_render_data.get_mut(&layer_impl.id)
+                && let Some(render_data) = contents.result.layer_render_data.get_mut(&layer_impl.base().id)
             {
-                render_data.layer_properties = Arc::clone(layer_properties);
+                render_data.layer = Arc::clone(layer_properties);
             }
         }
         true

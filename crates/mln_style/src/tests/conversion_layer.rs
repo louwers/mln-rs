@@ -40,7 +40,7 @@ fn layer_transition() {
     }"#,
     )
     .unwrap();
-    assert_eq!("background", layer.get_type_info().name);
+    assert_eq!("background", layer.info().name);
     let background = style_of::<Background>(&layer);
     assert_eq!(Some(Duration::from_millis(400)), background.paint.background_color.options.duration);
     assert_eq!(Some(Duration::from_millis(500)), background.paint.background_color.options.delay);

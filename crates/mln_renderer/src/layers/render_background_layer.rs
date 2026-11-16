@@ -6,9 +6,9 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::shader_defines::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
 use mln_gfx::{AttributeDataType, ColorMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::{Background, BackgroundPaintProperties};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::Color;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -48,21 +48,21 @@ impl LayerType for Background {
     type Layout = NoLayout;
     type Bucket = NoBucket;
 
-    fn render_layer(style: Arc<BackgroundLayerImpl>) -> RenderLayerPtr {
+    fn render_layer(style: Arc<LayerStyle<Background>>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderBackgroundLayer::new(style)))
     }
 }
 
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
-    style: Arc<BackgroundLayerImpl>,
+    style: Arc<LayerStyle<Background>>,
     unevaluated: BackgroundPaintProperties::Unevaluated,
     plain_shader: Option<ShaderProgramPtr>,
     pattern_shader: Option<ShaderProgramPtr>,
 }
 
 impl RenderBackgroundLayer {
-    pub(crate) fn new(impl_: Arc<BackgroundLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Background>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Background>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
@@ -96,7 +96,7 @@ impl RenderLayer for RenderBackgroundLayer {
         &mut self.base
     }
 
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         set_style(&mut self.base, &mut self.style, style);
         self.transition(parameters);
     }

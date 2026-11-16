@@ -29,7 +29,7 @@ fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    let render_layer = crate::tests::render_layer(&layer.base_impl());
+    let render_layer = crate::tests::render_layer(layer.style());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }

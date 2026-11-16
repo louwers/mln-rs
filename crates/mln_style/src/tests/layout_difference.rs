@@ -9,13 +9,13 @@ use crate::layer::Layer;
 /// Whether setting each `(name, json)` of `changes` on a copy of `layer`
 /// lays its tiles out again.
 fn relayouts(mut layer: Layer, changes: &[(&str, &str)]) -> bool {
-    let before = layer.base_impl();
+    let before = std::sync::Arc::clone(layer.style());
     for (name, json) in changes {
         let value = parse_json(json);
         let error = layer.set_property(name, &Convertible::from(&value), None);
         assert!(error.is_none(), "{name}: {error:?}");
     }
-    layer.base_impl().has_layout_difference(&*before)
+    layer.style().layout_difference(&*before)
 }
 
 const FILTER: (&str, &str) = ("filter", r#"["==", "class", "road"]"#);

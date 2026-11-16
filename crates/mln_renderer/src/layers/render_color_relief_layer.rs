@@ -31,10 +31,10 @@ use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::ColorRelief;
-use mln_style::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
 use mln_style::layers::color_relief_layer_properties::ColorReliefPaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::hash::{HashMap, HashSet};
@@ -70,14 +70,14 @@ impl LayerType for ColorRelief {
     type Layout = NoLayout;
     type Bucket = NoBucket;
 
-    fn render_layer(style: Arc<ColorReliefLayerImpl>) -> RenderLayerPtr {
+    fn render_layer(style: Arc<LayerStyle<ColorRelief>>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderColorReliefLayer::new(style)))
     }
 }
 
 pub(crate) struct RenderColorReliefLayer {
     base: RenderLayerBase,
-    style: Arc<ColorReliefLayerImpl>,
+    style: Arc<LayerStyle<ColorRelief>>,
     // Paint properties
     unevaluated: ColorReliefPaintProperties::Unevaluated,
 
@@ -109,7 +109,7 @@ pub(crate) struct RenderColorReliefLayer {
 }
 
 impl RenderColorReliefLayer {
-    pub(crate) fn new(impl_: Arc<ColorReliefLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<ColorRelief>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn ErasedEvaluatedLayer> =
             Arc::new(EvaluatedLayer::<ColorRelief>::new(Arc::clone(&impl_)));
@@ -273,7 +273,7 @@ impl RenderLayer for RenderColorReliefLayer {
         &mut self.base
     }
 
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         set_style(&mut self.base, &mut self.style, style);
         self.transition(parameters);
     }
@@ -464,7 +464,7 @@ impl RenderLayer for RenderColorReliefLayer {
 
         // Drop the DEM textures of buckets that are no longer rendered.
         let live_buckets: HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.base_impl).map(|b| b.get_id())).collect();
+            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
         self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
         let evaluated = &evaluated::<ColorRelief>(&self.base.evaluated_properties).paint;
@@ -481,8 +481,8 @@ impl RenderLayer for RenderColorReliefLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let bucket_ptr = tile.get_bucket(&*base_impl).filter(|b| b.has_data()).cloned();
+            let style = Arc::clone(&self.base.style);
+            let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
             let Some(bucket_ptr) = bucket_ptr else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;

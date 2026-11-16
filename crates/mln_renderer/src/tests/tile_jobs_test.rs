@@ -133,7 +133,7 @@ pub(super) fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    let render_layer = crate::tests::render_layer(&layer.base_impl());
+    let render_layer = crate::tests::render_layer(layer.style());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }
@@ -464,16 +464,16 @@ impl scheduler::Scheduler for Catching {
 
 /// Evaluated values of no layer type: a bug that panics when the layout
 /// asks for their type.
-struct Mistyped(Arc<dyn mln_style::layer::Impl>);
+struct Mistyped(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Mistyped {
     fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
         panic!("evaluated values of no layer type")
     }
-    fn style(&self) -> &dyn mln_style::layer::Impl {
+    fn style(&self) -> &dyn mln_style::layer_type::ErasedLayerStyle {
         &*self.0
     }
-    fn shared_style(&self) -> Arc<dyn mln_style::layer::Impl> {
+    fn shared_style(&self) -> Arc<dyn mln_style::layer_type::ErasedLayerStyle> {
         Arc::clone(&self.0)
     }
     fn render_passes(&self) -> u8 {

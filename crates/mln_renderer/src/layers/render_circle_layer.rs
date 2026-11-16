@@ -11,10 +11,10 @@ use mln_gfx::{
 };
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::expression::EvaluationContext;
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Circle;
-use mln_style::layers::circle_layer_impl::Impl as CircleLayerImpl;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_util::Color;
 use mln_util::error::Error;
@@ -346,21 +346,21 @@ impl LayerType for Circle {
         bucket.query_radius(layer)
     }
 
-    fn render_layer(style: Arc<CircleLayerImpl>) -> RenderLayerPtr {
+    fn render_layer(style: Arc<LayerStyle<Circle>>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderCircleLayer::new(style)))
     }
 }
 
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
-    style: Arc<CircleLayerImpl>,
+    style: Arc<LayerStyle<Circle>>,
     // Paint properties
     unevaluated: CirclePaintProperties::Unevaluated,
     circle_shader_group: Option<ShaderGroupPtr>,
 }
 
 impl RenderCircleLayer {
-    pub(crate) fn new(impl_: Arc<CircleLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Circle>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Circle>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
@@ -378,7 +378,7 @@ impl RenderLayer for RenderCircleLayer {
         &mut self.base
     }
 
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         set_style(&mut self.base, &mut self.style, style);
         self.transition(parameters);
     }
@@ -599,8 +599,8 @@ impl RenderLayer for RenderCircleLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let render_data = super::render_data_for_pass(tile, &*base_impl, render_pass);
+            let style = Arc::clone(&self.base.style);
+            let render_data = super::render_data_for_pass(tile, &*style, render_pass);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;
@@ -634,7 +634,7 @@ impl RenderLayer for RenderCircleLayer {
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
             if update_parameters.capture_rendered_features {
-                let evaluated = &crate::layer_type::evaluated::<Circle>(&render_data.layer_properties).paint;
+                let evaluated = &crate::layer_type::evaluated::<Circle>(&render_data.layer).paint;
                 let params = &render_tree.get_parameters().transform_params;
                 capture_rendered_features(
                     &mut self.base.stats,

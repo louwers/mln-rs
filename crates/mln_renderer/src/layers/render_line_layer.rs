@@ -17,10 +17,10 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Line;
-use mln_style::layers::line_layer_impl::Impl as LineLayerImpl;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::LineCapType;
 use mln_util::Color;
 use mln_util::error::Error;
@@ -260,14 +260,14 @@ impl LayerType for Line {
         bucket.query_radius(layer)
     }
 
-    fn render_layer(style: Arc<LineLayerImpl>) -> RenderLayerPtr {
+    fn render_layer(style: Arc<LayerStyle<Line>>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderLineLayer::new(style)))
     }
 }
 
 pub(crate) struct RenderLineLayer {
     base: RenderLayerBase,
-    style: Arc<LineLayerImpl>,
+    style: Arc<LayerStyle<Line>>,
     // Paint properties
     unevaluated: LinePaintProperties::Unevaluated,
 
@@ -286,7 +286,7 @@ pub(crate) struct RenderLineLayer {
 }
 
 impl RenderLineLayer {
-    pub(crate) fn new(impl_: Arc<LineLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Line>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Line>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
@@ -398,7 +398,7 @@ impl RenderLayer for RenderLineLayer {
         &mut self.base
     }
 
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         set_style(&mut self.base, &mut self.style, style);
         self.transition(parameters);
     }
@@ -516,13 +516,13 @@ impl RenderLayer for RenderLineLayer {
         let Some(render_tiles) = self.base.render_tiles.clone() else {
             return;
         };
-        let base_impl = Arc::clone(&self.base.base_impl);
+        let style = Arc::clone(&self.base.style);
         for tile in render_tiles.iter() {
-            let Some(render_data) = tile.get_layer_render_data(&*base_impl) else {
+            let Some(render_data) = tile.get_layer_render_data(&*style) else {
                 continue;
             };
 
-            let evaluated = &evaluated::<Line>(&render_data.layer_properties).paint;
+            let evaluated = &evaluated::<Line>(&render_data.layer).paint;
             if evaluated.line_dasharray.faded().from.is_empty() {
                 continue;
             }
@@ -655,8 +655,8 @@ impl RenderLayer for RenderLineLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let Some(render_data) = super::render_data_for_pass(tile, &*base_impl, render_pass) else {
+            let style = Arc::clone(&self.base.style);
+            let Some(render_data) = super::render_data_for_pass(tile, &*style, render_pass) else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;
             };
@@ -683,7 +683,7 @@ impl RenderLayer for RenderLineLayer {
                     paint_property_binders.depends_on_feature_state(),
                 )
             };
-            let evaluated = &evaluated::<Line>(&render_data.layer_properties).paint;
+            let evaluated = &evaluated::<Line>(&render_data.layer).paint;
 
             if parameters.capture_rendered_features {
                 let params = &render_tree.get_parameters().transform_params;

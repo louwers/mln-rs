@@ -13,6 +13,7 @@ use mln_map_types::{MapMode, TransformState};
 use mln_style::collection::ImmutableVector;
 use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer::SourceKind;
+use mln_style::layer_type::ErasedLayerStyle;
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
     GlobalStateChange, PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image, layer, source,
@@ -154,8 +155,8 @@ fn ptr_eq_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
 /// The render layer of the layer `style`, from its type in `registry`. A
 /// type that the registry lacks breaks the contract that a map and its
 /// renderer register alike; the layer isn't drawn.
-fn create_render_layer(registry: &Registry, style: &Arc<dyn layer::Impl>) -> Option<RenderLayerPtr> {
-    let name = style.get_type_info().name;
+fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -> Option<RenderLayerPtr> {
+    let name = style.info().name;
     let render_layer = registry.layer_type(name).and_then(|layer_type| layer_type.create_render_layer(style));
     debug_assert!(render_layer.is_some(), "the renderer's registry has no layer type '{name}'");
     if render_layer.is_none() {
@@ -182,7 +183,7 @@ pub(crate) struct RenderOrchestrator {
 
     image_impls: Arc<Vec<Arc<image::Impl>>>,
     source_impls: ImmutableVector<dyn source::Impl>,
-    layer_impls: ImmutableVector<dyn layer::Impl>,
+    layer_impls: ImmutableVector<dyn ErasedLayerStyle>,
 
     render_sources: HashMap<String, Box<dyn RenderSource>>,
     render_layers: HashMap<String, RenderLayerPtr>,
@@ -527,7 +528,7 @@ impl RenderOrchestrator {
         let render_layers_remade = std::mem::take(&mut self.remake_render_layers);
         if render_layers_remade {
             for render_layer in self.render_layers.values_mut() {
-                let impl_ = Arc::clone(&render_layer.borrow().base().base_impl);
+                let impl_ = Arc::clone(&render_layer.borrow().base().style);
                 let Some(new_layer) = create_render_layer(&self.registry, &impl_) else {
                     continue;
                 };
@@ -573,7 +574,7 @@ impl RenderOrchestrator {
             for layer_impl in self.layer_impls.iter() {
                 // C++ uses renderLayers.at(id); a layer type without a
                 // render layer is skipped.
-                let Some(layer) = self.render_layers.get(&layer_impl.id) else {
+                let Some(layer) = self.render_layers.get(&layer_impl.base().id) else {
                     continue;
                 };
                 self.ordered_layers.push(Rc::clone(layer));
@@ -729,17 +730,17 @@ impl RenderOrchestrator {
 
             for (index, layer_ptr) in self.ordered_layers.iter().enumerate() {
                 let layer = layer_ptr.borrow();
-                let base_impl = &layer.base().base_impl;
-                let layer_info = base_impl.get_type_info();
+                let style = &layer.base().style;
+                let layer_info = style.info();
                 render_tree_parameters.has_3d |= layer_info.pass_3d;
 
                 if layer_info.source != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
                     // source check goes before anything else is read.
                     if let Some(source_impl) = &source_impl
-                        && render_source_id == Some(base_impl.source.as_str())
+                        && render_source_id == Some(style.base().source.as_str())
                     {
-                        let layer_is_visible = base_impl.visibility != mln_style_types::VisibilityType::None;
+                        let layer_is_visible = style.base().visibility != mln_style_types::VisibilityType::None;
                         let zoom_fits_layer = layer.supports_zoom(self.zoom_history.last_zoom);
                         let layer_id = layer.get_id().to_owned();
                         // A global state change requires a relayout of
@@ -748,7 +749,7 @@ impl RenderOrchestrator {
                         // baked into the tile's buckets.
                         let global_state_requires_relayout = {
                             if !global_state_changed
-                                || !(base_impl.get_layout_dependencies()
+                                || !(style.layout_dependencies()
                                     | layer.base().evaluated_properties.evaluated_dependencies())
                                 .intersects(Dependency::GLOBAL_STATE)
                             {
@@ -757,7 +758,7 @@ impl RenderOrchestrator {
                                 true
                             } else {
                                 let mut refs = VecSet::new();
-                                base_impl.collect_layout_global_state_refs(&mut refs);
+                                style.collect_layout_global_state_refs(&mut refs);
                                 layer.base().evaluated_properties.collect_evaluated_global_state_refs(&mut refs);
                                 mln_style::expression::global_state_refs_intersect(
                                     Some(&refs),
@@ -787,7 +788,7 @@ impl RenderOrchestrator {
                 // Handle layers without source.
                 let is_first_source = source_index == 0;
                 if is_first_source
-                    && base_impl.visibility != mln_style_types::VisibilityType::None
+                    && style.base().visibility != mln_style_types::VisibilityType::None
                     && layer.supports_zoom(self.zoom_history.last_zoom)
                 {
                     // On the globe the background is a sphere mesh, not the
@@ -795,7 +796,7 @@ impl RenderOrchestrator {
                     if self.background_layer_as_color
                         && render_tree_parameters.sky.is_none()
                         && !update_parameters.transform_state.is_globe_rendering()
-                        && Arc::ptr_eq(base_impl, &self.layer_impls[0])
+                        && Arc::ptr_eq(style, &self.layer_impls[0])
                     {
                         let solid_background = layer.get_solid_background();
                         if let Some(solid_background) = solid_background {
@@ -1433,7 +1434,7 @@ impl RenderOrchestrator {
     ) -> Result<(), Error> {
         let cross_tile_symbol_index_layers: crate::geometry::feature_index::QueryLayers<'_> = layers
             .iter()
-            .filter(|(_, layer)| layer.base().base_impl.get_type_info().cross_tile_index)
+            .filter(|(_, layer)| layer.base().style.info().cross_tile_index)
             .map(|(id, layer)| (id.clone(), *layer))
             .collect();
 
@@ -1493,7 +1494,7 @@ impl RenderOrchestrator {
                 continue;
             }
             filtered_layers.insert(id.clone(), *layer);
-            source_ids.insert(layer.base().base_impl.source.clone());
+            source_ids.insert(layer.base().style.base().source.clone());
         }
 
         let proj_matrix = self.transform_state.get_proj_matrix(1, false);
@@ -1528,12 +1529,12 @@ impl RenderOrchestrator {
         // hash order); the port goes from the topmost style layer down, the
         // order GL JS (which wrote the expectations) returns.
         for layer_impl in self.layer_impls.iter().rev() {
-            if !filtered_layers.contains_key(&layer_impl.id) {
+            if !filtered_layers.contains_key(&layer_impl.base().id) {
                 continue;
             }
-            if let Some(mut features) = results_by_layer.remove(&layer_impl.id) {
+            if let Some(mut features) = results_by_layer.remove(&layer_impl.base().id) {
                 for feature in &mut features {
-                    feature.layer.clone_from(&layer_impl.id);
+                    feature.layer.clone_from(&layer_impl.base().id);
                 }
                 result.extend(features);
             }

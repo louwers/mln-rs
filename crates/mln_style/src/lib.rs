@@ -8,12 +8,12 @@
 //! layer types its JSON, property values and filters may name.
 //!
 //! Layers:
-//! - `layer::Layer` is the layer trait. A layer's data is an
-//!   `Arc<dyn layer::Impl>`, a `layer_type::LayerStyle<T>` of its type `T`;
-//!   `layer::ImplBase` holds the members every layer type has.
+//! - `layer::Layer` is a layer of any type. Its style data is an
+//!   `Arc<dyn layer_type::ErasedLayerStyle>`, a `layer_type::LayerStyle<T>`
+//!   of its type `T`; `layer_type::LayerBase` holds the members every layer
+//!   type has.
 //! - Each layer type is a marker type that implements
-//!   `layer_type::StyleLayerType`, such as `layers::Background`, with a
-//!   module such as `layers::background_layer::{BackgroundLayer, Impl}` and
+//!   `layer_type::StyleLayerType`, such as `layers::Background`, with
 //!   property sets such as
 //!   `layers::BackgroundPaintProperties::{Transitionable, Unevaluated, PossiblyEvaluated, Evaluated}`.
 //! - Each layer type, the light and the sky have a property table, which
@@ -33,7 +33,6 @@ pub mod filter;
 pub mod format_section_override;
 pub mod image;
 pub mod layer;
-pub mod layer_impl;
 pub mod layer_type;
 pub mod layers;
 pub mod light;

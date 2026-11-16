@@ -18,16 +18,19 @@ use std::sync::Arc;
 
 use feature::ValueObject;
 use mln_conversion::Convertible;
+use mln_style_types::VisibilityType;
 use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 
-use crate::expression::{Dependency, Functions};
-use crate::layer::{FontStack, ImplBase};
+use crate::expression::{Dependency, Expr, Functions};
+use crate::filter::Filter;
+use crate::layer::FontStack;
 use crate::layers::{
     Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
 };
 use crate::property_table::{self, OwnerSlot, Properties, PropertyTable, PropertyVisitor, SetPropertyError};
 use crate::property_value::PropertyValue;
+use crate::serialization::shared_expression;
 use crate::style_property::StyleProperty;
 
 /// Where a layer type's layers get their data.
@@ -163,12 +166,60 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
     }
 }
 
+/// The members every layer has.
+#[derive(Clone, Debug, mln_wire::Wire)]
+pub struct LayerBase {
+    // Backs an expression-valued "visibility" layout value; the evaluated
+    // result is kept in `visibility` and re-evaluated by the style whenever
+    // the global state changes.
+    #[wire(with = "shared_expression::option")]
+    pub(crate) visibility_expression: Option<Arc<Expr>>,
+
+    pub id: String,
+    pub source: String,
+    pub source_layer: String,
+    pub filter: Filter,
+    pub min_zoom: f32,
+    pub max_zoom: f32,
+    pub visibility: VisibilityType,
+}
+
+impl LayerBase {
+    #[must_use]
+    pub fn new(layer_id: String, source_id: String) -> Self {
+        LayerBase {
+            visibility_expression: None,
+            id: layer_id,
+            source: source_id,
+            source_layer: String::new(),
+            filter: Filter::default(),
+            min_zoom: f32::NEG_INFINITY,
+            max_zoom: f32::INFINITY,
+            visibility: VisibilityType::Visible,
+        }
+    }
+
+    pub(crate) fn get_filter_dependencies(&self) -> Dependency {
+        match &self.filter.expression {
+            Some(expression) => expression.dependencies(),
+            None => Dependency::NONE,
+        }
+    }
+
+    /// Adds the global-state keys that the filter reads to `refs`.
+    pub(crate) fn collect_filter_global_state_refs(&self, refs: &mut VecSet<String>) {
+        if let Some(expression) = &self.filter.expression {
+            crate::expression::collect_global_state_refs(expression.as_ref(), refs);
+        }
+    }
+}
+
 /// The style data of a layer of the type `T`: the members every layer has,
 /// and its type's properties.
 #[derive(mln_wire::Wire)]
 #[wire(bound = "")]
 pub struct LayerStyle<T: StyleLayerType> {
-    pub(crate) base: ImplBase,
+    pub(crate) base: LayerBase,
     pub layout: T::LayoutProperties,
     pub paint: T::PaintProperties,
     #[wire(skip)]
@@ -204,7 +255,7 @@ impl<T: StyleLayerType> LayerStyle<T> {
     #[must_use]
     pub fn new(layer_id: String, source_id: String) -> Self {
         LayerStyle {
-            base: ImplBase::new(layer_id, source_id),
+            base: LayerBase::new(layer_id, source_id),
             layout: T::LayoutProperties::default(),
             paint: T::PaintProperties::default(),
             extra: T::Extra::default(),
@@ -229,14 +280,14 @@ impl<T: StyleLayerType> LayerStyle<T> {
 
 /// The base members read as `style.id`, `style.visibility`, and so on.
 impl<T: StyleLayerType> std::ops::Deref for LayerStyle<T> {
-    type Target = ImplBase;
-    fn deref(&self) -> &ImplBase {
+    type Target = LayerBase;
+    fn deref(&self) -> &LayerBase {
         &self.base
     }
 }
 
 impl<T: StyleLayerType> std::ops::DerefMut for LayerStyle<T> {
-    fn deref_mut(&mut self) -> &mut ImplBase {
+    fn deref_mut(&mut self) -> &mut LayerBase {
         &mut self.base
     }
 }
@@ -252,20 +303,21 @@ impl<T: StyleLayerType> Properties for LayerStyle<T> {
 /// A layer's style data, whichever its type.
 pub trait ErasedLayerStyle: Any + Send + Sync {
     /// The members every layer has.
-    fn base(&self) -> &ImplBase;
+    fn base(&self) -> &LayerBase;
 
-    fn get_type_info(&self) -> LayerTypeInfo;
+    /// The layer's type.
+    fn info(&self) -> LayerTypeInfo;
 
     /// Whether going from `self` to `other` changes what the layer's tiles
     /// lay out. True when `other` is another type's.
-    fn has_layout_difference(&self, other: &dyn ErasedLayerStyle) -> bool;
+    fn layout_difference(&self, other: &dyn ErasedLayerStyle) -> bool;
 
     /// The dependencies of what affects tile layout: the filter and the
     /// layout properties.
-    fn get_layout_dependencies(&self) -> Dependency;
+    fn layout_dependencies(&self) -> Dependency;
 
     /// Adds the global-state keys read by what affects tile layout, as
-    /// [`get_layout_dependencies`](Self::get_layout_dependencies) counts it,
+    /// [`layout_dependencies`](Self::layout_dependencies) counts it,
     /// to `refs`.
     fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>);
 
@@ -295,19 +347,19 @@ pub trait ErasedLayerStyle: Any + Send + Sync {
 }
 
 impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
-    fn base(&self) -> &ImplBase {
+    fn base(&self) -> &LayerBase {
         &self.base
     }
 
-    fn get_type_info(&self) -> LayerTypeInfo {
+    fn info(&self) -> LayerTypeInfo {
         T::INFO
     }
 
-    fn has_layout_difference(&self, other: &dyn ErasedLayerStyle) -> bool {
+    fn layout_difference(&self, other: &dyn ErasedLayerStyle) -> bool {
         LayerStyle::<T>::recover_ref(other).is_none_or(|other| layout_difference(self, other))
     }
 
-    fn get_layout_dependencies(&self) -> Dependency {
+    fn layout_dependencies(&self) -> Dependency {
         self.layout.dependencies() | self.base.get_filter_dependencies()
     }
 
@@ -386,7 +438,7 @@ pub trait ErasedStyleLayerType: Send + Sync + 'static {
 
     /// Calls `f` with the members every layer has of `style`, which must be
     /// of the type, copying it first if it is shared.
-    fn mutate_base(&self, style: &mut Arc<dyn ErasedLayerStyle>, f: &mut dyn FnMut(&mut ImplBase));
+    fn mutate_base(&self, style: &mut Arc<dyn ErasedLayerStyle>, f: &mut dyn FnMut(&mut LayerBase));
 
     /// Reads the value that [`ErasedLayerStyle::write`] wrote for a layer of
     /// the type.
@@ -424,7 +476,7 @@ impl<T: StyleLayerType> ErasedStyleLayerType for LayerTypeEntry<T> {
         property_table::set_property(&mut slot, name, value, functions)
     }
 
-    fn mutate_base(&self, style: &mut Arc<dyn ErasedLayerStyle>, f: &mut dyn FnMut(&mut ImplBase)) {
+    fn mutate_base(&self, style: &mut Arc<dyn ErasedLayerStyle>, f: &mut dyn FnMut(&mut LayerBase)) {
         if let Some(style) = ErasedSlot::<T>(style, PhantomData).make_mut() {
             f(&mut style.base);
         }
@@ -477,3 +529,16 @@ pub static BUILTIN_STYLE_TYPES: [&dyn ErasedStyleLayerType; 11] = [
     style_entry::<Heatmap>(),
     style_entry::<Custom>(),
 ];
+
+// Debug is not a supertrait of this trait, nor of the other layer and source
+// traits that have a `dyn` Debug impl like this one: through the vtable it
+// would keep every implementation's derived Debug (and those of everything it
+// holds) in the binary. Each prints what tells its values apart instead.
+impl std::fmt::Debug for dyn ErasedLayerStyle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayerStyle")
+            .field("id", &self.base().id)
+            .field("type", &self.info().name)
+            .finish_non_exhaustive()
+    }
+}

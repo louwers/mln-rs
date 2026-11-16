@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use mln_style::layer::Impl;
-use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layers::Background;
 
 use crate::style_diff::diff_layers;
 
-fn layer(layer_id: &str, source_id: &str) -> Arc<dyn Impl> {
-    Arc::new(BackgroundLayerImpl::new(layer_id.to_owned(), source_id.to_owned()))
+fn layer(layer_id: &str, source_id: &str) -> Arc<dyn ErasedLayerStyle> {
+    Arc::new(LayerStyle::<Background>::new(layer_id.to_owned(), source_id.to_owned()))
 }
 
-type ImmutableLayer = Arc<dyn Impl>;
+type ImmutableLayer = Arc<dyn ErasedLayerStyle>;
 
 // gtest: StyleDiff.Empty
 #[test]

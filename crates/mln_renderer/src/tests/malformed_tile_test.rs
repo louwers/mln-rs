@@ -42,13 +42,13 @@ fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    let base_impl = layer.base_impl();
+    let style = layer.style();
     match json["type"].as_str().unwrap() {
-        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(&base_impl).unwrap())),
-        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(&base_impl).unwrap())),
-        "fill-extrusion" => Arc::new(EvaluatedLayer::<FillExtrusion>::new(LayerStyle::recover(&base_impl).unwrap())),
-        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(&base_impl).unwrap())),
-        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(&base_impl).unwrap())),
+        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(style).unwrap())),
+        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(style).unwrap())),
+        "fill-extrusion" => Arc::new(EvaluatedLayer::<FillExtrusion>::new(LayerStyle::recover(style).unwrap())),
+        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(style).unwrap())),
+        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(style).unwrap())),
         other => panic!("no properties for {other}"),
     }
 }

@@ -75,12 +75,12 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    let base_impl = layer.base_impl();
+    let style = layer.style();
     match json["type"].as_str().unwrap() {
-        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(&base_impl).unwrap())),
-        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(&base_impl).unwrap())),
-        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(&base_impl).unwrap())),
-        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(&base_impl).unwrap())),
+        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(style).unwrap())),
+        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(style).unwrap())),
+        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(style).unwrap())),
+        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(style).unwrap())),
         other => panic!("no properties for {other}"),
     }
 }
@@ -121,7 +121,7 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bu
     let mut glyph_dependencies = GlyphDependencies::default();
     let mut image_dependencies = ImageDependencies::default();
     let available_images = VecSet::from_iter(["marker".to_owned()]);
-    let layer_id = properties.style().id.clone();
+    let layer_id = properties.style().base().id.clone();
     let mut layout = properties
         .entry()
         .create_layout(

@@ -178,10 +178,10 @@ impl Scene {
         let mut fill = Layer::new(&StyleRegistry::with_builtins(), "fill", "water", "vector").unwrap();
         fill.set_source_layer("water");
         let fill_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
-            vec![Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(&fill.base_impl()).unwrap()))];
+            vec![Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(fill.style()).unwrap()))];
         let raster_layer = Layer::new(&StyleRegistry::with_builtins(), "raster", "raster", "raster").unwrap();
         let raster_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
-            vec![Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(&raster_layer.base_impl()).unwrap()))];
+            vec![Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(raster_layer.style()).unwrap()))];
 
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(size).unwrap();

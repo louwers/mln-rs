@@ -82,7 +82,7 @@ const RED: &str = r##""#ff0000""##;
 #[test]
 fn background_properties() {
     let mut layer = new_layer("background", "background", "");
-    assert_eq!("background", layer.get_type_info().name);
+    assert_eq!("background", layer.info().name);
 
     // Paint properties
 
@@ -95,7 +95,7 @@ fn background_properties() {
 #[test]
 fn circle_properties() {
     let mut layer = new_layer("circle", "circle", "source");
-    assert_eq!("circle", layer.get_type_info().name);
+    assert_eq!("circle", layer.info().name);
 
     // Paint properties
 
@@ -111,7 +111,7 @@ fn circle_properties() {
 #[test]
 fn fill_properties() {
     let mut layer = new_layer("fill", "fill", "source");
-    assert_eq!("fill", layer.get_type_info().name);
+    assert_eq!("fill", layer.info().name);
 
     // Paint properties
 
@@ -128,17 +128,17 @@ fn fill_properties() {
 #[test]
 fn fill_extrusion_layout_difference() {
     let mut layer = new_layer("fill-extrusion", "fill-extrusion", "source");
-    let original = layer.base_impl();
+    let original = Arc::clone(layer.style());
 
     set(&mut layer, "fill-extrusion-rounded-corner-distance", "2");
-    assert!(layer.base_impl().has_layout_difference(&*original));
+    assert!(layer.style().layout_difference(&*original));
 }
 
 // gtest: Layer.LineProperties
 #[test]
 fn line_properties() {
     let mut layer = new_layer("line", "line", "source");
-    assert_eq!("line", layer.get_type_info().name);
+    assert_eq!("line", layer.info().name);
 
     // Layout properties
 
@@ -167,7 +167,7 @@ fn line_properties() {
 #[test]
 fn raster_properties() {
     let mut layer = new_layer("raster", "raster", "source");
-    assert_eq!("raster", layer.get_type_info().name);
+    assert_eq!("raster", layer.info().name);
 
     // Paint properties
 
@@ -189,9 +189,9 @@ fn observer() {
     // check is "the impl pointer changed".
     let mut layer = new_layer("line", "line", "source");
     let notified = |layer: &mut Layer, f: &mut dyn FnMut(&mut Layer)| {
-        let before = layer.base_impl();
+        let before = Arc::clone(layer.style());
         f(layer);
-        !Arc::ptr_eq(&before, &layer.base_impl())
+        !Arc::ptr_eq(&before, layer.style())
     };
 
     // Notifies observer on filter change.

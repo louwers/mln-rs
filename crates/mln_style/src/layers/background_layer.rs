@@ -1,6 +1,5 @@
 use crate::layer::{LayerTypeInfo, SourceKind};
-use crate::layer_type::{NoProperties, StyleLayerType};
-pub use crate::layers::background_layer_impl::Impl;
+use crate::layer_type::{LayerStyle, NoProperties, StyleLayerType};
 use crate::layers::background_layer_properties::{self, BackgroundPaintProperties};
 use crate::property_table::{PropertyTable, PropertyVisitor};
 
@@ -22,7 +21,7 @@ impl StyleLayerType for Background {
     type PaintProperties = BackgroundPaintProperties::Transitionable;
     type Extra = ();
 
-    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         background_layer_properties::visit(slot, visitor)
     }
 }

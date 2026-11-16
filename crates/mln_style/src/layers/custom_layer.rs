@@ -79,9 +79,6 @@ pub trait CustomLayerHost: Send + Sync {
 /// The `custom` layer type, whose layers a [`CustomLayerHost`] draws.
 pub struct Custom;
 
-/// The style data of a `custom` layer.
-pub type Impl = LayerStyle<Custom>;
-
 static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
 
 impl StyleLayerType for Custom {
@@ -99,7 +96,7 @@ impl StyleLayerType for Custom {
     type PaintProperties = NoProperties;
     type Extra = CustomHost;
 
-    fn visit_property<V: PropertyVisitor<Impl>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
         None
     }
 }
@@ -145,9 +142,10 @@ impl LayerStyle<Custom> {
 mod tests {
     use std::sync::Arc;
 
-    use super::{CustomLayerHost, Impl};
+    use super::{Custom, CustomLayerHost};
     use crate::StyleRegistry;
     use crate::layer::Layer;
+    use crate::layer_type::LayerStyle;
 
     struct Host;
 
@@ -160,8 +158,7 @@ mod tests {
     fn the_impls_of_a_removed_layer_dont_keep_its_host() {
         let host: Arc<dyn CustomLayerHost> = Arc::new(Host);
         let layer = Layer::custom(&StyleRegistry::with_builtins(), "custom", Arc::clone(&host));
-        let impl_ = layer.base_impl();
-        let impl_ = Impl::recover_ref(&*impl_).unwrap();
+        let impl_ = LayerStyle::<Custom>::recover(layer.style()).unwrap();
         assert!(impl_.has_host(&host));
         assert!(impl_.host().is_some());
         drop(layer);

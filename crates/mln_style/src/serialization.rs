@@ -20,24 +20,24 @@ use mln_util::serialization::shared::{self, Kind, WireKind};
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::expression::Expr;
-use crate::layer_impl::Impl;
+use crate::layer_type::ErasedLayerStyle;
 use crate::registry::decoding_layer_type;
 
-/// The `shared::Kind` of `Layer::Impl`s.
+/// The `shared::Kind` of layers' style data.
 pub struct SharedLayer;
 
 impl Kind for SharedLayer {
-    type Value = dyn Impl;
+    type Value = dyn ErasedLayerStyle;
     const NAME: &'static str = "layer";
 }
 
 impl WireKind for SharedLayer {
-    fn write(impl_: &dyn Impl, w: &mut Writer) {
-        mln_wire::write_str(w, impl_.get_type_info().name);
+    fn write(impl_: &dyn ErasedLayerStyle, w: &mut Writer) {
+        mln_wire::write_str(w, impl_.info().name);
         impl_.write(w);
     }
 
-    fn read(r: &mut Reader<'_>) -> Option<Arc<dyn Impl>> {
+    fn read(r: &mut Reader<'_>) -> Option<Arc<dyn ErasedLayerStyle>> {
         let name = mln_wire::read_str(r)?;
         match decoding_layer_type(name) {
             Ok(layer_type) => layer_type.read_style(r),
@@ -64,15 +64,15 @@ impl WireKind for SharedExpression {
     }
 }
 
-/// `#[wire(with)]` for an `Arc<dyn layer::Impl>`.
+/// `#[wire(with)]` for an `Arc<dyn ErasedLayerStyle>`.
 pub mod shared_layer {
-    use super::{Arc, Impl, Reader, SharedLayer, Writer, shared};
+    use super::{Arc, ErasedLayerStyle, Reader, SharedLayer, Writer, shared};
 
-    pub fn write(impl_: &Arc<dyn Impl>, w: &mut Writer) {
+    pub fn write(impl_: &Arc<dyn ErasedLayerStyle>, w: &mut Writer) {
         shared::write::<SharedLayer>(impl_, w);
     }
 
-    pub fn read(r: &mut Reader<'_>) -> Option<Arc<dyn Impl>> {
+    pub fn read(r: &mut Reader<'_>) -> Option<Arc<dyn ErasedLayerStyle>> {
         shared::read::<SharedLayer>(r)
     }
 }

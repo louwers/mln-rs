@@ -170,5 +170,5 @@ pub(crate) fn new_layer(type_: &str, id: &str, source: &str) -> crate::layer::La
 pub(crate) fn style_of<T: crate::layer_type::StyleLayerType>(
     layer: &crate::layer::Layer,
 ) -> &crate::layer_type::LayerStyle<T> {
-    crate::layer_type::LayerStyle::recover_ref(layer.base_impl_ref()).unwrap()
+    crate::layer_type::LayerStyle::recover_ref(&**layer.style()).unwrap()
 }

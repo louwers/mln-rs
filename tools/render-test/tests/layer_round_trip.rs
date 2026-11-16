@@ -1,5 +1,5 @@
-// Every layer in every render- and query-test style crosses (its
-// `Layer::Impl`, as a tile worker in another wasm instance gets its layers,
+// Every layer in every render- and query-test style crosses (its style data,
+// as a tile worker in another wasm instance gets its layers,
 // mln_style::serialization) to one that encodes the same. A layer that doesn't
 // cross couldn't be laid out there, and one that crosses as another layer
 // would be laid out differently. Every layer also serializes to style JSON
@@ -13,10 +13,10 @@ use mln_conversion::{Convertible, Error};
 use mln_style::StyleRegistry;
 use mln_style::conversion::convert_layer;
 use mln_style::layer::Layer;
-use mln_style::layer_impl::Impl;
+use mln_style::layer_type::ErasedLayerStyle;
 
 #[derive(mln_wire::Wire)]
-struct Crossing(#[wire(with = "mln_style::serialization::shared_layer")] Arc<dyn Impl>);
+struct Crossing(#[wire(with = "mln_style::serialization::shared_layer")] Arc<dyn ErasedLayerStyle>);
 
 fn styles(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
@@ -64,7 +64,7 @@ fn every_layer_crosses() {
     let layers = every_layer(&registry);
     let mut failures = Vec::new();
     for (path, layer) in &layers {
-        let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
+        let encoded = mln_wire::to_vec(&Crossing(Arc::clone(layer.style()))).unwrap();
         match mln_style::decode_with(&registry, || mln_wire::from_slice::<Crossing>(&encoded)) {
             Ok(decoded) => {
                 if mln_wire::to_vec(&decoded).unwrap() != encoded {

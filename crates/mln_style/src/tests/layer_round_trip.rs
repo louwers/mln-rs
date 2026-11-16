@@ -1,4 +1,4 @@
-// A layer's `Layer::Impl` crosses (as a tile worker in another
+// A layer's style data crosses (as a tile worker in another
 // wasm instance gets its layers) to one that encodes the same, and serializes
 // to style JSON that parses back. tools/render-test's layer_round_trip test
 // checks every layer of the render and query suites.
@@ -14,7 +14,7 @@ use crate::StyleRegistry;
 use crate::conversion::convert_layer;
 use crate::expression::Functions;
 use crate::layer::Layer;
-use crate::layer_impl::Impl;
+use crate::layer_type::ErasedLayerStyle;
 use crate::layers::FillExtrusion;
 
 fn parse(json: &serde_json::Value) -> Layer {
@@ -24,12 +24,12 @@ fn parse(json: &serde_json::Value) -> Layer {
 }
 
 #[derive(mln_wire::Wire)]
-struct Crossing(#[wire(with = "crate::serialization::shared_layer")] Arc<dyn Impl>);
+struct Crossing(#[wire(with = "crate::serialization::shared_layer")] Arc<dyn ErasedLayerStyle>);
 
-/// The layer's serialized value, after checking that its `Impl` crosses
+/// The layer's serialized value, after checking that its style data crosses
 /// to one that encodes the same.
 fn round_trip(layer: &Layer) -> Value {
-    let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
+    let encoded = mln_wire::to_vec(&Crossing(Arc::clone(layer.style()))).unwrap();
     let decoded: Crossing = crate::decode_with(&StyleRegistry::with_builtins(), || mln_wire::from_slice(&encoded))
         .unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
     assert_eq!(mln_wire::to_vec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());

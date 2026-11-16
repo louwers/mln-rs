@@ -16,7 +16,7 @@ use glam::Vec2;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::EvaluationContext;
 use mln_style::layers::Symbol;
-use mln_style::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
+use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;

@@ -29,7 +29,7 @@ impl shared::Kind for SharedEvaluatedLayer {
 
 impl shared::WireKind for SharedEvaluatedLayer {
     fn write(layer: &dyn ErasedEvaluatedLayer, w: &mut Writer) {
-        mln_wire::write_str(w, layer.style().get_type_info().name);
+        mln_wire::write_str(w, layer.style().info().name);
         layer.write(w);
     }
 
@@ -158,10 +158,10 @@ impl LayoutResult {
         layer_ids.sort_unstable();
         let mut buckets: Vec<RenderedBucket<'_>> = Vec::new();
         for layer_id in layer_ids {
-            let LayerRenderData { bucket, layer_properties } = &self.layer_render_data[layer_id];
+            let LayerRenderData { bucket, layer } = &self.layer_render_data[layer_id];
             match buckets.iter_mut().find(|(shared, _)| Arc::ptr_eq(shared, bucket)) {
-                Some((_, layers)) => layers.push((layer_id, layer_properties)),
-                None => buckets.push((bucket, vec![(layer_id, layer_properties)])),
+                Some((_, layers)) => layers.push((layer_id, layer)),
+                None => buckets.push((bucket, vec![(layer_id, layer)])),
             }
         }
         buckets
@@ -215,8 +215,8 @@ impl Wire for LayoutResult {
                 return r.fail("a bucket that no layer renders");
             };
             let bucket = leader.entry().read_bucket(r)?;
-            for (layer_id, layer_properties) in layers {
-                layer_render_data.insert(layer_id, LayerRenderData { bucket: Arc::clone(&bucket), layer_properties });
+            for (layer_id, layer) in layers {
+                layer_render_data.insert(layer_id, LayerRenderData { bucket: Arc::clone(&bucket), layer });
             }
         }
         Some(LayoutResult { layer_render_data, feature_index: Arc::new(FeatureIndex::read(r)?) })

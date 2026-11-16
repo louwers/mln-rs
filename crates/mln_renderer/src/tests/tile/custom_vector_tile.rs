@@ -228,7 +228,7 @@ fn set_mlt_tile_data() {
     let mut layer = Layer::new(&StyleRegistry::with_builtins(), "fill", "water", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(&layer.base_impl()).unwrap()));
+        Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(layer.style()).unwrap()));
     tiles.set_style(&crate::tests::style(&[layer_properties]));
     tiles.set_necessity(&root, TileNecessity::Required);
     test.run_loop.wait_for_empty();

@@ -54,7 +54,7 @@ fn convert(json: &str) -> Layer {
 /// A layer from its style JSON, evaluated at `z` by its render layer, as
 /// the `RenderOrchestrator` evaluates it.
 fn layer(json: &str, z: f32) -> Arc<dyn ErasedEvaluatedLayer> {
-    let render_layer = crate::tests::render_layer(&convert(json).base_impl());
+    let render_layer = crate::tests::render_layer(convert(json).style());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(z));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }
@@ -307,7 +307,7 @@ fn every_geometry_layer_type_crosses() {
     ];
     for type_ in types {
         let layer = convert(&format!(r#"{{"id": "l", "type": "{type_}", "source": "s", "source-layer": "sl"}}"#));
-        let takes_geometry_tiles = layer.get_type_info().source == mln_style::layer::SourceKind::Geometry;
+        let takes_geometry_tiles = layer.info().source == mln_style::layer::SourceKind::Geometry;
         assert_eq!(
             takes_geometry_tiles,
             layers_of_type.iter().any(|(t, _)| *t == type_),
@@ -318,8 +318,8 @@ fn every_geometry_layer_type_crosses() {
     let layers: Vec<_> = layers_of_type.iter().flat_map(|(_, jsons)| jsons).map(|json| layer(json, 0.0)).collect();
     let result = cross(&layers, &tile_data());
     for (layer_id, render_data) in &result.layer_render_data {
-        let sent = layers.iter().find(|layer| &layer.style().id == layer_id).unwrap();
-        assert!(Arc::ptr_eq(&render_data.layer_properties, sent));
+        let sent = layers.iter().find(|layer| &layer.style().base().id == layer_id).unwrap();
+        assert!(Arc::ptr_eq(&render_data.layer, sent));
         assert!(render_data.bucket.has_data());
     }
 }
@@ -363,7 +363,7 @@ fn format_section_overrides_cross() {
             "text-field": ["format", ["to-string", ["get", "admin_level"]], {"text-color": "red"}]},
         "paint": {"text-color": "blue"}}"#,
     );
-    let render_layer = crate::tests::render_layer(&layer.base_impl());
+    let render_layer = crate::tests::render_layer(layer.style());
     render_layer.borrow_mut().transition(&TransitionParameters::new(None, TransitionOptions::default()));
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     let layers = vec![Arc::clone(&render_layer.borrow().base().evaluated_properties)];
@@ -484,14 +484,14 @@ fn properties_cross_while_a_paint_property_transitions() {
     use mln_util::time::Instant;
 
     let constant = FILL.replace(r#"["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]"#, r#""red""#);
-    let render_layer = crate::tests::render_layer(&convert(FILL).base_impl());
+    let render_layer = crate::tests::render_layer(convert(FILL).style());
     let mut render_layer = render_layer.borrow_mut();
     let start = Instant::now();
     let at = |now| PropertyEvaluationParameters::with_zoom_history(ZoomHistory::default(), Some(now), Duration::ZERO);
     render_layer.transition(&TransitionParameters::new(Some(start), TransitionOptions::default()));
     render_layer.evaluate(&at(start));
     let transition = TransitionOptions::new(Some(Duration::from_millis(300)), None, true);
-    render_layer.restyle(&TransitionParameters::new(Some(start), transition), &convert(&constant).base_impl());
+    render_layer.restyle(&TransitionParameters::new(Some(start), transition), convert(&constant).style());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
     assert!(!evaluated::<Fill>(&transitioning).paint.fill_color.is_constant());
@@ -501,7 +501,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     let JobResult::Laid(output) = codec.run(&job(&style, full(&tile_data()), Resolved::default())) else {
         panic!("not a layout");
     };
-    assert!(Arc::ptr_eq(&output.result.layer_render_data["water"].layer_properties, &transitioning));
+    assert!(Arc::ptr_eq(&output.result.layer_render_data["water"].layer, &transitioning));
 }
 
 /// A layout's render data has the layers of its job, not of a job sent
@@ -521,7 +521,7 @@ fn layouts_have_the_layers_they_answer() {
         panic!("not a layout");
     };
     for render_data in output.result.layer_render_data.values() {
-        assert!(sent.layers.iter().any(|layer| Arc::ptr_eq(layer, &render_data.layer_properties)));
+        assert!(sent.layers.iter().any(|layer| Arc::ptr_eq(layer, &render_data.layer)));
     }
 }
 
@@ -594,16 +594,16 @@ fn answers_cross_without_pixels() {
 }
 
 /// Evaluated values without a wire form.
-struct Unknown(Arc<dyn mln_style::layer::Impl>);
+struct Unknown(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Unknown {
     fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
         crate::layer_type::entry::<mln_style::layers::Line>()
     }
-    fn style(&self) -> &dyn mln_style::layer::Impl {
+    fn style(&self) -> &dyn mln_style::layer_type::ErasedLayerStyle {
         &*self.0
     }
-    fn shared_style(&self) -> Arc<dyn mln_style::layer::Impl> {
+    fn shared_style(&self) -> Arc<dyn mln_style::layer_type::ErasedLayerStyle> {
         Arc::clone(&self.0)
     }
     fn render_passes(&self) -> u8 {
@@ -637,7 +637,7 @@ fn failed_jobs_define_nothing() {
     let Job::Layout(job) = WorkerCodec::new(Registry::with_builtins()).decode_job(body).unwrap() else {
         panic!("not a layout job");
     };
-    assert_eq!(job.style.layers[0].style().id, "water");
+    assert_eq!(job.style.layers[0].style().base().id, "water");
 }
 
 /// A map side's first frame carries its registry's digest, and an instance

@@ -1,6 +1,5 @@
 use crate::layer::{LayerTypeInfo, SourceKind};
-use crate::layer_type::StyleLayerType;
-pub use crate::layers::line_layer_impl::Impl;
+use crate::layer_type::{LayerStyle, StyleLayerType};
 use crate::layers::line_layer_properties::{self, LineLayoutProperties, LinePaintProperties};
 use crate::property_table::{PropertyTable, PropertyVisitor};
 
@@ -22,7 +21,7 @@ impl StyleLayerType for Line {
     type PaintProperties = LinePaintProperties::Transitionable;
     type Extra = ();
 
-    fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         line_layer_properties::visit(slot, visitor)
     }
 }

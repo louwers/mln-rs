@@ -183,12 +183,12 @@ impl<T: LayerType> ErasedEvaluatedLayer for EvaluatedLayer<T> {
 }
 
 // Debug is not a supertrait, for the reason at mln_style's
-// `impl Debug for dyn Impl`.
+// `impl Debug for dyn ErasedLayerStyle`.
 impl std::fmt::Debug for dyn ErasedEvaluatedLayer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EvaluatedLayer")
-            .field("id", &self.style().id)
-            .field("type", &self.style().get_type_info().name)
+            .field("id", &self.style().base().id)
+            .field("type", &self.style().info().name)
             .finish_non_exhaustive()
     }
 }
@@ -202,11 +202,7 @@ pub(crate) fn evaluated<T: LayerType>(layer: &Arc<dyn ErasedEvaluatedLayer>) -> 
     let any: &dyn Any = &**layer;
     match any.downcast_ref() {
         Some(layer) => layer,
-        None => panic!(
-            "the evaluated values of a {} layer, not a {} layer",
-            layer.style().get_type_info().name,
-            T::INFO.name
-        ),
+        None => panic!("the evaluated values of a {} layer, not a {} layer", layer.style().info().name, T::INFO.name),
     }
 }
 
@@ -293,11 +289,7 @@ fn recover_group<T: LayerType>(group: &[Arc<dyn ErasedEvaluatedLayer>]) -> Resul
         .iter()
         .map(|layer| {
             EvaluatedLayer::recover(layer).ok_or_else(|| {
-                Error::native(format!(
-                    "a {} layer in a group of {} layers",
-                    layer.style().get_type_info().name,
-                    T::INFO.name
-                ))
+                Error::native(format!("a {} layer in a group of {} layers", layer.style().info().name, T::INFO.name))
             })
         })
         .collect()
@@ -341,7 +333,7 @@ impl<T: LayerType> ErasedLayout for TypedLayout<T> {
         for (id, layer) in self.0.layers() {
             built.render_data.entry(id.clone()).or_insert_with(|| LayerRenderData {
                 bucket: Arc::clone(&bucket),
-                layer_properties: Arc::<EvaluatedLayer<T>>::clone(layer),
+                layer: Arc::<EvaluatedLayer<T>>::clone(layer),
             });
         }
         Ok(())

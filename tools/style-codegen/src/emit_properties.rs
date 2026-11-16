@@ -2,7 +2,7 @@ use crate::defaults::{default_value, rust_value};
 use crate::emit_table::Visit;
 use crate::spec::{LayerSpec, Property};
 use crate::types::{camelize, evaluated_type, is_color_ramp, is_data_driven, snake};
-use crate::writer::{Writer, imports_for, layer_file_name};
+use crate::writer::{Writer, imports_for};
 
 /// The kind and type of a property in `properties!`: `data_driven Color`.
 fn kind_and_type(property: &Property, layout: bool) -> (&'static str, String) {
@@ -58,7 +58,6 @@ fn emit_set(w: &mut Writer, layer_type: &str, class: &str, scope: &str, properti
 
 pub(crate) fn emit(layer: &LayerSpec) -> String {
     let t = camelize(&layer.type_);
-    let file = layer_file_name(&layer.type_);
     let has_layout = !layer.layout_properties.is_empty();
     let mut w = Writer::new();
 
@@ -66,7 +65,7 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     w.line("// (tools/style-codegen/v8.json). Do not edit.");
     w.blank();
 
-    let mut imports = vec![format!("crate::layers::{file}_layer_impl::Impl as {t}LayerImpl")];
+    let mut imports = vec!["crate::layer_type::LayerStyle".to_owned(), format!("crate::layers::{t}")];
     imports.extend(crate::emit_table::imports(&Visit::Function));
     let heatmap_color = layer.paint_properties.iter().find(|p| p.name == "heatmap-color");
     if heatmap_color.is_some() {
@@ -84,7 +83,7 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     emit_set(&mut w, &layer.type_, &format!("{t}PaintProperties"), "paint", &layer.paint_properties);
 
     let entries = crate::emit_table::layer_entries(&layer.paint_properties, &layer.layout_properties);
-    crate::emit_table::emit(&mut w, &format!("{t}LayerImpl"), &entries, &Visit::Function);
+    crate::emit_table::emit(&mut w, &format!("LayerStyle<{t}>"), &entries, &Visit::Function);
 
     if let Some(property) = heatmap_color {
         // The renderer falls back to this default when the style leaves the

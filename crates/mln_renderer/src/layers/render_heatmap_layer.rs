@@ -21,10 +21,10 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Heatmap;
-use mln_style::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -86,14 +86,14 @@ impl LayerType for Heatmap {
         HeatmapLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
     }
 
-    fn render_layer(style: Arc<HeatmapLayerImpl>) -> RenderLayerPtr {
+    fn render_layer(style: Arc<LayerStyle<Heatmap>>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderHeatmapLayer::new(style)))
     }
 }
 
 pub(crate) struct RenderHeatmapLayer {
     base: RenderLayerBase,
-    style: Arc<HeatmapLayerImpl>,
+    style: Arc<LayerStyle<Heatmap>>,
     // Paint properties
     unevaluated: HeatmapPaintProperties::Unevaluated,
     color_ramp: Rc<PremultipliedImage>,
@@ -115,7 +115,7 @@ pub(crate) struct RenderHeatmapLayer {
 }
 
 impl RenderHeatmapLayer {
-    pub(crate) fn new(impl_: Arc<HeatmapLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Heatmap>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Heatmap>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
@@ -203,7 +203,7 @@ impl RenderLayer for RenderHeatmapLayer {
         &mut self.base
     }
 
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         set_style(&mut self.base, &mut self.style, style);
         self.transition(parameters);
     }
@@ -217,7 +217,7 @@ impl RenderLayer for RenderHeatmapLayer {
     fn layer_changed(
         &mut self,
         _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn layer::Impl>,
+        _new_layer: &Arc<dyn ErasedLayerStyle>,
         _changes: &mut UniqueChangeRequestVec,
     ) {
         // RenderLayer::layerChanged
@@ -372,8 +372,8 @@ impl RenderLayer for RenderHeatmapLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let Some(render_data) = super::render_data_for_pass(tile, &*base_impl, render_pass) else {
+            let style = Arc::clone(&self.base.style);
+            let Some(render_data) = super::render_data_for_pass(tile, &*style, render_pass) else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;
             };

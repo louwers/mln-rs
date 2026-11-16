@@ -10,8 +10,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mln_style::expression::Expr;
-use mln_style::layer;
 use mln_style::layer::LayerTypeInfo;
+use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::VisibilityType;
 use mln_util::hash::{HashMap, RandomState};
 
@@ -30,7 +30,7 @@ pub(crate) struct LayoutGroupKey {
     pub(crate) filter_expression: Option<Arc<Expr>>,
 
     // Reference to impl for layout comparison
-    pub(crate) impl_: Arc<dyn layer::Impl>,
+    pub(crate) impl_: Arc<dyn ErasedLayerStyle>,
 
     /// A hash of the fields above but the impl: keys that are equal hash
     /// alike.
@@ -79,29 +79,29 @@ impl PartialEq for LayoutGroupKey {
             }
         }
 
-        !self.impl_.has_layout_difference(&*other.impl_)
+        !self.impl_.layout_difference(&*other.impl_)
     }
 }
 
-fn create_group_key(impl_: &Arc<dyn layer::Impl>) -> LayoutGroupKey {
+fn create_group_key(impl_: &Arc<dyn ErasedLayerStyle>) -> LayoutGroupKey {
     // 0.0 == -0.0.
     let zoom_bits = |zoom: f32| if zoom == 0.0 { 0 } else { zoom.to_bits() };
     let mut state = std::hash::DefaultHasher::new();
-    impl_.get_type_info().name.hash(&mut state);
-    impl_.source.hash(&mut state);
-    impl_.source_layer.hash(&mut state);
-    zoom_bits(impl_.min_zoom).hash(&mut state);
-    zoom_bits(impl_.max_zoom).hash(&mut state);
-    impl_.visibility.hash(&mut state);
-    impl_.filter.expression_hash().hash(&mut state);
+    impl_.info().name.hash(&mut state);
+    impl_.base().source.hash(&mut state);
+    impl_.base().source_layer.hash(&mut state);
+    zoom_bits(impl_.base().min_zoom).hash(&mut state);
+    zoom_bits(impl_.base().max_zoom).hash(&mut state);
+    impl_.base().visibility.hash(&mut state);
+    impl_.base().filter.expression_hash().hash(&mut state);
     LayoutGroupKey {
-        type_info: impl_.get_type_info(),
-        source: impl_.source.clone(),
-        source_layer: impl_.source_layer.clone(),
-        min_zoom: impl_.min_zoom,
-        max_zoom: impl_.max_zoom,
-        visibility: impl_.visibility,
-        filter_expression: impl_.filter.expression.clone(),
+        type_info: impl_.info(),
+        source: impl_.base().source.clone(),
+        source_layer: impl_.base().source_layer.clone(),
+        min_zoom: impl_.base().min_zoom,
+        max_zoom: impl_.base().max_zoom,
+        visibility: impl_.base().visibility,
+        filter_expression: impl_.base().filter.expression.clone(),
         impl_: Arc::clone(impl_),
         hash: state.finish(),
     }
@@ -174,7 +174,7 @@ mod tests {
         if let Some(filter) = filter {
             layer.set_filter(filter);
         }
-        Arc::new(EvaluatedLayer::<T>::new(LayerStyle::recover(&layer.base_impl()).unwrap()))
+        Arc::new(EvaluatedLayer::<T>::new(LayerStyle::recover(layer.style()).unwrap()))
     }
 
     fn circle(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
@@ -182,7 +182,7 @@ mod tests {
     }
 
     fn ids(groups: &GroupMap) -> Vec<Vec<String>> {
-        groups.iter().map(|(_, group)| group.iter().map(|l| l.style().id.clone()).collect()).collect()
+        groups.iter().map(|(_, group)| group.iter().map(|l| l.style().base().id.clone()).collect()).collect()
     }
 
     /// The grouping by comparing each key with every group's, in order.

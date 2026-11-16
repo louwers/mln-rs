@@ -170,7 +170,7 @@ pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
     let bucket_parameters = input.bucket_parameters();
 
     for (_, layers) in group_layers(input.layers) {
-        let source_layer = &layers[0].style().source_layer;
+        let source_layer = &layers[0].style().base().source_layer;
         if !data.has_layer(source_layer)? {
             continue;
         }
@@ -224,8 +224,8 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
     let mut waiting = Vec::new();
     for DiscoveredGroup { layers, layout } in groups {
         let leader = layers[0].style();
-        let layer_ids: Vec<String> = layers.iter().map(|layer| layer.style().id.clone()).collect();
-        built.feature_index.set_bucket_layer_ids(&leader.id, &layer_ids);
+        let layer_ids: Vec<String> = layers.iter().map(|layer| layer.style().base().id.clone()).collect();
+        built.feature_index.set_bucket_layer_ids(&leader.base().id, &layer_ids);
 
         let layout = match layout {
             Some(layout) => Some(layout),
@@ -241,7 +241,7 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
                     unavailable_images: &UnavailableImages::new(),
                     filter_groups: &mut filter_groups,
                 },
-                SourceLayer::new(data.clone(), leader.source_layer.clone()),
+                SourceLayer::new(data.clone(), leader.base().source_layer.clone()),
             )?,
         };
         match layout {

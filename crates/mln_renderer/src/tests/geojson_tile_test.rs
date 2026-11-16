@@ -108,7 +108,7 @@ fn point_data() -> Arc<dyn GeoJSONData> {
 
 fn circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
     let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
-    Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(&layer.base_impl()).unwrap()))
+    Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))
 }
 
 fn root() -> OverscaledTileID {
@@ -181,7 +181,7 @@ fn issue_9927() {
 /// worker codec sends to evaluate it again.
 fn evaluated_circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
     let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
-    let render_layer = crate::tests::render_layer(&layer.base_impl());
+    let render_layer = crate::tests::render_layer(layer.style());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }

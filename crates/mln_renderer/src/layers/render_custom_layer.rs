@@ -17,11 +17,11 @@ use std::sync::Arc;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::{RendererBackend, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layers::custom_layer::Impl as CustomLayerImpl;
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::{
     Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
@@ -83,19 +83,19 @@ impl LayerType for Custom {
     type Layout = NoLayout;
     type Bucket = NoBucket;
 
-    fn render_layer(style: Arc<CustomLayerImpl>) -> RenderLayerPtr {
+    fn render_layer(style: Arc<LayerStyle<Custom>>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderCustomLayer::new(style)))
     }
 }
 
 pub(crate) struct RenderCustomLayer {
     base: RenderLayerBase,
-    style: Arc<CustomLayerImpl>,
+    style: Arc<LayerStyle<Custom>>,
     shared: Rc<Shared>,
 }
 
 impl RenderCustomLayer {
-    pub(crate) fn new(impl_: Arc<CustomLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Custom>>) -> Self {
         let host = impl_.host();
         let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Custom>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
@@ -135,7 +135,7 @@ impl RenderLayer for RenderCustomLayer {
 
     /// A new host for the same layer ID is a new layer to the host: the old
     /// one hears that the renderer stopped.
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         set_style(&mut self.base, &mut self.style, style);
         let same = self.shared.host.borrow().as_ref().is_some_and(|host| self.style.has_host(host));
         if !same {

@@ -14,10 +14,10 @@ use mln_gfx::{
     VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Fill;
-use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::Color;
 use mln_util::error::Error;
 
@@ -220,14 +220,14 @@ impl LayerType for Fill {
         (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 
-    fn render_layer(style: Arc<FillLayerImpl>) -> RenderLayerPtr {
+    fn render_layer(style: Arc<LayerStyle<Fill>>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderFillLayer::new(style)))
     }
 }
 
 pub(crate) struct RenderFillLayer {
     base: RenderLayerBase,
-    style: Arc<FillLayerImpl>,
+    style: Arc<LayerStyle<Fill>>,
     // Paint properties
     unevaluated: FillPaintProperties::Unevaluated,
 
@@ -244,7 +244,7 @@ pub(crate) struct RenderFillLayer {
 }
 
 impl RenderFillLayer {
-    pub(crate) fn new(impl_: Arc<FillLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Fill>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Fill>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
@@ -272,7 +272,7 @@ impl RenderLayer for RenderFillLayer {
         &mut self.base
     }
 
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         set_style(&mut self.base, &mut self.style, style);
         self.transition(parameters);
     }
@@ -460,8 +460,8 @@ impl RenderLayer for RenderFillLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let render_data = super::render_data_for_pass(tile, &*base_impl, render_pass);
+            let style = Arc::clone(&self.base.style);
+            let render_data = super::render_data_for_pass(tile, &*style, render_pass);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;
@@ -484,7 +484,7 @@ impl RenderLayer for RenderFillLayer {
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
-            let evaluated = &evaluated::<Fill>(&render_data.layer_properties).paint;
+            let evaluated = &evaluated::<Fill>(&render_data.layer).paint;
             let geometry = tile.get_bucket_geometry();
             let paint_of = || {
                 paint_vertices(geometry, bucket, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state())
@@ -585,7 +585,7 @@ impl RenderLayer for RenderFillLayer {
                 }
             };
 
-            let layer_id = self.base.base_impl.id.clone();
+            let layer_id = self.base.style.base().id.clone();
             let finish = |builder: &mut DrawableBuilder, type_: FillVariant| {
                 builder.flush();
 
