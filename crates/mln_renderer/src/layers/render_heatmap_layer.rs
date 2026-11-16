@@ -56,8 +56,6 @@ use crate::render_target::{RenderTarget, RenderTargetPtr};
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-/// Reads the data-driven attributes of `b` into `attrs`, from the paint
-/// vertices `shared`, and records in `pau` those that are uniforms.
 fn read_heatmap_attributes(
     attrs: &mut VertexAttributeArray,
     b: &HeatmapBinders,
