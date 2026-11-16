@@ -342,10 +342,6 @@ impl StyleLayerType for Polyline {
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
         None
     }
-
-    fn layout_difference(_a: &LayerStyle<Self>, _b: &LayerStyle<Self>) -> bool {
-        false
-    }
 }
 
 #[derive(Debug)]

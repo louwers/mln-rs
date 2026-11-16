@@ -832,6 +832,10 @@ impl Bucket for SymbolBucket {
         &mut self.base
     }
 
+    fn max_content_elevation(&self) -> f32 {
+        self.max_height_offset
+    }
+
     fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }

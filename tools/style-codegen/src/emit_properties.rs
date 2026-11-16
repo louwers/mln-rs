@@ -4,10 +4,10 @@ use crate::spec::{LayerSpec, Property};
 use crate::types::{camelize, evaluated_type, is_color_ramp, is_data_driven, snake};
 use crate::writer::{Writer, imports_for, layer_file_name};
 
-/// Layer types whose `LayerProperties` hold a `CrossfadeParameters`.
-#[must_use]
-pub(crate) fn has_crossfade(type_: &str) -> bool {
-    matches!(type_, "background" | "fill" | "line" | "fill-extrusion")
+/// Whether a layer type's `LayerProperties` hold a `CrossfadeParameters`:
+/// whether it has a cross-faded paint property.
+fn has_crossfade(layer: &LayerSpec) -> bool {
+    layer.paint_properties.iter().any(|p| matches!(p.property_type(), Some("cross-faded" | "cross-faded-data-driven")))
 }
 
 /// The kind and type of a property in `properties!`: `data_driven Color`.
@@ -65,7 +65,7 @@ fn emit_set(w: &mut Writer, layer_type: &str, class: &str, scope: &str, properti
 pub(crate) fn emit(layer: &LayerSpec) -> String {
     let t = camelize(&layer.type_);
     let file = layer_file_name(&layer.type_);
-    let crossfade = has_crossfade(&layer.type_);
+    let crossfade = has_crossfade(layer);
     let has_layout = !layer.layout_properties.is_empty();
     let mut w = Writer::new();
 

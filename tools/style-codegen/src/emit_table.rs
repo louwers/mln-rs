@@ -22,8 +22,11 @@ impl Entry<'_> {
         if is_data_driven(self.property) {
             info.push_str(".data_driven()");
         }
-        if self.property.name == "icon-image" || self.property.name == "text-field" {
+        if self.property.flag("tokens") {
             info.push_str(".tokens()");
+        }
+        if self.property.flag("overridable") {
+            info.push_str(".overridable()");
         }
         info
     }

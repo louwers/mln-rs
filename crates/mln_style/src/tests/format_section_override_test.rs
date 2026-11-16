@@ -24,10 +24,11 @@ use mln_vec_map::{VecMap, VecSet};
 use crate::evaluated::Evaluated;
 use crate::expression::Functions;
 use crate::format_section_override::{format_section_override as new_override, set_overrides};
-use crate::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides as MockOverrides;
+use crate::layers::symbol_layer_impl::{Impl as SymbolLayerImpl, SymbolLayerPaintPropertyOverrides as MockOverrides};
 use crate::layers::{SymbolLayoutProperties, SymbolPaintProperties};
 use crate::properties::{Transitionable, Transitioning};
 use crate::property_expression::PropertyExpression;
+use crate::property_table::layout_properties_differ;
 use crate::property_value::PropertyValue;
 use crate::transition_options::TransitionOptions;
 
@@ -253,17 +254,20 @@ fn symbol_layer_overrides() {
             assert_eq!(case.has_override(), MockOverrides::has_overrides(&layout.text_field), "{case:?}");
         }
 
-        let mut current = SymbolPaintProperties::Transitionable::default();
-        let mut updated = SymbolPaintProperties::Transitionable::default();
-        current.text_color =
+        // A constant overridable property's change counts while a section
+        // overrides it.
+        let mut current = SymbolLayerImpl::new(String::new(), String::new());
+        let mut updated = current.clone();
+        current.paint.text_color =
             Transitionable { value: PropertyValue::Constant(Color::green()), options: TransitionOptions::default() };
-        updated.text_color =
+        updated.paint.text_color =
             Transitionable { value: PropertyValue::Constant(Color::green()), options: TransitionOptions::default() };
-        assert!(!MockOverrides::has_paint_property_difference(&current, &updated));
+        assert!(!layout_properties_differ(&current, &updated, &[], true));
 
-        current.text_color =
+        current.paint.text_color =
             Transitionable { value: PropertyValue::Constant(Color::red()), options: TransitionOptions::default() };
-        assert!(MockOverrides::has_paint_property_difference(&current, &updated));
+        assert!(layout_properties_differ(&current, &updated, &[], true));
+        assert!(!layout_properties_differ(&current, &updated, &[], false));
     }
 
     // Possibly evaluated.

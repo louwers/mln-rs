@@ -110,6 +110,12 @@ pub(crate) trait Bucket: Any + Send + Sync {
     ) {
     }
 
+    /// How far above the ground the bucket's highest content is raised,
+    /// for a layer whose content elevation is an expression.
+    fn max_content_elevation(&self) -> f32 {
+        0.0
+    }
+
     /// The `version` counter (see `BucketBase::version`).
     fn get_version(&self) -> u64 {
         self.base().version.load(Ordering::SeqCst)

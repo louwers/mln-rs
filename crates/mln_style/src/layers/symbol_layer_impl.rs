@@ -9,7 +9,6 @@ use crate::evaluated::Evaluated;
 use crate::expression::{Expr, Formatted, FormattedSection, Type};
 use crate::layer_type::LayerStyle;
 use crate::layers::Symbol;
-use crate::layers::symbol_layer_properties::SymbolPaintProperties;
 use crate::properties::OverridableSection;
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
@@ -130,8 +129,8 @@ impl SymbolLayerPaintPropertyOverrides {
     #[cfg(test)]
     // gtests-data: ported for Layer.SymbolLayerOverrides.
     pub(crate) fn update_overrides(
-        evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-        updated: &mut SymbolPaintProperties::PossiblyEvaluated,
+        evaluated: &crate::layers::SymbolPaintProperties::PossiblyEvaluated,
+        updated: &mut crate::layers::SymbolPaintProperties::PossiblyEvaluated,
     ) {
         let property = evaluated.text_color.clone();
         if !property.is_constant() {
@@ -141,19 +140,6 @@ impl SymbolLayerPaintPropertyOverrides {
                 updated.text_color = property;
             }
         }
-    }
-
-    /// Whether a constant overridable property differs between `lhs` and
-    /// `rhs`.
-    #[must_use]
-    pub(crate) fn has_paint_property_difference(
-        lhs: &SymbolPaintProperties::Transitionable,
-        rhs: &SymbolPaintProperties::Transitionable,
-    ) -> bool {
-        let mut result = false;
-        let (l, r) = (&lhs.text_color.value, &rhs.text_color.value);
-        result |= l.is_constant() && r.is_constant() && (l.as_constant() != r.as_constant());
-        result
     }
 }
 

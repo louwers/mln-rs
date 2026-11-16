@@ -1,5 +1,3 @@
-use std::sync::OnceLock;
-
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
@@ -28,19 +26,18 @@ impl StyleLayerType for Symbol {
 
     type LayoutProperties = SymbolLayoutProperties::Unevaluated;
     type PaintProperties = SymbolPaintProperties::Transitionable;
-    type Extra = OnceLock<bool>;
+    type Extra = ();
 
     fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
         symbol_layer_properties::visit(slot, visitor)
     }
 
-    fn layout_difference(a: &Impl, b: &Impl) -> bool {
-        a.filter != b.filter
-            || a.visibility != b.visibility
-            || a.layout != b.layout
-            || a.paint.has_data_driven_property_difference(&b.paint)
-            || (has_format_section_overrides(a)
-                && SymbolLayerPaintPropertyOverrides::has_paint_property_difference(&a.paint, &b.paint))
+    fn has_section_overrides(style: &Impl) -> bool {
+        SymbolLayerPaintPropertyOverrides::has_overrides(&style.layout.text_field)
+    }
+
+    fn content_elevation(style: &Impl) -> Option<&PropertyValue<f32>> {
+        Some(&style.layout.symbol_height_offset)
     }
 
     fn populate_font_stack(style: &Impl, font_stack: &mut VecSet<FontStack>) {
@@ -75,9 +72,4 @@ impl StyleLayerType for Symbol {
             }
         }
     }
-}
-
-/// Whether a section of `style`'s `text-field` overrides a paint property.
-fn has_format_section_overrides(style: &Impl) -> bool {
-    *style.extra.get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(&style.layout.text_field))
 }

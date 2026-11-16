@@ -104,10 +104,6 @@ impl StyleLayerType for Custom {
     fn visit_property<V: PropertyVisitor<Impl>>(_slot: usize, _visitor: V) -> Option<V::Output> {
         None
     }
-
-    fn layout_difference(_a: &Impl, _b: &Impl) -> bool {
-        false
-    }
 }
 
 /// The host of a custom layer, while the style has the layer or a renderer

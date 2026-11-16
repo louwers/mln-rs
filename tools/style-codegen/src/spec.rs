@@ -29,6 +29,12 @@ impl Property {
         self.spec.get("property-type").and_then(Value::as_str)
     }
 
+    /// Whether the spec sets the boolean `key` true.
+    #[must_use]
+    pub(crate) fn flag(&self, key: &str) -> bool {
+        self.spec.get(key).and_then(Value::as_bool) == Some(true)
+    }
+
     /// `property.default` (None when the key is absent, i.e. `undefined`).
     #[must_use]
     pub(crate) fn default(&self) -> Option<&Value> {

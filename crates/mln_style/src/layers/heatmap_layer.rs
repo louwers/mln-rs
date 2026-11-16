@@ -25,8 +25,4 @@ impl StyleLayerType for Heatmap {
     fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
         heatmap_layer_properties::visit(slot, visitor)
     }
-
-    fn layout_difference(a: &Impl, b: &Impl) -> bool {
-        a.filter != b.filter || a.visibility != b.visibility || a.paint.has_data_driven_property_difference(&b.paint)
-    }
 }

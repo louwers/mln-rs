@@ -35,17 +35,20 @@ pub struct PropertyInfo {
     pub(crate) data_driven: bool,
     /// Whether a string constant's `{token}`s become an expression.
     pub(crate) tokens: bool,
+    /// Whether a section of a formatted value can override the paint
+    /// property's value.
+    pub(crate) overridable: bool,
 }
 
 impl PropertyInfo {
     #[must_use]
     pub(crate) const fn paint(name: &'static str) -> Self {
-        PropertyInfo { name, scope: PropertyScope::Paint, data_driven: false, tokens: false }
+        PropertyInfo { name, scope: PropertyScope::Paint, data_driven: false, tokens: false, overridable: false }
     }
 
     #[must_use]
     pub(crate) const fn layout(name: &'static str) -> Self {
-        PropertyInfo { name, scope: PropertyScope::Layout, data_driven: false, tokens: false }
+        PropertyInfo { name, scope: PropertyScope::Layout, data_driven: false, tokens: false, overridable: false }
     }
 
     #[must_use]
@@ -56,6 +59,11 @@ impl PropertyInfo {
     #[must_use]
     pub(crate) const fn tokens(self) -> Self {
         PropertyInfo { tokens: true, ..self }
+    }
+
+    #[must_use]
+    pub(crate) const fn overridable(self) -> Self {
+        PropertyInfo { overridable: true, ..self }
     }
 }
 
@@ -100,6 +108,12 @@ pub trait StyleValue: Clone + Default + PartialEq + 'static {
     fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error>;
 
     fn style_property(&self) -> StyleProperty;
+
+    /// Whether the values differ and either may differ by feature.
+    fn has_data_driven_property_difference(&self, other: &Self) -> bool;
+
+    /// Whether both values are constants, and differ.
+    fn constant_differs(&self, other: &Self) -> bool;
 }
 
 impl<T> StyleValue for PropertyValue<T>
@@ -114,6 +128,17 @@ where
     fn style_property(&self) -> StyleProperty {
         make_style_property(self)
     }
+
+    fn has_data_driven_property_difference(&self, other: &Self) -> bool {
+        PropertyValue::has_data_driven_property_difference(self, other)
+    }
+
+    fn constant_differs(&self, other: &Self) -> bool {
+        match (self, other) {
+            (PropertyValue::Constant(a), PropertyValue::Constant(b)) => a != b,
+            _ => false,
+        }
+    }
 }
 
 impl StyleValue for ColorRampPropertyValue {
@@ -125,6 +150,15 @@ impl StyleValue for ColorRampPropertyValue {
 
     fn style_property(&self) -> StyleProperty {
         make_color_ramp_style_property(self)
+    }
+
+    fn has_data_driven_property_difference(&self, other: &Self) -> bool {
+        ColorRampPropertyValue::has_data_driven_property_difference(self, other)
+    }
+
+    /// A color ramp is never a constant.
+    fn constant_differs(&self, _other: &Self) -> bool {
+        false
     }
 }
 
@@ -369,6 +403,64 @@ fn store<V>(slot: &mut V, change: &mut Option<V>) {
     if let Some(value) = change.take() {
         *slot = value;
     }
+}
+
+/// Whether going from `a` to `b` changes a property that tiles are laid out
+/// with: a layout property, a paint property named in `layout_paint`, a
+/// data-driven paint property while either value differs by feature, or,
+/// with `section_overrides`, an overridable paint property's constant.
+pub(crate) fn layout_properties_differ<S: Properties>(
+    a: &S,
+    b: &S,
+    layout_paint: &[&str],
+    section_overrides: bool,
+) -> bool {
+    /// Which differences of a property's values count.
+    #[derive(Clone, Copy)]
+    struct Checks {
+        any: bool,
+        data_driven: bool,
+        constant: bool,
+    }
+
+    struct Differs<'a, S> {
+        a: &'a S,
+        b: &'a S,
+        checks: Checks,
+    }
+
+    impl<S> PropertyVisitor<S> for Differs<'_, S> {
+        type Output = bool;
+
+        fn paint<V: StyleValue>(
+            self,
+            get: fn(&S) -> &Transitionable<V>,
+            _: fn(&mut S) -> &mut Transitionable<V>,
+        ) -> bool {
+            values_differ(&get(self.a).value, &get(self.b).value, self.checks)
+        }
+
+        fn layout<V: StyleValue>(self, get: fn(&S) -> &V, _: fn(&mut S) -> &mut V) -> bool {
+            values_differ(get(self.a), get(self.b), self.checks)
+        }
+    }
+
+    #[inline(never)]
+    fn values_differ<V: StyleValue>(a: &V, b: &V, checks: Checks) -> bool {
+        (checks.any && a != b)
+            || (checks.data_driven && a.has_data_driven_property_difference(b))
+            || (checks.constant && a.constant_differs(b))
+    }
+
+    S::TABLE.properties.iter().enumerate().any(|(slot, info)| {
+        let checks = Checks {
+            any: info.scope == PropertyScope::Layout || layout_paint.contains(&info.name),
+            data_driven: info.data_driven,
+            constant: section_overrides && info.overridable,
+        };
+        (checks.any || checks.data_driven || checks.constant)
+            && S::visit(slot, Differs { a, b, checks }).unwrap_or_default()
+    })
 }
 
 /// Each defined property of `owner` and paint property transition, in table

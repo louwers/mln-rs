@@ -25,8 +25,4 @@ impl StyleLayerType for ColorRelief {
     fn visit_property<V: PropertyVisitor<Impl>>(slot: usize, visitor: V) -> Option<V::Output> {
         color_relief_layer_properties::visit(slot, visitor)
     }
-
-    fn layout_difference(_a: &Impl, _b: &Impl) -> bool {
-        false
-    }
 }

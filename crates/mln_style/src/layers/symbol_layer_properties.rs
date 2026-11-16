@@ -95,7 +95,7 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
         PropertyInfo::paint("icon-opacity").data_driven(),
         PropertyInfo::paint("icon-translate"),
         PropertyInfo::paint("icon-translate-anchor"),
-        PropertyInfo::paint("text-color").data_driven(),
+        PropertyInfo::paint("text-color").data_driven().overridable(),
         PropertyInfo::paint("text-halo-blur").data_driven(),
         PropertyInfo::paint("text-halo-color").data_driven(),
         PropertyInfo::paint("text-halo-width").data_driven(),

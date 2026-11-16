@@ -27,6 +27,7 @@ use crate::layers::{
     Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
 };
 use crate::property_table::{self, OwnerSlot, Properties, PropertyTable, PropertyVisitor, SetPropertyError};
+use crate::property_value::PropertyValue;
 use crate::style_property::StyleProperty;
 
 /// Where a layer type's layers get their data.
@@ -114,13 +115,24 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
     /// `<type>_layer_properties.rs`.
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output>;
 
-    /// Whether going from `a` to `b` changes what the layer's tiles lay out:
-    /// the filter, the visibility, layout properties or data-driven paint
-    /// properties.
-    fn layout_difference(a: &LayerStyle<Self>, b: &LayerStyle<Self>) -> bool;
+    /// Paint properties whose constant values tiles are also laid out
+    /// with, so that changing one lays them out again.
+    const LAYOUT_PAINT_PROPERTIES: &'static [&'static str] = &[];
 
     /// Adds the font stacks that `style` uses to `out`.
     fn populate_font_stack(_style: &LayerStyle<Self>, _out: &mut VecSet<FontStack>) {}
+
+    /// Whether a section of a formatted value of `style` overrides the
+    /// `overridable` paint properties.
+    fn has_section_overrides(_style: &LayerStyle<Self>) -> bool {
+        false
+    }
+
+    /// The layout property that raises the layer's content above the
+    /// ground, if the type has one.
+    fn content_elevation(_style: &LayerStyle<Self>) -> Option<&PropertyValue<f32>> {
+        None
+    }
 }
 
 /// The style data of a layer of the type `T`: the members every layer has,
@@ -232,6 +244,10 @@ pub trait ErasedLayerStyle: Any + Send + Sync {
     /// Adds the font stacks that the layer uses to `out`.
     fn populate_font_stack(&self, out: &mut VecSet<FontStack>);
 
+    /// The layout property that raises the layer's content above the
+    /// ground, if its type has one.
+    fn content_elevation(&self) -> Option<&PropertyValue<f32>>;
+
     /// The layer's type.
     fn layer_type(&self) -> &'static dyn ErasedStyleLayerType;
 
@@ -260,7 +276,7 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
     }
 
     fn has_layout_difference(&self, other: &dyn ErasedLayerStyle) -> bool {
-        LayerStyle::<T>::recover_ref(other).is_none_or(|other| T::layout_difference(self, other))
+        LayerStyle::<T>::recover_ref(other).is_none_or(|other| layout_difference(self, other))
     }
 
     fn get_layout_dependencies(&self) -> Dependency {
@@ -274,6 +290,10 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
 
     fn populate_font_stack(&self, out: &mut VecSet<FontStack>) {
         T::populate_font_stack(self, out);
+    }
+
+    fn content_elevation(&self) -> Option<&PropertyValue<f32>> {
+        T::content_elevation(self)
     }
 
     fn layer_type(&self) -> &'static dyn ErasedStyleLayerType {
@@ -298,6 +318,17 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
     fn write(&self, w: &mut Writer) {
         Wire::write(self, w);
     }
+}
+
+/// Whether going from `a` to `b` changes what the layer's tiles lay out. Only
+/// a type whose layers have geometry sources lays out; for one, the filter,
+/// the visibility and the properties that
+/// [`property_table::layout_properties_differ`] counts do.
+fn layout_difference<T: StyleLayerType>(a: &LayerStyle<T>, b: &LayerStyle<T>) -> bool {
+    T::INFO.source == SourceKind::Geometry
+        && (a.base.filter != b.base.filter
+            || a.base.visibility != b.base.visibility
+            || property_table::layout_properties_differ(a, b, T::LAYOUT_PAINT_PROPERTIES, T::has_section_overrides(a)))
 }
 
 /// A layer type, whichever it is.
