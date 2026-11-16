@@ -9,7 +9,6 @@ use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
 use mln_runtime::{BackendType, Device, DeviceOptions};
-use mln_style::Edit;
 use mln_style::layers::{CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;
@@ -371,9 +370,10 @@ mod gl {
     use mln_actor::RunLoop;
     use mln_headless::HeadlessFrontend;
     use mln_map::Map;
+    use mln_style::Edit;
     use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Edit, Mutex, Ordering, check, session};
+    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check, session};
 
     const VERTEX: &str = "#version 300 es
 const vec2 corners[6] = vec2[6](
