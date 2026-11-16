@@ -51,8 +51,7 @@ pub enum BuiltIn {
     /// Port-only: a layer drawn into a texture, composited onto the frame.
     LayerCompositeShader,
     /// Port-only: turns a video frame's planes into the RGBA texture that a
-    /// video source's raster layers draw. `VIDEO_YUV` converts YUV planes,
-    /// three of them or, with `VIDEO_NV12` too, two; without it, the first
-    /// plane is RGBA.
+    /// video source's raster layers draw: three YUV planes, or with
+    /// `VIDEO_NV12` two, or with `VIDEO_RGBA` one RGBA plane.
     VideoFrameShader,
 }

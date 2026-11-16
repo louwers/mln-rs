@@ -4950,11 +4950,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #else
     let yuv = vec4<f32>(luma.r, chroma1.r, chroma2.r, 1.0);
 #endif
-#ifdef VIDEO_YUV
+#ifdef VIDEO_RGBA
+    return luma;
+#else
     let rgb = vec3<f32>(dot(props.to_r, yuv), dot(props.to_g, yuv), dot(props.to_b, yuv));
     return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
-#else
-    return luma;
 #endif
 }
 ",

@@ -2918,11 +2918,11 @@ void main() {
 #else
     vec4 yuv = vec4(luma.r, chroma1.r, chroma2.r, 1.0);
 #endif
-#ifdef VIDEO_YUV
+#ifdef VIDEO_RGBA
+    fragColor = luma;
+#else
     vec3 rgb = vec3(dot(u_to_r, yuv), dot(u_to_g, yuv), dot(u_to_b, yuv));
     fragColor = vec4(clamp(rgb, 0.0, 1.0), 1.0);
-#else
-    fragColor = luma;
 #endif
 }
 ",

@@ -296,9 +296,9 @@ impl VideoConverter {
         indices: &BufferPtr,
     ) -> Result<Program, GpuError> {
         let defines: &[&str] = match layout {
-            PlaneLayout::Rgba => &[],
-            PlaneLayout::Nv12 => &["VIDEO_YUV", "VIDEO_NV12"],
-            PlaneLayout::I420 => &["VIDEO_YUV"],
+            PlaneLayout::Rgba => &["VIDEO_RGBA"],
+            PlaneLayout::Nv12 => &["VIDEO_NV12"],
+            PlaneLayout::I420 => &[],
         };
         let mut defines: Vec<String> = defines.iter().map(|&define| define.to_owned()).collect();
         if external {

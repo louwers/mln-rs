@@ -4126,11 +4126,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 #else
     const float4 yuv = float4(luma.r, chroma1.r, chroma2.r, 1.0);
 #endif
-#if defined(VIDEO_YUV)
+#if defined(VIDEO_RGBA)
+    return half4(luma);
+#else
     const float3 rgb = float3(dot(props.to_r, yuv), dot(props.to_g, yuv), dot(props.to_b, yuv));
     return half4(half3(saturate(rgb)), 1.0);
-#else
-    return half4(luma);
 #endif
 }
 ",

@@ -3701,11 +3701,11 @@ void main() {
 #else
     const vec4 yuv = vec4(luma.r, chroma1.r, chroma2.r, 1.0);
 #endif
-#if defined(VIDEO_YUV)
+#if defined(VIDEO_RGBA)
+    out_color = luma;
+#else
     const vec3 rgb = vec3(dot(props.to_r, yuv), dot(props.to_g, yuv), dot(props.to_b, yuv));
     out_color = vec4(clamp(rgb, 0.0, 1.0), 1.0);
-#else
-    out_color = luma;
 #endif
 }
 ",
@@ -6971,4 +6971,5 @@ pub(crate) const ALL: &[&GlslShaderSource] = &[
     &SYMBOL_SDF_SHADER,
     &SYMBOL_TEXT_AND_ICON_SHADER,
     &LAYER_COMPOSITE_SHADER,
+    &VIDEO_FRAME_SHADER,
 ];
