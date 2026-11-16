@@ -316,8 +316,7 @@ mod d3d11 {
     fn render_on_d3d12(frame: VideoFrame) -> PremultipliedImage {
         let run_loop = RunLoop::new();
         let device = Device::with_backend(BackendType::D3D12, DeviceOptions::default()).expect("a D3D12 device");
-        let frontend =
-            HeadlessFrontend::with_device(device, VIEW, 1.0, Arc::default(), &run_loop).expect("a frontend");
+        let frontend = HeadlessFrontend::with_device(device, VIEW, 1.0, Arc::default(), &run_loop).expect("a frontend");
         render_with(frontend, &run_loop, frame)
     }
 
