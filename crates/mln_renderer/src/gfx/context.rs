@@ -47,7 +47,7 @@ impl Stats {
     }
 }
 
-pub struct Context {
+pub(crate) struct Context {
     backend: Rc<dyn RendererBackend>,
     caps: Caps,
     stats: Rc<Stats>,

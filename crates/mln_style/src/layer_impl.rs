@@ -88,19 +88,6 @@ impl dyn Impl {
     }
 }
 
-/// Returns a new handle to `impl_` as its concrete layer impl type.
-///
-/// # Panics
-///
-/// If `impl_` is not a `T`.
-pub fn downcast_arc<T: Impl>(impl_: &Arc<dyn Impl>) -> Arc<T> {
-    let any: Arc<dyn Any + Send + Sync> = Arc::<dyn Impl>::clone(impl_);
-    let Ok(typed) = any.downcast::<T>() else {
-        panic!("downcast_arc: layer impl type mismatch");
-    };
-    typed
-}
-
 // Debug is not a supertrait of this trait, nor of the other layer and source
 // traits that have a `dyn` Debug impl like this one: through the vtable it
 // would keep every implementation's derived Debug (and those of everything it

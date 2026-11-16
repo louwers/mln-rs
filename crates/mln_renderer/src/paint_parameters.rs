@@ -89,7 +89,7 @@ impl OpenPass {
     }
 }
 
-pub struct PaintParameters<'a> {
+pub(crate) struct PaintParameters<'a> {
     pub(crate) context: &'a Context,
     /// The pass of the backend's `Gpu` that drawables draw into, while one
     /// is open.

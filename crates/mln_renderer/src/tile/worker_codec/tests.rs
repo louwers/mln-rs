@@ -23,6 +23,7 @@ use mln_vec_map::VecSet;
 use super::map_side::MapCodec;
 use super::worker_side::WorkerCodec;
 use super::{Encoded, TileWorkerHost, envelope, fields};
+use crate::Registry;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
@@ -33,7 +34,6 @@ use crate::tile::job::{
     TileKey, run_job,
 };
 use crate::tile::tile_workers::InlineWorkers;
-use crate::{Registry, layermanager};
 
 fn fixture(path: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(path);
@@ -54,7 +54,7 @@ fn convert(json: &str) -> Layer {
 /// A layer from its style JSON, evaluated at `z` by its render layer, as
 /// the `RenderOrchestrator` evaluates it.
 fn layer(json: &str, z: f32) -> Arc<dyn ErasedEvaluatedLayer> {
-    let render_layer = layermanager::create_render_layer(&convert(json).base_impl()).unwrap();
+    let render_layer = crate::tests::render_layer(&convert(json).base_impl());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(z));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }
@@ -363,7 +363,7 @@ fn format_section_overrides_cross() {
             "text-field": ["format", ["to-string", ["get", "admin_level"]], {"text-color": "red"}]},
         "paint": {"text-color": "blue"}}"#,
     );
-    let render_layer = layermanager::create_render_layer(&layer.base_impl()).unwrap();
+    let render_layer = crate::tests::render_layer(&layer.base_impl());
     render_layer.borrow_mut().transition(&TransitionParameters::new(None, TransitionOptions::default()));
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     let layers = vec![Arc::clone(&render_layer.borrow().base().evaluated_properties)];
@@ -484,15 +484,14 @@ fn properties_cross_while_a_paint_property_transitions() {
     use mln_util::time::Instant;
 
     let constant = FILL.replace(r#"["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]"#, r#""red""#);
-    let render_layer = layermanager::create_render_layer(&convert(FILL).base_impl()).unwrap();
+    let render_layer = crate::tests::render_layer(&convert(FILL).base_impl());
     let mut render_layer = render_layer.borrow_mut();
     let start = Instant::now();
     let at = |now| PropertyEvaluationParameters::with_zoom_history(ZoomHistory::default(), Some(now), Duration::ZERO);
     render_layer.transition(&TransitionParameters::new(Some(start), TransitionOptions::default()));
     render_layer.evaluate(&at(start));
     let transition = TransitionOptions::new(Some(Duration::from_millis(300)), None, true);
-    render_layer
-        .transition_with_impl(&TransitionParameters::new(Some(start), transition), convert(&constant).base_impl());
+    render_layer.restyle(&TransitionParameters::new(Some(start), transition), &convert(&constant).base_impl());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
     assert!(!evaluated::<Fill>(&transitioning).paint.fill_color.is_constant());
@@ -548,7 +547,7 @@ fn styles_and_layers_are_defined_once() {
 
     // Evaluated again (another zoom), the line layer's properties travel
     // again, but not the layer or its expressions, and the fill layer by key.
-    let line = layermanager::create_render_layer(&layers[1].shared_style()).unwrap();
+    let line = crate::tests::render_layer(&layers[1].shared_style());
     line.borrow_mut().evaluate(&PropertyEvaluationParameters::new(1.0));
     let again = style(&[Arc::clone(&layers[0]), Arc::clone(&line.borrow().base().evaluated_properties)]);
     drop(line);

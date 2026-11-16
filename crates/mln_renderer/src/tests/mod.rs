@@ -323,3 +323,10 @@ pub(crate) fn style(
         font_faces: None,
     })
 }
+
+/// Port-only: the render layer of the layer `style`, of a built-in type.
+pub(crate) fn render_layer(style: &std::sync::Arc<dyn mln_style::layer::Impl>) -> crate::render_layer::RenderLayerPtr {
+    let registry = crate::Registry::with_builtins();
+    let layer_type = registry.layer_type(style.get_type_info().name).expect("a built-in layer type");
+    layer_type.create_render_layer(style).expect("a layer of its type")
+}

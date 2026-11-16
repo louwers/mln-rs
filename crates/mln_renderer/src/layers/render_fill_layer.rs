@@ -14,7 +14,6 @@ use mln_gfx::{
     VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
-use mln_style::layer::downcast_arc;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
@@ -37,7 +36,8 @@ use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluat
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    RenderLayer, RenderLayerBase, Stats, capture_retained_features, vertex_color_alpha, vertex_opacity,
+    RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, capture_retained_features, set_style, vertex_color_alpha,
+    vertex_opacity,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -61,10 +61,6 @@ const FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME: &str = "FillOutlinePatternInst
 /// covers. One that rasterizes on the CPU, where an instance costs about as
 /// much as a draw, draws its 1 px lines instead.
 const LINE_WIDTH: f32 = 2.0;
-
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillLayerImpl {
-    impl_.downcast_ref::<FillLayerImpl>().expect("RenderFillLayer: not a fill layer impl")
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -199,10 +195,15 @@ fn read_fill_attributes(
     );
 }
 
-impl LayerType for Fill {}
+impl LayerType for Fill {
+    fn render_layer(style: Arc<FillLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderFillLayer::new(style)))
+    }
+}
 
 pub(crate) struct RenderFillLayer {
     base: RenderLayerBase,
+    style: Arc<FillLayerImpl>,
     // Paint properties
     unevaluated: FillPaintProperties::Unevaluated,
 
@@ -221,11 +222,12 @@ pub(crate) struct RenderFillLayer {
 impl RenderFillLayer {
     pub(crate) fn new(impl_: Arc<FillLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Fill>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Fill>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderFillLayer {
             base,
+            style: impl_,
             unevaluated,
             fill_shader_group: None,
             outline_shader_group: None,
@@ -246,9 +248,14 @@ impl RenderLayer for RenderFillLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
@@ -257,7 +264,7 @@ impl RenderLayer for RenderFillLayer {
         let mut properties = EvaluatedLayer::<Fill> {
             crossfade: parameters.get_crossfade_parameters(),
             ..EvaluatedLayer::with_paint(
-                downcast_arc::<FillLayerImpl>(&self.base.base_impl),
+                Arc::clone(&self.style),
                 self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
             )
         };

@@ -29,7 +29,7 @@ use crate::render_tile::RenderTile;
 pub(crate) type LayerTweakerPtr = Rc<RefCell<dyn LayerTweaker>>;
 
 /// The data members of `LayerTweaker`.
-pub struct LayerTweakerBase {
+pub(crate) struct LayerTweakerBase {
     pub(crate) id: String,
     /// The evaluated values of the layer the tweaker sets the uniforms of,
     /// if it is a style layer.
@@ -74,15 +74,10 @@ pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, contex
 }
 
 /// Base class for layer tweakers, which manipulate layer group per frame.
-pub trait LayerTweaker {
-    fn base(&self) -> &LayerTweakerBase;
+pub(crate) trait LayerTweaker {
     fn base_mut(&mut self) -> &mut LayerTweakerBase;
 
     fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>);
-
-    fn get_id(&self) -> &str {
-        &self.base().id
-    }
 
     fn update_properties(&mut self, new_props: Arc<dyn ErasedEvaluatedLayer>) {
         let base = self.base_mut();

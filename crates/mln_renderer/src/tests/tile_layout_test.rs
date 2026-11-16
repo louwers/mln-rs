@@ -18,7 +18,6 @@ use mln_vec_map::VecSet;
 use serde_json::json;
 
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layermanager;
 use crate::layout::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, Run, SourceKey, TileKey, run_job};
 use crate::tile::tile_workers::InlineWorkers;
@@ -30,7 +29,7 @@ fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    let render_layer = layermanager::create_render_layer(&layer.base_impl()).unwrap();
+    let render_layer = crate::tests::render_layer(&layer.base_impl());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }

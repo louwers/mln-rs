@@ -31,7 +31,6 @@ use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::layer::downcast_arc;
 use mln_style::layers::ColorRelief;
 use mln_style::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
 use mln_style::layers::color_relief_layer_properties::ColorReliefPaintProperties;
@@ -57,22 +56,23 @@ use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &ColorReliefLayerImpl {
-    impl_.downcast_ref::<ColorReliefLayerImpl>().expect("RenderColorReliefLayer: not a color-relief layer impl")
-}
-
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
 
-impl LayerType for ColorRelief {}
+impl LayerType for ColorRelief {
+    fn render_layer(style: Arc<ColorReliefLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderColorReliefLayer::new(style)))
+    }
+}
 
 pub(crate) struct RenderColorReliefLayer {
     base: RenderLayerBase,
+    style: Arc<ColorReliefLayerImpl>,
     // Paint properties
     unevaluated: ColorReliefPaintProperties::Unevaluated,
 
@@ -106,7 +106,8 @@ pub(crate) struct RenderColorReliefLayer {
 impl RenderColorReliefLayer {
     pub(crate) fn new(impl_: Arc<ColorReliefLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<ColorRelief>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> =
+            Arc::new(EvaluatedLayer::<ColorRelief>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
 
@@ -114,6 +115,7 @@ impl RenderColorReliefLayer {
         let color_ramp_size = 256;
         let mut layer = RenderColorReliefLayer {
             base,
+            style: impl_,
             unevaluated,
             color_ramp_size,
             color_ramp_changed: true,
@@ -266,9 +268,14 @@ impl RenderLayer for RenderColorReliefLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
@@ -296,7 +303,7 @@ impl RenderLayer for RenderColorReliefLayer {
 
         let previous_evaluated = evaluated::<ColorRelief>(&self.base.evaluated_properties).paint.clone();
         let mut properties = EvaluatedLayer::<ColorRelief>::with_paint(
-            downcast_arc::<ColorReliefLayerImpl>(&self.base.base_impl),
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 

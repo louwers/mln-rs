@@ -27,6 +27,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use parking_lot::Mutex;
 use serde_json::json;
 
+use crate::Registry;
 use crate::gfx::dynamic_texture::DynamicTextureBinId;
 use crate::image_store::ImageStoreObserver;
 use crate::layer_type::ErasedEvaluatedLayer;
@@ -39,7 +40,6 @@ use crate::tile::job::{DataInput, Job, JobId, JobResult, JobTimes, LayoutJob, Re
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::{InlineWorkers, Lane, PoolWorkers, ReplyBody, TileWorkers};
 use crate::tile::worker_codec::{Encoded, RemoteJobs, RemoteWorkers, ReplySink, TileWorkerHost, WorkerInstances};
-use crate::{Registry, layermanager};
 
 /// Workers whose jobs run when the test says so, or get the replies the
 /// test makes up.
@@ -133,7 +133,7 @@ pub(super) fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer
     let mut error = ConversionError::default();
     let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    let render_layer = layermanager::create_render_layer(&layer.base_impl()).unwrap();
+    let render_layer = crate::tests::render_layer(&layer.base_impl());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }

@@ -51,10 +51,6 @@ fn get_tex_size(drawable: &Drawable, tex_id: usize) -> [f32; 2] {
 }
 
 impl LayerTweaker for SymbolLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

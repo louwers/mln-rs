@@ -35,10 +35,6 @@ impl CircleLayerTweaker {
 /// The constant value of paint property `$p`, or its default if it isn't
 /// constant.
 impl LayerTweaker for CircleLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

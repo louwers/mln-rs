@@ -20,17 +20,24 @@ pub struct StyleRegistry {
 }
 
 impl StyleRegistry {
-    /// The built-in layer types, with `functions`.
+    /// The registry of `functions` and `layer_types`. A layer type is known
+    /// by its name: of two types of one name, the first counts.
     #[must_use]
-    pub fn new(functions: Arc<Functions>) -> Self {
-        let layer_types = BUILTIN_STYLE_TYPES.iter().map(|&layer_type| (layer_type.info().name, layer_type)).collect();
-        StyleRegistry { functions, layer_types }
+    pub fn new(
+        functions: Arc<Functions>,
+        layer_types: impl IntoIterator<Item = &'static dyn ErasedStyleLayerType>,
+    ) -> Self {
+        let mut by_name = VecMap::new();
+        for layer_type in layer_types {
+            by_name.entry(layer_type.info().name).or_insert(layer_type);
+        }
+        StyleRegistry { functions, layer_types: by_name }
     }
 
     /// The built-in layer types and expression functions.
     #[must_use]
     pub fn with_builtins() -> Arc<Self> {
-        Arc::new(StyleRegistry::new(Functions::with_builtins()))
+        Arc::new(StyleRegistry::new(Functions::with_builtins(), BUILTIN_STYLE_TYPES))
     }
 
     /// The expression functions.

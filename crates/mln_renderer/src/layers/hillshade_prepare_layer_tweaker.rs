@@ -31,10 +31,6 @@ impl HillshadePrepareLayerTweaker {
 }
 
 impl LayerTweaker for HillshadePrepareLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

@@ -26,7 +26,6 @@ use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::VertexVector;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
 use mln_map_types::{TileProjector, TransformState};
-use mln_style::layer::downcast_arc;
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer_impl::{Impl as SymbolLayerImpl, SymbolLayerPaintPropertyOverrides};
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
@@ -61,17 +60,13 @@ use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matr
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    BucketPlacementData, LayerPrepareParameters, RenderLayer, RenderLayerBase, Stats, SymbolTranslate,
-    activate_layer_group, change_layer_index, compute_feature_ndc_bound, vertex_color_alpha, vertex_opacity,
+    BucketPlacementData, LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, SymbolTranslate,
+    activate_layer_group, change_layer_index, compute_feature_ndc_bound, set_style, vertex_color_alpha, vertex_opacity,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
-
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &SymbolLayerImpl {
-    impl_.downcast_ref::<SymbolLayerImpl>().expect("RenderSymbolLayer: not a symbol layer impl")
-}
 
 const SYMBOL_ICON_SHADER_NAME: &str = "SymbolIconShader";
 const SYMBOL_SDF_SHADER_NAME: &str = "SymbolSDFShader";
@@ -860,10 +855,15 @@ impl SegmentGroup {
     }
 }
 
-impl LayerType for Symbol {}
+impl LayerType for Symbol {
+    fn render_layer(style: Arc<SymbolLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderSymbolLayer::new(style)))
+    }
+}
 
 pub(crate) struct RenderSymbolLayer {
     base: RenderLayerBase,
+    style: Arc<SymbolLayerImpl>,
     unevaluated: SymbolPaintProperties::Unevaluated,
     has_format_section_overrides: bool,
 
@@ -886,11 +886,12 @@ pub(crate) struct RenderSymbolLayer {
 impl RenderSymbolLayer {
     pub(crate) fn new(impl_: Arc<SymbolLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Symbol>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Symbol>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderSymbolLayer {
             base,
+            style: impl_,
             unevaluated,
             has_format_section_overrides: false,
             icon_size: 1.0,
@@ -1053,24 +1054,29 @@ impl RenderLayer for RenderSymbolLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.has_format_section_overrides =
-            SymbolLayerPaintPropertyOverrides::has_overrides(&impl_cast(&self.base.base_impl).layout.text_field);
+            SymbolLayerPaintPropertyOverrides::has_overrides(&self.style.layout.text_field);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = evaluated::<Symbol>(&self.base.evaluated_properties).paint.clone();
         let mut properties = EvaluatedLayer::<Symbol>::with_paint(
-            downcast_arc::<SymbolLayerImpl>(&self.base.base_impl),
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
         if self.has_format_section_overrides {
             mln_style::format_section_override::set_overrides(
-                &impl_cast(&self.base.base_impl).layout,
+                &self.style.layout,
                 &mut properties.paint,
                 &self.unevaluated,
                 &parameters.global_state,
@@ -1327,7 +1333,7 @@ impl RenderLayer for RenderSymbolLayer {
         let render_tile_ids = &self.base.render_tile_ids;
         self.tile_bucket_versions.retain(|id, _| render_tile_ids.contains_key(id));
 
-        let layout = &impl_cast(&self.base.base_impl).layout;
+        let layout = &self.style.layout;
         let sort_features_by_key = layout.symbol_sort_key.is_expression();
         let constant_sort_key = layout.symbol_sort_key.is_constant();
         // Screen-space symbols are drawn over the view, not projected onto

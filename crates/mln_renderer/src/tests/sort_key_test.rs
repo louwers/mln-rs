@@ -6,7 +6,7 @@ use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
 use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer::downcast_arc;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Fill, Line, Symbol};
 use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
 use mln_text::glyph::{GlyphDependencies, GlyphPositions};
@@ -78,10 +78,10 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
         .unwrap_or_else(|| panic!("{}", error.message));
     let base_impl = layer.base_impl();
     match json["type"].as_str().unwrap() {
-        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(downcast_arc(&base_impl))),
-        "line" => Arc::new(EvaluatedLayer::<Line>::new(downcast_arc(&base_impl))),
-        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(downcast_arc(&base_impl))),
-        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(downcast_arc(&base_impl))),
+        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(&base_impl).unwrap())),
+        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(&base_impl).unwrap())),
+        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(&base_impl).unwrap())),
+        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(&base_impl).unwrap())),
         other => panic!("no properties for {other}"),
     }
 }

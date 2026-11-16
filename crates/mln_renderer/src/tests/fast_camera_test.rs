@@ -18,9 +18,8 @@ use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::StyleRegistry;
-use mln_style::layer::{Layer, downcast_arc};
-use mln_style::layers::fill_layer::Impl as FillLayerImpl;
-use mln_style::layers::raster_layer::Impl as RasterLayerImpl;
+use mln_style::layer::Layer;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Fill, Raster};
 use mln_style::source::Source;
 use mln_style::sources::tile_source::TileSource;
@@ -179,10 +178,10 @@ impl Scene {
         let mut fill = Layer::new(&StyleRegistry::with_builtins(), "fill", "water", "vector").unwrap();
         fill.set_source_layer("water");
         let fill_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
-            vec![Arc::new(EvaluatedLayer::<Fill>::new(downcast_arc::<FillLayerImpl>(&fill.base_impl())))];
+            vec![Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(&fill.base_impl()).unwrap()))];
         let raster_layer = Layer::new(&StyleRegistry::with_builtins(), "raster", "raster", "raster").unwrap();
         let raster_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
-            vec![Arc::new(EvaluatedLayer::<Raster>::new(downcast_arc::<RasterLayerImpl>(&raster_layer.base_impl())))];
+            vec![Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(&raster_layer.base_impl()).unwrap()))];
 
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(size).unwrap();

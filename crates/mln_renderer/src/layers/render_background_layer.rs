@@ -6,7 +6,6 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::shader_defines::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
 use mln_gfx::{AttributeDataType, ColorMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layer::downcast_arc;
 use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
 use mln_style::layers::{Background, BackgroundPaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
@@ -24,16 +23,12 @@ use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::layers::background_layer_tweaker::BackgroundLayerTweaker;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
-
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &BackgroundLayerImpl {
-    impl_.downcast_ref::<BackgroundLayerImpl>().expect("RenderBackgroundLayer: not a background layer impl")
-}
 
 const BACKGROUND_PLAIN_SHADER_NAME: &str = "BackgroundShader";
 const BACKGROUND_PATTERN_SHADER_NAME: &str = "BackgroundPatternShader";
@@ -47,10 +42,15 @@ fn add_pattern_if_needed(id: &str, params: &LayerPrepareParameters<'_>) {
     }
 }
 
-impl LayerType for Background {}
+impl LayerType for Background {
+    fn render_layer(style: Arc<BackgroundLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderBackgroundLayer::new(style)))
+    }
+}
 
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
+    style: Arc<BackgroundLayerImpl>,
     unevaluated: BackgroundPaintProperties::Unevaluated,
     plain_shader: Option<ShaderProgramPtr>,
     pattern_shader: Option<ShaderProgramPtr>,
@@ -59,10 +59,10 @@ pub(crate) struct RenderBackgroundLayer {
 impl RenderBackgroundLayer {
     pub(crate) fn new(impl_: Arc<BackgroundLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Background>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Background>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
-        RenderBackgroundLayer { base, unevaluated, plain_shader: None, pattern_shader: None }
+        RenderBackgroundLayer { base, style: impl_, unevaluated, plain_shader: None, pattern_shader: None }
     }
 
     /// The `drawPasses` / `passes` expression shared by `evaluate` and
@@ -91,9 +91,14 @@ impl RenderLayer for RenderBackgroundLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
@@ -102,7 +107,7 @@ impl RenderLayer for RenderBackgroundLayer {
         let evaluated = self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated);
         let mut properties = EvaluatedLayer::<Background> {
             crossfade: parameters.get_crossfade_parameters(),
-            ..EvaluatedLayer::with_paint(downcast_arc::<BackgroundLayerImpl>(&self.base.base_impl), evaluated)
+            ..EvaluatedLayer::with_paint(Arc::clone(&self.style), evaluated)
         };
 
         self.base.passes = self.passes_for(&properties.paint);

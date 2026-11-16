@@ -46,10 +46,6 @@ fn contrast_factor(contrast: f32) -> f32 {
 }
 
 impl LayerTweaker for RasterLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

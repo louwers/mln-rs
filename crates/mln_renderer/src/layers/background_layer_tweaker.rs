@@ -36,10 +36,6 @@ fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
 }
 
 impl LayerTweaker for BackgroundLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

@@ -85,10 +85,6 @@ fn cast_tlbr(a: [u16; 4]) -> [f32; 4] {
 }
 
 impl LayerTweaker for LineLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

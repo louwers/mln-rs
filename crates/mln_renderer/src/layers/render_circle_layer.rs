@@ -11,7 +11,6 @@ use mln_gfx::{
 };
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::expression::EvaluationContext;
-use mln_style::layer::downcast_arc;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_impl::Impl as CircleLayerImpl;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
@@ -36,17 +35,13 @@ use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluat
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::{PaintPropertyBinder, read_data_driven_paint_property};
 use crate::render_layer::{
-    CaptureView, RenderLayer, RenderLayerBase, Stats, capture_retained_features, compute_feature_ndc_bound,
-    vertex_color_alpha, vertex_opacity,
+    CaptureView, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, capture_retained_features,
+    compute_feature_ndc_bound, set_style, vertex_color_alpha, vertex_opacity,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
-
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &CircleLayerImpl {
-    impl_.downcast_ref::<CircleLayerImpl>().expect("RenderCircleLayer: not a circle layer impl")
-}
 
 const CIRCLE_SHADER_GROUP_NAME: &str = "CircleShader";
 
@@ -332,10 +327,15 @@ fn project_query_geometry(
     query_geometry.iter().map(|p| project_point(*p, projector, size)).collect()
 }
 
-impl LayerType for Circle {}
+impl LayerType for Circle {
+    fn render_layer(style: Arc<CircleLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderCircleLayer::new(style)))
+    }
+}
 
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
+    style: Arc<CircleLayerImpl>,
     // Paint properties
     unevaluated: CirclePaintProperties::Unevaluated,
     circle_shader_group: Option<ShaderGroupPtr>,
@@ -344,10 +344,10 @@ pub(crate) struct RenderCircleLayer {
 impl RenderCircleLayer {
     pub(crate) fn new(impl_: Arc<CircleLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Circle>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Circle>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
-        RenderCircleLayer { base, unevaluated, circle_shader_group: None }
+        RenderCircleLayer { base, style: impl_, unevaluated, circle_shader_group: None }
     }
 }
 
@@ -360,16 +360,21 @@ impl RenderLayer for RenderCircleLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = evaluated::<Circle>(&self.base.evaluated_properties).paint.clone();
         let mut properties = EvaluatedLayer::<Circle>::with_paint(
-            downcast_arc::<CircleLayerImpl>(&self.base.base_impl),
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
         let evaluated = &properties.paint;

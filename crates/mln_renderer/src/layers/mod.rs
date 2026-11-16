@@ -31,13 +31,6 @@ use std::sync::Arc;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_style::CrossfadeParameters;
 use mln_style::layers::{Background, BackgroundPaintProperties};
-pub(crate) use render_background_layer::RenderBackgroundLayer;
-pub(crate) use render_circle_layer::RenderCircleLayer;
-pub(crate) use render_fill_extrusion_layer::RenderFillExtrusionLayer;
-pub(crate) use render_fill_layer::RenderFillLayer;
-pub(crate) use render_line_layer::RenderLineLayer;
-pub(crate) use render_raster_layer::RenderRasterLayer;
-pub(crate) use render_symbol_layer::RenderSymbolLayer;
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::drawable::Drawable;

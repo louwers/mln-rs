@@ -28,7 +28,6 @@ use mln_gfx::{
     VertexAttributeArray,
 };
 use mln_map_types::TransformState;
-use mln_style::layer::downcast_arc;
 use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
@@ -53,24 +52,25 @@ use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::{RenderTarget, RenderTargetPtr};
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HillshadeLayerImpl {
-    impl_.downcast_ref::<HillshadeLayerImpl>().expect("RenderHillshadeLayer: not a hillshade layer impl")
-}
-
 const HILLSHADE_PREPARE_SHADER_GROUP_NAME: &str = "HillshadePrepareShader";
 const HILLSHADE_SHADER_GROUP_NAME: &str = "HillshadeShader";
 
-impl LayerType for Hillshade {}
+impl LayerType for Hillshade {
+    fn render_layer(style: Arc<HillshadeLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderHillshadeLayer::new(style)))
+    }
+}
 
 pub(crate) struct RenderHillshadeLayer {
     base: RenderLayerBase,
+    style: Arc<HillshadeLayerImpl>,
     // Paint properties
     unevaluated: HillshadePaintProperties::Unevaluated,
     maxzoom: u8,
@@ -92,11 +92,12 @@ pub(crate) struct RenderHillshadeLayer {
 impl RenderHillshadeLayer {
     pub(crate) fn new(impl_: Arc<HillshadeLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Hillshade>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Hillshade>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderHillshadeLayer {
             base,
+            style: impl_,
             unevaluated,
             maxzoom: constants::TERRAIN_RGB_MAXZOOM,
             hillshade_prepare_shader: None,
@@ -160,9 +161,14 @@ impl RenderLayer for RenderHillshadeLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
@@ -180,7 +186,7 @@ impl RenderLayer for RenderHillshadeLayer {
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = evaluated::<Hillshade>(&self.base.evaluated_properties).paint.clone();
         let mut properties = EvaluatedLayer::<Hillshade>::with_paint(
-            downcast_arc::<HillshadeLayerImpl>(&self.base.base_impl),
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 

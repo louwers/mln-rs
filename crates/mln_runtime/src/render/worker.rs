@@ -279,6 +279,7 @@ impl Gfx {
             local_font_family.clone(),
             Arc::clone(&glyph_cache),
             Arc::clone(&font_face_engine),
+            Arc::clone(&registry),
             run_loop,
         );
         renderer.set_tile_cache_enabled(tile_cache_enabled);
@@ -316,6 +317,7 @@ impl Gfx {
             self.local_font_family.clone(),
             Arc::clone(&self.glyph_cache),
             Arc::clone(&self.font_face_engine),
+            Arc::clone(&self.registry),
             &self.run_loop,
         );
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());

@@ -7,7 +7,7 @@ use std::rc::Weak;
 use crate::layer_group::LayerGroupPtr;
 use crate::layer_tweaker::LayerTweaker;
 
-pub enum ChangeRequest {
+pub(crate) enum ChangeRequest {
     AddLayerGroup(LayerGroupPtr),
     RemoveLayerGroup(LayerGroupPtr),
     UpdateLayerGroupIndex(LayerGroupPtr, i32),

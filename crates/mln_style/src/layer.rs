@@ -19,7 +19,7 @@ use crate::expression::{
 };
 use crate::filter::Filter;
 pub(crate) use crate::layer_impl::FontStack;
-pub use crate::layer_impl::{Impl, ImplBase, downcast_arc, font_stacks};
+pub use crate::layer_impl::{Impl, ImplBase, font_stacks};
 use crate::layer_type::LayerStyle;
 pub use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::layers::Custom;

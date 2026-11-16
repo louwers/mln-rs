@@ -338,10 +338,6 @@ impl PolylineLayerTweaker {
 }
 
 impl LayerTweaker for PolylineLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

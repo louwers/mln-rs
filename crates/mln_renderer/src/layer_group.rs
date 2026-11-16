@@ -59,7 +59,7 @@ fn sort_key(drawable: &Drawable) -> SortKey {
 }
 
 /// A layer-like group of drawables, not a group of layers.
-pub struct LayerGroup {
+pub(crate) struct LayerGroup {
     pub(crate) id: SimpleIdentity,
     pub(crate) enabled: bool,
     pub(crate) layer_index: i32,

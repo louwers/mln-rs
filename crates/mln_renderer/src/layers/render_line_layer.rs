@@ -17,7 +17,6 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer::downcast_arc;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_impl::Impl as LineLayerImpl;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
@@ -44,8 +43,8 @@ use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    LayerPrepareParameters, RenderLayer, RenderLayerBase, Stats, capture_retained_features, vertex_color_alpha,
-    vertex_opacity,
+    LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, capture_retained_features, set_style,
+    vertex_color_alpha, vertex_opacity,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
@@ -61,10 +60,6 @@ fn dash_pattern_cap(bucket: &LineBucket) -> LinePatternCap {
     } else {
         LinePatternCap::Square
     }
-}
-
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &LineLayerImpl {
-    impl_.downcast_ref::<LineLayerImpl>().expect("RenderLineLayer: not a line layer impl")
 }
 
 pub(crate) fn apply_color_ramp(
@@ -241,10 +236,15 @@ fn read_line_attributes(
     );
 }
 
-impl LayerType for Line {}
+impl LayerType for Line {
+    fn render_layer(style: Arc<LineLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderLineLayer::new(style)))
+    }
+}
 
 pub(crate) struct RenderLineLayer {
     base: RenderLayerBase,
+    style: Arc<LineLayerImpl>,
     // Paint properties
     unevaluated: LinePaintProperties::Unevaluated,
 
@@ -265,11 +265,12 @@ pub(crate) struct RenderLineLayer {
 impl RenderLineLayer {
     pub(crate) fn new(impl_: Arc<LineLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Line>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Line>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderLineLayer {
             base,
+            style: impl_,
             unevaluated,
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
@@ -374,9 +375,14 @@ impl RenderLayer for RenderLineLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
@@ -406,7 +412,7 @@ impl RenderLayer for RenderLineLayer {
         let mut properties = EvaluatedLayer::<Line> {
             crossfade: parameters.get_crossfade_parameters(),
             ..EvaluatedLayer::with_paint(
-                downcast_arc::<LineLayerImpl>(&self.base.base_impl),
+                Arc::clone(&self.style),
                 self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
             )
         };

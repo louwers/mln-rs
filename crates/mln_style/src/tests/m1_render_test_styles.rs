@@ -19,7 +19,7 @@ use mln_util::{Color, UnitBezier};
 
 use super::util::FixtureLog;
 use crate::expression::Functions;
-use crate::layer::downcast_arc;
+use crate::layer_type::LayerStyle;
 use crate::layers::BackgroundPaintProperties;
 use crate::layers::background_layer::Impl as BackgroundLayerImpl;
 use crate::map::zoom_history::ZoomHistory;
@@ -65,7 +65,7 @@ fn background_impl(style: &Impl, id: &str) -> Arc<BackgroundLayerImpl> {
     let impls = style.get_layer_impls();
     let impl_ = impls.iter().find(|impl_| impl_.id == id).unwrap_or_else(|| panic!("no layer {id}"));
     assert_eq!(impl_.get_type_info().name, "background");
-    downcast_arc::<BackgroundLayerImpl>(impl_)
+    LayerStyle::recover(impl_).unwrap()
 }
 
 /// One `RenderOrchestrator` update: `layer->transition(transitionParameters)`

@@ -29,7 +29,6 @@ use mln_gfx::{
     VertexAttributeArray,
 };
 use mln_map_types::TransformState;
-use mln_style::layer::downcast_arc;
 use mln_style::layers::Raster;
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use mln_style::layers::raster_layer_properties::RasterPaintProperties;
@@ -53,7 +52,8 @@ use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerPrepareParameters, RenderLayer, RenderLayerBase, activate_layer_group, change_layer_index,
+    LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, activate_layer_group, change_layer_index,
+    set_style,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -61,14 +61,15 @@ use crate::render_tree::RenderTree;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &RasterLayerImpl {
-    impl_.downcast_ref::<RasterLayerImpl>().expect("RenderRasterLayer: not a raster layer impl")
+impl LayerType for Raster {
+    fn render_layer(style: Arc<RasterLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderRasterLayer::new(style)))
+    }
 }
-
-impl LayerType for Raster {}
 
 pub(crate) struct RenderRasterLayer {
     base: RenderLayerBase,
+    style: Arc<RasterLayerImpl>,
     // Paint properties
     unevaluated: RasterPaintProperties::Unevaluated,
 
@@ -89,11 +90,12 @@ pub(crate) struct RenderRasterLayer {
 impl RenderRasterLayer {
     pub(crate) fn new(impl_: Arc<RasterLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Raster>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Raster>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderRasterLayer {
             base,
+            style: impl_,
             unevaluated,
             raster_shader: None,
             static_data_vertices: None,
@@ -253,16 +255,21 @@ impl RenderLayer for RenderRasterLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = evaluated::<Raster>(&self.base.evaluated_properties).paint.clone();
         let mut properties = EvaluatedLayer::<Raster>::with_paint(
-            downcast_arc::<RasterLayerImpl>(&self.base.base_impl),
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 

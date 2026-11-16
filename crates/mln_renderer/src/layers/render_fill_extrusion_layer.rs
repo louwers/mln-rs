@@ -30,7 +30,6 @@ use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layer::downcast_arc;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
@@ -55,16 +54,14 @@ use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{CaptureView, RenderLayer, RenderLayerBase, Stats, vertex_color_alpha};
+use crate::render_layer::{
+    CaptureView, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, set_style, vertex_color_alpha,
+};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
-
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillExtrusionLayerImpl {
-    impl_.downcast_ref::<FillExtrusionLayerImpl>().expect("RenderFillExtrusionLayer: not a fill-extrusion layer impl")
-}
 
 fn capture_rendered_features(
     stats: &mut Stats,
@@ -307,10 +304,15 @@ fn create_builder(
     builder
 }
 
-impl LayerType for FillExtrusion {}
+impl LayerType for FillExtrusion {
+    fn render_layer(style: Arc<FillExtrusionLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderFillExtrusionLayer::new(style)))
+    }
+}
 
 pub(crate) struct RenderFillExtrusionLayer {
     base: RenderLayerBase,
+    style: Arc<FillExtrusionLayerImpl>,
     // Paint properties
     unevaluated: FillExtrusionPaintProperties::Unevaluated,
 
@@ -332,11 +334,13 @@ pub(crate) struct RenderFillExtrusionLayer {
 impl RenderFillExtrusionLayer {
     pub(crate) fn new(impl_: Arc<FillExtrusionLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<FillExtrusion>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> =
+            Arc::new(EvaluatedLayer::<FillExtrusion>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderFillExtrusionLayer {
             base,
+            style: impl_,
             unevaluated,
             fill_extrusion_group: None,
             fill_extrusion_pattern_group: None,
@@ -357,9 +361,14 @@ impl RenderLayer for RenderFillExtrusionLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
@@ -368,7 +377,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         let mut properties = EvaluatedLayer::<FillExtrusion> {
             crossfade: parameters.get_crossfade_parameters(),
             ..EvaluatedLayer::with_paint(
-                downcast_arc::<FillExtrusionLayerImpl>(&self.base.base_impl),
+                Arc::clone(&self.style),
                 self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
             )
         };

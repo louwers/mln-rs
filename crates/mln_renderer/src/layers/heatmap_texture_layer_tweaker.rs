@@ -22,10 +22,6 @@ impl HeatmapTextureLayerTweaker {
 }
 
 impl LayerTweaker for HeatmapTextureLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

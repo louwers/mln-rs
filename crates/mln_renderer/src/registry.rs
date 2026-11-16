@@ -13,32 +13,29 @@ use std::sync::Arc;
 use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::{RegisterError, register_builtin_functions};
+use mln_style::layer_type::ErasedStyleLayerType;
 use mln_style::layers::{
     Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
 };
 use mln_vec_map::VecMap;
 
-use crate::layer_type::{ErasedLayerType, entry};
-
-/// The built-in layer types' render halves.
-const BUILTIN_LAYER_TYPES: [&dyn ErasedLayerType; 11] = [
-    entry::<Fill>(),
-    entry::<Line>(),
-    entry::<Circle>(),
-    entry::<Symbol>(),
-    entry::<Raster>(),
-    entry::<Background>(),
-    entry::<Hillshade>(),
-    entry::<ColorRelief>(),
-    entry::<FillExtrusion>(),
-    entry::<Heatmap>(),
-    entry::<Custom>(),
-];
+use crate::layer_type::{ErasedLayerType, LayerType, entry};
 
 /// What a [`Registry`] is built from.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct RegistryBuilder {
     functions: Functions,
+    /// The layer types added, by name.
+    layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
+}
+
+impl std::fmt::Debug for RegistryBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegistryBuilder")
+            .field("functions", &self.functions)
+            .field("layer_types", &self.layer_types.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 impl RegistryBuilder {
@@ -53,21 +50,48 @@ impl RegistryBuilder {
         &mut self.functions
     }
 
-    /// The registry of the functions added, with the built-in layer types.
+    /// Adds the layer type `T`. Fails for a name that an earlier type took.
+    pub(crate) fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
+        let name = T::INFO.name;
+        if self.layer_types.contains_key(name) {
+            return Err(RegisterError::Duplicate(name.to_owned()));
+        }
+        self.layer_types.insert(name, entry::<T>());
+        Ok(())
+    }
+
+    /// The registry of what was added.
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        let style = StyleRegistry::new(Arc::new(self.functions));
-        let layer_types = BUILTIN_LAYER_TYPES.iter().map(|&layer_type| (layer_type.info().name, layer_type)).collect();
+        let style_halves = self.layer_types.values().map(|&layer_type| style_half(layer_type));
+        let style = StyleRegistry::new(Arc::new(self.functions), style_halves);
         let mut hasher = Fnv::default();
         style.digest(&mut hasher);
-        Arc::new(Registry { style: Arc::new(style), layer_types, digest: hasher.finish() })
+        Arc::new(Registry { style: Arc::new(style), layer_types: self.layer_types, digest: hasher.finish() })
     }
 }
 
-/// Adds the style specification's expression functions. Fails for a name
-/// that an earlier call took, or a role that an earlier function has.
+/// The style half of `layer_type`.
+fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedStyleLayerType {
+    layer_type
+}
+
+/// Adds the style specification's expression functions and layer types.
+/// Fails for a name that an earlier call took, or a role that an earlier
+/// function has.
 pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    register_builtin_functions(builder.functions_mut())
+    register_builtin_functions(builder.functions_mut())?;
+    builder.add_layer_type::<Fill>()?;
+    builder.add_layer_type::<Line>()?;
+    builder.add_layer_type::<Circle>()?;
+    builder.add_layer_type::<Symbol>()?;
+    builder.add_layer_type::<Raster>()?;
+    builder.add_layer_type::<Background>()?;
+    builder.add_layer_type::<Hillshade>()?;
+    builder.add_layer_type::<ColorRelief>()?;
+    builder.add_layer_type::<FillExtrusion>()?;
+    builder.add_layer_type::<Heatmap>()?;
+    builder.add_layer_type::<Custom>()
 }
 
 /// The expression functions and layer types that a style parses against,
@@ -187,10 +211,16 @@ mod tests {
     }
 
     #[test]
+    fn a_layer_type_registers_once() {
+        let mut builder = RegistryBuilder::new();
+        builder.add_layer_type::<Circle>().unwrap();
+        assert_eq!(builder.add_layer_type::<Circle>(), Err(RegisterError::Duplicate("circle".to_owned())));
+    }
+
+    #[test]
     fn builtins_register_the_builtin_layer_types() {
         let registry = Registry::with_builtins();
-        let registered: Vec<_> =
-            registry.style().layer_types().map(mln_style::layer_type::ErasedStyleLayerType::info).collect();
+        let registered: Vec<_> = registry.style().layer_types().map(ErasedStyleLayerType::info).collect();
         let mut builtins: Vec<_> =
             mln_style::layer_type::BUILTIN_STYLE_TYPES.iter().map(|layer_type| layer_type.info()).collect();
         builtins.sort_by_key(|info| info.name);

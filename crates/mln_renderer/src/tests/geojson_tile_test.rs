@@ -5,9 +5,9 @@ use geo_types::Point;
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map_types::MapMode;
 use mln_style::StyleRegistry;
-use mln_style::layer::{Layer, downcast_arc};
+use mln_style::layer::Layer;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
-use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style::sources::geojson_source::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -108,7 +108,7 @@ fn point_data() -> Arc<dyn GeoJSONData> {
 
 fn circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
     let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
-    Arc::new(EvaluatedLayer::<Circle>::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())))
+    Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(&layer.base_impl()).unwrap()))
 }
 
 fn root() -> OverscaledTileID {
@@ -181,7 +181,7 @@ fn issue_9927() {
 /// worker codec sends to evaluate it again.
 fn evaluated_circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
     let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
-    let render_layer = crate::layermanager::create_render_layer(&layer.base_impl()).unwrap();
+    let render_layer = crate::tests::render_layer(&layer.base_impl());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }

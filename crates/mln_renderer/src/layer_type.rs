@@ -1,9 +1,10 @@
 //! The render half of the layer types.
 //!
 //! A layer type's render half is its marker type's [`LayerType`] impl, beside
-//! the type's render layer. The registry holds the types as
-//! `&'static dyn ErasedLayerType` ([`entry`]), the render half of the same
-//! `LayerTypeEntry<T>` value that a style registry holds as the style half.
+//! the type's render layer, which it makes from the layer's own style data.
+//! The registry holds the types as `&'static dyn ErasedLayerType`
+//! ([`entry`]), the render half of the same `LayerTypeEntry<T>` value that a
+//! style registry holds as the style half.
 //!
 //! A layer's values for a frame are an [`EvaluatedLayer<T>`], which the render
 //! layer, its tiles' render data and the tile workers share as an
@@ -22,8 +23,13 @@ use mln_style::serialization::shared_layer;
 use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 
+use crate::render_layer::RenderLayerPtr;
+
 /// A layer type that the renderer draws.
-pub(crate) trait LayerType: StyleLayerType {}
+pub(crate) trait LayerType: StyleLayerType {
+    /// The render layer that draws the layer `style`.
+    fn render_layer(style: Arc<LayerStyle<Self>>) -> RenderLayerPtr;
+}
 
 /// The values of a layer of the type `T` for a frame: its style data, its
 /// paint properties evaluated, the cross-fade of its patterns and the
@@ -61,7 +67,7 @@ impl<T: LayerType> std::fmt::Debug for EvaluatedLayer<T> {
 }
 
 /// A layer's values for a frame, whichever its type.
-pub trait ErasedEvaluatedLayer: Any + Send + Sync {
+pub(crate) trait ErasedEvaluatedLayer: Any + Send + Sync {
     /// The layer's style data.
     fn style(&self) -> &dyn ErasedLayerStyle;
 
@@ -151,12 +157,20 @@ pub(crate) fn evaluated<T: LayerType>(layer: &Arc<dyn ErasedEvaluatedLayer>) -> 
 
 /// A layer type that the renderer draws, whichever it is.
 pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
+    /// The render layer that draws the layer `style`, or `None` if `style`
+    /// is another type's.
+    fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<RenderLayerPtr>;
+
     /// Reads the values that [`ErasedEvaluatedLayer::write`] wrote for a
     /// layer of the type.
     fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>>;
 }
 
 impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
+    fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<RenderLayerPtr> {
+        LayerStyle::<T>::recover(style).map(T::render_layer)
+    }
+
     fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
         let style = shared_layer::read(r)?;
         let Some(style) = LayerStyle::<T>::recover(&style) else {

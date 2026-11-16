@@ -42,10 +42,6 @@ impl ColorReliefLayerTweaker {
 }
 
 impl LayerTweaker for ColorReliefLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

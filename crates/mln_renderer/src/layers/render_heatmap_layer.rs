@@ -21,7 +21,6 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer::downcast_arc;
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
@@ -45,16 +44,12 @@ use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase};
+use crate::render_layer::{RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::{RenderTarget, RenderTargetPtr};
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
-
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HeatmapLayerImpl {
-    impl_.downcast_ref::<HeatmapLayerImpl>().expect("RenderHeatmapLayer: not a heatmap layer impl")
-}
 
 const HEATMAP_SHADER_GROUP_NAME: &str = "HeatmapShader";
 const HEATMAP_TEXTURE_SHADER_GROUP_NAME: &str = "HeatmapTextureShader";
@@ -76,10 +71,15 @@ pub(crate) fn activate_render_target(
     }
 }
 
-impl LayerType for Heatmap {}
+impl LayerType for Heatmap {
+    fn render_layer(style: Arc<HeatmapLayerImpl>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderHeatmapLayer::new(style)))
+    }
+}
 
 pub(crate) struct RenderHeatmapLayer {
     base: RenderLayerBase,
+    style: Arc<HeatmapLayerImpl>,
     // Paint properties
     unevaluated: HeatmapPaintProperties::Unevaluated,
     color_ramp: Rc<PremultipliedImage>,
@@ -103,11 +103,12 @@ pub(crate) struct RenderHeatmapLayer {
 impl RenderHeatmapLayer {
     pub(crate) fn new(impl_: Arc<HeatmapLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Heatmap>::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Heatmap>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderHeatmapLayer {
             base,
+            style: impl_,
             unevaluated,
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
@@ -188,9 +189,14 @@ impl RenderLayer for RenderHeatmapLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
@@ -229,7 +235,7 @@ impl RenderLayer for RenderHeatmapLayer {
 
         let previous_evaluated = evaluated::<Heatmap>(&self.base.evaluated_properties).paint.clone();
         let mut properties = EvaluatedLayer::<Heatmap>::with_paint(
-            downcast_arc::<HeatmapLayerImpl>(&self.base.base_impl),
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 

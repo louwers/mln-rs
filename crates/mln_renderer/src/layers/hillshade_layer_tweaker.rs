@@ -140,10 +140,6 @@ impl HillshadeLayerTweaker {
 }
 
 impl LayerTweaker for HillshadeLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

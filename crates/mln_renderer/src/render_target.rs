@@ -26,7 +26,7 @@ pub(crate) type RenderTargetPtr = Rc<RefCell<RenderTarget>>;
 /// A texture that layer groups draw into ahead of the frame, which other
 /// drawables sample, with the depth texture the backend draws it with
 /// (`Context::render_target_depth`).
-pub struct RenderTarget {
+pub(crate) struct RenderTarget {
     texture: Texture2DPtr,
     /// Made with the first pass, of the texture's size.
     depth: Option<Attachment>,

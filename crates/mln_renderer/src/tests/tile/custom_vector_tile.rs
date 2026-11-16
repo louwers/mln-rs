@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_style::StyleRegistry;
 use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, TileFunction};
-use mln_style::layer::{Layer, downcast_arc};
+use mln_style::layer::Layer;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
-use mln_style::layers::fill_layer::Impl as FillLayerImpl;
 use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVectorTileLoader, TileDataFormat};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
@@ -228,7 +228,7 @@ fn set_mlt_tile_data() {
     let mut layer = Layer::new(&StyleRegistry::with_builtins(), "fill", "water", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Fill>::new(downcast_arc::<FillLayerImpl>(&layer.base_impl())));
+        Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(&layer.base_impl()).unwrap()));
     tiles.set_style(&crate::tests::style(&[layer_properties]));
     tiles.set_necessity(&root, TileNecessity::Required);
     test.run_loop.wait_for_empty();

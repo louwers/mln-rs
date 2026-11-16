@@ -11,7 +11,6 @@ use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::evaluated::Evaluated;
-use mln_style::layer::downcast_arc;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
 use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
@@ -196,7 +195,7 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         ..FillPaintProperties::PossiblyEvaluated::default()
     };
     let properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Fill>::with_paint(downcast_arc(&layer.base_impl()), evaluated));
+        Arc::new(EvaluatedLayer::<Fill>::with_paint(LayerStyle::recover(&layer.base_impl()).unwrap(), evaluated));
     let mut bucket = FillBucket::new(
         &FillLayoutProperties::PossiblyEvaluated::default(),
         &VecMap::from_iter([("fill".to_owned(), properties)]),

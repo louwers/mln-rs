@@ -33,10 +33,6 @@ impl HeatmapLayerTweaker {
 }
 
 impl LayerTweaker for HeatmapLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

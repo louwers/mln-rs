@@ -27,13 +27,13 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
 
+use crate::Registry;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::context::Context;
 use crate::image_store::{ImageStore, ImageStoreObserver};
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layermanager;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
@@ -151,7 +151,22 @@ fn ptr_eq_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
     }
 }
 
+/// The render layer of the layer `style`, from its type in `registry`. A
+/// type that the registry lacks breaks the contract that a map and its
+/// renderer register alike; the layer isn't drawn.
+fn create_render_layer(registry: &Registry, style: &Arc<dyn layer::Impl>) -> Option<RenderLayerPtr> {
+    let name = style.get_type_info().name;
+    let render_layer = registry.layer_type(name).and_then(|layer_type| layer_type.create_render_layer(style));
+    debug_assert!(render_layer.is_some(), "the renderer's registry has no layer type '{name}'");
+    if render_layer.is_none() {
+        Log::error(Event::Render, format!("no render layer for layer type '{name}'"));
+    }
+    render_layer
+}
+
 pub(crate) struct RenderOrchestrator {
+    /// The layer types that the render layers come from.
+    registry: Arc<Registry>,
     events: EventSink,
 
     zoom_history: ZoomHistory,
@@ -237,6 +252,7 @@ impl RenderOrchestrator {
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
         font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
+        registry: Arc<Registry>,
         run_loop: &RunLoop,
     ) -> Self {
         let events = EventSink::default();
@@ -269,6 +285,7 @@ impl RenderOrchestrator {
         let pool_workers = PoolWorkers::new(thread_pool.clone(), JOBS_PER_THREAD * mln_actor::BACKGROUND_THREADS);
         let tile_store = TileStore::new(Box::new(pool_workers), glyph_store, image_store, thread_pool.clone(), waker);
         RenderOrchestrator {
+            registry,
             events,
             zoom_history: ZoomHistory::default(),
             still_image_request_id: 0,
@@ -511,7 +528,7 @@ impl RenderOrchestrator {
         if render_layers_remade {
             for render_layer in self.render_layers.values_mut() {
                 let impl_ = Arc::clone(&render_layer.borrow().base().base_impl);
-                let Some(new_layer) = layermanager::create_render_layer(&impl_) else {
+                let Some(new_layer) = create_render_layer(&self.registry, &impl_) else {
                     continue;
                 };
                 render_layer.borrow_mut().layer_removed(&mut changes);
@@ -531,7 +548,7 @@ impl RenderOrchestrator {
 
         // Create render layers for newly added layers.
         for (id, impl_) in &layer_diff.added {
-            if let Some(render_layer) = layermanager::create_render_layer(impl_) {
+            if let Some(render_layer) = create_render_layer(&self.registry, impl_) {
                 render_layer.borrow_mut().transition(&added_layer_transition_parameters);
                 // `emplace` keeps an existing entry.
                 self.render_layers.entry(id.clone()).or_insert(render_layer);
@@ -545,7 +562,7 @@ impl RenderOrchestrator {
 
                 let mut render_layer = render_layer.borrow_mut();
                 render_layer.layer_changed(&transition_parameters, new_layer, &mut changes);
-                render_layer.transition_with_impl(&transition_parameters, Arc::clone(new_layer));
+                render_layer.restyle(&transition_parameters, new_layer);
             }
         }
 

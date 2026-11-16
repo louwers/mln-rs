@@ -14,6 +14,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::expression::Dependency;
+use mln_style::layer_type::{LayerStyle, StyleLayerType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::OverscaledTileID;
@@ -66,7 +67,7 @@ impl Default for SymbolTranslate {
 }
 
 #[derive(Clone)]
-pub struct BucketPlacementData {
+pub(crate) struct BucketPlacementData {
     pub(crate) bucket: BucketPtr,
     /// The `RenderTile` (`tile`): `tile_owner[tile_index]`.
     pub(crate) tile_owner: Rc<Vec<RenderTile>>,
@@ -88,7 +89,7 @@ impl BucketPlacementData {
 
 pub(crate) type LayerPlacementData = Vec<BucketPlacementData>;
 
-pub struct LayerPrepareParameters<'a> {
+pub(crate) struct LayerPrepareParameters<'a> {
     pub(crate) source: Option<&'a dyn RenderSource>,
     /// conformance: `ImageManager& imageManager` (background-pattern): the image store.
     pub(crate) images: &'a crate::image_store::ImageStore,
@@ -443,7 +444,7 @@ pub(crate) fn compute_globe_feature_ndc_bound(
 }
 
 /// The data members of `RenderLayer`.
-pub struct RenderLayerBase {
+pub(crate) struct RenderLayerBase {
     pub(crate) evaluated_properties: Arc<dyn ErasedEvaluatedLayer>,
     pub(crate) base_impl: Arc<dyn layer::Impl>,
 
@@ -495,7 +496,7 @@ impl RenderLayerBase {
     }
 }
 
-pub trait RenderLayer {
+pub(crate) trait RenderLayer {
     fn base(&self) -> &RenderLayerBase;
     fn base_mut(&mut self) -> &mut RenderLayerBase;
 
@@ -688,10 +689,10 @@ pub trait RenderLayer {
         &self.base().base_impl.id
     }
 
-    fn transition_with_impl(&mut self, parameters: &TransitionParameters, new_impl: Arc<dyn layer::Impl>) {
-        self.base_mut().base_impl = new_impl;
-        self.transition(parameters);
-    }
+    /// Makes `style`, the changed style of the layer, the layer's, and
+    /// transitions to it. Through [`set_style`], a style of another type
+    /// leaves the layer's.
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn layer::Impl>);
 
     /// Returns true if the layer has to be placed.
     fn needs_placement(&self) -> bool {
@@ -707,10 +708,6 @@ pub trait RenderLayer {
     /// this layer draws, at its own translation.
     fn get_follower_data(&self) -> &LayerPlacementData {
         &self.base().follower_data
-    }
-
-    fn get_layer_index(&self) -> i32 {
-        self.base().layer_index
     }
 
     /// Checks whether this layer needs to be rendered in the given render
@@ -769,6 +766,19 @@ pub trait RenderLayer {
         let group = self.base().layer_group.clone();
         let renderable = self.base().is_renderable;
         activate_layer_group(group.as_ref(), renderable, changes);
+    }
+}
+
+/// Makes `style` the style of the render layer whose members are `base` and
+/// whose style is `typed`, if it is a `T` layer's.
+pub(crate) fn set_style<T: StyleLayerType>(
+    base: &mut RenderLayerBase,
+    typed: &mut Arc<LayerStyle<T>>,
+    style: &Arc<dyn layer::Impl>,
+) {
+    if let Some(recovered) = LayerStyle::recover(style) {
+        *typed = recovered;
+        base.base_impl = Arc::clone(style);
     }
 }
 

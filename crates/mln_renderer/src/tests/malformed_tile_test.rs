@@ -11,7 +11,7 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
 use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer::downcast_arc;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Fill, FillExtrusion, Line, Symbol};
 use mln_style::sources::tile_source::TileSource;
 use mln_style_types::image::Impl as ImageImpl;
@@ -44,11 +44,11 @@ fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
         .unwrap_or_else(|| panic!("{}", error.message));
     let base_impl = layer.base_impl();
     match json["type"].as_str().unwrap() {
-        "line" => Arc::new(EvaluatedLayer::<Line>::new(downcast_arc(&base_impl))),
-        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(downcast_arc(&base_impl))),
-        "fill-extrusion" => Arc::new(EvaluatedLayer::<FillExtrusion>::new(downcast_arc(&base_impl))),
-        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(downcast_arc(&base_impl))),
-        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(downcast_arc(&base_impl))),
+        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(&base_impl).unwrap())),
+        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(&base_impl).unwrap())),
+        "fill-extrusion" => Arc::new(EvaluatedLayer::<FillExtrusion>::new(LayerStyle::recover(&base_impl).unwrap())),
+        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(&base_impl).unwrap())),
+        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(&base_impl).unwrap())),
         other => panic!("no properties for {other}"),
     }
 }
