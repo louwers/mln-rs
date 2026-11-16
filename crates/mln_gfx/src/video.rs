@@ -11,6 +11,8 @@ use crate::gpu::TextureId;
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_env = "ohos")]
+mod ohos;
 
 /// The matrix that turns a YUV frame's samples into RGB.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -144,6 +146,11 @@ pub enum GpuFrame {
     /// releases when it drops. The producer doesn't write the buffer again
     /// while the frame lives.
     AndroidHardwareBuffer { buffer: *mut std::ffi::c_void, color: YuvColor, lease: Option<FrameLease> },
+    /// An `OpenHarmony` `OH_NativeBuffer*`, which the frame holds a reference
+    /// on and unreferences when it drops. The producer doesn't write the
+    /// buffer again while the frame lives.
+    #[cfg(target_env = "ohos")]
+    OhosNativeBuffer { buffer: *mut std::ffi::c_void, color: YuvColor, lease: Option<FrameLease> },
     /// A `CVPixelBufferRef` backed by an IOSurface, which the frame
     /// retains: BGRA, or biplanar 4:2:0 YUV.
     CvPixelBuffer { buffer: *mut std::ffi::c_void, color: YuvColor },
@@ -164,6 +171,15 @@ impl Drop for GpuFrame {
     fn drop(&mut self) {
         if let GpuFrame::AndroidHardwareBuffer { buffer, .. } = *self {
             android::release_hardware_buffer(buffer);
+        }
+    }
+}
+
+#[cfg(target_env = "ohos")]
+impl Drop for GpuFrame {
+    fn drop(&mut self) {
+        if let GpuFrame::OhosNativeBuffer { buffer, .. } = *self {
+            ohos::unreference_native_buffer(buffer);
         }
     }
 }
@@ -279,6 +295,8 @@ impl GpuFrame {
             #[cfg(unix)]
             GpuFrame::DmaBuf { .. } => "dmabuf",
             GpuFrame::AndroidHardwareBuffer { .. } => "Android hardware buffer",
+            #[cfg(target_env = "ohos")]
+            GpuFrame::OhosNativeBuffer { .. } => "OpenHarmony native buffer",
             GpuFrame::CvPixelBuffer { .. } => "CVPixelBuffer",
             #[cfg(windows)]
             GpuFrame::DxgiSharedHandle { .. } => "DXGI shared handle",

@@ -22,8 +22,6 @@ use mln_gfx::gpu::{
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
-#[cfg(target_os = "android")]
-use mln_gfx::video::PlaneLayout;
 #[cfg(not(target_family = "wasm"))]
 use mln_gfx::video::{FrameKeepAlive, GpuFrame, ImportedFrame};
 use mln_util::hash::HashMap;
@@ -692,6 +690,33 @@ impl GlGpu {
         Ok(self.textures.insert(Texture { native, size: plane_size, format, usage }))
     }
 
+    /// A video frame of `buffer`, an Android hardware buffer or an
+    /// `OpenHarmony` native buffer, as an external texture that samples it as
+    /// RGB, which holds `keep_alive` while it lives.
+    #[cfg(any(target_os = "android", target_env = "ohos"))]
+    fn import_external(
+        &mut self,
+        buffer: *mut std::ffi::c_void,
+        color: mln_gfx::video::YuvColor,
+        keep_alive: FrameKeepAlive,
+    ) -> Result<ImportedFrame, GpuError> {
+        use mln_gfx::video::PlaneLayout;
+
+        if self.desktop {
+            return Err(GpuError::Unsupported("importing video frames on desktop OpenGL".to_owned()));
+        }
+        let (name, image, size) = self.current(|gpu| crate::video_frame::import(gpu.context.gl(), buffer))?;
+        let native = Rc::new(NativeTexture {
+            object: Object::Texture { name, owned: true },
+            external: true,
+            held: Some(Box::new((image, keep_alive))),
+            deleted: Rc::clone(&self.deleted),
+        });
+        let usage = TextureUsage { sampled: true, ..TextureUsage::default() };
+        let texture = self.textures.insert(Texture { native, size, format: TextureFormat::Rgba8Unorm, usage });
+        Ok(ImportedFrame { layout: PlaneLayout::Rgba, planes: vec![texture], color, external: true })
+    }
+
     #[cfg(not(target_family = "wasm"))]
     /// Takes a `GL_TEXTURE_2D` texture made elsewhere, such as a host's in
     /// the context's share group, of `desc`'s size, format and usage, as a
@@ -1159,7 +1184,7 @@ impl GlGpu {
         if textures {
             for binding in &bindings.textures {
                 match binding.texture.name() {
-                    #[cfg(target_os = "android")]
+                    #[cfg(any(target_os = "android", target_env = "ohos"))]
                     Some(name) if binding.texture.external => state.bind_external_texture(gl, binding.unit, name),
                     name => state.bind_texture(gl, binding.unit, name),
                 }
@@ -1266,7 +1291,8 @@ pub(crate) fn read_pixels(gl: &Gl, state: &State, height: u32, region: TextureRe
 }
 
 impl Gpu for GlGpu {
-    /// Imports dmabufs on Linux and the BSDs.
+    /// Imports dmabufs on Linux and the BSDs, and `OpenHarmony`'s native
+    /// buffers, as external textures that sample them as RGB.
     #[cfg(not(any(target_family = "wasm", target_os = "android")))]
     fn import_video_frame(&mut self, frame: &GpuFrame, keep_alive: FrameKeepAlive) -> Result<ImportedFrame, GpuError> {
         match frame {
@@ -1275,6 +1301,8 @@ impl Gpu for GlGpu {
                 let (layout, planes) = self.import_dma_buf(*fourcc, *modifier, *size, planes, &keep_alive)?;
                 Ok(ImportedFrame { layout, planes, color: *color, external: false })
             }
+            #[cfg(target_env = "ohos")]
+            GpuFrame::OhosNativeBuffer { buffer, color, .. } => self.import_external(*buffer, *color, keep_alive),
             frame => {
                 drop(keep_alive);
                 Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind())))
@@ -1596,19 +1624,7 @@ impl Gpu for GlGpu {
         let GpuFrame::AndroidHardwareBuffer { buffer, color, .. } = *frame else {
             return Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind())));
         };
-        if self.desktop {
-            return Err(GpuError::Unsupported("importing video frames on desktop OpenGL".to_owned()));
-        }
-        let (name, image, size) = self.current(|gpu| crate::video_frame::import(gpu.context.gl(), buffer))?;
-        let native = Rc::new(NativeTexture {
-            object: Object::Texture { name, owned: true },
-            external: true,
-            held: Some(Box::new((image, keep_alive))),
-            deleted: Rc::clone(&self.deleted),
-        });
-        let usage = TextureUsage { sampled: true, ..TextureUsage::default() };
-        let texture = self.textures.insert(Texture { native, size, format: TextureFormat::Rgba8Unorm, usage });
-        Ok(ImportedFrame { layout: PlaneLayout::Rgba, planes: vec![texture], color, external: true })
+        self.import_external(buffer, color, keep_alive)
     }
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {

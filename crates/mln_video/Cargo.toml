@@ -22,7 +22,7 @@ mln_util.workspace = true
 parking_lot.workspace = true
 
 # GStreamer, loaded at run time.
-[target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))'.dependencies]
+[target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_env = "ohos"), not(target_family = "wasm")))'.dependencies]
 libloading.workspace = true
 
 # The browser's players (`WebPlayers`): a host's JS object, and the frames'
@@ -40,6 +40,12 @@ web-sys = { workspace = true, features = [
 
 # Android's player: the NDK's media API, loaded at run time.
 [target.'cfg(target_os = "android")'.dependencies]
+libloading.workspace = true
+
+# OpenHarmony's player: its AVCodec, native image and native buffer APIs,
+# loaded at run time, and the poll that waits for a decoded frame's fence.
+[target.'cfg(target_env = "ohos")'.dependencies]
+libc.workspace = true
 libloading.workspace = true
 
 # The Media Foundation player: its media engine, the D3D11 device it decodes

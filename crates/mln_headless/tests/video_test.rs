@@ -2,7 +2,8 @@
 // one frame, of each layout a player sends from memory, whose four quarters
 // are four colors, drawn over the whole view. Each quarter must keep its
 // color and its place, on whichever backend the frontend renders. On Android,
-// also frames in hardware buffers, and the platform's player (video_android.rs).
+// also frames in hardware buffers, and the platform's player (video_android.rs),
+// and on OpenHarmony, frames in native buffers and its player (video_ohos.rs).
 
 use std::sync::Arc;
 
@@ -19,6 +20,8 @@ use parking_lot::Mutex;
 
 #[cfg(target_os = "android")]
 mod video_android;
+#[cfg(target_env = "ohos")]
+mod video_ohos;
 
 /// The quarters' colors: top left, top right, bottom left, bottom right. The
 /// last saturates no channel, so a wrong YUV range or matrix shows in it.

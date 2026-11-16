@@ -14,8 +14,16 @@ mod android;
 #[cfg(target_vendor = "apple")]
 mod apple;
 mod bytes;
-#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))]
+#[cfg(all(
+    unix,
+    not(target_vendor = "apple"),
+    not(target_os = "android"),
+    not(target_env = "ohos"),
+    not(target_family = "wasm")
+))]
 mod gstreamer;
+#[cfg(target_env = "ohos")]
+mod ohos;
 mod player;
 mod slot;
 #[cfg(any(target_family = "wasm", test))]
@@ -38,8 +46,9 @@ pub use web::{VideoHost, WebPlayers};
 
 /// The players of the platform the library runs on: GStreamer's on Linux and
 /// the BSDs, which fail to open each video, saying so, where GStreamer 1.x
-/// isn't installed, the NDK's media API on Android, Media Foundation on
-/// Windows, and `AVFoundation` on Apple's platforms. A platform without players
+/// isn't installed, the NDK's media API on Android, `OpenHarmony`'s `AVCodec`
+/// on `OpenHarmony`, Media Foundation on Windows, and `AVFoundation` on
+/// Apple's platforms. A platform without players
 /// fails to open each video too.
 ///
 /// `AVFoundation` steps its players on the main thread: in a process whose
@@ -48,10 +57,12 @@ pub use web::{VideoHost, WebPlayers};
 #[cfg(not(target_family = "wasm"))]
 #[must_use]
 pub fn platform_players() -> Arc<dyn VideoPlayers> {
-    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_env = "ohos")))]
     let players: Arc<dyn VideoPlayers> = Arc::new(gstreamer::GstreamerPlayers);
     #[cfg(target_os = "android")]
     let players: Arc<dyn VideoPlayers> = Arc::new(android::AndroidPlayers);
+    #[cfg(target_env = "ohos")]
+    let players: Arc<dyn VideoPlayers> = Arc::new(ohos::OhosPlayers);
     #[cfg(windows)]
     let players: Arc<dyn VideoPlayers> = Arc::new(windows::MediaFoundationPlayers);
     #[cfg(target_vendor = "apple")]

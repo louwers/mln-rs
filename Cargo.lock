@@ -3255,6 +3255,7 @@ dependencies = [
  "block2 0.6.2",
  "dispatch2",
  "js-sys",
+ "libc",
  "libloading",
  "mln-rs-actor",
  "mln-rs-gfx",

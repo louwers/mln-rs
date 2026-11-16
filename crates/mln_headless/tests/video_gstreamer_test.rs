@@ -6,7 +6,7 @@
 // import them draw without a copy through memory: with
 // MLN_VIDEO_EXPECT_GPU_FRAMES set, the test fails if the renderer refused
 // them.
-#![cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#![cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_env = "ohos")))]
 
 use std::sync::Arc;
 

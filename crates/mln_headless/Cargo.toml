@@ -161,8 +161,9 @@ mln_gl.workspace = true
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc.workspace = true
 
-# video_test's hardware buffers, from libnativewindow.
-[target.'cfg(target_os = "android")'.dev-dependencies]
+# video_test's hardware buffers, from libnativewindow, and native buffers,
+# from libnative_buffer.
+[target.'cfg(any(target_os = "android", target_env = "ohos"))'.dev-dependencies]
 libloading.workspace = true
 
 [lints]

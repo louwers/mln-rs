@@ -193,7 +193,7 @@ impl State {
     /// Binds `texture`, a `GL_TEXTURE_EXTERNAL_OES` texture, to `unit`'s
     /// external target, which only `samplerExternalOES` reads, so the
     /// cache of the units' 2D textures stays as it is.
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_env = "ohos"))]
     pub(crate) fn bind_external_texture(&self, gl: &Gl, unit: u32, texture: TextureID) {
         self.active_texture(gl, unit);
         // SAFETY: the texture is alive, and external.

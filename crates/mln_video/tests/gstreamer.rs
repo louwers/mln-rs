@@ -14,7 +14,7 @@
 //!
 //! and the same with `vp8enc` for `colors-vp8.webm`.
 
-#![cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#![cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_env = "ohos")))]
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
