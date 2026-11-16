@@ -35,7 +35,7 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
         PropertyInfo::paint("fill-color").data_driven(),
         PropertyInfo::paint("fill-opacity").data_driven(),
         PropertyInfo::paint("fill-outline-color").data_driven(),
-        PropertyInfo::paint("fill-pattern").data_driven(),
+        PropertyInfo::paint("fill-pattern").data_driven().cross_faded(),
         PropertyInfo::paint("fill-translate"),
         PropertyInfo::paint("fill-translate-anchor"),
         PropertyInfo::layout("fill-sort-key").data_driven(),

@@ -263,12 +263,12 @@ fn symbol_layer_overrides() {
             Transitionable { value: PropertyValue::Constant(Color::green()), options: TransitionOptions::default() };
         updated.paint.text_color =
             Transitionable { value: PropertyValue::Constant(Color::green()), options: TransitionOptions::default() };
-        assert!(!layout_properties_differ(&current, &updated, &[], true));
+        assert!(!layout_properties_differ(&current, &updated, true));
 
         current.paint.text_color =
             Transitionable { value: PropertyValue::Constant(Color::red()), options: TransitionOptions::default() };
-        assert!(layout_properties_differ(&current, &updated, &[], true));
-        assert!(!layout_properties_differ(&current, &updated, &[], false));
+        assert!(layout_properties_differ(&current, &updated, true));
+        assert!(!layout_properties_differ(&current, &updated, false));
     }
 
     // Possibly evaluated.

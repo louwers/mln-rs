@@ -36,7 +36,7 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
         PropertyInfo::paint("fill-extrusion-color").data_driven(),
         PropertyInfo::paint("fill-extrusion-height").data_driven(),
         PropertyInfo::paint("fill-extrusion-opacity"),
-        PropertyInfo::paint("fill-extrusion-pattern").data_driven(),
+        PropertyInfo::paint("fill-extrusion-pattern").data_driven().cross_faded(),
         PropertyInfo::paint("fill-extrusion-translate"),
         PropertyInfo::paint("fill-extrusion-translate-anchor"),
         PropertyInfo::paint("fill-extrusion-vertical-gradient"),

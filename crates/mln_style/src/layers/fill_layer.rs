@@ -15,8 +15,6 @@ impl StyleLayerType for Fill {
         from_json: true,
     };
     const PROPERTIES: &'static PropertyTable = &fill_layer_properties::PROPERTIES;
-    // A constant pattern's image is a dependency of the layout.
-    const LAYOUT_PAINT_PROPERTIES: &'static [&'static str] = &["fill-pattern"];
 
     type LayoutProperties = FillLayoutProperties::Unevaluated;
     type PaintProperties = FillPaintProperties::Transitionable;

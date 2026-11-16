@@ -28,6 +28,9 @@ impl Entry<'_> {
         if self.property.flag("overridable") {
             info.push_str(".overridable()");
         }
+        if self.property.property_type() == Some("cross-faded-data-driven") {
+            info.push_str(".cross_faded()");
+        }
         info
     }
 }

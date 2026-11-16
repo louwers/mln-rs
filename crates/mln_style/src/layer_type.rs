@@ -134,10 +134,6 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
     /// [`PROPERTIES`](Self::PROPERTIES).
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output>;
 
-    /// Paint properties whose constant values tiles are also laid out
-    /// with, so that changing one lays them out again.
-    const LAYOUT_PAINT_PROPERTIES: &'static [&'static str] = &[];
-
     fn populate_font_stack(_style: &LayerStyle<Self>, _out: &mut VecSet<FontStack>) {}
 
     /// Whether a section of a formatted value of `style` overrides the
@@ -383,7 +379,7 @@ fn layout_difference<T: StyleLayerType>(a: &LayerStyle<T>, b: &LayerStyle<T>) ->
     T::INFO.source == SourceKind::Geometry
         && (a.base.filter != b.base.filter
             || a.base.visibility != b.base.visibility
-            || property_table::layout_properties_differ(a, b, T::LAYOUT_PAINT_PROPERTIES, T::has_section_overrides(a)))
+            || property_table::layout_properties_differ(a, b, T::has_section_overrides(a)))
 }
 
 /// A layer type, whichever it is.

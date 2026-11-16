@@ -74,11 +74,37 @@ fn data_driven_paint_values_relayout_and_constants_dont() {
     }
 }
 
+/// The spec's `cross-faded-data-driven` properties: their values are
+/// dependencies of the layout.
+const CROSS_FADED: [(&str, &str, &str, &str); 4] = [
+    ("fill", "fill-pattern", r#""dots""#, r#"["get", "pattern"]"#),
+    ("fill-extrusion", "fill-extrusion-pattern", r#""dots""#, r#"["get", "pattern"]"#),
+    ("line", "line-pattern", r#""dots""#, r#"["get", "pattern"]"#),
+    ("line", "line-dasharray", "[2, 1]", r#"["get", "dashes"]"#),
+];
+
 #[test]
-fn a_constant_fill_pattern_relayouts_and_other_patterns_dont() {
-    assert!(relayouts(new_layer("fill", "l", "s"), &[("fill-pattern", r#""dots""#)]));
-    assert!(!relayouts(new_layer("line", "l", "s"), &[("line-pattern", r#""dots""#)]));
-    assert!(!relayouts(new_layer("fill-extrusion", "l", "s"), &[("fill-extrusion-pattern", r#""dots""#)]));
+fn cross_faded_properties_relayout_on_a_constant_or_an_expression() {
+    for (type_, name, constant, expression) in CROSS_FADED {
+        assert!(relayouts(new_layer(type_, "l", "s"), &[(name, constant)]), "{name} {constant}");
+        assert!(relayouts(new_layer(type_, "l", "s"), &[(name, expression)]), "{name} {expression}");
+    }
+}
+
+#[test]
+fn a_change_between_two_constant_patterns_relayouts() {
+    for (type_, name, constant, _) in CROSS_FADED {
+        let mut layer = new_layer(type_, "l", "s");
+        let value = parse_json(constant);
+        assert!(layer.set_property(name, &Convertible::from(&value), None).is_none());
+        let other = if name == "line-dasharray" { "[3, 1]" } else { r#""stripes""# };
+        assert!(relayouts(layer, &[(name, other)]), "{name}");
+    }
+}
+
+#[test]
+fn a_background_pattern_never_relayouts() {
+    assert!(!relayouts(new_layer("background", "l", "s"), &[("background-pattern", r#""dots""#)]));
 }
 
 /// A symbol layer with the `text-field` `text_field` and a green
