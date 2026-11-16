@@ -2655,8 +2655,8 @@ vec3 clip_color(vec3 c) {
     float l = lum(c);
     float n = min(min(c.r, c.g), c.b);
     float x = max(max(c.r, c.g), c.b);
-    if (n < 0.0) c = l + (c - l) * l / (l - n);
-    if (x > 1.0) c = l + (c - l) * (1.0 - l) / (x - l);
+    if (n < 0.0) c = l + (c - l) * l / max(l - n, 1e-6);
+    if (x > 1.0) c = l + (c - l) * (1.0 - l) / max(x - l, 1e-6);
     return c;
 }
 
@@ -2676,8 +2676,9 @@ vec4 composite(vec4 src, vec4 dst, int mode) {
         vec3 screened = src.rgb + dst.rgb + dst.a * src.rgb + src.a * dst.rgb - vec3(src.a * dst.a) - 2.0 * dst.rgb * src.rgb;
         co = mix(multiplied, screened, screen);
     } else {
-        vec3 cs = src.a > 0.0 ? src.rgb / src.a : vec3(0.0);
-        vec3 cb = dst.a > 0.0 ? dst.rgb / dst.a : vec3(0.0);
+        // Rounding to 8 bits can leave a premultiplied channel above its alpha.
+        vec3 cs = src.a > 0.0 ? clamp(src.rgb / src.a, 0.0, 1.0) : vec3(0.0);
+        vec3 cb = dst.a > 0.0 ? clamp(dst.rgb / dst.a, 0.0, 1.0) : vec3(0.0);
         vec3 blended = mode == 3 ? set_lum(cs, lum(cb)) : set_lum(cb, lum(cs));
         co = inv_dst_a * src.rgb + inv_src_a * dst.rgb + src.a * dst.a * blended;
     }

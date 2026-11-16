@@ -2786,10 +2786,10 @@ fn clip_color(color: vec3<f32>) -> vec3<f32> {
     let n = min(min(c.r, c.g), c.b);
     let x = max(max(c.r, c.g), c.b);
     if (n < 0.0) {
-        c = l + (c - l) * l / (l - n);
+        c = l + (c - l) * l / max(l - n, 1e-6);
     }
     if (x > 1.0) {
-        c = l + (c - l) * (1.0 - l) / (x - l);
+        c = l + (c - l) * (1.0 - l) / max(x - l, 1e-6);
     }
     return c;
 }
@@ -2810,13 +2810,14 @@ fn composite(src: vec4<f32>, dst: vec4<f32>, mode: i32) -> vec4<f32> {
         let screened = src.rgb + dst.rgb + dst.a * src.rgb + src.a * dst.rgb - vec3<f32>(src.a * dst.a) - 2.0 * dst.rgb * src.rgb;
         co = mix(multiplied, screened, screen);
     } else {
+        // Rounding to 8 bits can leave a premultiplied channel above its alpha.
         var cs = vec3<f32>(0.0);
         if (src.a > 0.0) {
-            cs = src.rgb / src.a;
+            cs = saturate(src.rgb / src.a);
         }
         var cb = vec3<f32>(0.0);
         if (dst.a > 0.0) {
-            cb = dst.rgb / dst.a;
+            cb = saturate(dst.rgb / dst.a);
         }
         var blended: vec3<f32>;
         if (mode == 3) {

@@ -4018,8 +4018,8 @@ static float3 clip_color(float3 c) {
     const float l = lum(c);
     const float n = min(min(c.r, c.g), c.b);
     const float x = max(max(c.r, c.g), c.b);
-    if (n < 0.0) c = l + (c - l) * l / (l - n);
-    if (x > 1.0) c = l + (c - l) * (1.0 - l) / (x - l);
+    if (n < 0.0) c = l + (c - l) * l / max(l - n, 1e-6);
+    if (x > 1.0) c = l + (c - l) * (1.0 - l) / max(x - l, 1e-6);
     return c;
 }
 
@@ -4039,8 +4039,9 @@ static float4 composite(float4 src, float4 dst, int mode) {
         const float3 screened = src.rgb + dst.rgb + dst.a * src.rgb + src.a * dst.rgb - float3(src.a * dst.a) - 2.0 * dst.rgb * src.rgb;
         co = mix(multiplied, screened, screen);
     } else {
-        const float3 cs = src.a > 0.0 ? src.rgb / src.a : float3(0.0);
-        const float3 cb = dst.a > 0.0 ? dst.rgb / dst.a : float3(0.0);
+        // Rounding to 8 bits can leave a premultiplied channel above its alpha.
+        const float3 cs = src.a > 0.0 ? saturate(src.rgb / src.a) : float3(0.0);
+        const float3 cb = dst.a > 0.0 ? saturate(dst.rgb / dst.a) : float3(0.0);
         const float3 blended = mode == 3 ? set_lum(cs, lum(cb)) : set_lum(cb, lum(cs));
         co = inv_dst_a * src.rgb + inv_src_a * dst.rgb + src.a * dst.a * blended;
     }
