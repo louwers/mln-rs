@@ -13,10 +13,12 @@ use mln_gfx::types::TexturePixelType;
 use mln_style_types::image::{ImageMap, ImagePosition, ImagePositions, ImageType, Impl as ImageImpl, RectU16};
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphPosition, GlyphPositions};
 use mln_util::hash::{HashMap, RandomState};
-use mln_util::image::{AlphaImage, PremultipliedImage};
+use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, PageTexture, TextureHandle};
+#[cfg(test)]
+use super::dynamic_texture::QueuedPixels;
 use crate::gfx::context::Context;
 
 const EXTRA_PADDING: u16 = 1;
@@ -267,7 +269,7 @@ impl DynamicTextureAtlas {
         let texture = &mut self.dummies[index].texture;
         let handle = if texture.is_empty() {
             let bytes = DUMMY_SIZE.width as usize * if pixel_type == TexturePixelType::Alpha { 1 } else { 4 };
-            texture.add_image(&vec![0; bytes], DUMMY_SIZE, None)
+            texture.add_image(vec![0; bytes], DUMMY_SIZE, None)
         } else {
             texture.reserve_size(DUMMY_SIZE, Some(DUMMY_BIN))
         };
@@ -311,17 +313,7 @@ impl DynamicTextureAtlas {
             let texture = &mut self.pages[index].texture;
             for (tex_handle, (_, glyph)) in texture_handles.iter_mut().zip(&drawn) {
                 if tex_handle.is_upload_needed() {
-                    let rect = *tex_handle.get_rectangle();
-                    let mut padded_image = AlphaImage::new(Size::new(u32::from(rect.w), u32::from(rect.h)));
-                    padded_image.fill(0);
-                    let _ = AlphaImage::copy(
-                        &glyph.bitmap,
-                        &mut padded_image,
-                        Point::new(0, 0),
-                        Point::new(u32::from(PADDING), u32::from(PADDING)),
-                        glyph.bitmap.size,
-                    );
-                    texture.upload_image(&padded_image.data, tex_handle);
+                    texture.upload_glyph(Arc::clone(glyph), PADDING, tex_handle);
                 }
             }
             let rects: Vec<RectU16> = texture_handles.iter().map(|handle| *handle.get_rectangle()).collect();
@@ -378,7 +370,7 @@ impl DynamicTextureAtlas {
         for (tex_handle, (image, type_)) in texture_handles.iter_mut().zip(&images) {
             let rect = *tex_handle.get_rectangle();
             if tex_handle.is_upload_needed() {
-                texture.upload_image(&padded_image(&image.image, rect, *type_).data, tex_handle);
+                texture.upload_image(padded_image(&image.image, rect, *type_).data, tex_handle);
             }
             let positions = match type_ {
                 ImageType::Icon => &mut positions.0,
@@ -541,7 +533,7 @@ impl DynamicTextureAtlas {
 
     /// The pixels queued for the page with id `page`, for tests.
     #[cfg(test)]
-    pub(crate) fn queued_uploads(&self, page: PageId) -> Option<&HashMap<DynamicTextureBinId, (RectU16, Vec<u8>)>> {
+    pub(crate) fn queued_uploads(&self, page: PageId) -> Option<&HashMap<DynamicTextureBinId, (RectU16, QueuedPixels)>> {
         self.pages.iter().find(|candidate| candidate.id == page).map(|page| page.texture.queued_uploads())
     }
 }

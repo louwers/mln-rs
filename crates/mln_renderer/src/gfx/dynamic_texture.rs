@@ -7,12 +7,15 @@
 use std::cell::OnceCell;
 use std::num::NonZeroU32;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use etagere::{AllocId, AtlasAllocator, size2};
 use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
+use mln_text::glyph::Glyph;
 use mln_util::hash::HashMap;
+use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -83,6 +86,17 @@ struct Bin {
 /// the leases on the page's bins.
 pub(crate) type PageTexture = Rc<OnceCell<Texture2DPtr>>;
 
+/// The pixels queued for a bin.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum QueuedPixels {
+    /// The bin's pixels, row by row.
+    Bytes(Vec<u8>),
+    /// A glyph's bitmap, `padding` pixels in from the bin's corner, with the
+    /// rest of the bin clear. The upload pads it, so that the queue holds no
+    /// copy of a glyph the atlas keeps alive anyway.
+    Glyph { glyph: Arc<Glyph>, padding: u16 },
+}
+
 /// A texture atlas page of images or glyphs: its bins, and the pixels queued
 /// for the frame's next upload.
 pub(crate) struct DynamicTexture {
@@ -95,7 +109,7 @@ pub(crate) struct DynamicTexture {
     /// takes the next one.
     max_id: Option<DynamicTextureBinId>,
     /// The images queued for the frame's next upload, keyed by handle id.
-    images_to_upload: HashMap<DynamicTextureBinId, (RectU16, Vec<u8>)>,
+    images_to_upload: HashMap<DynamicTextureBinId, (RectU16, QueuedPixels)>,
     texture: PageTexture,
 }
 
@@ -109,6 +123,24 @@ fn pixel_stride(pixel_type: TexturePixelType) -> usize {
     match pixel_type {
         TexturePixelType::Alpha | TexturePixelType::Luminance => 1,
         TexturePixelType::RGBA | TexturePixelType::Stencil | TexturePixelType::Depth => 4,
+    }
+}
+
+/// Writes into `padded` the pixels of a bin of `rect`'s size that holds
+/// `bitmap` `padding` pixels in from its corner, the rest clear.
+fn pad_glyph(bitmap: &AlphaImage, rect: RectU16, padding: u16, padded: &mut Vec<u8>) {
+    let width = usize::from(rect.w);
+    let padding = usize::from(padding);
+    let bitmap_width = bitmap.size.width as usize;
+    padded.clear();
+    padded.resize(width * usize::from(rect.h), 0);
+    if width == 0 || bitmap_width == 0 {
+        return;
+    }
+    for (row, source) in padded.chunks_exact_mut(width).skip(padding).zip(bitmap.data.chunks_exact(bitmap_width)) {
+        if let Some(target) = row.get_mut(padding..padding + bitmap_width) {
+            target.copy_from_slice(source);
+        }
     }
 }
 
@@ -174,7 +206,7 @@ impl DynamicTexture {
 
     pub(crate) fn add_image(
         &mut self,
-        pixel_data: &[u8],
+        pixel_data: Vec<u8>,
         image_size: Size,
         id: Option<DynamicTextureBinId>,
     ) -> Option<TextureHandle> {
@@ -185,25 +217,34 @@ impl DynamicTexture {
         Some(tex_handle)
     }
 
-    /// Queues the pixels of the handle's rectangle for the frame's next
-    /// upload.
-    pub(crate) fn upload_image(&mut self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
+    /// Queues `pixel_data`, the pixels of the handle's rectangle, for the
+    /// frame's next upload.
+    pub(crate) fn upload_image(&mut self, pixel_data: Vec<u8>, tex_handle: &mut TextureHandle) {
         let rect = tex_handle.rectangle;
-        let byte_size = rect.w as usize * rect.h as usize * pixel_stride(self.pixel_format);
-        let image_data = pixel_data[..byte_size].to_vec();
-        self.images_to_upload.entry(tex_handle.id).or_insert((rect, image_data));
+        debug_assert_eq!(pixel_data.len(), usize::from(rect.w) * usize::from(rect.h) * pixel_stride(self.pixel_format));
+        self.queue(tex_handle, QueuedPixels::Bytes(pixel_data));
+    }
+
+    /// Queues `glyph`'s bitmap, `padding` pixels in from the corner of the
+    /// handle's rectangle, for the frame's next upload.
+    pub(crate) fn upload_glyph(&mut self, glyph: Arc<Glyph>, padding: u16, tex_handle: &mut TextureHandle) {
+        self.queue(tex_handle, QueuedPixels::Glyph { glyph, padding });
+    }
+
+    fn queue(&mut self, tex_handle: &mut TextureHandle, pixels: QueuedPixels) {
+        self.images_to_upload.entry(tex_handle.id).or_insert((tex_handle.rectangle, pixels));
         tex_handle.needs_upload = false;
     }
 
     /// Queues new pixels for the bin with id `id`, replacing any still
     /// queued for it: a same-size image update.
     pub(crate) fn queue_upload(&mut self, id: DynamicTextureBinId, rect: RectU16, data: Vec<u8>) {
-        self.images_to_upload.insert(id, (rect, data));
+        self.images_to_upload.insert(id, (rect, QueuedPixels::Bytes(data)));
     }
 
     /// The pixels queued for the frame's next upload, by handle id.
     #[cfg(test)]
-    pub(crate) fn queued_uploads(&self) -> &HashMap<DynamicTextureBinId, (RectU16, Vec<u8>)> {
+    pub(crate) fn queued_uploads(&self) -> &HashMap<DynamicTextureBinId, (RectU16, QueuedPixels)> {
         &self.images_to_upload
     }
 
@@ -231,7 +272,16 @@ impl DynamicTexture {
             return;
         }
         let mut t = texture.borrow_mut();
-        for (rect, data) in self.images_to_upload.values() {
+        // The padded pixels of the glyph being uploaded, reused across bins.
+        let mut padded = Vec::new();
+        for (rect, pixels) in self.images_to_upload.values() {
+            let data = match pixels {
+                QueuedPixels::Bytes(data) => data,
+                QueuedPixels::Glyph { glyph, padding } => {
+                    pad_glyph(&glyph.bitmap, *rect, *padding, &mut padded);
+                    &padded
+                }
+            };
             let size = Size::new(u32::from(rect.w), u32::from(rect.h));
             if let Err(error) = t.upload_sub_region(context, data, size, rect.x, rect.y) {
                 Log::error(Event::Render, format!("Uploading to an atlas texture failed: {error}"));
@@ -260,6 +310,26 @@ impl DynamicTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pad_glyph_places_the_bitmap_inside_a_clear_border() {
+        let bitmap = AlphaImage::from_slice(Size::new(2, 3), &[1, 2, 3, 4, 5, 6]).unwrap();
+        let rect = RectU16 { x: 10, y: 20, w: 6, h: 7 };
+        // Starts dirty, as the reused buffer is after a larger glyph.
+        let mut padded = vec![9; 100];
+        pad_glyph(&bitmap, rect, 2, &mut padded);
+        #[rustfmt::skip]
+        let expected = [
+            0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
+            0, 0, 1, 2, 0, 0,
+            0, 0, 3, 4, 0, 0,
+            0, 0, 5, 6, 0, 0,
+            0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
+        ];
+        assert_eq!(padded, expected);
+    }
 
     #[test]
     fn bin_ids_are_nonzero_and_do_not_wrap() {

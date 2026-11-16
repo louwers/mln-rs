@@ -10,7 +10,7 @@ use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
 
-use crate::gfx::dynamic_texture::{DynamicTextureBinId, TextureHandle};
+use crate::gfx::dynamic_texture::{DynamicTextureBinId, QueuedPixels, TextureHandle};
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphPage, ImagePage};
 
 fn make_glyph(code: char) -> Arc<Glyph> {
@@ -191,6 +191,22 @@ fn font_stacks_share_the_allocation_of_the_same_glyph() {
     assert_eq!(handles[0].get_id(), handles[1].get_id());
 }
 
+/// A packed glyph's bin queues the glyph itself, not a copy of its pixels.
+#[test]
+fn packed_glyph_queues_the_glyph_for_its_bin() {
+    let mut test = DynamicTextureAtlasTest::new();
+    let glyph = make_glyph('A');
+    let page = test.upload_glyphs(&GlyphMap::from([(1, glyphs(&glyph))]));
+    let (page_id, bin) = (page.lease.page(), page.lease.texture_handles()[0]);
+
+    let (rect, pixels) = &test.atlas.queued_uploads(page_id).unwrap()[&bin.get_id()];
+    assert_eq!(rect, bin.get_rectangle());
+    let QueuedPixels::Glyph { glyph: queued, .. } = pixels else {
+        panic!("a glyph's bin queues the glyph");
+    };
+    assert!(Arc::ptr_eq(queued, &glyph));
+}
+
 /// A glyph no font has stays missing, and one without a bitmap has its
 /// metrics and no bin.
 #[test]
@@ -298,7 +314,9 @@ fn patched_pattern_is_queued_for_its_bin() {
     assert_eq!(queued(&test), original);
 
     test.atlas.patch_image(&make_gradient_image("pattern"));
-    let (rect, data) = queued(&test);
+    let (rect, QueuedPixels::Bytes(data)) = queued(&test) else {
+        panic!("a patch queues the bin's pixels");
+    };
     assert_eq!(&rect, tex_handle.get_rectangle());
 
     // The image starts two pixels in: one of padding, one of wrapped edge.
