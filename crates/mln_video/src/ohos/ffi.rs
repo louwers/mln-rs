@@ -194,7 +194,19 @@ functions!(Buffer from "libnative_buffer.so" {
     from_window_buffer = "OH_NativeBuffer_FromNativeWindowBuffer":
         fn(*mut OHNativeWindowBuffer, *mut *mut NativeBuffer) -> i32;
     reference = "OH_NativeBuffer_Reference": fn(*mut NativeBuffer) -> i32;
+    config = "OH_NativeBuffer_GetConfig": fn(*mut NativeBuffer, *mut BufferConfig);
 });
+
+/// `OH_NativeBuffer_Config`.
+#[repr(C)]
+#[derive(Default)]
+pub(super) struct BufferConfig {
+    width: i32,
+    height: i32,
+    format: i32,
+    usage: i32,
+    stride: i32,
+}
 
 /// The format keys, the values of the codec base library's `OH_MD_KEY_*`.
 struct Keys {
@@ -839,6 +851,20 @@ pub(super) struct SurfaceBuffer {
 unsafe impl Send for SurfaceBuffer {}
 
 impl SurfaceBuffer {
+    /// The frame's native buffer's size in pixels.
+    pub(super) fn size(&self) -> Result<(u32, u32), String> {
+        let mut buffer = std::ptr::null_mut();
+        let mut config = BufferConfig::default();
+        // SAFETY: the window buffer is alive, and its native buffer with it.
+        unsafe {
+            let status = (self.ohos.buffer.from_window_buffer)(self.window_buffer.as_ptr(), &raw mut buffer);
+            native_check(status, "OH_NativeBuffer_FromNativeWindowBuffer")?;
+            let buffer = NonNull::new(buffer).ok_or("the frame has no native buffer")?;
+            (self.ohos.buffer.config)(buffer.as_ptr(), &raw mut config);
+        }
+        Ok((config.width.max(0) as u32, config.height.max(0) as u32))
+    }
+
     /// The frame's native buffer, with a reference that the caller lets go
     /// of.
     pub(super) fn reference_native_buffer(&self) -> Result<NonNull<NativeBuffer>, String> {

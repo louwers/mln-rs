@@ -343,6 +343,10 @@ struct Playback<'a> {
     /// Whether a frame showed since the video last started over, so that a
     /// video without frames doesn't loop forever.
     shown_since_start: bool,
+    /// Whether a frame's picture filled only part of its native buffer,
+    /// which an external texture samples whole: frames go through memory,
+    /// which `copy_planes` crops, from then on.
+    cropped: bool,
     color: YuvColor,
 }
 
@@ -374,6 +378,7 @@ impl<'a> Playback<'a> {
             // The first frame shows at once, and starts the clock.
             seeking_to: Some(0),
             shown_since_start: false,
+            cropped: false,
             color,
         })
     }
@@ -392,7 +397,7 @@ impl<'a> Playback<'a> {
                 self.clock = None;
             }
             self.playing = playing;
-            if self.decoder.mode == Mode::Gpu && self.frames.gpu_frames_refused() {
+            if self.decoder.mode == Mode::Gpu && (self.frames.gpu_frames_refused() || self.cropped) {
                 self.decoder = Decoder::new(&self.video, Mode::Cpu)?;
                 self.seek(seek.map_or(self.position_us, seconds_to_us))?;
             } else if let Some(seconds) = seek {
@@ -500,11 +505,24 @@ impl<'a> Playback<'a> {
                     Log::warning(Event::Render, "A decoded video frame didn't reach the surface");
                     return Ok(());
                 };
+                let layout = decoder.layout;
+                let (width, height) = buffer.size()?;
+                if (layout.left, layout.top, layout.width, layout.height) != (0, 0, width, height) {
+                    Log::info(
+                        Event::Render,
+                        format!(
+                            "Video frames go through memory: the {}x{} picture is part of its {width}x{height} buffer",
+                            layout.width, layout.height
+                        ),
+                    );
+                    self.cropped = true;
+                    self.position_us = time_us;
+                    return Ok(());
+                }
                 let native = buffer.reference_native_buffer()?;
                 // The frame keeps the buffer from the surface, so that the
                 // decoder doesn't write into it while a renderer reads it.
                 let lease: FrameLease = Box::new(SurfaceLease { _buffer: buffer, _surface: Arc::clone(surface) });
-                let layout = decoder.layout;
                 let pixels = FramePixels::Gpu(GpuFrame::OhosNativeBuffer {
                     buffer: native.as_ptr(),
                     color: self.color,
