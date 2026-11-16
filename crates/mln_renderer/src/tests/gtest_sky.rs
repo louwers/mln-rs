@@ -43,7 +43,7 @@ fn assert_float_eq(expected: f32, actual: f32) {
 #[test]
 fn sky_defaults() {
     let sky = Sky::new();
-    let mut render_sky = RenderSky::new(Arc::clone(&sky.impl_));
+    let mut render_sky = RenderSky::new(Arc::new(sky));
     render_sky.evaluate(&PropertyEvaluationParameters::new(0.0));
 
     let evaluated = render_sky.get_evaluated();
@@ -68,7 +68,7 @@ fn sky_set_and_get() {
     set(&mut sky, "sky-horizon-blend", &json!(0.3));
     set(&mut sky, "atmosphere-blend", &json!(0.4));
 
-    let properties = &sky.impl_.properties;
+    let properties = &sky.properties;
     assert_eq!(Color::red(), *properties.sky_color.value.as_constant());
     assert_eq!(Color::green(), *properties.sky_horizon_color.value.as_constant());
     assert_eq!(Color::blue(), *properties.sky_fog_color.value.as_constant());
@@ -99,7 +99,7 @@ fn sky_constants_and_transitions() {
     )
     .expect("sky");
 
-    let properties = &sky.impl_.properties;
+    let properties = &sky.properties;
     assert_eq!(Color::red(), *properties.sky_horizon_color.value.as_constant());
     assert_eq!(Color::blue(), *properties.sky_fog_color.value.as_constant());
     assert_float_eq(0.1, *properties.sky_fog_ground_blend.value.as_constant());
@@ -118,10 +118,10 @@ fn sky_constants_and_transitions() {
 
     let mut transition_source = Sky::new();
     set(&mut transition_source, "atmosphere-blend", &json!(0.4));
-    let mut transitioning = RenderSky::new(Arc::clone(&transition_source.impl_));
-    let mut changed = (*transition_source.impl_).clone();
+    let mut changed = transition_source.clone();
+    let mut transitioning = RenderSky::new(Arc::new(transition_source));
     changed.properties.sky_atmosphere_blend.value = PropertyValue::Constant(0.9);
-    transitioning.impl_ = Arc::new(changed);
+    transitioning.sky = Arc::new(changed);
     let start = Instant::now();
     transitioning.transition(&TransitionParameters::new(
         Some(start),
@@ -152,11 +152,11 @@ fn sky_zoom_expressions() {
         &mut error,
     )
     .unwrap_or_else(|| panic!("{}", error.message));
-    let atmosphere_blend = &sky.impl_.properties.sky_atmosphere_blend.value;
+    let atmosphere_blend = &sky.properties.sky_atmosphere_blend.value;
     assert!(atmosphere_blend.is_expression());
     assert!(!atmosphere_blend.as_expression().is_zoom_constant());
 
-    let mut render_sky = RenderSky::new(Arc::clone(&sky.impl_));
+    let mut render_sky = RenderSky::new(Arc::new(sky));
     render_sky.evaluate(&PropertyEvaluationParameters::new(5.0));
     assert_float_eq(0.5, *render_sky.get_evaluated().sky_atmosphere_blend.uniform());
     assert_eq!(Color::new(0.5, 0.5, 0.5, 1.0), *render_sky.get_evaluated().sky_color.uniform());

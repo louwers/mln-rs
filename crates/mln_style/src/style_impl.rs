@@ -1,11 +1,8 @@
 // Deviations (structural; see also layer.rs):
-// - C++ `Style::Impl` is the `LayerObserver`, `LightObserver`,
-//   `SkyObserver` and `ProjectionObserver` of its layers, light, sky and
-//   projection. Here `get_layer_mut` / `get_light_mut` / `get_sky_mut` /
-//   `get_projection_mut` return guards that call `on_layer_changed` /
-//   `on_light_changed` / `on_sky_changed` / `on_projection_changed` when
-//   dropped, if the layer's, light's, sky's or projection's impl was
-//   replaced.
+// - C++ `Style::Impl` is the `LayerObserver` of its layers. Here
+//   `get_layer_mut` returns a guard that calls `on_layer_changed` when
+//   dropped, if the layer's impl was replaced. The light, sky and projection
+//   are values behind `Arc`s, which the style replaces when they change.
 // - The observer is an `Rc<dyn Observer>` (C++: `Observer*`, default
 //   `&nullObserver`).
 // - C++ `Style::Impl` is the SpriteLoaderObserver of its sprite loader,
@@ -47,13 +44,13 @@ use crate::expression::GlobalStateMap;
 use crate::image;
 use crate::layer::Layer;
 use crate::layer_type::ErasedLayerStyle;
-use crate::light::{self, Light};
+use crate::light::Light;
 use crate::map::camera::CameraOptions;
 use crate::observer::{NullObserver, Observer, SourceObserver};
 use crate::parser::Parser;
-use crate::projection::{self, Projection};
+use crate::projection::Projection;
 use crate::registry::StyleRegistry;
-use crate::sky::{self, Sky};
+use crate::sky::Sky;
 use crate::source::{self, Source};
 use crate::sprite::Sprite;
 use crate::style::StyleLoadError;
@@ -242,9 +239,9 @@ pub struct Impl {
     run_loop: RunLoop,
     layers: Collection<Layer>,
     transition_options: TransitionOptions,
-    light: Light,
-    sky: Option<Sky>,
-    projection: Projection,
+    light: Arc<Light>,
+    sky: Option<Arc<Sky>>,
+    projection: Arc<Projection>,
     shared: Rc<RefCell<SpriteShared>>,
 
     // Global state for the "global-state" expression. The map itself is
@@ -326,9 +323,9 @@ impl Impl {
             run_loop: run_loop.clone(),
             layers: Collection::default(),
             transition_options: TransitionOptions::default(),
-            light: Light::new(),
+            light: Arc::default(),
             sky: None,
-            projection: Projection::new(),
+            projection: Arc::default(),
             shared,
             global_state: Arc::new(GlobalStateMap::new()),
             global_state_defaults: GlobalStateMap::new(),
@@ -739,47 +736,51 @@ impl Impl {
     // Light
 
     pub(crate) fn set_light(&mut self, light: Light) {
-        self.light = light;
+        self.light = Arc::new(light);
         self.on_light_changed();
     }
 
-    pub(crate) fn get_light(&self) -> &Light {
+    pub fn get_light(&self) -> &Arc<Light> {
         &self.light
     }
 
-    /// The light, for mutation (see `get_layer_mut`).
-    pub(crate) fn get_light_mut(&mut self) -> LightRefMut<'_> {
-        let before = Arc::clone(&self.light.impl_);
-        LightRefMut { style: self, before }
+    /// Sets a property of the light (see [`Light::set_property`]); the light
+    /// is replaced only if the value changes it.
+    pub(crate) fn set_light_property(
+        &mut self,
+        name: &str,
+        value: &mln_conversion::Convertible<'_>,
+        functions: &Arc<crate::expression::Functions>,
+    ) -> Option<mln_conversion::Error> {
+        let before = Arc::clone(&self.light);
+        let error = Light::set_shared_property(&mut self.light, name, value, functions);
+        if !Arc::ptr_eq(&before, &self.light) {
+            self.on_light_changed();
+        }
+        error
     }
 
     // Sky
 
     /// Sets the sky; `None` removes it.
     pub(crate) fn set_sky(&mut self, sky: Option<Sky>) {
-        self.sky = sky;
+        self.sky = sky.map(Arc::new);
         self.observer().on_update();
     }
 
-    pub(crate) fn get_sky(&self) -> Option<&Sky> {
+    pub fn get_sky(&self) -> Option<&Arc<Sky>> {
         self.sky.as_ref()
     }
 
     // Projection
 
     pub(crate) fn set_projection(&mut self, projection: Projection) {
-        self.projection = projection;
+        self.projection = Arc::new(projection);
         self.on_projection_changed();
     }
 
-    pub fn get_projection(&self) -> &Projection {
+    pub fn get_projection(&self) -> &Arc<Projection> {
         &self.projection
-    }
-
-    /// The projection, for mutation (see `get_layer_mut`).
-    pub(crate) fn get_projection_mut(&mut self) -> ProjectionRefMut<'_> {
-        let before = Arc::clone(&self.projection.impl_);
-        ProjectionRefMut { style: self, before }
     }
 
     pub(crate) fn get_name(&self) -> String {
@@ -862,17 +863,6 @@ impl Impl {
 
     pub fn get_layer_impls(&self) -> ImmutableVector<dyn ErasedLayerStyle> {
         self.layers.get_impls()
-    }
-
-    /// The light's impl, for the renderer's `UpdateParameters`.
-    pub fn get_light_impl(&self) -> Arc<light::Impl> {
-        Arc::clone(&self.light.impl_)
-    }
-
-    /// The sky's impl, if the style has a sky, for the renderer's
-    /// `UpdateParameters`.
-    pub fn get_sky_impl(&self) -> Option<Arc<sky::Impl>> {
-        self.sky.as_ref().map(|sky| Arc::clone(&sky.impl_))
     }
 
     pub fn dump_debug_logs(&self) {
@@ -1033,62 +1023,6 @@ impl Drop for LayerRefMut<'_> {
         if !Arc::ptr_eq(&self.before, layer.style()) {
             let id = std::mem::take(&mut self.id);
             self.style.on_layer_changed(&id);
-        }
-    }
-}
-
-/// The mutable light of a style; notifies the style when dropped (see
-/// `Impl::get_light_mut`).
-pub(crate) struct LightRefMut<'a> {
-    style: &'a mut Impl,
-    before: Arc<light::Impl>,
-}
-
-impl std::ops::Deref for LightRefMut<'_> {
-    type Target = Light;
-    fn deref(&self) -> &Light {
-        &self.style.light
-    }
-}
-
-impl std::ops::DerefMut for LightRefMut<'_> {
-    fn deref_mut(&mut self) -> &mut Light {
-        &mut self.style.light
-    }
-}
-
-impl Drop for LightRefMut<'_> {
-    fn drop(&mut self) {
-        if !Arc::ptr_eq(&self.before, &self.style.light.impl_) {
-            self.style.on_light_changed();
-        }
-    }
-}
-
-/// The mutable projection of a style; notifies the style when dropped (see
-/// `Impl::get_projection_mut`).
-pub struct ProjectionRefMut<'a> {
-    style: &'a mut Impl,
-    before: Arc<projection::Impl>,
-}
-
-impl std::ops::Deref for ProjectionRefMut<'_> {
-    type Target = Projection;
-    fn deref(&self) -> &Projection {
-        &self.style.projection
-    }
-}
-
-impl std::ops::DerefMut for ProjectionRefMut<'_> {
-    fn deref_mut(&mut self) -> &mut Projection {
-        &mut self.style.projection
-    }
-}
-
-impl Drop for ProjectionRefMut<'_> {
-    fn drop(&mut self) {
-        if !Arc::ptr_eq(&self.before, &self.style.projection.impl_) {
-            self.style.on_projection_changed();
         }
     }
 }

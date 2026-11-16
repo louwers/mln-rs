@@ -15,7 +15,7 @@ fn field(object_name: &str, p: &Property) -> String {
 }
 
 /// Emits the property table of a root object (`light` or `sky`), whose
-/// `Impl` is in `crate::{object_name}`.
+/// type is `crate::{object_name}::{Object}`.
 #[must_use]
 pub(crate) fn emit(object_name: &str, properties: &[Property]) -> String {
     let mut w = Writer::new();
@@ -23,8 +23,9 @@ pub(crate) fn emit(object_name: &str, properties: &[Property]) -> String {
     w.line("// (tools/style-codegen/v8.json). Do not edit.");
     w.blank();
 
+    let owner = crate::types::camelize(object_name);
     let mut imports = crate::emit_table::imports(&Visit::Impl);
-    imports.push(format!("crate::{object_name}::Impl"));
+    imports.push(format!("crate::{object_name}::{owner}"));
     w.imports(imports);
     w.blank();
 
@@ -32,6 +33,6 @@ pub(crate) fn emit(object_name: &str, properties: &[Property]) -> String {
         .iter()
         .map(|property| Entry { property, paint: true, field: field(object_name, property) })
         .collect();
-    crate::emit_table::emit(&mut w, "Impl", &entries, &Visit::Impl);
+    crate::emit_table::emit(&mut w, &owner, &entries, &Visit::Impl);
     w.finish()
 }

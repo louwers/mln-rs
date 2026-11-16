@@ -2,7 +2,7 @@
 // (tools/style-codegen/v8.json). Do not edit.
 
 use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
-use crate::sky::Impl;
+use crate::sky::Sky;
 
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
@@ -18,7 +18,7 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[6, 2, 3, 1, 4, 0, 5],
 );
 
-impl Properties for Impl {
+impl Properties for Sky {
     const TABLE: &'static PropertyTable = &PROPERTIES;
 
     fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {

@@ -3,37 +3,40 @@ use std::sync::Arc;
 use mln_conversion::{Convertible, Error};
 
 use crate::expression::Functions;
-use crate::property_table::{self, SetPropertyError};
-pub use crate::sky_impl::{Impl, SkyProperties};
+use crate::property_table::{self, InPlace, SetPropertyError};
 use crate::style_property::StyleProperty;
 
-/// The style's sky.
-#[derive(Clone, Debug)]
-pub struct Sky {
-    pub impl_: Arc<Impl>,
-}
-
-impl Default for Sky {
-    fn default() -> Self {
-        Sky::new()
+crate::properties!(
+    #[expect(non_snake_case, reason = "named like the layers' property sets")]
+    pub mod SkyProperties: paint {
+        sky_atmosphere_blend: constant f32 = 0.8_f32,
+        sky_fog_color: constant Color = Color::white(),
+        sky_fog_ground_blend: constant f32 = 0.5_f32,
+        sky_horizon_color: constant Color = Color::white(),
+        sky_horizon_fog_blend: constant f32 = 0.8_f32,
+        sky_color: constant Color =
+            Color::new(136.0_f32 / 255.0_f32, 198.0_f32 / 255.0_f32, 252.0_f32 / 255.0_f32, 1.0_f32),
+        sky_horizon_blend: constant f32 = 0.8_f32,
     }
+    use mln_util::Color;
+);
+
+/// The style's sky.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Sky {
+    pub properties: SkyProperties::Transitionable,
 }
 
 impl Sky {
     #[must_use]
     pub fn new() -> Self {
-        Sky::from_impl(Arc::new(Impl::default()))
-    }
-
-    #[must_use]
-    pub fn from_impl(impl_: Arc<Impl>) -> Self {
-        Sky { impl_ }
+        Sky::default()
     }
 
     /// Sets a property (or `<name>-transition`) from a style JSON value,
     /// whose expressions parse against `functions`.
     pub fn set_property(&mut self, name: &str, value: &Convertible<'_>, functions: &Arc<Functions>) -> Option<Error> {
-        match property_table::set_property(&mut self.impl_, name, value, functions) {
+        match property_table::set_property(&mut InPlace(self), name, value, functions) {
             Ok(()) => None,
             Err(SetPropertyError::Invalid(error)) => Some(error),
             Err(SetPropertyError::Unknown) => Some(Error::new("sky doesn't support this property")),
@@ -42,6 +45,6 @@ impl Sky {
 
     #[must_use]
     pub fn get_property(&self, name: &str) -> StyleProperty {
-        property_table::get_property(&*self.impl_, name)
+        property_table::get_property(self, name)
     }
 }

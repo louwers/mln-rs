@@ -1,49 +1,30 @@
-// As for the light (see light.rs), the C++ `ProjectionObserver* observer`
-// (src/mln/style/projection_observer.hpp) is replaced by the
-// `ProjectionRefMut` guard of `Style::Impl::get_projection_mut`, which calls
-// `onProjectionChanged` when the projection's impl changed.
-
+#[cfg(test)]
 use std::sync::Arc;
 
 #[cfg(test)]
 use mln_conversion::{Convertible, Error};
-use mln_style_types::ProjectionDefinition;
+use mln_style_types::{ProjectionDefinition, ProjectionType};
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 #[cfg(test)]
 use crate::conversion::convert_property_value;
 use crate::conversion_impl::make_style_property;
+use crate::expression::EvaluationContext;
 #[cfg(test)]
 use crate::expression::Functions;
-pub(crate) use crate::projection_impl::Impl;
 use crate::property_value::PropertyValue;
 use crate::style_property::StyleProperty;
 
 /// The style's root `projection` object.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Projection {
-    pub impl_: Arc<Impl>,
-}
-
-impl Default for Projection {
-    fn default() -> Self {
-        Projection::new()
-    }
+    type_: PropertyValue<ProjectionDefinition>,
 }
 
 impl Projection {
     #[must_use]
     pub fn new() -> Self {
-        Projection::from_impl(Arc::new(Impl::default()))
-    }
-
-    #[must_use]
-    pub(crate) fn from_impl(impl_: Arc<Impl>) -> Self {
-        Projection { impl_ }
-    }
-
-    #[must_use]
-    pub(crate) fn mutable_impl(&self) -> Impl {
-        (*self.impl_).clone()
+        Projection::default()
     }
 
     #[cfg(test)]
@@ -68,7 +49,7 @@ impl Projection {
     #[must_use]
     pub(crate) fn get_property(&self, name: &str) -> StyleProperty {
         if name == "type" {
-            return make_style_property(&self.get_type());
+            return make_style_property(&self.type_);
         }
         StyleProperty::default()
     }
@@ -80,12 +61,39 @@ impl Projection {
 
     #[must_use]
     pub fn get_type(&self) -> PropertyValue<ProjectionDefinition> {
-        self.impl_.type_.clone()
+        self.type_.clone()
     }
 
     pub fn set_type(&mut self, type_: PropertyValue<ProjectionDefinition>) {
-        let mut impl_ = self.mutable_impl();
-        impl_.type_ = type_;
-        self.impl_ = Arc::new(impl_);
+        self.type_ = type_;
+    }
+
+    /// How finely tiles are subdivided for this projection, for the life of
+    /// the style: anything that can render a globe at some zoom gets the
+    /// globe granularity, so the Mercator hand-off at high zoom reuses the
+    /// same tiles.
+    #[must_use]
+    pub fn get_subdivision_granularity(&self) -> SubdivisionGranularitySetting {
+        if self.type_.is_undefined()
+            || (self.type_.is_constant()
+                && *self.type_.as_constant() == ProjectionDefinition::new(ProjectionType::Mercator))
+        {
+            return SubdivisionGranularitySetting::none();
+        }
+        SubdivisionGranularitySetting::globe()
+    }
+
+    /// The definition at a zoom level, with `globe` resolved; `mercator`
+    /// when the style does not set one.
+    #[must_use]
+    pub fn evaluate(&self, zoom: f32) -> ProjectionDefinition {
+        let definition = match &self.type_ {
+            PropertyValue::Undefined => Projection::get_default_type(),
+            PropertyValue::Constant(definition) => *definition,
+            PropertyValue::Expression(expression) => {
+                expression.evaluate(&EvaluationContext::new(zoom), Projection::get_default_type())
+            }
+        };
+        definition.at_zoom(f64::from(zoom))
     }
 }

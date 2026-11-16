@@ -8,8 +8,6 @@ use mln_actor::RunLoop;
 use mln_renderer::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
-use mln_style::PropertyValue;
-use mln_style_types::ProjectionDefinition;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -114,7 +112,7 @@ fn each_change_to_the_style_projection_reaches_the_transform() {
     map.process_events();
     assert!(map.style().is_loaded());
     assert!((lowest_jump(&mut map) + 0.5).abs() < 1e-9);
-    let globe_below_3 = map.style().get_projection().clone();
+    let globe_below_3 = (**map.style().get_projection()).clone();
 
     // A style's JSON that replaces it.
     map.style_mut().load_json(STYLE);
@@ -125,7 +123,7 @@ fn each_change_to_the_style_projection_reaches_the_transform() {
     assert!((lowest_jump(&mut map) + 0.5).abs() < 1e-9);
 
     // An edit.
-    map.style_mut().get_projection_mut().set_type(PropertyValue::Constant(ProjectionDefinition::from_name("mercator")));
+    map.style_mut().set_root_property_json("projection", r#"{"type":"mercator"}"#).unwrap();
     assert!(lowest_jump(&mut map) >= 1.0);
 }
 

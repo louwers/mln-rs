@@ -605,8 +605,8 @@ impl Map {
             font_faces: style_impl.get_font_faces(),
             sprite_loaded: style_impl.are_sprites_loaded(),
             transition_options: style_impl.get_transition_options(),
-            light: style_impl.get_light_impl(),
-            sky: style_impl.get_sky_impl(),
+            light: Arc::clone(style_impl.get_light()),
+            sky: style_impl.get_sky().cloned(),
             images: style_impl.get_image_impls(),
             sources: style_impl.get_source_impls(),
             layers: style_impl.get_layer_impls(),
@@ -627,7 +627,7 @@ impl Map {
             subdivision_granularity: if self.mode == MapMode::Tile {
                 SubdivisionGranularitySetting::none()
             } else {
-                style_impl.get_projection().impl_.get_subdivision_granularity()
+                style_impl.get_projection().get_subdivision_granularity()
             },
         };
 
@@ -652,14 +652,14 @@ impl Map {
         if self.mode == MapMode::Tile {
             return ProjectionDefinition::new(ProjectionType::Mercator);
         }
-        self.style.impl_.get_projection().impl_.evaluate(zoom as f32)
+        self.style.get_projection().evaluate(zoom as f32)
     }
 
     /// Gives the transform the style's current projection, which constrains
     /// the target of an animation it starts. The style reports each change
     /// to its projection, and the map calls this then.
     fn share_projection_with_transform(&mut self) {
-        let projection = (self.mode != MapMode::Tile).then(|| Arc::clone(&self.style.impl_.get_projection().impl_));
+        let projection = (self.mode != MapMode::Tile).then(|| Arc::clone(self.style.get_projection()));
         self.transform.set_projection_for_zoom(Some(Rc::new(move |zoom: f64| match &projection {
             Some(projection) => projection.evaluate(zoom as f32),
             None => ProjectionDefinition::new(ProjectionType::Mercator),

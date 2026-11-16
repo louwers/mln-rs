@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::{Convertible, Error};
 use crate::expression::Functions;
-use crate::light::{Impl, Light};
+use crate::light::Light;
 use crate::property_table;
 
 /// Converts the style's `light`, whose expressions parse against `functions`.
@@ -13,7 +13,7 @@ pub fn convert_light(value: &Convertible<'_>, functions: &Arc<Functions>, error:
     }
 
     let mut light = Light::new();
-    for name in property_table::names::<Impl>() {
+    for name in property_table::names::<Light>() {
         let Some(member) = value.object_member(&name) else {
             continue;
         };

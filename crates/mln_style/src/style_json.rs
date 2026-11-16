@@ -323,8 +323,8 @@ impl Style {
     pub fn root_property_json(&self, name: &str) -> Result<Option<String>, Error> {
         require_root_property(name)?;
         let value = match name {
-            "light" => defined_properties_json(&*self.get_light().impl_),
-            "sky" => self.get_sky().and_then(|sky| defined_properties_json(&*sky.impl_)),
+            "light" => defined_properties_json(&**self.get_light()),
+            "sky" => self.get_sky().and_then(|sky| defined_properties_json(&**sky)),
             "projection" => {
                 let projection = self.get_projection();
                 properties_json(&["type"], |name| projection.get_property(name))
@@ -364,7 +364,8 @@ impl Style {
         let context = format!("style light property {}", quote(name));
         let value = parse(json, &context)?;
         let functions = Arc::clone(self.registry().functions());
-        match self.get_light_mut().set_property(name, &Convertible::from(&value), &functions) {
+        self.impl_.mutated = true;
+        match self.impl_.set_light_property(name, &Convertible::from(&value), &functions) {
             None => Ok(()),
             Some(error) => Err(conversion_error(&context, &error)),
         }

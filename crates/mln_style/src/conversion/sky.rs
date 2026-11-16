@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::{Convertible, Error};
 use crate::expression::Functions;
 use crate::property_table;
-use crate::sky::{Impl, Sky};
+use crate::sky::Sky;
 
 /// Converts the style's `sky`, whose expressions parse against `functions`.
 pub fn convert_sky(value: &Convertible<'_>, functions: &Arc<Functions>, error: &mut Error) -> Option<Sky> {
@@ -13,7 +13,7 @@ pub fn convert_sky(value: &Convertible<'_>, functions: &Arc<Functions>, error: &
     }
 
     let mut sky = Sky::new();
-    for name in property_table::names::<Impl>() {
+    for name in property_table::names::<Sky>() {
         let Some(member) = value.object_member(&name) else {
             continue;
         };

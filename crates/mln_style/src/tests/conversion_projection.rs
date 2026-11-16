@@ -50,7 +50,7 @@ fn projection() {
     {
         let projection = parse_projection("{}", &mut error).expect("projection");
         assert!(projection.get_type().is_undefined());
-        assert_eq!(definition("mercator"), projection.impl_.evaluate(3.0));
+        assert_eq!(definition("mercator"), projection.evaluate(3.0));
     }
 
     {
@@ -59,11 +59,11 @@ fn projection() {
         assert_eq!(definition("globe"), *projection.get_type().as_constant());
         // The preset is the vertical perspective until zoom 11, Mercator from
         // zoom 12, and blends in between.
-        assert_eq!(definition("vertical-perspective"), projection.impl_.evaluate(3.0));
-        assert_eq!(definition("vertical-perspective"), projection.impl_.evaluate(11.0));
-        assert_eq!(between("vertical-perspective", "mercator", 0.5), projection.impl_.evaluate(11.5));
-        assert_eq!(definition("mercator"), projection.impl_.evaluate(12.0));
-        assert_eq!(definition("mercator"), projection.impl_.evaluate(16.0));
+        assert_eq!(definition("vertical-perspective"), projection.evaluate(3.0));
+        assert_eq!(definition("vertical-perspective"), projection.evaluate(11.0));
+        assert_eq!(between("vertical-perspective", "mercator", 0.5), projection.evaluate(11.5));
+        assert_eq!(definition("mercator"), projection.evaluate(12.0));
+        assert_eq!(definition("mercator"), projection.evaluate(16.0));
     }
 
     {
@@ -80,11 +80,11 @@ fn projection() {
         )
         .expect("projection");
         assert!(projection.get_type().is_expression());
-        assert_eq!(definition("vertical-perspective"), projection.impl_.evaluate(9.0));
-        assert_eq!(definition("vertical-perspective"), projection.impl_.evaluate(10.0));
-        assert_eq!(between("vertical-perspective", "mercator", 0.5), projection.impl_.evaluate(11.0));
-        assert_eq!(definition("mercator"), projection.impl_.evaluate(12.0));
-        assert_eq!(definition("mercator"), projection.impl_.evaluate(13.0));
+        assert_eq!(definition("vertical-perspective"), projection.evaluate(9.0));
+        assert_eq!(definition("vertical-perspective"), projection.evaluate(10.0));
+        assert_eq!(between("vertical-perspective", "mercator", 0.5), projection.evaluate(11.0));
+        assert_eq!(definition("mercator"), projection.evaluate(12.0));
+        assert_eq!(definition("mercator"), projection.evaluate(13.0));
     }
 
     {
@@ -99,10 +99,10 @@ fn projection() {
         )
         .expect("projection");
         assert!(projection.get_type().is_expression());
-        assert_double_eq(0.25, projection.impl_.evaluate(0.0).transition_state());
-        assert_double_eq(0.25, projection.impl_.evaluate(2.5).transition_state());
-        assert_double_eq(0.25, projection.impl_.evaluate(5.0).transition_state());
-        assert_double_eq(0.25, projection.impl_.evaluate(10.0).transition_state());
+        assert_double_eq(0.25, projection.evaluate(0.0).transition_state());
+        assert_double_eq(0.25, projection.evaluate(2.5).transition_state());
+        assert_double_eq(0.25, projection.evaluate(5.0).transition_state());
+        assert_double_eq(0.25, projection.evaluate(10.0).transition_state());
     }
 
     {
@@ -116,10 +116,10 @@ fn projection() {
             &mut error,
         )
         .expect("projection");
-        assert_double_eq(0.75, projection.impl_.evaluate(0.0).transition_state());
-        assert_double_eq(0.625, projection.impl_.evaluate(2.5).transition_state());
-        assert_double_eq(0.5, projection.impl_.evaluate(5.0).transition_state());
-        assert_double_eq(0.25, projection.impl_.evaluate(10.0).transition_state());
+        assert_double_eq(0.75, projection.evaluate(0.0).transition_state());
+        assert_double_eq(0.625, projection.evaluate(2.5).transition_state());
+        assert_double_eq(0.5, projection.evaluate(5.0).transition_state());
+        assert_double_eq(0.25, projection.evaluate(10.0).transition_state());
     }
 
     {
@@ -128,9 +128,9 @@ fn projection() {
         let projection =
             parse_projection(r#"{"type":["interpolate",["linear"],["zoom"],0,"mercator",20,"globe"]}"#, &mut error)
                 .expect("projection");
-        assert_near(0.25, projection.impl_.evaluate(5.0).transition_state(), 1e-6);
-        assert_near(0.575 * 0.5, projection.impl_.evaluate(11.5).transition_state(), 1e-6);
-        assert_eq!(definition("mercator"), projection.impl_.evaluate(15.0));
+        assert_near(0.25, projection.evaluate(5.0).transition_state(), 1e-6);
+        assert_near(0.575 * 0.5, projection.evaluate(11.5).transition_state(), 1e-6);
+        assert_eq!(definition("mercator"), projection.evaluate(15.0));
     }
 
     {
@@ -165,7 +165,7 @@ fn projection_subdivision_granularity() {
     let mut granularity = |src: &str| {
         let json = parse_json(src);
         let projection = convert_projection(&Convertible::from(&json), &Functions::with_builtins(), &mut error);
-        projection.unwrap_or_else(|| panic!("{}", error.message)).impl_.get_subdivision_granularity()
+        projection.unwrap_or_else(|| panic!("{}", error.message)).get_subdivision_granularity()
     };
     // Only a style that never renders a globe keeps the flat, unsubdivided geometry.
     assert_eq!(SubdivisionGranularitySetting::none(), granularity("{}"));

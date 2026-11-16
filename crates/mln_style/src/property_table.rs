@@ -260,6 +260,19 @@ impl<S: Clone> OwnerSlot<S> for Arc<S> {
     }
 }
 
+/// An owner that isn't shared, changed in place.
+pub(crate) struct InPlace<'a, S>(pub(crate) &'a mut S);
+
+impl<S> OwnerSlot<S> for InPlace<'_, S> {
+    fn get(&self) -> Option<&S> {
+        Some(self.0)
+    }
+
+    fn make_mut(&mut self) -> Option<&mut S> {
+        Some(self.0)
+    }
+}
+
 /// Sets the property `name` (or a paint property's `<name>-transition`) of
 /// the owner in `owner` from a style JSON value, whose expressions parse
 /// against `functions`. The owner is copied only if the value changes it and

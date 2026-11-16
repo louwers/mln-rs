@@ -378,7 +378,7 @@ fn the_sky_and_the_projection_change_and_reset() {
     style.set_root_property_json("projection", r#"{"type":"globe"}"#).unwrap();
     assert_eq!(root_property(&style, "projection").as_deref(), Some(r#"{"type":"globe"}"#));
     assert_eq!(
-        style.get_projection().impl_.evaluate(0.0),
+        style.get_projection().evaluate(0.0),
         mln_style_types::ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective)
     );
 

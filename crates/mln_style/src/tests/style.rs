@@ -580,12 +580,12 @@ fn sky_presence_and_replacement() {
     assert!(style.get_sky().is_none());
 
     style.load_json(r#"{"sky":{}}"#);
-    assert!(style.get_sky().expect("sky").impl_.properties.sky_color.value.is_undefined());
+    assert!(style.get_sky().expect("sky").properties.sky_color.value.is_undefined());
 
     style.load_json(r#"{"sky":{"sky-color":"blue","atmosphere-blend":0.4}}"#);
     let sky = style.get_sky().expect("sky");
-    assert_eq!(Color::blue(), *sky.impl_.properties.sky_color.value.as_constant());
-    assert_float_eq(0.4, *sky.impl_.properties.sky_atmosphere_blend.value.as_constant());
+    assert_eq!(Color::blue(), *sky.properties.sky_color.value.as_constant());
+    assert_float_eq(0.4, *sky.properties.sky_atmosphere_blend.value.as_constant());
 
     let mut replacement = Sky::new();
     assert!(
@@ -595,9 +595,9 @@ fn sky_presence_and_replacement() {
     );
     style.set_sky(Some(replacement));
     let sky = style.get_sky().expect("sky");
-    assert!(sky.impl_.properties.sky_color.value.is_undefined());
-    assert!(sky.impl_.properties.sky_atmosphere_blend.value.is_undefined());
-    assert_eq!(Color::red(), *sky.impl_.properties.sky_fog_color.value.as_constant());
+    assert!(sky.properties.sky_color.value.is_undefined());
+    assert!(sky.properties.sky_atmosphere_blend.value.is_undefined());
+    assert_eq!(Color::red(), *sky.properties.sky_fog_color.value.as_constant());
 
     style.set_sky(None);
     assert!(style.get_sky().is_none());
@@ -627,13 +627,13 @@ fn sky_projection_and_global_state_coexist() {
     }"#,
     );
 
-    assert_eq!(Color::blue(), *style.get_sky().expect("sky").impl_.properties.sky_color.value.as_constant());
+    assert_eq!(Color::blue(), *style.get_sky().expect("sky").properties.sky_color.value.as_constant());
     assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
     assert_eq!(Value::Bool(true), style.get_global_state()["showLabels"]);
 
     style.set_global_state_property("showLabels", &Value::Bool(false));
     assert_eq!(Value::Bool(false), style.get_global_state()["showLabels"]);
-    assert_eq!(Color::blue(), *style.get_sky().expect("sky").impl_.properties.sky_color.value.as_constant());
+    assert_eq!(Color::blue(), *style.get_sky().expect("sky").properties.sky_color.value.as_constant());
     assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
 
     style.set_sky(None);

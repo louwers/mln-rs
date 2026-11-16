@@ -36,14 +36,12 @@ pub mod layer;
 pub mod layer_type;
 pub mod layers;
 pub mod light;
-mod light_impl;
 #[rustfmt::skip]
 mod light_properties;
 pub mod map;
 pub mod observer;
 pub mod parser;
 pub mod projection;
-mod projection_impl;
 pub mod properties;
 pub mod property_expression;
 #[doc(hidden)]
@@ -53,7 +51,6 @@ pub mod registry;
 pub mod renderer;
 pub mod serialization;
 pub mod sky;
-mod sky_impl;
 #[rustfmt::skip]
 mod sky_properties;
 pub mod source;

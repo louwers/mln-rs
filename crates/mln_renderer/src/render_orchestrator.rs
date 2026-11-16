@@ -300,7 +300,7 @@ impl RenderOrchestrator {
             render_sources: HashMap::default(),
             render_layers: HashMap::default(),
             // conformance: renderLight(makeMutable<Light::Impl>())
-            render_light: crate::render_light::RenderLight::new(Arc::new(mln_style::light::Impl::default())),
+            render_light: crate::render_light::RenderLight::new(Arc::default()),
             render_sky: None,
             background_layer_as_color,
             placed_symbol_data_collected: false,
@@ -439,10 +439,10 @@ impl RenderOrchestrator {
         self.receive_tiles();
 
         // Update light. (conformance)
-        let light_changed = !Arc::ptr_eq(&self.render_light.impl_, &update_parameters.light);
+        let light_changed = !Arc::ptr_eq(&self.render_light.light, &update_parameters.light);
 
         if light_changed {
-            self.render_light.impl_ = Arc::clone(&update_parameters.light);
+            self.render_light.light = Arc::clone(&update_parameters.light);
             self.render_light.transition(&transition_parameters);
         } else if let Some(parameters) = &global_state_transition_parameters {
             self.render_light.transition(parameters);
@@ -460,8 +460,8 @@ impl RenderOrchestrator {
                     self.render_sky = Some(crate::render_sky::RenderSky::new(Arc::clone(sky)));
                     sky_changed = true;
                 }
-                Some(render_sky) if !Arc::ptr_eq(&render_sky.impl_, sky) => {
-                    render_sky.impl_ = Arc::clone(sky);
+                Some(render_sky) if !Arc::ptr_eq(&render_sky.sky, sky) => {
+                    render_sky.sky = Arc::clone(sky);
                     render_sky.transition(&transition_parameters);
                     sky_changed = true;
                 }

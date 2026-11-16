@@ -961,10 +961,7 @@ fn style_expired_with_projection() {
         test.file_source.respond(Kind::Style, &response);
 
         if in_place {
-            test.map()
-                .style_mut()
-                .get_projection_mut()
-                .set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
+            test.map().style_mut().set_root_property_json("projection", r#"{"type":"globe"}"#).unwrap();
         } else {
             let mut projection = Projection::new();
             projection.set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
@@ -1633,10 +1630,7 @@ fn globe_image_source_below_zoom_zero() {
     // zoom was cast to an unsigned tile zoom and the render never returned.
     let test = MapTest::new();
     test.load_json(&read_file("test/fixtures/api/empty.json"));
-    test.map()
-        .style_mut()
-        .get_projection_mut()
-        .set_type(PropertyValue::Constant(ProjectionDefinition::from_name("vertical-perspective")));
+    test.map().style_mut().set_root_property_json("projection", r#"{"type":"vertical-perspective"}"#).unwrap();
     let coords = [ll(60.0, -10.0), ll(60.0, 10.0), ll(50.0, 10.0), ll(50.0, -10.0)];
     let source = ImageSource::new("image", coords);
     source.set_image(decode_image("test/fixtures/image/no_profile.png"));
@@ -3313,7 +3307,7 @@ fn globe_hand_off_keeps_tiles() {
     .unwrap();
 
     map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
-    map.style_mut().get_projection_mut().set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
+    map.style_mut().set_root_property_json("projection", r#"{"type":"globe"}"#).unwrap();
     let center = ll(37.8, -122.5); // the fixture has tile 10/163/395
     map.jump_to(&CameraOptions { center: Some(center), zoom: Some(10.5), ..Default::default() });
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));

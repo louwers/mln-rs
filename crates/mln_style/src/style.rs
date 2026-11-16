@@ -12,7 +12,7 @@ use crate::projection::Projection;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source::Source;
-pub(crate) use crate::style_impl::{Impl, LayerRefMut, LightRefMut, ProjectionRefMut};
+pub(crate) use crate::style_impl::{Impl, LayerRefMut};
 use crate::transition_options::TransitionOptions;
 
 /// Why a style failed to load.
@@ -134,13 +134,8 @@ impl Style {
     }
 
     // Light
-    pub(crate) fn get_light_mut(&mut self) -> LightRefMut<'_> {
-        self.impl_.mutated = true;
-        self.impl_.get_light_mut()
-    }
-
     #[must_use]
-    pub(crate) fn get_light(&self) -> &Light {
+    pub fn get_light(&self) -> &Arc<Light> {
         self.impl_.get_light()
     }
 
@@ -156,18 +151,13 @@ impl Style {
     }
 
     #[must_use]
-    pub(crate) fn get_sky(&self) -> Option<&Sky> {
+    pub fn get_sky(&self) -> Option<&Arc<Sky>> {
         self.impl_.get_sky()
     }
 
     // Projection
-    pub fn get_projection_mut(&mut self) -> ProjectionRefMut<'_> {
-        self.impl_.mutated = true;
-        self.impl_.get_projection_mut()
-    }
-
     #[must_use]
-    pub fn get_projection(&self) -> &Projection {
+    pub fn get_projection(&self) -> &Arc<Projection> {
         self.impl_.get_projection()
     }
 

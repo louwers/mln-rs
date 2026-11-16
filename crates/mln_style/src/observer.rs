@@ -1,9 +1,6 @@
 // The observer methods take `&self` (C++: non-const virtuals): the style
 // holds an `Rc<dyn Observer>`, and the map's implementation uses interior
-// mutability. `LayerObserver` / `LightObserver` are implemented by
-// `Style::Impl` itself in C++; here they are the `on_layer_changed` /
-// `on_light_changed` methods the `LayerRefMut` / `LightRefMut` guards call
-// (see layer.rs).
+// mutability.
 
 use mln_util::error::Error;
 
