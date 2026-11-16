@@ -2470,6 +2470,7 @@ version = "0.0.12"
 dependencies = [
  "libc",
  "mln-rs-actor",
+ "mln-rs-d3d12",
  "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-gl",
@@ -2569,6 +2570,7 @@ dependencies = [
  "mln-rs-glsl",
  "mln-rs-util",
  "naga",
+ "parking_lot",
  "windows",
 ]
 

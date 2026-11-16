@@ -4,8 +4,11 @@
 use std::ffi::c_void;
 use std::sync::Arc;
 
+use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, TargetFormats, VertexBufferLayout};
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log};
+use parking_lot::Mutex;
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
 use windows::Win32::Graphics::Direct3D12::{
@@ -14,7 +17,8 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION,
     D3D12_MESSAGE_SEVERITY_ERROR, D3D12_MESSAGE_SEVERITY_WARNING, D3D12CreateDevice, D3D12GetDebugInterface,
     ID3D12CommandQueue, ID3D12Debug, ID3D12Debug1, ID3D12Device, ID3D12DeviceRemovedExtendedData,
-    ID3D12DeviceRemovedExtendedDataSettings, ID3D12InfoQueue, ID3D12InfoQueue1,
+    ID3D12DeviceRemovedExtendedDataSettings, ID3D12InfoQueue, ID3D12InfoQueue1, ID3D12PipelineState,
+    ID3D12RootSignature,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_CREATE_FACTORY_DEBUG, DXGI_CREATE_FACTORY_FLAGS,
@@ -22,6 +26,7 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows::core::{Interface, PCSTR};
 
+use crate::root_signature;
 use crate::shaders::ShaderCompiler;
 
 /// What `MLN_D3D12_VALIDATION` asks for: D3D12's debug layer with
@@ -44,6 +49,10 @@ impl Validation {
     }
 }
 
+/// The pipeline states of a device, by what made them: the program and its
+/// defines, the vertex buffers' layouts, the fixed state and the formats.
+pub(crate) type PipelineKey = (ShaderKey, Vec<VertexBufferLayout>, FixedState, TargetFormats);
+
 struct Shared {
     device: ID3D12Device,
     queue: ID3D12CommandQueue,
@@ -51,6 +60,11 @@ struct Shared {
     /// does.
     name: String,
     software: bool,
+    /// The root signature of every pipeline on the device.
+    root_signature: ID3D12RootSignature,
+    /// The pipeline states that the device's backends made, which the next
+    /// backend to need one takes: a renderer for each map makes the same.
+    pipelines: Mutex<HashMap<PipelineKey, ID3D12PipelineState>>,
 }
 
 /// A D3D12 device on one adapter, and its direct queue. Clones share them.
@@ -181,7 +195,10 @@ impl Device {
         let queue: ID3D12CommandQueue =
             unsafe { device.CreateCommandQueue(&raw const queue_desc) }.map_err(native("CreateCommandQueue"))?;
         Log::info(Event::Render, format!("graphics device uses D3D12 adapter {name}"));
-        Ok(Device { shared: Arc::new(Shared { device, queue, name, software }) })
+        let root_signature = root_signature::create(&device).map_err(|error| Error::native(error.to_string()))?;
+        Ok(Device {
+            shared: Arc::new(Shared { device, queue, name, software, root_signature, pipelines: Mutex::default() }),
+        })
     }
 
     /// The device.
@@ -313,5 +330,27 @@ fn log_messages(device: &ID3D12Device, abort: bool) {
             let _ = queue.SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
             let _ = queue.SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
         }
+    }
+}
+
+impl Device {
+    /// The root signature of every pipeline on the device.
+    pub(crate) fn root_signature(&self) -> &ID3D12RootSignature {
+        &self.shared.root_signature
+    }
+
+    /// The pipeline state of `key` that a backend on the device made, or
+    /// the one `create` makes.
+    pub(crate) fn pipeline(
+        &self,
+        key: PipelineKey,
+        create: impl FnOnce() -> Result<ID3D12PipelineState, GpuError>,
+    ) -> Result<ID3D12PipelineState, GpuError> {
+        if let Some(pipeline) = self.shared.pipelines.lock().get(&key) {
+            return Ok(pipeline.clone());
+        }
+        let pipeline = create()?;
+        self.shared.pipelines.lock().insert(key, pipeline.clone());
+        Ok(pipeline)
     }
 }

@@ -6,9 +6,12 @@ mod dxc;
 pub(crate) mod hlsl;
 
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
 use mln_glsl::{AttributeInfo, Module, ResourceUse, ShaderSource, Stage, shader_source};
+use mln_util::hash::HashMap;
+use parking_lot::Mutex;
 
 use self::dxc::Dxc;
 
@@ -37,8 +40,19 @@ impl ShaderCompiler {
         Ok(ShaderCompiler { dxc })
     }
 
-    /// Compiles the program of `key` with its defines.
-    pub fn compile(&self, key: &ShaderKey) -> Result<CompiledProgram, GpuError> {
+    /// The program of `key` with its defines, compiled once a process: it
+    /// doesn't depend on the device, and every renderer compiles the same.
+    pub fn compile(&self, key: &ShaderKey) -> Result<Arc<CompiledProgram>, GpuError> {
+        static PROGRAMS: Mutex<Option<HashMap<ShaderKey, Arc<CompiledProgram>>>> = Mutex::new(None);
+        if let Some(program) = PROGRAMS.lock().get_or_insert_default().get(key) {
+            return Ok(Arc::clone(program));
+        }
+        let program = Arc::new(self.compile_uncached(key)?);
+        PROGRAMS.lock().get_or_insert_default().insert(key.clone(), Arc::clone(&program));
+        Ok(program)
+    }
+
+    fn compile_uncached(&self, key: &ShaderKey) -> Result<CompiledProgram, GpuError> {
         let program = key.program();
         let source = shader_source(program).ok_or_else(|| GpuError::Unsupported(format!("no GLSL for {program:?}")))?;
         let mut defines = String::new();
