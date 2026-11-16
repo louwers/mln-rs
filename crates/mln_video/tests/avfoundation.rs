@@ -56,15 +56,32 @@ mod apple {
         fn CFRunLoopRunInMode(mode: *const c_void, seconds: f64, return_after_source_handled: u8) -> i32;
     }
 
-    /// Runs each test whose name has the first argument in it, on a thread,
-    /// while the main thread runs its run loop; then the one test that needs
-    /// the main thread to run none.
+    /// The test that needs the main thread to run no run loop.
+    const WITHOUT_RUN_LOOP: &str = "a_main_thread_without_a_run_loop_fails_the_video";
+
+    /// Lists the tests for `--list`, as libtest and cargo-nextest's custom
+    /// harnesses do. Otherwise runs each test whose name has the first
+    /// argument in it, or is it with `--exact`, on a thread while the main
+    /// thread runs its run loop; then the one test that needs the main thread
+    /// to run none.
     pub(crate) fn main() {
-        let filter = std::env::args().skip(1).find(|arg| !arg.starts_with('-')).unwrap_or_default();
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let has = |flag: &str| args.iter().any(|arg| arg == flag);
+        if has("--list") {
+            // None of the tests is ignored.
+            if !has("--ignored") {
+                for name in TESTS.iter().map(|&(name, _)| name).chain([WITHOUT_RUN_LOOP]) {
+                    println!("{name}: test");
+                }
+            }
+            return;
+        }
+        let exact = has("--exact");
+        let filter = args.iter().find(|arg| !arg.starts_with('-')).cloned().unwrap_or_default();
         let mut failed = Vec::new();
         let mut ran = 0;
         let mut run = |name: &str, test: fn(), spin: bool| {
-            if !name.contains(&filter) {
+            if if exact { name != filter } else { !name.contains(&filter) } {
                 return;
             }
             ran += 1;
@@ -82,11 +99,7 @@ mod apple {
         for &(name, test) in TESTS {
             run(name, test, true);
         }
-        run(
-            "a_main_thread_without_a_run_loop_fails_the_video",
-            a_main_thread_without_a_run_loop_fails_the_video,
-            false,
-        );
+        run(WITHOUT_RUN_LOOP, a_main_thread_without_a_run_loop_fails_the_video, false);
         println!("\n{} passed, {} failed", ran - failed.len(), failed.len());
         if !failed.is_empty() {
             println!("failures: {failed:?}");
