@@ -6,6 +6,7 @@
 
 use std::ffi::{c_int, c_void};
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_gfx::video::GpuFrame;
@@ -169,23 +170,61 @@ fn yuv_buffer_frame(size: Size) -> Option<VideoFrame> {
     })
 }
 
-/// Hands each video the frame it holds, once, and keeps its sink.
+/// Hands each video the frame it holds, once, and keeps its sink. Once the
+/// renderer refuses the frame, sends the same quarters in memory, as a
+/// player does, so that a still render that waits for a frame it can draw
+/// ends.
 #[derive(Debug)]
 struct OneGpuFrame {
     frame: Mutex<Option<VideoFrame>>,
     sink: Mutex<Option<FrameSink>>,
 }
 
-impl VideoPlayers for OneGpuFrame {
-    fn open(&self, request: OpenRequest) -> Result<Box<dyn VideoPlayer>, String> {
-        let frame = self.frame.lock().take().ok_or("one video only")?;
-        request.frames.push(frame);
-        *self.sink.lock() = Some(request.frames);
-        Ok(Box::new(Still))
+/// Sends the frame in memory once the renderer refuses the GPU one, until it
+/// drops.
+struct Fallback {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl VideoPlayer for Fallback {
+    fn play(&mut self) {}
+    fn pause(&mut self) {}
+    fn seek(&mut self, _seconds: f64) {}
+}
+
+impl Drop for Fallback {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            thread.join().unwrap();
+        }
     }
 }
 
-/// Renders `frame`: the image, and whether the renderer refused the frame.
+impl VideoPlayers for OneGpuFrame {
+    fn open(&self, request: OpenRequest) -> Result<Box<dyn VideoPlayer>, String> {
+        let frame = self.frame.lock().take().ok_or("one video only")?;
+        let size = frame.size;
+        request.frames.push(frame);
+        *self.sink.lock() = Some(request.frames.clone());
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::clone(&stop);
+        let thread = std::thread::spawn(move || {
+            while !stopped.load(Ordering::Relaxed) {
+                if request.frames.gpu_frames_refused() {
+                    request.frames.push(rgba_frame(size));
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        Ok(Box::new(Fallback { stop, thread: Some(thread) }))
+    }
+}
+
+/// Renders `frame`: the image, and whether the renderer refused the frame
+/// (and drew the same quarters from memory).
 fn render_gpu(frame: VideoFrame) -> (PremultipliedImage, bool) {
     let players = Arc::new(OneGpuFrame { frame: Mutex::new(Some(frame)), sink: Mutex::new(None) });
     let image = VideoMap::new(Arc::<OneGpuFrame>::clone(&players), None).render();
@@ -203,9 +242,8 @@ fn an_rgba_hardware_buffer_draws_in_place_on_opengl_es() {
     if refused {
         assert_ne!("gl", backend(), "OpenGL ES refused the frame");
         eprintln!("{} refused the hardware buffer frame", backend());
-    } else {
-        assert_quarters(&image, "RGBA hardware buffer");
     }
+    assert_quarters(&image, "RGBA hardware buffer");
 }
 
 #[test]
@@ -218,6 +256,7 @@ fn a_yuv_hardware_buffer_draws_in_place_on_opengl_es() {
     if refused {
         assert_ne!("gl", backend(), "OpenGL ES refused the frame");
         eprintln!("{} refused the hardware buffer frame", backend());
+        assert_quarters(&image, "the frame in memory after a refusal");
     } else {
         // The external sampler converts as the driver knows the buffer.
         assert!(shows_quarters(&image, QUARTERS, 40), "YUV hardware buffer: {:?}", quarter_colors(&image));
@@ -225,10 +264,11 @@ fn a_yuv_hardware_buffer_draws_in_place_on_opengl_es() {
     }
 }
 
-/// `tests/fixtures/quarters.mp4` of `mln_video`: a second of 64x48 H.264, whose
-/// quarters are [`QUARTERS`] for its first half and their opposites for its
-/// second.
-const VIDEO: &[u8] = include_bytes!("../../mln_video/tests/fixtures/quarters.mp4");
+/// `tests/fixtures/quarters-android.mp4` of `mln_video`: a second of 64x48
+/// H.264, whose quarters are red, green, blue and white for its first half
+/// and their opposites for its second.
+const VIDEO: &[u8] = include_bytes!("../../mln_video/tests/fixtures/quarters-android.mp4");
+const FIRST_HALF: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]];
 const SECOND_HALF: [[u8; 3]; 4] = [[0, 255, 255], [255, 0, 255], [255, 255, 0], [0, 0, 0]];
 
 /// Serves [`VIDEO`] for ranges, and nothing else.
@@ -264,7 +304,7 @@ fn the_platform_player_draws_a_video() {
     // memory that follow.
     for _ in 0..50 {
         let image = map.render();
-        if shows_quarters(&image, QUARTERS, 24) || shows_quarters(&image, SECOND_HALF, 24) {
+        if shows_quarters(&image, FIRST_HALF, 24) || shows_quarters(&image, SECOND_HALF, 24) {
             return;
         }
         std::thread::sleep(Duration::from_millis(100));

@@ -65,6 +65,7 @@ fn open(file_source: impl FileSource + 'static, cpu: bool) -> (Box<dyn VideoPlay
     let request = OpenRequest {
         urls: vec!["file:///quarters.mp4".to_owned()],
         file_source: Some(Arc::new(file_source)),
+        url_transform: None,
         frames: FrameSink::new(Arc::clone(&slot)),
     };
     let player = AndroidPlayers.open(request).unwrap();

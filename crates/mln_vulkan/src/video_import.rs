@@ -7,7 +7,7 @@
 // implicit fence comes out of the dmabuf as a sync file, which the next
 // submit waits for.
 
-use std::os::fd::{AsRawFd as _, FromRawFd as _, IntoRawFd as _, OwnedFd};
+use std::os::fd::{AsRawFd as _, IntoRawFd as _, OwnedFd};
 
 use ash::vk;
 use mln_gfx::gpu::{GpuError, TextureFormat};
@@ -278,6 +278,8 @@ fn bind(
 /// `None` where the kernel can't export them (before Linux 6.0).
 #[cfg(target_os = "linux")]
 pub(crate) fn writes_sync_file(plane: &DmaBufPlane) -> Option<OwnedFd> {
+    use std::os::fd::FromRawFd as _;
+
     #[repr(C)]
     struct ExportSyncFile {
         flags: u32,
