@@ -2942,6 +2942,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "serde_json",
+ "smallvec",
 ]
 
 [[package]]

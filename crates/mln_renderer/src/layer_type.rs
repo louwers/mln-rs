@@ -26,6 +26,7 @@ use mln_style::serialization::shared_layer;
 use mln_util::error::Error;
 use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
+use smallvec::SmallVec;
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
@@ -284,7 +285,11 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
 }
 
 /// `group`'s layers as `T` layers' values; fails if one is another type's.
-fn recover_group<T: LayerType>(group: &[Arc<dyn ErasedEvaluatedLayer>]) -> Result<Vec<Arc<EvaluatedLayer<T>>>, Error> {
+/// Inline for small groups, since a tile's layout recovers each of its
+/// groups.
+fn recover_group<T: LayerType>(
+    group: &[Arc<dyn ErasedEvaluatedLayer>],
+) -> Result<SmallVec<[Arc<EvaluatedLayer<T>>; 4]>, Error> {
     group
         .iter()
         .map(|layer| {
