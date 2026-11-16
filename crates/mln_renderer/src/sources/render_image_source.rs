@@ -9,8 +9,9 @@ use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
-use mln_style::source::{self, downcast_arc};
-use mln_style::sources::image_source;
+use mln_style::Source;
+use mln_style::source_type::SourceData;
+use mln_style::sources::ImageSourceType;
 use mln_tile_id::{GeometryCoordinate, GeometryCoordinates, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::LatLngBounds;
@@ -205,8 +206,7 @@ pub(crate) struct RenderImageSource {
 
 impl RenderImageSource {
     #[must_use]
-    pub(crate) fn new(impl_: Arc<image_source::Impl>) -> Self {
-        let impl_: Arc<dyn source::Impl> = impl_;
+    pub(crate) fn new(impl_: Source) -> Self {
         RenderImageSource {
             base: RenderSourceBase::new(impl_),
             bucket: None,
@@ -221,11 +221,11 @@ impl RenderImageSource {
     /// an image (one made without a url) has nothing to load, so a still
     /// render of it finishes.
     fn loaded(&self) -> bool {
-        self.bucket.is_some() || self.impl_().get_image().is_none()
+        self.bucket.is_some() || self.data().is_none_or(|data| data.description.is_none())
     }
 
-    fn impl_(&self) -> Arc<image_source::Impl> {
-        downcast_arc::<image_source::Impl>(&self.base.base_impl)
+    fn data(&self) -> Option<&SourceData<ImageSourceType>> {
+        SourceData::recover(&self.base.base_impl)
     }
 }
 
@@ -241,7 +241,7 @@ impl RenderSource for RenderImageSource {
     fn update(
         &mut self,
         _store: &mut TileStore,
-        base_impl: Arc<dyn source::Impl>,
+        base_impl: Source,
         _layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         _needs_relayout: bool,
@@ -255,9 +255,12 @@ impl RenderSource for RenderImageSource {
         let transform_state = parameters.transform_state;
         self.base.base_impl = base_impl;
 
-        let impl_ = self.impl_();
-        let coords = impl_.get_coordinates();
-        let image = impl_.get_image();
+        let Some(data) = self.data() else {
+            self.base.enabled = false;
+            return;
+        };
+        let coords = data.options.coordinates;
+        let image = data.description.clone();
 
         let Some(image) = image.filter(|image| image.valid()) else {
             self.base.enabled = false;
@@ -398,7 +401,7 @@ impl RenderSource for RenderImageSource {
     }
 
     fn dump_debug_logs(&self) {
-        Log::info(Event::General, format!("RenderImageSource::id: {}", self.base.base_impl.id));
+        Log::info(Event::General, format!("RenderImageSource::id: {}", self.base.base_impl.id()));
         Log::info(Event::General, format!("RenderImageSource::loaded: {}", if self.loaded() { "yes" } else { "no" }));
     }
 }

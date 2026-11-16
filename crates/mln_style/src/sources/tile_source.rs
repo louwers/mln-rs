@@ -1,66 +1,21 @@
-// One type serves C++'s VectorSource, RasterSource and RasterDEMSource, which
-// differ only in their source type. Like GeoJSONSource, a TileSource is a
-// handle to an `Rc`'d state (see source.rs).
+// A TileSource is a handle to an `Rc`'d state (see source.rs), and serves
+// the vector, raster and raster-dem source types alike.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
 
 use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
-use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
 
-use crate::conversion::Convertible;
-use crate::conversion::tileset::convert_tileset;
-use crate::source::{Source, SourceBase, downcast_arc};
-use crate::source_impl::{self, ImplBase};
-
-#[derive(Clone, Debug)]
-pub struct Impl {
-    base: ImplBase,
-    pub tileset: Option<Tileset>,
-    tile_size: u16,
-}
-
-impl Impl {
-    #[must_use]
-    pub(crate) fn new(source_type: SourceType, id: String, tile_size: u16) -> Self {
-        Impl { base: ImplBase::new(source_type, id), tileset: None, tile_size }
-    }
-
-    /// `Impl(const Impl&, Tileset)`.
-    #[must_use]
-    pub(crate) fn with_tileset(other: &Impl, tileset: Tileset) -> Self {
-        Impl { base: other.base.clone(), tileset: Some(tileset), tile_size: other.tile_size }
-    }
-
-    #[must_use]
-    pub fn get_tile_size(&self) -> u16 {
-        self.tile_size
-    }
-}
-
-impl source_impl::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-
-    fn get_attribution(&self) -> Option<String> {
-        self.tileset.as_ref().map(|tileset| tileset.attribution.clone())
-    }
-}
+use super::tileset::{
+    RasterDemSourceType, RasterSourceType, TilesetSourceOptions, VectorSourceType, tileset_parts, with_tileset,
+};
+use crate::source::{Source, SourceBase};
+use crate::source_type::{self, SourceData, StyleSourceType};
 
 struct Inner {
     base: SourceBase,
-    /// The URL of the source's TileJSON.
-    url: Option<String>,
-    /// The style's tileset members, which win over those of the TileJSON at `url`.
-    style_tileset: PartialTileset,
     req: RefCell<Option<Request>>,
 }
 
@@ -73,62 +28,65 @@ pub struct TileSource {
 
 impl std::fmt::Debug for TileSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TileSource")
-            .field("base", &self.inner.base)
-            .field("url", &self.inner.url)
-            .field("style_tileset", &self.inner.style_tileset)
-            .finish_non_exhaustive()
+        f.debug_struct("TileSource").field("base", &self.inner.base).finish_non_exhaustive()
     }
 }
 
 impl TileSource {
     #[must_use]
     pub fn vector(id: impl Into<String>, url: Option<String>, tileset: PartialTileset) -> Self {
-        Self::new(id.into(), SourceType::Vector, url, tileset, constants::TILE_SIZE_I)
+        Self::of::<VectorSourceType>(&id.into(), url, tileset, constants::TILE_SIZE_I)
     }
 
     #[must_use]
     pub fn raster(id: impl Into<String>, url: Option<String>, tileset: PartialTileset, tile_size: u16) -> Self {
-        Self::new(id.into(), SourceType::Raster, url, tileset, tile_size)
+        Self::of::<RasterSourceType>(&id.into(), url, tileset, tile_size)
     }
 
     #[must_use]
     pub fn raster_dem(id: impl Into<String>, url: Option<String>, tileset: PartialTileset, tile_size: u16) -> Self {
-        Self::new(id.into(), SourceType::RasterDEM, url, tileset, tile_size)
+        Self::of::<RasterDemSourceType>(&id.into(), url, tileset, tile_size)
     }
 
-    fn new(
-        id: String,
-        source_type: SourceType,
+    fn of<T: StyleSourceType<Options = TilesetSourceOptions>>(
+        id: &str,
         url: Option<String>,
-        style_tileset: PartialTileset,
+        tileset: PartialTileset,
         tile_size: u16,
     ) -> Self {
-        let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(source_type, id, tile_size));
-        TileSource {
-            inner: Rc::new(Inner { base: SourceBase::new(impl_), url, style_tileset, req: RefCell::new(None) }),
-        }
+        let options = TilesetSourceOptions { url, tileset, tile_size };
+        Self::new(source_type::Source::new(id, SourceData::<T>::new(options)))
     }
 
-    #[must_use]
-    pub(crate) fn impl_(&self) -> Arc<Impl> {
-        downcast_arc::<Impl>(&self.inner.base.base_impl())
+    /// The handle of `record`, a tileset source's.
+    pub(crate) fn new(record: source_type::Source) -> Self {
+        TileSource { inner: Rc::new(Inner { base: SourceBase::new(record), req: RefCell::new(None) }) }
+    }
+
+    fn options(&self) -> Option<TilesetSourceOptions> {
+        let record = self.inner.base.base_impl();
+        tileset_parts(&record).map(|(options, _)| options.clone())
+    }
+
+    fn tileset(&self) -> Option<Tileset> {
+        let record = self.inner.base.base_impl();
+        tileset_parts(&record).and_then(|(_, tileset)| tileset.cloned())
     }
 
     #[must_use]
     pub fn get_url(&self) -> Option<String> {
-        self.inner.url.clone()
+        self.options().and_then(|options| options.url)
     }
 
     #[must_use]
     pub fn get_tile_size(&self) -> u16 {
-        self.impl_().get_tile_size()
+        self.options().map_or(constants::TILE_SIZE_I, |options| options.tile_size)
     }
 
     /// The tileset the style lists, for a source without a URL.
     #[must_use]
     pub fn inline_tileset(&self) -> Option<Tileset> {
-        self.inner.url.is_none().then(|| self.inner.style_tileset.clone().into())
+        self.options().and_then(|options| options.inline_tileset())
     }
 
     /// The source's tileset once `tilejson`, the TileJSON at its URL, loads: the style's members
@@ -138,22 +96,18 @@ impl TileSource {
     ///
     /// When `tilejson` isn't a valid TileJSON, or neither it nor the style lists tiles.
     pub fn tileset_with_tilejson(&self, tilejson: &[u8]) -> Result<Tileset, String> {
-        let document: serde_json::Value = serde_json::from_slice(tilejson).map_err(|e| e.to_string())?;
-        let document = convert_tileset(&Convertible::from(&document), self.get_type())?;
-        let tileset = self.inner.style_tileset.clone().or(document);
-        if tileset.tiles.is_none() {
-            return Err("source must have tiles".to_owned());
-        }
-        Ok(tileset.into())
+        let options = self.options().ok_or_else(|| "not a tileset source".to_owned())?;
+        options.tileset_with_tilejson(tilejson, self.get_type())
     }
 
     /// Sets the tileset that `load_description` found and marks the source loaded. Returns
     /// whether the tileset changed.
     fn set_tileset(&self, tileset: Tileset) -> bool {
-        let current = self.impl_();
-        let changed = current.tileset.as_ref() != Some(&tileset);
-        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_tileset(&current, tileset));
-        self.inner.base.set_base_impl(new_impl);
+        let record = self.inner.base.base_impl();
+        let changed = self.tileset().as_ref() != Some(&tileset);
+        if let Some(record) = with_tileset(&record, tileset) {
+            self.inner.base.set_base_impl(record);
+        }
         self.inner.base.set_loaded(true);
         changed
     }
@@ -193,8 +147,11 @@ impl Source for TileSource {
     }
 
     fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop) {
-        let Some(url) = &self.inner.url else {
-            self.set_tileset(self.inner.style_tileset.clone().into());
+        let Some(options) = self.options() else {
+            return;
+        };
+        let Some(url) = &options.url else {
+            self.set_tileset(options.tileset.into());
             self.inner.base.observer().on_source_loaded(self);
             return;
         };
@@ -209,10 +166,6 @@ impl Source for TileSource {
         );
         *self.inner.req.borrow_mut() = Some(req);
     }
-
-    fn create_mutable(&self) -> Box<dyn source_impl::Impl> {
-        Box::new((*self.impl_()).clone())
-    }
 }
 
 impl TileSource {
@@ -220,28 +173,29 @@ impl TileSource {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn get_tiles(&self) -> Vec<String> {
-        self.impl_().tileset.as_ref().map(|tileset| tileset.tiles.clone()).unwrap_or_default()
+        self.tileset().map(|tileset| tileset.tiles).unwrap_or_default()
     }
 
     /// Sets the tile URLs of the source's loaded tileset.
     pub fn set_tiles(&self, tiles: &[String]) {
-        let impl_ = self.impl_();
-        let Some(tileset) = &impl_.tileset else {
+        let Some(tileset) = self.tileset() else {
             return;
         };
         if tileset.tiles == tiles {
             return;
         }
-        let tileset = Tileset { tiles: tiles.to_vec(), ..tileset.clone() };
-        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_tileset(&impl_, tileset));
-        self.inner.base.set_base_impl(new_impl);
+        let tileset = Tileset { tiles: tiles.to_vec(), ..tileset };
+        if let Some(record) = with_tileset(&self.inner.base.base_impl(), tileset) {
+            self.inner.base.set_base_impl(record);
+        }
         self.inner.base.observer().on_source_changed(self);
     }
 
     /// The encoding of a vector source's tiles: its tileset's once it's loaded, else the style's.
     #[must_use]
     pub fn get_vector_encoding(&self) -> VectorEncoding {
-        let loaded = self.impl_().tileset.as_ref().and_then(|tileset| tileset.vector_encoding);
-        loaded.or(self.inner.style_tileset.vector_encoding).unwrap_or(VectorEncoding::Mapbox)
+        let loaded = self.tileset().and_then(|tileset| tileset.vector_encoding);
+        let style = self.options().and_then(|options| options.tileset.vector_encoding);
+        loaded.or(style).unwrap_or(VectorEncoding::Mapbox)
     }
 }

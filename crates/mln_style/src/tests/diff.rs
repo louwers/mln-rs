@@ -127,7 +127,7 @@ mod versions {
     use crate::source::Source as _;
     use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
     use crate::sources::tile_source::TileSource;
-    use crate::{Edit, StyleRegistry, image, source};
+    use crate::{Edit, StyleRegistry, image};
 
     const STYLE: &str = r#"{"version":8,
         "sources":{"c":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
@@ -138,7 +138,7 @@ mod versions {
         crate::Style::from_json(&StyleRegistry::with_builtins(), STYLE, None).unwrap().style
     }
 
-    fn vector(id: &str) -> Arc<dyn source::Impl> {
+    fn vector(id: &str) -> crate::Source {
         TileSource::vector(id, Some("mbtiles://tiles".to_owned()), PartialTileset::default()).base_impl()
     }
 
@@ -147,7 +147,7 @@ mod versions {
         Arc::new(image::Impl::new(id.to_owned(), pixels, 1.0, false, Vec::new(), Vec::new(), None, None, None).unwrap())
     }
 
-    fn keys<T: ?Sized>(map: &mln_vec_map::VecMap<String, Arc<T>>) -> Vec<&str> {
+    fn keys<V>(map: &mln_vec_map::VecMap<String, V>) -> Vec<&str> {
         map.keys().map(String::as_str).collect()
     }
 
@@ -175,9 +175,9 @@ mod versions {
     fn the_source_pass_runs_in_id_order() {
         let mut style = style();
         style.apply(Edit::SetSourceImpl { id: "b".to_owned(), source: Some(vector("b")) }).unwrap();
-        let ids: Vec<_> = style.get_sources().iter().map(|source| source.id.clone()).collect();
+        let ids: Vec<_> = style.get_sources().iter().map(|source| source.id().to_owned()).collect();
         assert_eq!(["c", "a", "b"], *ids);
-        let sorted: Vec<_> = sources_by_id(style.get_sources()).iter().map(|source| source.id.clone()).collect();
+        let sorted: Vec<_> = sources_by_id(style.get_sources()).iter().map(|source| source.id().to_owned()).collect();
         assert_eq!(["a", "b", "c"], *sorted);
     }
 

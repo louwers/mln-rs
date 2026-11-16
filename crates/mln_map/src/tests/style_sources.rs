@@ -25,7 +25,7 @@ fn vector_source(id: &str) -> Box<dyn mln_style::source::Source> {
 }
 
 fn record_ids(map: &Map) -> Vec<String> {
-    map.style().get_sources().iter().map(|source| source.id.clone()).collect()
+    map.style().get_sources().iter().map(|source| source.id().to_owned()).collect()
 }
 
 // gtest: Style.DuplicateSource

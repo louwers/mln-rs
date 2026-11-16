@@ -19,7 +19,6 @@ use crate::layer_type::SourceKind;
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::property_table::{Properties, defined_properties};
-use crate::source::layer_kind;
 use crate::style::Style;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -61,7 +60,7 @@ impl Style {
                     quote(source_id)
                 )));
             };
-            if layer_kind(source.type_) != type_info.source {
+            if source.info().layer_kind != type_info.source {
                 return Err(Error::invalid_argument(format!(
                     "source {} does not support {} layer {}",
                     quote(source_id),

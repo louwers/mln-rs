@@ -16,7 +16,6 @@ use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding}
 use super::util::parse_json;
 use crate::conversion::Error;
 use crate::conversion::source::convert_source;
-use crate::expression::Functions;
 use crate::source::{Source, SourceObserver};
 use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::image_source::ImageSource;
@@ -166,7 +165,7 @@ fn geojson_source_url_update() {
     run_loop.run();
     assert!(*loaded.borrow());
     assert!(source.loaded());
-    assert!(source.impl_().get_data().and_then(|d| d.upgrade()).is_some());
+    assert!(crate::sources::geojson::geojson_data(&source.base_impl()).is_some());
 }
 
 // gtest: Source.GeoJSONSourceSynchronousUpdateOverrideReplacesTheOption
@@ -198,7 +197,8 @@ fn geojson_source_keeps_the_style_attribution() {
     let value = parse_json(
         r#"{"type": "geojson", "attribution": "Fixture data", "data": {"type": "FeatureCollection", "features": []}}"#,
     );
-    let converted = convert_source(&Convertible::from(&value), &mut error, "source", &Functions::with_builtins());
+    let converted =
+        convert_source(&Convertible::from(&value), &mut error, "source", &crate::StyleRegistry::with_builtins());
     let converted = converted.unwrap_or_else(|| panic!("{}", error.message));
     let source = converted.downcast_ref::<GeoJSONSource>().expect("a GeoJSONSource");
     assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
@@ -239,7 +239,7 @@ fn geojson_points(count: usize) -> Arc<Vec<u8>> {
 /// The number of features in tile 0/0/0 of `source`'s data.
 fn geojson_source_feature_count(source: &GeoJSONSource, _run_loop: &RunLoop) -> usize {
     let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    if let Some(data) = source.impl_().get_data().and_then(|data| data.upgrade()) {
+    if let Some(data) = crate::sources::geojson::geojson_data(&source.base_impl()).cloned() {
         let count = Arc::clone(&count);
         data.get_tile(
             &CanonicalTileID::new(0, 0, 0),
@@ -461,9 +461,9 @@ fn tileset_loaded_from_tilejson(source: &dyn Source) -> Tileset {
         let tileset = Rc::clone(&tileset);
         let handle = run_loop.handle();
         *observer.source_loaded.borrow_mut() = Some(Box::new(move |source| {
-            let impl_ = source.base_impl();
-            let impl_ = impl_.downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
-            *tileset.borrow_mut() = impl_.tileset.clone();
+            let record = source.base_impl();
+            let (_, loaded) = crate::sources::tileset::tileset_parts(&record).expect("a TileSource");
+            *tileset.borrow_mut() = loaded.cloned();
             handle.stop();
         }));
     }
@@ -573,7 +573,7 @@ fn image_source_image_update() {
 /// The source the style JSON `json` converts to.
 fn converted_source(json: &str) -> Result<Box<dyn Source>, String> {
     let mut error = Error::default();
-    convert_source(&Convertible::from(&parse_json(json)), &mut error, "source", &Functions::with_builtins())
+    convert_source(&Convertible::from(&parse_json(json)), &mut error, "source", &crate::StyleRegistry::with_builtins())
         .ok_or(error.message)
 }
 
@@ -590,9 +590,9 @@ fn vector_sources_take_the_style_sparse() {
     let source = converted_source(r#"{"type": "vector", "tiles": ["tiles"], "sparse": true}"#).unwrap();
     let run_loop = RunLoop::new();
     source.load_description(&StubFileSource::new(&run_loop, ResponseType::Asynchronous), &run_loop);
-    let impl_ = source.base_impl();
-    let impl_ = impl_.downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
-    assert!(impl_.tileset.as_ref().unwrap().sparse);
+    let record = source.base_impl();
+    let (_, loaded) = crate::sources::tileset::tileset_parts(&record).expect("a TileSource");
+    assert!(loaded.unwrap().sparse);
 
     let Err(error) = converted_source(r#"{"type": "vector", "url": "url", "sparse": "yes"}"#) else {
         panic!("an invalid sparse converts");

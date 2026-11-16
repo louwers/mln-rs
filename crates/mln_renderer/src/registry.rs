@@ -1,5 +1,5 @@
 //! The registrations that a runtime, its renderers and its tile workers
-//! share: the expression functions and the layer types.
+//! share: the expression functions, the layer types and the source types.
 //!
 //! An app fills a [`RegistryBuilder`] by explicit calls, [`register_builtins`]
 //! first, and builds the [`Registry`] once. Tile workers in other wasm
@@ -14,6 +14,11 @@ use mln_style::layer_type::ErasedStyleLayerType;
 use mln_style::layers::{
     Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
 };
+use mln_style::source_type::{ErasedStyleSourceType, StyleSourceType, style_source_entry};
+use mln_style::sources::{
+    CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
+    RasterSourceType, VectorSourceType,
+};
 use mln_vec_map::VecMap;
 
 use crate::layer_type::{ErasedLayerType, LayerType, entry};
@@ -23,6 +28,7 @@ use crate::layer_type::{ErasedLayerType, LayerType, entry};
 pub struct RegistryBuilder {
     functions: Functions,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
+    source_types: VecMap<&'static str, &'static dyn ErasedStyleSourceType>,
 }
 
 impl std::fmt::Debug for RegistryBuilder {
@@ -30,6 +36,7 @@ impl std::fmt::Debug for RegistryBuilder {
         f.debug_struct("RegistryBuilder")
             .field("functions", &self.functions)
             .field("layer_types", &self.layer_types.keys().collect::<Vec<_>>())
+            .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -54,9 +61,19 @@ impl RegistryBuilder {
         Ok(())
     }
 
+    /// Adds the source type `T`. Fails for a name that an earlier type took.
+    pub(crate) fn add_source_type<T: StyleSourceType>(&mut self) -> Result<(), RegisterError> {
+        let name = T::INFO.name;
+        if self.source_types.contains_key(name) {
+            return Err(RegisterError::Duplicate(name.to_owned()));
+        }
+        self.source_types.insert(name, style_source_entry::<T>());
+        Ok(())
+    }
+
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        Registry::new(Arc::new(self.functions), self.layer_types)
+        Registry::new(Arc::new(self.functions), self.layer_types, &self.source_types)
     }
 }
 
@@ -64,12 +81,17 @@ fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedSt
     layer_type
 }
 
-/// Adds the style specification's expression functions and layer types.
-/// Fails for a name that an earlier call took, or a role that an earlier
-/// function has.
+/// Adds the style specification's expression functions, layer types and
+/// source types, and the custom source types. Fails for a name that an
+/// earlier call took, or a role that an earlier function has.
 pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     register_builtin_functions(builder.functions_mut())?;
-    register_builtin_layer_types(builder)
+    register_builtin_types(builder)
+}
+
+fn register_builtin_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
+    register_builtin_layer_types(builder)?;
+    register_builtin_source_types(builder)
 }
 
 fn register_builtin_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
@@ -86,13 +108,23 @@ fn register_builtin_layer_types(builder: &mut RegistryBuilder) -> Result<(), Reg
     builder.add_layer_type::<Custom>()
 }
 
-/// The expression functions and layer types that a style parses against,
-/// its renderer draws and its tile workers lay out, built by a
-/// [`RegistryBuilder`]. It doesn't change once built.
+fn register_builtin_source_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
+    builder.add_source_type::<VectorSourceType>()?;
+    builder.add_source_type::<RasterSourceType>()?;
+    builder.add_source_type::<RasterDemSourceType>()?;
+    builder.add_source_type::<GeoJsonSourceType>()?;
+    builder.add_source_type::<ImageSourceType>()?;
+    builder.add_source_type::<CustomGeometrySourceType>()?;
+    builder.add_source_type::<CustomVectorSourceType>()
+}
+
+/// The expression functions, layer types and source types that a style
+/// parses against, its renderer draws and its tile workers lay out, built by
+/// a [`RegistryBuilder`]. It doesn't change once built.
 ///
 /// A map and the renderer and tile workers that draw it must be given
-/// registries filled by the same calls: they identify functions and layer
-/// types by name.
+/// registries filled by the same calls: they identify functions, layer
+/// types and source types by name.
 pub struct Registry {
     style: Arc<StyleRegistry>,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
@@ -113,10 +145,10 @@ impl Registry {
     pub fn with_builtins() -> Arc<Registry> {
         static BUILTINS: LazyLock<Arc<Registry>> = LazyLock::new(|| {
             let mut builder = RegistryBuilder::new();
-            // Into no layer types, the built-ins register.
-            let registered = register_builtin_layer_types(&mut builder);
+            // Into no types, the built-ins register.
+            let registered = register_builtin_types(&mut builder);
             debug_assert_eq!(registered, Ok(()));
-            Registry::new(Functions::with_builtins(), builder.layer_types)
+            Registry::new(Functions::with_builtins(), builder.layer_types, &builder.source_types)
         });
         Arc::clone(&BUILTINS)
     }
@@ -124,9 +156,11 @@ impl Registry {
     fn new(
         functions: Arc<Functions>,
         layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
+        source_types: &VecMap<&'static str, &'static dyn ErasedStyleSourceType>,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
-        Arc::new(Registry { style: Arc::new(StyleRegistry::new(functions, style_halves)), layer_types })
+        let style = StyleRegistry::new(functions, style_halves, source_types.values().copied());
+        Arc::new(Registry { style: Arc::new(style), layer_types })
     }
 
     #[must_use]
@@ -153,6 +187,22 @@ mod tests {
         let mut builder = RegistryBuilder::new();
         register_builtins(&mut builder).unwrap();
         assert!(matches!(register_builtins(&mut builder), Err(RegisterError::Duplicate(_))));
+    }
+
+    #[test]
+    fn builtins_register_seven_source_types() {
+        let mut builder = RegistryBuilder::new();
+        register_builtins(&mut builder).unwrap();
+        let registry = builder.build();
+        let names: Vec<_> = registry.style().source_types().map(|source_type| source_type.info().name).collect();
+        assert_eq!(names, ["custom-geometry", "custom-vector", "geojson", "image", "raster", "raster-dem", "vector"]);
+    }
+
+    #[test]
+    fn a_source_type_registers_once() {
+        let mut builder = RegistryBuilder::new();
+        builder.add_source_type::<GeoJsonSourceType>().unwrap();
+        assert_eq!(builder.add_source_type::<GeoJsonSourceType>(), Err(RegisterError::Duplicate("geojson".to_owned())));
     }
 
     #[test]

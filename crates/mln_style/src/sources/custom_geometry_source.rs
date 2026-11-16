@@ -9,7 +9,6 @@ use std::sync::Arc;
 use geojson::GeoJson;
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_storage::FileSource;
-use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
@@ -17,28 +16,12 @@ use mln_util::geo::LatLngBounds;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 
-use super::geojson_source::TileFeatures;
+use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType};
+pub use super::custom::{CustomGeometryTileLoader, TileOptions};
+use super::geojson::TileFeatures;
 use crate::custom_tile_loader::{CustomTileLoader, TileFunction};
-use crate::source::{Source, SourceBase, downcast_arc};
-use crate::source_impl::{self, ImplBase};
-
-/// How the host's GeoJSON is cut into tiles, as for a GeoJSON source.
-#[derive(Clone, Debug, PartialEq)]
-pub struct TileOptions {
-    pub tolerance: f64,
-    /// The size of a tile, in pixels: a power of two up to the tile extent
-    /// (8192).
-    pub tile_size: u16,
-    pub buffer: u16,
-    pub clip: bool,
-    pub wrap: bool,
-}
-
-impl Default for TileOptions {
-    fn default() -> Self {
-        TileOptions { tolerance: 0.375, tile_size: constants::TILE_SIZE_I, buffer: 128, clip: false, wrap: false }
-    }
-}
+use crate::source::{Source, SourceBase};
+use crate::source_type::{self, SourceData};
 
 #[derive(Clone)]
 pub struct Options {
@@ -81,10 +64,6 @@ pub enum CustomGeometrySourceError {
     #[error("custom geometry source tile size {0} is not a power of two up to {extent}", extent = constants::EXTENT)]
     InvalidTileSize(u16),
 }
-
-/// The loader of a custom geometry source: it hands tiles their features,
-/// cut from the host's GeoJSON.
-pub type CustomGeometryTileLoader = CustomTileLoader<Arc<TileFeatures>>;
 
 /// Cuts the host's GeoJSON for a tile, as `CustomGeometryTile::setTileData`
 /// does. Anything but a non-empty feature collection is an empty tile, and
@@ -159,81 +138,10 @@ impl CustomGeometrySourceHandle {
     }
 }
 
-#[derive(Clone)]
-pub struct Impl {
-    base: ImplBase,
-    tile_options: Arc<TileOptions>,
-    zoom_range: Range<u8>,
-    loader_ref: Option<PoolActorRef<CustomGeometryTileLoader>>,
-}
-
-impl std::fmt::Debug for Impl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomGeometrySource::Impl")
-            .field("base", &self.base)
-            .field("tile_options", &self.tile_options)
-            .field("zoom_range", &self.zoom_range)
-            .field("loaded", &self.loader_ref.is_some())
-            .finish()
-    }
-}
-
-impl Impl {
-    fn new(id: String, options: &Options) -> Self {
-        Impl {
-            base: ImplBase::new(SourceType::CustomVector, id),
-            tile_options: Arc::new(options.tile_options.clone()),
-            zoom_range: options.zoom_range,
-            loader_ref: None,
-        }
-    }
-
-    fn with_loader(other: &Impl, loader_ref: PoolActorRef<CustomGeometryTileLoader>) -> Self {
-        Impl { loader_ref: Some(loader_ref), ..other.clone() }
-    }
-
-    /// `operator!=`: whether tiles made for one impl don't suit the other.
-    #[must_use]
-    pub fn differs(&self, other: &Impl) -> bool {
-        !Arc::ptr_eq(&self.tile_options, &other.tile_options)
-            || self.zoom_range != other.zoom_range
-            || self.loader_ref.is_some() != other.loader_ref.is_some()
-    }
-
-    #[must_use]
-    pub fn get_tile_options(&self) -> &Arc<TileOptions> {
-        &self.tile_options
-    }
-
-    #[must_use]
-    pub fn get_zoom_range(&self) -> Range<u8> {
-        self.zoom_range
-    }
-
-    /// The tile loader; `None` until the source is loaded.
-    #[must_use]
-    pub fn get_tile_loader(&self) -> Option<&PoolActorRef<CustomGeometryTileLoader>> {
-        self.loader_ref.as_ref()
-    }
-}
-
-impl source_impl::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-
-    fn get_attribution(&self) -> Option<String> {
-        None
-    }
-}
-
 struct Inner {
     base: SourceBase,
     loader: Actor<CustomGeometryTileLoader>,
+    tile_options: Arc<TileOptions>,
 }
 
 /// A source whose tiles' GeoJSON the host gives on demand.
@@ -260,15 +168,22 @@ impl CustomGeometrySource {
         if !tile_size.is_power_of_two() || i32::from(tile_size) > constants::EXTENT {
             return Err(CustomGeometrySourceError::InvalidTileSize(tile_size));
         }
-        let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), &options));
+        let tile_options = Arc::new(options.tile_options.clone());
+        let data = SourceData::<CustomGeometrySourceType>::new(CustomGeometrySourceOptions {
+            tile_options: Arc::clone(&tile_options),
+            zoom_range: options.zoom_range,
+        });
+        let record = source_type::Source::new(&id.into(), data);
         let loader =
             Actor::new(pool, |_| CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function));
-        Ok(CustomGeometrySource { inner: Rc::new(Inner { base: SourceBase::new(impl_), loader }) })
+        Ok(CustomGeometrySource { inner: Rc::new(Inner { base: SourceBase::new(record), loader, tile_options }) })
     }
 
-    #[must_use]
-    pub(crate) fn impl_(&self) -> Arc<Impl> {
-        downcast_arc::<Impl>(&self.inner.base.base_impl())
+    /// Records the source's data as `f` changes it.
+    fn update(&self, f: impl FnOnce(&mut SourceData<CustomGeometrySourceType>)) {
+        if let Some(record) = self.inner.base.base_impl().map_data(f) {
+            self.inner.base.set_base_impl(record);
+        }
     }
 
     /// A handle to answer the tile functions with, from any thread.
@@ -276,7 +191,7 @@ impl CustomGeometrySource {
     pub fn handle(&self) -> CustomGeometrySourceHandle {
         CustomGeometrySourceHandle {
             loader: self.inner.loader.self_ref(),
-            tile_options: Arc::clone(&self.impl_().tile_options),
+            tile_options: Arc::clone(&self.inner.tile_options),
         }
     }
 
@@ -307,15 +222,9 @@ impl Source for CustomGeometrySource {
     }
 
     fn load_description(&self, _file_source: &dyn FileSource, _run_loop: &mln_actor::RunLoop) {
-        let new_impl: Arc<dyn source_impl::Impl> =
-            Arc::new(Impl::with_loader(&self.impl_(), self.inner.loader.self_ref()));
-        self.inner.base.set_base_impl(new_impl);
+        self.update(|data| data.description = Some(self.inner.loader.self_ref()));
         self.inner.base.set_loaded(true);
         self.inner.base.observer().on_source_loaded(self);
-    }
-
-    fn create_mutable(&self) -> Box<dyn source_impl::Impl> {
-        Box::new((*self.impl_()).clone())
     }
 }
 

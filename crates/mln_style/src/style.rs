@@ -18,8 +18,9 @@ use crate::parser::Parser;
 use crate::projection::Projection;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
-use crate::source::{self, Source, layer_kind};
+use crate::source::Source as SourceHandle;
 use crate::source_list::SourceList;
+use crate::source_type::Source;
 use crate::sprite::Sprite;
 use crate::transition_options::TransitionOptions;
 
@@ -47,7 +48,7 @@ impl StyleLoadError {
 /// records the style holds.
 pub struct Parsed {
     pub style: Style,
-    pub sources: Vec<Box<dyn Source>>,
+    pub sources: Vec<Box<dyn SourceHandle>>,
 }
 
 /// The images of a style, sorted by id.
@@ -148,7 +149,7 @@ impl Style {
         style.global_state_defaults = Arc::new(std::mem::take(&mut parser.global_state_defaults));
         style.global_state = Arc::clone(&style.global_state_defaults);
 
-        let mut sources: Vec<Box<dyn Source>> = Vec::new();
+        let mut sources: Vec<Box<dyn SourceHandle>> = Vec::new();
         let mut records = SourceList::default();
         for source in std::mem::take(&mut parser.sources) {
             // A parsed style cannot contain duplicate source ids (they are
@@ -292,7 +293,7 @@ impl Style {
 
     /// The record of the source `id`.
     #[must_use]
-    pub fn get_source(&self, id: &str) -> Option<&Arc<dyn source::Impl>> {
+    pub fn get_source(&self, id: &str) -> Option<&Source> {
         self.sources.get(id)
     }
 
@@ -526,10 +527,10 @@ impl Style {
 
     /// Records `source` as the source `id`, replacing its record in place or
     /// adding it last, or removes the record for `None`.
-    fn set_source_impl(&mut self, id: &str, source: Option<Arc<dyn source::Impl>>) {
+    fn set_source_impl(&mut self, id: &str, source: Option<Source>) {
         match source {
             Some(source) => {
-                if !self.sources.get(id).is_some_and(|current| Arc::ptr_eq(current, &source)) {
+                if !self.sources.get(id).is_some_and(|current| Source::ptr_eq(current, &source)) {
                     Arc::make_mut(&mut self.sources).set(source);
                 }
             }
@@ -575,7 +576,7 @@ fn layer_not_found(id: &str) -> Error {
 fn check_layer_source(sources: &SourceList, layer: &Layer) -> Result<(), Error> {
     let impl_ = layer.style();
     if let Some(source) = sources.get(&impl_.base().source)
-        && layer_kind(source.type_) != impl_.info().source
+        && source.info().layer_kind != impl_.info().source
     {
         let message = format!("Layer '{}' is not compatible with source '{}'", impl_.base().id, impl_.base().source);
         return Err(Error::invalid_argument(message));

@@ -7,65 +7,16 @@ use std::sync::Arc;
 
 use mln_image::decoder;
 use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
-use mln_style_types::SourceType;
 use mln_util::LatLng;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 
-use crate::source::{Source, SourceBase, downcast_arc};
-use crate::source_impl::{self, ImplBase};
-
-#[derive(Clone, Debug)]
-pub struct Impl {
-    base: ImplBase,
-    coords: [LatLng; 4],
-    image: Option<Arc<PremultipliedImage>>,
-}
-
-impl Impl {
-    #[must_use]
-    pub(crate) fn new(id: String, coords: [LatLng; 4]) -> Self {
-        Impl { base: ImplBase::new(SourceType::Image, id), coords, image: None }
-    }
-
-    #[must_use]
-    pub(crate) fn with_coordinates(other: &Impl, coords: [LatLng; 4]) -> Self {
-        Impl { base: other.base.clone(), coords, image: other.image.clone() }
-    }
-
-    #[must_use]
-    pub(crate) fn with_image(rhs: &Impl, image: PremultipliedImage) -> Self {
-        Impl { base: rhs.base.clone(), coords: rhs.coords, image: Some(Arc::new(image)) }
-    }
-
-    #[must_use]
-    pub fn get_image(&self) -> Option<Arc<PremultipliedImage>> {
-        self.image.clone()
-    }
-
-    #[must_use]
-    pub fn get_coordinates(&self) -> [LatLng; 4] {
-        self.coords
-    }
-}
-
-impl source_impl::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-
-    fn get_attribution(&self) -> Option<String> {
-        None
-    }
-}
+use super::image::{ImageSourceOptions, ImageSourceType};
+use crate::source::{Source, SourceBase};
+use crate::source_type::{self, SourceData};
 
 struct Inner {
     base: SourceBase,
-    url: RefCell<Option<String>>,
     req: RefCell<Option<Request>>,
     /// Port-only: counts the URLs and images set, so that an image that
     /// decodes after another was set (a decoder that answers later, see
@@ -80,44 +31,48 @@ pub struct ImageSource {
 
 impl std::fmt::Debug for ImageSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ImageSource")
-            .field("base", &self.inner.base)
-            .field("url", &self.inner.url.borrow())
-            .finish_non_exhaustive()
+        f.debug_struct("ImageSource").field("base", &self.inner.base).finish_non_exhaustive()
     }
 }
 
 impl ImageSource {
     pub fn new(id: impl Into<String>, coords: [LatLng; 4]) -> Self {
-        let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), coords));
+        let data = SourceData::<ImageSourceType>::new(ImageSourceOptions { url: None, coordinates: coords });
         ImageSource {
             inner: Rc::new(Inner {
-                base: SourceBase::new(impl_),
-                url: RefCell::new(None),
+                base: SourceBase::new(source_type::Source::new(&id.into(), data)),
                 req: RefCell::new(None),
                 generation: Cell::new(0),
             }),
         }
     }
 
-    #[must_use]
-    pub(crate) fn impl_(&self) -> Arc<Impl> {
-        downcast_arc::<Impl>(&self.inner.base.base_impl())
+    fn read<R>(&self, f: impl FnOnce(&SourceData<ImageSourceType>) -> R) -> Option<R> {
+        SourceData::recover(&self.inner.base.base_impl()).map(f)
+    }
+
+    /// Records the source's data as `f` changes it.
+    fn update(&self, f: impl FnOnce(&mut SourceData<ImageSourceType>)) {
+        if let Some(record) = self.inner.base.base_impl().map_data(f) {
+            self.inner.base.set_base_impl(record);
+        }
     }
 
     pub fn set_coordinates(&self, coords: [LatLng; 4]) {
-        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_coordinates(&self.impl_(), coords));
-        self.inner.base.set_base_impl(new_impl);
+        self.update(|data| data.options.coordinates = coords);
         self.inner.base.observer().on_source_changed(self);
     }
 
     #[must_use]
     pub fn get_coordinates(&self) -> [LatLng; 4] {
-        self.impl_().get_coordinates()
+        self.read(|data| data.options.coordinates).unwrap_or_default()
     }
 
     pub fn set_url(&self, url: &str) {
-        *self.inner.url.borrow_mut() = Some(url.to_owned());
+        self.update(|data| {
+            data.options.url = Some(url.to_owned());
+            data.load += 1;
+        });
         self.inner.generation.set(self.inner.generation.get() + 1);
         // Signal that the source description needs a reload
         if self.inner.base.loaded() || self.inner.req.borrow().is_some() {
@@ -128,18 +83,20 @@ impl ImageSource {
     }
 
     pub fn set_image(&self, image: PremultipliedImage) {
-        *self.inner.url.borrow_mut() = None;
         self.inner.generation.set(self.inner.generation.get() + 1);
         *self.inner.req.borrow_mut() = None;
         self.inner.base.set_loaded(true);
-        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_image(&self.impl_(), image));
-        self.inner.base.set_base_impl(new_impl);
+        self.update(|data| {
+            data.options.url = None;
+            data.description = Some(Arc::new(image));
+            data.load += 1;
+        });
         self.inner.base.observer().on_source_changed(self);
     }
 
     #[must_use]
     pub fn get_url(&self) -> Option<String> {
-        self.inner.url.borrow().clone()
+        self.read(|data| data.options.url.clone()).flatten()
     }
 }
 
@@ -171,8 +128,7 @@ fn on_image_response(weak: &Weak<Inner>, res: &Response) {
             let observer = this.inner.base.observer();
             match result {
                 Ok(image) => {
-                    let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_image(&this.impl_(), image));
-                    this.inner.base.set_base_impl(new_impl);
+                    this.update(|data| data.description = Some(Arc::new(image)));
                 }
                 Err(error) => observer.on_source_error(&this, Error::native(error.message)),
             }
@@ -188,8 +144,7 @@ impl Source for ImageSource {
     }
 
     fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop) {
-        let url = self.inner.url.borrow().clone();
-        let Some(url) = url else {
+        let Some(url) = self.get_url() else {
             self.inner.base.set_loaded(true);
             return;
         };
@@ -205,9 +160,5 @@ impl Source for ImageSource {
             Box::new(move |res: Response| on_image_response(&weak, &res)),
         );
         *self.inner.req.borrow_mut() = Some(req);
-    }
-
-    fn create_mutable(&self) -> Box<dyn source_impl::Impl> {
-        Box::new((*self.impl_()).clone())
     }
 }

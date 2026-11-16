@@ -581,9 +581,9 @@ fn source_records_keep_the_order_they_were_added_in() {
     // A new record of a source replaces the old one in place.
     let before = style.clone();
     let record = vector_source("b").base_impl();
-    set(&mut style, "b", Some(Arc::clone(&record)));
+    set(&mut style, "b", Some(record.clone()));
     assert_eq!(["c", "b", "a"], *ids_of(style.get_sources()));
-    assert!(Arc::ptr_eq(&record, style.get_source("b").unwrap()));
+    assert!(crate::Source::ptr_eq(&record, style.get_source("b").unwrap()));
     assert_eq!(Parts::SOURCES, Parts::between(&before, &style));
     // The same record changes nothing.
     let after = style.clone();
@@ -621,5 +621,5 @@ fn parts_name_what_differs() {
 }
 
 fn ids_of(sources: &crate::SourceList) -> Vec<String> {
-    sources.iter().map(|source| source.id.clone()).collect()
+    sources.iter().map(|source| source.id().to_owned()).collect()
 }

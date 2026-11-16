@@ -189,9 +189,9 @@ impl crate::Style {
     pub(crate) fn add_source_json(&mut self, id: &str, json: &str) {
         let value: serde_json::Value = serde_json::from_str(json).expect("JSON");
         let mut error = mln_conversion::Error::default();
-        let functions = Arc::clone(self.registry().functions());
+        let registry = Arc::clone(self.registry());
         let source =
-            crate::conversion::convert_source(&mln_conversion::Convertible::from(&value), &mut error, id, &functions)
+            crate::conversion::convert_source(&mln_conversion::Convertible::from(&value), &mut error, id, &registry)
                 .expect("a source");
         let _ = self.apply(crate::edit::Edit::SetSourceImpl { id: id.to_owned(), source: Some(source.base_impl()) });
     }

@@ -1,37 +1,15 @@
 use std::sync::Arc;
 
 use geojson::GeoJson;
-use mln_style_types::SourceType;
-use mln_util::constants;
 
 use super::geojson_options::convert_geojson_options;
-use super::tileset::{convert_tileset, optional_member};
 use super::{Converter, Convertible, Error};
+use crate::StyleRegistry;
 use crate::expression::Functions;
 use crate::source::Source;
 use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
-use crate::sources::tile_source::TileSource;
 
-/// A raster, raster-dem or vector source: the TileJSON at its `url`, its own TileJSON members, or
-/// both, its members winning.
-fn convert_tile_source(id: &str, value: &Convertible<'_>, source_type: SourceType) -> Result<Box<dyn Source>, String> {
-    let url = optional_member(value, "url", Convertible::to_string)?;
-    let tileset = convert_tileset(value, source_type)?;
-    if url.is_none() && tileset.tiles.is_none() {
-        return Err("source must have a url or tiles".to_owned());
-    }
-    let tile_size = optional_member(value, "tileSize", |size| {
-        size.to_number().filter(|size| (0.0..=f32::from(u16::MAX)).contains(size)).map(|size| size as u16)
-    })?
-    .unwrap_or(constants::TILE_SIZE_I);
-    Ok(Box::new(match source_type {
-        SourceType::Raster => TileSource::raster(id, url, tileset, tile_size),
-        SourceType::RasterDEM => TileSource::raster_dem(id, url, tileset, tile_size),
-        _ => TileSource::vector(id, url, tileset),
-    }))
-}
-
-fn convert_geojson_source(
+pub(crate) fn convert_geojson_source(
     id: &str,
     value: &Convertible<'_>,
     functions: &Arc<Functions>,
@@ -67,7 +45,7 @@ fn convert_geojson_source(
     Some(Box::new(result))
 }
 
-fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
+pub(crate) fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
     // A source without a url starts empty, until it gets an image or a url.
     let url_string = match value.object_member("url") {
         Some(url_value) => {
@@ -103,13 +81,14 @@ fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) ->
     Some(Box::new(result))
 }
 
-/// Converts the source `id`. A GeoJSON source's `clusterProperties`
-/// expressions parse against `functions`.
+/// Converts the source `id` through its type in `registry`. A GeoJSON
+/// source's `clusterProperties` expressions parse against the registry's
+/// functions.
 pub fn convert_source(
     value: &Convertible<'_>,
     error: &mut Error,
     id: &str,
-    functions: &Arc<Functions>,
+    registry: &StyleRegistry,
 ) -> Option<Box<dyn Source>> {
     if !value.is_object() {
         error.message = "source must be an object".to_owned();
@@ -125,16 +104,10 @@ pub fn convert_source(
         error.message = "source type must be a string".to_owned();
         return None;
     };
-    let tile_source_type = match type_.as_str() {
-        "raster" => SourceType::Raster,
-        "vector" => SourceType::Vector,
-        "raster-dem" => SourceType::RasterDEM, // dem-heatmap
-        "geojson" => return convert_geojson_source(id, value, functions, error),
-        "image" => return convert_image_source(id, value, error), // conformance
-        _ => {
-            error.message = "invalid source type".to_owned();
-            return None;
-        }
-    };
-    convert_tile_source(id, value, tile_source_type).map_err(|message| error.message = message).ok()
+    if let Some(source_type) = registry.source_type(&type_).filter(|source_type| source_type.info().from_json) {
+        source_type.create_from_json(id, value, registry.functions(), error)
+    } else {
+        error.message = "invalid source type".to_owned();
+        None
+    }
 }

@@ -2,150 +2,25 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
-use feature::Feature;
 use geojson::GeoJson;
 use mln_actor::RunLoop;
 use mln_actor::scheduler::{self, SchedulerPtr};
 use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
-use mln_tile_id::CanonicalTileID;
-use mln_util::constants;
 use mln_util::logging::{Event, Log};
-use mln_vec_map::VecMap;
 
-use super::geojson_source_impl::{self, Impl};
+pub use super::geojson::{
+    ClusterProperties, Features, GeoJSONData, GeoJSONDataBuilder, GeoJSONOptions, TileFeatures, create_geojson_data,
+};
+use super::geojson::{GeoJsonSourceOptions, GeoJsonSourceType};
 use crate::conversion::Error;
 use crate::conversion::geojson::convert_json_geojson;
-use crate::expression::Expr;
-use crate::source::{Source, SourceBase, downcast_arc};
-use crate::source_impl;
-
-pub(crate) type ClusterExpression = (Arc<Expr>, Arc<Expr>);
-pub type ClusterProperties = VecMap<String, ClusterExpression>;
-
-#[derive(Clone)]
-pub struct GeoJSONOptions {
-    // GeoJSON-VT options
-    pub minzoom: u8,
-    pub maxzoom: u8,
-    pub tile_size: u16,
-    pub buffer: u16,
-    pub tolerance: f64,
-    pub line_metrics: bool,
-
-    // Supercluster options
-    pub cluster: bool,
-    pub cluster_radius: u16,
-    pub cluster_max_zoom: u8,
-    pub cluster_min_points: usize,
-    pub cluster_properties: ClusterProperties,
-
-    // Update options
-    pub synchronous_update: bool,
-
-    /// The style's attribution for the source, reported by
-    /// `Source::get_attribution`.
-    pub attribution: Option<String>,
-}
-
-impl Default for GeoJSONOptions {
-    fn default() -> Self {
-        GeoJSONOptions {
-            minzoom: 0,
-            maxzoom: 18,
-            tile_size: constants::TILE_SIZE_I,
-            buffer: 128,
-            tolerance: 0.375,
-            line_metrics: false,
-            cluster: false,
-            cluster_radius: 50,
-            cluster_max_zoom: 17,
-            cluster_min_points: 2,
-            cluster_properties: ClusterProperties::new(),
-            synchronous_update: false,
-            attribution: None,
-        }
-    }
-}
-
-impl std::fmt::Debug for GeoJSONOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GeoJSONOptions")
-            .field("minzoom", &self.minzoom)
-            .field("maxzoom", &self.maxzoom)
-            .field("tile_size", &self.tile_size)
-            .field("buffer", &self.buffer)
-            .field("tolerance", &self.tolerance)
-            .field("line_metrics", &self.line_metrics)
-            .field("cluster", &self.cluster)
-            .field("cluster_radius", &self.cluster_radius)
-            .field("cluster_max_zoom", &self.cluster_max_zoom)
-            .field("cluster_min_points", &self.cluster_min_points)
-            .field("cluster_properties", &self.cluster_properties.keys().collect::<Vec<_>>())
-            .field("synchronous_update", &self.synchronous_update)
-            .field("attribution", &self.attribution)
-            .finish()
-    }
-}
-
-impl GeoJSONOptions {
-    /// The default options, as one shared instance.
-    pub fn default_options() -> Arc<GeoJSONOptions> {
-        static OPTIONS: OnceLock<Arc<GeoJSONOptions>> = OnceLock::new();
-        Arc::clone(OPTIONS.get_or_init(|| Arc::new(GeoJSONOptions::default())))
-    }
-}
-
-pub type TileFeatures = geojson_vt::TileFeatures;
-pub type Features = Vec<Feature<f64>>;
-
-pub trait GeoJSONData: Send + Sync {
-    /// Gets the features of tile `id`. `callback` runs either right away,
-    /// on the calling thread, or later on a thread of the data's own; with
-    /// `run_synchronously`, always right away.
-    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, run_synchronously: bool);
-
-    // SuperclusterData: data that isn't clustered has no clusters, and
-    // gives empty results. A cluster ID the data doesn't have fails with
-    // `ErrorKind::NotFound`.
-    fn get_children(&self, cluster_id: u32) -> Result<Features, mln_util::Error>;
-    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, mln_util::Error>;
-    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, mln_util::Error>;
-}
-
-/// Prepares GeoJSON for tiling. GeoJSON whose geometry `geo_types` can't
-/// hold (a position of fewer than two numbers), or that can't be clustered,
-/// such as a non-point feature, fails with
-/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
-pub fn create_geojson_data(
-    geojson: GeoJson,
-    sequenced_scheduler: SchedulerPtr,
-    options: &Arc<GeoJSONOptions>,
-) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
-    let collection = matches!(geojson, GeoJson::FeatureCollection(_));
-    let features = feature::geojson::features(geojson).map_err(|e| mln_util::Error::invalid_argument(e.to_string()))?;
-    geojson_source_impl::create(features, collection, sequenced_scheduler, options)
-}
-
-/// Builds the data of a [`GeoJSONSource`] with the source's options. It is
-/// `Send`, so the work can leave the source's thread.
-#[derive(Clone)]
-pub struct GeoJSONDataBuilder {
-    options: Arc<GeoJSONOptions>,
-    sequenced_scheduler: SchedulerPtr,
-}
-
-impl GeoJSONDataBuilder {
-    /// Fails as [`create_geojson_data`] does.
-    pub fn build(&self, geojson: GeoJson) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
-        create_geojson_data(geojson, Arc::clone(&self.sequenced_scheduler), &self.options)
-    }
-}
+use crate::source::{Source, SourceBase};
+use crate::source_type::{self, SourceData};
 
 struct Inner {
     base: SourceBase,
-    url: RefCell<Option<String>>,
     req: RefCell<Option<Request>>,
     request_generation: Cell<u64>,
     sequenced_scheduler: SchedulerPtr,
@@ -158,20 +33,16 @@ pub struct GeoJSONSource {
 
 impl std::fmt::Debug for GeoJSONSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GeoJSONSource")
-            .field("base", &self.inner.base)
-            .field("url", &self.inner.url.borrow())
-            .finish_non_exhaustive()
+        f.debug_struct("GeoJSONSource").field("base", &self.inner.base).finish_non_exhaustive()
     }
 }
 
 impl GeoJSONSource {
     pub fn new(id: impl Into<String>, options: Arc<GeoJSONOptions>) -> Self {
-        let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), options));
+        let data = SourceData::<GeoJsonSourceType>::new(GeoJsonSourceOptions::new(options));
         GeoJSONSource {
             inner: Rc::new(Inner {
-                base: SourceBase::new(impl_),
-                url: RefCell::new(None),
+                base: SourceBase::new(source_type::Source::new(&id.into(), data)),
                 req: RefCell::new(None),
                 request_generation: Cell::new(0),
                 sequenced_scheduler: scheduler::get_sequenced(),
@@ -184,14 +55,23 @@ impl GeoJSONSource {
         Self::new(id, GeoJSONOptions::default_options())
     }
 
-    #[must_use]
-    pub(crate) fn impl_(&self) -> Arc<Impl> {
-        downcast_arc::<Impl>(&self.inner.base.base_impl())
+    fn read<R>(&self, f: impl FnOnce(&SourceData<GeoJsonSourceType>) -> R) -> Option<R> {
+        SourceData::recover(&self.inner.base.base_impl()).map(f)
+    }
+
+    /// Records the source's data as `f` changes it.
+    fn update(&self, f: impl FnOnce(&mut SourceData<GeoJsonSourceType>)) {
+        if let Some(record) = self.inner.base.base_impl().map_data(f) {
+            self.inner.base.set_base_impl(record);
+        }
     }
 
     /// Sets the URL of a GeoJSON file to fetch.
     pub fn set_url(&self, url: &str) {
-        *self.inner.url.borrow_mut() = Some(url.to_owned());
+        self.update(|data| {
+            data.options.url = Some(url.to_owned());
+            data.load += 1;
+        });
         self.drop_building_response();
 
         // Signal that the source description needs a reload
@@ -204,11 +84,7 @@ impl GeoJSONSource {
 
     /// Sets the source's data. Fails as [`create_geojson_data`] does.
     pub fn set_geojson(&self, geojson: GeoJson) -> Result<(), mln_util::Error> {
-        let data = create_geojson_data(
-            geojson,
-            Arc::clone(&self.inner.sequenced_scheduler),
-            &Arc::clone(self.impl_().get_options()),
-        )?;
+        let data = self.data_builder().build(geojson)?;
         self.set_geojson_data(Some(data));
         Ok(())
     }
@@ -217,10 +93,7 @@ impl GeoJSONSource {
     /// for [`set_geojson_data`](Self::set_geojson_data) to take.
     #[must_use]
     pub fn data_builder(&self) -> GeoJSONDataBuilder {
-        GeoJSONDataBuilder {
-            options: Arc::clone(self.impl_().get_options()),
-            sequenced_scheduler: Arc::clone(&self.inner.sequenced_scheduler),
-        }
+        GeoJSONDataBuilder::new(self.get_options(), Arc::clone(&self.inner.sequenced_scheduler))
     }
 
     /// A count that goes up each time new data, a URL, or a URL's response
@@ -234,8 +107,10 @@ impl GeoJSONSource {
     pub fn set_geojson_data(&self, geojson_data: Option<Arc<dyn GeoJSONData>>) {
         *self.inner.req.borrow_mut() = None;
         self.drop_building_response();
-        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_data(&self.impl_(), geojson_data));
-        self.inner.base.set_base_impl(new_impl);
+        self.update(|data| {
+            data.description = geojson_data;
+            data.load += 1;
+        });
         self.inner.base.observer().on_source_changed(self);
     }
 
@@ -247,17 +122,17 @@ impl GeoJSONSource {
 
     #[must_use]
     pub fn get_url(&self) -> Option<String> {
-        self.inner.url.borrow().clone()
+        self.read(|data| data.options.url.clone()).flatten()
     }
 
     #[must_use]
     pub fn get_options(&self) -> Arc<GeoJSONOptions> {
-        Arc::clone(self.impl_().get_options())
+        self.read(|data| Arc::clone(&data.options.options)).unwrap_or_else(GeoJSONOptions::default_options)
     }
 
     #[must_use]
     pub fn is_update_synchronous(&self) -> bool {
-        source_impl::Impl::is_update_synchronous(&*self.impl_())
+        self.read(|data| data.options.synchronous_update).unwrap_or_default()
     }
 
     /// Replaces the `synchronous_update` option, on or off. The renderer
@@ -266,9 +141,7 @@ impl GeoJSONSource {
         if self.is_update_synchronous() == value {
             return;
         }
-        let mut new_impl = (*self.impl_()).clone();
-        new_impl.set_update_synchronous(value);
-        self.inner.base.set_base_impl(Arc::new(new_impl));
+        self.update(|data| data.options.synchronous_update = value);
         self.inner.base.observer().on_source_changed(self);
     }
 }
@@ -290,7 +163,7 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response, run_loop: &RunLoo
         // Note: This task appears to be safe enough to schedule on the
         // generic background queue. This task does not reference other
         // objects who's lifetimes are coupled with a map.
-        let options = Arc::clone(this.impl_().get_options());
+        let options = this.get_options();
         let data = res.data.clone();
         let seq_scheduler = Arc::clone(&this.inner.sequenced_scheduler);
         let generation = this.inner.request_generation.get() + 1;
@@ -325,12 +198,10 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response, run_loop: &RunLoo
                     // If a new request is being processed, ignore this data.
                     if generation == inner.request_generation.get() {
                         let this = GeoJSONSource { inner };
-                        // The impl is made here, from the current one, so
+                        // The record is made here, from the current one, so
                         // that it keeps what changed during the build, such
                         // as the synchronous-update override.
-                        let new_impl: Arc<dyn source_impl::Impl> =
-                            Arc::new(Impl::with_data(&this.impl_(), geojson_data));
-                        this.inner.base.set_base_impl(new_impl);
+                        this.update(|data| data.description = geojson_data);
                         this.inner.base.set_loaded(true);
                         this.inner.base.observer().on_source_loaded(&this);
                     }
@@ -346,8 +217,7 @@ impl Source for GeoJSONSource {
     }
 
     fn load_description(&self, file_source: &dyn FileSource, run_loop: &RunLoop) {
-        let url = self.inner.url.borrow().clone();
-        let Some(url) = url else {
+        let Some(url) = self.get_url() else {
             self.inner.base.set_loaded(true);
             return;
         };
@@ -363,17 +233,5 @@ impl Source for GeoJSONSource {
             Box::new(move |res: Response| on_description_response(&weak, &res, &callback_loop)),
         );
         *self.inner.req.borrow_mut() = Some(req);
-    }
-
-    fn create_mutable(&self) -> Box<dyn source_impl::Impl> {
-        Box::new((*self.impl_()).clone())
-    }
-}
-
-// Debug is not a supertrait, for the reason at
-// `impl Debug for dyn ErasedLayerStyle` (layer_type.rs).
-impl std::fmt::Debug for dyn GeoJSONData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GeoJSONData").finish_non_exhaustive()
     }
 }

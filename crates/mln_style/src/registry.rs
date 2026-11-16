@@ -1,5 +1,5 @@
-//! The registrations that a style parses against: its expression functions
-//! and its layer types.
+//! The registrations that a style parses against: its expression functions,
+//! its layer types and its source types.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -10,36 +10,49 @@ use mln_vec_map::VecMap;
 use crate::expression::{Functions, functions};
 use crate::layer::Layer;
 use crate::layer_type::{ErasedStyleLayerType, SourceKind};
+use crate::source_type::ErasedStyleSourceType;
 
-/// The expression functions and layer types that a style's JSON, its layers'
-/// property values and its filters parse against.
+/// The expression functions, layer types and source types that a style's
+/// JSON, its layers' property values and its filters parse against.
 pub struct StyleRegistry {
     functions: Arc<Functions>,
     layer_types: VecMap<&'static str, &'static dyn ErasedStyleLayerType>,
+    source_types: VecMap<&'static str, &'static dyn ErasedStyleSourceType>,
 }
 
 impl StyleRegistry {
-    /// The registry of `functions` and `layer_types`. A layer type is known
-    /// by its name: of two types of one name, the first counts.
+    /// The registry of `functions`, `layer_types` and `source_types`. A type
+    /// is known by its name: of two types of one name, the first counts.
     #[must_use]
     pub fn new(
         functions: Arc<Functions>,
         layer_types: impl IntoIterator<Item = &'static dyn ErasedStyleLayerType>,
+        source_types: impl IntoIterator<Item = &'static dyn ErasedStyleSourceType>,
     ) -> Self {
-        let mut by_name = VecMap::new();
+        let mut layers_by_name = VecMap::new();
         for layer_type in layer_types {
-            by_name.entry(layer_type.info().name).or_insert(layer_type);
+            layers_by_name.entry(layer_type.info().name).or_insert(layer_type);
         }
-        StyleRegistry { functions, layer_types: by_name }
+        let mut sources_by_name = VecMap::new();
+        for source_type in source_types {
+            sources_by_name.entry(source_type.info().name).or_insert(source_type);
+        }
+        StyleRegistry { functions, layer_types: layers_by_name, source_types: sources_by_name }
     }
 
-    /// The built-in layer types and expression functions, for this crate's
-    /// tests, which can't reach the renderer's `Registry::with_builtins`.
+    /// The built-in expression functions, layer types and source types, for
+    /// this crate's tests, which can't reach the renderer's
+    /// `Registry::with_builtins`.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
         use crate::layer_type::style_entry;
         use crate::layers::{
             Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
+        };
+        use crate::source_type::style_source_entry;
+        use crate::sources::{
+            CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
+            RasterSourceType, VectorSourceType,
         };
         let layer_types = [
             style_entry::<Fill>(),
@@ -54,7 +67,16 @@ impl StyleRegistry {
             style_entry::<Heatmap>(),
             style_entry::<Custom>(),
         ];
-        Arc::new(StyleRegistry::new(Functions::with_builtins(), layer_types))
+        let source_types = [
+            style_source_entry::<VectorSourceType>(),
+            style_source_entry::<RasterSourceType>(),
+            style_source_entry::<RasterDemSourceType>(),
+            style_source_entry::<GeoJsonSourceType>(),
+            style_source_entry::<ImageSourceType>(),
+            style_source_entry::<CustomGeometrySourceType>(),
+            style_source_entry::<CustomVectorSourceType>(),
+        ];
+        Arc::new(StyleRegistry::new(Functions::with_builtins(), layer_types, source_types))
     }
 
     #[must_use]
@@ -70,6 +92,16 @@ impl StyleRegistry {
     /// The layer types, in name order.
     pub fn layer_types(&self) -> impl Iterator<Item = &'static dyn ErasedStyleLayerType> + '_ {
         self.layer_types.values().copied()
+    }
+
+    #[must_use]
+    pub fn source_type(&self, name: &str) -> Option<&'static dyn ErasedStyleSourceType> {
+        self.source_types.get(name).copied()
+    }
+
+    /// The source types, in name order.
+    pub fn source_types(&self) -> impl Iterator<Item = &'static dyn ErasedStyleSourceType> + '_ {
+        self.source_types.values().copied()
     }
 
     /// A layer of the type `type_` from its style JSON `value`, without its
@@ -107,6 +139,7 @@ impl std::fmt::Debug for StyleRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StyleRegistry")
             .field("layer_types", &self.layer_types.keys().collect::<Vec<_>>())
+            .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }

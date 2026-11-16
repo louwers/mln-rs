@@ -6,7 +6,6 @@ use super::util::parse_json;
 use crate::conversion::Error;
 use crate::conversion::source::convert_source;
 use crate::conversion::tileset::convert_tileset;
-use crate::expression::Functions;
 use crate::source::Source;
 
 fn convert_json(json: &str, source_type: SourceType) -> Result<PartialTileset, String> {
@@ -15,7 +14,7 @@ fn convert_json(json: &str, source_type: SourceType) -> Result<PartialTileset, S
 
 fn convert_source_json(json: &str, error: &mut Error, id: &str) -> Option<Box<dyn Source>> {
     let value = parse_json(json);
-    convert_source(&Convertible::from(&value), error, id, &Functions::with_builtins())
+    convert_source(&Convertible::from(&value), error, id, &crate::StyleRegistry::with_builtins())
 }
 
 // gtest: SourceOptions.Basic

@@ -3,35 +3,19 @@
 // functions through a `Send` [`CustomVectorSourceHandle`].
 
 use std::rc::Rc;
-use std::sync::Arc;
 
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_storage::{Data, FileSource};
-use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 use mln_util::range::Range;
 
+use super::custom::{CustomVectorSourceOptions, CustomVectorSourceType};
+pub use super::custom::{CustomVectorTileData, CustomVectorTileLoader, TileDataFormat};
 use crate::custom_tile_loader::{CustomTileLoader, TileFunction};
-use crate::source::{Source, SourceBase, downcast_arc};
-use crate::source_impl::{self, ImplBase};
-
-/// The encoding of a custom vector tile's bytes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum TileDataFormat {
-    /// Mapbox Vector Tile.
-    #[default]
-    Mvt,
-    /// MapLibre Tile, decoded with the map's FastPFOR option.
-    Mlt,
-}
-
-/// The data a custom vector tile gets: its bytes, if any, and their format.
-pub type CustomVectorTileData = (Option<Data>, TileDataFormat);
-
-/// The loader of a custom vector source.
-pub type CustomVectorTileLoader = CustomTileLoader<CustomVectorTileData>;
+use crate::source::{Source, SourceBase};
+use crate::source_type::{self, SourceData};
 
 #[derive(Clone)]
 pub struct Options {
@@ -97,64 +81,6 @@ impl CustomVectorSourceHandle {
     }
 }
 
-#[derive(Clone)]
-pub struct Impl {
-    base: ImplBase,
-    zoom_range: Range<u8>,
-    loader_ref: Option<PoolActorRef<CustomVectorTileLoader>>,
-}
-
-impl std::fmt::Debug for Impl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomVectorSource::Impl")
-            .field("base", &self.base)
-            .field("zoom_range", &self.zoom_range)
-            .field("loaded", &self.loader_ref.is_some())
-            .finish()
-    }
-}
-
-impl Impl {
-    fn new(id: String, options: &Options) -> Self {
-        Impl { base: ImplBase::new(SourceType::CustomMVTVector, id), zoom_range: options.zoom_range, loader_ref: None }
-    }
-
-    fn with_loader(other: &Impl, loader_ref: PoolActorRef<CustomVectorTileLoader>) -> Self {
-        Impl { loader_ref: Some(loader_ref), ..other.clone() }
-    }
-
-    /// `operator!=`: whether tiles made for one impl don't suit the other.
-    #[must_use]
-    pub fn differs(&self, other: &Impl) -> bool {
-        self.zoom_range != other.zoom_range || self.loader_ref.is_some() != other.loader_ref.is_some()
-    }
-
-    #[must_use]
-    pub fn get_zoom_range(&self) -> Range<u8> {
-        self.zoom_range
-    }
-
-    /// The tile loader; `None` until the source is loaded.
-    #[must_use]
-    pub fn get_tile_loader(&self) -> Option<&PoolActorRef<CustomVectorTileLoader>> {
-        self.loader_ref.as_ref()
-    }
-}
-
-impl source_impl::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-
-    fn get_attribution(&self) -> Option<String> {
-        None
-    }
-}
-
 struct Inner {
     base: SourceBase,
     loader: Actor<CustomVectorTileLoader>,
@@ -175,15 +101,19 @@ impl std::fmt::Debug for CustomVectorSource {
 impl CustomVectorSource {
     /// Creates the source, whose tile functions run on `pool`.
     pub fn new(id: impl Into<String>, options: Options, pool: mln_actor::SchedulerPtr) -> Self {
-        let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), &options));
+        let data =
+            SourceData::<CustomVectorSourceType>::new(CustomVectorSourceOptions { zoom_range: options.zoom_range });
+        let record = source_type::Source::new(&id.into(), data);
         let loader =
             Actor::new(pool, |_| CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function));
-        CustomVectorSource { inner: Rc::new(Inner { base: SourceBase::new(impl_), loader }) }
+        CustomVectorSource { inner: Rc::new(Inner { base: SourceBase::new(record), loader }) }
     }
 
-    #[must_use]
-    pub(crate) fn impl_(&self) -> Arc<Impl> {
-        downcast_arc::<Impl>(&self.inner.base.base_impl())
+    /// Records the source's data as `f` changes it.
+    fn update(&self, f: impl FnOnce(&mut SourceData<CustomVectorSourceType>)) {
+        if let Some(record) = self.inner.base.base_impl().map_data(f) {
+            self.inner.base.set_base_impl(record);
+        }
     }
 
     /// A handle to answer the tile functions with, from any thread.
@@ -219,14 +149,8 @@ impl Source for CustomVectorSource {
     }
 
     fn load_description(&self, _file_source: &dyn FileSource, _run_loop: &mln_actor::RunLoop) {
-        let new_impl: Arc<dyn source_impl::Impl> =
-            Arc::new(Impl::with_loader(&self.impl_(), self.inner.loader.self_ref()));
-        self.inner.base.set_base_impl(new_impl);
+        self.update(|data| data.description = Some(self.inner.loader.self_ref()));
         self.inner.base.set_loaded(true);
         self.inner.base.observer().on_source_loaded(self);
-    }
-
-    fn create_mutable(&self) -> Box<dyn source_impl::Impl> {
-        Box::new((*self.impl_()).clone())
     }
 }

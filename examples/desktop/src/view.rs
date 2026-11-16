@@ -110,8 +110,7 @@ impl StyleInfo {
         let attributions = style
             .get_sources()
             .iter()
-            .filter_map(|source| source.get_attribution())
-            .filter(|attribution| !attribution.is_empty())
+            .filter_map(|source| source.get_attribution().filter(|attribution| !attribution.is_empty()))
             .collect();
         let projection = style.root_property_json("projection").ok().flatten();
         let globe = projection

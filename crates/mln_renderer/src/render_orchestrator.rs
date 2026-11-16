@@ -15,8 +15,8 @@ use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
-    GlobalStateChange, Layer, PropertyEvaluationParameters, Style, TransitionOptions, TransitionParameters, layer,
-    source,
+    GlobalStateChange, Layer, PropertyEvaluationParameters, Source, Style, TransitionOptions, TransitionParameters,
+    layer,
 };
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
@@ -183,7 +183,7 @@ pub(crate) struct RenderOrchestrator {
     /// the first and after `clear_data`: no layers, sources or images.
     style: Option<Arc<Style>>,
     /// The style's sources in id order, the order of the per-source pass.
-    sources_by_id: Vec<Arc<dyn source::Impl>>,
+    sources_by_id: Vec<Source>,
 
     render_sources: HashMap<String, Box<dyn RenderSource>>,
     render_layers: HashMap<String, RenderLayerPtr>,
@@ -722,13 +722,11 @@ impl RenderOrchestrator {
             let mut source_needs_relayout = false;
             // C++ has a render source for every source type; the port skips
             // the layers of a source type without one.
-            let has_render_source = source_impl
-                .as_ref()
-                .is_some_and(|source_impl| self.render_sources.contains_key(&source_impl.base().id));
+            let has_render_source =
+                source_impl.as_ref().is_some_and(|source_impl| self.render_sources.contains_key(source_impl.id()));
             // The id of the source whose layers this pass takes, if it has a
             // render source.
-            let render_source_id =
-                source_impl.as_ref().filter(|_| has_render_source).map(|source_impl| source_impl.base().id.as_str());
+            let render_source_id = source_impl.as_ref().filter(|_| has_render_source).map(Source::id);
 
             for (index, layer_ptr) in self.ordered_layers.iter().enumerate() {
                 let layer = layer_ptr.borrow();
@@ -776,7 +774,7 @@ impl RenderOrchestrator {
                             self.filtered_layers_for_source.push(Arc::clone(&layer.base().evaluated_properties));
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
-                                let source_id = source_impl.base().id.clone();
+                                let source_id = source_impl.id().to_owned();
                                 layer_render_items
                                     .entry(index as u32)
                                     .or_insert_with(|| LayerRenderItem::new(Rc::clone(layer_ptr), Some(source_id)));
@@ -818,10 +816,10 @@ impl RenderOrchestrator {
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
                 // C++ `renderSources.at(sourceImpl->id)`; a source type
                 // without a render source has none.
-                if let Some(source) = self.render_sources.get_mut(&source_impl.base().id) {
+                if let Some(source) = self.render_sources.get_mut(source_impl.id()) {
                     source.update(
                         &mut self.tile_store,
-                        Arc::clone(source_impl),
+                        source_impl.clone(),
                         &filtered_layers,
                         source_needs_rendering,
                         source_needs_relayout,

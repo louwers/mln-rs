@@ -25,11 +25,12 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{ColorMode, CullFaceMode};
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
-use mln_style::source;
-use mln_style::source::downcast_arc;
-use mln_style::sources::custom_vector_source::{CustomVectorTileData, TileDataFormat};
-use mln_style::sources::geojson_source::{GeoJSONData, TileFeatures};
-use mln_style::sources::{custom_geometry_source, custom_vector_source, geojson_source_impl, tile_source};
+use mln_style::Source;
+use mln_style::source_type::SourceData;
+use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
+use mln_style::sources::geojson::{GeoJSONData, TileFeatures};
+use mln_style::sources::tileset::tileset_parts;
+use mln_style::sources::{CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType};
 use mln_style_types::{LineCapType, LineJoinType, SourceType, TranslateAnchorType};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
@@ -484,8 +485,8 @@ fn supercluster_extension(
 
 impl RenderTileSource {
     /// The render source of `impl_`, whose tiles go in `store`.
-    pub(crate) fn new(impl_: Arc<dyn source::Impl>, store: &mut TileStore) -> Self {
-        let (kind, single_layer, origin) = match impl_.type_ {
+    pub(crate) fn new(impl_: Source, store: &mut TileStore) -> Self {
+        let (kind, single_layer, origin) = match impl_.get_type() {
             SourceType::Raster => (TileKind::Raster, false, Origin::Tileset { tileset: None }),
             SourceType::RasterDEM => (TileKind::Dem(RasterEncoding::Mapbox), false, Origin::Tileset { tileset: None }),
             SourceType::GeoJSON => (TileKind::Geometry, true, Origin::GeoJson { data: None, synchronous: false }),
@@ -493,7 +494,7 @@ impl RenderTileSource {
             SourceType::CustomMVTVector => (TileKind::Geometry, false, Origin::Custom),
             SourceType::Vector | SourceType::Image => (TileKind::Geometry, false, Origin::Tileset { tileset: None }),
         };
-        let key = store.add_source(impl_.id.clone(), kind, single_layer);
+        let key = store.add_source(impl_.id().to_owned(), kind, single_layer);
         RenderTileSource {
             base: RenderSourceBase::new(impl_),
             key,
@@ -509,11 +510,10 @@ impl RenderTileSource {
     /// Takes in a tileset source's `impl_`. Returns its tileset, if it has
     /// tiles; a new tileset clears the source's tiles.
     fn update_tileset(&mut self, store: &mut TileStore, parameters: &TileParameters<'_>) -> Option<Tileset> {
-        let impl_ = downcast_arc::<tile_source::Impl>(&self.base.base_impl);
+        let impl_tileset = tileset_parts(&self.base.base_impl)?.1.cloned();
         let Origin::Tileset { tileset: cached } = &mut self.origin else {
             return None;
         };
-        let impl_tileset = impl_.tileset.clone();
         // In Continuous mode, keep the existing tiles if the new tileset is
         // not yet available, thus providing smart style transitions without
         // flickering. In other modes, allow clearing the tiles first, before
@@ -530,7 +530,7 @@ impl RenderTileSource {
         // A tileset without tiles makes no tiles, and the source counts as
         // loaded until its tiles are set.
         let tileset = cached.clone().filter(|tileset| !tileset.tiles.is_empty())?;
-        let encoding = match self.base.base_impl.type_ {
+        let encoding = match self.base.base_impl.get_type() {
             // The encoding is decided once, from the first tileset (`isMLT`).
             SourceType::Vector if tileset.vector_encoding == Some(VectorEncoding::MLT) => {
                 VectorTileEncoding::Mlt { fast_pfor_enabled: self.fast_pfor_enabled }
@@ -562,7 +562,7 @@ impl RenderTileSource {
         needs_relayout: bool,
         parameters: &TileParameters<'_>,
     ) -> Option<Arc<dyn GeoJSONData>> {
-        let impl_ = downcast_arc::<geojson_source_impl::Impl>(&self.base.base_impl);
+        let impl_ = SourceData::<GeoJsonSourceType>::recover_arc(&self.base.base_impl)?;
         let Origin::GeoJson { data: current, synchronous } = &mut self.origin else {
             return None;
         };
@@ -573,7 +573,7 @@ impl RenderTileSource {
             *synchronous = parameters.is_update_synchronous;
             source.clear_all(ctx);
         }
-        let data = impl_.get_data().and_then(|weak| weak.upgrade());
+        let data = impl_.description.clone();
         let previous = current.as_ref().and_then(Weak::upgrade);
         if !same_data(previous.as_ref(), data.as_ref()) {
             *current = data.as_ref().map(Arc::downgrade);
@@ -585,7 +585,7 @@ impl RenderTileSource {
                 source.clear_all(ctx);
             } else if let Some(data) = &data {
                 source.reduce_memory_use(ctx);
-                let max_z = impl_.get_zoom_range().max;
+                let max_z = impl_.options.get_zoom_range().max;
                 let SourceTiles { info, tiles, .. } = source;
                 for tile in tiles.values_mut().filter(|tile| !tile.cached && tile.id.canonical.z <= max_z) {
                     info.load_geojson(tile, ctx, data, needs_relayout);
@@ -597,53 +597,57 @@ impl RenderTileSource {
 
     /// Takes in a custom source's `impl_`, whose new options or loader clear
     /// the source's tiles. Returns whether it has a loader.
-    fn update_custom(&mut self, store: &mut TileStore, base_impl: &Arc<dyn source::Impl>) -> bool {
-        let previous = std::mem::replace(&mut self.base.base_impl, Arc::clone(base_impl));
+    fn update_custom(&mut self, store: &mut TileStore, base_impl: &Source) -> bool {
+        let previous = std::mem::replace(&mut self.base.base_impl, base_impl.clone());
         let Some((source, ctx)) = store.source_mut(self.key) else {
             return false;
         };
-        let (differs, loader): (bool, Option<Arc<dyn CustomLoader>>) = if base_impl.type_ == SourceType::CustomVector {
-            let impl_ = downcast_arc::<custom_geometry_source::Impl>(base_impl);
-            let previous = downcast_arc::<custom_geometry_source::Impl>(&previous);
-            let loader = impl_.get_tile_loader().map(|loader| -> Arc<dyn CustomLoader> {
-                Arc::new(CustomLoaderOf {
-                    loader: loader.clone(),
-                    convert: Arc::new(|features: Arc<TileFeatures>| Some(TileData::Features(features))),
-                })
-            });
-            (impl_.differs(&previous), loader)
-        } else {
-            let impl_ = downcast_arc::<custom_vector_source::Impl>(base_impl);
-            let previous = downcast_arc::<custom_vector_source::Impl>(&previous);
-            let fast_pfor_enabled = self.fast_pfor_enabled;
-            let loader = impl_.get_tile_loader().map(|loader| -> Arc<dyn CustomLoader> {
-                Arc::new(CustomLoaderOf {
-                    loader: loader.clone(),
-                    convert: Arc::new(move |(data, format): CustomVectorTileData| {
-                        data.map(|data| match format {
-                            TileDataFormat::Mvt => TileData::Mvt(mln_tile::MvtTile::new(data)),
-                            TileDataFormat::Mlt => TileData::Mlt(mln_tile::MltTile::new(data, fast_pfor_enabled)),
-                        })
-                    }),
-                })
-            });
-            (impl_.differs(&previous), loader)
-        };
+        let (differs, loader): (bool, Option<Arc<dyn CustomLoader>>) =
+            if let Some(impl_) = SourceData::<CustomGeometrySourceType>::recover(base_impl) {
+                let loader = impl_.description.as_ref().map(|loader| -> Arc<dyn CustomLoader> {
+                    Arc::new(CustomLoaderOf {
+                        loader: loader.clone(),
+                        convert: Arc::new(|features: Arc<TileFeatures>| Some(TileData::Features(features))),
+                    })
+                });
+                let differs = SourceData::<CustomGeometrySourceType>::recover(&previous)
+                    .is_none_or(|previous| impl_.differs(previous));
+                (differs, loader)
+            } else if let Some(impl_) = SourceData::<CustomVectorSourceType>::recover(base_impl) {
+                let fast_pfor_enabled = self.fast_pfor_enabled;
+                let loader = impl_.description.as_ref().map(|loader| -> Arc<dyn CustomLoader> {
+                    Arc::new(CustomLoaderOf {
+                        loader: loader.clone(),
+                        convert: Arc::new(move |(data, format): CustomVectorTileData| {
+                            data.map(|data| match format {
+                                TileDataFormat::Mvt => TileData::Mvt(mln_tile::MvtTile::new(data)),
+                                TileDataFormat::Mlt => TileData::Mlt(mln_tile::MltTile::new(data, fast_pfor_enabled)),
+                            })
+                        }),
+                    })
+                });
+                let differs = SourceData::<CustomVectorSourceType>::recover(&previous)
+                    .is_none_or(|previous| impl_.differs(previous));
+                (differs, loader)
+            } else {
+                (true, None)
+            };
         // Clear the tiles only if the updated source has different tile
         // options, zoom range or initialization state for a custom tile
         // loader.
-        if !Arc::ptr_eq(&previous, base_impl) && differs {
+        let same = Source::ptr_eq(&previous, base_impl);
+        if !same && differs {
             source.clear_all(ctx);
         }
         let has_loader = loader.is_some();
-        if source.info.origin.is_none() || !Arc::ptr_eq(&previous, base_impl) {
+        if source.info.origin.is_none() || !same {
             source.info.origin = loader.map(DataOrigin::Custom);
         }
         has_loader
     }
 
     pub(crate) fn create_render_item(&mut self) -> Box<dyn RenderItem> {
-        Box::new(TileSourceRenderItem::new(Rc::clone(&self.render_tiles), self.base.base_impl.id.clone()))
+        Box::new(TileSourceRenderItem::new(Rc::clone(&self.render_tiles), self.base.base_impl.id().to_owned()))
     }
 }
 
@@ -668,7 +672,7 @@ impl RenderSource for RenderTileSource {
     fn update(
         &mut self,
         store: &mut TileStore,
-        base_impl: Arc<dyn source::Impl>,
+        base_impl: Source,
         layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         needs_relayout: bool,
@@ -681,12 +685,13 @@ impl RenderSource for RenderTileSource {
                 let Some(tileset) = self.update_tileset(store, parameters) else {
                     return;
                 };
-                let impl_ = downcast_arc::<tile_source::Impl>(&self.base.base_impl);
-                let tile_size = if self.base.base_impl.type_ == SourceType::Vector {
-                    constants::TILE_SIZE_I
-                } else {
-                    impl_.get_tile_size()
-                };
+                let tile_size = tileset_parts(&self.base.base_impl).map_or(constants::TILE_SIZE_I, |(options, _)| {
+                    if self.base.base_impl.get_type() == SourceType::Vector {
+                        constants::TILE_SIZE_I
+                    } else {
+                        options.tile_size
+                    }
+                });
                 (tile_size, tileset.zoom_range, tileset.bounds)
             }
             Origin::GeoJson { .. } => {
@@ -695,8 +700,10 @@ impl RenderSource for RenderTileSource {
                 if self.update_geojson(store, needs_relayout, parameters).is_none() {
                     return;
                 }
-                let impl_ = downcast_arc::<geojson_source_impl::Impl>(&self.base.base_impl);
-                (constants::TILE_SIZE_I, impl_.get_zoom_range(), None)
+                let Some(impl_) = SourceData::<GeoJsonSourceType>::recover(&self.base.base_impl) else {
+                    return;
+                };
+                (constants::TILE_SIZE_I, impl_.options.get_zoom_range(), None)
             }
             Origin::Custom => {
                 let has_loader = self.update_custom(store, &base_impl);
@@ -704,12 +711,12 @@ impl RenderSource for RenderTileSource {
                 if !has_loader {
                     return;
                 }
-                if base_impl.type_ == SourceType::CustomVector {
-                    let impl_ = downcast_arc::<custom_geometry_source::Impl>(&base_impl);
-                    (impl_.get_tile_options().tile_size, impl_.get_zoom_range(), None)
+                if let Some(impl_) = SourceData::<CustomGeometrySourceType>::recover(&base_impl) {
+                    (impl_.options.tile_options.tile_size, impl_.options.zoom_range, None)
+                } else if let Some(impl_) = SourceData::<CustomVectorSourceType>::recover(&base_impl) {
+                    (constants::TILE_SIZE_I, impl_.options.zoom_range, None)
                 } else {
-                    let impl_ = downcast_arc::<custom_vector_source::Impl>(&base_impl);
-                    (constants::TILE_SIZE_I, impl_.get_zoom_range(), None)
+                    return;
                 }
             }
         };
@@ -721,7 +728,7 @@ impl RenderSource for RenderTileSource {
             needs_rendering,
             needs_relayout,
             parameters,
-            source_impl: &*self.base.base_impl,
+            source_impl: &self.base.base_impl,
             tile_size,
             zoom_range,
             bounds,

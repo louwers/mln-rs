@@ -6,8 +6,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_map_types::MapDebugOptions;
-use mln_style::source;
-use mln_style_types::SourceType;
+use mln_style::Source;
+use mln_style::source_type::SourceData;
+use mln_style::sources::ImageSourceType;
 use mln_util::constants;
 use mln_util::error::Error;
 
@@ -58,12 +59,12 @@ impl RenderTiles {
 
 /// The data members of `RenderSource`.
 pub(crate) struct RenderSourceBase {
-    pub(crate) base_impl: Arc<dyn source::Impl>,
+    pub(crate) base_impl: Source,
     pub(crate) enabled: bool,
 }
 
 impl RenderSourceBase {
-    pub(crate) fn new(impl_: Arc<dyn source::Impl>) -> Self {
+    pub(crate) fn new(impl_: Source) -> Self {
         RenderSourceBase { base_impl: impl_, enabled: false }
     }
 }
@@ -76,7 +77,7 @@ pub(crate) trait RenderSource {
     fn update(
         &mut self,
         store: &mut TileStore,
-        impl_: Arc<dyn source::Impl>,
+        impl_: Source,
         layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         needs_relayout: bool,
@@ -151,18 +152,10 @@ pub(crate) trait RenderSource {
 
 /// Creates the render source of a style source, whose tiles, if it has
 /// any, `store` keeps.
-pub(crate) fn create(impl_: &Arc<dyn source::Impl>, store: &mut TileStore) -> Box<dyn RenderSource> {
-    match impl_.type_ {
-        SourceType::Image => {
-            Box::new(crate::sources::render_image_source::RenderImageSource::new(source::downcast_arc::<
-                mln_style::sources::image_source::Impl,
-            >(impl_)))
-        }
-        SourceType::Vector
-        | SourceType::Raster
-        | SourceType::RasterDEM
-        | SourceType::GeoJSON
-        | SourceType::CustomVector
-        | SourceType::CustomMVTVector => Box::new(RenderTileSource::new(Arc::clone(impl_), store)),
+pub(crate) fn create(impl_: &Source, store: &mut TileStore) -> Box<dyn RenderSource> {
+    if SourceData::<ImageSourceType>::recover(impl_).is_some() {
+        Box::new(crate::sources::render_image_source::RenderImageSource::new(impl_.clone()))
+    } else {
+        Box::new(RenderTileSource::new(impl_.clone(), store))
     }
 }

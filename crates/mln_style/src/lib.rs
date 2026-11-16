@@ -69,8 +69,8 @@ pub mod sky;
 #[rustfmt::skip]
 mod sky_properties;
 pub mod source;
-pub mod source_impl;
 pub mod source_list;
+pub mod source_type;
 pub mod sources;
 pub mod sprite;
 mod style;
@@ -92,6 +92,7 @@ pub use registry::{StyleRegistry, decode_with};
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
 pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 pub use source_list::SourceList;
+pub use source_type::{Source, SourceTypeInfo};
 pub use style::{Parsed, Style, StyleLoadError};
 pub use transition_options::TransitionOptions;
 

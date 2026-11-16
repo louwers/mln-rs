@@ -129,7 +129,7 @@ impl StyleSources {
     /// whether any did.
     pub(crate) fn sync(&self, style: &mut Arc<Style>) -> bool {
         let stale = |style: &Style, id: &str, source: &dyn Source| {
-            !style.get_source(id).is_some_and(|record| Arc::ptr_eq(record, &source.base_impl()))
+            !style.get_source(id).is_some_and(|record| mln_style::Source::ptr_eq(record, &source.base_impl()))
         };
         if !self.sources.iter().any(|(id, source)| stale(style, id, &**source)) {
             return false;

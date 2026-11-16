@@ -19,7 +19,8 @@ use mln_gfx::{ConsumerSync, Handoff, RendererBackend, SyncKind};
 use mln_map::{MapView, RenderMode};
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
-use mln_style::sources::{GeoJSONData, geojson_source_impl};
+use mln_style::source_type::SourceData;
+use mln_style::sources::{GeoJSONData, GeoJsonSourceType};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -1653,13 +1654,12 @@ impl Worker {
             self.sources.as_ref().and_then(|sources| sources.get(source_id)).ok_or_else(|| {
                 Error::not_found(format!("the session's last render has no source named {source_id}"))
             })?;
-        let geojson = source
-            .downcast_ref::<geojson_source_impl::Impl>()
+        let geojson = SourceData::<GeoJsonSourceType>::recover(source)
             .ok_or_else(|| Error::invalid_argument(format!("source {source_id} is not a GeoJSON source")))?;
-        if !geojson.get_options().cluster {
+        if !geojson.options.options.cluster {
             return Err(Error::invalid_argument(format!("GeoJSON source {source_id} does not cluster")));
         }
-        let data = geojson.get_data().and_then(|data| data.upgrade());
+        let data = geojson.description.clone();
         let children = data
             .as_ref()
             .filter(|_| cluster_id & ZOOM_BITS != 0)

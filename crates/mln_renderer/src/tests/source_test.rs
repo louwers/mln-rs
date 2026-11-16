@@ -261,7 +261,7 @@ fn run_tile_case(
     );
 
     test.run_observed(&mut store, observer);
-    render_source.base().base_impl.type_
+    render_source.base().base_impl.get_type()
 }
 
 fn tile_empty(kind: Tiled) {
@@ -1055,12 +1055,12 @@ fn set_max_parent_overscale_factor() {
     let mut render_source = render_source::create(&base_impl, &mut store);
     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
-    render_source.update(&mut store, Arc::clone(&base_impl), &layers, true, true, &parameters);
+    render_source.update(&mut store, base_impl.clone(), &layers, true, true, &parameters);
 
     // Each tile that changes updates the source again.
     test.run_with(&mut store, |store, event| {
         if matches!(event, StoreEvent::Changed) {
-            render_source.update(store, Arc::clone(&base_impl), &layers, true, true, &parameters);
+            render_source.update(store, base_impl.clone(), &layers, true, true, &parameters);
         }
     });
 

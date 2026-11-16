@@ -283,8 +283,7 @@ impl Parser {
 
         for (id, property) in members(object) {
             let mut error = Error::default();
-            let Some(source) = convert_source(&Convertible::from(property), &mut error, id, self.registry.functions())
-            else {
+            let Some(source) = convert_source(&Convertible::from(property), &mut error, id, &self.registry) else {
                 Log::warning(Event::ParseStyle, &error.message);
                 continue;
             };

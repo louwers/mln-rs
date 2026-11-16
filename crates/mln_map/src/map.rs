@@ -855,8 +855,8 @@ impl Map {
         let value: serde_json::Value = serde_json::from_str(json)
             .map_err(|error| Error::invalid_argument(format!("style source \"{id}\" is not valid JSON: {error}")))?;
         let mut error = mln_style::conversion::Error::default();
-        let functions = Arc::clone(self.style.registry().functions());
-        let Some(source) = convert_source(&Convertible::from(&value), &mut error, id, &functions) else {
+        let registry = Arc::clone(self.style.registry());
+        let Some(source) = convert_source(&Convertible::from(&value), &mut error, id, &registry) else {
             return Err(Error::invalid_argument(format!("style source \"{id}\": {}", error.message)));
         };
         self.add_source(source)

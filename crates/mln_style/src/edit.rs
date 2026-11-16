@@ -8,13 +8,14 @@ use mln_style_types::VisibilityType;
 
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
+use crate::image;
 use crate::layer::Layer;
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::sky::Sky;
+use crate::source_type::Source;
 use crate::style::Style;
 use crate::transition_options::TransitionOptions;
-use crate::{image, source};
 
 /// A change to a style, which [`Style::apply`] makes.
 #[expect(clippy::large_enum_variant, reason = "an edit is made and applied at once, not stored")]
@@ -87,7 +88,7 @@ pub enum Edit {
     /// removes the record.
     SetSourceImpl {
         id: String,
-        source: Option<Arc<dyn source::Impl>>,
+        source: Option<Source>,
     },
 }
 

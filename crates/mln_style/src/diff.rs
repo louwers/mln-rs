@@ -6,10 +6,11 @@ use std::sync::Arc;
 
 use mln_vec_map::VecMap;
 
+use crate::image;
 use crate::layer_list::LayerList;
 use crate::source_list::SourceList;
+use crate::source_type::Source;
 use crate::style::Style;
-use crate::{image, source};
 
 /// How a layer differs between two layer lists.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -123,32 +124,33 @@ impl LayerChanges {
 
 /// The items, by id, that differ between two id-sorted lists of shared
 /// values: sources or images.
-pub struct ItemChanges<T: ?Sized> {
+pub struct ItemChanges<V> {
     /// Only in the new list, or in both as another kind (a source of
     /// another type).
-    pub added: VecMap<String, Arc<T>>,
+    pub added: VecMap<String, V>,
     /// Only in the old list, or in both as another kind.
-    pub removed: VecMap<String, Arc<T>>,
+    pub removed: VecMap<String, V>,
     /// The new values of the items in both whose values differ.
-    pub changed: VecMap<String, Arc<T>>,
+    pub changed: VecMap<String, V>,
 }
 
-impl<T: ?Sized> Default for ItemChanges<T> {
+impl<V> Default for ItemChanges<V> {
     fn default() -> Self {
         ItemChanges { added: VecMap::new(), removed: VecMap::new(), changed: VecMap::new() }
     }
 }
 
-impl<T: ?Sized> ItemChanges<T> {
+impl<V: Clone> ItemChanges<V> {
     /// Merges `old` and `new`, both sorted by id with unique ids. An item
     /// whose id is in both but that `same_kind` tells apart is removed and
-    /// added.
+    /// added; one that `same` tells apart is changed.
     fn between(
-        old: &[Arc<T>],
-        new: &[Arc<T>],
-        id: impl Fn(&T) -> &str,
-        same_kind: impl Fn(&T, &T) -> bool,
-    ) -> ItemChanges<T> {
+        old: &[V],
+        new: &[V],
+        id: impl Fn(&V) -> &str,
+        same_kind: impl Fn(&V, &V) -> bool,
+        same: impl Fn(&V, &V) -> bool,
+    ) -> ItemChanges<V> {
         let (mut removed, mut added, mut changed) = (Vec::new(), Vec::new(), Vec::new());
         let (mut old_items, mut new_items) = (old.iter().peekable(), new.iter().peekable());
         loop {
@@ -166,17 +168,19 @@ impl<T: ?Sized> ItemChanges<T> {
                     if !same_kind(before, after) {
                         removed.push(before);
                         added.push(after);
-                    } else if !Arc::ptr_eq(before, after) {
+                    } else if !same(before, after) {
                         changed.push(after);
                     }
                 }
             }
         }
         // Each list is in id order, which the maps keep.
-        let map = |items: Vec<&Arc<T>>| items.into_iter().map(|item| (id(item).to_owned(), Arc::clone(item))).collect();
+        let map = |items: Vec<&V>| items.into_iter().map(|item| (id(item).to_owned(), item.clone())).collect();
         ItemChanges { added: map(added), removed: map(removed), changed: map(changed) }
     }
+}
 
+impl<V> ItemChanges<V> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.removed.is_empty() && self.changed.is_empty()
@@ -185,9 +189,9 @@ impl<T: ?Sized> ItemChanges<T> {
 
 /// The sources of `list` in id order.
 #[must_use]
-pub fn sources_by_id(list: &SourceList) -> Vec<Arc<dyn source::Impl>> {
+pub fn sources_by_id(list: &SourceList) -> Vec<Source> {
     let mut sources: Vec<_> = list.iter().cloned().collect();
-    sources.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+    sources.sort_unstable_by(|a, b| a.id().cmp(b.id()));
     sources
 }
 
@@ -202,8 +206,8 @@ pub fn sources_by_id(list: &SourceList) -> Vec<Arc<dyn source::Impl>> {
 pub struct StyleDiff {
     pub layers: LayerChanges,
     /// A source of another type with the same id is removed and added.
-    pub sources: ItemChanges<dyn source::Impl>,
-    pub images: ItemChanges<image::Impl>,
+    pub sources: ItemChanges<Source>,
+    pub images: ItemChanges<Arc<image::Impl>>,
 }
 
 impl StyleDiff {
@@ -220,8 +224,9 @@ impl StyleDiff {
             _ => ItemChanges::between(
                 &old.map(|old| sources_by_id(old.get_sources())).unwrap_or_default(),
                 &sources_by_id(new.get_sources()),
-                |source| &source.id,
-                |before, after| before.type_ == after.type_,
+                Source::id,
+                |before, after| before.info().name == after.info().name,
+                Source::ptr_eq,
             ),
         };
 
@@ -232,6 +237,7 @@ impl StyleDiff {
                 new.get_images(),
                 |image| &image.id,
                 |_, _| true,
+                Arc::ptr_eq,
             ),
         };
 
