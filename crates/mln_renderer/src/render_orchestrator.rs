@@ -656,12 +656,13 @@ impl RenderOrchestrator {
         }
 
         // Create render sources for newly added sources.
-        for (id, impl_) in &source_diff.added {
+        for (id, style_source) in &source_diff.added {
             if self.render_sources.contains_key(id) {
                 // `emplace` keeps an existing entry.
                 continue;
             }
-            let Some(mut render_source) = render_source::create(&self.registry, impl_, &mut self.tile_store) else {
+            let Some(mut render_source) = render_source::create(&self.registry, style_source, &mut self.tile_store)
+            else {
                 continue;
             };
             render_source.set_fast_pfor_enabled(update_parameters.fast_pfor_enabled);

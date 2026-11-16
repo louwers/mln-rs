@@ -57,13 +57,13 @@ impl RenderTiles {
 
 /// The data members of `RenderSource`.
 pub(crate) struct RenderSourceBase {
-    pub(crate) base_impl: Source,
+    pub(crate) style_source: Source,
     pub(crate) enabled: bool,
 }
 
 impl RenderSourceBase {
-    pub(crate) fn new(impl_: Source) -> Self {
-        RenderSourceBase { base_impl: impl_, enabled: false }
+    pub(crate) fn new(style_source: Source) -> Self {
+        RenderSourceBase { style_source, enabled: false }
     }
 }
 
@@ -75,7 +75,7 @@ pub(crate) trait RenderSource {
     fn update(
         &mut self,
         store: &mut TileStore,
-        impl_: Source,
+        style_source: Source,
         layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         needs_relayout: bool,

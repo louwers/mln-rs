@@ -421,19 +421,19 @@ pub(crate) struct RenderTileSource {
 }
 
 impl RenderTileSource {
-    /// The render source of `impl_`, whose tiles of `kind` go in `store`
+    /// The render source of `style_source`, whose tiles of `kind` go in `store`
     /// and get their data through `origin`. A tile of a `single_layer`
     /// source holds one source layer.
     pub(crate) fn new(
-        impl_: Source,
+        style_source: Source,
         kind: TileKind,
         single_layer: bool,
         origin: Box<dyn TileOrigin>,
         store: &mut TileStore,
     ) -> Self {
-        let key = store.add_source(impl_.id().to_owned(), kind, single_layer);
+        let key = store.add_source(style_source.id().to_owned(), kind, single_layer);
         RenderTileSource {
-            base: RenderSourceBase::new(impl_),
+            base: RenderSourceBase::new(style_source),
             key,
             origin,
             fast_pfor_enabled: false,
@@ -445,7 +445,7 @@ impl RenderTileSource {
     }
 
     pub(crate) fn create_render_item(&mut self) -> Box<dyn RenderItem> {
-        Box::new(TileSourceRenderItem::new(Rc::clone(&self.render_tiles), self.base.base_impl.id().to_owned()))
+        Box::new(TileSourceRenderItem::new(Rc::clone(&self.render_tiles), self.base.style_source.id().to_owned()))
     }
 }
 
@@ -461,19 +461,19 @@ impl RenderSource for RenderTileSource {
     fn update(
         &mut self,
         store: &mut TileStore,
-        base_impl: Source,
+        style_source: Source,
         layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,
     ) {
-        let previous = std::mem::replace(&mut self.base.base_impl, base_impl);
+        let previous = std::mem::replace(&mut self.base.style_source, style_source);
         self.base.enabled = needs_rendering;
         let Some((source, ctx)) = store.source_mut(self.key) else {
             return;
         };
         let origin_update = OriginUpdate { parameters, needs_relayout, fast_pfor_enabled: self.fast_pfor_enabled };
-        let Some(cover) = self.origin.update(&previous, &self.base.base_impl, source, ctx, &origin_update) else {
+        let Some(cover) = self.origin.update(&previous, &self.base.style_source, source, ctx, &origin_update) else {
             return;
         };
         let update = CoverUpdate {
@@ -481,7 +481,7 @@ impl RenderSource for RenderTileSource {
             needs_rendering,
             needs_relayout,
             parameters,
-            style_source: &self.base.base_impl,
+            style_source: &self.base.style_source,
             tile_size: cover.tile_size,
             zoom_range: cover.zoom_range,
             bounds: cover.bounds,

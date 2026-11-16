@@ -253,7 +253,7 @@ fn run_tile_case(
     );
 
     test.run_observed(&mut store, observer);
-    render_source.base().base_impl.get_type()
+    render_source.base().style_source.get_type()
 }
 
 fn tile_empty(kind: Tiled) {
@@ -1044,18 +1044,18 @@ fn set_max_parent_overscale_factor() {
     let mut common = *source.common();
     assert_eq!(None, common.get_max_overscale_factor_for_parent_tiles());
     common.set_max_overscale_factor_for_parent_tiles(Some(3));
-    let base_impl = crate::tests::ready(source.with_common(common));
+    let style_source = crate::tests::ready(source.with_common(common));
 
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&base_impl, &mut store);
+    let mut render_source = crate::tests::create_render_source(&style_source, &mut store);
     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
-    render_source.update(&mut store, base_impl.clone(), &layers, true, true, &parameters);
+    render_source.update(&mut store, style_source.clone(), &layers, true, true, &parameters);
 
     // Each tile that changes updates the source again.
     test.run_with(&mut store, |store, event| {
         if matches!(event, StoreEvent::Changed) {
-            render_source.update(store, base_impl.clone(), &layers, true, true, &parameters);
+            render_source.update(store, style_source.clone(), &layers, true, true, &parameters);
         }
     });
 

@@ -70,7 +70,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
         Some(response)
     });
 
-    let base_impl = crate::tests::ready(vector_source("source", None, tileset));
+    let style_source = crate::tests::ready(vector_source("source", None, tileset));
     // A loaded sprite with the icon "v" answers the symbol layer's request,
     // and missing icons stay missing.
     let mut store = crate::tests::pool_store(&run_loop, &thread_pool);
@@ -80,11 +80,11 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
         ImageImpl::new("v".to_owned(), icon, 1.0, false, Vec::new(), Vec::new(), None, None, None).unwrap(),
     ));
     store.images_mut().set_loaded(true);
-    let mut render_source = crate::tests::create_render_source(&base_impl, &mut store);
+    let mut render_source = crate::tests::create_render_source(&style_source, &mut store);
     let file_source: Arc<dyn FileSource> = file_source;
     render_source.update(
         &mut store,
-        base_impl,
+        style_source,
         layers,
         true,
         true,

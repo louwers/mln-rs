@@ -206,9 +206,9 @@ pub(crate) struct RenderImageSource {
 
 impl RenderImageSource {
     #[must_use]
-    pub(crate) fn new(impl_: Source) -> Self {
+    pub(crate) fn new(style_source: Source) -> Self {
         RenderImageSource {
-            base: RenderSourceBase::new(impl_),
+            base: RenderSourceBase::new(style_source),
             bucket: None,
             render_data: None,
             tile_ids: Vec::new(),
@@ -225,7 +225,7 @@ impl RenderImageSource {
     }
 
     fn data(&self) -> Option<&SourceData<ImageSourceType>> {
-        SourceData::recover(&self.base.base_impl)
+        SourceData::recover(&self.base.style_source)
     }
 }
 
@@ -241,7 +241,7 @@ impl RenderSource for RenderImageSource {
     fn update(
         &mut self,
         _store: &mut TileStore,
-        base_impl: Source,
+        style_source: Source,
         _layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         _needs_relayout: bool,
@@ -253,7 +253,7 @@ impl RenderSource for RenderImageSource {
         }
 
         let transform_state = parameters.transform_state;
-        self.base.base_impl = base_impl;
+        self.base.style_source = style_source;
 
         let Some(data) = self.data() else {
             self.base.enabled = false;
@@ -401,7 +401,7 @@ impl RenderSource for RenderImageSource {
     }
 
     fn dump_debug_logs(&self) {
-        Log::info(Event::General, format!("RenderImageSource::id: {}", self.base.base_impl.id()));
+        Log::info(Event::General, format!("RenderImageSource::id: {}", self.base.style_source.id()));
         Log::info(Event::General, format!("RenderImageSource::loaded: {}", if self.loaded() { "yes" } else { "no" }));
     }
 }
