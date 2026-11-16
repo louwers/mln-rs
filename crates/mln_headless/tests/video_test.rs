@@ -244,6 +244,43 @@ fn a_frame_of_odd_size_draws_in_place() {
     assert_quarters(&render(nv12_frame(Size::new(17, 15))), "odd NV12");
 }
 
+/// Hands each video a first GPU frame that no backend imports, and sends
+/// the quarters in memory the moment the renderer refuses it, which may be
+/// before the frame that refused it ends.
+#[cfg(not(target_os = "android"))]
+#[derive(Debug)]
+struct RefusedFirst;
+
+#[cfg(not(target_os = "android"))]
+impl VideoPlayers for RefusedFirst {
+    fn open(&self, request: OpenRequest) -> Result<Box<dyn VideoPlayer>, String> {
+        // Only Android's backends import hardware buffers, and only with a
+        // buffer.
+        let buffer = std::ptr::null_mut();
+        let pixels = FramePixels::Gpu(mln_gfx::video::GpuFrame::AndroidHardwareBuffer {
+            buffer,
+            color: FULL_BT601,
+            lease: None,
+        });
+        request.frames.push(VideoFrame { size: Size::new(16, 16), pixels, time: None });
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !request.frames.gpu_frames_refused() && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            request.frames.push(rgba_frame(Size::new(16, 16)));
+        });
+        Ok(Box::new(Still))
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+#[test]
+fn a_still_image_waits_for_the_frame_that_replaces_a_refused_first_one() {
+    let image = VideoMap::new(Arc::new(RefusedFirst), None).render();
+    assert_quarters(&image, "the frame in memory after a refused first frame");
+}
+
 /// Frames in D3D11 textures that the frame shares through an NT handle, as
 /// a Media Foundation player sends them, drawn on D3D12.
 #[cfg(windows)]
