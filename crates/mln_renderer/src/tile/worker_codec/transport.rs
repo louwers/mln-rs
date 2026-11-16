@@ -22,7 +22,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{LocalObject, SchedulerPtr, Thread};
+use mln_actor::{LocalObject, RunLoopHandle, Thread};
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
@@ -59,7 +59,7 @@ pub trait WorkerInstances {
 /// order they were sent.
 #[derive(Clone)]
 pub struct ReplySink {
-    scheduler: SchedulerPtr,
+    scheduler: RunLoopHandle,
     workers: Arc<LocalObject<Weak<RemoteWorkers>>>,
 }
 
@@ -76,11 +76,11 @@ impl ReplySink {
 
     fn deliver(&self, f: impl FnOnce(&RemoteWorkers) + Send + 'static) {
         let workers = Arc::clone(&self.workers);
-        self.scheduler.schedule(Box::new(move || {
+        self.scheduler.invoke(move || {
             if let Some(workers) = workers.get().and_then(|weak| weak.upgrade()) {
                 f(&workers);
             }
-        }));
+        });
     }
 }
 
@@ -127,13 +127,13 @@ impl RemoteWorkers {
     /// workers. The jobs name `registry`'s registrations, so each instance's
     /// host needs a registry filled by the same calls.
     pub fn new(
-        scheduler: &SchedulerPtr,
+        scheduler: &RunLoopHandle,
         registry: Arc<Registry>,
         instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>,
     ) -> Rc<Self> {
         Rc::new_cyclic(|self_weak: &Weak<RemoteWorkers>| {
             let workers = Arc::new(LocalObject::new(Weak::clone(self_weak)));
-            let instances = instances(ReplySink { scheduler: Arc::clone(scheduler), workers });
+            let instances = instances(ReplySink { scheduler: scheduler.clone(), workers });
             let count = instances.count();
             assert!(count > 0, "RemoteWorkers need a worker instance");
             RemoteWorkers {

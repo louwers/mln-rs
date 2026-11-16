@@ -8,6 +8,7 @@ use mln_storage::Data;
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
+use mln_util::pool::Pool;
 use mln_util::range::Range;
 
 pub use super::custom::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
@@ -96,7 +97,7 @@ impl CustomVectorSourceHandle {
 
 /// The custom vector source `id`, whose tile functions run on `pool`.
 #[must_use]
-pub fn create(id: &str, options: Options, pool: mln_actor::SchedulerPtr) -> Source {
+pub fn create(id: &str, options: Options, pool: &Pool) -> Source {
     let provider = CustomProvider::new(options.fetch_tile_function, options.cancel_tile_function, pool);
     let options = CustomVectorSourceOptions { zoom_range: options.zoom_range, provider };
     Source::new(id, SourceData::<CustomVectorSourceType>::new(options))

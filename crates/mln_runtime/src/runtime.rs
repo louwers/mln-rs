@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::thread::ThreadId;
 
-use mln_actor::{AsyncTask, RunLoop, SchedulerPtr};
+use mln_actor::{AsyncTask, RunLoop};
 use mln_renderer::Registry;
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
@@ -19,6 +19,7 @@ use mln_storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
 use mln_storage_offline::RegionDatabase;
 use mln_text::GlyphCache;
 use mln_util::error::Error;
+use mln_util::pool::Pool;
 use mln_util::thread::Joined;
 use parking_lot::Mutex;
 
@@ -96,6 +97,9 @@ pub(crate) struct RuntimeShared {
     /// declares font faces.
     pub(crate) font_face_engine: Arc<dyn FontFaceEngine>,
     pub(crate) registry: Arc<Registry>,
+    /// Where the runtime's background work runs: its maps', and their
+    /// render sessions'.
+    pub(crate) pool: Pool,
     /// The runtime's thread, which the drop waits for after the shutdown
     /// unless a release or disposal detached it, except in the browser,
     /// where the thread is the host's.
@@ -206,6 +210,24 @@ fn font_face_engine() -> Arc<dyn FontFaceEngine> {
     Arc::new(mln_web_host::shaper::ShaperModuleEngine)
 }
 
+/// The worker threads of a runtime's pool.
+#[cfg(not(target_family = "wasm"))]
+const POOL_THREADS: usize = 4;
+
+/// The pool of a new runtime.
+#[cfg(not(target_family = "wasm"))]
+fn runtime_pool() -> Result<Pool, Error> {
+    Pool::new(POOL_THREADS).map_err(|error| Error::native(format!("can't start the runtime's pool: {error}")))
+}
+
+/// The pool of a new runtime: in the browser, one without threads, which
+/// the instance's pump runs.
+#[cfg(target_family = "wasm")]
+#[expect(clippy::unnecessary_wraps, reason = "the threads of other builds can fail to start")]
+fn runtime_pool() -> Result<Pool, Error> {
+    Ok(Pool::local())
+}
+
 fn released() -> Error {
     Error::invalid_state("the runtime was released")
 }
@@ -217,7 +239,7 @@ pub(crate) type CoreQueue = Queue<Option<RuntimeCore>>;
 /// Where a runtime's background work runs, and where its results come back.
 #[derive(Clone)]
 pub(crate) struct Background {
-    pub(crate) pool: SchedulerPtr,
+    pub(crate) pool: Pool,
     pub(crate) queue: CoreQueue,
 }
 
@@ -310,10 +332,9 @@ pub(crate) struct RuntimeCore {
     pub(crate) queue: CoreQueue,
     pub(crate) registry: Arc<Registry>,
     /// The runtime's thread's loop, which its maps run their own work on.
-    /// Its pool, the process's, which a runtime shares with the others and,
-    /// in the browser, the instance's cooperative scheduler, is taken at its
-    /// first use.
     pub(crate) run_loop: RunLoop,
+    /// [`RuntimeShared::pool`].
+    pub(crate) pool: Pool,
     /// [`RuntimeShared::queued`].
     queued: Arc<AtomicUsize>,
     /// The tasks of the burst in progress that haven't finished.
@@ -332,6 +353,7 @@ impl RuntimeCore {
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
         run_loop: &RunLoop,
+        pool: Pool,
     ) -> Self {
         RuntimeCore {
             maps: BTreeMap::new(),
@@ -346,6 +368,7 @@ impl RuntimeCore {
             queue,
             registry,
             run_loop: run_loop.clone(),
+            pool,
             queued,
             burst_left: 0,
             holding: false,
@@ -389,10 +412,9 @@ impl RuntimeCore {
     /// The loader that the runtime's maps share.
     pub(crate) fn loader(&self) -> &Arc<dyn FileSource> {
         self.loader.get_or_init(|| {
-            let builder = Loader::builder()
+            let builder = Loader::builder(&self.pool)
                 .asset_path(&self.resource_options.asset_path)
-                .network(Arc::clone(self.network()))
-                .pool(self.run_loop.pool());
+                .network(Arc::clone(self.network()));
             #[cfg(not(target_family = "wasm"))]
             let builder = builder.database(Arc::<RegionDatabase>::clone(self.database()));
             Arc::new(builder.build())
@@ -413,7 +435,7 @@ impl RuntimeCore {
 
     /// Where the runtime's background work runs, and its results come back.
     pub(crate) fn background(&self) -> Background {
-        Background { pool: self.run_loop.pool(), queue: self.queue.clone() }
+        Background { pool: self.pool.clone(), queue: self.queue.clone() }
     }
 
     /// Sends `events` to the event handler.
@@ -511,8 +533,9 @@ impl Runtime {
         let resource_options = resource_options(options)?;
         let queued = Arc::new(AtomicUsize::new(0));
         let queue = CoreQueue::default();
+        let pool = runtime_pool()?;
         let (thread, thread_end) =
-            Self::start(resource_options, queue.clone(), Arc::clone(&queued), Arc::clone(&registry))?;
+            Self::start(resource_options, queue.clone(), Arc::clone(&queued), Arc::clone(&registry), pool.clone())?;
         Ok(Runtime {
             shared: Arc::new(RuntimeShared {
                 queue,
@@ -523,6 +546,7 @@ impl Runtime {
                 glyph_cache: Arc::default(),
                 font_face_engine: font_face_engine(),
                 registry,
+                pool,
                 thread_end,
             }),
         })
@@ -536,10 +560,11 @@ impl Runtime {
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
+        pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         let thread = mln_util::thread::spawn("Runtime", move || {
             let run_loop = RunLoop::new();
-            let mut core = Some(RuntimeCore::new(resource_options, queue.clone(), queued, registry, &run_loop));
+            let mut core = Some(RuntimeCore::new(resource_options, queue.clone(), queued, registry, &run_loop, pool));
             queue.run_until_stopped(&run_loop, &mut core);
             drop(core);
         })
@@ -558,11 +583,13 @@ impl Runtime {
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
+        pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         crate::web::install();
         let run_loop = RunLoop::new();
-        let core = RuntimeCore::new(resource_options, queue.clone(), queued, registry, &run_loop);
-        crate::web::drive(&run_loop, queue, Some(core));
+        let core = RuntimeCore::new(resource_options, queue.clone(), queued, registry, &run_loop, pool);
+        let pool = core.pool.clone();
+        crate::web::drive(&run_loop, &pool, queue, Some(core));
         Ok((std::thread::current().id(), None))
     }
 

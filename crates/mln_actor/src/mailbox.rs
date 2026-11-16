@@ -16,11 +16,10 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::{Arc, Weak};
 
-use mln_util::identity::SimpleIdentity;
 use parking_lot::Mutex;
 
 use crate::local_object;
-use crate::scheduler::{Scheduler, WeakScheduler};
+use crate::run_loop::{RunLoopHandle, WeakRunLoopHandle};
 
 /// A call on the mailbox's target object.
 pub(crate) type Message = Box<dyn FnOnce(&dyn Any) + Send + 'static>;
@@ -28,8 +27,7 @@ pub(crate) type Message = Box<dyn FnOnce(&dyn Any) + Send + 'static>;
 struct State {
     queue: VecDeque<Message>,
     closed: bool,
-    scheduler: Option<WeakScheduler>,
-    scheduler_tag: Option<SimpleIdentity>,
+    scheduler: Option<WeakRunLoopHandle>,
 }
 
 /// `Mailbox`.
@@ -45,32 +43,32 @@ impl Mailbox {
     #[must_use]
     pub fn new() -> Arc<Mailbox> {
         Arc::new_cyclic(|weak_self| Mailbox {
-            state: Mutex::new(State { queue: VecDeque::new(), closed: false, scheduler: None, scheduler_tag: None }),
+            state: Mutex::new(State { queue: VecDeque::new(), closed: false, scheduler: None }),
             id: local_object::next_id(),
             weak_self: Weak::clone(weak_self),
         })
     }
 
     /// `Mailbox(Scheduler&)` for `object`, which lives on this thread: the
-    /// scheduler must run its tasks on this thread too.
-    pub fn with_target(scheduler: &Arc<dyn Scheduler + Send + Sync>, object: Rc<dyn Any>) -> Arc<Mailbox> {
+    /// loop must run on this thread too.
+    pub fn with_target(scheduler: &RunLoopHandle, object: Rc<dyn Any>) -> Arc<Mailbox> {
         let mailbox = Mailbox::new();
         mailbox.open(scheduler, object);
         mailbox
     }
 
     /// `open(Scheduler&)`, binding `object` (on the calling thread) as the
-    /// target of the messages.
-    pub fn open(&self, scheduler: &Arc<dyn Scheduler + Send + Sync>, object: Rc<dyn Any>) {
+    /// target of the messages, which run on the loop of `scheduler`.
+    pub fn open(&self, scheduler: &RunLoopHandle, object: Rc<dyn Any>) {
         let mut state = self.state.lock();
         assert!(state.scheduler.is_none());
         if state.closed {
             return;
         }
         local_object::insert(self.id, object);
-        state.scheduler = Some(Arc::downgrade(scheduler));
+        state.scheduler = Some(scheduler.downgrade());
         if !state.queue.is_empty() {
-            self.schedule_to_receive(&state, None);
+            self.schedule_to_receive(&state);
         }
     }
 
@@ -96,8 +94,7 @@ impl Mailbox {
         let was_empty = state.queue.is_empty();
         state.queue.push_back(message);
         if was_empty {
-            let tag = state.scheduler_tag;
-            self.schedule_to_receive(&state, tag);
+            self.schedule_to_receive(&state);
         }
     }
 
@@ -125,24 +122,20 @@ impl Mailbox {
         if !was_empty {
             let state = self.state.lock();
             if !state.closed {
-                self.schedule_to_receive(&state, None);
+                self.schedule_to_receive(&state);
             }
         }
     }
 
-    fn schedule_to_receive(&self, state: &State, tag: Option<SimpleIdentity>) {
-        let Some(scheduler) = state.scheduler.as_ref().and_then(Weak::upgrade) else {
+    fn schedule_to_receive(&self, state: &State) {
+        let Some(scheduler) = state.scheduler.as_ref().and_then(WeakRunLoopHandle::upgrade) else {
             return;
         };
         let mailbox = Weak::clone(&self.weak_self);
-        let set_to_receive = Box::new(move || {
+        scheduler.invoke(move || {
             if let Some(locked) = mailbox.upgrade() {
                 locked.receive();
             }
         });
-        match tag {
-            Some(tag) => scheduler.schedule_tagged(tag, set_to_receive),
-            None => scheduler.schedule(set_to_receive),
-        }
     }
 }

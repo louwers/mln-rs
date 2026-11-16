@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{RunLoop, TaggedScheduler, scheduler};
+use mln_actor::RunLoop;
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -16,8 +16,8 @@ use mln_style::sources::vector_source;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
 use mln_util::geo::LatLng;
-use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::TaskGroup;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
@@ -57,7 +57,7 @@ fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
 fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..Default::default() };
     let run_loop = RunLoop::new();
-    let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+    let thread_pool = TaskGroup::new(&crate::tests::pool());
     let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(0.0), ..Default::default() });
@@ -129,7 +129,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     };
     drop(render_source);
     drop(store);
-    thread_pool.wait_for_empty();
+    thread_pool.wait();
     outcome
 }
 

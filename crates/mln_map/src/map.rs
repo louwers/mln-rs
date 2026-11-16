@@ -25,6 +25,7 @@ use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode
 use mln_util::geometry::for_each_point;
 use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
@@ -110,44 +111,49 @@ pub struct Map {
     file_source: Option<Arc<dyn FileSource>>,
     /// The loop that the map's responses and background work answer on.
     run_loop: RunLoop,
+    /// Where the map's background work runs.
+    pool: Pool,
 }
 
 impl Map {
     /// A map with a [`Loader`] of its own for the default
     /// `ResourceOptions`, on `run_loop`, which runs on this thread: the map's
     /// responses and background work answer there, and its background work
-    /// runs on the loop's pool.
+    /// runs on `pool`.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
-    pub fn new(map_options: MapOptions, run_loop: &RunLoop) -> Result<Map, Error> {
-        Self::with_resource_options(map_options, &ResourceOptions::default(), run_loop)
+    pub fn new(map_options: MapOptions, run_loop: &RunLoop, pool: &Pool) -> Result<Map, Error> {
+        Self::with_resource_options(map_options, &ResourceOptions::default(), run_loop, pool)
     }
 
     /// A map with a [`Loader`] of its own for `resource_options`, on
-    /// `run_loop`.
+    /// `run_loop` and `pool`.
     pub fn with_resource_options(
         map_options: MapOptions,
         resource_options: &ResourceOptions,
         run_loop: &RunLoop,
+        pool: &Pool,
     ) -> Result<Map, Error> {
-        let loader: Arc<dyn FileSource> = Arc::new(Loader::new(resource_options));
-        Self::with_registry(loader, map_options, Arc::clone(Registry::with_builtins().style()), run_loop)
+        let loader: Arc<dyn FileSource> = Arc::new(Loader::new(resource_options, pool));
+        Self::with_registry(loader, map_options, Arc::clone(Registry::with_builtins().style()), run_loop, pool)
     }
 
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
     // map_adapter.hpp): a map over a given file source.
-    /// A map whose resources come from `file_source`, on `run_loop`.
+    /// A map whose resources come from `file_source`, on `run_loop` and
+    /// `pool`.
     pub fn with_file_source(
         file_source: Arc<dyn FileSource>,
         map_options: MapOptions,
         run_loop: &RunLoop,
+        pool: &Pool,
     ) -> Result<Map, Error> {
-        Self::with_registry(file_source, map_options, Arc::clone(Registry::with_builtins().style()), run_loop)
+        Self::with_registry(file_source, map_options, Arc::clone(Registry::with_builtins().style()), run_loop, pool)
     }
 
     /// A map whose resources come from `file_source` and whose style parses
-    /// against `registry`, on `run_loop`. The other constructors use the
-    /// built-in registrations.
+    /// against `registry`, on `run_loop` and `pool`. The other constructors
+    /// use the built-in registrations.
     ///
     /// The renderer that draws the map must be given a registry filled by
     /// the same calls as `registry` ([`mln_renderer::Registry::style`]): it
@@ -157,12 +163,13 @@ impl Map {
         map_options: MapOptions,
         registry: Arc<StyleRegistry>,
         run_loop: &RunLoop,
+        pool: &Pool,
     ) -> Result<Map, Error> {
         let events = EventQueue::new();
         let renderer_events = RendererEvents::new();
         let pixel_ratio = map_options.pixel_ratio;
         let style = Arc::new(Style::new(registry));
-        let loader = StyleLoader::new(Some(Arc::clone(&file_source)), run_loop, pixel_ratio);
+        let loader = StyleLoader::new(Some(Arc::clone(&file_source)), run_loop, pool, pixel_ratio);
         let mut transform = Transform::new(map_options.constrain_mode, map_options.viewport_mode);
         transform.set_north_orientation(map_options.north_orientation);
         let mut map = Map {
@@ -200,6 +207,7 @@ impl Map {
             command_ends: Vec::new(),
             file_source: Some(file_source),
             run_loop: run_loop.clone(),
+            pool: pool.clone(),
         };
         map.share_projection_with_transform();
         map.transform.resize(map_options.size)?;
@@ -210,6 +218,12 @@ impl Map {
     #[must_use]
     pub fn run_loop(&self) -> &RunLoop {
         &self.run_loop
+    }
+
+    /// Where the map's background work runs.
+    #[must_use]
+    pub fn pool(&self) -> &Pool {
+        &self.pool
     }
 
     // MARK: - Renderer

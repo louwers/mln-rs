@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use mln_actor::TaggedScheduler;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log};
+use mln_util::pool::TaskGroup;
 
 use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::{DataKey, DiscoveryMemo, JobId, JobResult, JobTimes, Reply, Run, run_job};
@@ -67,14 +67,14 @@ const MEMO_JOBS: usize = 64;
 
 /// The renderer's thread pool, as one lane with one queue.
 pub(crate) struct PoolWorkers {
-    pool: TaggedScheduler,
+    pool: TaskGroup,
     memo: Arc<DiscoveryMemo>,
     capacity: usize,
 }
 
 impl PoolWorkers {
     /// Workers on `pool` that take `capacity` jobs at once.
-    pub(crate) fn new(pool: TaggedScheduler, capacity: usize) -> Self {
+    pub(crate) fn new(pool: TaskGroup, capacity: usize) -> Self {
         // Enough for the labelled tiles of a view that wait for glyphs.
         let memo = Arc::new(DiscoveryMemo::new(MEMO_JOBS));
         PoolWorkers { pool, memo, capacity }
@@ -93,7 +93,7 @@ impl TileWorkers for PoolWorkers {
     fn submit(&mut self, lane: Lane, run: Run, inbox: &InboxSender) {
         let memo = Arc::clone(&self.memo);
         let inbox = inbox.clone();
-        self.pool.schedule(Box::new(move || {
+        self.pool.spawn(move || {
             let done = move |Reply { id, result }, times| {
                 inbox.send(TileEvent::Reply { lane, id, body: ReplyBody::Result(result), times });
             };
@@ -102,7 +102,7 @@ impl TileWorkers for PoolWorkers {
                 return done(Reply { id: run.id, result }, JobTimes::default());
             }
             run_job(run, None, Some(&memo), done);
-        }));
+        });
     }
 }
 

@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop, TaggedScheduler};
+use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop};
 use mln_storage::{FileSource, Request, Resource, Response};
 use mln_text::glyph::{
     FontData, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, HBShapeRequests,
@@ -43,6 +43,7 @@ use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
+use mln_util::pool::TaskGroup;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
 use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
@@ -160,7 +161,7 @@ pub(crate) struct GlyphStore {
     local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
     glyph_cache: Arc<GlyphCache>,
     /// Where glyph PBFs are parsed.
-    pool: TaggedScheduler,
+    pool: TaskGroup,
     /// Asks the renderer for an update, for the engine's report.
     wake: Rc<dyn Fn()>,
     /// How many requests failed.
@@ -194,7 +195,7 @@ impl GlyphStore {
     pub(crate) fn new(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         glyph_cache: Arc<GlyphCache>,
-        pool: TaggedScheduler,
+        pool: TaskGroup,
         engine: Arc<dyn FontFaceEngine>,
         run_loop: RunLoop,
         wake: Rc<dyn Fn()>,
@@ -418,10 +419,10 @@ impl GlyphStore {
             let inbox = inbox.clone();
             match (font_data(response), &pool) {
                 (Ok(Some(data)), Some(pool)) => {
-                    pool.schedule(Box::new(move || {
+                    pool.spawn(move || {
                         let result = parse_glyphs(range, &data);
                         inbox.send(TileEvent::Glyphs { font_stack, range, id, result });
-                    }));
+                    });
                 }
                 (result, _) => {
                     let result = result.map(|data| data.map(GlyphData::Font));

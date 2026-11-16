@@ -8,7 +8,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::TaggedScheduler;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::image::{ImagePosition, ImagePositions, ImageType};
@@ -20,6 +19,7 @@ use mln_util::feature::Feature;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
+use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::{Bucket, BucketPtr, LayerFeatureStates};
@@ -448,7 +448,7 @@ impl Contents {
 /// buckets and feature index on `pool`, the renderer's workers, since a view
 /// that drops many tiles would otherwise spend frames freeing them; the
 /// atlas leases drop here, on the render thread.
-pub(crate) fn release(contents: Rc<Contents>, pool: &TaggedScheduler) {
+pub(crate) fn release(contents: Rc<Contents>, pool: &TaskGroup) {
     if let Some(Contents::Geometry(GeometryContents {
         result: LayoutResult { layer_render_data, feature_index },
         answer,
@@ -464,11 +464,11 @@ pub(crate) fn release(contents: Rc<Contents>, pool: &TaggedScheduler) {
 /// them (`release`).
 pub(crate) struct TileRenderData {
     contents: Option<Rc<Contents>>,
-    pool: TaggedScheduler,
+    pool: TaskGroup,
 }
 
 impl TileRenderData {
-    pub(crate) fn new(contents: Rc<Contents>, pool: TaggedScheduler) -> Self {
+    pub(crate) fn new(contents: Rc<Contents>, pool: TaskGroup) -> Self {
         TileRenderData { contents: Some(contents), pool }
     }
 

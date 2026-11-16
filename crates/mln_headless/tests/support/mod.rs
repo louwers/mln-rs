@@ -37,6 +37,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log};
+use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
 // MARK: - Fixtures
@@ -520,6 +521,7 @@ pub(crate) struct MapTest<FS: FileSource + 'static = StubFileSource> {
     pub observer: Rc<StubMapObserver>,
     pub file_source: Arc<FS>,
     pub run_loop: RunLoop,
+    pub pool: Pool,
 }
 
 impl MapTest<StubFileSource> {
@@ -549,14 +551,16 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     /// .withSize(frontend.getSize()).withPixelRatio(pixelRatio))`.
     pub(crate) fn create(run_loop: RunLoop, file_source: Arc<FS>, pixel_ratio: f32, mode: MapMode) -> Self {
         let observer = Rc::new(StubMapObserver::default());
-        let mut frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio, &run_loop).expect("a headless frontend");
+        let pool = Pool::new(4).unwrap();
+        let mut frontend =
+            HeadlessFrontend::with_pixel_ratio(pixel_ratio, &run_loop, &pool).expect("a headless frontend");
         let options = MapOptions { map_mode: mode, size: frontend.size(), pixel_ratio, ..Default::default() };
-        let map = Map::with_file_source(Arc::<FS>::clone(&file_source), options, &run_loop).unwrap();
+        let map = Map::with_file_source(Arc::<FS>::clone(&file_source), options, &run_loop, &pool).unwrap();
         frontend.attach(&map);
         let map = Rc::new(RefCell::new(map));
         let frontend = Rc::new(RefCell::new(frontend));
         let events = observer.observe(&map, Some(&frontend));
-        MapTest { events, map, frontend, observer, file_source, run_loop }
+        MapTest { events, map, frontend, observer, file_source, run_loop, pool }
     }
 
     /// `test.frontend`, which draws each update of the map from the run

@@ -20,8 +20,13 @@ use crate::{
 };
 
 fn map(options: MapOptions, run_loop: &RunLoop) -> Map {
-    Map::with_file_source(Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)), options, run_loop)
-        .expect("map")
+    Map::with_file_source(
+        Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)),
+        options,
+        run_loop,
+        &crate::tests::pool(),
+    )
+    .expect("map")
 }
 
 fn ll(lat: f64, lon: f64) -> LatLng {

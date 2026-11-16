@@ -8,6 +8,7 @@ use mln_storage::{
     Responder, Response,
 };
 use mln_util::logging::{Event, Log};
+use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
 static REQUEST_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -154,7 +155,7 @@ impl FileSource for ProxyFileSource {
 /// A `ProxyFileSource` over a loader for `resource_options`, whose cache
 /// database is read-only while offline (`TestRunner::registerProxyFileSource()`).
 #[must_use]
-pub fn proxy_loader(resource_options: &ResourceOptions) -> Arc<dyn FileSource> {
+pub fn proxy_loader(resource_options: &ResourceOptions, pool: &Pool) -> Arc<dyn FileSource> {
     let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new());
     let cache_path = &resource_options.cache_path;
     let database = if OFFLINE.load(Ordering::SeqCst) {
@@ -162,7 +163,7 @@ pub fn proxy_loader(resource_options: &ResourceOptions) -> Arc<dyn FileSource> {
     } else {
         DatabaseFileSource::new(cache_path, Some(Arc::clone(&network)))
     };
-    let loader = Loader::builder()
+    let loader = Loader::builder(pool)
         .asset_path(&resource_options.asset_path)
         .network(network)
         .database(Arc::new(database))

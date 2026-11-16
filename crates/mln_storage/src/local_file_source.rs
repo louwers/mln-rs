@@ -1,5 +1,5 @@
-use mln_actor::SchedulerPtr;
 use mln_util::constants::FILE_PROTOCOL;
+use mln_util::pool::Pool;
 
 use crate::file_source::FileSource;
 use crate::local_file_request::local_file_response;
@@ -48,13 +48,13 @@ fn file_response(resource: &Resource) -> Response {
 /// Android, the files under `mln_storage::android::APP_ASSETS` are the app's
 /// assets.
 pub(crate) struct LocalFileSource {
-    pool: SchedulerPtr,
+    pool: Pool,
 }
 
 impl LocalFileSource {
     /// Reads files on `pool`.
     #[must_use]
-    pub(crate) fn new(pool: SchedulerPtr) -> Self {
+    pub(crate) fn new(pool: Pool) -> Self {
         LocalFileSource { pool }
     }
 }
@@ -62,11 +62,11 @@ impl LocalFileSource {
 impl FileSource for LocalFileSource {
     fn load(&self, resource: &Resource, responder: Responder) {
         let resource = resource.clone();
-        self.pool.schedule(Box::new(move || {
+        self.pool.spawn(move || {
             if !responder.is_cancelled() {
                 responder.send(file_response(&resource));
             }
-        }));
+        });
     }
 
     fn can_request(&self, resource: &Resource) -> bool {

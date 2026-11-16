@@ -1,10 +1,10 @@
 //! The browser build: everything of a runtime on the one thread of its wasm
 //! instance, as examples/web runs a map.
 //!
-//! The instance has no other threads, so a runtime's loop and each render
-//! session's loop run on the thread that made them, in the slices of the
-//! instance's pump (`mln_web_host::pump`), which the loops and the
-//! cooperative scheduler wake. Nothing waits: a command runs in a later
+//! The instance has no other threads, so a runtime's loop and pool and each
+//! render session's loop run on the thread that made them, in the slices of
+//! the instance's pump (`mln_web_host::pump`), which the loops, the pool and
+//! the cooperative scheduler wake. Nothing waits: a command runs in a later
 //! slice, never inside the call that sent it. Each session's renderer runs
 //! its tiles' jobs in Web Workers of the instance's own ([`tile_workers`]),
 //! and shapes font faces with the shaper module
@@ -14,11 +14,12 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::RunLoop;
+use mln_actor::{RunLoop, RunLoopHandle};
 use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::RemoteWorkers;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
+use mln_util::pool::Pool;
 use mln_web_host::{pump, tile_workers};
 
 use crate::render::{SessionId, SessionQueue};
@@ -33,16 +34,19 @@ pub(crate) fn install() {
 
 /// Runs a runtime's `queue` with its `core` in the pump's slices until the
 /// queue stops, and with it the runtime's loop, `run_loop`, which the
-/// runtime's maps run their own work on.
-pub(crate) fn drive(run_loop: &RunLoop, queue: CoreQueue, mut core: Option<RuntimeCore>) {
+/// runtime's maps run their own work on, and its `pool`'s tasks.
+pub(crate) fn drive(run_loop: &RunLoop, pool: &Pool, queue: CoreQueue, mut core: Option<RuntimeCore>) {
     let run_loop = run_loop.clone();
     run_loop.set_waker(Some(pump::waker()));
     queue.set_waker(Some(pump::waker()));
+    pool.set_waker(Some(pump::waker()));
+    let mut tasks = Some(pump::add_pool(pool.clone()));
     pump::add(move || {
         run_loop.run_once();
         queue.run_once(&mut core);
         if queue.is_stopped() {
             drop(core.take());
+            drop(tasks.take());
         }
         !queue.is_stopped()
     })
@@ -99,10 +103,9 @@ pub(crate) fn run_session_now(id: SessionId) {
 
 /// Tile workers for a renderer on `scheduler`'s loop, in the instance's tile
 /// worker Web Workers, whose jobs name `registry`'s registrations, or `None`
-/// where none start, which leaves the tiles' jobs on the cooperative
-/// scheduler, in the pump's slices. A Web Worker that panics is replaced by
-/// a new one.
-pub(crate) fn tile_workers(scheduler: &mln_actor::SchedulerPtr, registry: &Arc<Registry>) -> Option<Rc<RemoteWorkers>> {
+/// where none start, which leaves the tiles' jobs on the runtime's pool, in
+/// the pump's slices. A Web Worker that panics is replaced by a new one.
+pub(crate) fn tile_workers(scheduler: &RunLoopHandle, registry: &Arc<Registry>) -> Option<Rc<RemoteWorkers>> {
     let ports = match tile_workers::connect() {
         Ok(ports) => ports,
         Err(error) => {

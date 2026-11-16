@@ -22,6 +22,7 @@ use mln_storage::{FileSource, Kind, Resource, Response};
 use mln_storage_offline::{Downloads, OfflineDownload, Post};
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
+use mln_util::pool::Pool;
 
 fn cpp_path(relative: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
@@ -53,6 +54,7 @@ impl<F: Fn(OfflineRegionStatus)> OfflineRegionObserver for StatusObserver<F> {
 fn resource_offline_usage_unset() {
     // `OfflineTest test{filename_test_fs}`.
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
     let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
     // A database of this run's own, which goes when the test ends.
     let dir = tempfile::tempdir().unwrap();
@@ -164,11 +166,12 @@ fn resource_offline_usage_unset() {
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
     let mut map = Map::with_file_source(
         stubfile_source,
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
         &run_loop,
+        &pool,
     )
     .unwrap();
     frontend.attach(&map);

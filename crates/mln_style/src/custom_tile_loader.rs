@@ -7,12 +7,12 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Weak};
 
-use mln_actor::SchedulerPtr;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 use mln_util::hash::HashMap;
+use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
 /// Called with the canonical ID of a tile that the map needs, or no longer
@@ -259,7 +259,7 @@ pub struct CustomProvider<D: Clone + Send + 'static> {
     fetch_tile_function: Option<TileFunction>,
     cancel_tile_function: Option<TileFunction>,
     state: Mutex<State<D>>,
-    pool: SchedulerPtr,
+    pool: Pool,
     this: Weak<Self>,
 }
 
@@ -269,13 +269,13 @@ impl<D: Clone + Send + 'static> CustomProvider<D> {
     pub fn new(
         fetch_tile_function: Option<TileFunction>,
         cancel_tile_function: Option<TileFunction>,
-        pool: SchedulerPtr,
+        pool: &Pool,
     ) -> Arc<Self> {
         Arc::new_cyclic(|this| CustomProvider {
             fetch_tile_function,
             cancel_tile_function,
             state: Mutex::new(State { loader: CustomTileLoader::new(), queue: VecDeque::new(), draining: false }),
-            pool,
+            pool: pool.clone(),
             this: Weak::clone(this),
         })
     }
@@ -368,11 +368,11 @@ impl<D: Clone + Send + 'static> CustomProvider<D> {
         };
         if start {
             let this = Weak::clone(&self.this);
-            self.pool.schedule(Box::new(move || {
+            self.pool.spawn(move || {
                 if let Some(provider) = this.upgrade() {
                     provider.drain();
                 }
-            }));
+            });
         }
     }
 
@@ -415,7 +415,7 @@ mod tests {
     // and a fetch that answers from inside itself doesn't deadlock.
     #[test]
     fn host_calls_run_off_the_calling_thread_in_order_and_may_reenter() {
-        let pool = mln_actor::scheduler::get_background();
+        let pool = Pool::new(4).unwrap();
         let fetches: Arc<Mutex<Vec<(ThreadId, CanonicalTileID)>>> = Arc::default();
         let provider_cell: Arc<OnceLock<Weak<CustomProvider<u32>>>> = Arc::default();
         let fetch: TileFunction = {
@@ -427,7 +427,7 @@ mod tests {
                 }
             })
         };
-        let provider = CustomProvider::new(Some(fetch), None, Arc::clone(&pool));
+        let provider = CustomProvider::new(Some(fetch), None, &pool);
         let _ = provider_cell.set(Arc::downgrade(&provider));
 
         let received: Arc<Mutex<Vec<u32>>> = Arc::default();
@@ -436,7 +436,12 @@ mod tests {
             let id = OverscaledTileID::new(3, 0, *tile);
             provider.fetch_tile(id, key as SubscriberKey, Box::new(Recorder(Arc::clone(&received))));
         }
-        pool.wait_for_empty();
+        // Each fetch answers before the next, so the last answer comes last.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while received.lock().len() < tiles.len() {
+            assert!(std::time::Instant::now() < deadline, "the host's answers didn't arrive");
+            std::thread::yield_now();
+        }
 
         let fetches = fetches.lock();
         assert_eq!(tiles, fetches.iter().map(|(_, tile)| *tile).collect::<Vec<_>>());

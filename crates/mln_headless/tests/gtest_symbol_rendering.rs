@@ -21,6 +21,7 @@ use mln_style::layer::Layer;
 use mln_style_types::VisibilityType;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 use support::*;
 
@@ -109,7 +110,9 @@ impl SymbolRenderingTest {
 
     fn with_frontend(live: bool, count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
         let run_loop = RunLoop::new();
-        let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop).expect("a headless frontend");
+        let pool = Pool::new(4).unwrap();
+        let mut frontend =
+            HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop, &pool).expect("a headless frontend");
         let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
         // A style URL never answers: the map keeps the style it has.
@@ -119,6 +122,7 @@ impl SymbolRenderingTest {
             file_source,
             MapOptions { map_mode: mode, size: Size::new(256, 256), ..Default::default() },
             &run_loop,
+            &pool,
         )
         .unwrap();
         frontend.attach(&map);

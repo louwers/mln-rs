@@ -48,12 +48,17 @@ mod tile_store_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 
+/// A pool for a test's background work.
+pub(crate) fn pool() -> mln_util::pool::Pool {
+    mln_util::pool::Pool::new(4).expect("a pool")
+}
+
 /// Port-only: a tile store whose jobs run on `workers` and which frees and
 /// parses glyphs on `pool`, whose glyph store hears from its engine on
 /// `run_loop`, with no images and no sprite loaded.
 pub(crate) fn tile_store(
     run_loop: &mln_actor::RunLoop,
-    pool: &mln_actor::TaggedScheduler,
+    pool: &mln_util::pool::TaskGroup,
     workers: Box<dyn crate::tile::tile_workers::TileWorkers>,
 ) -> crate::tile::store::TileStore {
     let glyphs = crate::text::glyph_store::GlyphStore::new(
@@ -76,7 +81,7 @@ pub(crate) fn tile_store(
 /// Port-only: a tile store whose jobs run on `pool`.
 pub(crate) fn pool_store(
     run_loop: &mln_actor::RunLoop,
-    pool: &mln_actor::TaggedScheduler,
+    pool: &mln_util::pool::TaskGroup,
 ) -> crate::tile::store::TileStore {
     tile_store(run_loop, pool, Box::new(crate::tile::tile_workers::PoolWorkers::new(pool.clone(), 8)))
 }

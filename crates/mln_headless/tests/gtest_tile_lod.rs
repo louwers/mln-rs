@@ -15,6 +15,7 @@ use mln_style::layer::Layer;
 use mln_style::sources::CustomGeometrySourceHandle;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_util::geo::LatLngBounds;
+use mln_util::pool::Pool;
 use support::*;
 
 /// Changes the map's tile settings.
@@ -34,7 +35,8 @@ struct TileLODTest {
 impl TileLODTest {
     fn new(camera_options: &CameraOptions) -> Self {
         let run_loop = RunLoop::new();
-        let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+        let pool = Pool::new(4).unwrap();
+        let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
         let mut map = Map::with_resource_options(
             MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
             &ResourceOptions {
@@ -42,6 +44,7 @@ impl TileLODTest {
                 ..ResourceOptions::default()
             },
             &run_loop,
+            &pool,
         )
         .unwrap();
         frontend.attach(&map);
@@ -61,7 +64,7 @@ impl TileLODTest {
             })),
             ..Default::default()
         };
-        let source = custom_geometry_source::create("custom", options, run_loop.pool()).unwrap();
+        let source = custom_geometry_source::create("custom", options, &pool).unwrap();
         handle.set(CustomGeometrySourceHandle::of(&source).unwrap()).unwrap();
         map.add_source(source).unwrap();
 

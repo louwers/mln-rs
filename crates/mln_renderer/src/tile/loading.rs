@@ -569,7 +569,7 @@ impl SourceInfo {
                     *slot = Answered::Now(data);
                 }
             }),
-            self.synchronous,
+            (!self.synchronous).then(|| ctx.pool.pool()),
         );
         let answered = std::mem::replace(&mut *slot.lock(), Answered::Later);
         if let Answered::Now(data) = answered {

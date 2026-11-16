@@ -19,6 +19,7 @@ use mln_runtime::{BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 
 /// A still image, and the stats of the renderer that drew it.
@@ -30,7 +31,7 @@ pub struct RenderResult {
 /// Renders a map into an offscreen texture on the calling thread.
 ///
 /// The frontend runs on a `RunLoop` of the calling thread, which the maps it
-/// renders run on too. It draws the updates of the map it is attached to
+/// renders run on too, and runs its renderer's background work on a pool. It draws the updates of the map it is attached to
 /// ([`attach`](Self::attach), which [`render`](Self::render) does too)
 /// when its owner asks: [`render`](Self::render) draws until a still image
 /// is complete, [`render_update`](Self::render_update) draws an update it
@@ -46,6 +47,8 @@ pub struct HeadlessFrontend {
     glyph_cache: Arc<GlyphCache>,
     /// The loop of the frontend and the maps it renders.
     run_loop: RunLoop,
+    /// Where the renderer's background work runs.
+    pool: Pool,
     /// Made when first used, and dropped when the attached map goes.
     renderer: Option<Renderer>,
     /// The stats of the renderer made last, which outlive it.
@@ -86,13 +89,13 @@ impl HeadlessFrontend {
     ///
     /// Fails as [`harness_device`] does, and with the backend's error when
     /// it can't render on the device.
-    pub fn new(size: Size, pixel_ratio: f32, run_loop: &RunLoop) -> Result<Self, Error> {
-        Self::with_glyph_cache(size, pixel_ratio, Arc::default(), run_loop)
+    pub fn new(size: Size, pixel_ratio: f32, run_loop: &RunLoop, pool: &Pool) -> Result<Self, Error> {
+        Self::with_glyph_cache(size, pixel_ratio, Arc::default(), run_loop, pool)
     }
 
     /// A 256x256 frontend.
-    pub fn with_pixel_ratio(pixel_ratio: f32, run_loop: &RunLoop) -> Result<Self, Error> {
-        Self::new(Size::new(256, 256), pixel_ratio, run_loop)
+    pub fn with_pixel_ratio(pixel_ratio: f32, run_loop: &RunLoop, pool: &Pool) -> Result<Self, Error> {
+        Self::new(Size::new(256, 256), pixel_ratio, run_loop, pool)
     }
 
     /// A frontend whose renderer uses `glyph_cache`. Frontends given the same
@@ -103,8 +106,9 @@ impl HeadlessFrontend {
         pixel_ratio: f32,
         glyph_cache: Arc<GlyphCache>,
         run_loop: &RunLoop,
+        pool: &Pool,
     ) -> Result<Self, Error> {
-        Self::with_device(harness_device()?, size, pixel_ratio, glyph_cache, run_loop)
+        Self::with_device(harness_device()?, size, pixel_ratio, glyph_cache, run_loop, pool)
     }
 
     /// A frontend that renders on `device`, such as one that other frontends
@@ -117,6 +121,7 @@ impl HeadlessFrontend {
         pixel_ratio: f32,
         glyph_cache: Arc<GlyphCache>,
         run_loop: &RunLoop,
+        pool: &Pool,
     ) -> Result<Self, Error> {
         let target = LocalTarget::offscreen(Some(device), physical_size(size, pixel_ratio))?;
         let backend = target.backend();
@@ -127,6 +132,7 @@ impl HeadlessFrontend {
             backend,
             glyph_cache,
             run_loop: run_loop.clone(),
+            pool: pool.clone(),
             renderer: None,
             stats: None,
             updates: None,
@@ -181,6 +187,7 @@ impl HeadlessFrontend {
                 None,
                 Arc::clone(&self.glyph_cache),
                 &self.run_loop,
+                &self.pool,
             );
             self.stats = Some(renderer.stats());
             renderer

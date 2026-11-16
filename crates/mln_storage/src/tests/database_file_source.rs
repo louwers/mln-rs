@@ -21,7 +21,7 @@ fn dbfs() -> Arc<DatabaseFileSource> {
 #[test]
 fn volatile_resource() {
     let run_loop = RunLoop::new();
-    let queue = run_loop.scheduler();
+    let queue = run_loop.handle();
 
     let dbfs = dbfs();
 
@@ -40,7 +40,7 @@ fn volatile_resource() {
     dbfs.put_then(
         &forwarded,
         &response,
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         local_callback(move || {
             let (r1, fs1, res1) = (Rc::clone(&r), Arc::clone(&fs), Rc::clone(&res));
             let request = res.borrow().clone();
@@ -57,7 +57,7 @@ fn volatile_resource() {
                     let stop = stop.clone();
                     let request = res1.borrow().clone();
                     *r1.borrow_mut() = Some(fs1.request(
-                        &stop.scheduler(),
+                        &stop.handle(),
                         &request,
                         Box::new(move |res_2: Response| {
                             r2.borrow_mut().take();
@@ -100,7 +100,7 @@ fn volatile_resource_is_not_stored() {
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(dbfs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -165,7 +165,7 @@ fn cached_request(run_loop: &RunLoop, source: &DatabaseFileSource, resource: &Re
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
     let (out, stop) = (Rc::clone(&result), run_loop.clone());
     let _req = source.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         resource,
         Box::new(move |res: Response| {
             *out.borrow_mut() = Some(res);

@@ -8,9 +8,9 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use mln_actor::SchedulerPtr;
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
+use mln_util::pool::Pool;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 use pmtiles::{Compression, DirEntry, Directory, Header, PmtError, TileCoord, TileId, TileType};
@@ -629,14 +629,14 @@ impl State {
 /// The `Pmtiles` file source: `pmtiles://` URLs of local or remote archives.
 pub(crate) struct PMTilesFileSource {
     state: Arc<State>,
-    pool: SchedulerPtr,
+    pool: Pool,
 }
 
 impl PMTilesFileSource {
     /// A PMTiles file source that reads archives through `archives`, and
     /// starts its requests on `pool`.
     #[must_use]
-    pub(crate) fn new(archives: Arc<dyn FileSource>, pool: SchedulerPtr) -> Self {
+    pub(crate) fn new(archives: Arc<dyn FileSource>, pool: Pool) -> Self {
         PMTilesFileSource {
             state: Arc::new(State {
                 file_source: archives,
@@ -656,7 +656,7 @@ impl FileSource for PMTilesFileSource {
         let cancelled = Arc::clone(&task);
         responder.on_cancel(move || drop(cancelled.lock().take()));
         let (state, resource) = (Arc::clone(&self.state), resource.clone());
-        self.pool.schedule(Box::new(move || {
+        self.pool.spawn(move || {
             if responder.is_cancelled() {
                 return;
             }
@@ -668,7 +668,7 @@ impl FileSource for PMTilesFileSource {
                 // return TileJSON
                 state.request_tilejson(&task, &resource, &responder);
             }
-        }));
+        });
     }
 
     fn can_request(&self, resource: &Resource) -> bool {

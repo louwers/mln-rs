@@ -1,11 +1,12 @@
 //! The instance's work, run on the browser's event loop of its thread.
 //!
 //! An instance has one thread, which the browser's event loop runs, so
-//! nothing of the instance may block it. The instance's `RunLoop`s and its
-//! cooperative scheduler call [`waker`] when they get work, which posts one
-//! message to a `MessageChannel` of the pump's own. Its task runs a slice:
-//! each [`Step`], then the scheduler's tasks until the slice's time is
-//! spent, then each step again for what those tasks delivered. Work that
+//! nothing of the instance may block it. The instance's `RunLoop`s, its
+//! pools and its cooperative scheduler call [`waker`] when they get work,
+//! which posts one message to a `MessageChannel` of the pump's own. Its task
+//! runs a slice: each [`Step`], then the loops of the cooperative scheduler
+//! and the pools' tasks until the slice's time is spent, then each step
+//! again for what those tasks delivered. Work that
 //! remains, or that arrives meanwhile, posts the next slice. A message
 //! rather than `setTimeout`, whose delay grows once timeouts nest, so that
 //! the next slice comes as soon as the event loop has run what waits ahead
@@ -17,11 +18,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_actor::scheduler;
+use mln_util::pool::Pool;
 use mln_util::time::Instant;
 use wasm_bindgen::prelude::*;
 
-/// How long each slice runs the scheduler's tasks. The steps run in every
-/// slice, however long they take.
+/// How long each slice runs the pools' tasks. The steps run in every slice,
+/// however long they take.
 const SLICE: Duration = Duration::from_millis(4);
 
 /// What a step runs in each slice. It returns `false` once it is done, which
@@ -41,10 +43,11 @@ struct Pump {
     scheduled: Cell<bool>,
     running: Cell<bool>,
     stopped: Cell<bool>,
-    /// The time the slices spent on the scheduler's tasks since
-    /// [`take_scheduler_time`] last took it.
+    /// The time the slices spent on the scheduler's and the pools' tasks
+    /// since [`take_scheduler_time`] last took it.
     scheduler_time: Cell<Duration>,
     steps: RefCell<Vec<Rc<Entry>>>,
+    pools: RefCell<Vec<Rc<Pool>>>,
     _on_message: Closure<dyn FnMut()>,
 }
 
@@ -76,6 +79,7 @@ impl Pump {
                 stopped: Cell::new(false),
                 scheduler_time: Cell::new(Duration::ZERO),
                 steps: RefCell::new(Vec::new()),
+                pools: RefCell::new(Vec::new()),
                 _on_message: on_message,
             }
         })
@@ -98,13 +102,30 @@ impl Pump {
         let deadline = Instant::now() + SLICE;
         self.run_steps();
         let tasks = Instant::now();
-        let more = scheduler::cooperative().is_some_and(|scheduler| scheduler.run_until(Some(deadline)));
+        let more = self.run_tasks(deadline);
         self.scheduler_time.set(self.scheduler_time.get() + tasks.elapsed());
         self.run_steps();
         self.running.set(false);
         if more {
             self.wake();
         }
+    }
+
+    /// Runs the cooperative scheduler's loops, then the pools' tasks until
+    /// `deadline`, then the loops again for what the tasks sent them.
+    /// Returns whether work remains.
+    fn run_tasks(&self, deadline: Instant) -> bool {
+        let cooperative = scheduler::cooperative();
+        if let Some(scheduler) = cooperative {
+            scheduler.run_loops();
+        }
+        // Not borrowed while the tasks run, which may add or drop pools.
+        let pools: Vec<Rc<Pool>> = self.pools.try_borrow().map(|pools| pools.clone()).unwrap_or_default();
+        let mut more = false;
+        for pool in pools {
+            more |= pool.run_until(Some(deadline));
+        }
+        cooperative.is_some_and(|scheduler| scheduler.run_loops()) || more
     }
 
     fn run_steps(&self) {
@@ -161,20 +182,52 @@ pub fn add(step: impl FnMut() -> bool + 'static) -> Step {
     Step { entry: Some(entry) }
 }
 
+/// Runs `pool`'s tasks in each slice, until the guard drops. Its waker
+/// should be [`waker`].
+#[must_use = "the pool stops running when its guard drops"]
+pub fn add_pool(pool: Pool) -> PoolGuard {
+    let pool = Rc::new(pool);
+    PUMP.with(|pump| {
+        // Never borrowed across a call out of the pump.
+        if let Ok(mut pools) = pump.pools.try_borrow_mut() {
+            pools.push(Rc::clone(&pool));
+        }
+        pump.wake();
+    });
+    PoolGuard { pool }
+}
+
+/// Runs a pool in the pump's slices until it drops.
+pub struct PoolGuard {
+    pool: Rc<Pool>,
+}
+
+impl Drop for PoolGuard {
+    fn drop(&mut self) {
+        let _ = PUMP.try_with(|pump| {
+            if let Ok(mut pools) = pump.pools.try_borrow_mut() {
+                pools.retain(|other| !Rc::ptr_eq(other, &self.pool));
+            }
+        });
+    }
+}
+
 /// Posts a slice, unless one is on its way.
 pub fn wake() {
     PUMP.with(|pump| pump.wake());
 }
 
-/// [`wake`], for `RunLoop::set_waker` and `CooperativeScheduler::set_waker`.
+/// [`wake`], for `RunLoop::set_waker`, `Pool::set_waker` and
+/// `CooperativeScheduler::set_waker`.
 /// The instance has one thread, so it runs on the pump's.
 #[must_use]
 pub fn waker() -> Arc<dyn Fn() + Send + Sync> {
     Arc::new(wake)
 }
 
-/// The time the slices spent on the scheduler's tasks since the last call,
-/// for a host that reports the instance's work between its frames.
+/// The time the slices spent on the scheduler's and the pools' tasks since
+/// the last call, for a host that reports the instance's work between its
+/// frames.
 #[must_use]
 pub fn take_scheduler_time() -> Duration {
     PUMP.with(|pump| pump.scheduler_time.take())

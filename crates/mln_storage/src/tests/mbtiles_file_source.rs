@@ -16,7 +16,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn mbtiles_file_source() -> MBTilesFileSource {
-    MBTilesFileSource::new(mln_actor::scheduler::get_background())
+    MBTilesFileSource::new(super::pool())
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.
@@ -26,7 +26,7 @@ fn request(fs: &MBTilesFileSource, resource: &Resource) -> Response {
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();

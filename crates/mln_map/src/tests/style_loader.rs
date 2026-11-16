@@ -17,7 +17,7 @@ fn testdata(relative: &str) -> String {
 }
 
 fn map_over(file_source: StubFileSource, options: MapOptions, run_loop: &RunLoop) -> Map {
-    Map::with_file_source(Arc::new(file_source), options, run_loop).expect("map")
+    Map::with_file_source(Arc::new(file_source), options, run_loop, &crate::tests::pool()).expect("map")
 }
 
 /// A map whose style requests `respond` answers.
@@ -138,8 +138,13 @@ fn load_json_cancels_pending_load_url() {
     let run_loop = RunLoop::new();
     let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
     file_source.set_response(Kind::Style, |_| Some(style_response(r#"{"version": 8, "name": "Streets"}"#)));
-    let mut map = Map::with_file_source(Arc::<StubFileSource>::clone(&file_source), MapOptions::default(), &run_loop)
-        .expect("map");
+    let mut map = Map::with_file_source(
+        Arc::<StubFileSource>::clone(&file_source),
+        MapOptions::default(),
+        &run_loop,
+        &crate::tests::pool(),
+    )
+    .expect("map");
 
     // Start loading a URL (this will be pending)
     map.load_style_url("http://some-url");
@@ -397,7 +402,9 @@ fn edits_fail_during_a_url_load_and_the_old_version_stays_published() {
     let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
     file_source.set_response(Kind::Style, |_| Some(style_response(REMOTE)));
     let options = MapOptions { map_mode: crate::MapMode::Continuous, ..MapOptions::default() };
-    let mut map = Map::with_file_source(Arc::<StubFileSource>::clone(&file_source), options, &run_loop).expect("map");
+    let mut map =
+        Map::with_file_source(Arc::<StubFileSource>::clone(&file_source), options, &run_loop, &crate::tests::pool())
+            .expect("map");
     let reader = map.update_reader();
     map.load_style_json(r#"{"version": 8, "name": "Local", "sources": {}, "layers": []}"#);
     let published = Arc::clone(&reader.latest().expect("an update").parameters.style);

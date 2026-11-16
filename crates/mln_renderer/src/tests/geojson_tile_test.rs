@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use feature::Feature;
 use geo_types::Point;
-use mln_actor::{RunLoop, TaggedScheduler, scheduler};
+use mln_actor::RunLoop;
 use mln_map_types::MapMode;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
@@ -11,7 +11,7 @@ use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParam
 use mln_style::sources::geojson::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
-use mln_util::identity::SimpleIdentity;
+use mln_util::pool::TaskGroup;
 
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
@@ -22,15 +22,12 @@ use crate::tile::tile_workers::TileWorkers;
 
 struct GeoJSONTileTest {
     run_loop: RunLoop,
-    thread_pool: TaggedScheduler,
+    thread_pool: TaskGroup,
 }
 
 impl GeoJSONTileTest {
     fn new() -> Self {
-        GeoJSONTileTest {
-            run_loop: RunLoop::new(),
-            thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
-        }
+        GeoJSONTileTest { run_loop: RunLoop::new(), thread_pool: TaskGroup::new(&crate::tests::pool()) }
     }
 
     /// Tiles `ids` of a GeoJSON source of `data`, whose jobs run on
@@ -69,7 +66,7 @@ impl GeoJSONTileTest {
 
 impl Drop for GeoJSONTileTest {
     fn drop(&mut self) {
-        self.thread_pool.wait_for_empty();
+        self.thread_pool.wait();
     }
 }
 
@@ -83,7 +80,7 @@ impl GeoJSONData for FakeGeoJSONData {
         &self,
         _id: &CanonicalTileID,
         callback: Box<dyn FnOnce(TileFeatures) + Send>,
-        _run_synchronously: bool,
+        _pool: Option<&mln_util::pool::Pool>,
     ) {
         callback(self.features.clone());
     }

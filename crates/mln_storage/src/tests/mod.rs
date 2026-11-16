@@ -271,6 +271,11 @@ thread_local! {
         RefCell::new(mln_util::hash::HashMap::default());
 }
 
+/// A pool for a test's file sources.
+pub(crate) fn pool() -> mln_util::pool::Pool {
+    mln_util::pool::Pool::new(4).expect("a pool")
+}
+
 /// A `Send` handle for a closure that runs on the calling thread only. The
 /// C++ tests pass callbacks that capture references to `forward`, which runs
 /// them on the calling thread (`Scheduler::bindOnce`); the Rust signature

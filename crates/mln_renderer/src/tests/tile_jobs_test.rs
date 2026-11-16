@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
-use mln_actor::{RunLoop, TaggedScheduler, scheduler};
+use mln_actor::RunLoop;
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -19,8 +19,8 @@ use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::hash::HashSet;
-use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::TaskGroup;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use parking_lot::Mutex;
@@ -153,7 +153,7 @@ pub(super) fn points() -> TileData {
 
 struct Test {
     run_loop: RunLoop,
-    thread_pool: TaggedScheduler,
+    thread_pool: TaskGroup,
     tile: OneTile,
     asked: Rc<Asked>,
 }
@@ -168,7 +168,7 @@ impl Test {
     /// loop.
     fn on(workers: impl FnOnce(&RunLoop) -> Box<dyn TileWorkers>, images: &[&str]) -> Self {
         let run_loop = RunLoop::new();
-        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+        let thread_pool = TaskGroup::new(&crate::tests::pool());
         let mut store = tile_store(&run_loop, &thread_pool, workers(&run_loop));
         let asked = Rc::new(Asked::default());
         store.images_mut().set_observer(Some(Rc::<Asked>::clone(&asked)));
@@ -218,7 +218,7 @@ impl Test {
 impl Drop for Test {
     fn drop(&mut self) {
         self.run_loop.run_once();
-        self.thread_pool.wait_for_empty();
+        self.thread_pool.wait();
     }
 }
 
@@ -447,20 +447,6 @@ fn a_missing_image_a_relayout_drops_resolves_when_used_again() {
     assert!(!job.resolved.missing_images.contains("a"), "the answer it carries forgets the missing image");
 }
 
-/// A scheduler whose tasks each run on a thread of their own, which catches
-/// their panics as the thread pool does.
-struct Catching;
-
-impl scheduler::Scheduler for Catching {
-    fn schedule(&self, task: scheduler::Task) {
-        std::thread::spawn(move || {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(task));
-        });
-    }
-
-    fn wait_for_empty(&self) {}
-}
-
 /// Evaluated values of no layer type: a bug that panics when the layout
 /// asks for their type.
 struct Mistyped(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
@@ -494,7 +480,7 @@ impl ErasedEvaluatedLayer for Mistyped {
 /// doesn't hold a place in flight for good.
 #[test]
 fn a_panicking_native_job_fails() {
-    let pool = TaggedScheduler::new(Arc::new(Catching), SimpleIdentity::new());
+    let pool = TaskGroup::new(&crate::tests::pool());
     let mut workers = PoolWorkers::new(pool, 1);
     let inbox = Inbox::new(Arc::new(|| {}));
     let circles = layer(json!({"id": "dots", "type": "circle"}));
@@ -570,7 +556,7 @@ impl Instances {
 
     /// `RemoteWorkers` over these instances.
     fn workers(&self, run_loop: &RunLoop) -> Box<dyn TileWorkers> {
-        let workers = RemoteWorkers::new(&run_loop.scheduler(), Registry::with_builtins(), |sink| {
+        let workers = RemoteWorkers::new(&run_loop.handle(), Registry::with_builtins(), |sink| {
             self.0.borrow_mut().sink = Some(sink);
             Box::new(self.clone())
         });
@@ -729,7 +715,7 @@ fn a_newer_generation_supersedes_the_job_in_flight() {
 
 /// A raster tile of `kind`, `x`/0 of zoom 1, and a second one at `x + 1`,
 /// whose jobs run on `workers`.
-fn raster_tiles(run_loop: &RunLoop, pool: &TaggedScheduler, workers: Box<dyn TileWorkers>, kind: TileKind) -> OneTile {
+fn raster_tiles(run_loop: &RunLoop, pool: &TaskGroup, workers: Box<dyn TileWorkers>, kind: TileKind) -> OneTile {
     let store = tile_store(run_loop, pool, workers);
     let mut tiles = OneTile::new(store, kind, OverscaledTileID::from_zxy(1, 0, 0), MapMode::Static);
     tiles.add(OverscaledTileID::from_zxy(1, 1, 0));
@@ -750,7 +736,7 @@ fn raster_size(tiles: &OneTile, x: u32) -> Option<Size> {
 #[test]
 fn raster_decodes_apply_in_any_order() {
     let run_loop = RunLoop::new();
-    let pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+    let pool = TaskGroup::new(&crate::tests::pool());
     let manual = Manual::default();
     let mut tiles = raster_tiles(&run_loop, &pool, Box::new(manual.clone()), TileKind::Raster);
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
@@ -782,7 +768,7 @@ fn raster_decodes_apply_in_any_order() {
     assert_eq!(raster_size(&tiles, 0), Some(Size::new(4, 4)));
     assert!(tiles.tile().is_complete());
     drop(tiles);
-    pool.wait_for_empty();
+    pool.wait();
 }
 
 /// A Web Worker that dies while it decodes a raster-dem tile: the tile kept
@@ -790,7 +776,7 @@ fn raster_decodes_apply_in_any_order() {
 #[test]
 fn a_worker_lost_during_a_decode() {
     let run_loop = RunLoop::new();
-    let pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+    let pool = TaskGroup::new(&crate::tests::pool());
     let instances = Instances::new(1);
     let kind = TileKind::Dem(mln_util::tileset::RasterEncoding::Mapbox);
     let mut tiles = raster_tiles(&run_loop, &pool, instances.workers(&run_loop), kind);
@@ -816,5 +802,5 @@ fn a_worker_lost_during_a_decode() {
     };
     assert_eq!(bucket.get_dem_data().dim, 16);
     drop(tiles);
-    pool.wait_for_empty();
+    pool.wait();
 }

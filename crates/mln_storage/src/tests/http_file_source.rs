@@ -31,7 +31,7 @@ fn cancel() {
     let fs = http_file_source();
 
     drop(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/test")),
         Box::new(|_: Response| panic!("Callback should not be called")),
     ));
@@ -48,7 +48,7 @@ fn http200() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/test")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
@@ -76,7 +76,7 @@ fn http206() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
@@ -101,7 +101,7 @@ fn http404() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/doesnotexist")),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -128,7 +128,7 @@ fn http_tile404() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Tile, server.url("/doesnotexist")),
         Box::new(move |res: Response| {
             assert!(res.no_content);
@@ -155,7 +155,7 @@ fn http200_empty_data() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/empty-data")),
         Box::new(move |res: Response| {
             assert!(!res.no_content);
@@ -181,7 +181,7 @@ fn http204() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/no-content")),
         Box::new(move |res: Response| {
             assert!(res.no_content);
@@ -208,7 +208,7 @@ fn http500() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/permanent-error")),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -235,7 +235,7 @@ fn expires_parsing() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/test?modified=1420794326&expires=1420797926&etag=foo")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
@@ -260,7 +260,7 @@ fn cache_control_parsing() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/test?cachecontrol=max-age=120")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
@@ -297,7 +297,7 @@ pub(crate) fn load_request(
     state.number.set(current + 1);
     let (fs2, state2, url2, run_loop2) = (Rc::clone(fs), Rc::clone(state), Rc::clone(url), run_loop.clone());
     let request = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, url(current)),
         Box::new(move |res: Response| {
             state2.reqs[i].borrow_mut().take();
@@ -357,7 +357,7 @@ fn load_once(fs: &HTTPFileSource, kind: Kind, url: String) -> Response {
     let result = Rc::new(RefCell::new(None));
     let (r, stop) = (Rc::clone(&result), run_loop.clone());
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(kind, url),
         Box::new(move |res: Response| {
             *r.borrow_mut() = Some(res);

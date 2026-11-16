@@ -57,6 +57,7 @@ use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode
 use mln_util::hash::HashSet;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 use mln_util::tileset::{PartialTileset, Scheme};
 use serde_json::json;
@@ -633,9 +634,10 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
 /// A loader over an online file source and a cache database at
 /// `cache_path`, with assets at `asset_path`, and the database.
 fn loader_with_database(cache_path: &str, asset_path: &str) -> (Arc<Loader>, Arc<DatabaseFileSource>) {
+    let pool = Pool::new(4).unwrap();
     let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new());
     let database = Arc::new(DatabaseFileSource::new(cache_path, Some(Arc::clone(&network))));
-    let loader = Loader::builder()
+    let loader = Loader::builder(&pool)
         .asset_path(asset_path)
         .network(network)
         .database(Arc::<DatabaseFileSource>::clone(&database))
@@ -1275,6 +1277,7 @@ fn dont_load_unneeded_tiles() {
 #[ignore = "TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:994"]
 fn continuous_rendering() {
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
 
     let did_not_stop = Rc::new(Cell::new(false));
     let emergency_shutoff = Timer::new(&run_loop);
@@ -1289,7 +1292,7 @@ fn continuous_rendering() {
 
     let timer = Rc::new(Timer::new(&run_loop));
 
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
 
     let observer = Rc::new(StubMapObserver::default());
     {
@@ -1314,6 +1317,7 @@ fn continuous_rendering() {
             ..ResourceOptions::default()
         },
         &run_loop,
+        &pool,
     )
     .unwrap();
     frontend.attach(&map);
@@ -2153,7 +2157,7 @@ fn prefetch_delta_override() {
     }
 
     // Custom source
-    test.map().add_source(counted_custom_source(&requested_tiles, Some(0), &test.run_loop)).unwrap();
+    test.map().add_source(counted_custom_source(&requested_tiles, Some(0), &test.pool)).unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     {
@@ -2182,12 +2186,8 @@ fn prefetch_delta_override() {
 }
 
 /// A custom geometry source "custom" that counts its fetches in
-/// `requested_tiles` and answers each with empty data, on `run_loop`'s pool.
-fn counted_custom_source(
-    requested_tiles: &Arc<AtomicI32>,
-    prefetch_zoom_delta: Option<u8>,
-    run_loop: &RunLoop,
-) -> Source {
+/// `requested_tiles` and answers each with empty data, on `pool`.
+fn counted_custom_source(requested_tiles: &Arc<AtomicI32>, prefetch_zoom_delta: Option<u8>, pool: &Pool) -> Source {
     let handle = Arc::new(OnceLock::<CustomGeometrySourceHandle>::new());
     let fetch: TileFunction = {
         let handle = Arc::clone(&handle);
@@ -2204,7 +2204,7 @@ fn counted_custom_source(
         cancel_tile_function: Some(Arc::new(|_: &CanonicalTileID| {})),
         ..Default::default()
     };
-    let custom = custom_geometry_source::create("custom", options, run_loop.pool()).unwrap();
+    let custom = custom_geometry_source::create("custom", options, pool).unwrap();
     handle.set(CustomGeometrySourceHandle::of(&custom).unwrap()).unwrap();
     if prefetch_zoom_delta.is_some() {
         return with_common(&custom, |common| common.prefetch_zoom_delta = prefetch_zoom_delta);
@@ -2351,7 +2351,7 @@ fn prefetch_delta_override_custom_source() {
 
     let requested_tiles = Arc::new(AtomicI32::new(0));
 
-    test.map().add_source(counted_custom_source(&requested_tiles, Some(0), &test.run_loop)).unwrap();
+    test.map().add_source(counted_custom_source(&requested_tiles, Some(0), &test.pool)).unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     {
@@ -2370,7 +2370,7 @@ fn prefetch_delta_override_custom_source() {
         map.edit_style(|style| style.apply(Edit::RemoveLayer("custom".to_owned()))).unwrap();
         map.remove_source("custom");
         map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
-        map.add_source(counted_custom_source(&requested_tiles, None, &test.run_loop)).unwrap();
+        map.add_source(counted_custom_source(&requested_tiles, None, &test.pool)).unwrap();
     }
     test.run_loop.run();
 
@@ -2391,12 +2391,13 @@ fn expired_sprite_sheet() {
     // test{":memory:", ".", 1, MapMode::Continuous}`: the frontend's
     // check runs on the update each frame draws.
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
     let (file_source, dbfs) = loader_with_database(":memory:", ".");
     let observer = Rc::new(StubMapObserver::default());
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
     let options =
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), pixel_ratio: 1.0, ..Default::default() };
-    let map = Map::with_file_source(file_source, options, &run_loop).unwrap();
+    let map = Map::with_file_source(file_source, options, &run_loop, &pool).unwrap();
     frontend.attach(&map);
     let updates = map.update_reader();
     let map = Rc::new(RefCell::new(map));
@@ -2985,7 +2986,7 @@ fn stencil_overflow() {
     };
     let mut options = CustomGeometrySourceOptions { fetch_tile_function: Some(fetch), ..Default::default() };
     options.tile_options.tile_size = mln_util::constants::TILE_SIZE_I / 32;
-    let custom = custom_geometry_source::create("custom", options, test.run_loop.pool()).unwrap();
+    let custom = custom_geometry_source::create("custom", options, &test.pool).unwrap();
     handle.set(CustomGeometrySourceHandle::of(&custom).unwrap()).unwrap();
 
     test.map().add_source(custom).unwrap();
@@ -3103,6 +3104,7 @@ fn observe_tile_lifecycle() {
     use TileOperation::*;
 
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
 
     let tile_ops: Rc<RefCell<Vec<(OverscaledTileID, TileOperation)>>> = Rc::default();
     // We expect to see a valid lifecycle for every tile in this list.
@@ -3124,7 +3126,7 @@ fn observe_tile_lifecycle() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop, &pool).expect("a headless frontend");
     let mut map = Map::with_resource_options(
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
@@ -3132,6 +3134,7 @@ fn observe_tile_lifecycle() {
             ..ResourceOptions::default()
         },
         &run_loop,
+        &pool,
     )
     .unwrap();
     frontend.attach(&map);
@@ -3351,6 +3354,7 @@ fn style_update_zoom_dependency() {
 fn globe_hand_off_keeps_tiles() {
     // Crossing the globe's Mercator hand-off must not re-parse the tiles already on screen.
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
     // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
     let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
     let observer = Rc::new(StubMapObserver::default());
@@ -3364,16 +3368,20 @@ fn globe_hand_off_keeps_tiles() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop, &pool).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(
-        Arc::new(Loader::new(&ResourceOptions {
-            asset_path: asset_path.to_str().expect("asset path").to_owned(),
-            ..ResourceOptions::default()
-        })),
+        Arc::new(Loader::new(
+            &ResourceOptions {
+                asset_path: asset_path.to_str().expect("asset path").to_owned(),
+                ..ResourceOptions::default()
+            },
+            &pool,
+        )),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &run_loop,
+        &pool,
     )
     .unwrap();
 
@@ -3424,6 +3432,7 @@ fn water_layers_in(order: [&str; 2]) -> String {
 #[test]
 fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
     let parses = Rc::new(Cell::new(0));
     let observer = Rc::new(StubMapObserver::default());
     {
@@ -3434,12 +3443,15 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
             }
         });
     }
-    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop, &pool).expect("a headless frontend");
     let asset_path = cpp_root().join("test/fixtures/api/assets");
-    let file_source: Arc<dyn FileSource> = Arc::new(Loader::new(&ResourceOptions {
-        asset_path: asset_path.to_str().expect("asset path").to_owned(),
-        ..ResourceOptions::default()
-    }));
+    let file_source: Arc<dyn FileSource> = Arc::new(Loader::new(
+        &ResourceOptions {
+            asset_path: asset_path.to_str().expect("asset path").to_owned(),
+            ..ResourceOptions::default()
+        },
+        &pool,
+    ));
     let options = MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() };
     let camera = CameraOptions { center: Some(ll(37.8, -122.5)), zoom: Some(10.0), ..Default::default() };
     let mut render = |map: &mut Map| {
@@ -3448,7 +3460,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
         result.image
     };
 
-    let mut map = Map::with_file_source(Arc::clone(&file_source), options, &run_loop).unwrap();
+    let mut map = Map::with_file_source(Arc::clone(&file_source), options, &run_loop, &pool).unwrap();
     map.load_style_json(&water_layers_in(["fill", "line"]));
     map.jump_to(&camera);
     let before = render(&mut map);
@@ -3460,7 +3472,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     assert_eq!(0, parses.get(), "moving a layer laid its tiles out again");
     assert_ne!(before, moved);
 
-    let mut reordered = Map::with_file_source(file_source, options, &run_loop).unwrap();
+    let mut reordered = Map::with_file_source(file_source, options, &run_loop, &pool).unwrap();
     reordered.load_style_json(&water_layers_in(["line", "fill"]));
     reordered.jump_to(&camera);
     assert_eq!(render(&mut reordered), moved);
@@ -3705,6 +3717,7 @@ fn globe_bounded_source_loads_finer_tiles() {
     // Just below an integer zoom the globe cover asks for the next zoom's tiles nearest the camera; a source with
     // bounds must create them.
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
     // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
     let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
     let observer = Rc::new(StubMapObserver::default());
@@ -3718,16 +3731,20 @@ fn globe_bounded_source_loads_finer_tiles() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop, &pool).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(
-        Arc::new(Loader::new(&ResourceOptions {
-            asset_path: asset_path.to_str().expect("asset path").to_owned(),
-            ..ResourceOptions::default()
-        })),
+        Arc::new(Loader::new(
+            &ResourceOptions {
+                asset_path: asset_path.to_str().expect("asset path").to_owned(),
+                ..ResourceOptions::default()
+            },
+            &pool,
+        )),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &run_loop,
+        &pool,
     )
     .unwrap();
 
@@ -4548,10 +4565,12 @@ fn tile_selection_options_publish_updates() {
     }
 
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
     let mut map = Map::with_file_source(
         Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
         MapOptions { map_mode: MapMode::Continuous, ..Default::default() },
         &run_loop,
+        &pool,
     )
     .unwrap();
     let updates = map.update_reader();
@@ -4805,11 +4824,13 @@ fn color_ramp_renders_current_state_after_unrelated_state_change_color_relief() 
 #[test]
 fn empty_size_is_an_error() {
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
     for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
         let result = Map::with_file_source(
             Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
             MapOptions { size, ..Default::default() },
             &run_loop,
+            &pool,
         );
         assert_eq!(
             result.err().map(|e| (e.kind, e.message)),

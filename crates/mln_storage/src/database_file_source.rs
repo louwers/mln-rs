@@ -206,15 +206,17 @@ impl<E: 'static> DatabaseFileSource<E> {
         &self,
         resource: &Resource,
         response: &Response,
-        queue: &mln_actor::SchedulerPtr,
+        queue: &mln_actor::RunLoopHandle,
         then: Box<dyn FnOnce() + Send>,
     ) {
-        let mut then = mln_actor::scheduler::bind_once(queue, then);
+        let queue = queue.downgrade();
         let resource = resource.clone();
         let response = response.clone();
         self.invoke(move |t| {
             t.with(|state| state.db.put(&resource, &response));
-            then();
+            if let Some(queue) = queue.upgrade() {
+                queue.invoke(then);
+            }
         });
     }
 

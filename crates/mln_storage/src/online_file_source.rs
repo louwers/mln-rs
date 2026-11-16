@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
-use mln_actor::{ActorRef, AsyncTask, Mailbox, RunLoop, SchedulerPtr, Thread, Timer};
+use mln_actor::{ActorRef, AsyncTask, Mailbox, RunLoop, RunLoopHandle, Thread, Timer};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::{
     ASSET_PROTOCOL, CLOCK_SKEW_RETRY_TIMEOUT, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL,
@@ -43,7 +43,7 @@ struct OnlineFileRequest {
     request: RefCell<Option<Request>>,
     timer: Timer,
     /// The source's thread's queue, where the resource transform answers.
-    queue: SchedulerPtr,
+    queue: RunLoopHandle,
     responder: Responder,
 
     /// Counts the number of times a response was already expired when
@@ -157,7 +157,7 @@ struct ThreadState {
     http_file_source: HTTPFileSource,
     /// This thread's loop, which the transfers answer on.
     run_loop: RunLoop,
-    queue: SchedulerPtr,
+    queue: RunLoopHandle,
     resource_transform: RefCell<Option<ResourceTransform>>,
     tasks: RefCell<VecMap<u64, Rc<OnlineFileRequest>>>,
     /// Replaces the backoff after a connection error, so that a test can
@@ -516,7 +516,7 @@ impl OnlineFileSourceThread {
             maximum_concurrent_requests: Cell::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
             http_file_source,
             run_loop: run_loop.clone(),
-            queue: run_loop.scheduler(),
+            queue: run_loop.handle(),
             resource_transform: RefCell::new(None),
             tasks: RefCell::new(VecMap::new()),
             #[cfg(test)]
@@ -539,7 +539,7 @@ impl OnlineFileSourceThread {
             resource: RefCell::new(resource),
             request: RefCell::new(None),
             timer: Timer::new(&self.state.run_loop),
-            queue: SchedulerPtr::clone(&self.state.queue),
+            queue: self.state.queue.clone(),
             responder,
             expired_requests: Cell::new(0),
             failed_requests: Cell::new(0),

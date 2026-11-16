@@ -27,7 +27,7 @@ use wasm_bindgen::prelude::*;
 /// panicked. `respawn(instance)` gives a port to a new Web Worker in place
 /// of a lost one, if it can.
 pub fn workers(
-    scheduler: &mln_actor::SchedulerPtr,
+    scheduler: &mln_actor::RunLoopHandle,
     ports: Vec<web_sys::MessagePort>,
     registry: Arc<Registry>,
     on_reply: impl Fn(usize) + 'static,

@@ -1,5 +1,5 @@
-use mln_actor::SchedulerPtr;
 use mln_util::constants::ASSET_PROTOCOL;
+use mln_util::pool::Pool;
 
 use crate::file_source::FileSource;
 use crate::local_file_request::local_file_response;
@@ -41,13 +41,13 @@ fn asset_response(root: &str, resource: &Resource) -> Response {
 /// fragment ends the URL's path.
 pub(crate) struct AssetFileSource {
     root: std::sync::Arc<str>,
-    pool: SchedulerPtr,
+    pool: Pool,
 }
 
 impl AssetFileSource {
     /// Loads `asset://` URLs from the directory `asset_path`, on `pool`.
     #[must_use]
-    pub(crate) fn new(asset_path: &str, pool: SchedulerPtr) -> Self {
+    pub(crate) fn new(asset_path: &str, pool: Pool) -> Self {
         AssetFileSource { root: asset_path.into(), pool }
     }
 }
@@ -55,11 +55,11 @@ impl AssetFileSource {
 impl FileSource for AssetFileSource {
     fn load(&self, resource: &Resource, responder: Responder) {
         let (root, resource) = (std::sync::Arc::clone(&self.root), resource.clone());
-        self.pool.schedule(Box::new(move || {
+        self.pool.spawn(move || {
             if !responder.is_cancelled() {
                 responder.send(asset_response(&root, &resource));
             }
-        }));
+        });
     }
 
     fn can_request(&self, resource: &Resource) -> bool {

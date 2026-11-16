@@ -17,6 +17,7 @@ use mln_style::sources::CustomGeometrySourceHandle;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::geojson::GeoJSONOptions;
 use mln_util::geo::{LatLng, LatLngBounds};
+use mln_util::pool::Pool;
 use serde_json::json;
 use support::*;
 
@@ -43,8 +44,9 @@ pub fn set(layer: &mut Layer, name: &str, value: &serde_json::Value) {
 #[test]
 fn grid() {
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
 
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
     let mut map = Map::with_resource_options(
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
@@ -52,6 +54,7 @@ fn grid() {
             ..ResourceOptions::default()
         },
         &run_loop,
+        &pool,
     )
     .unwrap();
     frontend.attach(&map);
@@ -86,7 +89,7 @@ fn grid() {
         ..Default::default()
     };
 
-    let source = custom_geometry_source::create("custom", options, run_loop.pool()).unwrap();
+    let source = custom_geometry_source::create("custom", options, &pool).unwrap();
     handle.set(CustomGeometrySourceHandle::of(&source).unwrap()).unwrap();
     map.add_source(source).unwrap();
 
@@ -111,12 +114,14 @@ fn grid() {
 #[test]
 fn recycle_map_update_images() {
     let run_loop = RunLoop::new();
+    let pool = Pool::new(4).unwrap();
 
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
     let mut map = Map::with_file_source(
         Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &run_loop,
+        &pool,
     )
     .unwrap();
     frontend.attach(&map);

@@ -76,8 +76,7 @@ impl RenderingStatsView {
                 ..Default::default()
             };
             // The default tile options are valid, so this always succeeds.
-            if let Ok(source) =
-                custom_geometry_source::create(RENDERING_STATS_SOURCE_ID, options, map.run_loop().pool())
+            if let Ok(source) = custom_geometry_source::create(RENDERING_STATS_SOURCE_ID, options, map.pool())
                 && let Some(source_handle) = CustomGeometrySourceHandle::of(&source)
             {
                 let _ = handle.set(source_handle);

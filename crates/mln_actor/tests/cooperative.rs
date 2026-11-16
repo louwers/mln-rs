@@ -4,9 +4,8 @@
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock, mpsc};
+use std::sync::{Arc, OnceLock};
 
-use mln_actor::actor::Actor;
 use mln_actor::{CooperativeScheduler, Thread, scheduler};
 use parking_lot::Mutex;
 
@@ -15,13 +14,6 @@ fn cooperative() -> &'static Arc<CooperativeScheduler> {
     static INSTALLED: OnceLock<()> = OnceLock::new();
     INSTALLED.get_or_init(|| scheduler::install_cooperative(Arc::new(CooperativeScheduler::new())));
     scheduler::cooperative().unwrap()
-}
-
-#[test]
-fn background_and_sequenced_are_the_cooperative_scheduler() {
-    let cooperative: Arc<dyn scheduler::Scheduler + Send + Sync> = Arc::<CooperativeScheduler>::clone(cooperative());
-    assert!(Arc::ptr_eq(&scheduler::get_background(), &cooperative));
-    assert!(Arc::ptr_eq(&scheduler::get_sequenced(), &cooperative));
 }
 
 #[test]
@@ -65,25 +57,11 @@ fn a_thread_keeps_its_object_on_a_loop_that_the_host_runs() {
         });
     }
     assert!(seen.lock().is_empty());
-    assert!(!cooperative.run_until(None));
+    // As the host's pump does: the first pass's messages leave the loop
+    // pending until the second.
+    cooperative.run_loops();
+    assert!(!cooperative.run_loops());
     assert_eq!(*seen.lock(), (0..10).collect::<Vec<_>>());
     drop(thread);
     assert_eq!(total.load(Ordering::SeqCst), 10);
-}
-
-#[test]
-fn a_background_actor_runs_when_the_host_runs_the_tasks() {
-    let cooperative = cooperative();
-    let (tx, rx) = mpsc::channel();
-    let actor = Actor::new(scheduler::get_background(), move |_| tx);
-    let main = std::thread::current().id();
-    for i in 0..3 {
-        actor.self_ref().invoke(move |tx: &mut mpsc::Sender<usize>| {
-            assert_eq!(std::thread::current().id(), main);
-            tx.send(i).unwrap();
-        });
-    }
-    assert!(rx.try_recv().is_err());
-    assert!(!cooperative.run_until(None));
-    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![0, 1, 2]);
 }

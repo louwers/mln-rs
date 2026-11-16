@@ -13,6 +13,7 @@ use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_image::decode_image;
 use mln_map::{Map, MapMode, MapOptions};
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 
 fn render_tests_dir() -> PathBuf {
@@ -21,13 +22,13 @@ fn render_tests_dir() -> PathBuf {
 
 /// Returns (difference, allowed).
 fn run(test: &str) -> (f64, f64) {
-    run_on(test, |size, pixel_ratio, run_loop| {
-        HeadlessFrontend::new(size, pixel_ratio, run_loop).expect("a headless frontend")
+    run_on(test, |size, pixel_ratio, run_loop, pool| {
+        HeadlessFrontend::new(size, pixel_ratio, run_loop, pool).expect("a headless frontend")
     })
 }
 
 /// `run` with the frontend `frontend` makes for the size and pixel ratio.
-fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &RunLoop) -> HeadlessFrontend) -> (f64, f64) {
+fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &RunLoop, &Pool) -> HeadlessFrontend) -> (f64, f64) {
     let dir = render_tests_dir().join(test);
     let json = std::fs::read_to_string(dir.join("style.json")).expect("style.json");
     let document: serde_json::Value = serde_json::from_str(&json).expect("json");
@@ -40,9 +41,11 @@ fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &RunLoop) -> HeadlessFron
     let size = Size::new(width, height);
 
     let run_loop = RunLoop::new();
-    let mut frontend = frontend(size, pixel_ratio, &run_loop);
+    let pool = Pool::new(4).unwrap();
+    let mut frontend = frontend(size, pixel_ratio, &run_loop, &pool);
     let mut map =
-        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }, &run_loop).unwrap();
+        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }, &run_loop, &pool)
+            .unwrap();
     frontend.attach(&map);
     map.load_style_json(&json);
     let camera = map.style().get_default_camera();
@@ -128,8 +131,8 @@ fn background_visibility_visible() {
 #[test]
 fn frontends_on_one_device_render_in_turn() {
     let device = mln_headless::harness_device().expect("device");
-    let on_shared_device = |size, pixel_ratio, run_loop: &RunLoop| {
-        HeadlessFrontend::with_device(device.clone(), size, pixel_ratio, Arc::default(), run_loop)
+    let on_shared_device = |size, pixel_ratio, run_loop: &RunLoop, pool: &Pool| {
+        HeadlessFrontend::with_device(device.clone(), size, pixel_ratio, Arc::default(), run_loop, pool)
             .expect("a headless frontend")
     };
     for test in ["background-color/literal", "background-color/function", "background-color/literal"] {

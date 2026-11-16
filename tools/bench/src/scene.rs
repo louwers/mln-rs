@@ -24,6 +24,7 @@ use mln_text::GlyphCache;
 use mln_util::feature::feature_id_to_string;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
@@ -250,7 +251,7 @@ impl Observer {
 /// The file source of the scenes over `resource_options`' cache database:
 /// the render suite's proxy, with the tile latency of [`crate::latency`].
 /// The scenes alive at once share it, as a host's maps share their runtime's.
-fn shared_file_source(resource_options: &ResourceOptions) -> Arc<dyn FileSource> {
+fn shared_file_source(resource_options: &ResourceOptions, pool: &Pool) -> Arc<dyn FileSource> {
     static SHARED: Mutex<Vec<(ResourceOptions, Weak<dyn FileSource>)>> = Mutex::new(Vec::new());
     let mut shared = SHARED.lock();
     shared.retain(|(_, file_source)| file_source.strong_count() > 0);
@@ -259,10 +260,17 @@ fn shared_file_source(resource_options: &ResourceOptions) -> Arc<dyn FileSource>
         .find(|(options, _)| options == resource_options)
         .and_then(|(_, file_source)| file_source.upgrade());
     live.unwrap_or_else(|| {
-        let file_source = crate::latency::delayed(render_test::file_source::proxy_loader(resource_options));
+        let file_source = crate::latency::delayed(render_test::file_source::proxy_loader(resource_options, pool));
         shared.push((resource_options.clone(), Arc::downgrade(&file_source)));
         file_source
     })
+}
+
+/// The pool that the scenes run their background work on, which they share
+/// as a host's maps share their runtime's.
+fn shared_pool() -> &'static Pool {
+    static POOL: OnceLock<Pool> = OnceLock::new();
+    POOL.get_or_init(|| Pool::new(4).expect("the scenes' pool"))
 }
 
 pub struct Scene {
@@ -295,12 +303,13 @@ impl Scene {
         let resource_options =
             ResourceOptions { cache_path: cache.display().to_string(), ..ResourceOptions::default() };
         let run_loop = RunLoop::new();
+        let pool = shared_pool();
         let mut frontend =
-            HeadlessFrontend::with_glyph_cache(size, 1.0, glyph_cache, &run_loop).expect("a headless frontend");
-        let file_source = shared_file_source(&resource_options);
+            HeadlessFrontend::with_glyph_cache(size, 1.0, glyph_cache, &run_loop, pool).expect("a headless frontend");
+        let file_source = shared_file_source(&resource_options, pool);
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
         let options = MapOptions { map_mode, size, pixel_ratio: 1.0, ..Default::default() };
-        let map = Map::with_file_source(file_source, options, &run_loop).expect("the map");
+        let map = Map::with_file_source(file_source, options, &run_loop, pool).expect("the map");
         frontend.attach(&map);
         Scene { frontend, draws_updates: mode != Mode::OnDemand, map, observer: Observer::default(), run_loop }
     }

@@ -23,12 +23,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use mln_actor::TaggedScheduler;
 use mln_storage::FileSource;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
+use mln_util::pool::TaskGroup;
 use mln_vec_map::VecSet;
 
 use crate::buckets::hillshade_bucket::HillshadeBucket;
@@ -70,7 +70,7 @@ pub(crate) struct StoreContext {
     pub(crate) images: ImageStore,
     pub(crate) atlas: DynamicTextureAtlas,
     /// The renderer's workers, which free what tiles let go of.
-    pub(crate) pool: TaggedScheduler,
+    pub(crate) pool: TaskGroup,
     /// Where glyphs load from: the last update's file source.
     pub(crate) file_source: Option<Arc<dyn FileSource>>,
     events: Vec<StoreEvent>,
@@ -713,7 +713,7 @@ impl TileStore {
         workers: Box<dyn TileWorkers>,
         glyphs: GlyphStore,
         images: ImageStore,
-        pool: TaggedScheduler,
+        pool: TaskGroup,
         wake: Waker,
     ) -> Self {
         let inbox = Inbox::new(wake);
@@ -955,7 +955,7 @@ impl TileStore {
     }
 
     /// The renderer's workers, which free what tiles let go of.
-    pub(crate) fn pool(&self) -> &TaggedScheduler {
+    pub(crate) fn pool(&self) -> &TaskGroup {
         &self.ctx.pool
     }
 

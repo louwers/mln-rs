@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_actor::{SchedulerPtr, scheduler};
+use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
 use crate::asset_file_source::AssetFileSource;
@@ -173,24 +173,26 @@ pub struct Loader {
 impl Loader {
     /// A loader for `options`: assets from its asset path, a cache database
     /// at its cache path (when the `sqlite` feature is on), and an
-    /// [`OnlineFileSource`] for the network.
+    /// [`OnlineFileSource`] for the network. It reads files and archives on
+    /// `pool`.
     #[must_use]
-    pub fn new(options: &ResourceOptions) -> Loader {
+    pub fn new(options: &ResourceOptions, pool: &Pool) -> Loader {
         let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new());
-        let builder = Loader::builder().asset_path(&options.asset_path).network(Arc::clone(&network));
+        let builder = Loader::builder(pool).asset_path(&options.asset_path).network(Arc::clone(&network));
         #[cfg(feature = "sqlite")]
         let builder = builder.database(Arc::new(DatabaseFileSource::new(&options.cache_path, Some(network))));
         builder.build()
     }
 
-    /// A builder for a loader with neither a database nor a network.
-    pub fn builder() -> LoaderBuilder {
+    /// A builder for a loader with neither a database nor a network, which
+    /// reads files and archives on `pool`.
+    pub fn builder(pool: &Pool) -> LoaderBuilder {
         LoaderBuilder {
             asset_path: ".".to_owned(),
             #[cfg(feature = "sqlite")]
             database: None,
             network: None,
-            pool: None,
+            pool: pool.clone(),
         }
     }
 }
@@ -202,7 +204,7 @@ pub struct LoaderBuilder {
     #[cfg(feature = "sqlite")]
     database: Option<Arc<dyn Cache>>,
     network: Option<Arc<dyn FileSource>>,
-    pool: Option<SchedulerPtr>,
+    pool: Pool,
 }
 
 impl LoaderBuilder {
@@ -227,20 +229,14 @@ impl LoaderBuilder {
         self
     }
 
-    /// Reads files and archives on `pool`, rather than the process's
-    /// background pool.
-    pub fn pool(mut self, pool: SchedulerPtr) -> Self {
-        self.pool = Some(pool);
-        self
-    }
-
+    #[must_use]
     pub fn build(self) -> Loader {
-        let pool = self.pool.unwrap_or_else(scheduler::get_background);
+        let pool = self.pool;
         let mut sources = Sources {
-            asset: Arc::new(AssetFileSource::new(&self.asset_path, Arc::clone(&pool))),
-            local: Arc::new(LocalFileSource::new(Arc::clone(&pool))),
+            asset: Arc::new(AssetFileSource::new(&self.asset_path, pool.clone())),
+            local: Arc::new(LocalFileSource::new(pool.clone())),
             #[cfg(feature = "sqlite")]
-            mbtiles: Arc::new(MBTilesFileSource::new(Arc::clone(&pool))),
+            mbtiles: Arc::new(MBTilesFileSource::new(pool.clone())),
             pmtiles: None,
             #[cfg(feature = "sqlite")]
             database: self.database,

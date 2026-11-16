@@ -18,6 +18,7 @@ use mln_util::feature::Feature;
 use mln_util::geo::LatLng;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 
 use crate::file_source::ProxyFileSource;
@@ -255,8 +256,9 @@ pub enum QueryGeometry {
 /// `Map(frontend, MapOptions().withMapMode(..).withSize(..)
 /// .withPixelRatio(..).withCrossSourceCollisions(..), resourceOptions)`, plus
 /// `map.setBounds(BoundOptions().withMaxPitch(..))` when `maxPitch` is set.
-pub type ImplFactory =
-    Box<dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions, &RunLoop) -> Result<Box<dyn TestRunnerImpl>, String>>;
+pub type ImplFactory = Box<
+    dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions, &RunLoop, &Pool) -> Result<Box<dyn TestRunnerImpl>, String>,
+>;
 
 /// Port-only: how the runner's options that C++ does not have set up a map.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -353,6 +355,8 @@ pub(crate) struct TestRunner {
     /// The loop of the runner's thread, which its maps run on
     /// (`mln::util::RunLoop runLoop` in `runRenderTests`).
     run_loop: RunLoop,
+    /// Where the runner's maps run their background work.
+    pool: Pool,
 }
 
 impl TestRunner {
@@ -374,6 +378,7 @@ impl TestRunner {
             watchdog: None,
             impl_options: ImplOptions::default(),
             run_loop: RunLoop::new(),
+            pool: Pool::new(4).expect("the runner's pool"),
         }
     }
 
@@ -936,7 +941,7 @@ impl TestRunner {
                 };
                 let resource_options = ResourceOptions { cache_path: self.manifest.get_cache_path().to_string() };
                 let created = catch_unwind(AssertUnwindSafe(|| {
-                    factory(ctx.metadata, &resource_options, &self.impl_options, &self.run_loop)
+                    factory(ctx.metadata, &resource_options, &self.impl_options, &self.run_loop, &self.pool)
                 }));
                 match created {
                     Ok(Ok(runner_impl)) => {

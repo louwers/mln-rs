@@ -10,6 +10,7 @@ use mln_renderer::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::Pool;
 
 use crate::file_source::proxy_loader;
 use crate::metadata::{MapMode, TestMetadata};
@@ -44,6 +45,7 @@ impl Impl {
         resource_options: &ResourceOptions,
         impl_options: ImplOptions,
         run_loop: &RunLoop,
+        pool: &Pool,
     ) -> Result<Impl, String> {
         let resource_options = mln_storage::ResourceOptions {
             cache_path: resource_options.cache_path.clone(),
@@ -51,15 +53,15 @@ impl Impl {
         };
         let registry = Registry::with_builtins();
         let mut frontend =
-            HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, run_loop).map_err(|e| e.to_string())?;
+            HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, run_loop, pool).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let workers = RemoteWorkers::new(&run_loop.scheduler(), Arc::clone(&registry), |replies| {
+            let workers = RemoteWorkers::new(&run_loop.handle(), Arc::clone(&registry), |replies| {
                 Box::new(ThreadWorkerInstances::new(count, Arc::clone(&registry), &replies))
             });
             frontend.renderer().set_tile_workers(&workers);
         }
-        let file_source = proxy_loader(&resource_options);
+        let file_source = proxy_loader(&resource_options, pool);
         let mut map = Map::with_registry(
             Arc::clone(&file_source),
             MapOptions {
@@ -71,6 +73,7 @@ impl Impl {
             },
             Arc::clone(registry.style()),
             run_loop,
+            pool,
         )
         .map_err(|e| e.to_string())?;
         frontend.attach(&map);
@@ -363,7 +366,7 @@ impl TestRunnerImpl for Impl {
             let maybe_image = Rc::clone(&maybe_image);
             let request_completed = Rc::clone(&request_completed);
             file_source.request(
-                &self.run_loop.scheduler(),
+                &self.run_loop.handle(),
                 &mln_storage::Resource::image(&format!("mapbox://render-tests/{image_path}")),
                 Box::new(move |response: mln_storage::Response| {
                     if let Some(data) = &response.data {
@@ -430,6 +433,7 @@ pub fn factory() -> ImplFactory {
         |metadata: &TestMetadata,
          resource_options: &ResourceOptions,
          impl_options: &ImplOptions,
-         run_loop: &RunLoop| { Ok(Box::new(Impl::new(metadata, resource_options, *impl_options, run_loop)?)) },
+         run_loop: &RunLoop,
+         pool: &Pool| { Ok(Box::new(Impl::new(metadata, resource_options, *impl_options, run_loop, pool)?)) },
     )
 }

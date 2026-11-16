@@ -4,9 +4,7 @@
 // ports.
 //
 // C++ -> Rust in these tests:
-// - `Actor<O>` on `Scheduler::GetBackground()` is the pool `crate::actor::
-//   Actor<O>` (objects are `Send`, messages are closures over `&mut O`);
-//   `util::Thread<O>` is the thread-pinned actor (messages are closures over
+// - `util::Thread<O>` is the thread-pinned actor (messages are closures over
 //   `&O`).
 // - `std::promise`/`std::future` are `mpsc` channels; a `future.get()` on the
 //   test thread is `get()` below, which fails the test after a generous
@@ -15,8 +13,6 @@
 //   here such checks set a shared flag that the test thread asserts on (a
 //   panic on another thread would only kill that thread).
 
-mod actor;
-mod actor_ref;
 mod async_task;
 mod run_loop;
 mod thread;
@@ -58,10 +54,4 @@ pub(crate) fn get<T>(future: &mpsc::Receiver<T>) -> T {
 #[track_caller]
 pub(crate) fn wait(future: &mpsc::Receiver<()>) {
     future.recv_timeout(Duration::from_secs(60)).expect("future not ready after 60 s");
-}
-
-/// Waits up to `timeout` for `future`'s value; `None` on timeout.
-#[must_use]
-pub(crate) fn wait_for<T>(future: &mpsc::Receiver<T>, timeout: Duration) -> Option<T> {
-    future.recv_timeout(timeout).ok()
 }

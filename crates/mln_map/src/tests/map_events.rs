@@ -17,8 +17,13 @@ use crate::map_options::UnusedStyleImagePolicy;
 use crate::{CameraChange, CameraChangeMode, CameraChangeSource, CameraOptions, Map, MapEvent, MapMode, MapOptions};
 
 fn map(options: MapOptions, run_loop: &RunLoop) -> Map {
-    Map::with_file_source(Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)), options, run_loop)
-        .expect("map")
+    Map::with_file_source(
+        Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)),
+        options,
+        run_loop,
+        &crate::tests::pool(),
+    )
+    .expect("map")
 }
 
 /// Reports `event` to the map as its renderer would.
@@ -100,7 +105,7 @@ fn each_change_to_the_style_projection_reaches_the_transform() {
         Some(response)
     });
     let options = MapOptions { size: Size::new(512, 1024), ..Default::default() };
-    let mut map = Map::with_file_source(Arc::new(file_source), options, &run_loop).expect("map");
+    let mut map = Map::with_file_source(Arc::new(file_source), options, &run_loop, &crate::tests::pool()).expect("map");
     assert!(lowest_jump(&mut map) >= 1.0);
 
     // A style load.

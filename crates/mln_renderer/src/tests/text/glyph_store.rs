@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use mln_actor::{AsyncTask, RunLoop, TaggedScheduler, Timer};
+use mln_actor::{AsyncTask, RunLoop, Timer};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
@@ -27,8 +27,8 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::i18n;
-use mln_util::identity::SimpleIdentity;
 use mln_util::image::AlphaImage;
+use mln_util::pool::{Pool, TaskGroup};
 use mln_util::size::Size;
 use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
@@ -141,7 +141,7 @@ struct Store {
     /// Where the responses arrive.
     inbox: Inbox,
     /// Where the store parses glyph PBFs.
-    pool: TaggedScheduler,
+    pool: TaskGroup,
     file_source: Arc<dyn FileSource>,
     waits: RefCell<Vec<Wait>>,
     _wake: AsyncTask,
@@ -165,7 +165,7 @@ impl Store {
                 }
             });
             let sender = wake.sender();
-            let pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
+            let pool = TaskGroup::new(&Pool::new(4).expect("a pool"));
             let store = GlyphStore::new(
                 Some(local_glyph_rasterizer),
                 glyph_cache,
@@ -945,7 +945,7 @@ fn immediate_file_source_failure_requests_the_range_again() {
     test.get_glyphs(dependencies(&['a']));
     test.run_loop.run_once();
     test.get_glyphs(dependencies(&['a']));
-    test.store.pool.wait_for_empty();
+    test.store.pool.wait();
     test.run_loop.run_once();
 
     assert_eq!(requests.get(), 2);

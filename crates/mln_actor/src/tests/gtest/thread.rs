@@ -1,13 +1,10 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::ThreadId;
 use std::time::Duration;
 
-use mln_util::identity::SimpleIdentity;
 use parking_lot::Mutex;
 
-use crate::actor::Actor;
-use crate::scheduler::{self, SchedulerPtr, TaggedScheduler, Task};
 use crate::tests::gtest::{Failures, get, wait};
 use crate::{ActorRef, RunLoop, Thread, Timer};
 
@@ -130,17 +127,6 @@ impl TestWorker {
     }
 }
 
-/// The pool actor flavour of `TestWorker`: a pool actor's object is `Send`,
-/// and a `Timer` belongs to its thread's `RunLoop`, so it has no timer (only
-/// `send` is used on pool workers).
-struct PoolTestWorker;
-
-impl PoolTestWorker {
-    fn send(cb: impl FnOnce()) {
-        cb();
-    }
-}
-
 // gtest: Thread.ExecutesAfter
 #[test]
 fn executes_after() {
@@ -175,75 +161,6 @@ fn can_self_wake_up() {
 
     let handle = run_loop.handle();
     thread.actor().invoke(move |o: &TestWorker| o.send_delayed(move || handle.stop()));
-
-    run_loop.run();
-}
-
-// gtest: Thread.Concurrency
-#[test]
-fn concurrency() {
-    let run_loop = RunLoop::new();
-
-    let num_messages: usize = 100_000;
-    let completed = Arc::new(AtomicUsize::new(num_messages));
-
-    let pool_worker = Actor::new(scheduler::get_background(), |_| PoolTestWorker);
-    let pool_worker_ref = pool_worker.self_ref();
-
-    let threaded_object = Thread::new("Test", TestWorker::new);
-    let threaded_object_ref = threaded_object.actor();
-
-    // 10 threads sending 100k messages to the Thread. The
-    // idea here is to test if the scheduler is handling concurrency
-    // correctly, otherwise this test should crash.
-    for _ in 0..num_messages {
-        let threaded_object_ref = threaded_object_ref.clone();
-        let handle = run_loop.handle();
-        let completed = Arc::clone(&completed);
-        pool_worker_ref.invoke(move |_: &mut PoolTestWorker| {
-            PoolTestWorker::send(move || {
-                threaded_object_ref.invoke(move |_: &TestWorker| {
-                    TestWorker::send(move || {
-                        if completed.fetch_sub(1, Ordering::SeqCst) == 1 {
-                            handle.stop();
-                        }
-                    });
-                });
-            });
-        });
-    }
-
-    run_loop.run();
-}
-
-// gtest: Thread.ThreadPoolMessaging
-#[test]
-fn thread_pool_messaging() {
-    let run_loop = RunLoop::new();
-
-    let pool_worker = Actor::new(scheduler::get_background(), |_| PoolTestWorker);
-    let pool_worker_ref = pool_worker.self_ref();
-
-    let threaded_object = Thread::new("Test", TestWorker::new);
-    let threaded_object_ref = threaded_object.actor();
-
-    // This is sending a message to the Thread from the main
-    // thread. Then the Thread will send another message to
-    // a worker on the ThreadPool.
-    let p = pool_worker_ref.clone();
-    let handle = run_loop.handle();
-    threaded_object_ref.invoke(move |_: &TestWorker| {
-        TestWorker::send(move || p.invoke(move |_: &mut PoolTestWorker| PoolTestWorker::send(move || handle.stop())));
-    });
-
-    run_loop.run();
-
-    // Same as before, but in the opposite direction.
-    let t = threaded_object_ref.clone();
-    let handle = run_loop.handle();
-    pool_worker_ref.invoke(move |_: &mut PoolTestWorker| {
-        PoolTestWorker::send(move || t.invoke(move |_: &TestWorker| TestWorker::send(move || handle.stop())));
-    });
 
     run_loop.run();
 }
@@ -344,144 +261,4 @@ fn delete_before_child_starts() {
 
     // Should process the queue before destruction.
     assert!(flag.load(Ordering::SeqCst));
-}
-
-// gtest: Thread.PoolWait
-#[test]
-fn pool_wait() {
-    let pool = scheduler::get_background();
-
-    let thread_count = 10;
-    for _ in 0..thread_count {
-        pool.schedule(Box::new(|| std::thread::sleep(Duration::from_millis(100))));
-    }
-
-    pool.wait_for_empty();
-}
-
-// gtest: Thread.PoolWaitRecursiveAdd
-#[test]
-fn pool_wait_recursive_add() {
-    let pool = scheduler::get_background();
-
-    let p = Arc::clone(&pool);
-    pool.schedule(Box::new(move || {
-        // Scheduled tasks can add more tasks
-        let p2 = Arc::clone(&p);
-        p.schedule(Box::new(move || {
-            std::thread::sleep(Duration::from_millis(10));
-            p2.schedule(Box::new(|| std::thread::sleep(Duration::from_millis(10))));
-        }));
-        std::thread::sleep(Duration::from_millis(10));
-    }));
-
-    pool.wait_for_empty();
-}
-
-// gtest: Thread.PoolWaitAdd
-#[test]
-fn pool_wait_add() {
-    #[derive(Default)]
-    struct State {
-        add_active: AtomicBool,
-        added: AtomicI32,
-        executed: AtomicI32,
-    }
-
-    let pool = scheduler::get_background();
-    let seq = scheduler::get_sequenced();
-
-    // add new tasks every few milliseconds
-    let state = Arc::new(State::default());
-    state.add_active.store(true, Ordering::SeqCst);
-
-    {
-        let pool = Arc::clone(&pool);
-        let state = Arc::clone(&state);
-        seq.schedule(Box::new(move || {
-            while state.add_active.load(Ordering::SeqCst) {
-                let s = Arc::clone(&state);
-                pool.schedule(Box::new(move || {
-                    s.executed.fetch_add(1, Ordering::SeqCst);
-                }));
-                state.added.fetch_add(1, Ordering::SeqCst);
-            }
-        }));
-    }
-
-    // Wait be sure some are added
-    while state.added.load(Ordering::SeqCst) < 1 {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-
-    // Add an item that should take long enough to be confident that
-    // more items would be added by the sequential task if not blocked
-    pool.schedule(Box::new(|| std::thread::sleep(Duration::from_millis(100))));
-
-    pool.wait_for_empty();
-
-    state.add_active.store(false, Ordering::SeqCst);
-    pool.wait_for_empty();
-
-    assert!(state.added.load(Ordering::SeqCst) >= 1);
-}
-
-// gtest: Thread.WrongThread
-#[test]
-#[ignore = "C++ builds it only with NDEBUG: waitForEmpty from a pool thread asserts in debug builds; the port's ThreadedScheduler asserts in every build"]
-fn wrong_thread() {
-    let pool = scheduler::get_background();
-
-    // Asserts in debug builds, silently ignored in release.
-    let p = Arc::clone(&pool);
-    pool.schedule(Box::new(move || p.wait_for_empty()));
-
-    pool.wait_for_empty();
-}
-
-fn make_counter_thread(pool: TaggedScheduler, stop_flag: Arc<AtomicBool>, counter: Arc<AtomicUsize>) -> Task {
-    Box::new(move || {
-        std::thread::sleep(Duration::from_micros(10));
-        counter.fetch_add(1, Ordering::SeqCst);
-        if !stop_flag.load(Ordering::SeqCst) {
-            pool.schedule(make_counter_thread(pool.clone(), Arc::clone(&stop_flag), Arc::clone(&counter)));
-        }
-    })
-}
-
-// gtest: Thread.TaggedPools
-#[test]
-fn tagged_pools() {
-    let background: SchedulerPtr = scheduler::get_background();
-    let pool_tag1 = TaggedScheduler::new(Arc::clone(&background), SimpleIdentity::new());
-    let pool_tag2 = TaggedScheduler::new(Arc::clone(&background), SimpleIdentity::new());
-    let stop_tasks1 = Arc::new(AtomicBool::new(false));
-    let stop_tasks2 = Arc::new(AtomicBool::new(false));
-    let run_count1 = Arc::new(AtomicUsize::new(0));
-    let run_count2 = Arc::new(AtomicUsize::new(0));
-
-    // Run a bunch of tasks on two different pool tags (that share the same thread pool)
-    for _ in 0..50 {
-        pool_tag1.schedule(make_counter_thread(pool_tag1.clone(), Arc::clone(&stop_tasks1), Arc::clone(&run_count1)));
-        pool_tag2.schedule(make_counter_thread(pool_tag2.clone(), Arc::clone(&stop_tasks2), Arc::clone(&run_count2)));
-    }
-    std::thread::sleep(Duration::from_millis(150));
-
-    // Stop tasks on queue 1 and wait for it to empty
-    stop_tasks1.store(true, Ordering::SeqCst);
-    pool_tag1.wait_for_empty();
-    let total_runs1 = run_count1.load(Ordering::SeqCst);
-
-    // Do the same for queue 2
-    stop_tasks2.store(true, Ordering::SeqCst);
-    pool_tag2.wait_for_empty();
-    let total_runs2 = run_count2.load(Ordering::SeqCst);
-
-    // No other tasks in queue 1 ran while waiting on queue 2.
-    assert_eq!(total_runs1, run_count1.load(Ordering::SeqCst));
-
-    std::thread::sleep(Duration::from_millis(150));
-
-    // Same for queue 2
-    assert_eq!(total_runs2, run_count2.load(Ordering::SeqCst));
 }

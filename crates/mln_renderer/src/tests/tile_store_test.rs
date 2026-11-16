@@ -8,12 +8,12 @@ use std::sync::Arc;
 
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
-use mln_actor::{RunLoop, TaggedScheduler, scheduler};
+use mln_actor::RunLoop;
 use mln_map_types::MapMode;
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
-use mln_util::identity::SimpleIdentity;
+use mln_util::pool::TaskGroup;
 use mln_util::tileset::{RasterEncoding, Tileset};
 use parking_lot::Mutex;
 use serde_json::json;
@@ -85,15 +85,12 @@ fn features(ids: &[u64]) -> TileData {
 
 struct Test {
     run_loop: RunLoop,
-    pool: TaggedScheduler,
+    pool: TaskGroup,
 }
 
 impl Test {
     fn new() -> Self {
-        Test {
-            run_loop: RunLoop::new(),
-            pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
-        }
+        Test { run_loop: RunLoop::new(), pool: TaskGroup::new(&crate::tests::pool()) }
     }
 
     /// Tile 0/0/0 of a vector tileset whose tiles `file_source` answers,
@@ -119,7 +116,7 @@ impl Test {
 
 impl Drop for Test {
     fn drop(&mut self) {
-        self.pool.wait_for_empty();
+        self.pool.wait();
     }
 }
 

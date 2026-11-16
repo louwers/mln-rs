@@ -18,8 +18,13 @@ use crate::{CameraOptions, ErrorKind, Map, MapOptions, TileSettings, UpdateReade
 
 fn map(run_loop: &RunLoop) -> Map {
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
-    Map::with_file_source(Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)), options, run_loop)
-        .expect("map")
+    Map::with_file_source(
+        Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)),
+        options,
+        run_loop,
+        &crate::tests::pool(),
+    )
+    .expect("map")
 }
 
 /// A reader of `map`'s updates, and the times that it woke.
@@ -197,7 +202,7 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
         Some(response)
     });
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
-    let mut map = Map::with_file_source(Arc::new(file_source), options, &run_loop).expect("map");
+    let mut map = Map::with_file_source(Arc::new(file_source), options, &run_loop, &crate::tests::pool()).expect("map");
     map.jump_to(&CameraOptions::default());
     map.set_feature_state("points", None, "1", hover(true));
 

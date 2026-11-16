@@ -10,6 +10,7 @@ use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 use mln_util::logging::{Event, Log};
+use mln_util::pool::Pool;
 use mln_util::range::Range;
 
 pub use super::custom::{CustomGeometryProvider, TileOptions};
@@ -147,7 +148,7 @@ impl CustomGeometrySourceHandle {
 
 /// The custom geometry source `id`, whose tile functions run on `pool`.
 /// Fails for a tile size that isn't a power of two up to the tile extent.
-pub fn create(id: &str, options: Options, pool: mln_actor::SchedulerPtr) -> Result<Source, CustomGeometrySourceError> {
+pub fn create(id: &str, options: Options, pool: &Pool) -> Result<Source, CustomGeometrySourceError> {
     let tile_size = options.tile_options.tile_size;
     if !tile_size.is_power_of_two() || i32::from(tile_size) > constants::EXTENT {
         return Err(CustomGeometrySourceError::InvalidTileSize(tile_size));
@@ -168,7 +169,7 @@ mod tests {
     fn with_tile_size(tile_size: u16) -> Result<Source, CustomGeometrySourceError> {
         let mut options = Options::default();
         options.tile_options.tile_size = tile_size;
-        create("custom", options, mln_actor::scheduler::get_background())
+        create("custom", options, &Pool::local())
     }
 
     #[test]

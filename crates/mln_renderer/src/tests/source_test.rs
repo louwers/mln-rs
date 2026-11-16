@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use geojson::GeoJson;
-use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
+use mln_actor::{RunLoop, Timer};
 use mln_map::transform::Transform;
 use mln_map_types::{
     CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, TransformState, ViewportMode,
@@ -26,8 +26,8 @@ use mln_style_types::{ProjectionDefinition, SourceType};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, EventSeverity, Log, Observer as LogObserver};
+use mln_util::pool::{Pool, TaskGroup};
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
@@ -43,7 +43,7 @@ use crate::tile_parameters::TileParameters;
 struct SourceTest {
     run_loop: RunLoop,
     transform: Transform,
-    thread_pool: TaggedScheduler,
+    thread_pool: TaskGroup,
     /// Set by `end_handle`'s calls.
     ended: Rc<std::cell::Cell<bool>>,
 }
@@ -83,7 +83,7 @@ impl SourceTest {
         SourceTest {
             run_loop: RunLoop::new(),
             transform,
-            thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
+            thread_pool: TaskGroup::new(&crate::tests::pool()),
             ended: Rc::default(),
         }
     }
@@ -134,7 +134,7 @@ impl SourceTest {
 
 impl Drop for SourceTest {
     fn drop(&mut self) {
-        self.thread_pool.wait_for_empty();
+        self.thread_pool.wait();
     }
 }
 
@@ -597,7 +597,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
         let (described, end) = (Rc::clone(&described), test.end_handle());
         let request_source = source.clone();
         let _request = file_source.request(
-            &test.run_loop.scheduler(),
+            &test.run_loop.handle(),
             &resource,
             Box::new(move |response: Response| {
                 let (sender, receiver) = std::sync::mpsc::channel();
@@ -636,7 +636,8 @@ fn raster_dem_tile_attribution() {
 /// render source after one update of `store`.
 fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (Source, Box<dyn RenderSource>) {
     let source =
-        custom_geometry_source::create("source", CustomGeometrySourceOptions::default(), test.run_loop.pool()).unwrap();
+        custom_geometry_source::create("source", CustomGeometrySourceOptions::default(), test.thread_pool.pool())
+            .unwrap();
 
     let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
@@ -710,7 +711,7 @@ fn custom_vector_source_set_tile_data() {
     }
     *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
 
-    let source = custom_vector_source::create("source", CustomVectorSourceOptions::default(), test.run_loop.pool());
+    let source = custom_vector_source::create("source", CustomVectorSourceOptions::default(), test.thread_pool.pool());
 
     let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
@@ -797,8 +798,7 @@ fn geojson_source_tiles_after_data_reset() {
     let geojson = r#"{"geometry": {"type": "Point", "coordinates": [1.1, 1.1]}, "type": "Feature", "properties": {}}"#
         .parse::<GeoJson>()
         .unwrap();
-    let geojson_data =
-        create_geojson_data(geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
+    let geojson_data = create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
     source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(Arc::clone(&geojson_data)) });
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
@@ -863,7 +863,7 @@ impl SynchronousUpdateSource {
                 "geometry": {"type": "Point", "coordinates": [1.1, 1.1]}}]}"#
             .parse::<GeoJson>()
             .unwrap();
-        let data = Some(create_geojson_data(geojson, scheduler::get_sequenced(), &self.options).unwrap());
+        let data = Some(create_geojson_data(geojson, &self.options).unwrap());
         self.source = edited(&self.source, Edit::SetGeoJsonData { id: "source".to_owned(), data });
         let mut parameters = test.tile_parameters(MapMode::Continuous);
         parameters.is_update_synchronous = self.source.data().is_update_synchronous();
@@ -903,20 +903,6 @@ fn geojson_source_synchronous_update_override_applies_to_existing_tiles() {
     assert!(asynchronous.is_loaded()); // The tiles now complete within the update.
 }
 
-/// Holds the tasks it is given until the test runs them.
-#[derive(Default)]
-struct HeldScheduler {
-    tasks: Mutex<Vec<scheduler::Task>>,
-}
-
-impl scheduler::Scheduler for HeldScheduler {
-    fn schedule(&self, task: scheduler::Task) {
-        self.tasks.lock().push(task);
-    }
-
-    fn wait_for_empty(&self) {}
-}
-
 // gtest: Source.GeoJSONSourceSlicesInlineWhileABackgroundSliceRuns
 #[test]
 fn geojson_source_slices_inline_while_a_background_slice_runs() {
@@ -924,16 +910,19 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     // At zoom 3 the index slices its tiles on demand, which fills its tile cache.
     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(3.0), ..Default::default() });
 
-    // Unclustered data slices on this scheduler while the source is asynchronous.
-    let slicer = Arc::new(HeldScheduler::default());
+    // Unclustered data slices on the store's pool while the source is
+    // asynchronous: a pool that holds its tasks until the test runs them.
+    let pool = Pool::local();
+    let queued = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let woken = Arc::clone(&queued);
+    pool.set_waker(Some(Arc::new(move || woken.store(true, std::sync::atomic::Ordering::SeqCst))));
     let mut source = geojson_source("source", GeoJSONOptions::default_options());
     let geojson = r#"{"type": "Polygon", "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]]}"#
         .parse::<GeoJson>()
         .unwrap();
-    let data =
-        create_geojson_data(geojson, Arc::<HeldScheduler>::clone(&slicer), &GeoJSONOptions::default_options()).unwrap();
+    let data = create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
     source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(data) });
-    let mut store = test.store();
+    let mut store = crate::tests::pool_store(&test.run_loop, &TaskGroup::new(&pool));
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let layers = circle_layers();
     let update = |render_source: &mut Box<dyn RenderSource>, store: &mut TileStore, source: &Source| {
@@ -944,18 +933,14 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     };
 
     update(&mut render_source, &mut store, &source);
-    assert!(!slicer.tasks.lock().is_empty());
+    assert!(queued.load(std::sync::atomic::Ordering::SeqCst));
     assert!(!render_source.is_loaded(&store));
 
     // The queued slices run in the background while the source turns
     // synchronous and recreates its tiles, which slice the same index inline.
     let source = edited(&source, synchronous_update(true));
-    let tasks = std::mem::take(&mut *slicer.tasks.lock());
-    let background = std::thread::spawn(move || {
-        for task in tasks {
-            task();
-        }
-    });
+    let background_pool = pool.clone();
+    let background = std::thread::spawn(move || background_pool.run_all());
     update(&mut render_source, &mut store, &source);
     background.join().unwrap();
     assert!(render_source.is_loaded(&store)); // The new tiles complete within the update.
@@ -1201,7 +1186,7 @@ impl TurningSource {
         for _ in 0..100 {
             self.file_source.respond_to_all();
             while self.test.run_loop.run_once() {}
-            self.test.thread_pool.wait_for_empty();
+            self.test.thread_pool.wait();
             while self.test.run_loop.run_once() {}
             crate::tests::update(&mut self.store);
             self.update(longitude, zoom);

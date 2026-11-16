@@ -41,7 +41,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn local_file_source() -> LocalFileSource {
-    LocalFileSource::new(mln_actor::scheduler::get_background())
+    LocalFileSource::new(super::pool())
 }
 
 /// Requests `resource`, runs the loop until the response and returns it
@@ -52,7 +52,7 @@ fn request(fs: &LocalFileSource, resource: &Resource) -> Response {
     let result = std::rc::Rc::new(std::cell::RefCell::new(None));
     let (r, out, stop) = (std::rc::Rc::clone(&req), std::rc::Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();

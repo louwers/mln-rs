@@ -56,7 +56,7 @@ fn cancel() {
     let fs = online_file_source();
 
     drop(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, "http://127.0.0.1:3000/test"),
         Box::new(|_: Response| panic!("Callback should not be called")),
     ));
@@ -75,11 +75,11 @@ fn cancel_multiple() {
     let resource = Resource::new(Kind::Unknown, server.url("/test"));
 
     let req2 =
-        fs.request(&run_loop.scheduler(), &resource, Box::new(|_: Response| panic!("Callback should not be called")));
+        fs.request(&run_loop.handle(), &resource, Box::new(|_: Response| panic!("Callback should not be called")));
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -112,7 +112,7 @@ fn temporary_error() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/temporary-error")),
         Box::new(move |res: Response| {
             let n = counter.get();
@@ -167,7 +167,7 @@ fn connection_error() {
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, closed_port_url("/")),
         Box::new(move |res: Response| {
             let duration = seconds_since(start);
@@ -207,7 +207,7 @@ fn timeout() {
     let req = req();
     let (r, stop, c) = (Rc::clone(&req), run_loop.clone(), Rc::clone(&counter));
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |res: Response| {
             c.set(c.get() + 1);
@@ -242,7 +242,7 @@ fn retry_delay_on_expired_tile() {
     let resource = Resource::new(Kind::Unknown, server.url("/test?expires=10000"));
     let (stop, c) = (run_loop.clone(), Rc::clone(&counter));
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |res: Response| {
             c.set(c.get() + 1);
@@ -271,7 +271,7 @@ fn retry_on_clock_skew() {
     let resource = Resource::new(Kind::Unknown, server.url("/clockskew"));
     let stop = run_loop.clone();
     let _req1 = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |res: Response| {
             assert!(!res.must_revalidate);
@@ -312,19 +312,19 @@ fn respect_prior_expires() {
     let mut resource1 = Resource::new(Kind::Unknown, server.url("/test"));
     resource1.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
-    let _req1 = fs.request(&run_loop.scheduler(), &resource1, Box::new(|_: Response| panic!("Should never be called")));
+    let _req1 = fs.request(&run_loop.handle(), &resource1, Box::new(|_: Response| panic!("Should never be called")));
 
     // No expiration time, should be requested immediately.
     let resource2 = Resource::new(Kind::Unknown, server.url("/test"));
 
     let stop = run_loop.clone();
-    let _req2 = fs.request(&run_loop.scheduler(), &resource2, Box::new(move |_: Response| stop.stop()));
+    let _req2 = fs.request(&run_loop.handle(), &resource2, Box::new(move |_: Response| stop.stop()));
 
     // Very long expiration time, should never arrive.
     let mut resource3 = Resource::new(Kind::Unknown, server.url("/test"));
     resource3.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
-    let _req3 = fs.request(&run_loop.scheduler(), &resource3, Box::new(|_: Response| panic!("Should never be called")));
+    let _req3 = fs.request(&run_loop.handle(), &resource3, Box::new(|_: Response| panic!("Should never be called")));
 
     run_loop.run();
 }
@@ -346,7 +346,7 @@ fn respect_minimum_update_interval() {
     let minimum_update_interval = resource.minimum_update_interval;
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |_: Response| {
             let wait = Duration::from_secs((now().secs_since_epoch() - start.secs_since_epoch()) as u64);
@@ -401,7 +401,7 @@ fn network_status_change() {
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -444,7 +444,7 @@ fn network_status_change_preempt() {
     let req = req();
     let (r, stop, c) = (Rc::clone(&req), run_loop.clone(), Rc::clone(&counter));
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -492,7 +492,7 @@ fn network_status_online_offline() {
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -520,7 +520,7 @@ fn rate_limit_test(path: &str, expect_retry_after: bool) {
     // arrives; it's only certain to be after the request was made.
     let requested_at = now();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url(path)),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -578,7 +578,7 @@ fn low_high_priority_requests() {
     let req_0 = req();
     let (r, c) = (Rc::clone(&req_0), Rc::clone(&response_counter));
     *req_0.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &regular1,
         Box::new(move |_: Response| {
             c.set(c.get() + 1);
@@ -592,7 +592,7 @@ fn low_high_priority_requests() {
     let req_1 = req();
     let (r, c, stop) = (Rc::clone(&req_1), Rc::clone(&response_counter), run_loop.clone());
     *req_1.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &low_prio,
         Box::new(move |_: Response| {
             c.set(c.get() + 1);
@@ -608,7 +608,7 @@ fn low_high_priority_requests() {
     let req_2 = req();
     let (r, c) = (Rc::clone(&req_2), Rc::clone(&response_counter));
     *req_2.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &regular2,
         Box::new(move |_: Response| {
             c.set(c.get() + 1);
@@ -647,7 +647,7 @@ fn low_high_priority_requests_many() {
         if num_reqs % 2 == 0 {
             let (counter, correct_regular) = (Rc::clone(&response_counter), Rc::clone(&correct_regular));
             *r.borrow_mut() = Some(fs.request(
-                &run_loop.scheduler(),
+                &run_loop.handle(),
                 &Resource::new(Kind::Unknown, server.url(&format!("/load/{num_reqs}"))),
                 Box::new(move |_: Response| {
                     counter.set(counter.get() + 1);
@@ -670,7 +670,7 @@ fn low_high_priority_requests_many() {
                 Rc::clone(&collector),
             );
             *r.borrow_mut() = Some(fs.request(
-                &run_loop.scheduler(),
+                &run_loop.handle(),
                 &resource,
                 Box::new(move |_: Response| {
                     counter.set(counter.get() + 1);
@@ -732,7 +732,7 @@ fn pending_requests_start_by_order() {
         .map(|(index, resource)| {
             let (answered, stop) = (Rc::clone(&answered), run_loop.clone());
             Some(fs.request(
-                &run_loop.scheduler(),
+                &run_loop.handle(),
                 resource,
                 Box::new(move |_: Response| {
                     answered.borrow_mut().push(index);
@@ -781,7 +781,7 @@ fn request_same_url_multiple_times() {
     for _ in 0..100 {
         let (count, stop) = (Rc::clone(&count), run_loop.clone());
         requests.push(fs.request(
-            &run_loop.scheduler(),
+            &run_loop.handle(),
             &Resource::new(Kind::Unknown, server.url("/load")),
             Box::new(move |_: Response| {
                 count.set(count.get() + 1);
@@ -806,7 +806,7 @@ fn failed_resource_transform() {
 
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, "http://127.0.0.1:3000/test"),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -845,7 +845,7 @@ fn retry_failed_resource_transform() {
     let responses = Rc::new(Cell::new(0));
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Unknown, server.url("/delayed")),
         Box::new(move |res: Response| {
             responses.set(responses.get() + 1);
@@ -895,7 +895,7 @@ fn a_header_transform_runs_for_every_attempt() {
     let responses = Rc::new(Cell::new(0));
     let stop = run_loop.clone();
     let _req = fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &Resource::new(Kind::Source, "localhost://temporary-error"),
         Box::new(move |res: Response| {
             responses.set(responses.get() + 1);

@@ -54,8 +54,7 @@ impl<O: 'static> Thread<O> {
         let object = AspiringActor::<O>::new();
         if let Some(scheduler) = scheduler::cooperative() {
             let run_loop = RunLoop::new();
-            let established =
-                EstablishedActor::new(&run_loop.scheduler(), &object, |self_ref| make(self_ref, &run_loop));
+            let established = EstablishedActor::new(&run_loop.handle(), &object, |self_ref| make(self_ref, &run_loop));
             let key = scheduler.host(&run_loop);
             let established = Some(LocalObject::new(established));
             return Thread { object, backing: Backing::Local { established, scheduler, key } };
@@ -66,7 +65,7 @@ impl<O: 'static> Thread<O> {
             let run_loop = RunLoop::new();
             let parent = AspiringActor::<O>::with_mailbox(mailbox);
             let established_actor =
-                EstablishedActor::new(&run_loop.scheduler(), &parent, |self_ref| make(self_ref, &run_loop));
+                EstablishedActor::new(&run_loop.handle(), &parent, |self_ref| make(self_ref, &run_loop));
             let _ = running_tx.send(run_loop.handle());
             run_loop.run();
             drop(established_actor);

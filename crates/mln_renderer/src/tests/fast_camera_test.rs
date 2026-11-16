@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::{LocalObject, RunLoop, TaggedScheduler, scheduler};
+use mln_actor::{LocalObject, RunLoop};
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
@@ -26,7 +26,7 @@ use mln_style::sources::{raster_source, vector_source};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::geo::LatLng;
-use mln_util::identity::SimpleIdentity;
+use mln_util::pool::TaskGroup;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
@@ -164,7 +164,7 @@ impl FileSource for Network {
 /// draws its land and water at low zoom levels.
 struct Scene {
     run_loop: RunLoop,
-    thread_pool: TaggedScheduler,
+    thread_pool: TaskGroup,
     network: Arc<Network>,
     transform: Transform,
     vector: Source,
@@ -180,7 +180,7 @@ struct Scene {
 impl Scene {
     fn new(size: Size) -> Self {
         let run_loop = RunLoop::new();
-        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
+        let thread_pool = TaskGroup::new(&crate::tests::pool());
         let network = Arc::new(Network::new());
 
         let tileset = |url: &str, max_zoom| PartialTileset {
@@ -270,7 +270,7 @@ impl Scene {
         // Until neither the tile workers nor the replies they sent have
         // anything left to do.
         loop {
-            self.thread_pool.wait_for_empty();
+            self.thread_pool.wait();
             let ran = self.run_loop.run_once();
             crate::tests::update(&mut self.store);
             let work = self.pyramids().iter().any(|source| source.tiles.values().any(SourceInfo::has_work));

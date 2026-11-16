@@ -6,10 +6,10 @@
 
 use std::sync::Arc;
 
-use mln_actor::SchedulerPtr;
 use mln_util::chrono::Timestamp;
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::MBTILES_PROTOCOL;
+use mln_util::pool::Pool;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 use rusqlite::types::ValueRef;
@@ -212,24 +212,24 @@ impl Databases {
 /// on a thread pool.
 pub(crate) struct MBTilesFileSource {
     databases: Arc<Databases>,
-    pool: SchedulerPtr,
+    pool: Pool,
 }
 
 impl MBTilesFileSource {
     /// Reads the databases on `pool`.
     #[must_use]
-    pub(crate) fn new(pool: SchedulerPtr) -> Self {
+    pub(crate) fn new(pool: Pool) -> Self {
         MBTilesFileSource { databases: Arc::default(), pool }
     }
 
     /// Answers `responder` with `read`'s response, on the pool.
     fn read(&self, responder: Responder, read: impl FnOnce(&Databases) -> Response + Send + 'static) {
         let databases = Arc::clone(&self.databases);
-        self.pool.schedule(Box::new(move || {
+        self.pool.spawn(move || {
             if !responder.is_cancelled() {
                 responder.send(read(&databases));
             }
-        }));
+        });
     }
 }
 

@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_actor::{RunLoop, SchedulerPtr, Thread};
+use mln_actor::{RunLoop, RunLoopHandle, Thread};
 use parking_lot::Mutex;
 
 use super::{cpp_path, req};
@@ -14,10 +14,7 @@ use crate::resource::{Kind, Resource};
 use crate::response::{Reason, Response};
 
 fn asset_file_source() -> AssetFileSource {
-    AssetFileSource::new(
-        cpp_path("test/fixtures/storage/assets").to_str().unwrap(),
-        mln_actor::scheduler::get_background(),
-    )
+    AssetFileSource::new(cpp_path("test/fixtures/storage/assets").to_str().unwrap(), super::pool())
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.
@@ -27,7 +24,7 @@ fn request(fs: &AssetFileSource, resource: &Resource) -> Response {
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -47,7 +44,7 @@ fn data(res: &Response) -> &[u8] {
 /// The state of a `TestWorker`'s request chain.
 struct WorkerChain {
     fs: Arc<AssetFileSource>,
-    queue: SchedulerPtr,
+    queue: RunLoopHandle,
     num_requests: Cell<u32>,
     request: RefCell<Option<Request>>,
     end_callback: Box<dyn Fn()>,
@@ -83,7 +80,7 @@ impl WorkerChain {
 
 struct TestWorker {
     fs: Arc<AssetFileSource>,
-    queue: SchedulerPtr,
+    queue: RunLoopHandle,
     chain: RefCell<Option<Rc<WorkerChain>>>,
 }
 
@@ -91,7 +88,7 @@ impl TestWorker {
     fn run(&self, end_callback: Box<dyn Fn() + Send>, failures: Arc<Mutex<Vec<String>>>) {
         let chain = Rc::new(WorkerChain {
             fs: Arc::clone(&self.fs),
-            queue: Arc::clone(&self.queue),
+            queue: self.queue.clone(),
             num_requests: Cell::new(1000),
             request: RefCell::new(None),
             end_callback,
@@ -128,7 +125,7 @@ fn load() {
         let worker_fs = Arc::clone(&fs);
         let thread = Thread::new("Test", move |_, run_loop| TestWorker {
             fs: worker_fs,
-            queue: run_loop.scheduler(),
+            queue: run_loop.handle(),
             chain: RefCell::new(None),
         });
 

@@ -526,7 +526,11 @@ impl Suite {
 
 fn mock_factory() -> ImplFactory {
     Box::new(
-        |_metadata: &TestMetadata, _options: &ResourceOptions, _impl_options: &ImplOptions, _: &mln_actor::RunLoop| {
+        |_metadata: &TestMetadata,
+         _options: &ResourceOptions,
+         _impl_options: &ImplOptions,
+         _: &mln_actor::RunLoop,
+         _: &mln_util::pool::Pool| {
             Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])))
         },
     )
@@ -711,7 +715,7 @@ fn pending_requests_leave_when_answered_or_cancelled() {
     assert!(!is_pending("http://tiles/answered.mvt"));
 
     let proxy = ProxyFileSource { default_resource_loader: std::sync::Arc::new(Unanswered) };
-    let request = proxy.request(&run_loop.scheduler(), &Resource::style("http://tiles/cancelled.mvt"), |_| {});
+    let request = proxy.request(&run_loop.handle(), &Resource::style("http://tiles/cancelled.mvt"), |_| {});
     assert!(is_pending("http://tiles/cancelled.mvt"));
     drop(request);
     assert!(!is_pending("http://tiles/cancelled.mvt"));

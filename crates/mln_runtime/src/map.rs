@@ -16,6 +16,7 @@ use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
 use mln_util::geo::LatLngBounds;
 use mln_util::hash::HashMap;
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
@@ -694,6 +695,11 @@ impl Map {
 
     pub(crate) fn glyph_cache(&self) -> Arc<GlyphCache> {
         Arc::clone(&self.shared.runtime.glyph_cache)
+    }
+
+    /// Where the runtime's background work runs.
+    pub(crate) fn pool(&self) -> Pool {
+        self.shared.runtime.pool.clone()
     }
 
     /// What the renderers of the runtime's maps load font faces with.
@@ -1465,10 +1471,12 @@ pub(crate) fn create(
     outbox: &mut Outbox,
 ) {
     let registry = Arc::clone(core.registry.style());
-    let mut map = match mln_map::Map::with_registry(Arc::clone(core.loader()), options.map, registry, &core.run_loop) {
-        Ok(map) => map,
-        Err(error) => return outbox.resolve(resolver, Err(error)),
-    };
+    let mut map =
+        match mln_map::Map::with_registry(Arc::clone(core.loader()), options.map, registry, &core.run_loop, &core.pool)
+        {
+            Ok(map) => map,
+            Err(error) => return outbox.resolve(resolver, Err(error)),
+        };
     if let Some(json) = &options.fallback_font_faces {
         if let Err(error) = map.set_fallback_font_faces(json) {
             return outbox.resolve(resolver, Err(error));

@@ -7,28 +7,25 @@
 // returns once a `stop()` task ran (C++ `stop` invokes a task that unrefs
 // the holder handle).
 //
-// The task queues live in a `Send + Sync` core (`RunLoopHandle`), which is
-// also the loop's `Scheduler` for mailboxes: other threads post to it, as
-// they post through a C++ `RunLoop*`. The async handles stay on the loop's
-// thread.
+// The task queues live in a `Send + Sync` core (`RunLoopHandle`), which
+// mailboxes and other threads post to, as they post through a C++
+// `RunLoop*`. The async handles stay on the loop's thread.
 //
 // Unlike C++, a thread has no current loop: what runs on a loop is given the
-// loop, or its scheduler, by whoever made it.
+// loop, or its handle, by whoever made it.
 //
 // Timers (`util::Timer`, timer.rs) run first in `run_once`, as `uv_run` runs
 // due timers before the poll phase; a blocking `run()` sleeps until the next
 // timer is due. Timers do not keep `run()` alive (libuv unrefs them).
 
-use std::cell::{Cell, OnceCell, RefCell};
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::ThreadId;
+use std::sync::{Arc, Weak as WeakArc};
 
 use parking_lot::{Condvar, Mutex};
 
-use crate::scheduler::{self, Scheduler};
 use crate::timer::Timers;
 
 type Task = Box<dyn FnOnce() + Send + 'static>;
@@ -51,8 +48,6 @@ pub(crate) struct Core {
     /// Told about every wake-up, for a loop that a host drives
     /// with `run_once` instead of `run` (see `RunLoop::set_waker`).
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    /// The thread that runs the loop.
-    owner: ThreadId,
 }
 
 impl Core {
@@ -65,7 +60,6 @@ impl Core {
             condvar: Condvar::new(),
             stopped: AtomicBool::new(false),
             waker: Mutex::new(None),
-            owner: std::thread::current().id(),
         }
     }
 
@@ -138,21 +132,14 @@ pub(crate) struct AsyncHandle {
 
 struct Inner {
     core: Arc<Core>,
-    /// The loop's scheduler, one for its life: mailboxes and actors hold
-    /// their scheduler weakly, so one made each time the loop is entered
-    /// would go once its guard drops, with what they send to it.
-    scheduler: scheduler::SchedulerPtr,
     handles: RefCell<Vec<Weak<AsyncHandle>>>,
     /// The buffer that `run_once` copies the handles into, kept between
     /// passes so that a pass doesn't allocate.
     sending: Cell<Vec<Rc<AsyncHandle>>>,
     timers: Rc<Timers>,
-    /// Where the loop's background work runs, taken at its first use.
-    pool: OnceCell<scheduler::SchedulerPtr>,
 }
 
-/// A thread's event loop: its tasks, async tasks and timers, and the pool
-/// that the work of its objects goes to in the background. Cheap to clone:
+/// A thread's event loop: its tasks, async tasks and timers. Cheap to clone:
 /// clones refer to the same loop.
 #[derive(Clone)]
 pub struct RunLoop {
@@ -160,54 +147,34 @@ pub struct RunLoop {
 }
 
 /// A `Send + Sync` reference to a `RunLoop`'s task queue (what other threads
-/// hold as a `RunLoop*` in C++): `invoke`, `stop`, and the loop's
-/// `Scheduler`.
+/// hold as a `RunLoop*` in C++): `invoke` and `stop`.
 #[derive(Clone)]
 pub struct RunLoopHandle {
     core: Arc<Core>,
 }
 
+/// A [`RunLoopHandle`] that doesn't keep the loop's queue alive.
+#[derive(Clone)]
+pub struct WeakRunLoopHandle {
+    core: WeakArc<Core>,
+}
+
 impl RunLoop {
-    /// A loop for this thread, whose background work goes to the process's
-    /// pool ([`scheduler::get_background`]).
+    /// A loop for this thread.
     #[must_use]
     pub fn new() -> Self {
-        let core = Arc::new(Core::new());
-        let scheduler = Arc::new(RunLoopHandle { core: Arc::clone(&core) });
         RunLoop {
             inner: Rc::new(Inner {
-                core,
-                scheduler,
+                core: Arc::new(Core::new()),
                 handles: RefCell::new(Vec::new()),
                 sending: Cell::new(Vec::new()),
                 timers: Rc::default(),
-                pool: OnceCell::new(),
             }),
         }
     }
 
-    /// A loop for this thread, whose background work goes to `pool`.
-    #[must_use]
-    pub fn with_pool(pool: scheduler::SchedulerPtr) -> Self {
-        let run_loop = RunLoop::new();
-        let _ = run_loop.inner.pool.set(pool);
-        run_loop
-    }
-
-    /// The pool that the loop's objects run their background work on.
-    #[must_use]
-    pub fn pool(&self) -> scheduler::SchedulerPtr {
-        Arc::clone(self.inner.pool.get_or_init(scheduler::get_background))
-    }
-
-    /// The loop's scheduler: mailboxes and requests that run their work on
-    /// this loop take it.
-    #[must_use]
-    pub fn scheduler(&self) -> scheduler::SchedulerPtr {
-        Arc::clone(&self.inner.scheduler)
-    }
-
-    /// A handle other threads can post to.
+    /// A handle other threads can post to: mailboxes and requests that run
+    /// their work on this loop take it.
     #[must_use]
     pub fn handle(&self) -> RunLoopHandle {
         RunLoopHandle { core: Arc::clone(&self.inner.core) }
@@ -350,16 +317,6 @@ impl Default for RunLoop {
     }
 }
 
-impl Scheduler for RunLoop {
-    fn schedule(&self, task: Box<dyn FnOnce() + Send + 'static>) {
-        self.inner.core.push(task);
-    }
-
-    fn wait_for_empty(&self) {
-        RunLoop::wait_for_empty(self);
-    }
-}
-
 impl RunLoopHandle {
     /// [`RunLoop::set_waker`] from any thread.
     pub fn set_waker(&self, waker: Option<Arc<dyn Fn() + Send + Sync>>) {
@@ -369,6 +326,12 @@ impl RunLoopHandle {
     /// Invokes `task` on the loop, from any thread.
     pub fn invoke(&self, task: impl FnOnce() + Send + 'static) {
         self.core.push(Box::new(task));
+    }
+
+    /// A handle that doesn't keep the loop's queue alive.
+    #[must_use]
+    pub fn downgrade(&self) -> WeakRunLoopHandle {
+        WeakRunLoopHandle { core: Arc::downgrade(&self.core) }
     }
 
     /// Wakes the thread that waits for this loop's work
@@ -387,21 +350,11 @@ impl RunLoopHandle {
     }
 }
 
-impl Scheduler for RunLoopHandle {
-    fn schedule(&self, task: Box<dyn FnOnce() + Send + 'static>) {
-        self.core.push(task);
-    }
-
-    /// On the loop's own thread, it runs the queued tasks (as C++ calls
-    /// `runOnce`); elsewhere it waits for the queue to drain.
-    fn wait_for_empty(&self) {
-        if self.core.owner == std::thread::current().id() {
-            self.core.process();
-            return;
-        }
-        while self.core.remaining() != 0 {
-            std::thread::yield_now();
-        }
+impl WeakRunLoopHandle {
+    /// The handle, unless the loop's queue is gone.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<RunLoopHandle> {
+        self.core.upgrade().map(|core| RunLoopHandle { core })
     }
 }
 
@@ -476,7 +429,7 @@ mod tests {
         let second = RunLoop::new();
         let mailbox = crate::mailbox::Mailbox::new();
         let received = Rc::new(Cell::new(false));
-        mailbox.open(&second.scheduler(), Rc::<Cell<bool>>::clone(&received));
+        mailbox.open(&second.handle(), Rc::<Cell<bool>>::clone(&received));
         let sender = Arc::clone(&mailbox);
         std::thread::spawn(move || {
             sender.push(Box::new(|target: &dyn std::any::Any| {

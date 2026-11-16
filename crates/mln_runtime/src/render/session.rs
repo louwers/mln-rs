@@ -859,6 +859,7 @@ fn attach_unlocked<R>(
                 tile_cache_enabled: map.tile_cache_enabled(),
                 local_font_family: map.local_font_family(),
                 failure: None,
+                pool: map.pool(),
             })),
             resizes_sent: 0,
             graphics_objects: 0,

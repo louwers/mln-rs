@@ -6,13 +6,13 @@
 use std::rc::Rc;
 
 use glam::Vec2;
-use mln_actor::TaggedScheduler;
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::TranslateAnchorType;
 use mln_style_types::image::ImagePosition;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::mat4::Mat4;
+use mln_util::pool::TaskGroup;
 
 use crate::bucket::BucketPtr;
 use crate::buckets::debug_bucket::DebugBucket; // layers: debug
@@ -132,7 +132,7 @@ impl RenderTile {
 
     /// Prepares the render tile for drawing; `tile` is the tile it was
     /// created for, whose contents the last reference frees on `pool`.
-    pub(crate) fn prepare(&mut self, tile: &Tile, pool: &TaggedScheduler, parameters: &SourcePrepareParameters<'_>) {
+    pub(crate) fn prepare(&mut self, tile: &Tile, pool: &TaskGroup, parameters: &SourcePrepareParameters<'_>) {
         self.shared_bucket = tile.contents.as_deref().and_then(Contents::shared_bucket);
         self.render_data =
             tile.contents.as_ref().map(|contents| TileRenderData::new(Rc::clone(contents), pool.clone()));

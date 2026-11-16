@@ -15,6 +15,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::ErrorKind;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 use mln_util::tileset::PartialTileset;
 
@@ -24,7 +25,7 @@ const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureC
 
 fn loaded_map(run_loop: &RunLoop) -> Map {
     let file_source = Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous));
-    let mut map = Map::with_file_source(file_source, MapOptions::default(), run_loop).expect("map");
+    let mut map = Map::with_file_source(file_source, MapOptions::default(), run_loop, &Pool::local()).expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map
 }
@@ -107,7 +108,7 @@ fn malformed_sources_are_invalid_arguments() {
 fn a_source_json_needs_a_loaded_style() {
     let run_loop = RunLoop::new();
     let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
-    let mut map = Map::with_file_source(file_source, MapOptions::default(), &run_loop).expect("map");
+    let mut map = Map::with_file_source(file_source, MapOptions::default(), &run_loop, &Pool::local()).expect("map");
     let error = map.add_source_json("points", EMPTY_GEOJSON_SOURCE).unwrap_err();
     assert_eq!(ErrorKind::InvalidState, error.kind);
     assert_eq!("style is not loaded", error.message);
@@ -115,15 +116,17 @@ fn a_source_json_needs_a_loaded_style() {
 
 // MARK: - Description loads
 
-/// A map over `file_source` whose style has no sources.
+/// A map over `file_source` whose style has no sources, and whose
+/// background work runs when the test runs its pool.
 fn map_over(file_source: &Arc<StubFileSource>, run_loop: &RunLoop) -> Map {
     let file_source: Arc<dyn mln_storage::FileSource> = Arc::<StubFileSource>::clone(file_source);
-    let mut map = Map::with_file_source(file_source, MapOptions::default(), run_loop).expect("map");
+    let mut map = Map::with_file_source(file_source, MapOptions::default(), run_loop, &Pool::local()).expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map
 }
 
-/// Runs `run_loop` and handles `map`'s reports until `done` holds.
+/// Runs `map`'s pool and `run_loop`, and handles `map`'s reports, until
+/// `done` holds.
 fn run_until(map: &mut Map, run_loop: &RunLoop, mut done: impl FnMut(&Map) -> bool) {
     let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
@@ -132,6 +135,7 @@ fn run_until(map: &mut Map, run_loop: &RunLoop, mut done: impl FnMut(&Map) -> bo
             return;
         }
         assert!(mln_util::time::Instant::now() < deadline, "timed out");
+        map.pool().run_all();
         if !run_loop.run_once() {
             std::thread::yield_now();
         }
@@ -160,7 +164,7 @@ fn feature_count(map: &Map, id: &str) -> usize {
     data.get_tile(
         &CanonicalTileID::new(0, 0, 0),
         Box::new(move |features| counted.store(features.len(), std::sync::atomic::Ordering::Relaxed)),
-        true,
+        None,
     );
     count.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -267,8 +271,7 @@ fn geojson_source_data_replaces_building_url_data() {
     assert!(map.style_loaded());
 
     // The build's reply finds the source moved on.
-    let pool = map.run_loop().pool();
-    pool.wait_for_empty();
+    map.pool().run_all();
     run_until(&mut map, &run_loop, |map| !map.has_reports());
     assert_eq!(2, feature_count(&map, "source"));
 }
@@ -289,7 +292,7 @@ fn geojson_source_url_replaces_building_url_data() {
     map.process_events();
 
     set_geojson_url(&mut map, "source", "new");
-    map.run_loop().pool().wait_for_empty();
+    map.pool().run_all();
     run_until(&mut map, &run_loop, |map| !map.has_reports());
     assert!(!map.style_loaded());
     assert_eq!(0, feature_count(&map, "source"));

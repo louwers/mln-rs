@@ -18,6 +18,7 @@ use mln_text::GlyphCache;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::logging::{Event, Log};
+use mln_util::pool::Pool;
 use mln_util::time::Instant;
 
 use crate::Registry;
@@ -89,7 +90,7 @@ pub struct Renderer {
 impl Renderer {
     /// A renderer with a glyph cache of its own, on `run_loop`, which runs
     /// on this thread: it takes its tiles' and glyphs' responses there, and
-    /// runs its background work on the loop's pool. `local_font_family` is
+    /// runs its background work on `pool`. `local_font_family` is
     /// the platform's `LocalGlyphRasterizer`'s (see
     /// `DefaultLocalGlyphRasterizer`).
     pub fn new(
@@ -97,8 +98,9 @@ impl Renderer {
         pixel_ratio: f32,
         local_font_family: Option<String>,
         run_loop: &mln_actor::RunLoop,
+        pool: &Pool,
     ) -> Self {
-        Self::with_glyph_cache(backend, pixel_ratio, local_font_family, Arc::default(), run_loop)
+        Self::with_glyph_cache(backend, pixel_ratio, local_font_family, Arc::default(), run_loop, pool)
     }
 
     /// A renderer that uses `glyph_cache`: renderers given the same
@@ -109,10 +111,11 @@ impl Renderer {
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
         run_loop: &mln_actor::RunLoop,
+        pool: &Pool,
     ) -> Self {
         let engine = crate::text::font_face_engine::default_engine();
         let registry = Registry::with_builtins();
-        Self::with_fonts(backend, pixel_ratio, local_font_family, glyph_cache, engine, registry, run_loop)
+        Self::with_fonts(backend, pixel_ratio, local_font_family, glyph_cache, engine, registry, run_loop, pool)
     }
 
     /// A renderer that uses `glyph_cache`, loads the font files of a style's
@@ -122,6 +125,7 @@ impl Renderer {
     ///
     /// The map that the renderer draws must have a registry filled by the
     /// same calls: a layer whose type `registry` lacks isn't drawn.
+    #[expect(clippy::too_many_arguments, reason = "each argument is a part of the renderer that its host picks")]
     pub fn with_fonts(
         backend: Rc<dyn RendererBackend>,
         pixel_ratio: f32,
@@ -130,6 +134,7 @@ impl Renderer {
         font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
         registry: Arc<Registry>,
         run_loop: &mln_actor::RunLoop,
+        pool: &Pool,
     ) -> Self {
         Renderer {
             orchestrator: ManuallyDrop::new(RenderOrchestrator::new(
@@ -139,6 +144,7 @@ impl Renderer {
                 font_face_engine,
                 registry,
                 run_loop,
+                pool,
             )),
             context: Rc::new(Context::new(Rc::clone(&backend))),
             backend,
@@ -176,7 +182,7 @@ impl Renderer {
     }
 
     /// Port-only: runs the tiles' jobs, and the raster tiles' workers, in
-    /// `workers` (by default on the map's thread pool). Set it before the
+    /// `workers` (by default on the renderer's pool). Set it before the
     /// first render so that every tile uses it.
     pub fn set_tile_workers(&mut self, workers: &Rc<RemoteWorkers>) {
         self.orchestrator.set_tile_workers(workers);

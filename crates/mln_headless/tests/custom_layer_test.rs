@@ -12,6 +12,7 @@ use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_style::layers::{CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
@@ -85,6 +86,7 @@ fn session(
     run_loop: &RunLoop,
 ) -> Option<(HeadlessFrontend, Map)> {
     let size = Size::new(SIDE, SIDE);
+    let pool = Pool::new(4).unwrap();
     let device = match Device::with_backend(backend, DeviceOptions::default()) {
         Ok(device) => device,
         Err(error) if error.kind == ErrorKind::Unsupported => {
@@ -93,10 +95,14 @@ fn session(
         }
         Err(error) => panic!("a {backend:?} device: {error}"),
     };
-    let mut frontend = HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), run_loop).expect("a frontend");
-    let mut map =
-        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() }, run_loop)
-            .unwrap();
+    let mut frontend =
+        HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), run_loop, &pool).expect("a frontend");
+    let mut map = Map::new(
+        MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() },
+        run_loop,
+        &pool,
+    )
+    .unwrap();
     frontend.attach(&map);
     map.load_style_json(STYLE);
     map.edit_style(|style| style.add_custom_layer("quad", host, before)).expect("the custom layer");

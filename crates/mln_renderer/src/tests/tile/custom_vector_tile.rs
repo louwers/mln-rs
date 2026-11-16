@@ -1,5 +1,5 @@
 // As in custom_geometry_tile.rs, the provider's strand runs on the test's
-// run loop.
+// local pool.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,13 +24,13 @@ use crate::tile::loading::DataOrigin;
 use crate::tile::tile::{TileKind, TileNecessity};
 use crate::tile::tile_workers::InlineWorkers;
 
-/// The provider, whose strand runs on the test's run loop.
+/// The provider, whose strand runs on `pool`.
 fn loader(
-    run_loop: &mln_actor::RunLoop,
+    pool: &mln_util::pool::Pool,
     fetch: Option<TileFunction>,
     cancel: Option<TileFunction>,
 ) -> Arc<CustomVectorProvider> {
-    CustomProvider::new(fetch, cancel, run_loop.scheduler())
+    CustomProvider::new(fetch, cancel, pool)
 }
 
 /// A tile function that counts its calls.
@@ -73,26 +73,26 @@ impl CustomTileSubscriber<CustomVectorTileData> for NullSubscriber {
 fn invalidate_failed_tile() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(&test.run_loop, Some(fetch), None);
+    let loader = loader(&test.local_pool, Some(fetch), None);
 
     let root = OverscaledTileID::from_zxy(0, 0, 0);
     let mut tiles = tiles(&test, &[root], Arc::clone(&loader));
     tiles.set_necessity(&root, TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     let id = CanonicalTileID::new(0, 0, 0);
     loader.set_tile_error(id, Error::native("failed"));
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     tiles.store.receive();
 
     loader.invalidate_tile(id);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     tiles.store.receive();
 
     // The render source updates the necessity of a changed tile.
     tiles.set_necessity(&root, TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
 
@@ -101,18 +101,18 @@ fn invalidate_failed_tile() {
 fn fetch_failed_tile_again() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(&test.run_loop, Some(fetch), None);
+    let loader = loader(&test.local_pool, Some(fetch), None);
 
     let id = OverscaledTileID::from_zxy(0, 0, 0);
     loader.fetch_tile(id, 0, Box::new(NullSubscriber));
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
     loader.set_tile_error(id.canonical, Error::native("failed"));
 
     // A tile that still shows older data doesn't cancel when it leaves the
     // view, so the next request for it has to ask the host again.
     loader.fetch_tile(id, 0, Box::new(NullSubscriber));
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
 
@@ -122,7 +122,7 @@ fn cancel_one_copy() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
     let (cancels, cancel) = counter();
-    let loader = loader(&test.run_loop, Some(fetch), Some(cancel));
+    let loader = loader(&test.local_pool, Some(fetch), Some(cancel));
 
     // Two copies of one tile in neighboring worlds share its data.
     let root = OverscaledTileID::from_zxy(0, 0, 0);
@@ -130,7 +130,7 @@ fn cancel_one_copy() {
     let mut tiles = tiles(&test, &[root, second], Arc::clone(&loader));
     tiles.set_necessity(&root, TileNecessity::Required);
     tiles.set_necessity(&second, TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     // The map moves by a world, and the source changes both copies' wraps.
@@ -139,16 +139,16 @@ fn cancel_one_copy() {
     tiles.rekey(&second, root);
 
     tiles.set_necessity(&root, TileNecessity::Optional);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(cancels.load(Ordering::SeqCst), 0);
 
     // The copy that is still needed is still invalidated, and fetches again.
     let id = CanonicalTileID::new(0, 0, 0);
     loader.invalidate_tile(id);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     tiles.store.receive();
     tiles.set_necessity(&first, TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
 
@@ -158,7 +158,7 @@ fn invalidate_region() {
     let test = RasterTileTest::new();
     let (fetched, fetch) = recorder();
     let (cancelled, cancel) = recorder();
-    let loader = loader(&test.run_loop, Some(fetch), Some(cancel));
+    let loader = loader(&test.local_pool, Some(fetch), Some(cancel));
 
     // The root tile, every tile at zoom 1, and two tiles at zoom 2.
     let mut tile_ids = vec![
@@ -175,7 +175,7 @@ fn invalidate_region() {
     for tile_id in &tile_ids {
         tiles.set_necessity(tile_id, TileNecessity::Required);
     }
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetched.lock().len(), tile_ids.len());
 
     // Cached data would otherwise answer the refetch.
@@ -183,21 +183,21 @@ fn invalidate_region() {
         let id = tile_id.canonical;
         loader.set_tile_data(id, (None, TileDataFormat::Mvt));
     }
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     tiles.store.receive();
     fetched.lock().clear();
 
     // Northeast of the origin, so it intersects the root tile, 1/1/0, and 2/2/1.
     let bounds = LatLngBounds::hull(LatLng::new(10.0, 10.0).unwrap(), LatLng::new(20.0, 20.0).unwrap());
     loader.invalidate_region(bounds);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     tiles.store.receive();
 
     // The render source updates the necessity of a changed tile.
     for tile_id in &tile_ids {
         tiles.set_necessity(tile_id, TileNecessity::Required);
     }
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     let intersecting =
         vec![CanonicalTileID::new(0, 0, 0), CanonicalTileID::new(1, 1, 0), CanonicalTileID::new(2, 2, 1)];
     let mut cancelled = cancelled.lock().clone();
@@ -212,7 +212,7 @@ fn invalidate_region() {
 #[test]
 fn set_mlt_tile_data() {
     let test = RasterTileTest::new();
-    let loader = loader(&test.run_loop, None, None);
+    let loader = loader(&test.local_pool, None, None);
     let root = OverscaledTileID::from_zxy(0, 0, 0);
     let mut tiles = tiles(&test, &[root], Arc::clone(&loader));
 
@@ -222,12 +222,13 @@ fn set_mlt_tile_data() {
         Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(layer.style()).unwrap()));
     tiles.set_style(&crate::tests::style(&[layer_properties]));
     tiles.set_necessity(&root, TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
 
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test/fixtures/map/issue12432/0-0-0.mlt");
     let data = Arc::new(std::fs::read(path).unwrap());
     loader.set_tile_data(root.canonical, (Some(data), TileDataFormat::Mlt));
     while !tiles.tile().is_complete() {
+        test.local_pool.run_all();
         test.run_loop.run_once();
         tiles.update();
     }

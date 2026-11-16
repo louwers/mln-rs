@@ -18,6 +18,7 @@ use mln_style::{Edit, PropertyValue};
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
+use mln_util::pool::Pool;
 use serde_json::json;
 use support::*;
 
@@ -72,7 +73,8 @@ impl FeatureTrackingTest {
 
     fn with_geojson(geojson: &str, camera: CameraOptions) -> Self {
         let run_loop = RunLoop::new();
-        let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop).expect("a headless frontend");
+        let pool = Pool::new(4).unwrap();
+        let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
         let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response(GLYPH_PATH)));
         let mut map = Map::with_file_source(
@@ -84,6 +86,7 @@ impl FeatureTrackingTest {
                 ..Default::default()
             },
             &run_loop,
+            &pool,
         )
         .expect("map");
         frontend.attach(&map);

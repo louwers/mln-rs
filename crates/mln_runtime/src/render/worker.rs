@@ -25,6 +25,7 @@ use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
+use mln_util::pool::Pool;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
@@ -112,6 +113,8 @@ pub(crate) struct Init {
     /// Why the session's device couldn't be made before the build: in the
     /// browser, whose WebGPU makes devices asynchronously.
     pub(crate) failure: Option<Error>,
+    /// Where the renderer's background work runs: the runtime's pool.
+    pub(crate) pool: Pool,
 }
 
 impl TargetInit {
@@ -239,6 +242,8 @@ struct Gfx {
     local_font_family: Option<String>,
     /// The loop that the renderer runs its own work on.
     run_loop: RunLoop,
+    /// Where the renderer's background work runs (`Init`).
+    pool: Pool,
 }
 
 impl Gfx {
@@ -257,6 +262,7 @@ impl Gfx {
             tile_cache_enabled,
             local_font_family,
             failure,
+            pool,
         } = init;
         if let Some(failure) = failure {
             return Err(failure);
@@ -280,6 +286,7 @@ impl Gfx {
             Arc::clone(&font_face_engine),
             Arc::clone(&registry),
             run_loop,
+            &pool,
         );
         renderer.set_tile_cache_enabled(tile_cache_enabled);
         set_tile_workers(&mut renderer, &registry, run_loop);
@@ -292,6 +299,7 @@ impl Gfx {
             registry,
             local_font_family,
             run_loop: run_loop.clone(),
+            pool,
         })
     }
 
@@ -318,6 +326,7 @@ impl Gfx {
             Arc::clone(&self.font_face_engine),
             Arc::clone(&self.registry),
             &self.run_loop,
+            &self.pool,
         );
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
@@ -331,7 +340,7 @@ impl Gfx {
 /// background threads.
 fn set_tile_workers(renderer: &mut Renderer, registry: &Arc<Registry>, run_loop: &RunLoop) {
     #[cfg(target_family = "wasm")]
-    if let Some(workers) = crate::web::tile_workers(&run_loop.scheduler(), registry) {
+    if let Some(workers) = crate::web::tile_workers(&run_loop.handle(), registry) {
         renderer.set_tile_workers(&workers);
     }
     #[cfg(not(target_family = "wasm"))]

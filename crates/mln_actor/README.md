@@ -6,8 +6,7 @@
 > without notice. mln-rs doesn't re-export it.
 
 Ports the actor model and threading of the C++ core: `src/mln/actor` and
-`util/{run_loop,async_task,thread,thread_pool}`, with the default platform's run
-loop.
+`util/{run_loop,async_task,thread}`, with the default platform's run loop.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

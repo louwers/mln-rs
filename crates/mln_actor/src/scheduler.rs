@@ -1,56 +1,23 @@
-// `mapbox::base::WeakPtr<Scheduler>` is `Weak<dyn Scheduler + Send + Sync>`:
-// schedulers that other threads post to live in an `Arc` (a RunLoop's
-// `RunLoopHandle`, a `ThreadPool`).
-//
 // Port-only: a host without threads installs a `CooperativeScheduler` at
-// startup (`install_cooperative`), which `GetBackground` and `GetSequenced`
-// then return (cooperative_scheduler.rs).
+// startup (`install_cooperative`), which runs the objects of `Thread`s on the
+// host's thread (cooperative_scheduler.rs).
 
 use std::cell::RefCell;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, OnceLock};
 
-use mln_util::identity::SimpleIdentity;
-use parking_lot::Mutex;
+use mln_util::pool::TaskGroup;
 
 use crate::cooperative_scheduler::CooperativeScheduler;
 use crate::local_object::LocalObject;
-use crate::thread_pool::{SequencedScheduler, ThreadPool};
-
-pub type Task = Box<dyn FnOnce() + Send + 'static>;
-
-/// A `Scheduler` is responsible for coordinating the processing of messages
-/// by one or more actors via their mailboxes.
-pub trait Scheduler {
-    /// Enqueues a function for execution.
-    fn schedule(&self, task: Task);
-
-    /// Enqueues a function for execution in the queue of `tag` (schedulers
-    /// without tagged queues ignore the tag, as the C++ `RunLoop` does).
-    fn schedule_tagged(&self, _tag: SimpleIdentity, task: Task) {
-        self.schedule(task);
-    }
-
-    /// Wait until there's nothing pending or in process. Must not be called
-    /// from a task provided to this scheduler.
-    fn wait_for_empty(&self);
-
-    fn wait_for_empty_tagged(&self, _tag: SimpleIdentity) {
-        self.wait_for_empty();
-    }
-}
-
-pub type SchedulerPtr = Arc<dyn Scheduler + Send + Sync>;
-pub(crate) type WeakScheduler = Weak<dyn Scheduler + Send + Sync>;
+use crate::run_loop::RunLoopHandle;
 
 static COOPERATIVE: OnceLock<Arc<CooperativeScheduler>> = OnceLock::new();
 
-/// Port-only: makes `scheduler` run everything that would otherwise run on
-/// threads of its own: the background and sequenced schedulers, and the
-/// objects of `util::Thread`s, which stay on the creating thread's `RunLoop`
-/// (see `cooperative_scheduler.rs`). For a host with one thread (the
-/// browser), which runs the tasks with `CooperativeScheduler::run_until`.
-/// It must come before anything gets a scheduler or starts a `Thread`, and
-/// only once.
+/// Port-only: makes `scheduler` run the objects of `util::Thread`s, which
+/// stay on the creating thread's `RunLoop` (see `cooperative_scheduler.rs`).
+/// For a host with one thread (the browser), which runs them with
+/// `CooperativeScheduler::run_loops`. It must come before anything starts a
+/// `Thread`, and only once.
 pub fn install_cooperative(scheduler: Arc<CooperativeScheduler>) {
     if COOPERATIVE.set(scheduler).is_err() {
         panic!("a cooperative scheduler is already installed");
@@ -60,8 +27,7 @@ pub fn install_cooperative(scheduler: Arc<CooperativeScheduler>) {
 /// Port-only: the installed cooperative scheduler, after installing a new
 /// one if none is: `install_cooperative` for hosts that may each try to
 /// install it, such as libraries that share a wasm instance. The first
-/// install must still come before anything gets a scheduler or starts a
-/// `Thread`.
+/// install must still come before anything starts a `Thread`.
 pub fn install_cooperative_once() -> &'static Arc<CooperativeScheduler> {
     COOPERATIVE.get_or_init(|| Arc::new(CooperativeScheduler::new()))
 }
@@ -71,99 +37,16 @@ pub fn cooperative() -> Option<&'static Arc<CooperativeScheduler>> {
     COOPERATIVE.get()
 }
 
-/// Returns the process-wide thread pool, created on first use and kept alive
-/// by its users (or the installed cooperative scheduler). It's a
-/// [`RunLoop`](crate::RunLoop)'s pool unless the loop was given another.
-pub fn get_background() -> SchedulerPtr {
-    static WEAK: Mutex<Option<Weak<ThreadPool>>> = Mutex::new(None);
-    if let Some(cooperative) = cooperative() {
-        return Arc::<CooperativeScheduler>::clone(cooperative);
-    }
-    let mut weak = WEAK.lock();
-    if let Some(scheduler) = weak.as_ref().and_then(Weak::upgrade) {
-        return scheduler;
-    }
-    let scheduler = Arc::new(ThreadPool::new());
-    *weak = Some(Arc::downgrade(&scheduler));
-    scheduler
-}
-
-/// Returns one of 10 process-wide single-thread schedulers, round robin, each
-/// created on first use and kept alive by its users (or the installed
-/// cooperative scheduler).
-pub fn get_sequenced() -> SchedulerPtr {
-    const SCHEDULERS_COUNT: usize = 10;
-    struct State {
-        weaks: Vec<Option<Weak<SequencedScheduler>>>,
-        last_used_index: usize,
-    }
-    static STATE: Mutex<State> = Mutex::new(State { weaks: Vec::new(), last_used_index: 0 });
-    if let Some(cooperative) = cooperative() {
-        return Arc::<CooperativeScheduler>::clone(cooperative);
-    }
-    let mut state = STATE.lock();
-    if state.weaks.is_empty() {
-        state.weaks.resize(SCHEDULERS_COUNT, None);
-    }
-    state.last_used_index = (state.last_used_index + 1) % SCHEDULERS_COUNT;
-    let index = state.last_used_index;
-    if let Some(scheduler) = state.weaks[index].as_ref().and_then(Weak::upgrade) {
-        return scheduler;
-    }
-    let result = Arc::new(SequencedScheduler::new());
-    state.weaks[index] = Some(Arc::downgrade(&result));
-    result
-}
-
-/// Returns a function that, when called, schedules `task` on `scheduler` (if
-/// it is still alive). Repeated calls do nothing.
-pub fn bind_once(scheduler: &SchedulerPtr, task: Task) -> impl FnMut() + Send + 'static {
-    let scheduler = Arc::downgrade(scheduler);
-    let mut scheduled = Some(task);
-    move || {
-        let Some(task) = scheduled.take() else {
-            return; // Repeated call.
-        };
-        if let Some(scheduler) = scheduler.upgrade() {
-            scheduler.schedule(task);
-        }
-    }
-}
-
-/// Runs `task` on `scheduler` and then `reply(result)` on `reply_to`, which
-/// runs its tasks on the calling thread.
-///
-/// C++ captures `reply` in the closure that travels through the pool; here
-/// it stays on the calling thread (it usually holds thread-local state such
-/// as `Rc`s, which C++ reaches through raw pointers) and the result is
-/// handed back to it.
-pub fn schedule_and_reply_value<R, TaskFn, ReplyFn>(
-    scheduler: &dyn Scheduler,
-    tag: Option<SimpleIdentity>,
-    reply_to: &SchedulerPtr,
-    task: TaskFn,
-    reply: ReplyFn,
-) where
-    R: Send + 'static,
-    TaskFn: FnOnce() -> R + Send + 'static,
-    ReplyFn: FnOnce(R) + 'static,
-{
-    schedule_and_reply_later(scheduler, tag, reply_to, move |respond: Respond<R>| respond(task()), reply);
-}
-
 /// Where a task of `schedule_and_reply_later` hands its result.
 pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
 
-/// Port-only: `scheduleAndReplyValue` for a task whose result may come
-/// after it returns (an image the browser decodes): `task` runs on
-/// `scheduler` with a `Respond` to call once with its result, then or later
-/// and from any thread, and `reply(result)` runs on `reply_to`, which runs
-/// its tasks on the calling thread. A `Respond` dropped without a call drops
-/// the reply.
-fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
-    scheduler: &dyn Scheduler,
-    tag: Option<SimpleIdentity>,
-    reply_to: &SchedulerPtr,
+/// Runs `task` in `group` with a `Respond` to call once with its result,
+/// then or later and from any thread, and `reply(result)` on `reply_to`,
+/// which runs its tasks on the calling thread. A `Respond` dropped without a
+/// call drops the reply. Once the loop is gone, the task doesn't run.
+pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
+    group: &TaskGroup,
+    reply_to: &RunLoopHandle,
     task: TaskFn,
     reply: ReplyFn,
 ) where
@@ -171,76 +54,18 @@ fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
     TaskFn: FnOnce(Respond<R>) + Send + 'static,
     ReplyFn: FnOnce(R) + 'static,
 {
-    let reply_scheduler = Arc::downgrade(reply_to);
+    let reply_to = reply_to.downgrade();
     let reply = LocalObject::new(RefCell::new(Some(reply)));
-    schedule_under(
-        scheduler,
-        tag,
-        Box::new(move || {
-            if let Some(reply_scheduler) = reply_scheduler.upgrade() {
-                task(Box::new(move |result| {
-                    schedule_under(
-                        &*reply_scheduler,
-                        tag,
-                        Box::new(move || {
-                            if let Some(reply) = reply.take()
-                                && let Some(reply) = reply.borrow_mut().take()
-                            {
-                                reply(result);
-                            }
-                        }),
-                    );
-                }));
-            }
-        }),
-    );
-}
-
-/// Queues `task` under `tag`, or in the scheduler's default queue without one.
-fn schedule_under(scheduler: &dyn Scheduler, tag: Option<SimpleIdentity>, task: Task) {
-    match tag {
-        Some(tag) => scheduler.schedule_tagged(tag, task),
-        None => scheduler.schedule(task),
-    }
-}
-
-/// A scheduler plus the tag its tasks are queued under.
-#[derive(Clone)]
-pub struct TaggedScheduler {
-    pub(crate) tag: SimpleIdentity,
-    scheduler: SchedulerPtr,
-}
-
-impl TaggedScheduler {
-    pub fn new(scheduler: SchedulerPtr, tag: SimpleIdentity) -> Self {
-        TaggedScheduler { tag, scheduler }
-    }
-
-    #[must_use]
-    pub(crate) fn get(&self) -> &SchedulerPtr {
-        &self.scheduler
-    }
-
-    /// Runs `task` on the scheduler under this tag, which
-    /// [`wait_for_empty`](Self::wait_for_empty) waits for.
-    pub fn schedule(&self, task: Task) {
-        self.scheduler.schedule_tagged(self.tag, task);
-    }
-
-    pub fn wait_for_empty(&self) {
-        self.scheduler.wait_for_empty_tagged(self.tag);
-    }
-
-    /// Port-only: runs `task` on the scheduler under this tag with a
-    /// `Respond` to call once with its result, then or later and from any
-    /// thread, and `reply(result)` on `reply_to`, which runs its tasks on the
-    /// calling thread. A `Respond` dropped without a call drops the reply.
-    pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(&self, reply_to: &SchedulerPtr, task: TaskFn, reply: ReplyFn)
-    where
-        R: Send + 'static,
-        TaskFn: FnOnce(Respond<R>) + Send + 'static,
-        ReplyFn: FnOnce(R) + 'static,
-    {
-        schedule_and_reply_later(&*self.scheduler, Some(self.tag), reply_to, task, reply);
-    }
+    group.spawn(move || {
+        let Some(reply_to) = reply_to.upgrade() else { return };
+        task(Box::new(move |result| {
+            reply_to.invoke(move || {
+                if let Some(reply) = reply.take()
+                    && let Some(reply) = reply.borrow_mut().take()
+                {
+                    reply(result);
+                }
+            });
+        }));
+    });
 }

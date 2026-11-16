@@ -11,7 +11,7 @@ without atomics or shared memory, so one instance per Web Worker, each with its
 own memory and one thread. MapLibre Native has no counterpart; its browser
 builds use Emscripten's threads.
 
-- `pump`: runs the instance's `RunLoop`s and its cooperative scheduler on the
+- `pump`: runs the instance's `RunLoop`s, pools and cooperative scheduler on the
   browser's event loop, in slices of a few milliseconds that never block it.
 - `tile_workers` and `tile_worker`: the two sides of tile workers in other Web
   Workers, which talk to the map's instance only through bytes over

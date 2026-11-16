@@ -1,10 +1,10 @@
 //! A request for a resource, and the file source's side of it.
 
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Weak};
 
-use mln_actor::{LocalObject, Scheduler, SchedulerPtr};
+use mln_actor::{LocalObject, RunLoopHandle, WeakRunLoopHandle};
 use parking_lot::Mutex;
 
 use crate::response::Response;
@@ -14,7 +14,7 @@ use crate::response::Response;
 pub type Callback = Box<dyn FnMut(Response) + 'static>;
 
 /// The requesting thread's queue, which a request doesn't keep alive.
-type WeakQueue = Weak<dyn Scheduler + Send + Sync>;
+type WeakQueue = WeakRunLoopHandle;
 
 /// The callback of a request that answers on the sending thread.
 type DirectCallback = Arc<Mutex<Box<dyn FnMut(Response) + Send>>>;
@@ -43,7 +43,7 @@ pub struct Responder {
 #[derive(Clone)]
 enum Deliver {
     /// In a task on the requesting thread's queue.
-    Queued { queue: Weak<dyn Scheduler + Send + Sync>, slot: Arc<LocalObject<Slot>> },
+    Queued { queue: WeakQueue, slot: Arc<LocalObject<Slot>> },
     /// On the sending thread.
     Direct(DirectCallback),
 }
@@ -55,12 +55,7 @@ impl Slot {
     /// Runs the callback, unless the request was cancelled, or the callback
     /// runs already: then it runs once that call returns, in a task of
     /// `queue`.
-    fn call(
-        shared: &Arc<Shared>,
-        slot: &Arc<LocalObject<Slot>>,
-        queue: &Weak<dyn Scheduler + Send + Sync>,
-        response: Response,
-    ) {
+    fn call(shared: &Arc<Shared>, slot: &Arc<LocalObject<Slot>>, queue: &WeakQueue, response: Response) {
         if shared.cancelled.load(Ordering::SeqCst) {
             return;
         }
@@ -72,15 +67,10 @@ impl Slot {
         callback(response);
     }
 
-    fn queue(
-        shared: &Arc<Shared>,
-        slot: &Arc<LocalObject<Slot>>,
-        queue: &Weak<dyn Scheduler + Send + Sync>,
-        response: Response,
-    ) {
+    fn queue(shared: &Arc<Shared>, slot: &Arc<LocalObject<Slot>>, queue: &WeakQueue, response: Response) {
         let Some(scheduler) = queue.upgrade() else { return };
-        let (shared, slot, weak) = (Arc::clone(shared), Arc::clone(slot), Weak::clone(queue));
-        scheduler.schedule(Box::new(move || Slot::call(&shared, &slot, &weak, response)));
+        let (shared, slot, weak) = (Arc::clone(shared), Arc::clone(slot), queue.clone());
+        scheduler.invoke(move || Slot::call(&shared, &slot, &weak, response));
     }
 }
 
@@ -103,14 +93,11 @@ impl Shared {
 impl Request {
     /// A request whose responses `callback` receives on the thread that runs
     /// `queue`, which must be this thread.
-    pub fn new(queue: &SchedulerPtr, callback: impl FnMut(Response) + 'static) -> (Request, Responder) {
+    pub fn new(queue: &RunLoopHandle, callback: impl FnMut(Response) + 'static) -> (Request, Responder) {
         let slot = Arc::new(LocalObject::new(Slot(RefCell::new(Box::new(callback)))));
         let shared = Arc::new(Shared::default());
-        let deliver = Deliver::Queued { queue: Arc::downgrade(queue), slot: Arc::clone(&slot) };
-        (
-            Request { shared: Arc::clone(&shared), slot: Some((slot, Arc::downgrade(queue))) },
-            Responder { shared, deliver },
-        )
+        let deliver = Deliver::Queued { queue: queue.downgrade(), slot: Arc::clone(&slot) };
+        (Request { shared: Arc::clone(&shared), slot: Some((slot, queue.downgrade())) }, Responder { shared, deliver })
     }
 
     /// A request whose responses `callback` receives on the thread that sends
@@ -147,7 +134,7 @@ impl Drop for Request {
             if slot.take().is_none()
                 && let Some(queue) = queue.upgrade()
             {
-                queue.schedule(Box::new(move || drop(slot.take())));
+                queue.invoke(move || drop(slot.take()));
             }
         }
     }
@@ -215,7 +202,7 @@ mod tests {
         let run_loop = RunLoop::new();
         let ran = Rc::new(Cell::new(false));
         let callback_ran = Rc::clone(&ran);
-        let (request, responder) = Request::new(&run_loop.scheduler(), move |_| callback_ran.set(true));
+        let (request, responder) = Request::new(&run_loop.handle(), move |_| callback_ran.set(true));
         responder.send(Response::new());
         std::thread::spawn(move || drop(request)).join().unwrap();
         while run_loop.run_once() {}

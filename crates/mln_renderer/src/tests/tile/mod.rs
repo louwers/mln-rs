@@ -13,21 +13,22 @@ mod tile_coordinate;
 
 use std::sync::Arc;
 
-use mln_actor::{TaggedScheduler, scheduler};
 use mln_map_types::MapMode;
 use mln_tile_id::OverscaledTileID;
-use mln_util::identity::SimpleIdentity;
+use mln_util::pool::{Pool, TaskGroup};
 
 use crate::tests::OneTile;
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::TileWorkers;
 
 /// The fixture shared by `RasterTileTest` and `RasterDEMTileTest`
-/// (`test/tile/raster_tile.test.cpp`, `raster_dem_tile.test.cpp`): a loop
-/// and the workers' pool, which the tiles' stores free on.
+/// (`test/tile/raster_tile.test.cpp`, `raster_dem_tile.test.cpp`): a loop,
+/// the workers' pool, which the tiles' stores free on, and a pool without
+/// threads, which the test runs itself.
 pub(crate) struct RasterTileTest {
     pub(crate) run_loop: mln_actor::RunLoop,
-    pub(crate) thread_pool: TaggedScheduler,
+    pub(crate) thread_pool: TaskGroup,
+    pub(crate) local_pool: Pool,
 }
 
 impl RasterTileTest {
@@ -35,7 +36,8 @@ impl RasterTileTest {
     pub(crate) fn new() -> Self {
         RasterTileTest {
             run_loop: mln_actor::RunLoop::new(),
-            thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
+            thread_pool: TaskGroup::new(&crate::tests::pool()),
+            local_pool: Pool::local(),
         }
     }
 
@@ -92,7 +94,7 @@ pub(crate) fn remote_workers(
 ) -> std::rc::Rc<crate::tile::worker_codec::RemoteWorkers> {
     use crate::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
     let registry = crate::Registry::with_builtins();
-    RemoteWorkers::new(&run_loop.scheduler(), Arc::clone(&registry), |replies| {
+    RemoteWorkers::new(&run_loop.handle(), Arc::clone(&registry), |replies| {
         Box::new(ThreadWorkerInstances::new(count, registry, &replies))
     })
 }
@@ -109,6 +111,6 @@ pub(crate) fn png(width: u32, height: u32) -> mln_storage::Data {
 
 impl Drop for RasterTileTest {
     fn drop(&mut self) {
-        self.thread_pool.wait_for_empty();
+        self.thread_pool.wait();
     }
 }

@@ -16,7 +16,8 @@
 
 use std::sync::Arc;
 
-use mln_actor::{RunLoop, TaggedScheduler};
+use mln_actor::RunLoop;
+use mln_actor::scheduler::schedule_and_reply_later;
 use mln_sprite::load_sprite;
 use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style::source_type::{Described, ErasedDescription, Load};
@@ -26,8 +27,8 @@ use mln_text::glyph::FontFaces;
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::hash::HashMap;
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
+use mln_util::pool::{Pool, TaskGroup};
 
 /// What a request or a job of the loader answers.
 pub(crate) enum Reply {
@@ -127,7 +128,7 @@ struct SpriteLoad {
 pub(crate) struct StyleLoader {
     file_source: Option<Arc<dyn FileSource>>,
     run_loop: RunLoop,
-    thread_pool: TaggedScheduler,
+    thread_pool: TaskGroup,
     replies: EventQueue<Reply>,
     /// The URL of the style document, or `None` for a style loaded from
     /// JSON.
@@ -158,12 +159,18 @@ pub(crate) struct StyleLoader {
 
 impl StyleLoader {
     /// A loader that requests from `file_source`, answers on `run_loop` and
-    /// parses sprites on its pool, for `pixel_ratio`.
-    pub(crate) fn new(file_source: Option<Arc<dyn FileSource>>, run_loop: &RunLoop, pixel_ratio: f32) -> Self {
+    /// parses sprites and describes sources in a group of its own on `pool`,
+    /// for `pixel_ratio`.
+    pub(crate) fn new(
+        file_source: Option<Arc<dyn FileSource>>,
+        run_loop: &RunLoop,
+        pool: &Pool,
+        pixel_ratio: f32,
+    ) -> Self {
         StyleLoader {
             file_source,
             run_loop: run_loop.clone(),
-            thread_pool: TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new()),
+            thread_pool: TaskGroup::new(pool),
             replies: EventQueue::new(),
             url: None,
             request: None,
@@ -230,7 +237,7 @@ impl StyleLoader {
         self.style_load = load;
         let replies = self.replies.clone();
         self.request = Some(file_source.request(
-            &self.run_loop.scheduler(),
+            &self.run_loop.handle(),
             &Resource::style(url),
             Box::new(move |response: Response| replies.push(Reply::Style { load, response })),
         ));
@@ -306,7 +313,7 @@ impl StyleLoader {
                         let replies = self.replies.clone();
                         let reply_load = load.clone();
                         entry.request = Some(file_source.request(
-                            &self.run_loop.scheduler(),
+                            &self.run_loop.handle(),
                             &resource,
                             Box::new(move |response: Response| {
                                 replies.push(Reply::Source { load: reply_load.clone(), response });
@@ -343,7 +350,7 @@ impl StyleLoader {
         let replies = self.replies.clone();
         let respond = move |result| replies.push(Reply::SourceDescribed { load, describing, result });
         if source.data().describes_in_background() {
-            self.thread_pool.schedule_and_reply_later(&self.run_loop.scheduler(), job, respond);
+            schedule_and_reply_later(&self.thread_pool, &self.run_loop.handle(), job, respond);
         } else {
             job(Box::new(respond));
         }
@@ -444,7 +451,7 @@ impl StyleLoader {
             let replies = self.replies.clone();
             let id = sprite.id.clone();
             file_source.request(
-                &self.run_loop.scheduler(),
+                &self.run_loop.handle(),
                 &resource,
                 Box::new(move |response: Response| {
                     replies.push(Reply::Sprite { id: id.clone(), load, part, response });
@@ -498,8 +505,9 @@ impl StyleLoader {
         // The image decodes through the `decoder`, which may answer after
         // the job returns (the browser's).
         let job_id = id.clone();
-        self.thread_pool.schedule_and_reply_later(
-            &self.run_loop.scheduler(),
+        schedule_and_reply_later(
+            &self.thread_pool,
+            &self.run_loop.handle(),
             move |respond| load_sprite(job_id, image, json, respond),
             move |result| replies.push(Reply::SpriteParsed { id, load, result }),
         );

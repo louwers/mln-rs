@@ -1,14 +1,13 @@
 // C++ calls a CustomTileLoader directly and reaches it from the tiles
 // through a mailbox on the test's run loop. Here the provider's strand runs
-// on the run loop, so the test's calls run when the loop does, and what the
-// provider sends the tiles waits in their store's inbox.
+// on a pool without threads, so the test's calls run when the test runs the
+// pool, and what the provider sends the tiles waits in their store's inbox.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use feature::Feature;
 use geo_types::Point;
-use mln_actor::scheduler;
 use mln_style::custom_tile_loader::{CustomProvider, TileFunction};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
@@ -28,13 +27,13 @@ use crate::tile::loading::DataOrigin;
 use crate::tile::tile::{TileKind, TileNecessity};
 use crate::tile::tile_workers::InlineWorkers;
 
-/// The provider, whose strand runs on the test's run loop.
+/// The provider, whose strand runs on `pool`.
 fn loader(
-    run_loop: &mln_actor::RunLoop,
+    pool: &mln_util::pool::Pool,
     fetch: Option<TileFunction>,
     cancel: Option<TileFunction>,
 ) -> Arc<CustomGeometryProvider> {
-    CustomProvider::new(fetch, cancel, run_loop.scheduler())
+    CustomProvider::new(fetch, cancel, pool)
 }
 
 /// A tile function that counts its calls.
@@ -73,11 +72,11 @@ fn root() -> OverscaledTileID {
 fn invoke_fetch_tile() {
     let test = RasterTileTest::new();
     let (fetched, fetch) = recorder();
-    let loader = loader(&test.run_loop, Some(fetch), Some(Arc::new(|_: &CanonicalTileID| {})));
+    let loader = loader(&test.local_pool, Some(fetch), Some(Arc::new(|_: &CanonicalTileID| {})));
 
     let mut tiles = tiles(&test, &[root()], Arc::clone(&loader));
     tiles.set_necessity(&root(), TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
 
     assert_eq!(*fetched.lock(), vec![CanonicalTileID::new(0, 0, 0)]);
 }
@@ -87,12 +86,12 @@ fn invoke_fetch_tile() {
 fn invoke_cancel_tile() {
     let test = RasterTileTest::new();
     let (cancelled, cancel) = recorder();
-    let loader = loader(&test.run_loop, Some(Arc::new(|_: &CanonicalTileID| {})), Some(cancel));
+    let loader = loader(&test.local_pool, Some(Arc::new(|_: &CanonicalTileID| {})), Some(cancel));
 
     let mut tiles = tiles(&test, &[root()], Arc::clone(&loader));
     tiles.set_necessity(&root(), TileNecessity::Required);
     tiles.set_necessity(&root(), TileNecessity::Optional);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
 
     assert_eq!(*cancelled.lock(), vec![CanonicalTileID::new(0, 0, 0)]);
 }
@@ -102,16 +101,16 @@ fn invoke_cancel_tile() {
 fn fetch_cancelled_tile_again() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(&test.run_loop, Some(fetch), None);
+    let loader = loader(&test.local_pool, Some(fetch), None);
 
     let mut tiles = tiles(&test, &[root()], Arc::clone(&loader));
     tiles.set_necessity(&root(), TileNecessity::Required);
     tiles.set_necessity(&root(), TileNecessity::Optional);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     tiles.set_necessity(&root(), TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
 
@@ -120,26 +119,26 @@ fn fetch_cancelled_tile_again() {
 fn invalidate_failed_tile() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(&test.run_loop, Some(fetch), None);
+    let loader = loader(&test.local_pool, Some(fetch), None);
 
     let mut tiles = tiles(&test, &[root()], Arc::clone(&loader));
     tiles.set_necessity(&root(), TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     let id = CanonicalTileID::new(0, 0, 0);
     loader.set_tile_error(id, Error::native("failed"));
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     tiles.store.receive();
     assert_eq!(tiles.errors(), ["failed"]);
 
     loader.invalidate_tile(id);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     tiles.store.receive();
 
     // The render source updates the necessity of a changed tile.
     tiles.set_necessity(&root(), TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
 
@@ -147,7 +146,7 @@ fn invalidate_failed_tile() {
 #[test]
 fn invoke_tile_changed() {
     let test = RasterTileTest::new();
-    let loader = loader(&test.run_loop, None, None);
+    let loader = loader(&test.local_pool, None, None);
     let mut tiles = tiles(&test, &[root()], Arc::clone(&loader));
 
     let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
@@ -162,6 +161,7 @@ fn invoke_tile_changed() {
         ..Feature::default()
     }]))));
     while !tiles.tile().is_complete() {
+        test.local_pool.run_all();
         test.run_loop.run_once();
         tiles.update();
     }
@@ -182,19 +182,18 @@ fn invoke_tile_changed() {
 fn cancellation_discards_queued_invalidation() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    // On the background scheduler, so the provider's message to the tile
-    // waits in the store's inbox until the test takes it in.
-    let pool = scheduler::get_background();
-    let loader: Arc<CustomGeometryProvider> = CustomProvider::new(Some(fetch), None, Arc::clone(&pool));
+    // The provider's message to the tile waits in the store's inbox until
+    // the test takes it in.
+    let loader = loader(&test.local_pool, Some(fetch), None);
     let mut tiles = tiles(&test, &[root()], Arc::clone(&loader));
     tiles.set_necessity(&root(), TileNecessity::Required);
-    pool.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     loader.invalidate_tile(root().canonical);
-    pool.wait_for_empty();
+    test.local_pool.run_all();
     tiles.drop_tile();
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
 
     assert_eq!(tiles.changes(), 0);
 }
@@ -204,15 +203,15 @@ fn cancellation_discards_queued_invalidation() {
 fn cancellation_discards_late_invalidation() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(&test.run_loop, Some(fetch), None);
+    let loader = loader(&test.local_pool, Some(fetch), None);
     let mut tiles = tiles(&test, &[root()], Arc::clone(&loader));
     tiles.set_necessity(&root(), TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     tiles.drop_tile();
     loader.invalidate_tile(root().canonical);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
 
     assert_eq!(tiles.changes(), 0);
 }
@@ -223,14 +222,14 @@ fn cancel_one_copy() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
     let (cancels, cancel) = counter();
-    let loader = loader(&test.run_loop, Some(fetch), Some(cancel));
+    let loader = loader(&test.local_pool, Some(fetch), Some(cancel));
 
     // Two copies of one tile in neighboring worlds share its data.
     let second = OverscaledTileID::new(0, 1, CanonicalTileID::new(0, 0, 0));
     let mut tiles = tiles(&test, &[root(), second], Arc::clone(&loader));
     tiles.set_necessity(&root(), TileNecessity::Required);
     tiles.set_necessity(&second, TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     // The map moves by a world, and the source changes both copies' wraps.
@@ -239,16 +238,16 @@ fn cancel_one_copy() {
     tiles.rekey(&second, root());
 
     tiles.set_necessity(&root(), TileNecessity::Optional);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(cancels.load(Ordering::SeqCst), 0);
 
     // The copy that is still needed is still invalidated, and fetches again.
     let id = CanonicalTileID::new(0, 0, 0);
     loader.invalidate_tile(id);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     tiles.store.receive();
     tiles.set_necessity(&first, TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
 
@@ -257,23 +256,23 @@ fn cancel_one_copy() {
 fn cancelled_tile_drops_cached_data() {
     let test = RasterTileTest::new();
     let (fetches, fetch) = counter();
-    let loader = loader(&test.run_loop, Some(fetch), None);
+    let loader = loader(&test.local_pool, Some(fetch), None);
 
     let mut first = tiles(&test, &[root()], Arc::clone(&loader));
     first.set_necessity(&root(), TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     // The data arrives, but the tile leaves the view before it is parsed.
     loader.set_tile_data(root().canonical, Arc::new(Vec::new()));
     first.set_necessity(&root(), TileNecessity::Optional);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     first.drop_tile();
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
 
     // The data went with the last tile that wanted it.
     let mut next = tiles(&test, &[root()], Arc::clone(&loader));
     next.set_necessity(&root(), TileNecessity::Required);
-    test.run_loop.wait_for_empty();
+    test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }

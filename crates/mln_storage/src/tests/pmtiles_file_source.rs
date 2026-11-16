@@ -20,10 +20,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn pmtiles_file_source() -> Rc<PMTilesFileSource> {
-    Rc::new(PMTilesFileSource::new(
-        Arc::new(Loader::new(&ResourceOptions::default())),
-        mln_actor::scheduler::get_background(),
-    ))
+    Rc::new(PMTilesFileSource::new(Arc::new(Loader::new(&ResourceOptions::default(), &super::pool())), super::pool()))
 }
 
 fn tile(url: &str, z: i8) -> Resource {
@@ -37,7 +34,7 @@ fn request(fs: &PMTilesFileSource, resource: &Resource) -> Response {
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -146,7 +143,7 @@ fn corrupt_gzip_metadata() {
 #[test]
 fn repeated_tile_request() {
     let run_loop = RunLoop::new();
-    let queue = run_loop.scheduler();
+    let queue = run_loop.handle();
     let pmtiles = pmtiles_file_source();
 
     let req1 = req();
@@ -154,7 +151,7 @@ fn repeated_tile_request() {
 
     let (r1, r2, fs, stop) = (Rc::clone(&req1), Rc::clone(&req2), Rc::clone(&pmtiles), run_loop.clone());
     *req1.borrow_mut() = Some(pmtiles.request(
-        &run_loop.scheduler(),
+        &run_loop.handle(),
         &tile(&to_absolute_url("geography-class-png.pmtiles"), 0),
         Box::new(move |res1: Response| {
             r1.borrow_mut().take();

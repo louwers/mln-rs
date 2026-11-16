@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::actor_ref::ActorRef;
 use crate::mailbox::Mailbox;
-use crate::scheduler::SchedulerPtr;
+use crate::run_loop::RunLoopHandle;
 
 /// The mailbox and the `ActorRef` handed out before the object exists.
 pub(crate) struct AspiringActor<O: 'static> {
@@ -42,7 +42,7 @@ impl<O: 'static> EstablishedActor<O> {
     /// Creates the object for `parent`'s mailbox. `make` receives the
     /// actor's own reference and builds the object.
     pub(crate) fn new(
-        scheduler: &SchedulerPtr,
+        scheduler: &RunLoopHandle,
         parent: &AspiringActor<O>,
         make: impl FnOnce(ActorRef<O>) -> O,
     ) -> Self {
@@ -76,7 +76,7 @@ mod tests {
         // thread to be up and running.
         struct TestActor {
             destroyed: Arc<AtomicBool>,
-            run_loop: crate::RunLoopHandle,
+            run_loop: RunLoopHandle,
         }
         impl Drop for TestActor {
             fn drop(&mut self) {
@@ -106,7 +106,7 @@ mod tests {
             let parent = &parent;
             let thread = s.spawn(move || {
                 let run_loop = RunLoop::new();
-                let _test = EstablishedActor::new(&run_loop.scheduler(), parent, |_| TestActor {
+                let _test = EstablishedActor::new(&run_loop.handle(), parent, |_| TestActor {
                     destroyed: captured,
                     run_loop: run_loop.handle(),
                 });
