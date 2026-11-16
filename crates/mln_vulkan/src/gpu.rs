@@ -2074,6 +2074,7 @@ impl Gpu for VulkanGpu {
     fn import_video_frame(
         &mut self,
         frame: &mln_gfx::video::GpuFrame,
+        #[cfg_attr(not(unix), expect(unused_variables, reason = "only dmabuf frames, on Unix, import"))]
         keep_alive: mln_gfx::video::FrameKeepAlive,
     ) -> Result<mln_gfx::video::ImportedFrame, GpuError> {
         match frame {
