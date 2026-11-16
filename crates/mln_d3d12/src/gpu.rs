@@ -26,13 +26,13 @@ use mln_util::size::Size;
 use windows::Win32::Foundation::{HANDLE, RECT};
 use windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY;
 use windows::Win32::Graphics::Direct3D12::{
-    D3D12_BOX, D3D12_CLEAR_VALUE, D3D12_CLEAR_VALUE_0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-    D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_DEPTH_STENCIL_VALUE,
-    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-    D3D12_FENCE_FLAG_NONE, D3D12_GRAPHICS_PIPELINE_STATE_DESC, D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED,
-    D3D12_INDEX_BUFFER_VIEW, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
-    D3D12_INPUT_ELEMENT_DESC, D3D12_INPUT_LAYOUT_DESC, D3D12_PLACED_SUBRESOURCE_FOOTPRINT,
-    D3D12_PRIMITIVE_TOPOLOGY_TYPE, D3D12_RANGE, D3D12_RENDER_PASS_BEGINNING_ACCESS,
+    D3D12_BOX, D3D12_CLEAR_FLAG_DEPTH, D3D12_CLEAR_FLAG_STENCIL, D3D12_CLEAR_VALUE, D3D12_CLEAR_VALUE_0,
+    D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT, D3D12_CPU_DESCRIPTOR_HANDLE,
+    D3D12_DEPTH_STENCIL_VALUE, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
+    D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_FENCE_FLAG_NONE, D3D12_GRAPHICS_PIPELINE_STATE_DESC,
+    D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED, D3D12_INDEX_BUFFER_VIEW, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA,
+    D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, D3D12_INPUT_ELEMENT_DESC, D3D12_INPUT_LAYOUT_DESC,
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT, D3D12_PRIMITIVE_TOPOLOGY_TYPE, D3D12_RANGE, D3D12_RENDER_PASS_BEGINNING_ACCESS,
     D3D12_RENDER_PASS_BEGINNING_ACCESS_0, D3D12_RENDER_PASS_BEGINNING_ACCESS_CLEAR_PARAMETERS,
     D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
     D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE, D3D12_RENDER_PASS_DEPTH_STENCIL_DESC,
@@ -612,6 +612,39 @@ impl D3d12Gpu {
         Ok(self.textures.insert(texture))
     }
 
+    /// Clears the new render target `texture` to zeros in the copy list, as
+    /// new memory holds: D3D12 can't use a placed render target until a
+    /// discard, clear or copy, and the renderer reads a depth it didn't
+    /// clear in `fill-extrusion-multiple/stencil-wrap`.
+    fn clear_new_target(&mut self, texture: TextureId, depth: bool) -> Result<(), GpuError> {
+        let list = self.copy_list()?;
+        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        let (resource, rest) = (&entry.memory.resource, entry.rest);
+        let target = if depth { D3D12_RESOURCE_STATE_DEPTH_WRITE } else { D3D12_RESOURCE_STATE_RENDER_TARGET };
+        // SAFETY: no work uses the new texture, its views are its own, and
+        // the barriers return it to its rest.
+        unsafe {
+            if rest != target {
+                list.ResourceBarrier(&[transition(resource, rest, target)]);
+            }
+            match (entry.rtv, entry.dsv) {
+                (Some(rtv), _) => list.ClearRenderTargetView(rtv.handle, &[0.0; 4], None),
+                (_, Some(dsv)) => {
+                    let mut flags = D3D12_CLEAR_FLAG_DEPTH;
+                    if entry.info.format.is_some_and(TextureFormat::has_stencil) {
+                        flags |= D3D12_CLEAR_FLAG_STENCIL;
+                    }
+                    list.ClearDepthStencilView(dsv.handle, flags, 0.0, 0, None);
+                }
+                (None, None) => {}
+            }
+            if rest != target {
+                list.ResourceBarrier(&[transition(resource, target, rest)]);
+            }
+        }
+        Ok(())
+    }
+
     fn info(&self) -> (impl Fn(BufferId) -> Option<BufferInfo> + '_, impl Fn(TextureId) -> Option<TextureInfo> + '_) {
         let buffer =
             |id| self.buffers.get(id).map(|buffer: &Buffer| BufferInfo { usage: buffer.usage, size: buffer.size });
@@ -958,8 +991,13 @@ impl Gpu for D3d12Gpu {
         };
         let info = TextureInfo { format: Some(desc.format), size: desc.size, usage: desc.usage };
         let rest = rest_state(info.format, desc.usage);
-        let memory = self.memory.texture(self.device.device(), &resource_desc, rest)?;
-        self.insert_texture(memory, format, info, rest)
+        let bytes = u64::from(width) * u64::from(height) * u64::from(desc.format.bytes_per_texel().unwrap_or(8));
+        let memory = self.memory.texture(self.device.device(), &resource_desc, bytes, rest)?;
+        let id = self.insert_texture(memory, format, info, rest)?;
+        if desc.usage.render_target {
+            self.clear_new_target(id, depth)?;
+        }
+        Ok(id)
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {

@@ -18,7 +18,8 @@ use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, MemoryLocation};
 use mln_gfx::gpu::GpuError;
 use mln_util::logging::{Event, Log};
 use windows::Win32::Graphics::Direct3D12::{
-    D3D12_RANGE, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_FLAG_NONE,
+    D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT, D3D12_RANGE, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER,
+    D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, D3D12_RESOURCE_FLAG_NONE,
     D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_GENERIC_READ,
     D3D12_RESOURCE_STATES, D3D12_SMALL_RESOURCE_PLACEMENT_ALIGNMENT, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, ID3D12Device,
     ID3D12Resource,
@@ -280,19 +281,24 @@ impl Memory {
     }
 
     /// A texture of `desc`, in `state`: with the 4 KiB alignment of a small
-    /// texture where it can have it.
+    /// texture where it can have it, a texture of `bytes` up to 64 KiB that
+    /// isn't a render target.
     pub(crate) fn texture(
         &mut self,
         device: &ID3D12Device,
         desc: &D3D12_RESOURCE_DESC,
+        bytes: u64,
         state: D3D12_RESOURCE_STATES,
     ) -> Result<TextureMemory, GpuError> {
         let mut desc = *desc;
-        desc.Alignment = u64::from(D3D12_SMALL_RESOURCE_PLACEMENT_ALIGNMENT);
-        // SAFETY: a plain query.
-        let info = unsafe { device.GetResourceAllocationInfo(0, std::slice::from_ref(&desc)) };
-        if info.Alignment != desc.Alignment {
-            desc.Alignment = 0;
+        let target = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+        if (desc.Flags & target).0 == 0 && bytes <= u64::from(D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT) {
+            desc.Alignment = u64::from(D3D12_SMALL_RESOURCE_PLACEMENT_ALIGNMENT);
+            // SAFETY: a plain query.
+            let info = unsafe { device.GetResourceAllocationInfo(0, std::slice::from_ref(&desc)) };
+            if info.Alignment != desc.Alignment {
+                desc.Alignment = 0;
+            }
         }
         let resource = self.place("texture", MemoryLocation::GpuOnly, &desc, state)?;
         Ok(TextureMemory {
