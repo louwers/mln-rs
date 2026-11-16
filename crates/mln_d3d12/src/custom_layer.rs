@@ -16,14 +16,15 @@ pub struct CustomLayerEncoder {
     pub command_list: ID3D12GraphicsCommandList,
 }
 
-/// The map's pass at a custom layer's place in the style: its render
-/// targets are set on `command_list`.
+/// The map's render pass at a custom layer's place in the style, begun on
+/// `command_list` with `BeginRenderPass`.
 ///
 /// Set your own pipeline state, root signature, descriptor heaps, vertex
 /// and index buffers, topology, viewport, scissor rectangle and stencil
-/// reference, with pipelines of `color_format` and `depth_stencil_format`.
-/// The map sets what its next draws need again, its render targets
-/// included.
+/// reference, with pipelines of `color_format` and `depth_stencil_format`,
+/// and draw. Record nothing that a render pass can't hold, such as
+/// barriers, copies or other render targets, and don't end the pass. The
+/// map sets what its next draws need again.
 pub struct CustomLayerPass {
     pub device: ID3D12Device,
     pub command_list: ID3D12GraphicsCommandList,

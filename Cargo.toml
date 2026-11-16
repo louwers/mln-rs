@@ -389,6 +389,7 @@ wgpu = { version = "30.0.1", default-features = false, features = [
 ash = { version = "0.38.0" }
 # The Vulkan backend on Windows: its D3D12 fences, and the D3D11 textures of
 # its exported rings on the DXGI adapter of the Vulkan GPU, at wgpu's version.
+# The D3D12 backend (crates/mln_d3d12): D3D12, DXGI and DXC.
 # mln_system_fonts: DirectWrite's font fallback.
 windows = { version = "0.62.2", features = [
   "Win32_Foundation",
@@ -400,6 +401,8 @@ windows = { version = "0.62.2", features = [
   "Win32_System_LibraryLoader",
 ] }
 windows-core = { version = "0.62.2" }
+# The memory of the Vulkan and D3D12 backends, at the version that wgpu's own
+# backends allocate with. The D3D12 backend turns on `d3d12`.
 gpu-allocator = { version = "0.28.0", default-features = false, features = [
   "std",
   "vulkan",

@@ -18,6 +18,7 @@ mod custom_layer;
 mod device;
 mod gpu;
 mod heaps;
+mod memory;
 mod renderer_backend;
 mod root_signature;
 mod shaders;

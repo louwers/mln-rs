@@ -112,3 +112,27 @@ fn every_program_compiles_for_gpu() {
         }
     }
 }
+
+// The memory of destroyed buffers goes back once the work before it has
+// finished, and new buffers take it again.
+#[test]
+fn destroyed_buffers_memory_is_reused() {
+    use mln_gfx::gpu::{BufferDesc, BufferUsage, ResourceId};
+
+    let mut gpu = gpu();
+    let round = |gpu: &mut D3d12Gpu| {
+        let buffers: Vec<_> = [BufferUsage::Vertex, BufferUsage::Uniform]
+            .into_iter()
+            .flat_map(|usage| (0..500).map(move |_| BufferDesc { label: "small", usage, size: 300 }))
+            .map(|desc| gpu.create_buffer(&desc).expect("a buffer"))
+            .collect();
+        for buffer in buffers {
+            gpu.destroy(ResourceId::Buffer(buffer));
+        }
+        gpu.flush(true).expect("the flush");
+        gpu.slab_pages()
+    };
+    let first = round(&mut gpu);
+    assert!(first > 0);
+    assert_eq!(round(&mut gpu), first, "the second round takes the first's slabs");
+}

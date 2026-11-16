@@ -1,29 +1,32 @@
 //! The D3D12 device and its direct queue, which backends on any thread
 //! share.
 
+use std::ffi::c_void;
 use std::sync::Arc;
 
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
+use mln_util::logging::{Event, EventSeverity, Log};
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
 use windows::Win32::Graphics::Direct3D12::{
-    D3D_SHADER_MODEL_6_0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_FEATURE_DATA_SHADER_MODEL,
-    D3D12_FEATURE_SHADER_MODEL, D3D12_MESSAGE_SEVERITY_CORRUPTION, D3D12_MESSAGE_SEVERITY_ERROR, D3D12CreateDevice,
-    D3D12GetDebugInterface, ID3D12CommandQueue, ID3D12Debug, ID3D12Debug1, ID3D12Device, ID3D12InfoQueue,
+    D3D_SHADER_MODEL_6_0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_DRED_ENABLEMENT_FORCED_ON,
+    D3D12_FEATURE_DATA_SHADER_MODEL, D3D12_FEATURE_SHADER_MODEL, D3D12_MESSAGE_CALLBACK_FLAG_NONE,
+    D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION,
+    D3D12_MESSAGE_SEVERITY_ERROR, D3D12_MESSAGE_SEVERITY_WARNING, D3D12CreateDevice, D3D12GetDebugInterface,
+    ID3D12CommandQueue, ID3D12Debug, ID3D12Debug1, ID3D12Device, ID3D12DeviceRemovedExtendedData,
+    ID3D12DeviceRemovedExtendedDataSettings, ID3D12InfoQueue, ID3D12InfoQueue1,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_CREATE_FACTORY_DEBUG, DXGI_CREATE_FACTORY_FLAGS,
     IDXGIAdapter1, IDXGIFactory4,
 };
-use windows::core::Interface;
+use windows::core::{Interface, PCSTR};
 
 use crate::shaders::ShaderCompiler;
 
 /// What `MLN_D3D12_VALIDATION` asks for: D3D12's debug layer with
-/// GPU-based validation, which logs what it finds through the debugger's
-/// output, or with `abort` also breaks on an error, which ends a process
-/// that runs without a debugger.
+/// GPU-based validation and DRED, whose messages go to the log, and with
+/// `abort` the end of the process at the first error.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Validation {
     Off,
@@ -111,6 +114,13 @@ impl Device {
                     if let Ok(debug) = debug.cast::<ID3D12Debug1>() {
                         debug.SetEnableGPUBasedValidation(true);
                     }
+                    let mut dred: Option<ID3D12DeviceRemovedExtendedDataSettings> = None;
+                    if D3D12GetDebugInterface(&raw mut dred).is_ok()
+                        && let Some(dred) = dred
+                    {
+                        dred.SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+                        dred.SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+                    }
                 } else {
                     Log::error(Event::Render, "D3D12's debug layer isn't installed");
                     validation = Validation::Off;
@@ -158,14 +168,8 @@ impl Device {
                 }
             }
         };
-        if validation == Validation::Abort
-            && let Ok(queue) = device.cast::<ID3D12InfoQueue>()
-        {
-            // SAFETY: plain calls.
-            unsafe {
-                let _ = queue.SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
-                let _ = queue.SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
-            }
+        if validation != Validation::Off {
+            log_messages(&device, validation == Validation::Abort);
         }
         // SAFETY: plain calls.
         let desc = unsafe { adapter.GetDesc1() }.map_err(native("IDXGIAdapter1::GetDesc1"))?;
@@ -245,4 +249,69 @@ fn create_device(adapter: &IDXGIAdapter1) -> Result<ID3D12Device, Error> {
         return Err(Error::unsupported("the D3D12 device runs no shader model 6.0"));
     }
     Ok(device)
+}
+
+impl Device {
+    /// Why the device was removed, with the address of the page fault that
+    /// DRED recorded, if any; `None` while it works.
+    #[must_use]
+    pub fn removed_reason(&self) -> Option<String> {
+        // SAFETY: plain queries.
+        unsafe {
+            let error = self.shared.device.GetDeviceRemovedReason().err()?;
+            let fault = self
+                .shared
+                .device
+                .cast::<ID3D12DeviceRemovedExtendedData>()
+                .and_then(|dred| dred.GetPageFaultAllocationOutput())
+                .ok()
+                .filter(|output| output.PageFaultVA != 0)
+                .map_or_else(String::new, |output| format!(", a page fault at {:#x}", output.PageFaultVA));
+            Some(format!("the D3D12 device was removed: {error}{fault}"))
+        }
+    }
+}
+
+/// Sends the debug layer's messages to the log, and with `abort` ends the
+/// process at the first error. Without `ID3D12InfoQueue1`, they go to the
+/// debugger's output, and `abort` breaks there.
+fn log_messages(device: &ID3D12Device, abort: bool) {
+    unsafe extern "system" fn message(
+        _: D3D12_MESSAGE_CATEGORY,
+        severity: D3D12_MESSAGE_SEVERITY,
+        _: D3D12_MESSAGE_ID,
+        description: PCSTR,
+        abort: *mut c_void,
+    ) {
+        // SAFETY: the debug layer passes a string, valid during the call.
+        let text = unsafe { description.to_string() }.unwrap_or_default();
+        let error = matches!(severity, D3D12_MESSAGE_SEVERITY_CORRUPTION | D3D12_MESSAGE_SEVERITY_ERROR);
+        let severity = match severity {
+            D3D12_MESSAGE_SEVERITY_CORRUPTION | D3D12_MESSAGE_SEVERITY_ERROR => EventSeverity::Error,
+            D3D12_MESSAGE_SEVERITY_WARNING => EventSeverity::Warning,
+            _ => EventSeverity::Info,
+        };
+        Log::record(severity, Event::Render, -1, &format!("D3D12: {text}"));
+        if error && !abort.is_null() {
+            std::process::abort();
+        }
+    }
+    let context = if abort { std::ptr::NonNull::<c_void>::dangling().as_ptr() } else { std::ptr::null_mut() };
+    // SAFETY: the callback takes the arguments the debug layer passes, and
+    // reads `context` only for whether it is null.
+    unsafe {
+        if let Ok(queue) = device.cast::<ID3D12InfoQueue1>() {
+            let mut cookie = 0;
+            if queue
+                .RegisterMessageCallback(Some(message), D3D12_MESSAGE_CALLBACK_FLAG_NONE, context, &raw mut cookie)
+                .is_ok()
+            {
+                return;
+            }
+        }
+        if abort && let Ok(queue) = device.cast::<ID3D12InfoQueue>() {
+            let _ = queue.SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
+            let _ = queue.SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
+        }
+    }
 }

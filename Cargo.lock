@@ -2564,6 +2564,7 @@ dependencies = [
 name = "mln-rs-d3d12"
 version = "0.0.12"
 dependencies = [
+ "gpu-allocator",
  "mln-rs-gfx",
  "mln-rs-glsl",
  "mln-rs-util",
