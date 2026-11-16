@@ -190,6 +190,16 @@ impl State {
         }
     }
 
+    /// Binds `texture`, a `GL_TEXTURE_EXTERNAL_OES` texture, to `unit`'s
+    /// external target, which only `samplerExternalOES` reads, so the
+    /// cache of the units' 2D textures stays as it is.
+    #[cfg(target_os = "android")]
+    pub(crate) fn bind_external_texture(&self, gl: &Gl, unit: u32, texture: TextureID) {
+        self.active_texture(gl, unit);
+        // SAFETY: the texture is alive, and external.
+        unsafe { gl.bind_texture(crate::video_frame::TEXTURE_EXTERNAL, Some(texture)) };
+    }
+
     fn active_texture(&self, gl: &Gl, unit: u32) {
         if changed(&self.active_texture_unit, unit) {
             // SAFETY: `unit` is below MAX_ACTIVE_TEXTURE_UNITS, which GL ES 3.0 has.

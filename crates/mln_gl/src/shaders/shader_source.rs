@@ -654,7 +654,9 @@ shader_source!(
     &[
         tex("u_plane0", ID_VIDEO_FRAME_PLANE0_TEXTURE),
         tex("u_plane1", ID_VIDEO_FRAME_PLANE1_TEXTURE),
-        tex("u_plane2", ID_VIDEO_FRAME_PLANE2_TEXTURE)
+        tex("u_plane2", ID_VIDEO_FRAME_PLANE2_TEXTURE),
+        // The plane of a frame in an external texture (`VIDEO_EXTERNAL`).
+        tex("u_external_plane", ID_VIDEO_FRAME_PLANE0_TEXTURE)
     ]
 );
 

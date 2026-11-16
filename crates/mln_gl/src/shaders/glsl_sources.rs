@@ -2898,9 +2898,17 @@ precision highp float;
 #endif
 
 in vec2 v_pos;
+// An external texture (VIDEO_EXTERNAL) is one RGBA plane, which its sampler
+// converts from the buffer's format. Its sampler has a name of its own: the
+// Android emulator's GLSL translator takes a name declared as an external
+// sampler for one, also where the preprocessor leaves the declaration out.
+#ifdef VIDEO_EXTERNAL
+uniform samplerExternalOES u_external_plane;
+#else
 uniform sampler2D u_plane0;
 uniform sampler2D u_plane1;
 uniform sampler2D u_plane2;
+#endif
 
 layout (std140) uniform VideoFramePropsUBO {
     highp mat4 u_matrix;
@@ -2910,6 +2918,9 @@ layout (std140) uniform VideoFramePropsUBO {
 };
 
 void main() {
+#ifdef VIDEO_EXTERNAL
+    fragColor = texture(u_external_plane, v_pos);
+#else
     vec4 luma = texture(u_plane0, v_pos);
     vec4 chroma1 = texture(u_plane1, v_pos);
     vec4 chroma2 = texture(u_plane2, v_pos);
@@ -2923,6 +2934,7 @@ void main() {
 #else
     vec3 rgb = vec3(dot(u_to_r, yuv), dot(u_to_g, yuv), dot(u_to_b, yuv));
     fragColor = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+#endif
 #endif
 }
 ",

@@ -53,6 +53,8 @@ mod overlay;
 pub mod surface_target;
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
 mod video_import;
+#[cfg(target_os = "android")]
+mod video_frame;
 #[cfg(windows)]
 mod wgl;
 #[cfg(windows)]

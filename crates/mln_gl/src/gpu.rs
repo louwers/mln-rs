@@ -22,6 +22,10 @@ use mln_gfx::gpu::{
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
+#[cfg(not(target_family = "wasm"))]
+use mln_gfx::video::{FrameKeepAlive, GpuFrame, ImportedFrame};
+#[cfg(target_os = "android")]
+use mln_gfx::video::PlaneLayout;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
@@ -48,6 +52,8 @@ enum GlObject {
     Sampler(SamplerID),
     Program(ProgramID),
     VertexArray(VertexArrayID),
+    /// What a texture held while GL read it, which goes after the texture.
+    Held(Box<dyn Any>),
 }
 
 /// The GL objects let go of since the backend last deleted them.
@@ -118,10 +124,12 @@ enum Object {
 /// if the backend made it.
 struct NativeTexture {
     object: Object,
+    /// Whether the texture is a `GL_TEXTURE_EXTERNAL_OES` one.
+    external: bool,
+    /// What the texture reads, such as an imported video frame, which goes
+    /// once the texture is deleted.
+    held: Option<Box<dyn Any>>,
     deleted: Rc<Deleted>,
-    /// A video frame's plane that the texture samples, which goes with it.
-    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
-    _video: Option<VideoPlane>,
 }
 
 /// The `EGLImage` of a video frame's plane, and what keeps the frame alive.
@@ -129,7 +137,7 @@ struct NativeTexture {
 struct VideoPlane {
     image: *mut std::ffi::c_void,
     images: Rc<crate::video_import::DmaBufImages>,
-    _keep_alive: mln_gfx::video::FrameKeepAlive,
+    _keep_alive: FrameKeepAlive,
 }
 
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
@@ -153,6 +161,9 @@ impl Drop for NativeTexture {
     fn drop(&mut self) {
         if let Object::Texture { name, owned: true } = self.object {
             self.deleted.push(GlObject::Texture(name));
+        }
+        if let Some(held) = self.held.take() {
+            self.deleted.push(GlObject::Held(held));
         }
     }
 }
@@ -562,6 +573,7 @@ impl GlGpu {
                         state.forget_vertex_array(vertex_array);
                         gl.delete_vertex_array(vertex_array);
                     }
+                    GlObject::Held(held) => drop(held),
                 }
             }
         }
@@ -594,7 +606,7 @@ impl GlGpu {
         modifier: u64,
         size: Size,
         planes: &[mln_gfx::video::DmaBufPlane],
-        keep_alive: &mln_gfx::video::FrameKeepAlive,
+        keep_alive: &FrameKeepAlive,
     ) -> Result<(mln_gfx::video::PlaneLayout, Vec<TextureId>), GpuError> {
         use crate::video_import::{DmaBufImages, plane_formats};
         let (layout, formats) =
@@ -641,8 +653,9 @@ impl GlGpu {
             };
             let native = Rc::new(NativeTexture {
                 object: Object::Texture { name, owned: true },
+                external: false,
+                held: Some(Box::new(video)),
                 deleted: Rc::clone(&self.deleted),
-                _video: Some(video),
             });
             let usage = TextureUsage { sampled: true, ..TextureUsage::default() };
             textures.push(self.textures.insert(Texture { native, size: plane_size, format, usage }));
@@ -658,9 +671,9 @@ impl GlGpu {
     pub(crate) fn import_texture(&mut self, texture: TextureID, desc: &TextureDesc<'_>) -> TextureId {
         let native = Rc::new(NativeTexture {
             object: Object::Texture { name: texture, owned: false },
+            external: false,
+            held: None,
             deleted: Rc::clone(&self.deleted),
-            #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
-            _video: None,
         });
         self.textures.insert(Texture { native, size: desc.size, format: desc.format, usage: desc.usage })
     }
@@ -682,9 +695,9 @@ impl GlGpu {
         let mut attachment = |format, copy_src| {
             let native = Rc::new(NativeTexture {
                 object: Object::Framebuffer(framebuffer),
+                external: false,
+                held: None,
                 deleted: Rc::clone(&self.deleted),
-                #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
-                _video: None,
             });
             self.textures.insert(Texture {
                 native,
@@ -774,6 +787,10 @@ impl GlGpu {
         // that the shaders are as well: what they use of GLSL ES is in it,
         // and it ignores their precision qualifiers.
         let version = if self.desktop { "#version 330 core\n" } else { "#version 300 es\n" };
+        // The video frame shader's `samplerExternalOES` needs its extension,
+        // which goes before any of the source's other lines.
+        let external = key.define_values().any(|(name, _)| name == "VIDEO_EXTERNAL");
+        let extensions = if external { "#extension GL_OES_EGL_image_external_essl3 : require\n" } else { "" };
         let defines: String =
             key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
         let gl = self.context.gl();
@@ -781,7 +798,7 @@ impl GlGpu {
             // SAFETY: the shader is new, and deleted if it doesn't compile.
             unsafe {
                 let shader = gl.create_shader(stage).map_err(GpuError::Invalid)?;
-                gl.shader_source(shader, &[version, &defines, prelude, glsl].concat());
+                gl.shader_source(shader, &[version, extensions, &defines, prelude, glsl].concat());
                 gl.compile_shader(shader);
                 if gl.get_shader_compile_status(shader) {
                     return Ok(shader);
@@ -1112,7 +1129,11 @@ impl GlGpu {
         }
         if textures {
             for binding in &bindings.textures {
-                state.bind_texture(gl, binding.unit, binding.texture.name());
+                match binding.texture.name() {
+                    #[cfg(target_os = "android")]
+                    Some(name) if binding.texture.external => state.bind_external_texture(gl, binding.unit, name),
+                    name => state.bind_texture(gl, binding.unit, name),
+                }
                 state.bind_sampler(gl, binding.unit, Some(binding.sampler.object));
             }
         }
@@ -1216,17 +1237,14 @@ pub(crate) fn read_pixels(gl: &Gl, state: &State, height: u32, region: TextureRe
 }
 
 impl Gpu for GlGpu {
-    #[cfg(not(target_family = "wasm"))]
-    fn import_video_frame(
-        &mut self,
-        frame: &mln_gfx::video::GpuFrame,
-        keep_alive: mln_gfx::video::FrameKeepAlive,
-    ) -> Result<mln_gfx::video::ImportedFrame, GpuError> {
+    /// Imports dmabufs on Linux and the BSDs.
+    #[cfg(not(any(target_family = "wasm", target_os = "android")))]
+    fn import_video_frame(&mut self, frame: &GpuFrame, keep_alive: FrameKeepAlive) -> Result<ImportedFrame, GpuError> {
         match frame {
-            #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
-            mln_gfx::video::GpuFrame::DmaBuf { fourcc, modifier, size, planes, color } => {
+            #[cfg(all(unix, not(target_vendor = "apple")))]
+            GpuFrame::DmaBuf { fourcc, modifier, size, planes, color } => {
                 let (layout, planes) = self.import_dma_buf(*fourcc, *modifier, *size, planes, &keep_alive)?;
-                Ok(mln_gfx::video::ImportedFrame { layout, planes, color: *color, external: false })
+                Ok(ImportedFrame { layout, planes, color: *color, external: false })
             }
             frame => Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind()))),
         }
@@ -1374,16 +1392,16 @@ impl Gpu for GlGpu {
         })?;
         let native = Rc::new(NativeTexture {
             object: Object::Texture { name: object, owned: true },
+            external: false,
+            held: None,
             deleted: Rc::clone(&self.deleted),
-            #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
-            _video: None,
         });
         Ok(self.textures.insert(Texture { native, size: desc.size, format: desc.format, usage: desc.usage }))
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
         let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
-        if !entry.usage.sampled {
+        if !entry.usage.sampled || entry.native.external {
             return Err(GpuError::Invalid("a write to a texture that isn't sampled".to_owned()));
         }
         region.write_bytes_per_row(entry.size, entry.format, data)?;
@@ -1537,6 +1555,28 @@ impl Gpu for GlGpu {
         let has_elements = blocks.iter().any(|block| matches!(block.range, BlockRange::Element { .. }));
         let tags = BindingsTags { shader: desc.shader, elements };
         Ok(self.bindings.insert(Bindings { blocks, textures, elements: has_elements, tags }))
+    }
+
+    /// Imports Android hardware buffers, as external textures that sample
+    /// them as RGB.
+    #[cfg(target_os = "android")]
+    fn import_video_frame(&mut self, frame: &GpuFrame, keep_alive: FrameKeepAlive) -> Result<ImportedFrame, GpuError> {
+        let GpuFrame::AndroidHardwareBuffer { buffer, color } = *frame else {
+            return Err(GpuError::Unsupported(format!("importing {} video frames", frame.kind())));
+        };
+        if self.desktop {
+            return Err(GpuError::Unsupported("importing video frames on desktop OpenGL".to_owned()));
+        }
+        let (name, image, size) = self.current(|gpu| crate::video_frame::import(gpu.context.gl(), buffer))?;
+        let native = Rc::new(NativeTexture {
+            object: Object::Texture { name, owned: true },
+            external: true,
+            held: Some(Box::new((image, keep_alive))),
+            deleted: Rc::clone(&self.deleted),
+        });
+        let usage = TextureUsage { sampled: true, ..TextureUsage::default() };
+        let texture = self.textures.insert(Texture { native, size, format: TextureFormat::Rgba8Unorm, usage });
+        Ok(ImportedFrame { layout: PlaneLayout::Rgba, planes: vec![texture], color, external: true })
     }
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
