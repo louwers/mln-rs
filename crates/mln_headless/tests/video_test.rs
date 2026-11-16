@@ -470,24 +470,54 @@ mod pixel_buffers {
     }
 
     /// Hands each video one frame of the pixel buffer it holds, and keeps
-    /// the video's sink.
+    /// the video's sink. As the platform's player does, it answers a
+    /// renderer's refusal of the GPU frame with the same picture in memory.
     #[derive(Debug, Default)]
     struct OneGpuFrame {
         frame: Mutex<Option<VideoFrame>>,
         sink: Mutex<Option<FrameSink>>,
     }
 
+    /// Sends the frame in memory once renderers refuse GPU frames, until
+    /// it is dropped.
+    struct InMemoryOnRefusal(Arc<std::sync::atomic::AtomicBool>);
+
+    impl VideoPlayer for InMemoryOnRefusal {
+        fn play(&mut self) {}
+        fn pause(&mut self) {}
+        fn seek(&mut self, _seconds: f64) {}
+    }
+
+    impl Drop for InMemoryOnRefusal {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     impl VideoPlayers for OneGpuFrame {
         fn open(&self, request: OpenRequest) -> Result<Box<dyn VideoPlayer>, String> {
             let frame = self.frame.lock().take().ok_or("one video only")?;
+            let in_memory = rgba_frame(frame.size);
             request.frames.push(frame);
+            let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (sink, player_closed) = (request.frames.clone(), Arc::clone(&closed));
+            std::thread::spawn(move || {
+                while !player_closed.load(std::sync::atomic::Ordering::Relaxed) {
+                    if sink.gpu_frames_refused() {
+                        sink.push(in_memory);
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            });
             *self.sink.lock() = Some(request.frames);
-            Ok(Box::new(Still))
+            Ok(Box::new(InMemoryOnRefusal(closed)))
         }
     }
 
     /// Draws `buffer`'s frame on Metal, whose quarters must keep their
-    /// place; other backends must refuse it.
+    /// place; other backends must refuse it and draw the frame in memory
+    /// that replaces it.
     fn draws_or_refuses(size: Size, buffer: NonNull<CVPixelBuffer>, what: &str) {
         let pixels = FramePixels::Gpu(GpuFrame::CvPixelBuffer {
             buffer: buffer.as_ptr().cast(),
@@ -504,10 +534,10 @@ mod pixel_buffers {
         let refused = players.sink.lock().as_ref().expect("a video opened").gpu_frames_refused();
         if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("metal")) {
             assert!(!refused, "{what}: Metal refused the frame");
-            assert_quarters(&image, what);
         } else {
             assert!(refused, "{what}: a backend without an import of CVPixelBuffers took one");
         }
+        assert_quarters(&image, what);
     }
 
     #[test]
