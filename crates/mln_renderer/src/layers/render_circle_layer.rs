@@ -17,6 +17,7 @@ use mln_style::layers::circle_layer_properties::CirclePaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_util::Color;
+use mln_util::error::Error;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::vectors::{Vec2, Vec3, vec2_gl_fmod};
 
@@ -32,6 +33,8 @@ use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::circle_layout::CircleLayout;
+use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::{PaintPropertyBinder, read_data_driven_paint_property};
 use crate::render_layer::{
@@ -328,6 +331,21 @@ fn project_query_geometry(
 }
 
 impl LayerType for Circle {
+    type Layout = CircleLayout;
+    type Bucket = CircleBucket;
+
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Circle>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<CircleLayout>, Error> {
+        CircleLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
+    }
+
+    fn query_radius(bucket: &CircleBucket, layer: &EvaluatedLayer<Circle>) -> f32 {
+        bucket.query_radius(layer)
+    }
+
     fn render_layer(style: Arc<CircleLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderCircleLayer::new(style)))
     }

@@ -2,7 +2,6 @@
 // `dyn Impl` (`ErasedLayerStyle`). `ImplBase` holds the members every layer
 // has, and `dyn Impl` derefs to it, so `impl_.id` reads them.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use mln_style_types::VisibilityType;
@@ -77,14 +76,6 @@ impl std::ops::Deref for dyn Impl {
     type Target = ImplBase;
     fn deref(&self) -> &ImplBase {
         self.base()
-    }
-}
-
-impl dyn Impl {
-    /// The impl as a `T`, if it is one.
-    pub fn downcast_ref<T: Impl>(&self) -> Option<&T> {
-        let any: &dyn Any = self;
-        any.downcast_ref()
     }
 }
 

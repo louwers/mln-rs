@@ -26,6 +26,7 @@ use mln_style::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_tile_id::OverscaledTileID;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -42,6 +43,8 @@ use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::heatmap_layout::HeatmapLayout;
+use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
@@ -72,6 +75,17 @@ pub(crate) fn activate_render_target(
 }
 
 impl LayerType for Heatmap {
+    type Layout = HeatmapLayout;
+    type Bucket = HeatmapBucket;
+
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Heatmap>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<HeatmapLayout>, Error> {
+        HeatmapLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
+    }
+
     fn render_layer(style: Arc<HeatmapLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderHeatmapLayer::new(style)))
     }

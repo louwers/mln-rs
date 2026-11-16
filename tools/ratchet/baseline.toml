@@ -27,10 +27,8 @@
 "crates/mln_renderer/src/layers/render_line_layer.rs" = 1
 "crates/mln_renderer/src/layers/render_raster_layer.rs" = 4
 "crates/mln_renderer/src/layers/render_symbol_layer.rs" = 1
-"crates/mln_renderer/src/layout/circle_layout.rs" = 1
-"crates/mln_renderer/src/layout/pattern_layout.rs" = 1
 "crates/mln_renderer/src/layout/symbol_instance.rs" = 1
-"crates/mln_renderer/src/layout/symbol_layout.rs" = 4
+"crates/mln_renderer/src/layout/symbol_layout.rs" = 3
 "crates/mln_renderer/src/render_layer.rs" = 1
 "crates/mln_renderer/src/renderer.rs" = 1
 "crates/mln_renderer/src/sources/render_image_source.rs" = 1

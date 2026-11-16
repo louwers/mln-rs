@@ -36,6 +36,7 @@ use mln_style_types::{
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
+use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::interpolate::Interpolate;
 use mln_util::mat4::{Mat4, matrix};
@@ -56,6 +57,8 @@ use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::{LayerTweakerPtr, get_tile_matrix_for};
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::{LayoutParameters, SourceLayer};
+use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
@@ -856,6 +859,22 @@ impl SegmentGroup {
 }
 
 impl LayerType for Symbol {
+    type Layout = SymbolLayout;
+    type Bucket = SymbolBucket;
+
+    /// A symbol layout always waits for its glyphs and images.
+    fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {
+        true
+    }
+
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Symbol>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<SymbolLayout>, Error> {
+        SymbolLayout::new(parameters.bucket_parameters, group, source_layer, parameters).map(Some)
+    }
+
     fn render_layer(style: Arc<SymbolLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderSymbolLayer::new(style)))
     }

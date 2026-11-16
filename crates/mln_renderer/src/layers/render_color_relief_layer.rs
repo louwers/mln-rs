@@ -46,6 +46,7 @@ use mln_util::time::Instant;
 
 use super::color_relief_layer_tweaker::{ColorReliefDrawableData, ColorReliefLayerTweaker};
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
+use crate::bucket::NoBucket;
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
@@ -55,6 +56,7 @@ use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
@@ -65,6 +67,9 @@ use crate::update_parameters::UpdateParameters;
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
 
 impl LayerType for ColorRelief {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+
     fn render_layer(style: Arc<ColorReliefLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderColorReliefLayer::new(style)))
     }

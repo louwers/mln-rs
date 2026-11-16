@@ -20,7 +20,6 @@ mod image_store;
 mod layer_group;
 mod layer_tweaker;
 mod layer_type;
-mod layermanager;
 mod layers;
 mod layout;
 mod line_atlas;

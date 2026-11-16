@@ -8,29 +8,24 @@ use std::sync::Arc;
 
 use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
-use mln_style::expression::{EvaluationContext, GlobalStateMap};
-use mln_style::layer::LayerTypeInfo;
+use mln_style::expression::GlobalStateMap;
 use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
-use crate::bucket::BucketPtr;
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::group_by_layout::group_layers;
-use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layermanager;
+use crate::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layout::filter_groups::FilterGroups;
-use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
-use crate::layout::pattern_layout::PatternLayerMap;
+use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
 use crate::render_layer::LayerRenderData;
 use crate::text::glyph_store::HBShapeResults;
 
@@ -62,12 +57,11 @@ pub(crate) struct LayoutInput<'a> {
 }
 
 impl LayoutInput<'_> {
-    fn bucket_parameters(&self, layer_type: LayerTypeInfo) -> BucketParameters {
+    fn bucket_parameters(&self) -> BucketParameters {
         BucketParameters {
             tile_id: self.id,
             mode: self.params.mode,
             pixel_ratio: self.params.pixel_ratio,
-            layer_type,
             global_state: self.global_state.cloned(),
             retain_features_by_id: self.params.capture_rendered_features,
             subdivision_granularity: self.params.subdivision_granularity,
@@ -148,9 +142,9 @@ pub(crate) struct Discovered {
 struct DiscoveredGroup {
     layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     /// The layout of a group that can need glyphs or images, with its
-    /// features selected and evaluated; `None` for a group `build` lays out
-    /// alone.
-    layout: Option<Box<dyn Layout>>,
+    /// features selected and evaluated; `None` for a group that `build`
+    /// lays out.
+    layout: Option<Box<dyn ErasedLayout>>,
 }
 
 /// A tile's buckets and feature index.
@@ -173,31 +167,31 @@ pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
         return Ok(discovered);
     };
     let unavailable_images = UnavailableImages::new();
+    let bucket_parameters = input.bucket_parameters();
 
     for (_, layers) in group_layers(input.layers) {
-        let leader_impl = &layers[0].style();
-        if !data.has_layer(&leader_impl.source_layer)? {
+        let source_layer = &layers[0].style().source_layer;
+        if !data.has_layer(source_layer)? {
             continue;
         }
-        let layer_type = leader_impl.get_type_info();
-        let layout =
-            if layermanager::lays_out(layer_type) && layermanager::layout_can_need_dependencies(layer_type, &layers) {
-                layermanager::create_layout(
-                    &mut LayoutParameters {
-                        bucket_parameters: &input.bucket_parameters(layer_type),
-                        font_faces: input.font_faces.cloned(),
-                        glyph_dependencies: &mut discovered.dependencies.glyphs,
-                        image_dependencies: &mut discovered.dependencies.images,
-                        available_images: input.available_images,
-                        unavailable_images: &unavailable_images,
-                        filter_groups: &mut discovered.filter_groups,
-                    },
-                    SourceLayer::new(data.clone(), leader_impl.source_layer.clone()),
-                    &layers,
-                )?
-            } else {
-                None
-            };
+        let layer_type = layers[0].entry();
+        let layout = if layer_type.layout_can_need_dependencies(&layers) {
+            layer_type.create_layout(
+                &layers,
+                &mut LayoutParameters {
+                    bucket_parameters: &bucket_parameters,
+                    font_faces: input.font_faces.cloned(),
+                    glyph_dependencies: &mut discovered.dependencies.glyphs,
+                    image_dependencies: &mut discovered.dependencies.images,
+                    available_images: input.available_images,
+                    unavailable_images: &unavailable_images,
+                    filter_groups: &mut discovered.filter_groups,
+                },
+                SourceLayer::new(data.clone(), source_layer.clone()),
+            )?
+        } else {
+            None
+        };
         discovered.groups.push(DiscoveredGroup { layers, layout });
     }
 
@@ -223,141 +217,42 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
     let Some(data) = input.data else {
         return Ok(built);
     };
-    let canonical = &input.id.canonical;
     let LayoutParams { first_load, show_collision_boxes, .. } = input.params;
+    let build = BuildParams { first_load, show_collision_boxes, canonical: input.id.canonical };
+    let bucket_parameters = input.bucket_parameters();
 
     let mut waiting = Vec::new();
     for DiscoveredGroup { layers, layout } in groups {
-        let leader_impl = &layers[0].style();
+        let leader = layers[0].style();
         let layer_ids: Vec<String> = layers.iter().map(|layer| layer.style().id.clone()).collect();
-        built.feature_index.set_bucket_layer_ids(&leader_impl.id, &layer_ids);
+        built.feature_index.set_bucket_layer_ids(&leader.id, &layer_ids);
 
+        let layout = match layout {
+            Some(layout) => Some(layout),
+            // Layouts of groups that need no glyphs or images record nothing.
+            None => layers[0].entry().create_layout(
+                &layers,
+                &mut LayoutParameters {
+                    bucket_parameters: &bucket_parameters,
+                    font_faces: input.font_faces.cloned(),
+                    glyph_dependencies: &mut GlyphDependencies::default(),
+                    image_dependencies: &mut ImageDependencies::default(),
+                    available_images: input.available_images,
+                    unavailable_images: &UnavailableImages::new(),
+                    filter_groups: &mut filter_groups,
+                },
+                SourceLayer::new(data.clone(), leader.source_layer.clone()),
+            )?,
+        };
         match layout {
             Some(layout) if layout.has_dependencies() => waiting.push(layout),
-            Some(mut layout) => layout.create_bucket(
-                &ImagePositions::default(),
-                &mut built.feature_index,
-                &mut built.render_data,
-                first_load,
-                show_collision_boxes,
-                canonical,
-            )?,
-            None => build_group(&layers, data, input, &mut filter_groups, &mut built)?,
+            Some(mut layout) => layout.create_bucket(None, &mut built, &build)?,
+            None => {}
         }
     }
 
     for mut layout in waiting {
-        if layout.need_finalize_symbols() {
-            layout.finalize_symbols(&resolved.shaping);
-        }
-        layout.prepare_symbols(&resolved.glyphs, &resolved.icons);
-        if !layout.has_symbol_instances() {
-            continue;
-        }
-        layout.create_bucket(
-            &resolved.patterns,
-            &mut built.feature_index,
-            &mut built.render_data,
-            first_load,
-            show_collision_boxes,
-            canonical,
-        )?;
+        layout.create_bucket(Some(resolved), &mut built, &build)?;
     }
     Ok(built)
-}
-
-/// Builds the bucket of a group that needs no glyphs or images.
-fn build_group(
-    layers: &[Arc<dyn ErasedEvaluatedLayer>],
-    data: &TileData,
-    input: &LayoutInput<'_>,
-    filter_groups: &mut FilterGroups,
-    built: &mut Built,
-) -> Result<(), Error> {
-    let leader_impl = &layers[0].style();
-    let layer_type = leader_impl.get_type_info();
-    let parameters = input.bucket_parameters(layer_type);
-    let canonical = &input.id.canonical;
-
-    if layermanager::lays_out(layer_type) {
-        // Layouts of groups that need no glyphs or images record nothing.
-        let layout = layermanager::create_layout(
-            &mut LayoutParameters {
-                bucket_parameters: &parameters,
-                font_faces: input.font_faces.cloned(),
-                glyph_dependencies: &mut GlyphDependencies::default(),
-                image_dependencies: &mut ImageDependencies::default(),
-                available_images: input.available_images,
-                unavailable_images: &UnavailableImages::new(),
-                filter_groups,
-            },
-            SourceLayer::new(data.clone(), leader_impl.source_layer.clone()),
-            layers,
-        )?;
-        if let Some(mut layout) = layout {
-            debug_assert!(!layout.has_dependencies());
-            layout.create_bucket(
-                &ImagePositions::default(),
-                &mut built.feature_index,
-                &mut built.render_data,
-                input.params.first_load,
-                input.params.show_collision_boxes,
-                canonical,
-            )?;
-        }
-        return Ok(());
-    }
-
-    let filter = &leader_impl.filter;
-    let source_layer_id = &leader_impl.source_layer;
-    let Some(mut bucket) = layermanager::create_bucket(&parameters, layers) else {
-        return Ok(());
-    };
-    let Some(geometry_layer) = data.layer(source_layer_id)? else {
-        return Ok(());
-    };
-
-    bucket.set_retain_features_by_id(input.params.capture_rendered_features);
-    bucket.reserve_features(geometry_layer.len());
-
-    let effective_z = f32::from(input.id.overscaled_z);
-    let context = EvaluationContext::new(effective_z)
-        .with_canonical_tile_id(Some(canonical))
-        .with_global_state(input.global_state.map(|state| &**state));
-    let passes =
-        |feature: &dyn GeometryTileFeature| filter.evaluate(&EvaluationContext { feature: Some(feature), ..context });
-    let selected = filter_groups.select(source_layer_id, &geometry_layer, filter, &context, passes);
-
-    for i in 0..geometry_layer.len() {
-        if selected.as_ref().is_some_and(|selected| !selected[i]) {
-            continue;
-        }
-        let feature = geometry_layer.feature(i)?;
-        if selected.is_none() && !passes(&feature) {
-            continue;
-        }
-
-        let geometries = feature.geometry()?;
-        bucket.add_feature(
-            &feature,
-            &geometries,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            i,
-            canonical,
-        )?;
-        built.feature_index.insert(&geometries, i, source_layer_id, &leader_impl.id);
-    }
-
-    if bucket.has_data() {
-        let bucket: BucketPtr = Arc::from(bucket);
-        for layer in layers {
-            // `emplace` keeps an existing entry.
-            built.render_data.entry(layer.style().id.clone()).or_insert_with(|| LayerRenderData {
-                bucket: Arc::clone(&bucket),
-                layer_properties: Arc::clone(layer),
-            });
-        }
-    }
-    Ok(())
 }

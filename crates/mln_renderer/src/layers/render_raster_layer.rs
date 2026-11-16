@@ -41,6 +41,7 @@ use mln_util::time::Instant;
 
 use super::raster_layer_tweaker::RasterLayerTweaker;
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
+use crate::bucket::NoBucket;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
@@ -50,6 +51,7 @@ use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
     LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, activate_layer_group, change_layer_index,
@@ -62,6 +64,9 @@ use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::update_parameters::UpdateParameters;
 
 impl LayerType for Raster {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+
     fn render_layer(style: Arc<RasterLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderRasterLayer::new(style)))
     }

@@ -20,12 +20,10 @@ use parking_lot::RwLock;
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
-use crate::bucket_parameters::BucketParameters;
 use crate::gfx::context::Context;
-use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
+use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::PaintPropertyBinder;
-use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
     pub struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
@@ -60,16 +58,13 @@ pub(crate) struct HeatmapBucket {
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl HeatmapBucket {
-    pub(crate) fn new(parameters: &BucketParameters, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Self {
+    #[must_use]
+    pub(crate) fn new(layers: &VecMap<String, Arc<EvaluatedLayer<Heatmap>>>, mode: MapMode, zoom: f32) -> Self {
         let mut paint_property_binders = VecMap::new();
-        for layer in layers {
-            // `emplace` keeps the first entry for an id.
-            paint_property_binders.entry(layer.style().id.clone()).or_insert_with(|| {
-                RwLock::new(HeatmapBinders::new(
-                    &evaluated::<Heatmap>(layer).paint,
-                    f32::from(parameters.tile_id.overscaled_z),
-                ))
-            });
+        for (id, layer) in layers {
+            paint_property_binders
+                .entry(id.clone())
+                .or_insert_with(|| RwLock::new(HeatmapBinders::new(&layer.paint, zoom)));
         }
         HeatmapBucket {
             base: BucketBase::default(),
@@ -77,7 +72,7 @@ impl HeatmapBucket {
             triangles: GeometryVec::default(),
             segments: Vec::new(),
             paint_property_binders,
-            mode: parameters.mode,
+            mode,
         }
     }
 
@@ -187,7 +182,7 @@ impl Bucket for HeatmapBucket {
         !self.segments.is_empty()
     }
 
-    fn get_query_radius(&self, _layer: &dyn RenderLayer) -> f32 {
-        0.0
+    fn write_wire(&self, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(self, w);
     }
 }

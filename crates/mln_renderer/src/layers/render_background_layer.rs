@@ -14,6 +14,7 @@ use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::{background_crossfade, background_layer_properties};
+use crate::bucket::NoBucket;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
@@ -22,6 +23,7 @@ use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::layers::background_layer_tweaker::BackgroundLayerTweaker;
+use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
@@ -43,6 +45,9 @@ fn add_pattern_if_needed(id: &str, params: &LayerPrepareParameters<'_>) {
 }
 
 impl LayerType for Background {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+
     fn render_layer(style: Arc<BackgroundLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderBackgroundLayer::new(style)))
     }

@@ -42,7 +42,7 @@ use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::upload::{upload_indexes, vertex_buffer};
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;
 
@@ -194,7 +194,7 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         },
         ..FillPaintProperties::PossiblyEvaluated::default()
     };
-    let properties: Arc<dyn ErasedEvaluatedLayer> =
+    let properties =
         Arc::new(EvaluatedLayer::<Fill>::with_paint(LayerStyle::recover(&layer.base_impl()).unwrap(), evaluated));
     let mut bucket = FillBucket::new(
         &FillLayoutProperties::PossiblyEvaluated::default(),

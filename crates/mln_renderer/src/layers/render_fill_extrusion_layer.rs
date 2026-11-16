@@ -35,6 +35,7 @@ use mln_style::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::AlignmentType;
+use mln_util::error::Error;
 use mln_util::hash::HashSet;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
@@ -42,8 +43,8 @@ use super::{DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_lay
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{
-    FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutVertex, FillExtrusionStaticVertex,
-    FillExtrusionWallVertex,
+    FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
+    FillExtrusionStaticVertex, FillExtrusionWallVertex,
 };
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
@@ -52,6 +53,8 @@ use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::{LayoutParameters, SourceLayer};
+use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
@@ -305,6 +308,27 @@ fn create_builder(
 }
 
 impl LayerType for FillExtrusion {
+    type Layout = PatternLayout<FillExtrusionLayoutSpec>;
+    type Bucket = FillExtrusionBucket;
+
+    /// Whether a layer of the group has a pattern.
+    fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<FillExtrusion>>]) -> bool {
+        uses_pattern::<FillExtrusionLayoutSpec>(group)
+    }
+
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<FillExtrusion>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<PatternLayout<FillExtrusionLayoutSpec>>, Error> {
+        PatternLayout::new(parameters, group, source_layer).map(Some)
+    }
+
+    fn query_radius(_bucket: &FillExtrusionBucket, layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
+        let translate = layer.paint.fill_extrusion_translate.uniform();
+        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    }
+
     fn render_layer(style: Arc<FillExtrusionLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderFillExtrusionLayer::new(style)))
     }

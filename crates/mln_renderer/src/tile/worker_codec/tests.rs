@@ -597,6 +597,9 @@ fn answers_cross_without_pixels() {
 struct Unknown(Arc<dyn mln_style::layer::Impl>);
 
 impl ErasedEvaluatedLayer for Unknown {
+    fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
+        crate::layer_type::entry::<mln_style::layers::Line>()
+    }
     fn style(&self) -> &dyn mln_style::layer::Impl {
         &*self.0
     }

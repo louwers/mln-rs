@@ -24,10 +24,12 @@ use mln_style::layers::{
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::logging::{Event, Log};
 
+use crate::bucket::NoBucket;
 use crate::change_request::UniqueChangeRequestVec;
 use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupKind};
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
+use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
@@ -78,6 +80,9 @@ impl Shared {
 }
 
 impl LayerType for Custom {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+
     fn render_layer(style: Arc<CustomLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderCustomLayer::new(style)))
     }

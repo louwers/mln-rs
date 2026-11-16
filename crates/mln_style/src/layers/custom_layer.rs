@@ -161,7 +161,7 @@ mod tests {
         let host: Arc<dyn CustomLayerHost> = Arc::new(Host);
         let layer = Layer::custom(&StyleRegistry::with_builtins(), "custom", Arc::clone(&host));
         let impl_ = layer.base_impl();
-        let impl_ = impl_.downcast_ref::<Impl>().unwrap();
+        let impl_ = Impl::recover_ref(&*impl_).unwrap();
         assert!(impl_.has_host(&host));
         assert!(impl_.host().is_some());
         drop(layer);

@@ -10,13 +10,7 @@ use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 
 use super::decoding_layer_type;
-use crate::bucket::{Bucket, BucketPtr};
-use crate::buckets::circle_bucket::CircleBucket;
-use crate::buckets::fill_bucket::FillBucket;
-use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
-use crate::buckets::heatmap_bucket::HeatmapBucket;
-use crate::buckets::line_bucket::LineBucket;
-use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::bucket::BucketPtr;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_layer::LayerRenderData;
@@ -153,44 +147,6 @@ pub(crate) mod available_images {
     }
 }
 
-/// The bucket types a layout makes (debug, raster and
-/// hillshade buckets never come from one), each as its index and then the
-/// bucket: a bucket is a trait object.
-macro_rules! bucket_types {
-    ($($bucket:ty),+ $(,)?) => {
-        fn write_bucket(bucket: &dyn Bucket, w: &mut Writer) {
-            let mut index = 0u32;
-            $(if let Some(bucket) = bucket.downcast_ref::<$bucket>() {
-                mln_wire::write_tag(w, index);
-                return bucket.write(w);
-            }
-            index += 1;)+
-            let _ = index;
-            w.fail("a bucket type that no tile worker makes".to_owned());
-        }
-
-        fn read_bucket(r: &mut Reader<'_>) -> Option<BucketPtr> {
-            let tag = r.tag()?;
-            let mut index = 0u32;
-            $(if tag == index {
-                return Some(Arc::new(<$bucket>::read(r)?));
-            }
-            index += 1;)+
-            let _ = index;
-            r.fail_tag()
-        }
-    };
-}
-
-bucket_types! {
-    FillBucket,
-    LineBucket,
-    CircleBucket,
-    HeatmapBucket,
-    FillExtrusionBucket,
-    SymbolBucket,
-}
-
 /// A bucket, and the ids of the layers that render it with the properties
 /// they were laid out with.
 type RenderedBucket<'a> = (&'a BucketPtr, Vec<(&'a String, &'a Arc<dyn ErasedEvaluatedLayer>)>);
@@ -215,7 +171,6 @@ impl LayoutResult {
         let buckets = self.buckets();
         buckets.len().write(w);
         for (bucket, layers) in buckets {
-            write_bucket(bucket.as_ref(), w);
             layers.len().write(w);
             for (layer_id, properties) in layers {
                 layer_id.write(w);
@@ -223,6 +178,8 @@ impl LayoutResult {
                 // side gets the properties it sent.
                 evaluated_layer::write(properties, w);
             }
+            // The reader reads the bucket as its layers' type's.
+            bucket.write_wire(w);
         }
     }
 }
@@ -236,9 +193,9 @@ pub(super) fn encode_buckets(result: &LayoutResult) -> Vec<u8> {
     w.finish().unwrap()
 }
 
-/// A `LayoutResult` crosses as each bucket once, with the layers that render
-/// it (a layer group's layers share their bucket), and the feature index
-/// without its data.
+/// A `LayoutResult` crosses as each bucket once, after the layers that
+/// render it (a layer group's layers share their bucket, and their type is
+/// the bucket's), and the feature index without its data.
 impl Wire for LayoutResult {
     fn write(&self, w: &mut Writer) {
         self.write_buckets(w);
@@ -249,11 +206,16 @@ impl Wire for LayoutResult {
         let mut layer_render_data = mln_util::hash::HashMap::default();
         let buckets = r.length()?;
         for _ in 0..buckets {
-            let bucket = read_bucket(r)?;
-            let layers = r.length()?;
-            for _ in 0..layers {
-                let layer_id = String::read(r)?;
-                let layer_properties = evaluated_layer::read(r)?;
+            let len = r.length()?;
+            let mut layers = Vec::with_capacity(len.min(r.rest().len()));
+            for _ in 0..len {
+                layers.push((String::read(r)?, evaluated_layer::read(r)?));
+            }
+            let Some((_, leader)) = layers.first() else {
+                return r.fail("a bucket that no layer renders");
+            };
+            let bucket = leader.entry().read_bucket(r)?;
+            for (layer_id, layer_properties) in layers {
                 layer_render_data.insert(layer_id, LayerRenderData { bucket: Arc::clone(&bucket), layer_properties });
             }
         }

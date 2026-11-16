@@ -23,6 +23,7 @@ use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::LineCapType;
 use mln_util::Color;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -39,6 +40,8 @@ use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::{LayoutParameters, SourceLayer};
+use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
@@ -237,6 +240,26 @@ fn read_line_attributes(
 }
 
 impl LayerType for Line {
+    type Layout = PatternLayout<LineLayoutSpec>;
+    type Bucket = LineBucket;
+
+    /// Whether a layer of the group has a pattern.
+    fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Line>>]) -> bool {
+        uses_pattern::<LineLayoutSpec>(group)
+    }
+
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Line>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<PatternLayout<LineLayoutSpec>>, Error> {
+        PatternLayout::new(parameters, group, source_layer).map(Some)
+    }
+
+    fn query_radius(bucket: &LineBucket, layer: &EvaluatedLayer<Line>) -> f32 {
+        bucket.query_radius(layer)
+    }
+
     fn render_layer(style: Arc<LineLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderLineLayer::new(style)))
     }

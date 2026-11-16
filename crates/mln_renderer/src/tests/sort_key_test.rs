@@ -9,7 +9,7 @@ use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Fill, Line, Symbol};
 use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
-use mln_text::glyph::{GlyphDependencies, GlyphPositions};
+use mln_text::glyph::GlyphDependencies;
 use mln_tile_id::OverscaledTileID;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
@@ -26,10 +26,9 @@ use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
-use crate::layermanager;
 use crate::layout::filter_groups::FilterGroups;
-use crate::layout::layout::{LayoutParameters, SourceLayer};
-use crate::render_layer::LayerRenderData;
+use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
+use crate::layout::tile_layout::{Built, Resolved};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SortKeyType {
@@ -88,7 +87,7 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
 
 /// Lays out three features with ranks 2, 0, 1 at x = 100, 200, 300 and
 /// returns the layer's bucket.
-fn create_bucket(properties: Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> BucketPtr {
+fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> BucketPtr {
     let ranks = [2.0, 0.0, 1.0];
     let features = ranks
         .iter()
@@ -115,7 +114,6 @@ fn create_bucket(properties: Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Buc
         tile_id: OverscaledTileID::from_zxy(0, 0, 0),
         mode: MapMode::Continuous,
         pixel_ratio: 1.0,
-        layer_type: properties.style().get_type_info(),
         global_state: None,
         retain_features_by_id: false,
         subdivision_granularity: SubdivisionGranularitySetting::none(),
@@ -124,21 +122,23 @@ fn create_bucket(properties: Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Buc
     let mut image_dependencies = ImageDependencies::default();
     let available_images = VecSet::from_iter(["marker".to_owned()]);
     let layer_id = properties.style().id.clone();
-    let mut layout = layermanager::create_layout(
-        &mut LayoutParameters {
-            bucket_parameters: &bucket_parameters,
-            font_faces: None,
-            glyph_dependencies: &mut glyph_dependencies,
-            image_dependencies: &mut image_dependencies,
-            available_images: &available_images,
-            unavailable_images: &UnavailableImages::new(),
-            filter_groups: &mut FilterGroups::default(),
-        },
-        SourceLayer::new(data.clone(), ""),
-        &[properties],
-    )
-    .unwrap()
-    .unwrap();
+    let mut layout = properties
+        .entry()
+        .create_layout(
+            std::slice::from_ref(properties),
+            &mut LayoutParameters {
+                bucket_parameters: &bucket_parameters,
+                font_faces: None,
+                glyph_dependencies: &mut glyph_dependencies,
+                image_dependencies: &mut image_dependencies,
+                available_images: &available_images,
+                unavailable_images: &UnavailableImages::new(),
+                filter_groups: &mut FilterGroups::default(),
+            },
+            SourceLayer::new(data.clone(), ""),
+        )
+        .unwrap()
+        .unwrap();
 
     let marker = Arc::new(
         ImageImpl::new(
@@ -158,20 +158,12 @@ fn create_bucket(properties: Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Buc
         "marker".to_owned(),
         ImagePosition::new(RectU16 { x: 0, y: 0, w: 18, h: 18 }, &marker),
     )]);
-    layout.prepare_symbols(&GlyphPositions::new(), &image_positions);
-    let mut feature_index = FeatureIndex::new(Some(data));
-    let mut render_data: HashMap<String, LayerRenderData> = HashMap::default();
-    layout
-        .create_bucket(
-            &image_positions,
-            &mut feature_index,
-            &mut render_data,
-            true,
-            false,
-            &bucket_parameters.tile_id.canonical,
-        )
-        .unwrap();
-    render_data.remove(&layer_id).unwrap().bucket
+    let resolved = Resolved { icons: image_positions.clone(), patterns: image_positions, ..Resolved::default() };
+    let mut built = Built { render_data: HashMap::default(), feature_index: FeatureIndex::new(Some(data)) };
+    let build =
+        BuildParams { first_load: true, show_collision_boxes: false, canonical: bucket_parameters.tile_id.canonical };
+    layout.create_bucket(Some(&resolved), &mut built, &build).unwrap();
+    built.render_data.remove(&layer_id).unwrap().bucket
 }
 
 /// The features in the order their vertices are, from the x coordinate the
@@ -191,7 +183,7 @@ fn feature_order(xs: impl Iterator<Item = i16>, coordinate_scale: i16) -> Vec<us
 fn fill_order() {
     for type_ in SORT_KEY_TYPES {
         let properties = layer(json!({ "id": "fill", "type": "fill", "source": "source" }), "fill-sort-key", type_);
-        let bucket = create_bucket(properties, Shape::Polygon);
+        let bucket = create_bucket(&properties, Shape::Polygon);
         let bucket = bucket.downcast_ref::<FillBucket>().unwrap();
         assert_eq!(
             expected_order(type_),
@@ -205,7 +197,7 @@ fn fill_order() {
 fn line_order() {
     for type_ in SORT_KEY_TYPES {
         let properties = layer(json!({ "id": "line", "type": "line", "source": "source" }), "line-sort-key", type_);
-        let bucket = create_bucket(properties, Shape::LineString);
+        let bucket = create_bucket(&properties, Shape::LineString);
         let bucket = bucket.downcast_ref::<LineBucket>().unwrap();
         assert_eq!(
             expected_order(type_),
@@ -220,7 +212,7 @@ fn circle_order() {
     for type_ in SORT_KEY_TYPES {
         let properties =
             layer(json!({ "id": "circle", "type": "circle", "source": "source" }), "circle-sort-key", type_);
-        let bucket = create_bucket(properties, Shape::Point);
+        let bucket = create_bucket(&properties, Shape::Point);
         let bucket = bucket.downcast_ref::<CircleBucket>().unwrap();
         assert_eq!(
             expected_order(type_),
@@ -249,7 +241,7 @@ fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Arc<dyn ErasedEval
 #[test]
 fn symbol_order() {
     for type_ in SORT_KEY_TYPES {
-        let bucket = create_bucket(symbol_layer(type_, None), Shape::Point);
+        let bucket = create_bucket(&symbol_layer(type_, None), Shape::Point);
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
         let order: Vec<usize> = bucket
             .state()
@@ -277,7 +269,7 @@ fn symbol_order() {
 #[test]
 fn symbol_viewport_y() {
     for type_ in SORT_KEY_TYPES {
-        let bucket = create_bucket(symbol_layer(type_, Some("viewport-y")), Shape::Point);
+        let bucket = create_bucket(&symbol_layer(type_, Some("viewport-y")), Shape::Point);
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
         assert!(bucket.sort_features_by_y, "{type_:?}");
         assert!(bucket.sort_key_ranges.is_empty(), "{type_:?}");

@@ -200,7 +200,7 @@ fn layer_transition_refreshes_immutable_collection() {
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(1, after.len());
     assert!(Arc::ptr_eq(&style.get_layer("line").unwrap().base_impl(), &after[0]));
-    let impl_ = after[0].downcast_ref::<LineLayerImpl>().unwrap();
+    let impl_ = LineLayerImpl::recover_ref(&*after[0]).unwrap();
     assert_eq!(Some(Duration::from_millis(123)), impl_.paint.line_color.options.duration);
     assert_eq!(Some(Duration::from_millis(45)), impl_.paint.line_color.options.delay);
 }

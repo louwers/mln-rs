@@ -23,10 +23,9 @@ use parking_lot::RwLock;
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
 use crate::gfx::context::Context;
-use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
+use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
-use crate::render_layer::RenderLayer;
 use crate::util::subdivision::subdivide_vertex_line;
 
 crate::paint_property_binders!(
@@ -79,7 +78,7 @@ impl LineBucket {
     #[must_use]
     pub(crate) fn new(
         layout: LineLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
+        layer_paint_properties: &VecMap<String, Arc<EvaluatedLayer<Line>>>,
         zoom: f32,
         overscaling: u32,
     ) -> Self {
@@ -87,7 +86,7 @@ impl LineBucket {
         for (id, properties) in layer_paint_properties {
             paint_property_binders
                 .entry(id.clone())
-                .or_insert_with(|| RwLock::new(LineBinders::new(&evaluated::<Line>(properties).paint, zoom)));
+                .or_insert_with(|| RwLock::new(LineBinders::new(&properties.paint, zoom)));
         }
         LineBucket {
             base: BucketBase::default(),
@@ -100,6 +99,34 @@ impl LineBucket {
             overscaling,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
         }
+    }
+
+    /// How far outside a feature a query for `layer` still hits it, from
+    /// the layer's current values and the bucket's statistics of them.
+    pub(crate) fn query_radius(&self, layer: &EvaluatedLayer<Line>) -> f32 {
+        let evaluated = &layer.paint;
+        let binders = self.paint_property_binders.get(&layer.style.id);
+        let translate = evaluated.line_translate.uniform();
+        let offset = get_or_max(
+            evaluated.line_offset.constant(),
+            LinePaintProperties::Defaults::line_offset(),
+            binders.and_then(|b| b.read().line_offset.statistics.max()),
+        );
+        let mut line_width = get_or_max(
+            evaluated.line_width.constant(),
+            LinePaintProperties::Defaults::line_width(),
+            binders.and_then(|b| b.read().line_width.statistics.max()),
+        );
+        let gap_width = get_or_max(
+            evaluated.line_gap_width.constant(),
+            LinePaintProperties::Defaults::line_gap_width(),
+            binders.and_then(|b| b.read().line_gap_width.statistics.max()),
+        );
+        if gap_width != 0.0 {
+            line_width = gap_width + 2.0 * line_width;
+        }
+
+        line_width / 2.0 + offset.abs() + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 
     pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
@@ -311,30 +338,8 @@ impl Bucket for LineBucket {
         !self.segments.is_empty()
     }
 
-    fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
-        let evaluated = &evaluated::<Line>(&layer.base().evaluated_properties).paint;
-        let binders = self.paint_property_binders.get(layer.get_id());
-        let translate = evaluated.line_translate.uniform();
-        let offset = get_or_max(
-            evaluated.line_offset.constant(),
-            LinePaintProperties::Defaults::line_offset(),
-            binders.and_then(|b| b.read().line_offset.statistics.max()),
-        );
-        let mut line_width = get_or_max(
-            evaluated.line_width.constant(),
-            LinePaintProperties::Defaults::line_width(),
-            binders.and_then(|b| b.read().line_width.statistics.max()),
-        );
-        let gap_width = get_or_max(
-            evaluated.line_gap_width.constant(),
-            LinePaintProperties::Defaults::line_gap_width(),
-            binders.and_then(|b| b.read().line_gap_width.statistics.max()),
-        );
-        if gap_width != 0.0 {
-            line_width = gap_width + 2.0 * line_width;
-        }
-
-        line_width / 2.0 + offset.abs() + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    fn write_wire(&self, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(self, w);
     }
 
     fn update(

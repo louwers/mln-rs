@@ -19,6 +19,7 @@ use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
+use mln_util::error::Error;
 
 use super::fill_layer_tweaker::FillLayerTweaker;
 use super::{
@@ -33,6 +34,8 @@ use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::{LayoutParameters, SourceLayer};
+use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
@@ -196,6 +199,27 @@ fn read_fill_attributes(
 }
 
 impl LayerType for Fill {
+    type Layout = PatternLayout<FillLayoutSpec>;
+    type Bucket = FillBucket;
+
+    /// Whether a layer of the group has a pattern.
+    fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Fill>>]) -> bool {
+        uses_pattern::<FillLayoutSpec>(group)
+    }
+
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Fill>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<PatternLayout<FillLayoutSpec>>, Error> {
+        PatternLayout::new(parameters, group, source_layer).map(Some)
+    }
+
+    fn query_radius(_bucket: &FillBucket, layer: &EvaluatedLayer<Fill>) -> f32 {
+        let translate = layer.paint.fill_translate.uniform();
+        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    }
+
     fn render_layer(style: Arc<FillLayerImpl>) -> RenderLayerPtr {
         Rc::new(RefCell::new(RenderFillLayer::new(style)))
     }

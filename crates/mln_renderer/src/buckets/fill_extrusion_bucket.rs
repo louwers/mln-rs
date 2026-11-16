@@ -30,10 +30,9 @@ use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
 use crate::gfx::context::Context;
 use crate::gfx::fill_large_mesh_arrays::fill_large_mesh_arrays;
-use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
+use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
-use crate::render_layer::RenderLayer;
 use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_vertex_line};
 use crate::util::triangulate::triangulate;
 
@@ -101,15 +100,15 @@ impl FillExtrusionBucket {
     #[must_use]
     pub(crate) fn new(
         layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
+        layer_paint_properties: &VecMap<String, Arc<EvaluatedLayer<FillExtrusion>>>,
         zoom: f32,
         _overscaling: u32,
     ) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
-            paint_property_binders.entry(id.clone()).or_insert_with(|| {
-                RwLock::new(FillExtrusionBinders::new(&evaluated::<FillExtrusion>(properties).paint, zoom))
-            });
+            paint_property_binders
+                .entry(id.clone())
+                .or_insert_with(|| RwLock::new(FillExtrusionBinders::new(&properties.paint, zoom)));
         }
         FillExtrusionBucket {
             base: BucketBase::default(),
@@ -343,10 +342,8 @@ impl Bucket for FillExtrusionBucket {
         !self.triangle_segments.is_empty()
     }
 
-    fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
-        let evaluated = &evaluated::<FillExtrusion>(&layer.base().evaluated_properties).paint;
-        let translate = evaluated.fill_extrusion_translate.uniform();
-        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    fn write_wire(&self, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(self, w);
     }
 
     fn update(
@@ -370,19 +367,24 @@ impl Bucket for FillExtrusionBucket {
 pub(crate) struct FillExtrusionLayoutSpec;
 
 impl PatternLayoutSpec for FillExtrusionLayoutSpec {
+    type Type = FillExtrusion;
     type Bucket = FillExtrusionBucket;
     type Layout = FillExtrusionLayoutProperties::PossiblyEvaluated;
 
     fn evaluate_layout(
-        properties: &Arc<dyn ErasedEvaluatedLayer>,
+        layer: &EvaluatedLayer<FillExtrusion>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout {
-        let properties = evaluated::<FillExtrusion>(properties);
-        properties.style.layout.evaluate(parameters)
+        layer.style.layout.evaluate(parameters)
     }
 
-    fn pattern_property(properties: &Arc<dyn ErasedEvaluatedLayer>) -> &Evaluated<Image> {
-        &evaluated::<FillExtrusion>(properties).paint.fill_extrusion_pattern
+    fn pattern_property(layer: &EvaluatedLayer<FillExtrusion>) -> &Evaluated<Image> {
+        &layer.paint.fill_extrusion_pattern
+    }
+
+    fn sorted(_leader: &EvaluatedLayer<FillExtrusion>) -> bool {
+        // conformance: FillExtrusionLayerFactory::createLayout (no sort key)
+        false
     }
 
     fn sort_key(
@@ -401,7 +403,7 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
 
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
+        layer_properties_map: &VecMap<String, Arc<EvaluatedLayer<FillExtrusion>>>,
         zoom: f32,
         overscaling: u32,
     ) -> FillExtrusionBucket {

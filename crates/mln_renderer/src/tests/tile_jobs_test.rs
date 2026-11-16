@@ -462,11 +462,14 @@ impl scheduler::Scheduler for Catching {
     fn wait_for_empty(&self) {}
 }
 
-/// Evaluated values of no layer type's, which a layout of their layer's type
-/// can't read: a bug that the layout panics at.
+/// Evaluated values of no layer type: a bug that panics when the layout
+/// asks for their type.
 struct Mistyped(Arc<dyn mln_style::layer::Impl>);
 
 impl ErasedEvaluatedLayer for Mistyped {
+    fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
+        panic!("evaluated values of no layer type")
+    }
     fn style(&self) -> &dyn mln_style::layer::Impl {
         &*self.0
     }

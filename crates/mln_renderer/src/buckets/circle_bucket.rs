@@ -17,9 +17,8 @@ use parking_lot::RwLock;
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
 use crate::gfx::context::Context;
-use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
+use crate::layer_type::EvaluatedLayer;
 use crate::paint_property_binder::PaintPropertyBinder;
-use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
     pub struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
@@ -54,7 +53,7 @@ pub(crate) struct CircleBucket {
 impl CircleBucket {
     #[must_use]
     pub(crate) fn new(
-        layer_paint_properties: &VecMap<String, Arc<dyn ErasedEvaluatedLayer>>,
+        layer_paint_properties: &VecMap<String, Arc<EvaluatedLayer<Circle>>>,
         mode: MapMode,
         zoom: f32,
     ) -> Self {
@@ -62,7 +61,7 @@ impl CircleBucket {
         for (id, properties) in layer_paint_properties {
             paint_property_binders
                 .entry(id.clone())
-                .or_insert_with(|| RwLock::new(CircleBinders::new(&evaluated::<Circle>(properties).paint, zoom)));
+                .or_insert_with(|| RwLock::new(CircleBinders::new(&properties.paint, zoom)));
         }
         CircleBucket {
             base: BucketBase::default(),
@@ -72,6 +71,26 @@ impl CircleBucket {
             paint_property_binders,
             mode,
         }
+    }
+
+    /// How far outside a feature a query for `layer` still hits it, from
+    /// the layer's current values and the bucket's statistics of them.
+    pub(crate) fn query_radius(&self, layer: &EvaluatedLayer<Circle>) -> f32 {
+        let evaluated = &layer.paint;
+        let binders = self.paint_property_binders.get(&layer.style.id);
+        let radius = get_radius_or_width(
+            evaluated.circle_radius.constant(),
+            CirclePaintProperties::Defaults::circle_radius(),
+            binders.and_then(|b| b.read().circle_radius.statistics.max()),
+        );
+        let stroke = get_radius_or_width(
+            evaluated.circle_stroke_width.constant(),
+            CirclePaintProperties::Defaults::circle_stroke_width(),
+            binders.and_then(|b| b.read().circle_stroke_width.statistics.max()),
+        );
+        let translate = evaluated.circle_translate.uniform();
+        // util::length(a, b) = std::sqrt(a * a + b * b), in float
+        radius + stroke + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 
     /// The layout vertex for `p` with extrusion (`ex`, `ey`). As in C++,
@@ -116,22 +135,8 @@ impl Bucket for CircleBucket {
         !self.segments.is_empty()
     }
 
-    fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
-        let evaluated = &evaluated::<Circle>(&layer.base().evaluated_properties).paint;
-        let binders = self.paint_property_binders.get(layer.get_id());
-        let radius = get_radius_or_width(
-            evaluated.circle_radius.constant(),
-            CirclePaintProperties::Defaults::circle_radius(),
-            binders.and_then(|b| b.read().circle_radius.statistics.max()),
-        );
-        let stroke = get_radius_or_width(
-            evaluated.circle_stroke_width.constant(),
-            CirclePaintProperties::Defaults::circle_stroke_width(),
-            binders.and_then(|b| b.read().circle_stroke_width.statistics.max()),
-        );
-        let translate = evaluated.circle_translate.uniform();
-        // util::length(a, b) = std::sqrt(a * a + b * b), in float
-        radius + stroke + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    fn write_wire(&self, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(self, w);
     }
 
     fn update(

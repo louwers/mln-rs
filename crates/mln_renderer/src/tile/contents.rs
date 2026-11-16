@@ -251,7 +251,8 @@ impl GeometryContents {
                 continue;
             };
             if data.bucket.has_data() {
-                query_padding = query_padding.max(data.bucket.get_query_radius(*layer));
+                let evaluated = &layer.base().evaluated_properties;
+                query_padding = query_padding.max(evaluated.entry().query_radius(&*data.bucket, evaluated));
             }
         }
         query_padding
