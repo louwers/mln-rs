@@ -1,8 +1,6 @@
-// The `PAN`, `ZOOM`, `BEARING` and `PITCH` constants are
-// maplibre-native-ffi's C API defaults for each part
-// (`momentum_defaults` and `resolve_momentum_snap` in its src/map/map.cpp),
-// which Orbis's orb-camera also names, so that hosts and the gesture
-// recognizer start from the same glide.
+// The `PAN`, `ZOOM`, `BEARING` and `PITCH` constants are the C API's defaults
+// for each part, which Orbis's orb-camera also names, so that hosts and the
+// gesture recognizer start from the same glide.
 
 use std::time::Duration;
 
@@ -38,7 +36,7 @@ impl Default for MomentumEasing {
 /// Speeds and distances are in the part's unit: logical pixels for pan, zoom
 /// levels for zoom, and degrees for bearing and pitch.
 ///
-/// maplibre-native-ffi's C API gives each setting a field bit, and a setting
+/// The C API gives each setting a field bit, and a setting
 /// whose bit isn't set takes the part's default. In Rust that is struct
 /// update from the part's constant: `UIScrollView`'s normal deceleration with
 /// the pan's other defaults is
@@ -81,18 +79,18 @@ impl MomentumDecay {
         max_speed: f64::INFINITY,
         max_distance: f64::INFINITY,
     };
-    /// maplibre-native-ffi's pan default: stops at 10 px/s, needs a release
+    /// The C API's pan default: stops at 10 px/s, needs a release
     /// of at least 200 px/s, and counts one faster than 10 000 px/s as
     /// 10 000.
     pub const PAN: MomentumDecay =
         MomentumDecay { stop_speed: 10.0, min_speed: 200.0, max_speed: 10_000.0, ..MomentumDecay::FRICTION };
-    /// maplibre-native-ffi's zoom default: stops at 0.01 levels/s and moves at
+    /// The C API's zoom default: stops at 0.01 levels/s and moves at
     /// most 2.5 levels.
     pub const ZOOM: MomentumDecay = MomentumDecay { stop_speed: 0.01, max_distance: 2.5, ..MomentumDecay::FRICTION };
-    /// maplibre-native-ffi's bearing default: stops at 1°/s and needs at least
+    /// The C API's bearing default: stops at 1°/s and needs at least
     /// 60°/s.
     pub const BEARING: MomentumDecay = MomentumDecay { min_speed: 60.0, ..MomentumDecay::FRICTION };
-    /// maplibre-native-ffi's pitch default: stops at 1°/s and needs at least
+    /// The C API's pitch default: stops at 1°/s and needs at least
     /// 5°/s.
     pub const PITCH: MomentumDecay = MomentumDecay { min_speed: 5.0, ..MomentumDecay::FRICTION };
 }
@@ -117,13 +115,13 @@ pub struct MomentumSnap {
 }
 
 impl MomentumSnap {
-    /// maplibre-native-ffi's zoom snap: the nearest whole level, over 300 ms.
+    /// The C API's zoom snap: the nearest whole level, over 300 ms.
     pub const ZOOM: MomentumSnap =
         MomentumSnap { spacing: 1.0, offset: 0.0, tolerance: 0.5, duration: Duration::from_millis(300) };
-    /// maplibre-native-ffi's bearing snap: north, within 7°, over 300 ms.
+    /// The C API's bearing snap: north, within 7°, over 300 ms.
     pub const BEARING: MomentumSnap =
         MomentumSnap { spacing: 360.0, offset: 0.0, tolerance: 7.0, duration: Duration::from_millis(300) };
-    /// maplibre-native-ffi's pitch snap: flat, within 7°, over 300 ms.
+    /// The C API's pitch snap: flat, within 7°, over 300 ms.
     pub const PITCH: MomentumSnap =
         MomentumSnap { spacing: 90.0, offset: 0.0, tolerance: 7.0, duration: Duration::from_millis(300) };
 }
@@ -142,7 +140,7 @@ impl Default for MomentumSnap {
 /// field stops the parts that move it. On a tilted map, pan moves the map's
 /// content the same distance on screen in every direction.
 ///
-/// [`Default`] gives each part maplibre-native-ffi's C API default decay
+/// [`Default`] gives each part the C API's default decay
 /// ([`MomentumDecay::PAN`], [`ZOOM`](MomentumDecay::ZOOM),
 /// [`BEARING`](MomentumDecay::BEARING) and [`PITCH`](MomentumDecay::PITCH)),
 /// and no velocities, anchors or snaps: a part moves only when its velocity

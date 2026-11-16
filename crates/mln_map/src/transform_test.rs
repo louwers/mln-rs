@@ -4490,7 +4490,7 @@ fn friction(half_life: Duration, stop_speed: f64) -> MomentumDecay {
 
 /// A momentum with the C++ header's defaults, which the ported gtests use:
 /// plain friction for every part ([`CameraMomentum::default`] takes
-/// maplibre-native-ffi's C API defaults instead).
+/// the C API's defaults instead).
 fn header_momentum() -> CameraMomentum {
     CameraMomentum {
         pan_decay: MomentumDecay::FRICTION,

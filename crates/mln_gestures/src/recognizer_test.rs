@@ -970,7 +970,7 @@ fn zoom_and_pitch_settle_only_when_their_snaps_are_set() {
     let (zoom, pitch) = pinch_and_tilt(&GestureOptions::DEFAULT);
     assert!((zoom - zoom.round()).abs() > 0.05, "{zoom}");
     assert!(pitch > 1.0, "{pitch}");
-    // ffi's C API defaults: a whole level, and flat within 7°.
+    // The C API's defaults: a whole level, and flat within 7°.
     let (zoom, pitch) = pinch_and_tilt(&GestureOptions {
         zoom_snap: Some(MomentumSnap::ZOOM),
         pitch_snap: Some(MomentumSnap::PITCH),

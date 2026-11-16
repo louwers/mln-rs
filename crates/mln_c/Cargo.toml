@@ -7,8 +7,8 @@ description.workspace = true
 license.workspace = true
 repository.workspace = true
 include.workspace = true
-# maplibre-native-ffi's C ABI, built as a C library rather than used from
-# Rust, so not published to crates.io.
+# The C API, built as a C library rather than used from Rust, so not
+# published to crates.io.
 publish = false
 
 [lib]

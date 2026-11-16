@@ -65,7 +65,7 @@ impl RuntimeEventKind {
     }
 }
 
-/// The type of an event. The values are maplibre-native-ffi's
+/// The type of an event. The values are the C API's
 /// `mln_runtime_event_type`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(u32)]
@@ -123,7 +123,7 @@ fn map_event_type(event: &MapEvent) -> EventType {
     }
 }
 
-/// A set of event types. The bits are maplibre-native-ffi's
+/// A set of event types. The bits are the C API's
 /// `mln_runtime_event_flag`: `1 << type` for each type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EventMask(u64);

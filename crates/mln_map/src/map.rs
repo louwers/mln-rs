@@ -815,7 +815,7 @@ impl Map {
     }
 
     /// Moves the camera relative to where it is, as a gesture does
-    /// (maplibre-native-ffi's `mln_map_apply_camera_delta`): a pan, a zoom,
+    /// (the C API's `mln_map_apply_camera_delta`): a pan, a zoom,
     /// turn and tilt around an anchor, a gesture phase, and the momentum a
     /// gesture's end continues with. See [`CameraDelta`]. Returns the
     /// command, whose end [`drain_command_ends`](Self::drain_command_ends)
@@ -828,7 +828,7 @@ impl Map {
     }
 
     /// Moves the camera to absolute values, by a jump, an ease or a flight,
-    /// as a command or as part of a gesture (maplibre-native-ffi's
+    /// as a command or as part of a gesture (the C API's
     /// `mln_map_update_camera`). See [`CameraUpdate`]. Returns the command,
     /// whose end [`drain_command_ends`](Self::drain_command_ends) reports.
     pub fn update_camera(&mut self, update: &CameraUpdate) -> CameraCommandId {

@@ -1,5 +1,5 @@
 //! The camera the recognizer moves: a small command sink that reads the
-//! camera and sends it maplibre-native-ffi's camera calls.
+//! camera and sends it the map's camera calls.
 //! `mln_runtime::Map` implements it.
 
 use mln_map::{CameraDelta, CameraOptions, CameraUpdate, TransformState, TransitionEnd};
@@ -7,7 +7,7 @@ use mln_util::LatLng;
 use mln_util::geo::{ScreenCoordinate, WrapMode};
 
 /// What the recognizer needs from a camera: to read it, and
-/// maplibre-native-ffi's two camera calls, which carry each change's gesture
+/// the map's two camera calls, which carry each change's gesture
 /// phase. The calls may apply later, as a runtime's commands do: the
 /// recognizer reads what the camera shows by then.
 pub trait GestureCamera {
