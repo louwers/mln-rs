@@ -13,8 +13,9 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
-use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
-use mln_style::sources::geojson_source::GeoJSONSource;
+use mln_style::sources::CustomGeometrySourceHandle;
+use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
+use mln_style::sources::geojson::GeoJSONOptions;
 use mln_util::geo::{LatLng, LatLngBounds};
 use serde_json::json;
 use support::*;
@@ -85,9 +86,9 @@ fn grid() {
         ..Default::default()
     };
 
-    let source = CustomGeometrySource::new("custom", options, run_loop.pool()).unwrap();
-    handle.set(source.handle()).unwrap();
-    map.add_source(Box::new(source)).unwrap();
+    let source = custom_geometry_source::create("custom", options, run_loop.pool()).unwrap();
+    handle.set(CustomGeometrySourceHandle::of(&source).unwrap()).unwrap();
+    map.add_source(source).unwrap();
 
     let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
     fill_layer.set_source_layer("landcover");
@@ -121,14 +122,17 @@ fn recycle_map_update_images() {
     frontend.attach(&map);
 
     let load_style = |map: &mut Map, marker_name: &str, marker_path: &str| {
-        let source = GeoJSONSource::with_default_options("geometry");
-        source.set_geojson(GeoJson::from(Geometry::new_point([0.0, 0.0]))).unwrap();
+        let source = geojson_source_with_data(
+            "geometry",
+            GeoJSONOptions::default_options(),
+            GeoJson::from(Geometry::new_point([0.0, 0.0])),
+        );
 
         let mut layer = Layer::new(Registry::with_builtins().style(), "symbol", "geometry", "geometry").unwrap();
         set(&mut layer, "icon-image", &json!(marker_name));
 
         map.load_style_json(&read_file("test/fixtures/api/empty.json"));
-        map.add_source(Box::new(source)).unwrap();
+        map.add_source(source).unwrap();
         map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
         map.edit_style(|style| style.apply(Edit::AddImage(style_image(marker_name, decode_image(marker_path), 1.0))))
             .unwrap();

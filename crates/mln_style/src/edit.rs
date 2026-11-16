@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use feature::Value;
 use mln_style_types::VisibilityType;
+use mln_util::LatLng;
+use mln_util::image::PremultipliedImage;
 
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
@@ -13,7 +15,8 @@ use crate::layer::Layer;
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::sky::Sky;
-use crate::source_type::Source;
+use crate::source_type::{Described, ErasedDescription, Source, SourceCommon, SourceInstance};
+use crate::sources::geojson::GeoJSONData;
 use crate::style::Style;
 use crate::transition_options::TransitionOptions;
 
@@ -83,12 +86,65 @@ pub enum Edit {
     RemoveImage(String),
     /// A sprite's images, each replacing the image with its id.
     AddImages(Vec<Arc<image::Impl>>),
-    /// Records `source`, whose id is `id`, as the source whose handle the map holds,
-    /// replacing that source's record in place or adding it last; `None`
-    /// removes the record.
-    SetSourceImpl {
+    /// Adds `source` last.
+    AddSource(Source),
+    RemoveSource(String),
+    /// Gives the source `id` what a load of its description found. The load
+    /// is the source's `instance` with its data's `load`; once the source
+    /// moved on from that load, this changes nothing, and neither does an
+    /// `Err`, which the map reports.
+    SetSourceDescription {
         id: String,
-        source: Option<Source>,
+        instance: SourceInstance,
+        load: u64,
+        result: Described<ErasedDescription>,
+    },
+    /// Sets the members every source has.
+    SetSourceCommon {
+        id: String,
+        common: SourceCommon,
+    },
+    /// Sets the tile URLs of a vector, raster or raster-dem source's loaded
+    /// tileset; a source whose tileset hasn't loaded keeps none.
+    SetSourceTiles {
+        id: String,
+        tiles: Vec<String>,
+    },
+    /// Makes a GeoJSON source load its data from `url`. Its data stays
+    /// until the URL's arrives.
+    SetGeoJsonUrl {
+        id: String,
+        url: String,
+    },
+    /// Replaces a GeoJSON source's data, which it no longer loads from a
+    /// URL.
+    SetGeoJsonData {
+        id: String,
+        data: Option<Arc<dyn GeoJSONData>>,
+    },
+    /// Sets whether a GeoJSON source's tiles lay out in the call that asks
+    /// for them, in place of its `synchronous_update` option.
+    SetGeoJsonSynchronous {
+        id: String,
+        synchronous: bool,
+    },
+    /// Makes an image source load its image from `url`. Its image stays
+    /// until the URL's arrives.
+    SetImageSourceUrl {
+        id: String,
+        url: String,
+    },
+    /// Replaces an image source's image, which it no longer loads from a
+    /// URL.
+    SetImageSourceImage {
+        id: String,
+        image: PremultipliedImage,
+    },
+    /// Moves an image source's corners: top left, top right, bottom right,
+    /// bottom left.
+    SetImageSourceCoordinates {
+        id: String,
+        coordinates: [LatLng; 4],
     },
 }
 

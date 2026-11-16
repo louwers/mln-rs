@@ -5,6 +5,8 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use mln_actor::scheduler::Respond;
+use mln_storage::{Data, Resource};
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
@@ -13,8 +15,9 @@ use crate::conversion::tileset::{convert_tileset, optional_member};
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer_type::SourceKind;
-use crate::source_type::{OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType};
-use crate::sources::tile_source::TileSource;
+use crate::source_type::{
+    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
+};
 
 /// Which of the tileset source types a [`TilesetSourceType`] is.
 pub trait TilesetKind: Send + Sync + 'static {
@@ -111,19 +114,34 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
     type Options = TilesetSourceOptions;
     type Description = Tileset;
 
-    fn from_json(
-        id: &str,
-        value: &Convertible<'_>,
-        _functions: &Arc<Functions>,
-        error: &mut Error,
-    ) -> Option<Box<dyn crate::source::Source>> {
+    fn from_json(value: &Convertible<'_>, _functions: &Arc<Functions>, error: &mut Error) -> Option<SourceData<Self>> {
         match convert_options(value, K::INFO.type_) {
-            Ok(options) => Some(Box::new(TileSource::new(Source::new(id, SourceData::<Self>::new(options))))),
+            Ok(options) => Some(SourceData::new(options)),
             Err(message) => {
                 error.message = message;
                 None
             }
         }
+    }
+
+    /// The TileJSON at the source's URL, or else the tileset the style lists.
+    fn load(source: &SourceData<Self>) -> Load<Tileset> {
+        match &source.options.url {
+            Some(url) => Load::Fetch(Resource::source(url)),
+            None => Load::Ready(source.options.tileset.clone().into()),
+        }
+    }
+
+    fn describe(options: &TilesetSourceOptions, data: Option<Data>, respond: Respond<Described<Tileset>>) {
+        let tileset = match data {
+            None => Err("unexpectedly empty TileJSON".to_owned()),
+            Some(data) => options.tileset_with_tilejson(&data, K::INFO.type_),
+        };
+        respond(tileset.map(Some).map_err(mln_util::Error::native));
+    }
+
+    fn metadata_changed(old: Option<&Tileset>, new: Option<&Tileset>) -> bool {
+        old != new
     }
 
     fn attribution(source: &SourceData<Self>) -> Option<String> {
@@ -177,19 +195,40 @@ pub fn tileset_parts(source: &Source) -> Option<(&TilesetSourceOptions, Option<&
     }
 }
 
-/// `source` with `tileset` as its loaded tileset, if it's a vector, raster or
-/// raster-dem source.
+/// `source` with `tiles` as the tile URLs of its loaded tileset, if it's a
+/// vector, raster or raster-dem source with one.
 #[must_use]
-pub(crate) fn with_tileset(source: &Source, tileset: Tileset) -> Option<Source> {
-    fn with<K: TilesetKind>(source: &Source, tileset: Tileset) -> Option<Source> {
+pub(crate) fn with_tiles(source: &Source, tiles: Vec<String>) -> Option<Source> {
+    fn with<K: TilesetKind>(source: &Source, tiles: Vec<String>) -> Option<Source> {
         let data = SourceData::<TilesetSourceType<K>>::recover(source)?;
+        let tileset = Tileset { tiles, ..data.description.clone()? };
         Some(source.with_data(SourceData::<TilesetSourceType<K>> { description: Some(tileset), ..data.clone() }))
     }
-    if SourceData::<VectorSourceType>::recover(source).is_some() {
-        with::<VectorKind>(source, tileset)
-    } else if SourceData::<RasterSourceType>::recover(source).is_some() {
-        with::<RasterKind>(source, tileset)
-    } else {
-        with::<RasterDemKind>(source, tileset)
-    }
+    with::<VectorKind>(source, tiles.clone())
+        .or_else(|| with::<RasterKind>(source, tiles.clone()))
+        .or_else(|| with::<RasterDemKind>(source, tiles))
+}
+
+fn tileset_source<K: TilesetKind>(id: &str, url: Option<String>, tileset: PartialTileset, tile_size: u16) -> Source {
+    Source::new(id, SourceData::<TilesetSourceType<K>>::new(TilesetSourceOptions { url, tileset, tile_size }))
+}
+
+/// A vector source: the TileJSON at `url`, the members of `tileset`, or
+/// both, `tileset`'s winning.
+#[must_use]
+pub fn vector_source(id: &str, url: Option<String>, tileset: PartialTileset) -> Source {
+    tileset_source::<VectorKind>(id, url, tileset, constants::TILE_SIZE_I)
+}
+
+/// A raster source of tiles `tile_size` pixels wide, as [`vector_source`].
+#[must_use]
+pub fn raster_source(id: &str, url: Option<String>, tileset: PartialTileset, tile_size: u16) -> Source {
+    tileset_source::<RasterKind>(id, url, tileset, tile_size)
+}
+
+/// A raster-dem source of tiles `tile_size` pixels wide, as
+/// [`vector_source`].
+#[must_use]
+pub fn raster_dem_source(id: &str, url: Option<String>, tileset: PartialTileset, tile_size: u16) -> Source {
+    tileset_source::<RasterDemKind>(id, url, tileset, tile_size)
 }

@@ -15,7 +15,7 @@ use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
 use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
-use mln_style::sources::geojson_source::TileFeatures;
+use mln_style::sources::geojson::TileFeatures;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use parking_lot::Mutex;

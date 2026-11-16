@@ -17,8 +17,7 @@ use crate::layers::Line;
 use crate::projection::Projection;
 use crate::property_value::PropertyValue;
 use crate::sky::Sky;
-use crate::source::Source as _;
-use crate::sources::tile_source::TileSource;
+use crate::sources::tileset::vector_source as tileset_vector_source;
 use crate::style::Style;
 use crate::transition_options::TransitionOptions;
 use crate::{StyleRegistry, image};
@@ -563,36 +562,38 @@ fn sky_projection_and_global_state_coexist() {
     assert_eq!(Value::Bool(false), style.get_global_state()["showLabels"]);
 }
 
-fn vector_source(id: &str) -> TileSource {
-    TileSource::vector(id, Some("mptiler://tiles/contours".to_owned()), PartialTileset::default())
+fn vector_source(id: &str) -> crate::Source {
+    tileset_vector_source(id, Some("mptiler://tiles/contours".to_owned()), PartialTileset::default())
 }
 
 #[test]
-fn source_records_keep_the_order_they_were_added_in() {
+fn sources_keep_the_order_they_were_added_in() {
     let mut style = stub_style();
-    let set = |style: &mut Style, id: &str, source| {
-        edit(style, Edit::SetSourceImpl { id: id.to_owned(), source });
-    };
     for id in ["c", "b", "a"] {
-        set(&mut style, id, Some(vector_source(id).base_impl()));
+        edit(&mut style, Edit::AddSource(vector_source(id)));
     }
     assert_eq!(["c", "b", "a"], *ids_of(style.get_sources()));
+    let error = style.apply(Edit::AddSource(vector_source("b"))).unwrap_err();
+    assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
 
-    // A new record of a source replaces the old one in place.
+    // A changed source keeps its place.
     let before = style.clone();
-    let record = vector_source("b").base_impl();
-    set(&mut style, "b", Some(record.clone()));
+    let mut common = *style.get_source("b").unwrap().common();
+    common.set_volatile(true);
+    edit(&mut style, Edit::SetSourceCommon { id: "b".to_owned(), common });
     assert_eq!(["c", "b", "a"], *ids_of(style.get_sources()));
-    assert!(crate::Source::ptr_eq(&record, style.get_source("b").unwrap()));
+    assert!(style.get_source("b").unwrap().common().is_volatile());
     assert_eq!(Parts::SOURCES, Parts::between(&before, &style));
-    // The same record changes nothing.
+    // The same members change nothing.
     let after = style.clone();
-    set(&mut style, "b", Some(record));
+    edit(&mut style, Edit::SetSourceCommon { id: "b".to_owned(), common });
     assert!(Parts::between(&after, &style).is_empty());
 
-    set(&mut style, "b", None);
+    edit(&mut style, Edit::RemoveSource("b".to_owned()));
     assert_eq!(["c", "a"], *ids_of(style.get_sources()));
     assert_eq!(["c", "b", "a"], *ids_of(before.get_sources()));
+    let error = style.apply(Edit::RemoveSource("b".to_owned())).unwrap_err();
+    assert_eq!(mln_util::ErrorKind::NotFound, error.kind);
 }
 
 #[test]
@@ -605,7 +606,7 @@ fn parts_name_what_differs() {
         assert_eq!(part, Parts::between(&before, &style));
     };
     case(Edit::SetLayerZoomRange { layer: "bg".to_owned(), min: 1.0, max: 2.0 }, Parts::LAYERS);
-    case(Edit::SetSourceImpl { id: "s".to_owned(), source: Some(vector_source("s").base_impl()) }, Parts::SOURCES);
+    case(Edit::AddSource(vector_source("s")), Parts::SOURCES);
     case(Edit::AddImage(make_image("i")), Parts::IMAGES);
     case(Edit::SetLight(crate::light::Light::new()), Parts::LIGHT);
     case(Edit::SetSky(Some(Sky::new())), Parts::SKY);
@@ -613,9 +614,8 @@ fn parts_name_what_differs() {
     case(Edit::SetTransition(TransitionOptions::new(Some(Duration::from_millis(1)), None, true)), Parts::TRANSITION);
     case(Edit::SetGlobalState { name: "k".to_owned(), value: Value::Bool(true) }, Parts::GLOBAL_STATE);
     case(Edit::SetGlobalStateDefaults(crate::expression::GlobalStateMap::new()), Parts::GLOBAL_STATE | Parts::DOCUMENT);
-    let other = Style::from_json(style.registry(), r#"{"version":8,"name":"other","sources":{},"layers":[]}"#, None)
-        .unwrap()
-        .style;
+    let other =
+        Style::from_json(style.registry(), r#"{"version":8,"name":"other","sources":{},"layers":[]}"#, None).unwrap();
     assert!(Parts::between(&style, &other).contains(Parts::DOCUMENT | Parts::LAYERS));
     assert!(Parts::between(&style, &style.clone()).is_empty());
 }

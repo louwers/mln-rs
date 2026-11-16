@@ -339,3 +339,14 @@ pub(crate) fn create_render_source(
     crate::render_source::create(&crate::registry::Registry::with_builtins(), source, store)
         .expect("a built-in source type")
 }
+
+/// `source` with the description that its type knows without a fetch, such
+/// as the tileset a style lists, as the map's loader gives it.
+pub(crate) fn ready(source: mln_style::Source) -> mln_style::Source {
+    match source.data().plan_load() {
+        mln_style::source_type::Load::Ready(description) => {
+            source.with_description(Some(description)).expect("a description of the source's type")
+        }
+        _ => source,
+    }
+}

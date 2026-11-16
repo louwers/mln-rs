@@ -34,7 +34,7 @@ fn render_tests_dir() -> PathBuf {
 fn load(test: &str) -> Style {
     let path = render_tests_dir().join(test).join("style.json");
     let json = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    Style::from_json(&StyleRegistry::with_builtins(), &json, None).unwrap_or_else(|e| panic!("{test}: {e}")).style
+    Style::from_json(&StyleRegistry::with_builtins(), &json, None).unwrap_or_else(|e| panic!("{test}: {e}"))
 }
 
 fn background_impl(style: &Style, id: &str) -> Arc<LayerStyle<Background>> {

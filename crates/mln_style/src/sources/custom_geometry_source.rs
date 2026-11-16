@@ -1,14 +1,11 @@
-// `CustomGeometrySource` is a handle (see source.rs): `Clone` shares the
-// source. A source isn't `Send`, while the host's tile functions run on a
-// background thread, so the host answers through a
-// [`CustomGeometrySourceHandle`], which is.
+//! Custom geometry sources, whose tiles' GeoJSON the host gives on demand.
+//! The host answers its tile functions, which run on a background thread,
+//! through a [`CustomGeometrySourceHandle`].
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use geojson::GeoJson;
 use mln_actor::actor::{Actor, PoolActorRef};
-use mln_storage::FileSource;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
@@ -20,8 +17,7 @@ use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType};
 pub use super::custom::{CustomGeometryTileLoader, TileOptions};
 use super::geojson::TileFeatures;
 use crate::custom_tile_loader::{CustomTileLoader, TileFunction};
-use crate::source::{Source, SourceBase};
-use crate::source_type::{self, SourceData};
+use crate::source_type::{Source, SourceData};
 
 #[derive(Clone)]
 pub struct Options {
@@ -56,7 +52,7 @@ impl std::fmt::Debug for Options {
     }
 }
 
-/// Why a [`CustomGeometrySource`] can't be made.
+/// Why a custom geometry source can't be made.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CustomGeometrySourceError {
     /// The tile size isn't a power of two up to the tile extent, so tiles
@@ -79,8 +75,7 @@ fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options: &TileOpti
             return TileFeatures::new();
         }
     };
-    // `CustomGeometrySource::new` checked that the tile size divides the
-    // extent.
+    // `create` checked that the tile size divides the extent.
     let scale = f64::from(constants::EXTENT / i32::from(options.tile_size.max(1)));
     let vt_options = geojson_vt::TileOptions {
         extent: constants::EXTENT as u16,
@@ -108,6 +103,16 @@ impl std::fmt::Debug for CustomGeometrySourceHandle {
 }
 
 impl CustomGeometrySourceHandle {
+    /// The handle of `source`, if it's a custom geometry source.
+    #[must_use]
+    pub fn of(source: &Source) -> Option<Self> {
+        let data = SourceData::<CustomGeometrySourceType>::recover(source)?;
+        Some(CustomGeometrySourceHandle {
+            loader: data.options.loader.self_ref(),
+            tile_options: Arc::clone(&data.options.tile_options),
+        })
+    }
+
     /// Hands over the tile's features. The GeoJSON is cut to the tile on the
     /// background thread, and only if a tile needs it.
     pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJson) {
@@ -128,114 +133,43 @@ impl CustomGeometrySourceHandle {
 
     /// Drops the tile's data, and asks the host for it again if a tile needs
     /// it.
-    pub(crate) fn invalidate_tile(&self, tile_id: CanonicalTileID) {
+    pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.loader.invoke(move |loader| loader.invalidate_tile(&tile_id));
     }
 
     /// Invalidates every tile that `bounds` intersect.
-    pub(crate) fn invalidate_region(&self, bounds: LatLngBounds) {
+    pub fn invalidate_region(&self, bounds: LatLngBounds) {
         self.loader.invoke(move |loader| loader.invalidate_region(&bounds));
     }
 }
 
-struct Inner {
-    base: SourceBase,
-    loader: Actor<CustomGeometryTileLoader>,
-    tile_options: Arc<TileOptions>,
-}
-
-/// A source whose tiles' GeoJSON the host gives on demand.
-#[derive(Clone)]
-pub struct CustomGeometrySource {
-    inner: Rc<Inner>,
-}
-
-impl std::fmt::Debug for CustomGeometrySource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomGeometrySource").field("base", &self.inner.base).finish_non_exhaustive()
+/// The custom geometry source `id`, whose tile functions run on `pool`.
+/// Fails for a tile size that isn't a power of two up to the tile extent.
+pub fn create(id: &str, options: Options, pool: mln_actor::SchedulerPtr) -> Result<Source, CustomGeometrySourceError> {
+    let tile_size = options.tile_options.tile_size;
+    if !tile_size.is_power_of_two() || i32::from(tile_size) > constants::EXTENT {
+        return Err(CustomGeometrySourceError::InvalidTileSize(tile_size));
     }
-}
-
-impl CustomGeometrySource {
-    /// Creates the source, whose tile functions run on `pool`. Fails for a
-    /// tile size that isn't a power of two up to the tile extent.
-    pub fn new(
-        id: impl Into<String>,
-        options: Options,
-        pool: mln_actor::SchedulerPtr,
-    ) -> Result<Self, CustomGeometrySourceError> {
-        let tile_size = options.tile_options.tile_size;
-        if !tile_size.is_power_of_two() || i32::from(tile_size) > constants::EXTENT {
-            return Err(CustomGeometrySourceError::InvalidTileSize(tile_size));
-        }
-        let tile_options = Arc::new(options.tile_options.clone());
-        let data = SourceData::<CustomGeometrySourceType>::new(CustomGeometrySourceOptions {
-            tile_options: Arc::clone(&tile_options),
-            zoom_range: options.zoom_range,
-        });
-        let record = source_type::Source::new(&id.into(), data);
-        let loader =
-            Actor::new(pool, |_| CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function));
-        Ok(CustomGeometrySource { inner: Rc::new(Inner { base: SourceBase::new(record), loader, tile_options }) })
-    }
-
-    /// Records the source's data as `f` changes it.
-    fn update(&self, f: impl FnOnce(&mut SourceData<CustomGeometrySourceType>)) {
-        if let Some(record) = self.inner.base.base_impl().map_data(f) {
-            self.inner.base.set_base_impl(record);
-        }
-    }
-
-    /// A handle to answer the tile functions with, from any thread.
-    #[must_use]
-    pub fn handle(&self) -> CustomGeometrySourceHandle {
-        CustomGeometrySourceHandle {
-            loader: self.inner.loader.self_ref(),
-            tile_options: Arc::clone(&self.inner.tile_options),
-        }
-    }
-
-    /// See [`CustomGeometrySourceHandle::set_tile_data`].
-    pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJson) {
-        self.handle().set_tile_data(tile_id, data);
-    }
-
-    /// See [`CustomGeometrySourceHandle::set_tile_error`].
-    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
-        self.handle().set_tile_error(tile_id, error);
-    }
-
-    /// See `CustomGeometrySourceHandle::invalidate_tile`.
-    pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
-        self.handle().invalidate_tile(tile_id);
-    }
-
-    /// See `CustomGeometrySourceHandle::invalidate_region`.
-    pub fn invalidate_region(&self, bounds: LatLngBounds) {
-        self.handle().invalidate_region(bounds);
-    }
-}
-
-impl Source for CustomGeometrySource {
-    fn base(&self) -> &SourceBase {
-        &self.inner.base
-    }
-
-    fn load_description(&self, _file_source: &dyn FileSource, _run_loop: &mln_actor::RunLoop) {
-        self.update(|data| data.description = Some(self.inner.loader.self_ref()));
-        self.inner.base.set_loaded(true);
-        self.inner.base.observer().on_source_loaded(self);
-    }
+    let loader = Arc::new(Actor::new(pool, |_| {
+        CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function)
+    }));
+    let description = loader.self_ref();
+    let options = CustomGeometrySourceOptions {
+        tile_options: Arc::new(options.tile_options),
+        zoom_range: options.zoom_range,
+        loader,
+    };
+    Ok(Source::new(id, SourceData::<CustomGeometrySourceType>::with_description(options, description)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn with_tile_size(tile_size: u16) -> Result<CustomGeometrySource, CustomGeometrySourceError> {
+    fn with_tile_size(tile_size: u16) -> Result<Source, CustomGeometrySourceError> {
         let mut options = Options::default();
         options.tile_options.tile_size = tile_size;
-        CustomGeometrySource::new("custom", options, mln_actor::scheduler::get_background())
+        create("custom", options, mln_actor::scheduler::get_background())
     }
 
     #[test]

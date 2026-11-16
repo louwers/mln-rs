@@ -18,9 +18,10 @@ use crate::parser::Parser;
 use crate::projection::Projection;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
-use crate::source::Source as SourceHandle;
 use crate::source_list::SourceList;
-use crate::source_type::Source;
+use crate::source_type::{Source, SourceData, StyleSourceType};
+use crate::sources::geojson::GeoJsonSourceType;
+use crate::sources::image::ImageSourceType;
 use crate::sprite::Sprite;
 use crate::transition_options::TransitionOptions;
 
@@ -44,13 +45,6 @@ impl StyleLoadError {
     }
 }
 
-/// A parsed style document: the style, and the sources it names, whose
-/// records the style holds.
-pub struct Parsed {
-    pub style: Style,
-    pub sources: Vec<Box<dyn SourceHandle>>,
-}
-
 /// The images of a style, sorted by id.
 pub(crate) type ImageList = Vec<Arc<image::Impl>>;
 
@@ -72,7 +66,7 @@ pub struct Style {
     name: Arc<str>,
     default_camera: CameraOptions,
     layers: Arc<LayerList>,
-    /// The records of the sources, in the order they were added.
+    /// The sources, in the order they were added.
     sources: Arc<SourceList>,
     images: Arc<ImageList>,
     light: Arc<Light>,
@@ -133,13 +127,12 @@ impl Style {
 
     /// The style that the style document `json` describes, parsed against
     /// `registry`, with `fallback_font_faces` after the document's font
-    /// faces, and the document's sources. Fails with why `json` isn't a
-    /// style.
+    /// faces. Fails with why `json` isn't a style.
     pub fn from_json(
         registry: &Arc<StyleRegistry>,
         json: &str,
         fallback_font_faces: Option<&Arc<mln_text::glyph::FontFaces>>,
-    ) -> Result<Parsed, Error> {
+    ) -> Result<Style, Error> {
         let mut parser = Parser::new(registry);
         parser.parse(json)?;
 
@@ -149,19 +142,17 @@ impl Style {
         style.global_state_defaults = Arc::new(std::mem::take(&mut parser.global_state_defaults));
         style.global_state = Arc::clone(&style.global_state_defaults);
 
-        let mut sources: Vec<Box<dyn SourceHandle>> = Vec::new();
-        let mut records = SourceList::default();
+        let mut sources = SourceList::default();
         for source in std::mem::take(&mut parser.sources) {
             // A parsed style cannot contain duplicate source ids (they are
             // object keys).
-            if records.get(&source.get_id()).is_some() {
-                Log::error(Event::ParseStyle, format!("Source {} already exists", source.get_id()));
+            if sources.get(source.id()).is_some() {
+                Log::error(Event::ParseStyle, format!("Source {} already exists", source.id()));
                 continue;
             }
-            records.set(source.base_impl());
-            sources.push(source);
+            sources.set(source);
         }
-        style.sources = Arc::new(records);
+        style.sources = Arc::new(sources);
 
         // The parser drops duplicate layer ids, so the layers go in at once
         // without `AddLayer`'s lookup. A layer incompatible with its source
@@ -202,7 +193,7 @@ impl Style {
             merged.extend(fallback.iter().cloned());
             style.font_faces = Some(Arc::new(merged));
         }
-        Ok(Parsed { style, sources })
+        Ok(style)
     }
 
     #[must_use]
@@ -285,13 +276,13 @@ impl Style {
         self.images.iter().find(|image| image.id == id)
     }
 
-    /// The records of the style's sources, in the order they were added.
+    /// The style's sources, in the order they were added.
     #[must_use]
     pub fn get_sources(&self) -> &Arc<SourceList> {
         &self.sources
     }
 
-    /// The record of the source `id`.
+    /// The source `id`.
     #[must_use]
     pub fn get_source(&self, id: &str) -> Option<&Source> {
         self.sources.get(id)
@@ -418,7 +409,108 @@ impl Style {
                 Arc::make_mut(&mut self.images).remove(index);
             }
             Edit::AddImages(images) => self.add_images(images),
-            Edit::SetSourceImpl { id, source } => self.set_source_impl(&id, source),
+            Edit::AddSource(source) => {
+                if self.sources.get(source.id()).is_some() {
+                    return Err(Error::already_exists(format!("source \"{}\" already exists", source.id())));
+                }
+                Arc::make_mut(&mut self.sources).set(source);
+            }
+            Edit::RemoveSource(id) => {
+                if self.sources.get(&id).is_none() {
+                    return Err(source_not_found(&id));
+                }
+                Arc::make_mut(&mut self.sources).remove(&id);
+            }
+            Edit::SetSourceDescription { id, instance, load, result } => {
+                let Some(source) = self.sources.get(&id) else { return Ok(()) };
+                if source.instance() != instance || source.data().load() != load {
+                    return Ok(());
+                }
+                if let Ok(description) = result
+                    && let Some(source) = source.with_description(description)
+                {
+                    Arc::make_mut(&mut self.sources).set(source);
+                }
+            }
+            Edit::SetSourceCommon { id, common } => {
+                let source = self.sources.get(&id).ok_or_else(|| source_not_found(&id))?;
+                if *source.common() != common {
+                    let source = source.with_common(common);
+                    Arc::make_mut(&mut self.sources).set(source);
+                }
+            }
+            Edit::SetSourceTiles { id, tiles } => {
+                let source = self.sources.get(&id).ok_or_else(|| source_not_found(&id))?;
+                let Some((_, tileset)) = crate::sources::tileset::tileset_parts(source) else {
+                    return Err(not_a(&id, "a vector, raster or raster-dem source"));
+                };
+                if tileset.is_some_and(|tileset| tileset.tiles != tiles)
+                    && let Some(source) = crate::sources::tileset::with_tiles(source, tiles)
+                {
+                    Arc::make_mut(&mut self.sources).set(source);
+                }
+            }
+            Edit::SetGeoJsonUrl { id, url } => {
+                self.update_source::<GeoJsonSourceType>(&id, "a GeoJSON source", |data| {
+                    data.options.url = Some(url);
+                    data.load += 1;
+                    true
+                })?;
+            }
+            Edit::SetGeoJsonData { id, data: geojson } => {
+                self.update_source::<GeoJsonSourceType>(&id, "a GeoJSON source", |data| {
+                    data.options.url = None;
+                    data.description = geojson;
+                    data.load += 1;
+                    true
+                })?;
+            }
+            Edit::SetGeoJsonSynchronous { id, synchronous } => {
+                self.update_source::<GeoJsonSourceType>(&id, "a GeoJSON source", |data| {
+                    let changed = data.options.synchronous_update != synchronous;
+                    data.options.synchronous_update = synchronous;
+                    changed
+                })?;
+            }
+            Edit::SetImageSourceUrl { id, url } => {
+                self.update_source::<ImageSourceType>(&id, "an image source", |data| {
+                    data.options.url = Some(url);
+                    data.load += 1;
+                    true
+                })?;
+            }
+            Edit::SetImageSourceImage { id, image } => {
+                self.update_source::<ImageSourceType>(&id, "an image source", |data| {
+                    data.options.url = None;
+                    data.description = Some(Arc::new(image));
+                    data.load += 1;
+                    true
+                })?;
+            }
+            Edit::SetImageSourceCoordinates { id, coordinates } => {
+                self.update_source::<ImageSourceType>(&id, "an image source", |data| {
+                    data.options.coordinates = coordinates;
+                    true
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Changes the data of the source `id`, a `T` source, which `kind`
+    /// names in the error for a source of another type. `change` returns
+    /// whether it changed anything; the source keeps its data if not.
+    fn update_source<T: StyleSourceType>(
+        &mut self,
+        id: &str,
+        kind: &str,
+        change: impl FnOnce(&mut SourceData<T>) -> bool,
+    ) -> Result<(), Error> {
+        let source = self.sources.get(id).ok_or_else(|| source_not_found(id))?;
+        let mut data = SourceData::<T>::recover(source).ok_or_else(|| not_a(id, kind))?.clone();
+        if change(&mut data) {
+            let source = source.with_data(data);
+            Arc::make_mut(&mut self.sources).set(source);
         }
         Ok(())
     }
@@ -524,23 +616,16 @@ impl Style {
         new_images.sort_by(|a, b| a.id.cmp(&b.id));
         self.images = Arc::new(new_images);
     }
+}
 
-    /// Records `source` as the source `id`, replacing its record in place or
-    /// adding it last, or removes the record for `None`.
-    fn set_source_impl(&mut self, id: &str, source: Option<Source>) {
-        match source {
-            Some(source) => {
-                if !self.sources.get(id).is_some_and(|current| Source::ptr_eq(current, &source)) {
-                    Arc::make_mut(&mut self.sources).set(source);
-                }
-            }
-            None => {
-                if self.sources.get(id).is_some() {
-                    Arc::make_mut(&mut self.sources).remove(id);
-                }
-            }
-        }
-    }
+fn source_not_found(id: &str) -> Error {
+    Error::not_found(format!("source \"{id}\" does not exist"))
+}
+
+/// The error for the source `id`, which isn't `kind`, as in `source "water"
+/// is not a GeoJSON source`.
+fn not_a(id: &str, kind: &str) -> Error {
+    Error::invalid_argument(format!("source \"{id}\" is not {kind}"))
 }
 
 /// Sets the property `name` of `layer` to the style JSON `value`: a layer

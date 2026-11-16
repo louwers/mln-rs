@@ -13,8 +13,7 @@ use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, 
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{Functions, Value as ExpressionValue};
 use mln_style::filter::Filter;
-use mln_style::source::Source;
-use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
+use mln_style::sources::geojson::GeoJSONOptions;
 use mln_style::{Edit, Layer};
 use mln_util::ErrorKind;
 use mln_util::feature::Feature;
@@ -327,9 +326,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
         {
             let mut map = test.map();
             // Keep the point away from tile boundaries so source queries return one copy.
-            let source = map.source("source1").expect("source1");
-            let source = source.downcast_ref::<GeoJSONSource>().expect("GeoJSONSource");
-            source.set_geojson(GeoJson::from(Geometry::new_point([1.003, 1.003]))).unwrap();
+            set_geojson(&mut map, "source1", GeoJson::from(Geometry::new_point([1.003, 1.003])));
             let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle_layer", "source1").unwrap();
             map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
         }
@@ -568,9 +565,7 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
 
     let coordinate = ll(0.0, 0.0);
     let options = GeoJSONOptions { cluster: true, ..GeoJSONOptions::default() };
-    let source = GeoJSONSource::new("cluster_source", Arc::new(options));
-    source.set_url("http://url");
-    source.load_description(&*test.0.file_source, &test.0.run_loop);
+    let source = mln_style::sources::geojson_source("cluster_source", Arc::new(options));
 
     let mut cluster_layer =
         Layer::new(Registry::with_builtins().style(), "symbol", "cluster_layer", "cluster_source").unwrap();
@@ -578,7 +573,9 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     set(&mut cluster_layer, "icon-size", &json!(12.0));
 
     test.map().jump_to(&CameraOptions { center: Some(coordinate), zoom: Some(0.0), ..Default::default() });
-    test.map().add_source(Box::new(source)).unwrap();
+    test.map().add_source(source).unwrap();
+    let url = Edit::SetGeoJsonUrl { id: "cluster_source".to_owned(), url: "http://url".to_owned() };
+    test.map().edit_style(|style| style.apply(url)).unwrap();
     test.map().edit_style(|style| style.apply(Edit::AddLayer { layer: cluster_layer, before: None })).unwrap();
     test.0.run_loop.run_once();
     test.render();

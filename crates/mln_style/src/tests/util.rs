@@ -77,12 +77,6 @@ pub(crate) fn read_file(relative: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// Reads a file of testdata/ as bytes.
-pub(crate) fn read_file_bytes(relative: &str) -> Vec<u8> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
-    std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
-}
-
 pub(crate) fn parse_json(json: &str) -> serde_json::Value {
     serde_json::from_str(json).expect("test JSON must parse")
 }
@@ -178,7 +172,7 @@ impl crate::Style {
     /// does; a document that doesn't parse leaves the style as it was.
     pub(crate) fn load_json(&mut self, json: &str) {
         if let Ok(parsed) = Self::from_json(&Arc::clone(self.registry()), json, None) {
-            *self = parsed.style;
+            *self = parsed;
         }
     }
 }
@@ -193,6 +187,6 @@ impl crate::Style {
         let source =
             crate::conversion::convert_source(&mln_conversion::Convertible::from(&value), &mut error, id, &registry)
                 .expect("a source");
-        let _ = self.apply(crate::edit::Edit::SetSourceImpl { id: id.to_owned(), source: Some(source.base_impl()) });
+        let _ = self.apply(crate::edit::Edit::AddSource(source));
     }
 }

@@ -1,22 +1,31 @@
-//! The map's style loader: it fetches a style document and the sprites the
-//! document names, and parses the sprites on the thread pool.
+//! The map's style loader: it fetches a style document, the sprites the
+//! document names and the descriptions of the style's sources, and parses
+//! the sprites and the descriptions that need it on the thread pool.
 //!
 //! Requests and jobs answer into one inbox of [`Reply`]s, on the map's loop.
 //! The map drains it in `process_events` and hands each reply to
 //! [`StyleLoader::on_reply`], which returns what the map does as
 //! [`LoadEvent`]s. A reply to a load that a later one replaced carries the
 //! older load's number and is dropped.
+//!
+//! The loader watches each version of the style ([`StyleLoader::watch_sources`])
+//! and loads the description of each source whose instance or
+//! [`load`](mln_style::source_type::SourceData::load) it hasn't seen, as the
+//! source's type says. What a load finds goes back into the style as an
+//! [`Edit::SetSourceDescription`].
 
 use std::sync::Arc;
 
 use mln_actor::{RunLoop, TaggedScheduler};
 use mln_sprite::load_sprite;
 use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, Response};
+use mln_style::source_type::{Described, ErasedDescription, Load};
 use mln_style::sprite::Sprite;
-use mln_style::{Parsed, Style, StyleLoadError, StyleRegistry, image};
+use mln_style::{Edit, SourceInstance, Style, StyleLoadError, StyleRegistry, image};
 use mln_text::glyph::FontFaces;
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 
@@ -28,6 +37,20 @@ pub(crate) enum Reply {
     Sprite { id: String, load: u64, part: SpritePart, response: Response },
     /// A sprite parsed, or why it didn't.
     SpriteParsed { id: String, load: u64, result: Result<Vec<Arc<image::Impl>>, Error> },
+    /// A response to a source's description request.
+    Source { load: SourceLoadId, response: Response },
+    /// What a source's fetched description data describes, for the
+    /// `describing`th response to the load.
+    SourceDescribed { load: SourceLoadId, describing: u64, result: Described<ErasedDescription> },
+}
+
+/// A load of a source's description: the source's id and instance, and the
+/// [`load`](mln_style::source_type::SourceData::load) of its data.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SourceLoadId {
+    pub(crate) id: Arc<str>,
+    pub(crate) instance: SourceInstance,
+    pub(crate) load: u64,
 }
 
 /// Which of a sprite's two resources a response is for.
@@ -42,8 +65,8 @@ pub(crate) enum SpritePart {
 pub(crate) enum LoadEvent {
     /// A load began.
     Loading,
-    /// A style document parsed, which replaces the style and its sources.
-    Parsed(Parsed),
+    /// A style document parsed, which replaces the style.
+    Parsed(Style),
     /// The style and its sprite requests are in place.
     Loaded,
     /// The style document failed to load or parse.
@@ -54,6 +77,26 @@ pub(crate) enum LoadEvent {
     /// A sprite's images, for the style.
     SpriteImages(Option<Sprite>, Vec<Arc<image::Impl>>),
     SpriteFailed(Option<Sprite>, Error),
+    /// What a load of a source's description found, for the style as an
+    /// [`Edit::SetSourceDescription`]. An `Err` is already the loader's last
+    /// error.
+    SourceDescribed {
+        load: SourceLoadId,
+        result: Described<ErasedDescription>,
+    },
+}
+
+/// Where the load of a style source's description stands.
+struct SourceLoad {
+    load: SourceLoadId,
+    /// Held to keep the request running, as a file source that revalidates
+    /// answers again; dropping it cancels it.
+    request: Option<Request>,
+    /// Counts the responses whose data went to be described, so that a
+    /// description of older data doesn't replace a newer one's.
+    describing: u64,
+    /// Whether the description loaded, or the source has nothing to load.
+    loaded: bool,
 }
 
 /// A sprite of the parsed style, and where its load stands.
@@ -71,14 +114,16 @@ struct SpriteLoad {
     loaded: bool,
 }
 
-/// Loads a map's style document and its sprites (see the module docs).
+/// Loads a map's style document, its sprites and its sources' descriptions
+/// (see the module docs).
 ///
 /// "Loaded" has two meanings here. The document is loaded from the time a
 /// document parses until the next URL load begins: the map refuses edits of
 /// the loaded document meanwhile, since the parse that ends the load
 /// replaces the whole style. The sprites are loaded once each sprite of the
-/// parsed document loaded or failed for good; with the sources, they make
-/// the style loaded for a still image.
+/// parsed document loaded or failed for good, and a source once its
+/// description loaded or it has none to load; together they make the style
+/// loaded for a still image. A source whose load failed isn't loaded.
 pub(crate) struct StyleLoader {
     file_source: Option<Arc<dyn FileSource>>,
     run_loop: RunLoop,
@@ -104,6 +149,8 @@ pub(crate) struct StyleLoader {
     last_error: Option<Error>,
     /// A style document parsed, and no URL load began since.
     document_loaded: bool,
+    /// The loads of the style's sources' descriptions, by source id.
+    sources: HashMap<Arc<str>, SourceLoad>,
     /// An edit changed the style since its document parsed, so a later
     /// answer to the document's request doesn't replace it.
     edited: bool,
@@ -129,6 +176,7 @@ impl StyleLoader {
             fallback_font_faces: None,
             last_error: None,
             document_loaded: false,
+            sources: HashMap::default(),
             edited: false,
         }
     }
@@ -189,9 +237,10 @@ impl StyleLoader {
         vec![LoadEvent::Loading]
     }
 
-    /// Handles a reply from the inbox, parsing a style document against
-    /// `registry`.
-    pub(crate) fn on_reply(&mut self, registry: &Arc<StyleRegistry>, reply: Reply) -> Vec<LoadEvent> {
+    /// Handles a reply from the inbox for the map whose style is `style`,
+    /// parsing a style document against its registry.
+    pub(crate) fn on_reply(&mut self, style: &Style, reply: Reply) -> Vec<LoadEvent> {
+        let registry = style.registry();
         let mut events = Vec::new();
         match reply {
             Reply::Style { load, response } => self.on_document_response(registry, load, &response, &mut events),
@@ -209,8 +258,95 @@ impl StyleLoader {
                     Err(error) => self.sprite_failed(sprite, error, &mut events),
                 }
             }
+            Reply::Source { load, response } => self.on_source_response(style, load, response, &mut events),
+            Reply::SourceDescribed { load, describing, result } => {
+                let Some(entry) = self.sources.get_mut(&load.id).filter(|entry| entry.load == load) else {
+                    return events;
+                };
+                if entry.describing != describing {
+                    return events;
+                }
+                match &result {
+                    Ok(_) => entry.loaded = true,
+                    Err(error) => self.last_error = Some(error.clone()),
+                }
+                events.push(LoadEvent::SourceDescribed { load, result });
+            }
         }
         events
+    }
+
+    /// Loads the description of each source of `style` whose load the
+    /// loader hasn't seen, and forgets the loads of the sources `style`
+    /// lacks. Returns the edits that give sources the descriptions their
+    /// types know without a fetch, for the map to make before it publishes
+    /// `style`.
+    pub(crate) fn watch_sources(&mut self, style: &Style) -> Vec<Edit> {
+        let sources = style.get_sources();
+        self.sources.retain(|id, entry| sources.get(id).is_some_and(|source| source.instance() == entry.load.instance));
+        let mut edits = Vec::new();
+        for source in sources.iter() {
+            let load =
+                SourceLoadId { id: Arc::from(source.id()), instance: source.instance(), load: source.data().load() };
+            if self.sources.get(&load.id).is_some_and(|entry| entry.load == load) {
+                continue;
+            }
+            let mut entry = SourceLoad { load: load.clone(), request: None, describing: 0, loaded: true };
+            match source.data().plan_load() {
+                Load::Done => {}
+                Load::Ready(description) => edits.push(Edit::SetSourceDescription {
+                    id: source.id().to_owned(),
+                    instance: load.instance,
+                    load: load.load,
+                    result: Ok(Some(description)),
+                }),
+                Load::Fetch(resource) => {
+                    entry.loaded = false;
+                    if let Some(file_source) = &self.file_source {
+                        let replies = self.replies.clone();
+                        let reply_load = load.clone();
+                        entry.request = Some(file_source.request(
+                            &self.run_loop.scheduler(),
+                            &resource,
+                            Box::new(move |response: Response| {
+                                replies.push(Reply::Source { load: reply_load.clone(), response });
+                            }),
+                        ));
+                    }
+                }
+            }
+            self.sources.insert(Arc::clone(&load.id), entry);
+        }
+        edits
+    }
+
+    /// Describes the data of a response to the description request of
+    /// `style`'s source, on the thread pool if the source's type asks for
+    /// it. A failed response fails the load at once.
+    fn on_source_response(&mut self, style: &Style, load: SourceLoadId, res: Response, events: &mut Vec<LoadEvent>) {
+        let Some(entry) = self.sources.get_mut(&load.id).filter(|entry| entry.load == load) else { return };
+        let Some(source) = style.get_source(&load.id).filter(|source| source.instance() == load.instance) else {
+            return;
+        };
+        if let Some(error) = &res.error {
+            let error = Error::native(error.message.clone());
+            self.last_error = Some(error.clone());
+            events.push(LoadEvent::SourceDescribed { load, result: Err(error) });
+            return;
+        } else if res.not_modified {
+            return;
+        }
+        let data = if res.no_content { None } else { Some(res.data.unwrap_or_default()) };
+        entry.describing += 1;
+        let describing = entry.describing;
+        let job = source.data().describe_job(data);
+        let replies = self.replies.clone();
+        let respond = move |result| replies.push(Reply::SourceDescribed { load, describing, result });
+        if source.data().describes_in_background() {
+            self.thread_pool.schedule_and_reply_later(&self.run_loop.scheduler(), job, respond);
+        } else {
+            job(Box::new(respond));
+        }
     }
 
     fn on_document_response(
@@ -271,7 +407,7 @@ impl StyleLoader {
         self.document_loaded = true;
         self.edited = false;
         self.sprites.clear();
-        self.sprite_list = parsed.style.get_sprites().to_vec();
+        self.sprite_list = parsed.get_sprites().to_vec();
         let mut sprite_events = Vec::new();
         if self.file_source.is_none() {
             self.sprites.push(SpriteLoad::new(None, 0));
@@ -410,6 +546,17 @@ impl StyleLoader {
         !self.sprites.is_empty() && self.sprites.iter().all(|entry| entry.loaded)
     }
 
+    /// Whether each source of `style` loaded its description, or has none to
+    /// load.
+    pub(crate) fn sources_loaded(&self, style: &Style) -> bool {
+        style.get_sources().iter().all(|source| self.source_loaded(source.id()))
+    }
+
+    /// Whether the source `id` loaded its description, or has none to load.
+    pub(crate) fn source_loaded(&self, id: &str) -> bool {
+        self.sources.get(id).is_some_and(|entry| entry.loaded)
+    }
+
     /// Whether a style document parsed, and no URL load began since.
     pub(crate) fn document_loaded(&self) -> bool {
         self.document_loaded
@@ -418,12 +565,6 @@ impl StyleLoader {
     /// Records that an edit changed the style since its document parsed.
     pub(crate) fn edited(&mut self) {
         self.edited = true;
-    }
-
-    /// Records a source's load error, which fails still images until the
-    /// next load.
-    pub(crate) fn set_error(&mut self, error: Error) {
-        self.last_error = Some(error);
     }
 
     /// The last error of a sprite or a source since the last load began.

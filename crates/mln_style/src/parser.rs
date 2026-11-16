@@ -21,7 +21,7 @@ use crate::light::Light;
 use crate::projection::Projection;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
-use crate::source::Source;
+use crate::source_type::Source;
 use crate::sprite::Sprite;
 use crate::transition_options::TransitionOptions;
 
@@ -36,7 +36,7 @@ pub struct Parser {
     pub sprites: Vec<Sprite>,
     pub glyph_url: String,
     pub font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
-    pub sources: Vec<Box<dyn Source>>,
+    pub sources: Vec<Source>,
     pub(crate) layers: Vec<Layer>,
 
     pub(crate) transition: TransitionOptions,

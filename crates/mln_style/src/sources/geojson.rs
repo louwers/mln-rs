@@ -5,8 +5,9 @@ use std::sync::{Arc, OnceLock};
 
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
-use mln_actor::scheduler::SchedulerPtr;
+use mln_actor::scheduler::{self, Respond, SchedulerPtr};
 use mln_expression::expression::evaluate_accumulated;
+use mln_storage::{Data, Resource};
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
@@ -16,10 +17,13 @@ use mln_util::range::Range;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
+use crate::conversion::geojson::convert_json_geojson;
 use crate::conversion::{Convertible, Error as ConversionError};
 use crate::expression::{Expr, Functions, from_expression_value};
 use crate::layer_type::SourceKind;
-use crate::source_type::{OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType};
+use crate::source_type::{
+    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
+};
 
 /// The features of tile `id`. For a zoom above the maximum zoom or a missing
 /// parent tile, `get_tile` fails (C++ throws); this logs the error and hands
@@ -291,8 +295,11 @@ pub struct GeoJSONDataBuilder {
 }
 
 impl GeoJSONDataBuilder {
-    pub(crate) fn new(options: Arc<GeoJSONOptions>, sequenced_scheduler: SchedulerPtr) -> Self {
-        GeoJSONDataBuilder { options, sequenced_scheduler }
+    /// A builder of data with `options`, whose tiles cut on a sequenced
+    /// scheduler of the thread pool.
+    #[must_use]
+    pub fn new(options: Arc<GeoJSONOptions>) -> Self {
+        GeoJSONDataBuilder { options, sequenced_scheduler: scheduler::get_sequenced() }
     }
 
     /// Fails as [`create_geojson_data`] does.
@@ -325,6 +332,29 @@ impl GeoJsonSourceOptions {
     pub fn get_zoom_range(&self) -> Range<u8> {
         Range::new(self.options.minzoom, self.options.maxzoom)
     }
+
+    /// What builds data for the source with its options, on any thread.
+    #[must_use]
+    pub fn data_builder(&self) -> GeoJSONDataBuilder {
+        GeoJSONDataBuilder::new(Arc::clone(&self.options))
+    }
+}
+
+/// The data of GeoJSON text `data`, built with `options`. Text that isn't
+/// GeoJSON, or GeoJSON that can't be built, is logged and builds nothing.
+fn build_geojson(data: &[u8], options: &GeoJsonSourceOptions) -> Option<Arc<dyn GeoJSONData>> {
+    let mut error = ConversionError::default();
+    let Some(geojson) = convert_json_geojson(data, &mut error) else {
+        Log::error(Event::ParseStyle, format!("Failed to parse GeoJSON data: {}", error.message));
+        return None;
+    };
+    match options.data_builder().build(geojson) {
+        Ok(data) => Some(data),
+        Err(e) => {
+            Log::error(Event::ParseStyle, format!("Failed to parse GeoJSON data: {e}"));
+            None
+        }
+    }
 }
 
 impl StyleSourceType for GeoJsonSourceType {
@@ -335,16 +365,34 @@ impl StyleSourceType for GeoJsonSourceType {
         type_: SourceType::GeoJSON,
     };
 
+    const DESCRIBES_IN_BACKGROUND: bool = true;
+
     type Options = GeoJsonSourceOptions;
     type Description = Arc<dyn GeoJSONData>;
 
     fn from_json(
-        id: &str,
         value: &Convertible<'_>,
         functions: &Arc<Functions>,
         error: &mut ConversionError,
-    ) -> Option<Box<dyn crate::source::Source>> {
-        crate::conversion::source::convert_geojson_source(id, value, functions, error)
+    ) -> Option<SourceData<Self>> {
+        crate::conversion::source::convert_geojson_source(value, functions, error)
+    }
+
+    /// The GeoJSON at the source's URL, if it has one.
+    fn load(source: &SourceData<Self>) -> Load<Arc<dyn GeoJSONData>> {
+        match &source.options.url {
+            Some(url) => Load::Fetch(Resource::source(url)),
+            None => Load::Done,
+        }
+    }
+
+    /// Builds the fetched GeoJSON. Data that doesn't build is logged and
+    /// describes an empty source, so that its tiles don't wait for data.
+    fn describe(options: &GeoJsonSourceOptions, data: Option<Data>, respond: Respond<Described<Arc<dyn GeoJSONData>>>) {
+        respond(match data {
+            None => Err(Error::native("unexpectedly empty GeoJSON")),
+            Some(data) => Ok(build_geojson(&data, options)),
+        });
     }
 
     fn attribution(source: &SourceData<Self>) -> Option<String> {
@@ -383,4 +431,10 @@ impl std::fmt::Debug for dyn GeoJSONData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GeoJSONData").finish_non_exhaustive()
     }
+}
+
+/// A GeoJSON source with `options` and no data until it gets some or a URL.
+#[must_use]
+pub fn geojson_source(id: &str, options: Arc<GeoJSONOptions>) -> Source {
+    Source::new(id, SourceData::<GeoJsonSourceType>::new(GeoJsonSourceOptions::new(options)))
 }

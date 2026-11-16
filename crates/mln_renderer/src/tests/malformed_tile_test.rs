@@ -12,7 +12,7 @@ use mln_storage::{FileSource, Kind, Response};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Fill, FillExtrusion, Line, Symbol};
-use mln_style::sources::tile_source::TileSource;
+use mln_style::sources::vector_source;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
 use mln_util::geo::LatLng;
@@ -70,9 +70,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
         Some(response)
     });
 
-    let source = TileSource::vector("source", None, tileset);
-    mln_style::source::Source::load_description(&source, &*file_source, &run_loop);
-    let base_impl = mln_style::source::Source::base_impl(&source);
+    let base_impl = crate::tests::ready(vector_source("source", None, tileset));
     // A loaded sprite with the icon "v" answers the symbol layer's request,
     // and missing icons stay missing.
     let mut store = crate::tests::pool_store(&run_loop, &thread_pool);

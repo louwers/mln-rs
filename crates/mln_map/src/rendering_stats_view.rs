@@ -7,7 +7,7 @@ use geojson::{Feature, GeoJson, Geometry};
 use mln_renderer::RenderingStats;
 use mln_style::conversion::Convertible;
 use mln_style::sources::custom_geometry_source::{
-    CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
+    self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
 };
 use mln_style::{Edit, Layer};
 use mln_tile_id::CanonicalTileID;
@@ -76,9 +76,12 @@ impl RenderingStatsView {
                 ..Default::default()
             };
             // The default tile options are valid, so this always succeeds.
-            if let Ok(source) = CustomGeometrySource::new(RENDERING_STATS_SOURCE_ID, options, map.run_loop().pool()) {
-                let _ = handle.set(source.handle());
-                let _ = map.add_source(Box::new(source));
+            if let Ok(source) =
+                custom_geometry_source::create(RENDERING_STATS_SOURCE_ID, options, map.run_loop().pool())
+                && let Some(source_handle) = CustomGeometrySourceHandle::of(&source)
+            {
+                let _ = handle.set(source_handle);
+                let _ = map.add_source(source);
             }
         }
 

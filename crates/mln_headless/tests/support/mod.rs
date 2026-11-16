@@ -56,6 +56,30 @@ pub(crate) fn read_file(path: &str) -> String {
     String::from_utf8(read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
+/// A GeoJSON source `id` with `options` and the data of `geojson`.
+pub(crate) fn geojson_source_with_data(
+    id: &str,
+    options: Arc<mln_style::sources::GeoJSONOptions>,
+    geojson: geojson::GeoJson,
+) -> mln_style::Source {
+    use mln_style::source_type::SourceData;
+    use mln_style::sources::geojson::{GeoJsonSourceOptions, GeoJsonSourceType};
+    let options = GeoJsonSourceOptions::new(options);
+    let data = options.data_builder().build(geojson).expect("GeoJSON data");
+    mln_style::Source::new(id, SourceData::<GeoJsonSourceType>::with_description(options, data))
+}
+
+/// Replaces the data of `map`'s GeoJSON source `id` with `geojson`.
+pub(crate) fn set_geojson(map: &mut Map, id: &str, geojson: geojson::GeoJson) {
+    use mln_style::source_type::SourceData;
+    use mln_style::sources::geojson::GeoJsonSourceType;
+    let source = map.source(id).expect("the source");
+    let builder = SourceData::<GeoJsonSourceType>::recover(source).expect("a GeoJSON source").options.data_builder();
+    let data = builder.build(geojson).expect("GeoJSON data");
+    let edit = mln_style::Edit::SetGeoJsonData { id: id.to_owned(), data: Some(data) };
+    map.edit_style(|style| style.apply(edit)).expect("a GeoJSON source");
+}
+
 pub(crate) fn decode_image(path: &str) -> PremultipliedImage {
     mln_image::decode_image(&read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }

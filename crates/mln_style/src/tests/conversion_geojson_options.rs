@@ -3,7 +3,7 @@ use mln_conversion::Convertible;
 use super::util::parse_json;
 use crate::conversion::{Error, convert_geojson_options};
 use crate::expression::Functions;
-use crate::sources::geojson_source::GeoJSONOptions;
+use crate::sources::geojson::GeoJSONOptions;
 
 fn convert_json(json: &str, error: &mut Error) -> Option<GeoJSONOptions> {
     let value = parse_json(json);

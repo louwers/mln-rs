@@ -7,13 +7,22 @@
 //! holds the types as `&'static dyn ErasedStyleSourceType`, by name. An
 //! erased value gets back to its type only through [`SourceData::recover`]
 //! and [`SourceData::recover_arc`].
+//!
+//! A source's description is what loading its options finds, such as the
+//! tileset of a TileJSON. The type says how it loads ([`StyleSourceType::load`]
+//! and [`StyleSourceType::describe`]); the map's loader runs the loads and
+//! applies what they find as an [`Edit::SetSourceDescription`](crate::Edit).
 
 use std::any::Any;
 use std::marker::PhantomData;
+use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use mln_actor::scheduler::Respond;
 use mln_conversion::{Convertible, Error};
+use mln_storage::{Data, Resource};
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
@@ -75,29 +84,71 @@ pub enum OfflineResources {
     Image { url: String },
 }
 
-/// A source type: what its sources hold, how style JSON describes them and
-/// what they report.
+/// How a source's description loads, as its type says from its data.
+pub enum Load<D> {
+    /// Nothing loads: the source is loaded with the description it has.
+    Done,
+    /// The description, known without a fetch, such as a tileset that the
+    /// style lists.
+    Ready(D),
+    /// The resource whose data [`StyleSourceType::describe`] turns into the
+    /// description.
+    Fetch(Resource),
+}
+
+/// What describing a source's fetched data found: its description, `None`
+/// for data that describes nothing, or why the source failed to load.
+pub type Described<D> = Result<Option<D>, mln_util::Error>;
+
+/// A description of a source of some type, which
+/// [`Source::with_description`] gives back to its type.
+pub type ErasedDescription = Box<dyn Any + Send>;
+
+/// A source type: what its sources hold, how style JSON describes them, how
+/// their descriptions load and what they report.
 pub trait StyleSourceType: Sized + Send + Sync + 'static {
     const INFO: SourceTypeInfo;
+
+    /// Whether [`describe`](Self::describe) runs on the thread pool rather
+    /// than on the map's thread, for work such as parsing GeoJSON or
+    /// decoding an image.
+    const DESCRIBES_IN_BACKGROUND: bool = false;
 
     /// What the style or the API gives: a URL, an inline tileset, GeoJSON
     /// options, coordinates.
     type Options: Clone + Send + Sync + 'static;
 
-    /// What loading finds: a tileset, GeoJSON data, an image, a tile loader.
+    /// What loading finds: a tileset, GeoJSON data, an image.
     type Description: Clone + Send + Sync + 'static;
 
-    /// A source named `id` from its style JSON `value`, whose expressions
-    /// parse against `functions`, as the handle that loads it. Only a type
-    /// whose [`INFO`](Self::INFO) has `from_json` is asked.
-    fn from_json(
-        _id: &str,
-        _value: &Convertible<'_>,
-        _functions: &Arc<Functions>,
-        error: &mut Error,
-    ) -> Option<Box<dyn crate::source::Source>> {
+    /// The data of a source from its style JSON `value`, whose expressions
+    /// parse against `functions`. Only a type whose [`INFO`](Self::INFO)
+    /// has `from_json` is asked.
+    fn from_json(_value: &Convertible<'_>, _functions: &Arc<Functions>, error: &mut Error) -> Option<SourceData<Self>> {
         error.message = "invalid source type".to_owned();
         None
+    }
+
+    /// How `source`'s description loads for its current options. The map
+    /// asks again whenever [`SourceData::load`] grows.
+    fn load(_source: &SourceData<Self>) -> Load<Self::Description> {
+        Load::Done
+    }
+
+    /// Turns `data`, the fetched resource of a [`Load::Fetch`], into the
+    /// description of a source of `options`, and answers through `respond`,
+    /// at once or later (the browser's image decoder). `None` is a response
+    /// without content.
+    fn describe(_options: &Self::Options, _data: Option<Data>, respond: Respond<Described<Self::Description>>) {
+        respond(Err(mln_util::Error::native(format!("a {} source fetches nothing", Self::INFO.name))));
+    }
+
+    /// Whether `new`, a loaded description that replaces `old`, changes what
+    /// the source says about itself, such as a tileset's tiles and
+    /// attribution, which the map reports as a change of the source.
+    #[must_use]
+    fn metadata_changed(_old: Option<&Self::Description>, _new: Option<&Self::Description>) -> bool {
+        false
     }
 
     fn attribution(_source: &SourceData<Self>) -> Option<String> {
@@ -151,7 +202,7 @@ pub struct SourceCommon {
 }
 
 impl SourceCommon {
-    pub(crate) fn set_prefetch_zoom_delta(&mut self, delta: Option<u8>) {
+    pub fn set_prefetch_zoom_delta(&mut self, delta: Option<u8>) {
         self.prefetch_zoom_delta = delta;
         warn_if_overscale_factor_caps_prefetch_delta(self.max_overscale_factor, self.prefetch_zoom_delta);
     }
@@ -161,7 +212,7 @@ impl SourceCommon {
         self.prefetch_zoom_delta
     }
 
-    pub(crate) fn set_minimum_tile_update_interval(&mut self, interval: Duration) {
+    pub fn set_minimum_tile_update_interval(&mut self, interval: Duration) {
         self.minimum_tile_update_interval = interval;
     }
 
@@ -170,7 +221,7 @@ impl SourceCommon {
         self.minimum_tile_update_interval
     }
 
-    pub(crate) fn set_max_overscale_factor_for_parent_tiles(&mut self, overscale_factor: Option<u8>) {
+    pub fn set_max_overscale_factor_for_parent_tiles(&mut self, overscale_factor: Option<u8>) {
         self.max_overscale_factor = overscale_factor;
         warn_if_overscale_factor_caps_prefetch_delta(self.max_overscale_factor, self.prefetch_zoom_delta);
     }
@@ -185,7 +236,7 @@ impl SourceCommon {
         self.volatile
     }
 
-    pub(crate) fn set_volatile(&mut self, set: bool) {
+    pub fn set_volatile(&mut self, set: bool) {
         self.volatile = set;
     }
 }
@@ -214,6 +265,12 @@ impl<T: StyleSourceType> SourceData<T> {
         SourceData { options, description: None, load: 0 }
     }
 
+    /// A source of `options` with `description`.
+    #[must_use]
+    pub fn with_description(options: T::Options, description: T::Description) -> Self {
+        SourceData { options, description: Some(description), load: 0 }
+    }
+
     /// `source`'s data as a `T` source's, or `None` for another type's.
     #[must_use]
     pub fn recover(source: &Source) -> Option<&Self> {
@@ -234,6 +291,27 @@ impl<T: StyleSourceType> SourceData<T> {
 pub trait ErasedSource: Any + Send + Sync {
     fn source_type(&self) -> &'static dyn ErasedStyleSourceType;
 
+    /// [`SourceData::load`].
+    fn load(&self) -> u64;
+
+    /// [`StyleSourceType::load`], with the description erased.
+    fn plan_load(&self) -> Load<ErasedDescription>;
+
+    /// [`StyleSourceType::DESCRIBES_IN_BACKGROUND`].
+    fn describes_in_background(&self) -> bool;
+
+    /// [`StyleSourceType::describe`] of `data` for the source's options, as
+    /// a job that owns what it needs and may run on another thread.
+    fn describe_job(&self, data: Option<Data>) -> DescribeJob;
+
+    /// This data with `description` in place of its description, or `None`
+    /// if `description` isn't one of the type's.
+    fn with_description(&self, description: Option<ErasedDescription>) -> Option<Arc<dyn ErasedSource>>;
+
+    /// [`StyleSourceType::metadata_changed`] from `previous`'s description
+    /// to this one's; false when `previous` is another type's.
+    fn metadata_changed_from(&self, previous: &dyn ErasedSource) -> bool;
+
     fn attribution(&self) -> Option<String>;
 
     fn summary(&self) -> SourceSummary;
@@ -250,9 +328,54 @@ pub trait ErasedSource: Any + Send + Sync {
     fn offline_tileset(&self, tilejson: &[u8]) -> Result<Tileset, String>;
 }
 
+/// A job that describes a source's fetched data, answering through the
+/// [`Respond`] it takes.
+pub type DescribeJob = Box<dyn FnOnce(Respond<Described<ErasedDescription>>) + Send>;
+
+fn erase<D: Send + 'static>(description: D) -> ErasedDescription {
+    Box::new(description)
+}
+
 impl<T: StyleSourceType> ErasedSource for SourceData<T> {
     fn source_type(&self) -> &'static dyn ErasedStyleSourceType {
         style_source_entry::<T>()
+    }
+
+    fn load(&self) -> u64 {
+        self.load
+    }
+
+    fn plan_load(&self) -> Load<ErasedDescription> {
+        match T::load(self) {
+            Load::Done => Load::Done,
+            Load::Ready(description) => Load::Ready(erase(description)),
+            Load::Fetch(resource) => Load::Fetch(resource),
+        }
+    }
+
+    fn describes_in_background(&self) -> bool {
+        T::DESCRIBES_IN_BACKGROUND
+    }
+
+    fn describe_job(&self, data: Option<Data>) -> DescribeJob {
+        let options = self.options.clone();
+        Box::new(move |respond| {
+            T::describe(&options, data, Box::new(move |described| respond(described.map(|d| d.map(erase)))));
+        })
+    }
+
+    fn with_description(&self, description: Option<ErasedDescription>) -> Option<Arc<dyn ErasedSource>> {
+        let description = match description {
+            Some(description) => Some(*description.downcast::<T::Description>().ok()?),
+            None => None,
+        };
+        Some(Arc::new(SourceData::<T> { options: self.options.clone(), description, load: self.load }))
+    }
+
+    fn metadata_changed_from(&self, previous: &dyn ErasedSource) -> bool {
+        let any: &dyn Any = previous;
+        any.downcast_ref::<Self>()
+            .is_some_and(|previous| T::metadata_changed(previous.description.as_ref(), self.description.as_ref()))
     }
 
     fn attribution(&self) -> Option<String> {
@@ -276,27 +399,58 @@ impl<T: StyleSourceType> ErasedSource for SourceData<T> {
     }
 }
 
-/// A source of a style version: its id, the members every source has, and
-/// its type's data. A clone shares the data; two sources are the same when
-/// [`Source::ptr_eq`] says so.
+/// Which source a [`Source`] is, of all the sources made in the process:
+/// the versions of one source share it, and two sources that only share an
+/// id don't.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SourceInstance(NonZeroU64);
+
+impl SourceInstance {
+    fn next() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let value = NEXT.fetch_add(1, Ordering::Relaxed);
+        SourceInstance(NonZeroU64::new(value).unwrap_or(NonZeroU64::MIN))
+    }
+}
+
+/// A source of a style version: its id, which instance it is, the members
+/// every source has, and its type's data. A clone shares the data; two
+/// sources are the same when [`Source::ptr_eq`] says so.
 #[derive(Clone)]
 pub struct Source {
     id: Arc<str>,
+    instance: SourceInstance,
     common: SourceCommon,
     data: Arc<dyn ErasedSource>,
 }
 
 impl Source {
-    /// The source `id` of `data`, with the default common members.
+    /// A new source `id` of `data`, with the default common members.
     #[must_use]
     pub fn new<T: StyleSourceType>(id: &str, data: SourceData<T>) -> Self {
-        Source { id: Arc::from(id), common: SourceCommon::default(), data: Arc::new(data) }
+        Source {
+            id: Arc::from(id),
+            instance: SourceInstance::next(),
+            common: SourceCommon::default(),
+            data: Arc::new(data),
+        }
     }
 
     /// This source with `data` in place of its data.
     #[must_use]
     pub fn with_data<T: StyleSourceType>(&self, data: SourceData<T>) -> Self {
-        Source { id: Arc::clone(&self.id), common: self.common, data: Arc::new(data) }
+        self.with_erased_data(Arc::new(data))
+    }
+
+    fn with_erased_data(&self, data: Arc<dyn ErasedSource>) -> Self {
+        Source { id: Arc::clone(&self.id), instance: self.instance, common: self.common, data }
+    }
+
+    /// This source with `description` as its description, or `None` if
+    /// `description` isn't one of its type's.
+    #[must_use]
+    pub fn with_description(&self, description: Option<ErasedDescription>) -> Option<Self> {
+        Some(self.with_erased_data(self.data.with_description(description)?))
     }
 
     /// This source with its data changed by `f`, or `None` if it isn't a
@@ -311,12 +465,17 @@ impl Source {
     /// This source with `common` in place of its common members.
     #[must_use]
     pub fn with_common(&self, common: SourceCommon) -> Self {
-        Source { id: Arc::clone(&self.id), common, data: Arc::clone(&self.data) }
+        Source { id: Arc::clone(&self.id), instance: self.instance, common, data: Arc::clone(&self.data) }
     }
 
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    #[must_use]
+    pub fn instance(&self) -> SourceInstance {
+        self.instance
     }
 
     #[must_use]
@@ -360,11 +519,19 @@ impl Source {
         self.data.is_update_synchronous()
     }
 
-    /// Whether `a` and `b` are the same source: the same id and common
-    /// members, and data that's the same allocation.
+    /// Whether `a` and `b` are the same source: the same id, instance and
+    /// common members, and data that's the same allocation.
     #[must_use]
     pub fn ptr_eq(a: &Source, b: &Source) -> bool {
-        Arc::ptr_eq(&a.data, &b.data) && a.common == b.common && a.id == b.id
+        Arc::ptr_eq(&a.data, &b.data) && a.common == b.common && a.instance == b.instance && a.id == b.id
+    }
+
+    /// Whether `self`, a later version of `previous`, says something new
+    /// about itself through its description (see
+    /// [`StyleSourceType::metadata_changed`]).
+    #[must_use]
+    pub fn metadata_changed_from(&self, previous: &Source) -> bool {
+        self.data.metadata_changed_from(&*previous.data)
     }
 }
 
@@ -374,6 +541,7 @@ impl std::fmt::Debug for Source {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Source")
             .field("id", &self.id)
+            .field("instance", &self.instance)
             .field("type", &self.info().name)
             .field("common", &self.common)
             .finish_non_exhaustive()
@@ -384,14 +552,14 @@ impl std::fmt::Debug for Source {
 pub trait ErasedStyleSourceType: Send + Sync + 'static {
     fn info(&self) -> SourceTypeInfo;
 
-    /// [`StyleSourceType::from_json`].
+    /// The source `id` of [`StyleSourceType::from_json`]'s data.
     fn create_from_json(
         &self,
         id: &str,
         value: &Convertible<'_>,
         functions: &Arc<Functions>,
         error: &mut Error,
-    ) -> Option<Box<dyn crate::source::Source>>;
+    ) -> Option<Source>;
 }
 
 /// The [`ErasedStyleSourceType`] of `T`, which [`style_source_entry`]
@@ -413,8 +581,8 @@ impl<T: StyleSourceType> ErasedStyleSourceType for SourceTypeEntry<T> {
         value: &Convertible<'_>,
         functions: &Arc<Functions>,
         error: &mut Error,
-    ) -> Option<Box<dyn crate::source::Source>> {
-        T::from_json(id, value, functions, error)
+    ) -> Option<Source> {
+        T::from_json(value, functions, error).map(|data| Source::new(id, data))
     }
 }
 

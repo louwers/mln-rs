@@ -37,15 +37,16 @@ use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::symbol_layer::Symbol;
 use mln_style::projection::Projection;
+use mln_style::source_type::SourceData;
 use mln_style::sources::custom_geometry_source::{
-    CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
+    self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
 };
-use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
-use mln_style::sources::image_source::ImageSource;
-use mln_style::sources::tile_source::TileSource;
+use mln_style::sources::geojson::GeoJSONOptions;
+use mln_style::sources::image::ImageSourceOptions;
+use mln_style::sources::{ImageSourceType, image_source};
 use mln_style::sprite::Sprite;
 use mln_style::style_property::Kind as StylePropertyKind;
-use mln_style::{Edit, PropertyValue, TransitionOptions, source};
+use mln_style::{Edit, PropertyValue, Source, TransitionOptions};
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_test_server::HttpServer;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
@@ -95,8 +96,22 @@ fn layer_property(layer: &str, name: &str, value: serde_json::Value) -> Edit {
     Edit::SetLayerProperty { layer: layer.to_owned(), name: name.to_owned(), value }
 }
 
-fn vector_source(id: &str, tiles: &str) -> TileSource {
-    TileSource::vector(id, None, PartialTileset { tiles: Some(vec![tiles.to_owned()]), ..PartialTileset::default() })
+fn vector_source(id: &str, tiles: &str) -> Source {
+    let tileset = PartialTileset { tiles: Some(vec![tiles.to_owned()]), ..PartialTileset::default() };
+    mln_style::sources::vector_source(id, None, tileset)
+}
+
+/// `source` with `change` made to its common members.
+fn with_common(source: &Source, change: impl FnOnce(&mut mln_style::source_type::SourceCommon)) -> Source {
+    let mut common = *source.common();
+    change(&mut common);
+    source.with_common(common)
+}
+
+/// An image source `id` of `image` at `coordinates`.
+fn image_source_of(id: &str, coordinates: [LatLng; 4], image: PremultipliedImage) -> Source {
+    let options = ImageSourceOptions { url: None, coordinates };
+    Source::new(id, SourceData::<ImageSourceType>::with_description(options, Arc::new(image)))
 }
 
 fn no_content() -> Response {
@@ -1562,9 +1577,8 @@ fn source_changes_reach_the_observer() {
     assert_eq!(changed.take(), ["described"]);
 
     {
-        let map = test.map();
-        let source = map.source("points").unwrap().downcast_ref::<GeoJSONSource>().unwrap();
-        source.set_geojson(GeoJson::from(Geometry::new_point([1.0, 1.0]))).unwrap();
+        let mut map = test.map();
+        set_geojson(&mut map, "points", GeoJson::from(Geometry::new_point([1.0, 1.0])));
         assert!(changed.borrow().is_empty());
     }
     assert_eq!(changed.take(), ["points"]);
@@ -1630,7 +1644,7 @@ fn issue12432() {
 #[test]
 fn issue15216() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
-    test.map().add_source(Box::new(ImageSource::new("ImageSource", [LatLng::default(); 4]))).unwrap();
+    test.map().add_source(image_source("ImageSource", [LatLng::default(); 4])).unwrap();
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
@@ -1654,9 +1668,8 @@ fn globe_image_source_below_zoom_zero() {
         .edit_style(|style| style.set_root_property_json("projection", r#"{"type":"vertical-perspective"}"#))
         .unwrap();
     let coords = [ll(60.0, -10.0), ll(60.0, 10.0), ll(50.0, 10.0), ll(50.0, -10.0)];
-    let source = ImageSource::new("image", coords);
-    source.set_image(decode_image("test/fixtures/image/no_profile.png"));
-    test.map().add_source(Box::new(source)).unwrap();
+    let source = image_source_of("image", coords, decode_image("test/fixtures/image/no_profile.png"));
+    test.map().add_source(source).unwrap();
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
@@ -1680,9 +1693,9 @@ fn image_source_beyond_mercator_latitudes() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    let source = ImageSource::new("image", [ll(88.0, -10.0), ll(88.0, 10.0), ll(86.0, 10.0), ll(86.0, -10.0)]);
-    source.set_image(PremultipliedImage::new(Size::new(4, 4)));
-    test.map().add_source(Box::new(source)).unwrap();
+    let coordinates = [ll(88.0, -10.0), ll(88.0, 10.0), ll(86.0, 10.0), ll(86.0, -10.0)];
+    let source = image_source_of("image", coordinates, PremultipliedImage::new(Size::new(4, 4)));
+    test.map().add_source(source).unwrap();
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
@@ -1718,11 +1731,12 @@ fn an_image_source_without_a_url_draws_once_it_has_an_image() {
 
     let mut red = PremultipliedImage::new(Size::new(1, 1));
     red.data.copy_from_slice(&[255, 0, 0, 255]);
-    let image_source = |map: &Map| map.source("image").unwrap().downcast_ref::<ImageSource>().cloned().unwrap();
-    image_source(&test.map()).set_image(red);
+    let edit = Edit::SetImageSourceImage { id: "image".to_owned(), image: red };
+    test.map().edit_style(|style| style.apply(edit)).unwrap();
     assert_eq!(center_pixel(&test.render().image), [255, 0, 0, 255]);
 
-    image_source(&test.map()).set_url("fixture://image.png");
+    let edit = Edit::SetImageSourceUrl { id: "image".to_owned(), url: "fixture://image.png".to_owned() };
+    test.map().edit_style(|style| style.apply(edit)).unwrap();
     assert_eq!(test.file_source.requests_len(), 1);
     // The frontend's device logs the platform or GPU it is on, and the
     // process's first OpenGL context the GPU, which may be this test's.
@@ -2126,9 +2140,9 @@ fn prefetch_delta_override() {
     );
 
     // Vector source
-    let vector = vector_source("vector", "a/{z}/{x}/{y}");
-    source::set_prefetch_zoom_delta(&vector, Some(0));
-    test.map().add_source(Box::new(vector)).unwrap();
+    let vector =
+        with_common(&vector_source("vector", "a/{z}/{x}/{y}"), |common| common.set_prefetch_zoom_delta(Some(0)));
+    test.map().add_source(vector).unwrap();
 
     let requested_tiles = Arc::new(AtomicI32::new(0));
     {
@@ -2140,7 +2154,7 @@ fn prefetch_delta_override() {
     }
 
     // Custom source
-    test.map().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0), &test.run_loop))).unwrap();
+    test.map().add_source(counted_custom_source(&requested_tiles, Some(0), &test.run_loop)).unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     {
@@ -2157,8 +2171,10 @@ fn prefetch_delta_override() {
     stop_on_full_frame(&test);
 
     for id in ["vector", "custom"] {
-        let map = test.map();
-        source::set_prefetch_zoom_delta(map.source(id).unwrap(), None);
+        let mut map = test.map();
+        let mut common = *map.source(id).unwrap().common();
+        common.set_prefetch_zoom_delta(None);
+        map.edit_style(|style| style.apply(Edit::SetSourceCommon { id: id.to_owned(), common })).unwrap();
     }
     test.run_loop.run();
 
@@ -2172,7 +2188,7 @@ fn counted_custom_source(
     requested_tiles: &Arc<AtomicI32>,
     prefetch_zoom_delta: Option<u8>,
     run_loop: &RunLoop,
-) -> CustomGeometrySource {
+) -> Source {
     let handle = Arc::new(OnceLock::<CustomGeometrySourceHandle>::new());
     let fetch: TileFunction = {
         let handle = Arc::clone(&handle);
@@ -2189,10 +2205,10 @@ fn counted_custom_source(
         cancel_tile_function: Some(Arc::new(|_: &CanonicalTileID| {})),
         ..Default::default()
     };
-    let custom = CustomGeometrySource::new("custom", options, run_loop.pool()).unwrap();
-    handle.set(custom.handle()).unwrap();
+    let custom = custom_geometry_source::create("custom", options, run_loop.pool()).unwrap();
+    handle.set(CustomGeometrySourceHandle::of(&custom).unwrap()).unwrap();
     if prefetch_zoom_delta.is_some() {
-        source::set_prefetch_zoom_delta(&custom, prefetch_zoom_delta);
+        return with_common(&custom, |common| common.set_prefetch_zoom_delta(prefetch_zoom_delta));
     }
     custom
 }
@@ -2215,7 +2231,7 @@ fn globe_prefetch_requests_coarser_tiles() {
         r#"{"version": 8, "projection": {"type": "vertical-perspective"}, "sources": {},
                  "layers": [{"id": "vector", "type": "fill", "source": "vector"}]}"#,
     );
-    test.map().add_source(Box::new(vector_source("vector", "a/{z}/{x}/{y}"))).unwrap();
+    test.map().add_source(vector_source("vector", "a/{z}/{x}/{y}")).unwrap();
 
     // C++ guards `zooms` with a mutex; the stub file source answers on this thread.
     let zooms: Rc<RefCell<BTreeSet<i32>>> = Rc::new(RefCell::new(BTreeSet::new()));
@@ -2336,7 +2352,7 @@ fn prefetch_delta_override_custom_source() {
 
     let requested_tiles = Arc::new(AtomicI32::new(0));
 
-    test.map().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0), &test.run_loop))).unwrap();
+    test.map().add_source(counted_custom_source(&requested_tiles, Some(0), &test.run_loop)).unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     {
@@ -2355,7 +2371,7 @@ fn prefetch_delta_override_custom_source() {
         map.edit_style(|style| style.apply(Edit::RemoveLayer("custom".to_owned()))).unwrap();
         map.remove_source("custom");
         map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
-        map.add_source(Box::new(counted_custom_source(&requested_tiles, None, &test.run_loop))).unwrap();
+        map.add_source(counted_custom_source(&requested_tiles, None, &test.run_loop)).unwrap();
     }
     test.run_loop.run();
 
@@ -2469,12 +2485,13 @@ fn source_minimum_update_interval_override() {
     );
 
     // Vector source
-    let vector_source_a = vector_source("source-a", "a/{z}/{x}/{y}");
-    source::set_minimum_tile_update_interval(&vector_source_a, Duration::from_secs(1));
-    test.map().add_source(Box::new(vector_source_a)).unwrap();
+    let vector_source_a = with_common(&vector_source("source-a", "a/{z}/{x}/{y}"), |common| {
+        common.set_minimum_tile_update_interval(Duration::from_secs(1));
+    });
+    test.map().add_source(vector_source_a).unwrap();
 
     let vector_source_b = vector_source("source-b", "b/{z}/{x}/{y}");
-    test.map().add_source(Box::new(vector_source_b)).unwrap();
+    test.map().add_source(vector_source_b).unwrap();
 
     let requested_tiles_a = Rc::new(Cell::new(0));
     let requested_tiles_b = Rc::new(Cell::new(0));
@@ -2679,9 +2696,8 @@ fn volatile_source() {
       }]
     }"#,
     );
-    let source = vector_source("vector", "a/{z}/{x}/{y}");
-    source::set_volatile(&source, is_volatile);
-    test.map().add_source(Box::new(source)).unwrap();
+    let source = with_common(&vector_source("vector", "a/{z}/{x}/{y}"), |common| common.set_volatile(is_volatile));
+    test.map().add_source(source).unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     let run_loop = test.run_loop.clone();
@@ -2970,10 +2986,10 @@ fn stencil_overflow() {
     };
     let mut options = CustomGeometrySourceOptions { fetch_tile_function: Some(fetch), ..Default::default() };
     options.tile_options.tile_size = mln_util::constants::TILE_SIZE_I / 32;
-    let custom = CustomGeometrySource::new("custom", options, test.run_loop.pool()).unwrap();
-    handle.set(custom.handle()).unwrap();
+    let custom = custom_geometry_source::create("custom", options, test.run_loop.pool()).unwrap();
+    handle.set(CustomGeometrySourceHandle::of(&custom).unwrap()).unwrap();
 
-    test.map().add_source(Box::new(custom)).unwrap();
+    test.map().add_source(custom).unwrap();
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
@@ -3769,15 +3785,16 @@ fn line_layer_depth_distribution() {
 
         let geo = Geometry::new_line_string([[-x, y], [x, y], [x, -y], [-x, -y], [-x, y]]);
 
-        let source = GeoJSONSource::with_default_options(format!("GeoJSONSource_{index}"));
-        source.set_geojson(GeoJson::from(vec![geojson::Feature::from(geo)])).unwrap();
-
-        source
+        geojson_source_with_data(
+            &format!("GeoJSONSource_{index}"),
+            GeoJSONOptions::default_options(),
+            GeoJson::from(vec![geojson::Feature::from(geo)]),
+        )
     };
 
     for i in 0..LAYER_COUNT {
         // add one source per layer
-        test.map().add_source(Box::new(get_source(i))).unwrap();
+        test.map().add_source(get_source(i)).unwrap();
 
         let mut layer = Layer::new(
             Registry::with_builtins().style(),
@@ -3850,9 +3867,9 @@ fn geojson_symbol_map() -> (MapTest, Rc<Cell<u32>>) {
 fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous: bool, with_text: bool) {
     let source_id = format!("point-{index}");
     let options = GeoJSONOptions { synchronous_update: synchronous, ..GeoJSONOptions::default() };
-    let source = GeoJSONSource::new(source_id.clone(), Arc::new(options));
-    source.set_geojson(GeoJson::from(Geometry::new_point([longitude, 0.0]))).unwrap();
-    test.map().add_source(Box::new(source)).unwrap();
+    let source =
+        geojson_source_with_data(&source_id, Arc::new(options), GeoJson::from(Geometry::new_point([longitude, 0.0])));
+    test.map().add_source(source).unwrap();
 
     let text = if with_text { "New place" } else { "" };
     let layer_json = format!(

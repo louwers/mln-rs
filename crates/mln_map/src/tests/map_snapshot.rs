@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 
 use mln_actor::RunLoop;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::ErrorKind;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -220,9 +219,8 @@ fn a_source_that_reloads_its_description_changes_the_generation() {
     assert!(map.style_loaded());
     let generation = map.generation();
 
-    let source = map.source("points").expect("the source");
-    source.downcast_ref::<GeoJSONSource>().expect("a GeoJSON source").set_url("http://points");
-    map.process_events();
+    let edit = mln_style::Edit::SetGeoJsonUrl { id: "points".to_owned(), url: "http://points".to_owned() };
+    map.edit_style(|style| style.apply(edit)).expect("a GeoJSON source");
     assert!(!map.style_loaded());
     assert!(map.generation() > generation);
 }

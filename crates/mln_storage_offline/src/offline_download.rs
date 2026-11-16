@@ -332,7 +332,7 @@ impl OfflineDownload {
         result.required_resource_count_is_precise = true;
 
         for source in &parser.sources {
-            let record = source.base_impl();
+            let record = source.clone();
             let type_ = record.get_type();
             let (tileset, tile_size) = match record.data().offline() {
                 OfflineResources::None => continue,
@@ -424,7 +424,7 @@ impl OfflineDownload {
         self.status.required_resource_count_is_precise = true;
 
         for source in &parser.sources {
-            let record = source.base_impl();
+            let record = source.clone();
             match record.data().offline() {
                 OfflineResources::None => {}
                 OfflineResources::Tiles { tileset, tile_size } => {

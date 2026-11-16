@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::{Convertible, Error};
 use crate::expression::{Functions, dsl};
-use crate::sources::geojson_source::{ClusterProperties, GeoJSONOptions};
+use crate::sources::geojson::{ClusterProperties, GeoJSONOptions};
 
 // The C++ `static_cast<uint8_t/uint16_t/size_t>(float)` of out-of-range
 // values is UB; the port saturates (`as`).

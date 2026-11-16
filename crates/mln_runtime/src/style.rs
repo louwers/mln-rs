@@ -1,21 +1,21 @@
 //! The map handle's style commands: sources and their data, custom sources,
 //! images, layers, the light, the global state and transitions.
 
-use std::any::Any;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use geojson::{GeoJson, GeometryValue};
 use mln_style::expression::Functions;
 use mln_style::image::Impl as StyleImage;
-use mln_style::source::{Source, same_source, set_volatile};
+use mln_style::source_type::SourceData;
 use mln_style::sources::custom_geometry_source::{self, TileOptions};
-use mln_style::sources::geojson_source::GeoJSONData;
-use mln_style::sources::image_source::ImageSource;
+use mln_style::sources::geojson::{GeoJSONData, GeoJSONDataBuilder};
+use mln_style::sources::image::ImageSourceOptions;
 use mln_style::sources::{
-    CustomGeometrySource, CustomVectorSource, GeoJSONOptions, GeoJSONSource, TileDataFormat, custom_vector_source,
+    CustomGeometrySourceHandle, CustomVectorSourceHandle, GeoJSONOptions, GeoJsonSourceType, ImageSourceType,
+    TileDataFormat, custom_vector_source, geojson_source,
 };
-use mln_style::{Edit, TransitionOptions};
+use mln_style::{Edit, Source, SourceInstance, TransitionOptions};
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
@@ -143,7 +143,7 @@ impl GeoJsonSourceOptions {
     fn into_core(self, functions: &Arc<Functions>) -> Result<GeoJSONOptions, Error> {
         let cluster_properties = match &self.cluster_properties {
             Some(json) => parse_cluster_properties(json, functions)?,
-            None => mln_style::sources::geojson_source::ClusterProperties::default(),
+            None => mln_style::sources::geojson::ClusterProperties::default(),
         };
         Ok(GeoJSONOptions {
             minzoom: self.min_zoom,
@@ -169,7 +169,7 @@ impl GeoJsonSourceOptions {
 fn parse_cluster_properties(
     json: &str,
     functions: &Arc<Functions>,
-) -> Result<mln_style::sources::geojson_source::ClusterProperties, Error> {
+) -> Result<mln_style::sources::geojson::ClusterProperties, Error> {
     let value: serde_json::Value = serde_json::from_str(json)
         .map_err(|error| Error::invalid_argument(format!("cluster_properties is not valid JSON: {error}")))?;
     if !value.is_object() {
@@ -270,7 +270,7 @@ fn tile_functions(
 /// holds for it.
 struct CallbackSource {
     id: String,
-    source: Box<dyn Source>,
+    instance: SourceInstance,
     /// Held only to be dropped: the core's tile functions hold the
     /// callbacks weakly.
     _callbacks: Arc<CustomSourceCallbacks>,
@@ -284,7 +284,9 @@ pub(crate) struct CallbackSources(Vec<CallbackSource>);
 /// GeoJSON data for one source: the data being built, and the newest data
 /// that waits to follow it.
 struct GeoJsonUpdate {
-    source: GeoJSONSource,
+    /// The source the data is for; a source that replaced it under its id
+    /// doesn't take it.
+    instance: SourceInstance,
     /// The build in progress, by its number, and its completion, which
     /// resolves when the data is installed or when something replaced the
     /// source's data first.
@@ -302,15 +304,15 @@ pub(crate) struct GeoJsonUpdates(HashMap<String, GeoJsonUpdate>);
 /// runtime's state unborrowed.
 pub(crate) fn reconcile(entry: &mut MapEntry, outbox: &mut Outbox) {
     let map = &entry.core;
-    let present = |id: &str, source: &dyn Source| map.source(id).is_some_and(|found| same_source(found, source));
+    let present = |id: &str, instance: SourceInstance| map.source(id).is_some_and(|found| found.instance() == instance);
     let (kept, gone): (Vec<_>, Vec<_>) =
-        std::mem::take(&mut entry.callback_sources.0).into_iter().partition(|held| present(&held.id, &*held.source));
+        std::mem::take(&mut entry.callback_sources.0).into_iter().partition(|held| present(&held.id, held.instance));
     entry.callback_sources.0 = kept;
     if !gone.is_empty() {
         outbox.push(move || drop(gone));
     }
     entry.geojson_updates.0.retain(|id, update| {
-        if present(id, &update.source) {
+        if present(id, update.instance) {
             return true;
         }
         let cancelled = || Err(Error::cancelled("the source left the style before its data was ready"));
@@ -354,16 +356,24 @@ fn source_not_found(id: &str) -> Error {
     Error::not_found(format!("source {} does not exist", quote(id)))
 }
 
-fn find_source<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a dyn Source, Error> {
+fn find_source<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a Source, Error> {
     map.source(id).ok_or_else(|| source_not_found(id))
 }
 
-/// The source `id` as a `T`, which `kind` names in the error for a source of
-/// another kind, as in `source "water" is not a GeoJSON source`.
-fn find_source_as<'a, T: Source>(map: &'a mln_map::Map, id: &str, kind: &str) -> Result<&'a T, Error> {
-    find_source(map, id)?
-        .downcast_ref::<T>()
-        .ok_or_else(|| Error::invalid_argument(format!("source {} is not {kind}", quote(id))))
+/// The error for the source `id`, which isn't `kind`, as in `source "water"
+/// is not a GeoJSON source`.
+fn not_a(id: &str, kind: &str) -> Error {
+    Error::invalid_argument(format!("source {} is not {kind}", quote(id)))
+}
+
+/// The data of the source `id`, a GeoJSON source.
+fn geojson_data<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a SourceData<GeoJsonSourceType>, Error> {
+    SourceData::recover(find_source(map, id)?).ok_or_else(|| not_a(id, "a GeoJSON source"))
+}
+
+/// The data of the source `id`, an image source.
+fn image_data<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a SourceData<ImageSourceType>, Error> {
+    SourceData::recover(find_source(map, id)?).ok_or_else(|| not_a(id, "an image source"))
 }
 
 fn require_new_source(map: &mln_map::Map, id: &str) -> Result<(), Error> {
@@ -406,17 +416,16 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
     Some(serde_json::Value::Object(members).to_string())
 }
 
-/// What the API reports about `source`, a source handle; `None` for a
-/// source of a type the runtime doesn't name.
-fn source_info(source: &dyn Source) -> Option<SourceInfo> {
-    let record = source.base_impl();
-    let kind = source_kind(record.info().name)?;
-    let summary = record.summary();
+/// What the API reports about `source`; `None` for a source of a type the
+/// runtime doesn't name.
+fn source_info(source: &Source) -> Option<SourceInfo> {
+    let kind = source_kind(source.info().name)?;
+    let summary = source.summary();
     Some(SourceInfo {
-        id: record.id().to_owned(),
+        id: source.id().to_owned(),
         kind,
-        is_volatile: record.common().is_volatile(),
-        attribution: record.get_attribution().filter(|attribution| !attribution.is_empty()),
+        is_volatile: source.common().is_volatile(),
+        attribution: source.get_attribution().filter(|attribution| !attribution.is_empty()),
         url: summary.url,
         tiles: summary.inline_tileset.map(|tileset| SourceTiles {
             urls: tileset.tiles,
@@ -526,8 +535,9 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             require_loaded(map)?;
-            set_volatile(find_source(map, &source_id)?, is_volatile);
-            Ok(())
+            let mut common = *find_source(map, &source_id)?.common();
+            common.set_volatile(is_volatile);
+            map.edit_style(|style| style.apply(Edit::SetSourceCommon { id: source_id, common }))
         })
     }
 
@@ -550,7 +560,7 @@ impl Map {
             let functions = Arc::clone(map.style().registry().functions());
             let options = options.into_core(&functions)?;
             require_new_source(map, &source_id)?;
-            map.add_source(Box::new(GeoJSONSource::new(source_id, Arc::new(options))))
+            map.add_source(geojson_source(&source_id, Arc::new(options)))
         })
     }
 
@@ -566,7 +576,8 @@ impl Map {
         self.send(
             move |entry, outbox| {
                 require_loaded(&entry.core)?;
-                find_source_as::<GeoJSONSource>(&entry.core, &source_id, "a GeoJSON source")?.set_url(&url);
+                let edit = Edit::SetGeoJsonUrl { id: source_id.clone(), url };
+                entry.core.edit_style(|style| style.apply(edit))?;
                 if let Some((_, resolver)) =
                     entry.geojson_updates.0.get_mut(&source_id).and_then(|update| update.waiting.take())
                 {
@@ -637,9 +648,7 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             require_loaded(map)?;
-            find_source_as::<GeoJSONSource>(map, &source_id, "a GeoJSON source")?
-                .set_override_synchronous_update(enabled);
-            Ok(())
+            map.edit_style(|style| style.apply(Edit::SetGeoJsonSynchronous { id: source_id, synchronous: enabled }))
         })
     }
 
@@ -668,9 +677,8 @@ impl Map {
                         zoom_range,
                         tile_options,
                     };
-                    let source = CustomGeometrySource::new(id, options, pool)
-                        .map_err(|error| Error::invalid_argument(error.to_string()))?;
-                    Ok(Box::new(source))
+                    custom_geometry_source::create(&id, options, pool)
+                        .map_err(|error| Error::invalid_argument(error.to_string()))
                 })
             },
             |(), entry| entry.applied(),
@@ -693,7 +701,7 @@ impl Map {
                     let (fetch_tile_function, cancel_tile_function) = tile_functions(callbacks);
                     let options =
                         custom_vector_source::Options { fetch_tile_function, cancel_tile_function, zoom_range };
-                    Ok(Box::new(CustomVectorSource::new(id, options, pool)))
+                    Ok(custom_vector_source::create(&id, options, pool))
                 })
             },
             |(), entry| entry.applied(),
@@ -859,9 +867,9 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             require_new_source(map, &source_id)?;
-            let source = ImageSource::new(source_id, coordinates);
-            source.set_image(image);
-            map.add_source(Box::new(source))
+            let options = ImageSourceOptions { url: None, coordinates };
+            let data = SourceData::<ImageSourceType>::with_description(options, Arc::new(image));
+            map.add_source(Source::new(&source_id, data))
         })
     }
 
@@ -874,8 +882,7 @@ impl Map {
         let (source_id, url) = (source_id.into(), url.into());
         self.command(move |map| {
             require_loaded(map)?;
-            find_source_as::<ImageSource>(map, &source_id, "an image source")?.set_url(&url);
-            Ok(())
+            map.edit_style(|style| style.apply(Edit::SetImageSourceUrl { id: source_id, url }))
         })
     }
 
@@ -888,8 +895,7 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             require_loaded(map)?;
-            find_source_as::<ImageSource>(map, &source_id, "an image source")?.set_image(image);
-            Ok(())
+            map.edit_style(|style| style.apply(Edit::SetImageSourceImage { id: source_id, image }))
         })
     }
 
@@ -903,15 +909,14 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             require_loaded(map)?;
-            find_source_as::<ImageSource>(map, &source_id, "an image source")?.set_coordinates(coordinates);
-            Ok(())
+            map.edit_style(|style| style.apply(Edit::SetImageSourceCoordinates { id: source_id, coordinates }))
         })
     }
 
     /// The corners of an image source's image, clockwise from the top left.
     pub fn image_source_coordinates(&self, source_id: impl Into<String>) -> Result<Completion<[LatLng; 4]>, Error> {
         let source_id = source_id.into();
-        self.query(move |map| Ok(find_source_as::<ImageSource>(map, &source_id, "an image source")?.get_coordinates()))
+        self.query(move |map| Ok(image_data(map, &source_id)?.options.coordinates))
     }
 
     // MARK: - Layers
@@ -959,21 +964,19 @@ fn add_callback_source(
     outbox: &mut Outbox,
     id: String,
     callbacks: Arc<CustomSourceCallbacks>,
-    make: impl FnOnce(String, &Arc<CustomSourceCallbacks>, mln_actor::SchedulerPtr) -> Result<Box<dyn Source>, Error>,
+    make: impl FnOnce(String, &Arc<CustomSourceCallbacks>, mln_actor::SchedulerPtr) -> Result<Source, Error>,
 ) -> Result<(), Error> {
     let pool = entry.core.run_loop().pool();
     let map = &mut entry.core;
     let added = require_new_source(map, &id).and_then(|()| {
         let source = make(id.clone(), &callbacks, pool)?;
-        // The map takes a handle of the source, and the runtime keeps
-        // another to know it by.
-        let held = clone_source(&*source)?;
+        let instance = source.instance();
         map.add_source(source)?;
-        Ok(held)
+        Ok(instance)
     });
     match added {
-        Ok(source) => {
-            entry.callback_sources.0.push(CallbackSource { id, source, _callbacks: callbacks });
+        Ok(instance) => {
+            entry.callback_sources.0.push(CallbackSource { id, instance, _callbacks: callbacks });
             Ok(())
         }
         Err(error) => {
@@ -983,24 +986,12 @@ fn add_callback_source(
     }
 }
 
-/// Another handle to a custom source.
-fn clone_source(source: &dyn Source) -> Result<Box<dyn Source>, Error> {
-    let any: &dyn Any = source;
-    if let Some(geometry) = any.downcast_ref::<CustomGeometrySource>() {
-        Ok(Box::new(geometry.clone()))
-    } else if let Some(vector) = any.downcast_ref::<CustomVectorSource>() {
-        Ok(Box::new(vector.clone()))
-    } else {
-        Err(Error::invalid_argument("not a custom source"))
-    }
+fn custom_geometry(map: &mln_map::Map, id: &str) -> Result<CustomGeometrySourceHandle, Error> {
+    CustomGeometrySourceHandle::of(find_source(map, id)?).ok_or_else(|| not_a(id, "a custom geometry source"))
 }
 
-fn custom_geometry<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a CustomGeometrySource, Error> {
-    find_source_as(map, id, "a custom geometry source")
-}
-
-fn custom_vector<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a CustomVectorSource, Error> {
-    find_source_as(map, id, "a custom vector source")
+fn custom_vector(map: &mln_map::Map, id: &str) -> Result<CustomVectorSourceHandle, Error> {
+    CustomVectorSourceHandle::of(find_source(map, id)?).ok_or_else(|| not_a(id, "a custom vector source"))
 }
 
 /// Takes new data for the GeoJSON source `source_id`: builds it now with
@@ -1018,46 +1009,52 @@ fn queue_geojson(
 ) -> Result<Option<Resolver<Applied>>, (Error, Resolver<Applied>)> {
     let found = (|| {
         require_loaded(&entry.core)?;
-        let source = find_source_as::<GeoJSONSource>(&entry.core, source_id, "a GeoJSON source")?.clone();
+        let data = geojson_data(&entry.core, source_id)?;
         let geojson = parse_geojson(json)?;
-        if source.get_options().cluster {
+        if data.options.options.cluster {
             check_clusterable(&geojson)?;
         }
-        Ok((source, geojson))
+        let instance = find_source(&entry.core, source_id)?.instance();
+        Ok((instance, data.load, data.options.data_builder(), data.options.synchronous_update, geojson))
     })();
-    let (source, geojson) = match found {
+    let (instance, load, builder, synchronous, geojson) = match found {
         Ok(found) => found,
         Err(error) => return Err((error, resolver)),
     };
-    if source.is_update_synchronous() {
-        return match source.data_builder().build(geojson) {
+    if synchronous {
+        return match builder.build(geojson) {
             Ok(data) => {
-                source.set_geojson_data(Some(data));
-                Ok(Some(resolver))
+                let edit = Edit::SetGeoJsonData { id: source_id.to_owned(), data: Some(data) };
+                match entry.core.edit_style(|style| style.apply(edit)) {
+                    Ok(()) => Ok(Some(resolver)),
+                    Err(error) => Err((error, resolver)),
+                }
             }
             Err(error) => Err((error, resolver)),
         };
     }
     let update = entry.geojson_updates.0.entry(source_id.to_owned()).or_insert_with(|| GeoJsonUpdate {
-        source: source.clone(),
+        instance,
         building: None,
         waiting: None,
     });
     if update.building.is_none() {
-        update.source = source;
-        start_geojson(update, map_id, source_id.to_owned(), geojson, resolver, background);
+        update.instance = instance;
+        start_geojson(update, map_id, source_id.to_owned(), (builder, load), geojson, resolver, background);
     } else if let Some((_, replaced)) = update.waiting.replace((geojson, resolver)) {
         outbox.resolve(replaced, Err(Error::cancelled("newer data for the source replaced it")));
     }
     Ok(None)
 }
 
-/// Builds `geojson` for `update`'s source on a background thread, then
-/// installs it from the runtime's thread.
+/// Builds `geojson` with `builder` for `update`'s source, whose data is at
+/// `load`, on a background thread, then installs it from the runtime's
+/// thread.
 fn start_geojson(
     update: &mut GeoJsonUpdate,
     map_id: MapId,
     source_id: String,
+    (builder, load): (GeoJSONDataBuilder, u64),
     geojson: GeoJson,
     resolver: Resolver<Applied>,
     background: Background,
@@ -1067,15 +1064,21 @@ fn start_geojson(
     static BUILDS: AtomicU64 = AtomicU64::new(0);
     let build = BUILDS.fetch_add(1, Ordering::Relaxed);
     update.building = Some((build, resolver));
-    let builder = update.source.data_builder();
-    let generation = update.source.data_generation();
     let next = background.clone();
     background.pool.schedule(Box::new(move || {
         let data = builder.build(geojson);
         post(&background.queue, move |core, outbox| {
-            install_geojson(core, map_id, &source_id, (build, generation), data, next, outbox);
+            install_geojson(core, map_id, &source_id, (build, load), data, next, outbox);
         });
     }));
+}
+
+/// The builder and the data's load of the source `id`, if it's the GeoJSON
+/// source `instance`.
+fn current_geojson(map: &mln_map::Map, id: &str, instance: SourceInstance) -> Option<(GeoJSONDataBuilder, u64)> {
+    let source = map.source(id).filter(|source| source.instance() == instance)?;
+    let data = SourceData::<GeoJsonSourceType>::recover(source)?;
+    Some((data.options.data_builder(), data.load))
 }
 
 /// Installs data that a background thread built, unless something replaced
@@ -1084,7 +1087,7 @@ fn install_geojson(
     core: &mut RuntimeCore,
     map_id: MapId,
     source_id: &str,
-    (build, generation): (u64, u64),
+    (build, load): (u64, u64),
     data: Result<Arc<dyn GeoJSONData>, Error>,
     background: Background,
     outbox: &mut Outbox,
@@ -1093,23 +1096,23 @@ fn install_geojson(
     let Some(entry) = core.maps.get_mut(&map_id) else { return };
     let Some(update) = entry.geojson_updates.0.get_mut(source_id) else { return };
     let Some((_, resolver)) = update.building.take_if(|(building, _)| *building == build) else { return };
-    let current = entry.core.source(source_id).is_some_and(|found| same_source(found, &update.source));
+    let current = current_geojson(&entry.core, source_id, update.instance);
     let installed = match data {
         Err(error) => Err(error),
-        Ok(_) if !current || update.source.data_generation() != generation => {
+        Ok(_) if current.as_ref().is_none_or(|(_, current_load)| *current_load != load) => {
             Err(Error::cancelled("the source's data was replaced before this data was ready"))
         }
         Ok(data) => {
-            update.source.set_geojson_data(Some(data));
-            Ok(())
+            let edit = Edit::SetGeoJsonData { id: source_id.to_owned(), data: Some(data) };
+            entry.core.edit_style(|style| style.apply(edit))
         }
     };
-    match update.waiting.take() {
-        Some((geojson, next)) if current => {
-            start_geojson(update, map_id, source_id.to_owned(), geojson, next, background);
+    match (update.waiting.take(), current_geojson(&entry.core, source_id, update.instance)) {
+        (Some((geojson, next)), Some(current)) => {
+            start_geojson(update, map_id, source_id.to_owned(), current, geojson, next, background);
         }
-        Some((_, next)) => outbox.resolve(next, Err(Error::cancelled("the source left the style"))),
-        None => {
+        (Some((_, next)), None) => outbox.resolve(next, Err(Error::cancelled("the source left the style"))),
+        (None, _) => {
             entry.geojson_updates.0.remove(source_id);
         }
     }

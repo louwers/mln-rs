@@ -12,7 +12,8 @@ use mln_storage::ResourceOptions;
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
-use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
+use mln_style::sources::CustomGeometrySourceHandle;
+use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_util::geo::LatLngBounds;
 use support::*;
 
@@ -60,9 +61,9 @@ impl TileLODTest {
             })),
             ..Default::default()
         };
-        let source = CustomGeometrySource::new("custom", options, run_loop.pool()).unwrap();
-        handle.set(source.handle()).unwrap();
-        map.add_source(Box::new(source)).unwrap();
+        let source = custom_geometry_source::create("custom", options, run_loop.pool()).unwrap();
+        handle.set(CustomGeometrySourceHandle::of(&source).unwrap()).unwrap();
+        map.add_source(source).unwrap();
 
         let mut layer = Layer::new(Registry::with_builtins().style(), "circle", "circles", "custom").unwrap();
         let error = layer.set_property("circle-color", &Convertible::from(&serde_json::json!("rgba(0,0,255,0)")), None);

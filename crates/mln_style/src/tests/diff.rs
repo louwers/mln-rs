@@ -124,9 +124,8 @@ mod versions {
     use mln_util::tileset::PartialTileset;
 
     use crate::diff::{LayerChange, StyleDiff, sources_by_id};
-    use crate::source::Source as _;
-    use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
-    use crate::sources::tile_source::TileSource;
+    use crate::sources::geojson::{GeoJSONOptions, geojson_source};
+    use crate::sources::tileset::vector_source;
     use crate::{Edit, StyleRegistry, image};
 
     const STYLE: &str = r#"{"version":8,
@@ -135,11 +134,11 @@ mod versions {
         "layers":[{"id":"bg","type":"background"},{"id":"dots","type":"circle","source":"a"}]}"#;
 
     fn style() -> crate::Style {
-        crate::Style::from_json(&StyleRegistry::with_builtins(), STYLE, None).unwrap().style
+        crate::Style::from_json(&StyleRegistry::with_builtins(), STYLE, None).unwrap()
     }
 
     fn vector(id: &str) -> crate::Source {
-        TileSource::vector(id, Some("mbtiles://tiles".to_owned()), PartialTileset::default()).base_impl()
+        vector_source(id, Some("mbtiles://tiles".to_owned()), PartialTileset::default())
     }
 
     fn image(id: &str) -> Arc<image::Impl> {
@@ -174,7 +173,7 @@ mod versions {
     #[test]
     fn the_source_pass_runs_in_id_order() {
         let mut style = style();
-        style.apply(Edit::SetSourceImpl { id: "b".to_owned(), source: Some(vector("b")) }).unwrap();
+        style.apply(Edit::AddSource(vector("b"))).unwrap();
         let ids: Vec<_> = style.get_sources().iter().map(|source| source.id().to_owned()).collect();
         assert_eq!(["c", "a", "b"], *ids);
         let sorted: Vec<_> = sources_by_id(style.get_sources()).iter().map(|source| source.id().to_owned()).collect();
@@ -185,10 +184,11 @@ mod versions {
     fn sources_differ_by_id_record_and_type() {
         let old = style();
         let mut new = old.clone();
-        let geojson_a = GeoJSONSource::new("a", GeoJSONOptions::default_options()).base_impl();
-        new.apply(Edit::SetSourceImpl { id: "c".to_owned(), source: Some(vector("c")) }).unwrap();
-        new.apply(Edit::SetSourceImpl { id: "a".to_owned(), source: Some(geojson_a) }).unwrap();
-        new.apply(Edit::SetSourceImpl { id: "d".to_owned(), source: Some(vector("d")) }).unwrap();
+        let geojson_a = geojson_source("a", GeoJSONOptions::default_options());
+        for source in [vector("c"), geojson_a, vector("d")] {
+            let _ = new.apply(Edit::RemoveSource(source.id().to_owned()));
+            new.apply(Edit::AddSource(source)).unwrap();
+        }
         let diff = StyleDiff::between(Some(&old), &new);
         assert_eq!(["c", "d"], *keys(&diff.sources.added));
         assert_eq!(["c"], *keys(&diff.sources.removed));

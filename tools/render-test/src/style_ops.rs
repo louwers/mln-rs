@@ -139,7 +139,7 @@ mod tests {
     }
 
     fn load_json(style: &mut Style, json: &str) {
-        *style = Style::from_json(style.registry(), json, None).expect("a style").style;
+        *style = Style::from_json(style.registry(), json, None).expect("a style");
     }
 
     #[test]

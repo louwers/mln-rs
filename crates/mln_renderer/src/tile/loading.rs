@@ -12,7 +12,7 @@ use mln_actor::actor::PoolActorRef;
 use mln_storage::response::Reason;
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, SubscriberKey};
-use mln_style::sources::geojson_source::{GeoJSONData, TileFeatures};
+use mln_style::sources::geojson::{GeoJSONData, TileFeatures};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;

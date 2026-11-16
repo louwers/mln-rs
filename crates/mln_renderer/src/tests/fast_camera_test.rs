@@ -18,11 +18,11 @@ use mln_actor::{LocalObject, RunLoop, TaggedScheduler, scheduler};
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
+use mln_style::Source;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Fill, Raster};
-use mln_style::source::Source;
-use mln_style::sources::tile_source::TileSource;
+use mln_style::sources::{raster_source, vector_source};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::geo::LatLng;
@@ -167,8 +167,8 @@ struct Scene {
     thread_pool: TaggedScheduler,
     network: Arc<Network>,
     transform: Transform,
-    vector: TileSource,
-    raster: TileSource,
+    vector: Source,
+    raster: Source,
     fill_layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     raster_layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     vector_render_source: Box<dyn RenderSource>,
@@ -182,17 +182,14 @@ impl Scene {
         let run_loop = RunLoop::new();
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         let network = Arc::new(Network::new());
-        let file_source: Arc<dyn FileSource> = Arc::<Network>::clone(&network);
 
         let tileset = |url: &str, max_zoom| PartialTileset {
             tiles: Some(vec![url.to_owned()]),
             max_zoom: Some(max_zoom),
             ..Default::default()
         };
-        let vector = TileSource::vector("vector", None, tileset("vector/{z}/{x}/{y}", 14));
-        let raster = TileSource::raster("raster", None, tileset("raster/{z}/{x}/{y}", 6), 256);
-        vector.load_description(&*file_source, &run_loop);
-        raster.load_description(&*file_source, &run_loop);
+        let vector = crate::tests::ready(vector_source("vector", None, tileset("vector/{z}/{x}/{y}", 14)));
+        let raster = crate::tests::ready(raster_source("raster", None, tileset("raster/{z}/{x}/{y}", 6), 256));
 
         let mut fill = Layer::new(Registry::with_builtins().style(), "fill", "water", "vector").unwrap();
         fill.set_source_layer("water");
@@ -207,8 +204,8 @@ impl Scene {
 
         let mut store = crate::tests::pool_store(&run_loop, &thread_pool);
         Scene {
-            vector_render_source: crate::tests::create_render_source(&vector.base_impl(), &mut store),
-            raster_render_source: crate::tests::create_render_source(&raster.base_impl(), &mut store),
+            vector_render_source: crate::tests::create_render_source(&vector, &mut store),
+            raster_render_source: crate::tests::create_render_source(&raster, &mut store),
             store,
             run_loop,
             thread_pool,
@@ -266,22 +263,8 @@ impl Scene {
         let relayout = !self.laid_out;
         self.laid_out = true;
         let store = &mut self.store;
-        self.vector_render_source.update(
-            store,
-            self.vector.base_impl(),
-            &self.fill_layers,
-            true,
-            relayout,
-            &parameters,
-        );
-        self.raster_render_source.update(
-            store,
-            self.raster.base_impl(),
-            &self.raster_layers,
-            true,
-            relayout,
-            &parameters,
-        );
+        self.vector_render_source.update(store, self.vector.clone(), &self.fill_layers, true, relayout, &parameters);
+        self.raster_render_source.update(store, self.raster.clone(), &self.raster_layers, true, relayout, &parameters);
 
         self.network.end_frame();
         // Until neither the tile workers nor the replies they sent have

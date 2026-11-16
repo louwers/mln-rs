@@ -11,17 +11,17 @@ use mln_map_types::{
 };
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, Kind, RequestOrder, Resource, Responder, Response};
+use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Responder, Response};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Hillshade, Line, Raster};
-use mln_style::source::{self, Source, SourceObserver};
-use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
-use mln_style::sources::custom_vector_source::{
-    CustomVectorSource, Options as CustomVectorSourceOptions, TileDataFormat,
+use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
+use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
+use mln_style::sources::geojson::{GeoJSONOptions, create_geojson_data, geojson_source};
+use mln_style::sources::{
+    CustomGeometrySourceHandle, CustomVectorSourceHandle, raster_dem_source, raster_source, vector_source,
 };
-use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource, create_geojson_data};
-use mln_style::sources::tile_source::TileSource;
+use mln_style::{Edit, Source, Style};
 use mln_style_types::{ProjectionDefinition, SourceType};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
@@ -140,7 +140,6 @@ impl Drop for SourceTest {
 
 type OnTileChanged = Box<dyn Fn()>;
 type OnTileError = Box<dyn Fn(&str, &OverscaledTileID, Error)>;
-type OnSourceChanged = Box<dyn Fn(&dyn Source)>;
 
 /// Hears what a tile store reports of its sources' tiles.
 #[derive(Default)]
@@ -168,18 +167,12 @@ impl StubRenderSourceObserver {
     }
 }
 
-/// A style observer stub: the `SourceObserver` half.
-#[derive(Default)]
-struct StubStyleObserver {
-    source_changed: RefCell<Option<OnSourceChanged>>,
-}
-
-impl SourceObserver for StubStyleObserver {
-    fn on_source_changed(&self, source: &dyn Source) {
-        if let Some(f) = &*self.source_changed.borrow() {
-            f(source);
-        }
-    }
+/// `source` after `edit`, made through a style that holds it.
+fn edited(source: &Source, edit: Edit) -> Source {
+    let mut style = Style::new(Arc::clone(Registry::with_builtins().style()));
+    style.apply(Edit::AddSource(source.clone())).unwrap();
+    style.apply(edit).unwrap();
+    style.get_source(source.id()).unwrap().clone()
 }
 
 /// The three tiled source types the C++ tests repeat each case for.
@@ -214,11 +207,11 @@ impl Tiled {
 
     /// The source "source" for `url` and `tileset`: raster or raster-dem
     /// with tile size 512, or vector.
-    fn source(self, url: Option<String>, tileset: PartialTileset) -> Box<dyn Source> {
+    fn source(self, url: Option<String>, tileset: PartialTileset) -> Source {
         match self {
-            Tiled::Raster => Box::new(TileSource::raster("source", url, tileset, 512)),
-            Tiled::RasterDEM => Box::new(TileSource::raster_dem("source", url, tileset, 512)),
-            Tiled::Vector => Box::new(TileSource::vector("source", url, tileset)),
+            Tiled::Raster => raster_source("source", url, tileset, 512),
+            Tiled::RasterDEM => raster_dem_source("source", url, tileset, 512),
+            Tiled::Vector => vector_source("source", url, tileset),
         }
     }
 
@@ -245,15 +238,14 @@ fn run_tile_case(
     observer: &StubRenderSourceObserver,
 ) -> SourceType {
     let layers = kind.layers();
-    let source = kind.source(None, tiles_tileset());
-    source.load_description(&*file_source, &test.run_loop);
+    let source = crate::tests::ready(kind.source(None, tiles_tileset()));
 
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let fs: Arc<dyn FileSource> = file_source;
     render_source.update(
         &mut store,
-        source.base_impl(),
+        source.clone(),
         &layers,
         true,
         true,
@@ -409,10 +401,9 @@ fn tile_out_of_view_keeps_loading() {
     let file_source = Arc::new(PendingTileSource::default());
     let (requested, cancelled) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.cancelled));
     let layers = Tiled::Vector.layers();
-    let source = Tiled::Vector.source(None, tiles_tileset());
-    source.load_description(&*file_source, &test.run_loop);
+    let source = crate::tests::ready(Tiled::Vector.source(None, tiles_tileset()));
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let fs: Arc<dyn FileSource> = file_source;
     // Requests made so far, after an update with the camera at `bearing`.
     let mut turn = |test: &mut SourceTest, bearing: f64, needs_relayout: bool| {
@@ -423,7 +414,7 @@ fn tile_out_of_view_keeps_loading() {
             ..Default::default()
         });
         let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
-        render_source.update(&mut store, source.base_impl(), &layers, true, needs_relayout, &parameters);
+        render_source.update(&mut store, source.clone(), &layers, true, needs_relayout, &parameters);
         requested.lock().clone()
     };
 
@@ -449,10 +440,9 @@ fn tile_requests_follow_the_view() {
     let file_source = Arc::new(PendingTileSource::default());
     let (requested, orders) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.orders));
     let layers = Tiled::Vector.layers();
-    let source = Tiled::Vector.source(None, tiles_tileset());
-    source.load_description(&*file_source, &test.run_loop);
+    let source = crate::tests::ready(Tiled::Vector.source(None, tiles_tileset()));
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let fs: Arc<dyn FileSource> = file_source;
     // The tiles requested so far and where their requests stand now, after
     // an update with the camera at `center`.
@@ -460,7 +450,7 @@ fn tile_requests_follow_the_view() {
         test.transform.jump_to(&CameraOptions { center: Some(center), zoom: Some(6.0), ..Default::default() });
         let mut parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
         parameters.prefetch_zoom_delta = 4;
-        render_source.update(&mut store, source.base_impl(), &layers, true, needs_relayout, &parameters);
+        render_source.update(&mut store, source.clone(), &layers, true, needs_relayout, &parameters);
         let orders: Vec<u32> = orders.lock().iter().map(RequestOrder::get).collect();
         (requested.lock().clone(), orders)
     };
@@ -587,36 +577,43 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
         Some(response)
     });
 
-    let observer = Rc::new(StubStyleObserver::default());
-    let changed = Rc::new(RefCell::new(false));
-    {
-        let changed = Rc::clone(&changed);
-        let end = test.end_handle();
-        *observer.source_changed.borrow_mut() = Some(Box::new(move |source| {
-            assert_eq!(Some(attribution.to_owned()), source.get_attribution());
-            *changed.borrow_mut() = true;
-            end();
-        }));
-    }
-
     let source = kind.source(Some("url".to_owned()), PartialTileset::default());
-    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
-    source.load_description(&*file_source, &test.run_loop);
-
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     render_source.update(
         &mut store,
-        source.base_impl(),
+        source.clone(),
         &layers,
         true,
         true,
         &test.tile_parameters_with(MapMode::Continuous, Some(fs)),
     );
 
-    test.run_with(&mut store, |_, _| {});
-    assert!(*changed.borrow());
+    // The map's loader fetches the TileJSON and describes it.
+    let mln_style::source_type::Load::Fetch(resource) = source.data().plan_load() else { panic!("a TileJSON") };
+    let described = Rc::new(RefCell::new(None));
+    {
+        let (described, end) = (Rc::clone(&described), test.end_handle());
+        let request_source = source.clone();
+        let _request = file_source.request(
+            &test.run_loop.scheduler(),
+            &resource,
+            Box::new(move |response: Response| {
+                let (sender, receiver) = std::sync::mpsc::channel();
+                request_source.data().describe_job(response.data)(Box::new(move |result| {
+                    let _ = sender.send(result);
+                }));
+                let description = receiver.recv().unwrap().unwrap();
+                *described.borrow_mut() = request_source.with_description(description);
+                end();
+            }),
+        );
+        test.run_with(&mut store, |_, _| {});
+    }
+    let described = described.take().expect("a description");
+    assert_eq!(Some(attribution.to_owned()), described.get_attribution());
+    assert!(described.metadata_changed_from(&source));
 }
 
 // gtest: Source.RasterTileAttribution
@@ -637,11 +634,9 @@ fn raster_dem_tile_attribution() {
 
 /// A loaded custom geometry source "source", a line layer for it, and its
 /// render source after one update of `store`.
-fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (CustomGeometrySource, Box<dyn RenderSource>) {
-    let file_source = StubFileSource::new(&test.run_loop, ResponseType::Asynchronous);
+fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (Source, Box<dyn RenderSource>) {
     let source =
-        CustomGeometrySource::new("source", CustomGeometrySourceOptions::default(), test.run_loop.pool()).unwrap();
-    source.load_description(&file_source, &test.run_loop);
+        custom_geometry_source::create("source", CustomGeometrySourceOptions::default(), test.run_loop.pool()).unwrap();
 
     let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
@@ -649,8 +644,8 @@ fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (CustomGeom
         Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), store);
-    render_source.update(store, source.base_impl(), &layers, true, true, &test.tile_parameters(MapMode::Continuous));
+    let mut render_source = crate::tests::create_render_source(&source, store);
+    render_source.update(store, source.clone(), &layers, true, true, &test.tile_parameters(MapMode::Continuous));
     (source, render_source)
 }
 
@@ -668,7 +663,7 @@ fn custom_geometry_source_set_tile_data() {
     let mut store = test.store();
     let (source, _render_source) = custom_geometry_case(&test, &mut store);
 
-    let handle = source.handle();
+    let handle = CustomGeometrySourceHandle::of(&source).unwrap();
     test.run_loop.invoke(move || {
         // Set Tile Data
         handle.set_tile_data(CanonicalTileID::new(0, 0, 0), GeoJson::from(Vec::<geojson::Feature>::new()));
@@ -695,7 +690,7 @@ fn custom_geometry_source_set_tile_error() {
     let mut store = test.store();
     let (source, _render_source) = custom_geometry_case(&test, &mut store);
 
-    let handle = source.handle();
+    let handle = CustomGeometrySourceHandle::of(&source).unwrap();
     test.run_loop.invoke(move || {
         handle.set_tile_error(CanonicalTileID::new(0, 0, 0), Error::native("failed"));
     });
@@ -715,9 +710,7 @@ fn custom_vector_source_set_tile_data() {
     }
     *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
 
-    let file_source = StubFileSource::new(&test.run_loop, ResponseType::Asynchronous);
-    let source = CustomVectorSource::new("source", CustomVectorSourceOptions::default(), test.run_loop.pool());
-    source.load_description(&file_source, &test.run_loop);
+    let source = custom_vector_source::create("source", CustomVectorSourceOptions::default(), test.run_loop.pool());
 
     let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
@@ -725,17 +718,17 @@ fn custom_vector_source_set_tile_data() {
         Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
 
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
     render_source.update(
         &mut store,
-        source.base_impl(),
+        source.clone(),
         &[layer_properties],
         true,
         true,
         &test.tile_parameters(MapMode::Continuous),
     );
 
-    let handle = source.handle();
+    let handle = CustomVectorSourceHandle::of(&source).unwrap();
     test.run_loop.invoke(move || handle.set_tile_data(CanonicalTileID::new(0, 0, 0), None, TileDataFormat::Mvt));
 
     test.run_observed(&mut store, &observer);
@@ -746,28 +739,27 @@ fn custom_vector_source_set_tile_data() {
 fn empty_tileset() {
     let test = SourceTest::new();
     let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
-    let source = TileSource::vector("source", None, PartialTileset::default());
-    source.load_description(&*file_source, &test.run_loop);
+    let mut source = crate::tests::ready(vector_source("source", None, PartialTileset::default()));
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
 
     let layers = Tiled::Vector.layers();
     let fs: Arc<dyn FileSource> = file_source;
     let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs));
 
-    render_source.update(&mut store, source.base_impl(), &layers, true, true, &parameters);
+    render_source.update(&mut store, source.clone(), &layers, true, true, &parameters);
     assert!(render_source.is_loaded(&store));
 
-    source.set_tiles(&["tiles".to_owned()]);
-    render_source.update(&mut store, source.base_impl(), &layers, true, false, &parameters);
+    source = edited(&source, Edit::SetSourceTiles { id: "source".to_owned(), tiles: vec!["tiles".to_owned()] });
+    render_source.update(&mut store, source.clone(), &layers, true, false, &parameters);
     assert!(!render_source.is_loaded(&store));
 
-    source.set_tiles(&[]);
-    render_source.update(&mut store, source.base_impl(), &layers, true, false, &parameters);
+    source = edited(&source, Edit::SetSourceTiles { id: "source".to_owned(), tiles: Vec::new() });
+    render_source.update(&mut store, source.clone(), &layers, true, false, &parameters);
     assert!(render_source.is_loaded(&store));
 
-    source.set_tiles(&["tiles".to_owned()]);
-    render_source.update(&mut store, source.base_impl(), &layers, true, false, &parameters);
+    source = edited(&source, Edit::SetSourceTiles { id: "source".to_owned(), tiles: vec!["tiles".to_owned()] });
+    render_source.update(&mut store, source.clone(), &layers, true, false, &parameters);
     assert!(!render_source.is_loaded(&store));
 
     assert_eq!(0, tile_errors(&mut store));
@@ -779,14 +771,13 @@ fn empty_raster_tilesets_make_no_tiles() {
     for kind in [Tiled::Raster, Tiled::RasterDEM] {
         let test = SourceTest::new();
         let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
-        let source = kind.source(None, PartialTileset::default());
-        source.load_description(&*file_source, &test.run_loop);
+        let source = crate::tests::ready(kind.source(None, PartialTileset::default()));
         let mut store = test.store();
-        let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+        let mut render_source = crate::tests::create_render_source(&source, &mut store);
 
         let fs: Arc<dyn FileSource> = file_source;
         let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs));
-        render_source.update(&mut store, source.base_impl(), &kind.layers(), true, true, &parameters);
+        render_source.update(&mut store, source.clone(), &kind.layers(), true, true, &parameters);
 
         assert!(render_source.is_loaded(&store));
         assert_eq!(0, tile_errors(&mut store));
@@ -802,15 +793,15 @@ fn tile_errors(store: &mut TileStore) -> usize {
 #[test]
 fn geojson_source_tiles_after_data_reset() {
     let test = SourceTest::new();
-    let source = GeoJSONSource::with_default_options("source");
+    let mut source = geojson_source("source", GeoJSONOptions::default_options());
     let geojson = r#"{"geometry": {"type": "Point", "coordinates": [1.1, 1.1]}, "type": "Feature", "properties": {}}"#
         .parse::<GeoJson>()
         .unwrap();
     let geojson_data =
         create_geojson_data(geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
-    source.set_geojson_data(Some(Arc::clone(&geojson_data)));
+    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(Arc::clone(&geojson_data)) });
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
 
     let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
@@ -818,20 +809,20 @@ fn geojson_source_tiles_after_data_reset() {
     let layers = vec![layer_properties];
 
     let continuous = test.tile_parameters(MapMode::Continuous);
-    render_source.update(&mut store, source.base_impl(), &layers, true, true, &continuous);
+    render_source.update(&mut store, source.clone(), &layers, true, true, &continuous);
     // loaded == false, means that the source contains pending tiles.
     assert!(!render_source.is_loaded(&store));
 
-    source.set_geojson_data(None);
-    render_source.update(&mut store, source.base_impl(), &layers, true, true, &continuous);
+    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: None });
+    render_source.update(&mut store, source.clone(), &layers, true, true, &continuous);
     assert!(!render_source.is_loaded(&store)); // Tiles remain in continuous mode.
 
-    source.set_geojson_data(Some(geojson_data));
-    render_source.update(&mut store, source.base_impl(), &layers, true, true, &continuous);
+    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(geojson_data) });
+    render_source.update(&mut store, source.clone(), &layers, true, true, &continuous);
     assert!(!render_source.is_loaded(&store));
 
-    source.set_geojson_data(None);
-    render_source.update(&mut store, source.base_impl(), &layers, true, true, &test.tile_parameters(MapMode::Static));
+    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: None });
+    render_source.update(&mut store, source.clone(), &layers, true, true, &test.tile_parameters(MapMode::Static));
     assert!(render_source.is_loaded(&store)); // Tiles are reset in static mode.
 }
 
@@ -846,7 +837,7 @@ fn circle_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
 /// complete within an update shows only how they lay out.
 struct SynchronousUpdateSource {
     options: Arc<GeoJSONOptions>,
-    source: GeoJSONSource,
+    source: Source,
     store: TileStore,
     render_source: Box<dyn RenderSource>,
     layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
@@ -856,9 +847,9 @@ impl SynchronousUpdateSource {
     fn new(test: &SourceTest, synchronous_update: bool) -> Self {
         let options: Arc<GeoJSONOptions> =
             Arc::new(GeoJSONOptions { cluster: true, synchronous_update, ..Default::default() });
-        let source = GeoJSONSource::new("source", Arc::clone(&options));
+        let source = geojson_source("source", Arc::clone(&options));
         let mut store = test.store();
-        let render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+        let render_source = crate::tests::create_render_source(&source, &mut store);
         SynchronousUpdateSource { options, source, store, render_source, layers: circle_layers() }
     }
 
@@ -872,14 +863,19 @@ impl SynchronousUpdateSource {
                 "geometry": {"type": "Point", "coordinates": [1.1, 1.1]}}]}"#
             .parse::<GeoJson>()
             .unwrap();
-        self.source
-            .set_geojson_data(Some(create_geojson_data(geojson, scheduler::get_sequenced(), &self.options).unwrap()));
+        let data = Some(create_geojson_data(geojson, scheduler::get_sequenced(), &self.options).unwrap());
+        self.source = edited(&self.source, Edit::SetGeoJsonData { id: "source".to_owned(), data });
         let mut parameters = test.tile_parameters(MapMode::Continuous);
         parameters.is_update_synchronous = self.source.is_update_synchronous();
-        self.render_source.update(&mut self.store, self.source.base_impl(), &self.layers, true, true, &parameters);
+        self.render_source.update(&mut self.store, self.source.clone(), &self.layers, true, true, &parameters);
         // The end of the renderer's update.
         self.store.drive();
     }
+}
+
+/// The edit that sets the synchronous update of the GeoJSON source "source".
+fn synchronous_update(synchronous: bool) -> Edit {
+    Edit::SetGeoJsonSynchronous { id: "source".to_owned(), synchronous }
 }
 
 // gtest: Source.GeoJSONSourceSynchronousUpdateOverrideAppliesToExistingTiles
@@ -890,7 +886,7 @@ fn geojson_source_synchronous_update_override_applies_to_existing_tiles() {
     let mut synchronous = SynchronousUpdateSource::new(&test, true);
     synchronous.update(&test);
     assert!(synchronous.is_loaded()); // The tiles complete within the update.
-    synchronous.source.set_override_synchronous_update(false);
+    synchronous.source = edited(&synchronous.source, synchronous_update(false));
     synchronous.update(&test);
     assert!(!synchronous.is_loaded()); // The tiles now lay out in the background.
 
@@ -902,7 +898,7 @@ fn geojson_source_synchronous_update_override_applies_to_existing_tiles() {
         crate::tests::update(&mut asynchronous.store);
         std::thread::yield_now();
     }
-    asynchronous.source.set_override_synchronous_update(true);
+    asynchronous.source = edited(&asynchronous.source, synchronous_update(true));
     asynchronous.update(&test);
     assert!(asynchronous.is_loaded()); // The tiles now complete within the update.
 }
@@ -930,37 +926,37 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
 
     // Unclustered data slices on this scheduler while the source is asynchronous.
     let slicer = Arc::new(HeldScheduler::default());
-    let source = GeoJSONSource::with_default_options("source");
+    let mut source = geojson_source("source", GeoJSONOptions::default_options());
     let geojson = r#"{"type": "Polygon", "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]]}"#
         .parse::<GeoJson>()
         .unwrap();
-    source.set_geojson_data(Some(
-        create_geojson_data(geojson, Arc::<HeldScheduler>::clone(&slicer), &GeoJSONOptions::default_options()).unwrap(),
-    ));
+    let data =
+        create_geojson_data(geojson, Arc::<HeldScheduler>::clone(&slicer), &GeoJSONOptions::default_options()).unwrap();
+    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(data) });
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let layers = circle_layers();
-    let update = |render_source: &mut Box<dyn RenderSource>, store: &mut TileStore| {
+    let update = |render_source: &mut Box<dyn RenderSource>, store: &mut TileStore, source: &Source| {
         let mut parameters = test.tile_parameters(MapMode::Continuous);
         parameters.is_update_synchronous = source.is_update_synchronous();
-        render_source.update(store, source.base_impl(), &layers, true, true, &parameters);
+        render_source.update(store, source.clone(), &layers, true, true, &parameters);
         store.drive();
     };
 
-    update(&mut render_source, &mut store);
+    update(&mut render_source, &mut store, &source);
     assert!(!slicer.tasks.lock().is_empty());
     assert!(!render_source.is_loaded(&store));
 
     // The queued slices run in the background while the source turns
     // synchronous and recreates its tiles, which slice the same index inline.
-    source.set_override_synchronous_update(true);
+    let source = edited(&source, synchronous_update(true));
     let tasks = std::mem::take(&mut *slicer.tasks.lock());
     let background = std::thread::spawn(move || {
         for task in tasks {
             task();
         }
     });
-    update(&mut render_source, &mut store);
+    update(&mut render_source, &mut store, &source);
     background.join().unwrap();
     assert!(render_source.is_loaded(&store)); // The new tiles complete within the update.
 
@@ -1045,11 +1041,10 @@ fn set_max_parent_overscale_factor() {
 
     let layers = Tiled::Raster.layers();
     let source = Tiled::Raster.source(None, tiles_tileset());
-    assert_eq!(None, source.get_max_overscale_factor_for_parent_tiles());
-    source::set_max_overscale_factor_for_parent_tiles(&*source, Some(3));
-    assert_eq!(Some(3), source.get_max_overscale_factor_for_parent_tiles());
-    source.load_description(&*file_source, &test.run_loop);
-    let base_impl = source.base_impl();
+    let mut common = *source.common();
+    assert_eq!(None, common.get_max_overscale_factor_for_parent_tiles());
+    common.set_max_overscale_factor_for_parent_tiles(Some(3));
+    let base_impl = crate::tests::ready(source.with_common(common));
 
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&base_impl, &mut store);
@@ -1090,15 +1085,14 @@ fn raster_dem_tile_rounds_covering_zoom() {
     }
 
     let layers = Tiled::RasterDEM.layers();
-    let source = Tiled::RasterDEM.source(None, tiles_tileset());
-    source.load_description(&*file_source, &test.run_loop);
+    let source = crate::tests::ready(Tiled::RasterDEM.source(None, tiles_tileset()));
 
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     render_source.update(
         &mut store,
-        source.base_impl(),
+        source.clone(),
         &layers,
         true,
         true,
@@ -1124,7 +1118,7 @@ struct TurningSource {
     test: SourceTest,
     file_source: Arc<StubFileSource>,
     requests: Rc<RefCell<usize>>,
-    source: Box<dyn Source>,
+    source: Source,
     store: TileStore,
     render_source: Box<dyn RenderSource>,
     layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
@@ -1133,6 +1127,12 @@ struct TurningSource {
 }
 
 impl TurningSource {
+    fn set_max_overscale_factor(&mut self, factor: Option<u8>) {
+        let mut common = *self.source.common();
+        common.set_max_overscale_factor_for_parent_tiles(factor);
+        self.source = self.source.with_common(common);
+    }
+
     fn new(projection: &str, size: Size, min_zoom: u8) -> Self {
         let mut test = SourceTest::new();
         test.transform.resize(size).unwrap();
@@ -1157,13 +1157,13 @@ impl TurningSource {
                 ..Default::default()
             },
         );
-        source.load_description(&*file_source, &test.run_loop);
+        let source = crate::tests::ready(source);
         let mut store = crate::tests::tile_store(
             &test.run_loop,
             &test.thread_pool,
             Box::new(crate::tile::tile_workers::InlineWorkers),
         );
-        let render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+        let render_source = crate::tests::create_render_source(&source, &mut store);
         TurningSource {
             test,
             file_source,
@@ -1191,7 +1191,7 @@ impl TurningSource {
         let file_source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&self.file_source);
         let mut parameters = self.test.tile_parameters_with(MapMode::Continuous, Some(file_source));
         parameters.prefetch_zoom_delta = self.prefetch_zoom_delta;
-        self.render_source.update(&mut self.store, self.source.base_impl(), &self.layers, true, false, &parameters);
+        self.render_source.update(&mut self.store, self.source.clone(), &self.layers, true, false, &parameters);
     }
 
     /// Updates the source at this camera until every tile it asks for has
@@ -1361,10 +1361,10 @@ fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
     assert_eq!(Vec::<CanonicalTileID>::new(), large.tiles_at(2));
 
     let mut out_of_reach = TurningSource::new("vertical-perspective", Size::new(512, 512), 1);
-    source::set_max_overscale_factor_for_parent_tiles(&*out_of_reach.source, Some(1));
+    out_of_reach.set_max_overscale_factor(Some(1));
     out_of_reach.load(60.0, 3.0);
     assert_eq!(Vec::<CanonicalTileID>::new(), out_of_reach.tiles_at(1));
-    source::set_max_overscale_factor_for_parent_tiles(&*out_of_reach.source, Some(2));
+    out_of_reach.set_max_overscale_factor(Some(2));
     out_of_reach.load(60.0, 3.0);
     assert_eq!(4, out_of_reach.tiles_at(1).len());
 }
@@ -1402,17 +1402,16 @@ fn raster_dem_borders_across_a_world_wrap() {
         Some(response)
     });
     let layers = Tiled::RasterDEM.layers();
-    let source = Tiled::RasterDEM.source(None, tiles_tileset());
-    source.load_description(&*file_source, &test.run_loop);
+    let source = crate::tests::ready(Tiled::RasterDEM.source(None, tiles_tileset()));
     let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let fs: Arc<dyn FileSource> = file_source;
     let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
     let mut relayout = true;
     loop {
         // The store backfills the tiles as their DEMs arrive.
         let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
-        render_source.update(&mut store, source.base_impl(), &layers, true, relayout, &parameters);
+        render_source.update(&mut store, source.clone(), &layers, true, relayout, &parameters);
         relayout = false;
         let key = render_source.tiles().expect("the source's tiles");
         if store.source(key).is_some_and(|source| !source.tiles.is_empty()) && render_source.is_loaded(&store) {

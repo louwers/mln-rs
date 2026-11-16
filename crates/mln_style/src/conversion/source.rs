@@ -6,15 +6,17 @@ use super::geojson_options::convert_geojson_options;
 use super::{Converter, Convertible, Error};
 use crate::StyleRegistry;
 use crate::expression::Functions;
-use crate::source::Source;
-use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
+use crate::source_type::{Source, SourceData};
+use crate::sources::geojson::{GeoJSONOptions, GeoJsonSourceOptions, GeoJsonSourceType};
+use crate::sources::image::{ImageSourceOptions, ImageSourceType};
 
+/// A GeoJSON source's data from its style JSON: its options, and its data,
+/// built at once, or the URL it loads it from.
 pub(crate) fn convert_geojson_source(
-    id: &str,
     value: &Convertible<'_>,
     functions: &Arc<Functions>,
     error: &mut Error,
-) -> Option<Box<dyn Source>> {
+) -> Option<SourceData<GeoJsonSourceType>> {
     let Some(data_value) = value.object_member("data") else {
         error.message = "GeoJSON source must have a data value".to_owned();
         return None;
@@ -25,27 +27,29 @@ pub(crate) fn convert_geojson_source(
         options = Arc::new(converted);
     }
 
-    let result = GeoJSONSource::new(id, options);
+    let mut options = GeoJsonSourceOptions::new(options);
 
     if data_value.is_object() {
         let geojson = GeoJson::convert(&data_value, error)?;
-        if let Err(e) = result.set_geojson(geojson) {
-            // C++ lets the Supercluster exception (a clustered
-            // non-point feature) propagate out of the style parse.
-            error.message = e.message;
-            return None;
+        match options.data_builder().build(geojson) {
+            Ok(data) => Some(SourceData::with_description(options, data)),
+            Err(e) => {
+                // A clustered non-point feature fails the style's parse.
+                error.message = e.message;
+                None
+            }
         }
     } else if let Some(url) = data_value.to_string() {
-        result.set_url(&url);
+        options.url = Some(url);
+        Some(SourceData::new(options))
     } else {
         error.message = "GeoJSON data must be a URL or an object".to_owned();
-        return None;
+        None
     }
-
-    Some(Box::new(result))
 }
 
-pub(crate) fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
+/// An image source's data from its style JSON.
+pub(crate) fn convert_image_source(value: &Convertible<'_>, error: &mut Error) -> Option<SourceData<ImageSourceType>> {
     // A source without a url starts empty, until it gets an image or a url.
     let url_string = match value.object_member("url") {
         Some(url_value) => {
@@ -73,12 +77,7 @@ pub(crate) fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mu
         let lat_lng = super::convert::<mln_util::LatLng>(&coordinates_value.array_member(i), error)?;
         *coordinate = lat_lng;
     }
-    let result = crate::sources::image_source::ImageSource::new(id, coordinates);
-    if let Some(url_string) = url_string {
-        result.set_url(&url_string);
-    }
-
-    Some(Box::new(result))
+    Some(SourceData::new(ImageSourceOptions { url: url_string, coordinates }))
 }
 
 /// Converts the source `id` through its type in `registry`. A GeoJSON
@@ -89,7 +88,7 @@ pub fn convert_source(
     error: &mut Error,
     id: &str,
     registry: &StyleRegistry,
-) -> Option<Box<dyn Source>> {
+) -> Option<Source> {
     if !value.is_object() {
         error.message = "source must be an object".to_owned();
         return None;

@@ -6,13 +6,13 @@ use super::util::parse_json;
 use crate::conversion::Error;
 use crate::conversion::source::convert_source;
 use crate::conversion::tileset::convert_tileset;
-use crate::source::Source;
+use crate::source_type::Source;
 
 fn convert_json(json: &str, source_type: SourceType) -> Result<PartialTileset, String> {
     convert_tileset(&Convertible::from(&parse_json(json)), source_type)
 }
 
-fn convert_source_json(json: &str, error: &mut Error, id: &str) -> Option<Box<dyn Source>> {
+fn convert_source_json(json: &str, error: &mut Error, id: &str) -> Option<Source> {
     let value = parse_json(json);
     convert_source(&Convertible::from(&value), error, id, &crate::StyleRegistry::with_builtins())
 }

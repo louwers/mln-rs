@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use mln_actor::actor::PoolActorRef;
+use mln_actor::actor::{Actor, PoolActorRef};
 use mln_storage::Data;
 use mln_style_types::SourceType;
 use mln_util::constants;
@@ -56,10 +56,21 @@ pub type CustomVectorTileLoader = CustomTileLoader<CustomVectorTileData>;
 pub struct CustomGeometrySourceType;
 
 /// A custom geometry source's options.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CustomGeometrySourceOptions {
     pub tile_options: Arc<TileOptions>,
     pub zoom_range: Range<u8>,
+    /// The tile loader, which lives as long as a version of the source.
+    pub loader: Arc<Actor<CustomGeometryTileLoader>>,
+}
+
+impl std::fmt::Debug for CustomGeometrySourceOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomGeometrySourceOptions")
+            .field("tile_options", &self.tile_options)
+            .field("zoom_range", &self.zoom_range)
+            .finish_non_exhaustive()
+    }
 }
 
 impl StyleSourceType for CustomGeometrySourceType {
@@ -71,7 +82,7 @@ impl StyleSourceType for CustomGeometrySourceType {
     };
 
     type Options = CustomGeometrySourceOptions;
-    /// The tile loader, once the source is loaded.
+    /// A reference to the options' tile loader.
     type Description = PoolActorRef<CustomGeometryTileLoader>;
 }
 
@@ -89,9 +100,17 @@ impl SourceData<CustomGeometrySourceType> {
 pub struct CustomVectorSourceType;
 
 /// A custom vector source's options.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CustomVectorSourceOptions {
     pub zoom_range: Range<u8>,
+    /// The tile loader, which lives as long as a version of the source.
+    pub loader: Arc<Actor<CustomVectorTileLoader>>,
+}
+
+impl std::fmt::Debug for CustomVectorSourceOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomVectorSourceOptions").field("zoom_range", &self.zoom_range).finish_non_exhaustive()
+    }
 }
 
 impl StyleSourceType for CustomVectorSourceType {
@@ -103,7 +122,7 @@ impl StyleSourceType for CustomVectorSourceType {
     };
 
     type Options = CustomVectorSourceOptions;
-    /// The tile loader, once the source is loaded.
+    /// A reference to the options' tile loader.
     type Description = PoolActorRef<CustomVectorTileLoader>;
 }
 

@@ -13,7 +13,7 @@ use mln_style::expression::dsl::{eq, get, literal_str};
 use mln_style::filter::Filter;
 use mln_style::layer::Layer;
 use mln_style::projection::Projection;
-use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
+use mln_style::sources::geojson::GeoJSONOptions;
 use mln_style::{Edit, PropertyValue};
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_util::geo::LatLng;
@@ -88,8 +88,8 @@ impl FeatureTrackingTest {
         .expect("map");
         frontend.attach(&map);
 
-        let source = GeoJSONSource::with_default_options(SOURCE_NAME);
-        source.set_geojson(geojson.parse().expect("GeoJSON")).expect("set GeoJSON");
+        let source =
+            geojson_source_with_data(SOURCE_NAME, GeoJSONOptions::default_options(), geojson.parse().expect("GeoJSON"));
 
         let mut background_layer =
             Layer::new(Registry::with_builtins().style(), "background", "background", "").unwrap();
@@ -141,7 +141,7 @@ impl FeatureTrackingTest {
         .expect("style::Image");
 
         map.load_style_json(&read_file(&format!("{FIXTURE_BASE}api/empty.json")));
-        map.add_source(Box::new(source)).expect("add source");
+        map.add_source(source).expect("add source");
         map.edit_style(|style| {
             for layer in [background_layer, fill_layer, line_layer, circle_layer, symbol_layer] {
                 style.apply(Edit::AddLayer { layer, before: None })?;
@@ -751,13 +751,12 @@ fn globe_capture_during_transition() {
 fn globe_capture_close_up() {
     let mut test = globe_test();
     let options = GeoJSONOptions { maxzoom: 0, ..GeoJSONOptions::default() };
-    let source = GeoJSONSource::new("lowZoom", Arc::new(options));
     let large = r#"{"type": "Feature", "id": "large", "properties": {},
         "geometry": {"type": "Polygon", "coordinates": [[[-40, -40], [40, -40], [40, 40], [-40, 40], [-40, -40]]]}}"#;
-    source.set_geojson(large.parse().expect("GeoJSON")).expect("set GeoJSON");
+    let source = geojson_source_with_data("lowZoom", Arc::new(options), large.parse().expect("GeoJSON"));
     let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "lowZoomFill", "lowZoom").unwrap();
     set(&mut fill_layer, "fill-color", &json!("rgba(0,255,0,1)"));
-    test.map.add_source(Box::new(source)).expect("add source");
+    test.map.add_source(source).expect("add source");
     test.map.edit_style(|style| style.apply(Edit::AddLayer { layer: fill_layer, before: None })).expect("add layer");
     test.map.jump_to(&CameraOptions { pitch: Some(60.0), ..camera(11.0) });
     let image = test.run(None, 0.0).image;

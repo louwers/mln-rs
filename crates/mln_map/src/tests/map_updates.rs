@@ -11,7 +11,6 @@ use mln_renderer::update_slot::Update;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::expression::expression::FeatureState;
-use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
@@ -290,9 +289,8 @@ fn publishes_synchronous(update: &Update) -> bool {
 }
 
 fn set_override_synchronous_update(map: &mut Map, value: bool) {
-    let source = map.source("points").expect("the source");
-    source.downcast_ref::<GeoJSONSource>().expect("a GeoJSON source").set_override_synchronous_update(value);
-    map.process_events();
+    let edit = mln_style::Edit::SetGeoJsonSynchronous { id: "points".to_owned(), synchronous: value };
+    map.edit_style(|style| style.apply(edit)).expect("a GeoJSON source");
 }
 
 #[test]
