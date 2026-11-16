@@ -6,7 +6,7 @@
 // its Web Workers (the map's or a tile worker's) or the native runner reports
 // an error, or when a view's tiles got no worker replies. The interaction
 // views drag on the map back and forth before their frame, over a slow
-// network, and also fail when the map fetches URLs again. It also runs
+// network, and log the URLs the map fetched again. It also runs
 // mln_gfx's conformance case of writes from JS arrays on a GPU of the map's
 // backend (the page's `checkGpu`), makes the map's wasm instance and a tile worker's
 // panic (the page's `panic`), and fails unless the page stops and shows the
@@ -65,10 +65,6 @@ const metrics = path.join(repo, "tools/render-test/testdata/metrics");
 const cache = path.join(metrics, "cache-style.db");
 // The page as Vite builds it, as it deploys.
 const root = path.join(here, "../dist");
-
-// An interaction view, whose fixtures come as over a network (server.mjs),
-// fails when the map fetches more than this many URLs again.
-const MAX_REPEATS = 1;
 
 const { values: options } = parseArgs({
   options: {
@@ -160,7 +156,7 @@ async function compare() {
           ? failure
           : `loaded in ${Math.round(stats.loadedMs)} ms, ${stats.replies} worker replies`) +
         (again
-          ? `, after the ${view.interaction} ${again.count} fetches again (at most ${MAX_REPEATS})`
+          ? `, after the ${view.interaction} ${again.count} fetches again`
           : "") +
         (missing.length
           ? `, ${missing.length} tiles or resources not in the cache (not found)`
@@ -182,16 +178,6 @@ async function compare() {
     // Every view has tiles, and only their workers reply: the raster and
     // raster-dem tiles' too, in the views that have nothing else.
     if (stats.replies === 0) failures.push(`${view.name}: no worker replies`);
-    if (again && again.count > MAX_REPEATS) {
-      const urls = again.urls
-        .slice(0, 3)
-        .map(
-          ([url, count]) => `${url.replace(server.origin, "")} ${count} times`,
-        );
-      failures.push(
-        `${view.name}: ${again.count} fetches again after the ${view.interaction}, of ${urls.join(", ")}`,
-      );
-    }
     // An interaction's frame is of the camera it left the map at.
     let style = view.style;
     if (interaction) {

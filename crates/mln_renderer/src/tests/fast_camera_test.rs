@@ -5,11 +5,12 @@
 //! The harness updates a vector source drawn by a fill layer and a raster
 //! source, as a map's frames do, over a network that has `SLOTS` requests in
 //! flight at once, as the online file source does, and answers each
-//! `LATENCY` frames after it got a slot. It counts the frames until the view
-//! the camera stops at has all its tiles.
+//! `LATENCY` frames after it got a slot, fresh for an hour. It counts the
+//! frames until the view the camera stops at has all its tiles, or the
+//! requests each tile got.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -22,6 +23,7 @@ use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Fill, Raster};
 use mln_style::source::Source;
 use mln_style::sources::tile_source::TileSource;
+use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
@@ -56,11 +58,13 @@ struct Pending {
     in_flight_since: Cell<Option<usize>>,
 }
 
-/// The open requests, in the order they were made, and the frames ended.
+/// The open requests, in the order they were made, the frames ended, and
+/// how many requests each tile got.
 #[derive(Default)]
 struct Requests {
     open: VecDeque<Rc<Pending>>,
     frame: usize,
+    made: BTreeMap<String, usize>,
 }
 
 /// Answers every tile of the vector source with the same vector tile, and
@@ -112,6 +116,7 @@ impl Network {
             let mut response = Response::new();
             let data = if pending.tile.starts_with("vector") { &self.vector_tile } else { &self.raster_tile };
             response.data = Some(Arc::clone(data));
+            response.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
             pending.responder.send(response);
         }
     }
@@ -122,6 +127,13 @@ impl Network {
         let requests = requests.borrow();
         requests.open.iter().filter(|pending| !pending.responder.is_cancelled()).map(|p| p.tile.clone()).collect()
     }
+
+    /// The tiles requested more than once, and how many times.
+    fn requested_again(&self) -> BTreeMap<String, usize> {
+        let requests = self.requests();
+        let requests = requests.borrow();
+        requests.made.iter().filter(|(_, count)| **count > 1).map(|(tile, count)| (tile.clone(), *count)).collect()
+    }
 }
 
 impl FileSource for Network {
@@ -129,8 +141,15 @@ impl FileSource for Network {
         let data = resource.tile_data.as_ref().expect("only tiles are requested");
         let source = resource.url.split('/').next().unwrap_or_default();
         let tile = format!("{source}/{}/{}/{}", data.z, data.x, data.y);
-        let pending = Rc::new(Pending { tile, responder, in_flight_since: Cell::new(None) });
-        self.requests().borrow_mut().open.push_back(pending);
+        // A tile that is still fresh, which the online file source holds
+        // until it expires: never answered.
+        if resource.prior_expires.is_some_and(|expires| expires > now()) {
+            return;
+        }
+        let requests = self.requests();
+        let mut requests = requests.borrow_mut();
+        *requests.made.entry(tile.clone()).or_default() += 1;
+        requests.open.push_back(Rc::new(Pending { tile, responder, in_flight_since: Cell::new(None) }));
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {
@@ -208,13 +227,19 @@ impl Scene {
             .map(|source| source.tiles().and_then(|key| self.store.source(key)).expect("the source's tiles"))
     }
 
-    /// A frame at `zoom` over `center`: the sources update for the camera,
-    /// then the network answers what is due, and the tile workers lay out
-    /// what it answered.
+    /// A frame at `zoom` over `center`, north up.
     fn frame(&mut self, zoom: f64, center: (f64, f64)) {
+        self.frame_rotated(zoom, center, 0.0);
+    }
+
+    /// A frame at `zoom` over `center`, turned by `bearing` degrees: the
+    /// sources update for the camera, then the network answers what is due,
+    /// and the tile workers lay out what it answered.
+    fn frame_rotated(&mut self, zoom: f64, center: (f64, f64), bearing: f64) {
         self.transform.jump_to(&CameraOptions {
             center: Some(LatLng::new(center.0, center.1).unwrap()),
             zoom: Some(zoom),
+            bearing: Some(bearing),
             ..Default::default()
         });
         let file_source: Arc<dyn FileSource> = Arc::<Network>::clone(&self.network);
@@ -353,4 +378,62 @@ fn fast_pan_loads_the_final_view_first() {
         frames <= needed,
         "Beijing took {frames} frames to load, its tiles' requests {needed}; requests open after the fling: {open:?}"
     );
+}
+
+/// From 0 at `seconds`: to 1, then between -1 and 1, each swing half a
+/// second, back to 0 after each second.
+fn swing(seconds: f64) -> f64 {
+    4.0 * ((seconds - 0.25).rem_euclid(1.0) - 0.5).abs() - 1.0
+}
+
+/// A point of zoom 14's tiles, in tile coordinates.
+fn z14_point(x: f64, y: f64) -> (f64, f64) {
+    let tiles = 16384.0;
+    let latitude = (std::f64::consts::PI * (1.0 - 2.0 * y / tiles)).sinh().atan().to_degrees();
+    (latitude, x / tiles * 360.0 - 180.0)
+}
+
+/// A camera's zoom, center and bearing.
+type Camera = (f64, (f64, f64), f64);
+
+/// Three seconds of the camera swinging back and forth along `path`, its
+/// camera at a time in seconds, a frame at a time at 60 Hz,
+/// from a loaded view. A tile that the view needs only for moments, too
+/// short to load it, goes on loading after it leaves the view, so that each
+/// swing back finds it rather than fetching it again.
+fn assert_swing_fetches_each_tile_once(path: fn(f64) -> Camera) {
+    let mut scene = Scene::new(Size::new(1024, 768));
+    let (zoom, center, bearing) = path(0.0);
+    for _ in 0..500 {
+        scene.frame_rotated(zoom, center, bearing);
+        if scene.is_complete() {
+            break;
+        }
+    }
+    assert!(scene.is_complete(), "the first view didn't complete");
+    for frame in 1..=180 {
+        let (zoom, center, bearing) = path(f64::from(frame) / 60.0);
+        scene.frame_rotated(zoom, center, bearing);
+    }
+    assert_eq!(BTreeMap::new(), scene.network.requested_again(), "the tiles requested again during the swings");
+}
+
+/// A turn between -90° and 90° around a point 0.23 of a tile south-east of a
+/// tile corner: the view reaches the column and the row of tiles two west
+/// and two north of that corner only near its widest, for a sixth of each
+/// swing.
+#[test]
+fn turning_back_and_forth_fetches_each_tile_once() {
+    assert_swing_fetches_each_tile_once(|seconds| (14.0, z14_point(2620.23, 6332.23), 90.0 * swing(seconds)));
+}
+
+/// A pan 0.65 of a tile east and west of a tile's center that zooms out
+/// from 14.9 to 14 at each end: the view's edges reach the next tiles only
+/// in the last eighth of each swing, as a pinch back and forth does.
+#[test]
+fn panning_and_zooming_back_and_forth_fetches_each_tile_once() {
+    assert_swing_fetches_each_tile_once(|seconds| {
+        let swing = swing(seconds);
+        (14.0 + 0.9 * (1.0 - swing.abs()), z14_point(2620.5 + 0.65 * swing, 6332.0), 0.0)
+    });
 }
