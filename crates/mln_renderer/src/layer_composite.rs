@@ -180,10 +180,10 @@ pub(crate) struct LayerComposite {
     /// prelude declares, which WebGL2 rejects a draw without a buffer for.
     projection: Option<UniformBufferPtr>,
     /// The bindings of each slot of `uniforms`, and what they were made of:
-    /// the epoch of the frame's buffers, the uniforms' buffer and the
-    /// textures.
+    /// the epoch of the frame's buffers, the uniforms' buffer, the textures
+    /// and the number of slots, the last of which is the copy's.
     bindings: Vec<Owned<BindingsId>>,
-    bindings_made: Option<(u64, BufferId, TextureId, Option<TextureId>)>,
+    bindings_made: Option<(u64, BufferId, TextureId, Option<TextureId>, usize)>,
 }
 
 impl LayerComposite {
@@ -393,20 +393,21 @@ impl LayerComposite {
 
         let layer = &target.color;
         let frame = self.frame.as_ref();
+        let slots = self.groups.len() + 1;
         let made = (
             context.global_uniform_buffers().epoch(),
             uniforms.id(),
             layer.texture,
             frame.map(|frame| frame.frame.texture),
+            slots,
         );
-        let slots = self.groups.len() + 1;
-        if self.bindings_made != Some(made) || self.bindings.len() < slots {
+        if self.bindings_made != Some(made) {
             self.bindings.clear();
             self.bindings_made = None;
             let global = context.global_uniform_buffers();
             let size = size_of::<LayerCompositeUBO>();
             let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
-            for slot in 0..uniforms.size() / stride {
+            for slot in 0..slots {
                 // A group's image is the layer's texture and its backdrop the
                 // frame's copy; the copy's image is the frame's texture.
                 let (image, backdrop) = match frame {
