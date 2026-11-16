@@ -953,6 +953,96 @@ MLN_API mln_status mln_map_get_image_source_coordinates(
 ) MLN_NOEXCEPT;
 
 /**
+ * Plays a video source's video again after mln_map_pause_video_source().
+ *
+ * A video source's video plays from when the style adds the source, muted and
+ * looping, through the platform's video player.
+ *
+ * Completes with:
+ * - MLN_STATUS_NOT_FOUND when the style has no source named `source_id`.
+ * - MLN_STATUS_INVALID_ARGUMENT when the source named `source_id` isn't a
+ *   video source.
+ * - MLN_STATUS_INVALID_STATE while the style isn't loaded, as
+ *   mln_map_set_style_url() describes.
+ */
+MLN_BINDING("execution=command")
+MLN_API mln_status mln_map_play_video_source(
+  mln_map map, mln_buffer_view source_id, const mln_completion* completion,
+  mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
+ * Pauses a video source's video, which keeps showing its current frame.
+ *
+ * Completes with:
+ * - MLN_STATUS_NOT_FOUND when the style has no source named `source_id`.
+ * - MLN_STATUS_INVALID_ARGUMENT when the source named `source_id` isn't a
+ *   video source.
+ * - MLN_STATUS_INVALID_STATE while the style isn't loaded, as
+ *   mln_map_set_style_url() describes.
+ */
+MLN_BINDING("execution=command")
+MLN_API mln_status mln_map_pause_video_source(
+  mln_map map, mln_buffer_view source_id, const mln_completion* completion,
+  mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
+ * Moves a video source's video to `position_ms` from its start.
+ *
+ * A paused video shows the frame there.
+ *
+ * Returns:
+ * - MLN_STATUS_INVALID_ARGUMENT when `position_ms` is negative or not finite.
+ *
+ * Completes with:
+ * - MLN_STATUS_NOT_FOUND when the style has no source named `source_id`.
+ * - MLN_STATUS_INVALID_ARGUMENT when the source named `source_id` isn't a
+ *   video source.
+ * - MLN_STATUS_INVALID_STATE while the style isn't loaded, as
+ *   mln_map_set_style_url() describes.
+ */
+MLN_BINDING("execution=command")
+MLN_API mln_status mln_map_seek_video_source(
+  mln_map map, mln_buffer_view source_id, double position_ms,
+  const mln_completion* completion, mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
+ * Moves the video of a video source.
+ *
+ * `coordinates` are the video's four corners, clockwise from the top left.
+ *
+ * Completes with:
+ * - MLN_STATUS_NOT_FOUND when the style has no source named `source_id`.
+ * - MLN_STATUS_INVALID_ARGUMENT when the source named `source_id` isn't a
+ *   video source.
+ * - MLN_STATUS_INVALID_STATE while the style isn't loaded, as
+ *   mln_map_set_style_url() describes.
+ */
+MLN_BINDING("execution=command")
+MLN_API mln_status mln_map_set_video_source_coordinates(
+  mln_map map, mln_buffer_view source_id,
+  const mln_lat_lng* coordinates MLN_BINDING("length=coordinate_count"),
+  size_t coordinate_count, const mln_completion* completion,
+  mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
+ * Reads the corners of a video source's video, clockwise from the top left.
+ *
+ * Completes with:
+ * - MLN_STATUS_NOT_FOUND when the style has no source named `source_id`.
+ * - MLN_STATUS_INVALID_ARGUMENT when the source named `source_id` isn't a
+ *   video source.
+ */
+MLN_BINDING("execution=query;result=mln_lat_lng;shape=array")
+MLN_API mln_status mln_map_get_video_source_coordinates(
+  mln_map map, mln_buffer_view source_id, const mln_completion* completion,
+  mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
  * Adds a layer to the map's style.
  *
  * `layer_json` is a [layer](https://maplibre.org/maplibre-style-spec/layers/)

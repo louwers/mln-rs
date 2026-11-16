@@ -949,22 +949,26 @@ impl Map {
     // MARK: - Video sources
 
     /// Plays the video of the video source `source_id` again, after
-    /// [`pause_video`](Self::pause_video). A video plays from the moment its
-    /// source is added.
-    pub fn play_video(&self, source_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
+    /// [`pause_video_source`](Self::pause_video_source). A video plays from
+    /// the moment its source is added.
+    pub fn play_video_source(&self, source_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         self.control_video(source_id.into(), VideoControl::Play)
     }
 
     /// Pauses the video of the video source `source_id`, which keeps showing
     /// its frame.
-    pub fn pause_video(&self, source_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
+    pub fn pause_video_source(&self, source_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         self.control_video(source_id.into(), VideoControl::Pause)
     }
 
-    /// Moves the video of the video source `source_id` to `seconds` from its
-    /// start.
-    pub fn seek_video(&self, source_id: impl Into<String>, seconds: f64) -> Result<Completion<Applied>, Error> {
-        self.control_video(source_id.into(), VideoControl::Seek(seconds))
+    /// Moves the video of the video source `source_id` to `position` from its
+    /// start. A paused video shows the frame there.
+    pub fn seek_video_source(
+        &self,
+        source_id: impl Into<String>,
+        position: std::time::Duration,
+    ) -> Result<Completion<Applied>, Error> {
+        self.control_video(source_id.into(), VideoControl::Seek(position.as_secs_f64()))
     }
 
     fn control_video(&self, source_id: String, control: VideoControl) -> Result<Completion<Applied>, Error> {
@@ -988,6 +992,14 @@ impl Map {
             require_loaded(style)?;
             find_source_as::<VideoSource>(style, &source_id, "a video source")?.set_coordinates(coordinates);
             Ok(())
+        })
+    }
+
+    /// The corners of a video source's video, clockwise from the top left.
+    pub fn video_source_coordinates(&self, source_id: impl Into<String>) -> Result<Completion<[LatLng; 4]>, Error> {
+        let source_id = source_id.into();
+        self.query(move |map| {
+            Ok(find_source_as::<VideoSource>(map.style(), &source_id, "a video source")?.get_coordinates())
         })
     }
 

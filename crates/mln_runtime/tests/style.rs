@@ -473,20 +473,21 @@ fn video_sources_open_players_that_the_map_steers() {
 
     wait(map.add_style_source_json("drone", VIDEO_SOURCE));
     assert_eq!(wait(map.style_source("drone")).unwrap().kind, SourceKind::Video);
-    wait(map.pause_video("drone"));
-    wait(map.seek_video("drone", 2.5));
-    wait(map.play_video("drone"));
+    wait(map.pause_video_source("drone"));
+    wait(map.seek_video_source("drone", std::time::Duration::from_millis(2500)));
+    wait(map.play_video_source("drone"));
     wait(map.set_video_source_coordinates("drone", corners(1.0)));
+    assert_eq!(wait(map.video_source_coordinates("drone")), corners(1.0));
     wait(map.remove_style_source("drone"));
     assert_eq!(*calls.lock(), ["open fixture://drone.mp4 fixture://drone.webm", "pause", "seek 2.5", "play", "close"]);
 
     wait(map.add_style_source_json("geojson", EMPTY_GEOJSON_SOURCE));
-    let wrong = wait_err(map.pause_video("geojson"));
+    let wrong = wait_err(map.pause_video_source("geojson"));
     assert_eq!(
         (wrong.kind, wrong.message.as_str()),
         (ErrorKind::InvalidArgument, "source \"geojson\" is not a video source")
     );
-    assert_eq!(wait_err(map.play_video("missing")).kind, ErrorKind::NotFound);
+    assert_eq!(wait_err(map.play_video_source("missing")).kind, ErrorKind::NotFound);
 }
 
 #[test]
