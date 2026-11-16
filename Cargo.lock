@@ -2763,6 +2763,7 @@ dependencies = [
  "glow",
  "khronos-egl",
  "libc",
+ "libloading",
  "mln-rs-actor",
  "mln-rs-d3d12",
  "mln-rs-feature",

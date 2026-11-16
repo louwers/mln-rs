@@ -1,7 +1,8 @@
 // Video sources through Map -> HeadlessFrontend: a player that hands the map
 // one frame, of each layout a player sends from memory, whose four quarters
 // are four colors, drawn over the whole view. Each quarter must keep its
-// color and its place, on whichever backend the frontend renders.
+// color and its place, on whichever backend the frontend renders. On Android,
+// also frames in hardware buffers, and the platform's player (video_android.rs).
 
 use std::sync::Arc;
 
@@ -9,10 +10,14 @@ use mln_actor::RunLoop;
 use mln_gfx::video::{CpuPlane, FramePixels, VideoFrame, YuvColor, YuvMatrix, YuvRange};
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
+use mln_storage::FileSource;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_video::{OpenRequest, VideoPlayer, VideoPlayers};
 use parking_lot::Mutex;
+
+#[cfg(target_os = "android")]
+mod video_android;
 
 /// The quarters' colors: top left, top right, bottom left, bottom right.
 const QUARTERS: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]];
@@ -109,49 +114,79 @@ fn nv12_frame(size: Size) -> VideoFrame {
     }
 }
 
+/// A map whose video covers the whole view.
+struct VideoMap {
+    map: Map,
+    frontend: HeadlessFrontend,
+    _run_loop: RunLoop,
+}
+
+impl VideoMap {
+    /// A map whose video `players` play, reading it through `file_source`.
+    fn new(players: Arc<dyn VideoPlayers>, file_source: Option<Arc<dyn FileSource>>) -> VideoMap {
+        // At zoom 0 the world is 512 pixels wide: the video covers the view.
+        let size = Size::new(512, 512);
+        let run_loop = RunLoop::new();
+        let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
+        let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+        let mut map = match file_source {
+            Some(file_source) => Map::with_file_source(file_source, options, &run_loop).unwrap(),
+            None => Map::new(options, &run_loop).unwrap(),
+        };
+        map.set_video_players(Some(players));
+        frontend.attach(&map);
+        map.style_mut().load_json(
+            r#"{
+              "version": 8,
+              "center": [0, 0],
+              "zoom": 0,
+              "sources": {
+                "video": {
+                  "type": "video",
+                  "urls": ["fixture://video.mp4"],
+                  "coordinates": [[-180, 85], [180, 85], [180, -85], [-180, -85]]
+                }
+              },
+              "layers": [{"id": "video", "type": "raster", "source": "video", "paint": {"raster-fade-duration": 0}}]
+            }"#,
+        );
+        let camera = map.style().get_default_camera();
+        map.jump_to(&camera);
+        VideoMap { map, frontend, _run_loop: run_loop }
+    }
+
+    fn render(&mut self) -> PremultipliedImage {
+        self.frontend.render(&mut self.map).expect("render").image
+    }
+}
+
 /// Renders a map whose video covers the whole view, with `frame`.
 fn render(frame: VideoFrame) -> PremultipliedImage {
-    // At zoom 0 the world is 512 pixels wide: the video covers the view.
-    let size = Size::new(512, 512);
-    let run_loop = RunLoop::new();
-    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
-    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, &run_loop).unwrap();
-    map.set_video_players(Some(Arc::new(OneFrame(Mutex::new(Some(frame))))));
-    frontend.attach(&map);
-    map.style_mut().load_json(
-        r#"{
-          "version": 8,
-          "center": [0, 0],
-          "zoom": 0,
-          "sources": {
-            "video": {
-              "type": "video",
-              "urls": ["fixture://video.webm"],
-              "coordinates": [[-180, 85], [180, 85], [180, -85], [-180, -85]]
-            }
-          },
-          "layers": [{"id": "video", "type": "raster", "source": "video", "paint": {"raster-fade-duration": 0}}]
-        }"#,
-    );
-    let camera = map.style().get_default_camera();
-    map.jump_to(&camera);
-    frontend.render(&mut map).expect("render").image
+    VideoMap::new(Arc::new(OneFrame(Mutex::new(Some(frame)))), None).render()
+}
+
+/// The colors at the center of each quarter of the view, in the order of
+/// [`QUARTERS`].
+fn quarter_colors(image: &PremultipliedImage) -> [[u8; 4]; 4] {
+    let size = image.size;
+    [(1, 1), (3, 1), (1, 3), (3, 3)].map(|(x, y)| {
+        let (px, py) = (size.width * x / 4, size.height * y / 4);
+        let offset = (py * size.width + px) as usize * 4;
+        [0, 1, 2, 3].map(|channel| image.data[offset + channel])
+    })
+}
+
+/// Whether each quarter of the view is opaque and within `tolerance` of
+/// `expected`'s color in each channel.
+fn shows_quarters(image: &PremultipliedImage, expected: [[u8; 3]; 4], tolerance: u8) -> bool {
+    quarter_colors(image).iter().zip(expected).all(|(actual, expected)| {
+        actual[3] == 255 && actual.iter().zip(expected).all(|(a, e)| a.abs_diff(e) <= tolerance)
+    })
 }
 
 /// Checks the center of each quarter of the view.
 fn assert_quarters(image: &PremultipliedImage, what: &str) {
-    let size = image.size;
-    for (x, y) in [(1, 1), (3, 1), (1, 3), (3, 3)] {
-        let (px, py) = (size.width * x / 4, size.height * y / 4);
-        let offset = (py * size.width + px) as usize * 4;
-        let actual = &image.data[offset..offset + 4];
-        let expected = QUARTERS[usize::from(x == 3) + 2 * usize::from(y == 3)];
-        for channel in 0..3 {
-            let difference = i32::from(actual[channel]).abs_diff(i32::from(expected[channel]));
-            assert!(difference <= 3, "{what} at ({px}, {py}): {actual:?}, expected {expected:?}");
-        }
-        assert_eq!(255, actual[3], "{what} at ({px}, {py})");
-    }
+    assert!(shows_quarters(image, QUARTERS, 3), "{what}: {:?}, expected {QUARTERS:?}", quarter_colors(image));
 }
 
 #[test]
