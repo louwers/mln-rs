@@ -9,6 +9,9 @@ use mln_util::size::Size;
 
 use crate::gpu::TextureId;
 
+#[cfg(target_os = "android")]
+mod android;
+
 /// The matrix that turns a YUV frame's samples into RGB.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum YuvMatrix {
@@ -130,7 +133,8 @@ pub enum GpuFrame {
     /// the frame lives.
     #[cfg(unix)]
     DmaBuf { fourcc: u32, modifier: u64, size: Size, planes: Vec<DmaBufPlane>, color: YuvColor },
-    /// An `AHardwareBuffer*`, which the frame holds a reference on.
+    /// An `AHardwareBuffer*`, which the frame holds a reference on and
+    /// releases when it drops.
     AndroidHardwareBuffer { buffer: *mut std::ffi::c_void, color: YuvColor },
     /// A `CVPixelBufferRef` backed by an IOSurface, which the frame
     /// retains: BGRA, or biplanar 4:2:0 YUV.
@@ -141,6 +145,15 @@ pub enum GpuFrame {
     /// A JS `ImageBitmap` or `VideoFrame`, in the browser.
     #[cfg(target_family = "wasm")]
     Web(WebImage),
+}
+
+#[cfg(target_os = "android")]
+impl Drop for GpuFrame {
+    fn drop(&mut self) {
+        if let GpuFrame::AndroidHardwareBuffer { buffer, .. } = *self {
+            android::release_hardware_buffer(buffer);
+        }
+    }
 }
 
 /// One plane of a [`GpuFrame::DmaBuf`].

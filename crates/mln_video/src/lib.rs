@@ -9,6 +9,8 @@
 //! [`platform_players`] are the platform's players. An app or a test can
 //! bring its own. In the browser, the host brings them, as `WebPlayers`.
 
+#[cfg(target_os = "android")]
+mod android;
 mod bytes;
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))]
 mod gstreamer;
@@ -32,15 +34,18 @@ pub use web::{VideoHost, WebPlayers};
 
 /// The players of the platform the library runs on: GStreamer's on Linux and
 /// the BSDs, which fail to open each video, saying so, where GStreamer 1.x
-/// isn't installed. A platform without players fails to open each video
-/// too.
+/// isn't installed, and the NDK's media API on Android. A platform without
+/// players fails to open each video too.
 #[cfg(not(target_family = "wasm"))]
 #[must_use]
 pub fn platform_players() -> Arc<dyn VideoPlayers> {
-    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))]
-    return Arc::new(gstreamer::GstreamerPlayers);
-    #[cfg(not(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm"))))]
-    Arc::new(NoPlayers)
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    let players: Arc<dyn VideoPlayers> = Arc::new(gstreamer::GstreamerPlayers);
+    #[cfg(target_os = "android")]
+    let players: Arc<dyn VideoPlayers> = Arc::new(android::AndroidPlayers);
+    #[cfg(not(all(unix, not(target_vendor = "apple"))))]
+    let players: Arc<dyn VideoPlayers> = Arc::new(NoPlayers);
+    players
 }
 
 /// The players of the platform the library runs on. In the browser, where

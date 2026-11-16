@@ -30,6 +30,11 @@ mln_wire.workspace = true
 slotmap.workspace = true
 thiserror.workspace = true
 
+# The function that releases a video frame's Android hardware buffer,
+# loaded at run time.
+[target.'cfg(target_os = "android")'.dependencies]
+libloading.workspace = true
+
 # The browser's images that video frames hold (`video::WebImage`).
 [target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen.workspace = true

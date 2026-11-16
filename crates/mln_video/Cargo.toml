@@ -38,5 +38,9 @@ web-sys = { workspace = true, features = [
   "OffscreenCanvasRenderingContext2d",
 ] }
 
+# Android's player: the NDK's media API, loaded at run time.
+[target.'cfg(target_os = "android")'.dependencies]
+libloading.workspace = true
+
 [lints]
 workspace = true
