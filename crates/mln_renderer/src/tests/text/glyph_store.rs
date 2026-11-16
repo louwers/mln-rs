@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use mln_actor::{AsyncTask, RunLoop, Timer};
+use mln_actor::{AsyncTask, RunLoop, TaggedScheduler, Timer};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
@@ -27,6 +27,7 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::i18n;
+use mln_util::identity::SimpleIdentity;
 use mln_util::image::AlphaImage;
 use mln_util::size::Size;
 use mln_vec_map::{VecMap, VecSet};
@@ -139,6 +140,8 @@ struct Store {
     store: RefCell<GlyphStore>,
     /// Where the responses arrive.
     inbox: Inbox,
+    /// Where the store parses glyph PBFs.
+    pool: TaggedScheduler,
     file_source: Arc<dyn FileSource>,
     waits: RefCell<Vec<Wait>>,
     _wake: AsyncTask,
@@ -162,16 +165,18 @@ impl Store {
                 }
             });
             let sender = wake.sender();
+            let pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
             let store = GlyphStore::new(
                 Some(local_glyph_rasterizer),
                 glyph_cache,
+                pool.clone(),
                 engine,
                 run_loop.clone(),
                 Rc::new(move || sender.send()),
             );
             let sender = wake.sender();
             let inbox = Inbox::new(Arc::new(move || sender.send()));
-            Store { store: RefCell::new(store), inbox, file_source, waits: RefCell::default(), _wake: wake }
+            Store { store: RefCell::new(store), inbox, pool, file_source, waits: RefCell::default(), _wake: wake }
         })
     }
 
@@ -189,8 +194,8 @@ impl Store {
     /// Gives the store the responses that arrived.
     fn take_responses(&self) {
         while let Some(event) = self.inbox.next() {
-            if let TileEvent::Glyphs { font_stack, range, id, response } = event {
-                self.store.borrow_mut().take_response(&font_stack, range, id, &response);
+            if let TileEvent::Glyphs { font_stack, range, id, result } = event {
+                self.store.borrow_mut().take_response(&font_stack, range, id, result);
             }
         }
     }
@@ -935,10 +940,12 @@ fn immediate_file_source_failure_requests_the_range_again() {
 
     test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
 
-    // The failure is taken in when the store wakes the renderer.
+    // The failure is taken in when the store wakes the renderer, and the
+    // glyphs once the pool has parsed them.
     test.get_glyphs(dependencies(&['a']));
     test.run_loop.run_once();
     test.get_glyphs(dependencies(&['a']));
+    test.store.pool.wait_for_empty();
     test.run_loop.run_once();
 
     assert_eq!(requests.get(), 2);

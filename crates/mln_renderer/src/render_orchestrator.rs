@@ -266,15 +266,16 @@ impl RenderOrchestrator {
             let events = events.clone();
             Rc::new(move || events.emit(RendererEvent::Invalidate))
         };
+        let thread_pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
         let mut glyph_store = GlyphStore::new(
             Some(Box::new(DefaultLocalGlyphRasterizer::new(local_font_family))),
             glyph_cache,
+            thread_pool.clone(),
             font_face_engine,
             run_loop.clone(),
             wake,
         );
         glyph_store.set_observer(Some(Rc::new(OrchestratorGlyphObserver { events: events.clone() })));
-        let thread_pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
         let update_requests =
             Mailbox::with_target(&run_loop.scheduler(), Rc::new(UpdateRequests { events: events.clone() }));
         let waker: Waker = {

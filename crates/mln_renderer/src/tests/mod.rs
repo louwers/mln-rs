@@ -48,9 +48,9 @@ mod tile_store_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 
-/// Port-only: a tile store whose jobs run on `workers` and which frees on
-/// `pool`, whose glyph store hears from its engine on `run_loop`, with no
-/// images and no sprite loaded.
+/// Port-only: a tile store whose jobs run on `workers` and which frees and
+/// parses glyphs on `pool`, whose glyph store hears from its engine on
+/// `run_loop`, with no images and no sprite loaded.
 pub(crate) fn tile_store(
     run_loop: &mln_actor::RunLoop,
     pool: &mln_actor::TaggedScheduler,
@@ -59,6 +59,7 @@ pub(crate) fn tile_store(
     let glyphs = crate::text::glyph_store::GlyphStore::new(
         None,
         std::sync::Arc::default(),
+        pool.clone(),
         crate::text::font_face_engine::default_engine(),
         run_loop.clone(),
         std::rc::Rc::new(|| {}),

@@ -16,9 +16,9 @@ use mln_util::hash::{HashMap, RandomState};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, PageTexture, TextureHandle};
 #[cfg(test)]
 use super::dynamic_texture::QueuedPixels;
+use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, PageTexture, TextureHandle};
 use crate::gfx::context::Context;
 
 const EXTRA_PADDING: u16 = 1;
@@ -533,7 +533,10 @@ impl DynamicTextureAtlas {
 
     /// The pixels queued for the page with id `page`, for tests.
     #[cfg(test)]
-    pub(crate) fn queued_uploads(&self, page: PageId) -> Option<&HashMap<DynamicTextureBinId, (RectU16, QueuedPixels)>> {
+    pub(crate) fn queued_uploads(
+        &self,
+        page: PageId,
+    ) -> Option<&HashMap<DynamicTextureBinId, (RectU16, QueuedPixels)>> {
         self.pages.iter().find(|candidate| candidate.id == page).map(|page| page.texture.queued_uploads())
     }
 }

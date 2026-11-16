@@ -13,6 +13,7 @@ use mln_tile::TileData;
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 
+use crate::text::glyph_store::GlyphResult;
 use crate::tile::job::{JobId, JobTimes, TileKey};
 use crate::tile::tile_workers::{Lane, ReplyBody};
 
@@ -30,9 +31,9 @@ pub(crate) enum TileEvent {
     Reply { lane: Lane, id: JobId, body: ReplyBody, times: JobTimes },
     /// The worker of `lane` is gone, with every job it had.
     LaneLost(Lane),
-    /// A response to the glyph store's request `id`, for a glyph range. It
+    /// The answer to the glyph store's request `id`, for a glyph range. It
     /// applies only while the range still waits for that request.
-    Glyphs { font_stack: FontStack, range: GlyphRange, id: u64, response: Response },
+    Glyphs { font_stack: FontStack, range: GlyphRange, id: u64, result: GlyphResult },
 }
 
 /// What a GeoJSON or custom source gives a tile.

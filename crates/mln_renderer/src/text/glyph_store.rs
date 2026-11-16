@@ -7,7 +7,9 @@
 // store's inbox, from whatever thread answers, and the tile store hands
 // them over (`take_response`).
 //
-// Glyphs parsed from PBF ranges go through the `GlyphCache` the store is
+// A glyph PBF is parsed on the renderer's thread pool as soon as it arrives,
+// so that its bytes don't wait for the next update and its parsing stays off
+// the render thread. Its glyphs go through the `GlyphCache` the store is
 // given (thread-safe, so renderers on other threads can share it), and each
 // range keeps its glyphs in one shared map; `Entry::glyphs` holds only the
 // local and HarfBuzz glyphs.
@@ -26,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop};
+use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop, TaggedScheduler};
 use mln_storage::{FileSource, Request, Resource, Response};
 use mln_text::glyph::{
     FontData, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, HBShapeRequests,
@@ -55,6 +57,18 @@ pub(crate) struct HBShapeResult {
 }
 
 pub(crate) type HBShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<u16>, HBShapeResult>>>;
+
+/// What a glyph range's response brought.
+pub(crate) enum GlyphData {
+    /// The glyphs of a glyph PBF, interned in the store's glyph cache.
+    Glyphs(Vec<Arc<Glyph>>),
+    /// A font file, which the font-face engine loads on the render thread.
+    Font(FontData),
+}
+
+/// The answer to a glyph range's request: `None` for a response without
+/// content.
+pub(crate) type GlyphResult = Result<Option<GlyphData>, Error>;
 
 pub(crate) trait GlyphStoreObserver {
     fn on_glyphs_loaded(&self, _font_stack: &FontStack, _range: GlyphRange) {}
@@ -145,6 +159,8 @@ pub(crate) struct GlyphStore {
     observer: Rc<dyn GlyphStoreObserver>,
     local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
     glyph_cache: Arc<GlyphCache>,
+    /// Where glyph PBFs are parsed.
+    pool: TaggedScheduler,
     /// Asks the renderer for an update, for the engine's report.
     wake: Rc<dyn Fn()>,
     /// How many requests failed.
@@ -171,12 +187,14 @@ pub(crate) struct GlyphStore {
 }
 
 impl GlyphStore {
-    /// A store that shares `glyph_cache`, loads font faces with `engine`,
-    /// hears from the engine on `run_loop`, the renderer's, and calls `wake`
-    /// there when that report is in for `update`.
+    /// A store that shares `glyph_cache`, parses glyph PBFs on `pool`, loads
+    /// font faces with `engine`, hears from the engine on `run_loop`, the
+    /// renderer's, and calls `wake` there when that report is in for
+    /// `update`.
     pub(crate) fn new(
         local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
         glyph_cache: Arc<GlyphCache>,
+        pool: TaggedScheduler,
         engine: Arc<dyn FontFaceEngine>,
         run_loop: RunLoop,
         wake: Rc<dyn Fn()>,
@@ -190,6 +208,7 @@ impl GlyphStore {
             observer: Rc::new(NullObserver),
             local_glyph_rasterizer,
             glyph_cache,
+            pool,
             wake,
             failures: 0,
             requests: 0,
@@ -219,11 +238,11 @@ impl GlyphStore {
         self.revision
     }
 
-    /// Takes in a response to request `id`, for `font_stack`'s `range`,
+    /// Takes in the answer to request `id`, for `font_stack`'s `range`,
     /// unless the range was dropped or requested again since.
-    pub(crate) fn take_response(&mut self, font_stack: &FontStack, range: GlyphRange, id: u64, response: &Response) {
+    pub(crate) fn take_response(&mut self, font_stack: &FontStack, range: GlyphRange, id: u64, result: GlyphResult) {
         if self.is_loading(font_stack, range, id) {
-            self.process_response(response, font_stack, range, id);
+            self.process_data(result, font_stack, range, id);
         }
     }
 
@@ -233,7 +252,7 @@ impl GlyphStore {
         if !self.deferred_responses.is_empty() && self.engine_readiness.lock().result.is_some() {
             for (data, font_stack, range, id) in std::mem::take(&mut self.deferred_responses) {
                 if self.is_loading(&font_stack, range, id) {
-                    self.process_data(Ok(Some(data)), &font_stack, range, id);
+                    self.process_data(Ok(Some(GlyphData::Font(data))), &font_stack, range, id);
                 }
             }
         }
@@ -368,7 +387,7 @@ impl GlyphStore {
             // A face that holds its font file needs no request.
             self.set_range(font_stack, range, RangeState::Loading { id, request: None });
             self.observer.on_glyphs_requested(font_stack, range);
-            self.process_data(Ok(Some(data)), font_stack, range, id);
+            self.process_data(Ok(Some(GlyphData::Font(data))), font_stack, range, id);
             return;
         }
 
@@ -387,8 +406,29 @@ impl GlyphStore {
 
         let inbox = inbox.clone();
         let callback_font_stack = font_stack.clone();
+        let parser = (range.type_ == GlyphIDType::FontPBF).then(|| (self.pool.clone(), Arc::clone(&self.glyph_cache)));
+        // Only the first answer applies: the range is no longer loading once
+        // it has one. A revalidation's not-modified isn't an answer.
+        let mut answered = false;
         let (req, responder) = Request::direct(move |response: Response| {
-            inbox.send(TileEvent::Glyphs { font_stack: callback_font_stack.clone(), range, id, response });
+            if response.not_modified || std::mem::replace(&mut answered, true) {
+                return;
+            }
+            let font_stack = callback_font_stack.clone();
+            let inbox = inbox.clone();
+            match (font_data(response), &parser) {
+                (Ok(Some(data)), Some((pool, glyph_cache))) => {
+                    let glyph_cache = Arc::clone(glyph_cache);
+                    pool.schedule(Box::new(move || {
+                        let result = parse_glyphs(range, &data, &glyph_cache);
+                        inbox.send(TileEvent::Glyphs { font_stack, range, id, result });
+                    }));
+                }
+                (result, _) => {
+                    let result = result.map(|data| data.map(GlyphData::Font));
+                    inbox.send(TileEvent::Glyphs { font_stack, range, id, result });
+                }
+            }
         });
         file_source.load(&resource, responder);
         self.set_range(font_stack, range, RangeState::Loading { id, request: Some(req) });
@@ -398,62 +438,35 @@ impl GlyphStore {
         self.entries.entry(font_stack.clone()).or_default().ranges.insert(range, state);
     }
 
-    fn process_response(&mut self, res: &Response, font_stack: &FontStack, range: GlyphRange, id: u64) {
-        if res.not_modified {
-            return;
-        }
-
-        let data = match &res.error {
-            Some(error) => Err(Error::native(error.message.clone())),
-            None => Ok((!res.no_content).then(|| FontData::from(res.data.clone().unwrap_or_default()))),
-        };
-        self.process_data(data, font_stack, range, id);
-    }
-
-    /// The rest of `processResponse`, for a glyph PBF or font file that
-    /// answers request `id`: `None` when the response had no content, an
-    /// error when the request failed.
-    fn process_data(
-        &mut self,
-        data: Result<Option<FontData>, Error>,
-        font_stack: &FontStack,
-        range: GlyphRange,
-        id: u64,
-    ) {
-        let (data, mut error) = match data {
+    /// The rest of `processResponse`, for the answer to request `id`.
+    fn process_data(&mut self, result: GlyphResult, font_stack: &FontStack, range: GlyphRange, id: u64) {
+        let (data, error) = match result {
             Ok(data) => (data, None),
             Err(error) => (None, Some(error)),
         };
-        if range.type_ != GlyphIDType::FontPBF
-            && let Some(data) = &data
-            && self.defer_until_engine_ready(data, font_stack, range, id)
-        {
-            return;
-        }
-
         let mut range_glyphs = None;
-        if let Some(data) = &data {
-            if range.type_ == GlyphIDType::FontPBF {
-                match parse_glyph_pbf(&range, data.as_bytes()) {
-                    Ok(glyphs) => {
-                        let mut interned = GlyphCacheRange::new();
-                        for glyph in glyphs {
-                            let id = glyph.id;
-                            if !self.local_glyph_rasterizer.can_rasterize_glyph(font_stack, id) {
-                                interned.insert(id, self.glyph_cache.intern_glyph(glyph));
-                            }
-                        }
-                        range_glyphs = Some(self.glyph_cache.intern_range(interned));
-                    }
-                    Err(parse_error) => error = Some(Error::native(parse_error.to_string())),
+        match data {
+            Some(GlyphData::Glyphs(glyphs)) => {
+                let interned: GlyphCacheRange = glyphs
+                    .into_iter()
+                    .filter(|glyph| !self.local_glyph_rasterizer.can_rasterize_glyph(font_stack, glyph.id))
+                    .map(|glyph| (glyph.id, glyph))
+                    .collect();
+                range_glyphs = Some(self.glyph_cache.intern_range(interned));
+            }
+            Some(GlyphData::Font(data)) => {
+                if self.defer_until_engine_ready(&data, font_stack, range, id) {
+                    return;
                 }
-            } else if self.load_hb_shaper(font_stack, range.type_, data.clone()) {
-                let id = GlyphID::with_type(0, range.type_);
-                if !self.local_glyph_rasterizer.can_rasterize_glyph(font_stack, id) {
-                    let entry = self.entries.entry(font_stack.clone()).or_default();
-                    entry.glyphs.insert(id, Arc::new(Glyph { id, ..Glyph::default() }));
+                if self.load_hb_shaper(font_stack, range.type_, data) {
+                    let id = GlyphID::with_type(0, range.type_);
+                    if !self.local_glyph_rasterizer.can_rasterize_glyph(font_stack, id) {
+                        let entry = self.entries.entry(font_stack.clone()).or_default();
+                        entry.glyphs.insert(id, Arc::new(Glyph { id, ..Glyph::default() }));
+                    }
                 }
             }
+            None => {}
         }
 
         self.revision += 1;
@@ -580,6 +593,21 @@ impl GlyphStore {
         }
         self.font_faces.as_ref()?.iter().find(|face| face.type_ == type_)?.data.clone()
     }
+}
+
+/// What `response`, which isn't a not-modified one, brought: `None` when it
+/// had no content.
+fn font_data(response: Response) -> Result<Option<FontData>, Error> {
+    match response.error {
+        Some(error) => Err(Error::native(error.message)),
+        None => Ok((!response.no_content).then(|| FontData::from(response.data.unwrap_or_default()))),
+    }
+}
+
+/// The glyphs of `range`'s glyph PBF `data`, interned in `glyph_cache`.
+fn parse_glyphs(range: GlyphRange, data: &FontData, glyph_cache: &GlyphCache) -> GlyphResult {
+    let glyphs = parse_glyph_pbf(&range, data.as_bytes()).map_err(|error| Error::native(error.to_string()))?;
+    Ok(Some(GlyphData::Glyphs(glyphs.into_iter().map(|glyph| glyph_cache.intern_glyph(glyph)).collect())))
 }
 
 /// Whether `glyph_id` is a glyph a layout draws: a font face's glyph 0 only
