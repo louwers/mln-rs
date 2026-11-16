@@ -462,6 +462,11 @@ impl<'a> Playback<'a> {
                 self.seeking_to = None;
                 self.show(last, last_attr)?;
             }
+            if self.cropped && self.decoder.mode == Mode::Gpu {
+                // The decoder goes to memory first, which shows the frame
+                // again and ends the track again.
+                return Ok(());
+            }
             return self.start_over();
         }
         let time_us = attr.pts;
