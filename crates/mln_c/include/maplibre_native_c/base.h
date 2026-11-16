@@ -106,8 +106,10 @@ typedef enum mln_render_backend : uint32_t {
   MLN_RENDER_BACKEND_WEB_GPU = 4u,
   /**
    * D3D12, on Windows. It compiles its shaders at run time with DXC, which
-   * your app ships: `dxcompiler.dll`, 1.8.2502 or later, beside the library.
-   * Without it, the library renders on another backend.
+   * your app ships: `dxcompiler.dll`, 1.8.2502 or later, beside your app's
+   * executable or in another directory of the DLL search path, which doesn't
+   * take the library's own directory. Without it, the library renders on
+   * another backend.
    */
   MLN_RENDER_BACKEND_D3D12 = 5u,
 } mln_render_backend;
