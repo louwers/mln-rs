@@ -2407,8 +2407,8 @@ fn expired_sprite_sheet() {
                 let updates = updates.clone();
                 observer.did_finish_rendering_frame_callback.set(move |_| {
                     let params = updates.latest().expect("an update").parameters;
-                    assert!(params.images.windows(2).all(|pair| pair[0].id <= pair[1].id));
-                    assert!(params.images.len() < 4);
+                    assert!(params.style.get_images().windows(2).all(|pair| pair[0].id <= pair[1].id));
+                    assert!(params.style.get_images().len() < 4);
                 });
                 let run_loop = run_loop.clone();
                 observer.did_become_idle_callback.set(move |()| run_loop.stop());
@@ -5094,4 +5094,28 @@ fn releases_tiles_outside_zoom_range_color_relief() {
         layer: r#"{"type":"color-relief","paint":{"color-relief-color":["interpolate",["linear"],["elevation"],-10000,"black",10000,"white"]}}"#,
         keeper: INACTIVE_DEM_KEEPER,
     });
+}
+
+/// Port-only: `clear_data` drops the renderer's layers, sources and images,
+/// and keeps the light, sky and global state it drew with, so the next
+/// frame draws the same picture.
+#[test]
+fn clear_data_keeps_the_light_sky_and_global_state() {
+    let test = MapTest::new();
+    test.load_json(
+        r#"{"version": 8, "sources": {},
+        "state": {"color": {"default": "rgba(0,0,255,1)"}},
+        "light": {"intensity": 0.2},
+        "sky": {"sky-color": "rgba(0,255,0,1)"},
+        "layers": [{"id": "background", "type": "background",
+            "paint": {"background-color": ["to-color", ["global-state", "color"]]}}]}"#,
+    );
+    let red = Value::String("rgba(255,0,0,1)".to_owned());
+    test.map().edit_style(|style| style.apply(Edit::SetGlobalState { name: "color".to_owned(), value: red })).unwrap();
+    let before = test.render().image;
+    assert_eq!(center_pixel(&before), [255, 0, 0, 255]);
+
+    test.frontend().renderer().clear_data();
+    let after = test.render().image;
+    assert_eq!(before, after);
 }

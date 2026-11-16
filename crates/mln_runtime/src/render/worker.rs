@@ -1086,8 +1086,9 @@ impl Worker {
         let projection = gfx.renderer.frame_projection();
         // The previous render's sources may hold the last references to
         // replaced data, which the renderer's workers free instead.
-        if let Some(previous) = self.sources.replace(Arc::clone(&update.parameters.sources))
-            && !Arc::ptr_eq(&previous, &update.parameters.sources)
+        let sources = update.parameters.style.get_sources();
+        if let Some(previous) = self.sources.replace(Arc::clone(sources))
+            && !Arc::ptr_eq(&previous, sources)
         {
             gfx.renderer.drop_on_workers(previous);
         }

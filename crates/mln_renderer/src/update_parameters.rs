@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
-use mln_style::expression::GlobalStateMap;
-use mln_style::light::Light;
-use mln_style::sky::Sky;
-use mln_style::transition_options::TransitionOptions;
-use mln_style::{LayerList, SourceList, image};
+use mln_style::Style;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
 
@@ -20,19 +16,10 @@ pub struct UpdateParameters {
     pub time_point: Option<Instant>,
     pub transform_state: TransformState,
 
-    pub glyph_url: String,
-    /// symbols: `std::shared_ptr<FontFaces> fontFaces`.
-    pub font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
+    /// The version of the style to draw. A renderer compares it with the
+    /// version it drew last ([`mln_style::diff::StyleDiff`]).
+    pub style: Arc<Style>,
     pub sprite_loaded: bool,
-    pub transition_options: TransitionOptions,
-    pub light: Arc<Light>,
-    pub sky: Option<Arc<Sky>>,
-    pub images: Arc<Vec<Arc<image::Impl>>>,
-    /// The style's sources, in the order they were added.
-    pub sources: Arc<SourceList>,
-    pub layers: Arc<LayerList>,
-    /// The style's global state, used by "global-state" expressions.
-    pub global_state: Option<Arc<GlobalStateMap>>,
     /// The map's feature state. Each render source takes its own, in place
     /// of what it held.
     pub feature_states: Arc<crate::source_state::FeatureStatesBySource>,

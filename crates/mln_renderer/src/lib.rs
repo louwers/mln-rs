@@ -44,7 +44,6 @@ mod renderer_event;
 mod sky_pass;
 pub mod source_state;
 mod sources;
-mod style_diff;
 pub mod text;
 pub mod tile;
 mod tile_mask;

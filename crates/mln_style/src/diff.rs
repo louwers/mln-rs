@@ -1,11 +1,15 @@
-//! What changed between two versions of a style's parts, which the renderer
-//! reads to find what to redo.
+//! What changed between two versions of a style, which the renderer reads
+//! to find what to redo: [`StyleDiff`].
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use mln_vec_map::VecMap;
 
 use crate::layer_list::LayerList;
+use crate::source_list::SourceList;
+use crate::style::Style;
+use crate::{image, source};
 
 /// How a layer differs between two layer lists.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -114,5 +118,123 @@ impl LayerChanges {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.changes.is_empty()
+    }
+}
+
+/// The items, by id, that differ between two id-sorted lists of shared
+/// values: sources or images.
+pub struct ItemChanges<T: ?Sized> {
+    /// Only in the new list, or in both as another kind (a source of
+    /// another type).
+    pub added: VecMap<String, Arc<T>>,
+    /// Only in the old list, or in both as another kind.
+    pub removed: VecMap<String, Arc<T>>,
+    /// The new values of the items in both whose values differ.
+    pub changed: VecMap<String, Arc<T>>,
+}
+
+impl<T: ?Sized> Default for ItemChanges<T> {
+    fn default() -> Self {
+        ItemChanges { added: VecMap::new(), removed: VecMap::new(), changed: VecMap::new() }
+    }
+}
+
+impl<T: ?Sized> ItemChanges<T> {
+    /// Merges `old` and `new`, both sorted by id with unique ids. An item
+    /// whose id is in both but that `same_kind` tells apart is removed and
+    /// added.
+    fn between(
+        old: &[Arc<T>],
+        new: &[Arc<T>],
+        id: impl Fn(&T) -> &str,
+        same_kind: impl Fn(&T, &T) -> bool,
+    ) -> ItemChanges<T> {
+        let (mut removed, mut added, mut changed) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut old_items, mut new_items) = (old.iter().peekable(), new.iter().peekable());
+        loop {
+            let order = match (old_items.peek(), new_items.peek()) {
+                (None, None) => break,
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (Some(before), Some(after)) => id(before).cmp(id(after)),
+            };
+            match order {
+                Ordering::Less => removed.extend(old_items.next()),
+                Ordering::Greater => added.extend(new_items.next()),
+                Ordering::Equal => {
+                    let (Some(before), Some(after)) = (old_items.next(), new_items.next()) else { break };
+                    if !same_kind(before, after) {
+                        removed.push(before);
+                        added.push(after);
+                    } else if !Arc::ptr_eq(before, after) {
+                        changed.push(after);
+                    }
+                }
+            }
+        }
+        // Each list is in id order, which the maps keep.
+        let map = |items: Vec<&Arc<T>>| items.into_iter().map(|item| (id(item).to_owned(), Arc::clone(item))).collect();
+        ItemChanges { added: map(added), removed: map(removed), changed: map(changed) }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty() && self.changed.is_empty()
+    }
+}
+
+/// The sources of `list` in id order.
+#[must_use]
+pub fn sources_by_id(list: &SourceList) -> Vec<Arc<dyn source::Impl>> {
+    let mut sources: Vec<_> = list.iter().cloned().collect();
+    sources.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+    sources
+}
+
+/// What a renderer has to redo to go from one version of a style to
+/// another: the change class of each layer, source and image.
+///
+/// It compares the two versions, not the edits between them, so it answers
+/// for however many versions came in between. Parts whose `Arc` is the same
+/// in both come out empty without a walk. Light, sky and global state
+/// aren't in it: a renderer compares them by their own pointers.
+#[derive(Default)]
+pub struct StyleDiff {
+    pub layers: LayerChanges,
+    /// A source of another type with the same id is removed and added.
+    pub sources: ItemChanges<dyn source::Impl>,
+    pub images: ItemChanges<image::Impl>,
+}
+
+impl StyleDiff {
+    /// What changed from `old` to `new`. `None` is a renderer with nothing
+    /// yet, for which every layer, source and image of `new` is added.
+    #[must_use]
+    pub fn between(old: Option<&Style>, new: &Style) -> StyleDiff {
+        let empty_layers = Arc::default();
+        let old_layers = old.map_or(&empty_layers, Style::get_layer_list);
+        let layers = LayerChanges::between(old_layers, new.get_layer_list());
+
+        let sources = match old {
+            Some(old) if Arc::ptr_eq(old.get_sources(), new.get_sources()) => ItemChanges::default(),
+            _ => ItemChanges::between(
+                &old.map(|old| sources_by_id(old.get_sources())).unwrap_or_default(),
+                &sources_by_id(new.get_sources()),
+                |source| &source.id,
+                |before, after| before.type_ == after.type_,
+            ),
+        };
+
+        let images = match old {
+            Some(old) if Arc::ptr_eq(old.get_images(), new.get_images()) => ItemChanges::default(),
+            _ => ItemChanges::between(
+                old.map_or(&[][..], |old| old.get_images().as_slice()),
+                new.get_images(),
+                |image| &image.id,
+                |_, _| true,
+            ),
+        };
+
+        StyleDiff { layers, sources, images }
     }
 }

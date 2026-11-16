@@ -569,7 +569,6 @@ impl Map {
         let projection = self.projection_at(self.transform.get_zoom());
         self.transform.set_projection_definition(&projection);
 
-        let style = &*self.style;
         let params = UpdateParameters {
             style_loaded: self.style_loaded(),
             mode: self.mode,
@@ -577,16 +576,8 @@ impl Map {
             debug_options: self.debug_options,
             time_point,
             transform_state: self.transform.get_state().clone(),
-            glyph_url: style.get_glyph_url().to_owned(),
-            font_faces: style.get_font_faces().cloned(),
+            style: Arc::clone(&self.style),
             sprite_loaded: self.loader.sprites_loaded(),
-            transition_options: style.get_transition_options(),
-            light: Arc::clone(style.get_light()),
-            sky: style.get_sky().cloned(),
-            images: Arc::clone(style.get_images()),
-            sources: Arc::clone(style.get_sources()),
-            layers: Arc::clone(style.get_layer_list()),
-            global_state: Some(Arc::clone(style.get_global_state())),
             feature_states: self.feature_state.shared(),
             file_source: self.file_source.clone(),
             prefetch_zoom_delta: self.tile.prefetch_zoom_delta,
@@ -603,7 +594,7 @@ impl Map {
             subdivision_granularity: if self.mode == MapMode::Tile {
                 SubdivisionGranularitySetting::none()
             } else {
-                style.get_projection().get_subdivision_granularity()
+                self.style.get_projection().get_subdivision_granularity()
             },
         };
 

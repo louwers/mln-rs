@@ -400,7 +400,7 @@ fn edits_fail_during_a_url_load_and_the_old_version_stays_published() {
     let mut map = Map::with_file_source(Arc::<StubFileSource>::clone(&file_source), options, &run_loop).expect("map");
     let reader = map.update_reader();
     map.load_style_json(r#"{"version": 8, "name": "Local", "sources": {}, "layers": []}"#);
-    let published = Arc::clone(&reader.latest().expect("an update").parameters.layers);
+    let published = Arc::clone(&reader.latest().expect("an update").parameters.style);
     let local = Arc::clone(map.style());
 
     map.load_style_url("http://some-url");
@@ -409,7 +409,8 @@ fn edits_fail_during_a_url_load_and_the_old_version_stays_published() {
     assert_eq!(mln_util::ErrorKind::InvalidState, error.unwrap_err().kind);
     // The version from before the load stays, and stays published.
     assert!(Arc::ptr_eq(&local, map.style()));
-    assert!(Arc::ptr_eq(&published, &reader.latest().expect("an update").parameters.layers));
+    assert!(Arc::ptr_eq(&local, &published));
+    assert!(Arc::ptr_eq(&published, &reader.latest().expect("an update").parameters.style));
 
     file_source.respond_to_all();
     run_loop.run_once();

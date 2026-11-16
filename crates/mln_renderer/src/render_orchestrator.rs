@@ -10,13 +10,13 @@ use mln_actor::{ActorRef, Mailbox, RunLoop, TaggedScheduler};
 use mln_gfx::ShaderRegistry;
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_map_types::{MapMode, TransformState};
-use mln_style::diff::{LayerChange, LayerChanges};
+use mln_style::diff::{LayerChange, StyleDiff, sources_by_id};
 use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
-    GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, SourceList, TransitionOptions,
-    TransitionParameters, image, layer, source,
+    GlobalStateChange, Layer, PropertyEvaluationParameters, Style, TransitionOptions, TransitionParameters, layer,
+    source,
 };
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
@@ -43,7 +43,6 @@ use crate::render_source::{self, RenderSource, SourcePrepareParameters};
 use crate::render_tree::{DebugType, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::{EventSink, RendererEvent, RendererEvents};
 use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
-use crate::style_diff::{SourceDifference, diff_images, diff_sources, sources_by_id};
 use crate::text::cross_tile_symbol_index::AddLayerResult;
 use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver};
 use crate::text::placement::Placement;
@@ -180,12 +179,11 @@ pub(crate) struct RenderOrchestrator {
     line_atlas: Rc<RefCell<LineAtlas>>,
     pattern_atlas: Rc<RefCell<PatternAtlas>>,
 
-    image_impls: Arc<Vec<Arc<image::Impl>>>,
-    source_impls: Arc<SourceList>,
-    /// The sources of `source_impls` in id order, the order of the
-    /// per-source pass.
+    /// The version of the style the last update drew, or `None` before
+    /// the first and after `clear_data`: no layers, sources or images.
+    style: Option<Arc<Style>>,
+    /// The style's sources in id order, the order of the per-source pass.
     sources_by_id: Vec<Arc<dyn source::Impl>>,
-    layers: Arc<LayerList>,
 
     render_sources: HashMap<String, Box<dyn RenderSource>>,
     render_layers: HashMap<String, RenderLayerPtr>,
@@ -298,10 +296,8 @@ impl RenderOrchestrator {
             placement_controller: crate::text::placement::PlacementController::new(),
             line_atlas: Rc::new(RefCell::new(LineAtlas::new())),
             pattern_atlas: Rc::new(RefCell::new(PatternAtlas::new())),
-            image_impls: Arc::new(Vec::new()),
-            source_impls: Arc::default(),
+            style: None,
             sources_by_id: Vec::new(),
-            layers: Arc::default(),
             render_sources: HashMap::default(),
             render_layers: HashMap::default(),
             // conformance: renderLight(makeMutable<Light::Impl>())
@@ -370,8 +366,9 @@ impl RenderOrchestrator {
         let zoom_changed =
             self.zoom_history.update(update_parameters.transform_state.get_zoom() as f32, update_parameters.time_point);
 
+        let style = &update_parameters.style;
         let transition_options =
-            if is_map_mode_continuous { update_parameters.transition_options } else { TransitionOptions::default() };
+            if is_map_mode_continuous { style.get_transition_options() } else { TransitionOptions::default() };
 
         let transition_duration = transition_options.duration.unwrap_or(if is_map_mode_continuous {
             DEFAULT_TRANSITION_DURATION
@@ -379,18 +376,17 @@ impl RenderOrchestrator {
             Duration::ZERO
         });
 
-        let global_state_changed = !ptr_eq_option(self.global_state.as_ref(), update_parameters.global_state.as_ref());
+        let new_global_state = Some(Arc::clone(style.get_global_state()));
+        let global_state_changed = !ptr_eq_option(self.global_state.as_ref(), new_global_state.as_ref());
         let mut changed_global_state_keys: Option<Arc<VecSet<String>>> = None;
         let mut global_state_change = None;
-        if global_state_changed
-            && let (Some(previous), Some(current)) = (&self.global_state, &update_parameters.global_state)
-        {
+        if global_state_changed && let (Some(previous), Some(current)) = (&self.global_state, &new_global_state) {
             let changed_keys = Arc::new(diff_global_state_keys(previous, current));
             changed_global_state_keys = Some(Arc::clone(&changed_keys));
             global_state_change =
                 Some(GlobalStateChange { prior_state: Arc::clone(previous), changed_keys, state_only: false });
         }
-        self.global_state = update_parameters.global_state.clone();
+        self.global_state = new_global_state;
 
         // A layer added this frame has shown nothing yet, so a global-state
         // change leaves it nothing to transition from.
@@ -432,11 +428,11 @@ impl RenderOrchestrator {
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             capture_rendered_features: update_parameters.capture_rendered_features,
-            font_faces: update_parameters.font_faces.clone(),
+            font_faces: style.get_font_faces().cloned(),
         };
 
-        self.tile_store.glyphs().set_url(&update_parameters.glyph_url);
-        self.tile_store.glyphs().set_font_faces(update_parameters.font_faces.clone());
+        self.tile_store.glyphs().set_url(style.get_glyph_url());
+        self.tile_store.glyphs().set_font_faces(style.get_font_faces().cloned());
         self.tile_store.set_file_source(update_parameters.file_source.clone());
 
         // What arrived for the tiles before the sources update, so that a
@@ -444,10 +440,10 @@ impl RenderOrchestrator {
         self.receive_tiles();
 
         // Update light. (conformance)
-        let light_changed = !Arc::ptr_eq(&self.render_light.light, &update_parameters.light);
+        let light_changed = !Arc::ptr_eq(&self.render_light.light, style.get_light());
 
         if light_changed {
-            self.render_light.light = Arc::clone(&update_parameters.light);
+            self.render_light.light = Arc::clone(style.get_light());
             self.render_light.transition(&transition_parameters);
         } else if let Some(parameters) = &global_state_transition_parameters {
             self.render_light.transition(parameters);
@@ -459,7 +455,7 @@ impl RenderOrchestrator {
 
         // Update sky while preserving transitions between successive configurations.
         let mut sky_changed = false;
-        if let Some(sky) = &update_parameters.sky {
+        if let Some(sky) = style.get_sky() {
             match &mut self.render_sky {
                 None => {
                     self.render_sky = Some(crate::render_sky::RenderSky::new(Arc::clone(sky)));
@@ -487,8 +483,25 @@ impl RenderOrchestrator {
             render_sky.evaluate(&evaluation_parameters);
         }
 
-        let image_diff = diff_images(&self.image_impls, &update_parameters.images);
-        self.image_impls = Arc::clone(&update_parameters.images);
+        // The previous sources may hold the last references to replaced
+        // data, such as a GeoJSON source's index, which can take
+        // milliseconds to free. The workers drop them once this update has
+        // moved the render sources and their tiles to the new ones. Declared
+        // before the diff, which holds previous sources too, so that it
+        // drops after the diff. The previous version itself drops here, on
+        // the render thread, with its layers and images.
+        let previous_sources = self.style.as_ref().map(|previous| previous.get_sources());
+        let sources_changed = previous_sources.is_none_or(|previous| !Arc::ptr_eq(previous, style.get_sources()));
+        let _previous_sources = previous_sources
+            .filter(|_| sources_changed)
+            .map(|previous| DropOnWorkers::new(Arc::clone(previous), self.thread_pool.clone()));
+        let StyleDiff { layers: layer_changes, sources: source_diff, images: image_diff } =
+            StyleDiff::between(self.style.as_deref(), style);
+        if sources_changed {
+            self.sources_by_id = sources_by_id(style.get_sources());
+        }
+        self.style = Some(Arc::clone(style));
+        let layers = Arc::clone(style.get_layer_list());
 
         // Adding or removing an image changes the layout of the tiles whose
         // dependencies name it, and updating one does when its size or SDF
@@ -521,9 +534,6 @@ impl RenderOrchestrator {
             self.tile_store.images_changed(&relayout_images);
         }
 
-        let layer_changes = LayerChanges::between(&self.layers, &update_parameters.layers);
-        self.layers = Arc::clone(&update_parameters.layers);
-
         let mut changes: UniqueChangeRequestVec = Vec::new();
 
         // Make each render layer again from its layer, without the relayout
@@ -551,7 +561,7 @@ impl RenderOrchestrator {
 
         // Create render layers for newly added layers.
         for (id, _) in layer_changes.iter().filter(|(_, change)| change.adds()) {
-            let Some(layer) = self.layers.get(id) else { continue };
+            let Some(layer) = layers.get(id) else { continue };
             if let Some(render_layer) = create_render_layer(&self.registry, layer.style()) {
                 render_layer.borrow_mut().transition(&added_layer_transition_parameters);
                 // `emplace` keeps an existing entry.
@@ -561,7 +571,7 @@ impl RenderOrchestrator {
 
         // Update render layers for changed layers.
         for (id, _) in layer_changes.iter().filter(|(_, change)| change.restyles()) {
-            if let (Some(render_layer), Some(layer)) = (self.render_layers.get(&**id), self.layers.get(id)) {
+            if let (Some(render_layer), Some(layer)) = (self.render_layers.get(&**id), layers.get(id)) {
                 let new_layer = layer.style();
 
                 let mut render_layer = render_layer.borrow_mut();
@@ -572,9 +582,9 @@ impl RenderOrchestrator {
 
         if layers_added_or_removed {
             self.ordered_layers.clear();
-            self.ordered_layers.reserve(self.layers.len());
+            self.ordered_layers.reserve(layers.len());
             let mut layer_index: i32 = 0;
-            for style_layer in self.layers.iter() {
+            for style_layer in layers.iter() {
                 // C++ uses renderLayers.at(id); a layer type without a
                 // render layer is skipped.
                 let Some(layer) = self.render_layers.get(style_layer.get_id()) else {
@@ -591,7 +601,7 @@ impl RenderOrchestrator {
         debug_assert_eq!(self.ordered_layers.len(), self.render_layers.len());
 
         if layers_added_or_removed || !layer_changes.is_empty() {
-            self.tile_store.glyphs().evict(&layer::font_stacks(self.layers.iter().map(Layer::style)));
+            self.tile_store.glyphs().evict(&layer::font_stacks(layers.iter().map(Layer::style)));
         }
 
         // Update layers for class and zoom changes.
@@ -637,24 +647,6 @@ impl RenderOrchestrator {
                 }
             }
         }
-
-        // The previous sources may hold the last references to replaced
-        // data, such as a GeoJSON source's index, which can take
-        // milliseconds to free. The workers drop them once this update has
-        // moved the render sources and their tiles to the new ones. Declared
-        // before the diff, which holds previous sources too, so that it
-        // drops after the diff.
-        let _previous_sources = (!Arc::ptr_eq(&self.source_impls, &update_parameters.sources))
-            .then(|| DropOnWorkers::new(Arc::clone(&self.source_impls), self.thread_pool.clone()));
-        let source_diff = if Arc::ptr_eq(&self.source_impls, &update_parameters.sources) {
-            SourceDifference::default()
-        } else {
-            let sources = sources_by_id(&update_parameters.sources);
-            let diff = diff_sources(&self.sources_by_id, &sources);
-            self.sources_by_id = sources;
-            diff
-        };
-        self.source_impls = Arc::clone(&update_parameters.sources);
 
         // Remove render layers for removed sources.
         for id in source_diff.removed.keys() {
@@ -709,8 +701,8 @@ impl RenderOrchestrator {
         let mut layer_render_items: VecMap<u32, LayerRenderItem> = VecMap::new();
 
         // Reserve size for filteredLayersForSource if there are sources.
-        if !self.source_impls.is_empty() {
-            self.filtered_layers_for_source.reserve(self.layers.len());
+        if !self.sources_by_id.is_empty() {
+            self.filtered_layers_for_source.reserve(layers.len());
         }
 
         // Track which layers are flagged for rendering
@@ -806,7 +798,7 @@ impl RenderOrchestrator {
                     if self.background_layer_as_color
                         && render_tree_parameters.sky.is_none()
                         && !update_parameters.transform_state.is_globe_rendering()
-                        && self.layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
+                        && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
                     {
                         let solid_background = layer.get_solid_background();
                         if let Some(solid_background) = solid_background {
@@ -1052,16 +1044,11 @@ impl RenderOrchestrator {
     }
 
     pub(crate) fn clear_data(&mut self) {
-        if !self.source_impls.is_empty() {
-            self.source_impls = Arc::default();
-            self.sources_by_id.clear();
-        }
-        if !self.layers.is_empty() {
-            self.layers = Arc::default();
-        }
-        if !self.image_impls.is_empty() {
-            self.image_impls = Arc::new(Vec::new());
-        }
+        // The next update finds every layer, source and image added. The
+        // global state, light and sky stay, so the next update doesn't
+        // transition them again.
+        self.style = None;
+        self.sources_by_id.clear();
 
         let mut changes: UniqueChangeRequestVec = Vec::new();
         for layer in self.render_layers.values() {
@@ -1539,7 +1526,8 @@ impl RenderOrchestrator {
         // DEVIATION: C++ iterates `filteredLayers`, an unordered_map (libstdc++
         // hash order); the port goes from the topmost style layer down, the
         // order GL JS (which wrote the expectations) returns.
-        for style_layer in self.layers.iter().rev() {
+        let layers = self.style.as_ref().map(|style| Arc::clone(style.get_layer_list())).unwrap_or_default();
+        for style_layer in layers.iter().rev() {
             let id = style_layer.get_id();
             if !filtered_layers.contains_key(id) {
                 continue;

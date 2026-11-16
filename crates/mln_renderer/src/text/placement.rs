@@ -863,7 +863,7 @@ impl Placement {
         Placement {
             kind,
             collision_index: CollisionIndex::new(&update_parameters.transform_state, update_parameters.mode),
-            transition_options: update_parameters.transition_options,
+            transition_options: update_parameters.style.get_transition_options(),
             fade_start_time: None,
             commit_time: update_parameters.time_point,
             placement_zoom: update_parameters.transform_state.get_zoom() as f32,

@@ -113,3 +113,132 @@ fn a_change_tiles_are_laid_out_with_is_relaid() {
         assert_eq!(expected.relayouts(), expected == LayerChange::Relaid, "{name}");
     }
 }
+
+// `StyleDiff::between`: what changed between two versions of a style.
+
+mod style_diff {
+    use std::sync::Arc;
+
+    use mln_util::image::PremultipliedImage;
+    use mln_util::size::Size;
+    use mln_util::tileset::PartialTileset;
+
+    use crate::diff::{LayerChange, StyleDiff, sources_by_id};
+    use crate::source::Source as _;
+    use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
+    use crate::sources::tile_source::TileSource;
+    use crate::{Edit, StyleRegistry, image, source};
+
+    const STYLE: &str = r#"{"version":8,
+        "sources":{"c":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
+                   "a":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
+        "layers":[{"id":"bg","type":"background"},{"id":"dots","type":"circle","source":"a"}]}"#;
+
+    fn style() -> crate::Style {
+        crate::Style::from_json(&StyleRegistry::with_builtins(), STYLE, None).unwrap().style
+    }
+
+    fn vector(id: &str) -> Arc<dyn source::Impl> {
+        TileSource::vector(id, Some("mbtiles://tiles".to_owned()), PartialTileset::default()).base_impl()
+    }
+
+    fn image(id: &str) -> Arc<image::Impl> {
+        let pixels = PremultipliedImage::new(Size::new(2, 2));
+        Arc::new(image::Impl::new(id.to_owned(), pixels, 1.0, false, Vec::new(), Vec::new(), None, None, None).unwrap())
+    }
+
+    fn keys<T: ?Sized>(map: &mln_vec_map::VecMap<String, Arc<T>>) -> Vec<&str> {
+        map.keys().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn a_renderer_with_nothing_gets_everything_added() {
+        let mut style = style();
+        style.apply(Edit::AddImage(image("i"))).unwrap();
+        let diff = StyleDiff::between(None, &style);
+        let layers: Vec<_> = diff.layers.iter().map(|(id, change)| (id.to_string(), change)).collect();
+        assert_eq!(layers, [("bg".to_owned(), LayerChange::Added), ("dots".to_owned(), LayerChange::Added)]);
+        assert!(diff.layers.order_changed);
+        assert_eq!(["a", "c"], *keys(&diff.sources.added));
+        assert_eq!(["i"], *keys(&diff.images.added));
+        assert!(diff.sources.removed.is_empty() && diff.images.removed.is_empty());
+    }
+
+    #[test]
+    fn the_same_version_has_no_changes() {
+        let style = style();
+        let diff = StyleDiff::between(Some(&style), &style.clone());
+        assert!(diff.layers.is_empty() && diff.sources.is_empty() && diff.images.is_empty());
+    }
+
+    #[test]
+    fn the_source_pass_runs_in_id_order() {
+        let mut style = style();
+        style.apply(Edit::SetSourceImpl { id: "b".to_owned(), source: Some(vector("b")) }).unwrap();
+        let ids: Vec<_> = style.get_sources().iter().map(|source| source.id.clone()).collect();
+        assert_eq!(["c", "a", "b"], *ids);
+        let sorted: Vec<_> = sources_by_id(style.get_sources()).iter().map(|source| source.id.clone()).collect();
+        assert_eq!(["a", "b", "c"], *sorted);
+    }
+
+    #[test]
+    fn sources_differ_by_id_record_and_type() {
+        let old = style();
+        let mut new = old.clone();
+        let geojson_a = GeoJSONSource::new("a", GeoJSONOptions::default_options()).base_impl();
+        new.apply(Edit::SetSourceImpl { id: "c".to_owned(), source: Some(vector("c")) }).unwrap();
+        new.apply(Edit::SetSourceImpl { id: "a".to_owned(), source: Some(geojson_a) }).unwrap();
+        new.apply(Edit::SetSourceImpl { id: "d".to_owned(), source: Some(vector("d")) }).unwrap();
+        let diff = StyleDiff::between(Some(&old), &new);
+        assert_eq!(["c", "d"], *keys(&diff.sources.added));
+        assert_eq!(["c"], *keys(&diff.sources.removed));
+        assert_eq!(["a"], *keys(&diff.sources.changed));
+    }
+
+    #[test]
+    fn images_differ_by_id_and_value() {
+        let mut old = style();
+        old.apply(Edit::AddImage(image("kept"))).unwrap();
+        old.apply(Edit::AddImage(image("changed"))).unwrap();
+        old.apply(Edit::AddImage(image("removed"))).unwrap();
+        let mut new = old.clone();
+        new.apply(Edit::AddImage(image("changed"))).unwrap();
+        new.apply(Edit::RemoveImage("removed".to_owned())).unwrap();
+        new.apply(Edit::AddImage(image("added"))).unwrap();
+        let diff = StyleDiff::between(Some(&old), &new);
+        assert_eq!(["added"], *keys(&diff.images.added));
+        assert_eq!(["removed"], *keys(&diff.images.removed));
+        assert_eq!(["changed"], *keys(&diff.images.changed));
+    }
+
+    #[test]
+    fn each_layer_edit_names_its_layer_and_class() {
+        let base = style();
+        let cases = [
+            ("circle-color", serde_json::json!("#ff0000"), LayerChange::Restyled),
+            ("circle-radius", serde_json::json!(["get", "radius"]), LayerChange::Relaid),
+            ("filter", serde_json::json!(["==", "class", "road"]), LayerChange::Relaid),
+            ("visibility", serde_json::json!("none"), LayerChange::Relaid),
+        ];
+        for (name, value, expected) in cases {
+            let mut edited = base.clone();
+            let edit = Edit::SetLayerProperty { layer: "dots".to_owned(), name: name.to_owned(), value };
+            edited.apply(edit).unwrap();
+            let diff = StyleDiff::between(Some(&base), &edited);
+            let layers: Vec<_> = diff.layers.iter().map(|(id, change)| (id.to_string(), change)).collect();
+            assert_eq!(layers, [("dots".to_owned(), expected)], "{name}");
+        }
+
+        // A global state key that a visibility expression reads.
+        let mut stateful = base.clone();
+        let visibility = serde_json::json!(["case", ["to-boolean", ["global-state", "show"]], "visible", "none"]);
+        let edit =
+            Edit::SetLayerProperty { layer: "dots".to_owned(), name: "visibility".to_owned(), value: visibility };
+        stateful.apply(edit).unwrap();
+        let mut shown = stateful.clone();
+        shown.apply(Edit::SetGlobalState { name: "show".to_owned(), value: feature::Value::Bool(true) }).unwrap();
+        let diff = StyleDiff::between(Some(&stateful), &shown);
+        let layers: Vec<_> = diff.layers.iter().map(|(id, change)| (id.to_string(), change)).collect();
+        assert_eq!(layers, [("dots".to_owned(), LayerChange::Relaid)]);
+    }
+}

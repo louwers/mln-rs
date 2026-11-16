@@ -82,7 +82,7 @@ pub enum Edit {
     RemoveImage(String),
     /// A sprite's images, each replacing the image with its id.
     AddImages(Vec<Arc<image::Impl>>),
-    /// Records `source` as the source `id`, whose handle the map holds,
+    /// Records `source`, whose id is `id`, as the source whose handle the map holds,
     /// replacing that source's record in place or adding it last; `None`
     /// removes the record.
     SetSourceImpl {

@@ -177,7 +177,7 @@ fn a_style_load_clears_the_feature_state_that_it_publishes() {
     assert!(map.get_feature_state("other", None, "1").is_empty());
     let update = reader.latest().expect("an update");
     assert!(update.parameters.feature_states.is_empty());
-    assert_eq!(1, update.parameters.sources.len());
+    assert_eq!(1, update.parameters.style.get_sources().len());
 
     // State set once the style has loaded stays.
     map.set_feature_state("points", None, "1", hover(true));
@@ -212,7 +212,7 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
     let (waker_peek, waker_carried) = (Arc::clone(&peek), Arc::clone(&carried));
     reader.set_waker(Some(Arc::new(move || {
         if let Some(update) = waker_peek.lock().as_ref().and_then(UpdateReader::latest)
-            && !update.parameters.sources.is_empty()
+            && !update.parameters.style.get_sources().is_empty()
         {
             waker_carried.lock().push(!update.parameters.feature_states.is_empty());
         }
@@ -286,7 +286,7 @@ fn each_reader_wakes_until_it_drops() {
 
 /// Whether `update`'s only source updates synchronously.
 fn publishes_synchronous(update: &Update) -> bool {
-    update.parameters.sources.iter().next().expect("a source").is_update_synchronous()
+    update.parameters.style.get_sources().iter().next().expect("a source").is_update_synchronous()
 }
 
 fn set_override_synchronous_update(map: &mut Map, value: bool) {
