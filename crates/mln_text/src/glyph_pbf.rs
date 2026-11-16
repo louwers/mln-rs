@@ -122,10 +122,10 @@ fn parse_glyph(glyph_range: GlyphRange, data: &[u8]) -> Result<Option<Glyph>, De
     if m.width != 0 && m.height != 0 {
         let border = u32::from(Glyph::BORDER_SIZE);
         let size = Size::new(m.width + 2 * border, m.height + 2 * border);
-        if size.area() as usize != glyph_data.len() {
+        let Ok(bitmap) = AlphaImage::from_slice(size, glyph_data) else {
             return Ok(None);
-        }
-        glyph.bitmap = AlphaImage::from_slice(size, glyph_data).expect("size checked");
+        };
+        glyph.bitmap = bitmap;
     }
 
     Ok(Some(glyph))

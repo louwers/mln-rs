@@ -48,16 +48,15 @@ pub(crate) fn update_renderables<C: RenderablesContext>(
         debug_assert!(ideal_data_tile_id.overscaled_z >= ideal_data_tile_id.canonical.z);
 
         let ideal_render_tile_id = ideal_data_tile_id.to_unwrapped();
-        let mut tile = ctx.get_tile(ideal_data_tile_id);
-        if tile.is_none() {
-            tile = ctx.create_tile(ideal_data_tile_id);
-            // For source types where TileJSON.bounds is set, tiles outside
-            // the bounds are not created
-            if tile.is_none() {
-                continue;
-            }
-        }
-        let ideal_tile = tile.expect("tile");
+        let ideal_tile = match ctx.get_tile(ideal_data_tile_id) {
+            Some(tile) => tile,
+            None => match ctx.create_tile(ideal_data_tile_id) {
+                Some(tile) => tile,
+                // For source types where TileJSON.bounds is set, tiles
+                // outside the bounds are not created
+                None => continue,
+            },
+        };
 
         // if (source has the tile and bucket is loaded) {
         if ctx.is_renderable(&ideal_tile) {

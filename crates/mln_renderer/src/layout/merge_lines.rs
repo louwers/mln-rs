@@ -74,16 +74,15 @@ pub(crate) fn merge_lines(features: &mut [SymbolFeature]) {
         let Some(formatted_text) = &feature.formatted_text else {
             continue;
         };
-        if geometry.is_empty() || geometry[0].is_empty() {
-            continue;
-        }
+        let Some(line) = geometry.first() else { continue };
+        let (Some(&first), Some(&last)) = (line.first(), line.last()) else { continue };
 
         // TODO: Key should include formatting options (see
         // https://github.com/mapbox/mapbox-gl-js/issues/3645)
 
         let text = formatted_text.raw_text().to_vec();
-        let left_key = get_key(&text, *geometry[0].first().expect("not empty"));
-        let right_key = get_key(&text, *geometry[0].last().expect("not empty"));
+        let left_key = get_key(&text, first);
+        let right_key = get_key(&text, last);
 
         let left = right_index.get(&left_key).copied();
         let right = left_index.get(&right_key).copied();
@@ -97,8 +96,9 @@ pub(crate) fn merge_lines(features: &mut [SymbolFeature]) {
 
                 left_index.remove(&left_key);
                 right_index.remove(&right_key);
-                let back = *features[i].geometry[0].last().expect("merged line is not empty");
-                right_index.insert(get_key(&text, back), i);
+                if let Some(&back) = features[i].geometry[0].last() {
+                    right_index.insert(get_key(&text, back), i);
+                }
             }
             (Some(_), _) => {
                 // found mergeable line adjacent to the start of the current line, merge

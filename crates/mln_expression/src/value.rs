@@ -107,14 +107,6 @@ impl Value {
             _ => None,
         }
     }
-
-    #[must_use]
-    pub(crate) fn as_array(&self) -> Option<&Vec<Value>> {
-        match self {
-            Value::Array(a) => Some(a),
-            _ => None,
-        }
-    }
 }
 
 impl From<bool> for Value {

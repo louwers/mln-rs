@@ -49,9 +49,7 @@ pub(crate) fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> 
         return Some(Value::Array(result));
     }
 
-    // since value represents a JSON value, if it's not undefined, object, or
-    // array, it must be convertible to mln::Value
-    Some(from_mbgl_value(&value.to_value().expect("to_value of a JSON scalar")))
+    value.to_value().map(|value| from_mbgl_value(&value))
 }
 
 impl Literal {
@@ -99,7 +97,7 @@ impl Literal {
 
             Some(Expr::literal(parsed_value))
         } else {
-            let parsed_value = parse_value(value, ctx).expect("primitive literal");
+            let parsed_value = parse_value(value, ctx)?;
             Some(Expr::literal(parsed_value))
         }
     }

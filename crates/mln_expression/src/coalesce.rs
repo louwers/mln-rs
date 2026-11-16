@@ -51,7 +51,10 @@ impl Coalesce {
             }
             args.push(parsed);
         }
-        let output_type = output_type.expect("coalesce output type");
+        let Some(output_type) = output_type else {
+            ctx.error("Expected at least one argument.".to_owned());
+            return None;
+        };
 
         // Above, we parse arguments without inferred type annotation so that
         // they don't produce a runtime error for `null` input, which would
@@ -80,11 +83,9 @@ impl Coalesce {
                 && let Some(image) = from_expression_value::<Image>(r)
                 && !image.is_available()
             {
-                if requested_image.is_none() {
-                    requested_image = Some(Image::new(image.id()));
-                }
+                let requested_image = requested_image.get_or_insert_with(|| Image::new(image.id()));
                 if args_count == 0 {
-                    result = Ok(Value::Image(requested_image.clone().unwrap()));
+                    result = Ok(Value::Image(requested_image.clone()));
                 }
                 continue;
             }

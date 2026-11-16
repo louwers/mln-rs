@@ -306,11 +306,11 @@ impl LineAtlas {
         cap: LinePatternCap,
     ) -> &mut DashPatternTexture {
         let key = dash_key(from, to, cap);
-        if !self.textures.contains_key(&key) {
-            self.textures.insert(key.clone(), DashPatternTexture::new(from, to, cap));
-            self.needs_upload.push(key.clone());
-        }
-        self.textures.get_mut(&key).expect("dash pattern texture")
+        let needs_upload = &mut self.needs_upload;
+        self.textures.entry(key.clone()).or_insert_with(|| {
+            needs_upload.push(key);
+            DashPatternTexture::new(from, to, cap)
+        })
     }
 
     /// Uploads the textures to the GPU to be available when we need it.

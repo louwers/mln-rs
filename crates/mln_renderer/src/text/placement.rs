@@ -1920,17 +1920,17 @@ impl Placement {
         if has_sdf_icon {
             bs.sdf_icon.opacity_attribute_data.clear();
         }
-        if has_icon_collision_box {
-            bs.icon_collision_box.as_mut().expect("data").dynamic_vertices.clear();
+        if has_icon_collision_box && let Some(buffer) = bs.icon_collision_box.as_mut() {
+            buffer.dynamic_vertices.clear();
         }
-        if has_icon_collision_circle {
-            bs.icon_collision_circle.as_mut().expect("data").dynamic_vertices.clear();
+        if has_icon_collision_circle && let Some(buffer) = bs.icon_collision_circle.as_mut() {
+            buffer.dynamic_vertices.clear();
         }
-        if has_text_collision_box {
-            bs.text_collision_box.as_mut().expect("data").dynamic_vertices.clear();
+        if has_text_collision_box && let Some(buffer) = bs.text_collision_box.as_mut() {
+            buffer.dynamic_vertices.clear();
         }
-        if has_text_collision_circle {
-            bs.text_collision_circle.as_mut().expect("data").dynamic_vertices.clear();
+        if has_text_collision_circle && let Some(buffer) = bs.text_collision_circle.as_mut() {
+            buffer.dynamic_vertices.clear();
         }
 
         let duplicate_opacity_state = JointOpacityState::new(false, false, true);
@@ -2047,12 +2047,9 @@ impl Placement {
                     if feature.along_line {
                         return;
                     }
+                    let Some(icon_collision_box) = icon_collision_box.as_mut() else { return };
                     let dynamic_vertex = SymbolBucket::collision_dynamic_vertex(placed, false, shift);
-                    extend(
-                        &mut icon_collision_box.as_mut().expect("data").dynamic_vertices,
-                        feature.boxes.len() * 4,
-                        dynamic_vertex,
-                    );
+                    extend(&mut icon_collision_box.dynamic_vertices, feature.boxes.len() * 4, dynamic_vertex);
                 };
 
             let update_text_collision_box =
@@ -2090,11 +2087,8 @@ impl Placement {
                         }
                     }
                     let dynamic_vertex = SymbolBucket::collision_dynamic_vertex(placed, !used, shift);
-                    extend(
-                        &mut text_collision_box.as_mut().expect("data").dynamic_vertices,
-                        feature.boxes.len() * 4,
-                        dynamic_vertex,
-                    );
+                    let Some(text_collision_box) = text_collision_box.as_mut() else { return shift };
+                    extend(&mut text_collision_box.dynamic_vertices, feature.boxes.len() * 4, dynamic_vertex);
                     shift
                 };
 
@@ -2107,7 +2101,8 @@ impl Placement {
                 if !feature.along_line {
                     return;
                 }
-                let dynamic_vertices = &mut circle_buffer.as_mut().expect("data").dynamic_vertices;
+                let Some(circle_buffer) = circle_buffer.as_mut() else { return };
+                let dynamic_vertices = &mut circle_buffer.dynamic_vertices;
                 if let Some(circles) = self.collision_circles.get(&(bucket.bucket_instance_id, symbol_index, is_text)) {
                     for circle in circles {
                         let dynamic_vertex =
@@ -2572,12 +2567,13 @@ impl Placement {
 
             if let Some(text_collision_box) = symbol.get_text_collision_feature().boxes.first() {
                 let mut offset = Vec2::ZERO;
-                if let Some(variable_anchor) = variable_anchor {
+                if let Some(variable_anchor) = variable_anchor
+                    && let Some(text_variable_anchor_offset) = &text_variable_anchor_offset
+                {
                     let width = text_collision_box.x2 - text_collision_box.x1;
                     let height = text_collision_box.y2 - text_collision_box.y1;
 
-                    let variable_text_offset =
-                        text_variable_anchor_offset.as_ref().expect("offsets").get_offset_by_anchor(&variable_anchor);
+                    let variable_text_offset = text_variable_anchor_offset.get_offset_by_anchor(&variable_anchor);
 
                     offset = calculate_variable_layout_offset(
                         variable_anchor,
@@ -2597,12 +2593,12 @@ impl Placement {
                 let mut offset = Vec2::ZERO;
                 if let Some(variable_anchor) = variable_anchor
                     && variable_icon_placement
+                    && let Some(text_variable_anchor_offset) = &text_variable_anchor_offset
                 {
                     let width = icon_collision_box.x2 - icon_collision_box.x1;
                     let height = icon_collision_box.y2 - icon_collision_box.y1;
 
-                    let variable_text_offset =
-                        text_variable_anchor_offset.as_ref().expect("offsets").get_offset_by_anchor(&variable_anchor);
+                    let variable_text_offset = text_variable_anchor_offset.get_offset_by_anchor(&variable_anchor);
 
                     offset = calculate_variable_layout_offset(
                         variable_anchor,

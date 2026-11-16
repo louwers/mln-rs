@@ -118,12 +118,13 @@ pub fn find_zoom_curve_checked(e: &Expr) -> ZoomCurvePtr<'_> {
     if !e.has(Dependency::ZOOM) {
         return ZoomCurvePtr::Null;
     }
-    match find_zoom_curve(e).expect("zoom-dependent expression without a zoom curve") {
-        ZoomCurve::Error(err) => {
+    match find_zoom_curve(e) {
+        Some(ZoomCurve::Error(err)) => {
             Log::error(Event::Style, format!("Invalid Expression: {}", err.message));
             ZoomCurvePtr::Null
         }
-        ZoomCurve::Interpolate(i) => ZoomCurvePtr::Interpolate(i),
-        ZoomCurve::Step(s) => ZoomCurvePtr::Step(s),
+        Some(ZoomCurve::Interpolate(i)) => ZoomCurvePtr::Interpolate(i),
+        Some(ZoomCurve::Step(s)) => ZoomCurvePtr::Step(s),
+        None => ZoomCurvePtr::Null,
     }
 }

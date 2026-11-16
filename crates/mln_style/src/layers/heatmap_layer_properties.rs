@@ -56,10 +56,23 @@ impl Properties for HeatmapLayerImpl {
 #[must_use]
 pub fn default_heatmap_color() -> ColorRampPropertyValue {
     let mut error = Error::default();
-    let raw_value: serde_json::Value = serde_json::from_str(
-        r#"["interpolate",["linear"],["heatmap-density"],0,"rgba(0, 0, 255, 0)",0.1,"royalblue",0.3,"cyan",0.5,"lime",0.7,"yellow",1,"red"]"#,
-    )
-    .unwrap();
+    let raw_value = serde_json::json!([
+        "interpolate",
+        ["linear"],
+        ["heatmap-density"],
+        0,
+        "rgba(0, 0, 255, 0)",
+        0.1,
+        "royalblue",
+        0.3,
+        "cyan",
+        0.5,
+        "lime",
+        0.7,
+        "yellow",
+        1,
+        "red"
+    ]);
     convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error)
         .expect("the heatmap-color default converts")
 }

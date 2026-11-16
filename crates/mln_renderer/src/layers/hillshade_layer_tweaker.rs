@@ -37,13 +37,9 @@ impl IlluminationProperties {
 
 /// Pad shorter arrays by repeating the last element.
 fn pad_array<T: Clone + Default>(arr: &mut Vec<T>, max_length: usize) {
-    if arr.is_empty() {
-        arr.push(T::default());
-    }
-    while arr.len() < max_length {
-        let last = arr.last().expect("non-empty").clone();
-        arr.push(last);
-    }
+    let last = arr.last().cloned().unwrap_or_default();
+    let length = max_length.max(arr.len()).max(1);
+    arr.resize(length, last);
 }
 
 /// Convert style properties to illumination properties

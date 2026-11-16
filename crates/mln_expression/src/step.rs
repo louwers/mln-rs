@@ -104,7 +104,10 @@ impl Step {
             i += 2;
         }
 
-        let output_type = output_type.expect("step output type");
+        let Some(output_type) = output_type else {
+            ctx.error(format!("Expected at least 4 arguments, but found only {}.", length - 1));
+            return None;
+        };
 
         Some(Step::new_expr(output_type, input, stops))
     }

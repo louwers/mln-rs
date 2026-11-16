@@ -160,14 +160,11 @@ impl Impl {
             // run's later parts lie to the left of its earlier ones.
             text_parts.reverse();
         } else {
-            text_parts.push(TextPart { text: vec![text[0]], script: get_unicode_script(u32::from(text[0])) });
-            for &ch in &text[1..] {
+            for &ch in text {
                 let script = get_unicode_script(u32::from(ch));
-                let last = text_parts.last_mut().expect("non-empty");
-                if last.script == script || script == *b"Zinh" {
-                    last.text.push(ch);
-                } else {
-                    text_parts.push(TextPart { text: vec![ch], script });
+                match text_parts.last_mut() {
+                    Some(last) if last.script == script || script == *b"Zinh" => last.text.push(ch),
+                    _ => text_parts.push(TextPart { text: vec![ch], script }),
                 }
             }
         }

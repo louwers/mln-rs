@@ -173,11 +173,10 @@ impl Match {
             Labels::String(labels) => labels.iter().for_each(|(label, &output)| group(label.to_mbgl(), output)),
         }
 
-        for (output, mut labels) in grouped {
-            if labels.len() == 1 {
-                serialized.push(labels.pop().expect("a label"));
-            } else {
-                serialized.push(MbglValue::Array(labels));
+        for (output, labels) in grouped {
+            match <[MbglValue; 1]>::try_from(labels) {
+                Ok([label]) => serialized.push(label),
+                Err(labels) => serialized.push(MbglValue::Array(labels)),
             }
             serialized.push(self.outputs[output].serialize());
         }
@@ -353,8 +352,11 @@ pub(crate) fn parse_match(value: &Convertible<'_>, ctx: &mut ParsingContext) -> 
 
     let otherwise = ctx.parse(&value.array_member(length - 1), length - 1, output_type.clone(), None)?;
 
-    let input_type = input_type.expect("match input type");
-    let output_type = output_type.expect("match output type");
+    let Some(input_type) = input_type else {
+        ctx.error(format!("Expected at least 4 arguments, but found only {}.", length - 1));
+        return None;
+    };
+    let output_type = output_type.unwrap_or_else(|| otherwise.get_type());
 
     let actual_input_type = input.get_type();
     if actual_input_type != Type::Value

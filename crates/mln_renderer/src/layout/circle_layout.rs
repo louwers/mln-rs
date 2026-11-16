@@ -221,18 +221,17 @@ impl CircleLayout {
                     continue;
                 }
 
-                let needs_segment = match bucket.segments.last() {
-                    None => true,
-                    Some(last) => last.vertex_length + VERTEX_LENGTH > u16::MAX as usize,
-                };
-                if needs_segment {
-                    // Move to a new segments because the old one can't hold
+                let (vertex_offset, index_offset) = (bucket.vertices.len(), bucket.triangles.len());
+                let segment = match bucket.segments.last_mut() {
+                    Some(last) if u16::try_from(last.vertex_length + VERTEX_LENGTH).is_ok() => last,
+                    // Move to a new segment because the old one can't hold
                     // the geometry.
-                    let mut segment =
-                        mln_gfx::shaders::segment::SegmentBase::new(bucket.vertices.len(), bucket.triangles.len());
-                    segment.sort_key = sort_key;
-                    bucket.segments.push(segment);
-                }
+                    _ => {
+                        let mut segment = mln_gfx::shaders::segment::SegmentBase::new(vertex_offset, index_offset);
+                        segment.sort_key = sort_key;
+                        bucket.segments.push_mut(segment)
+                    }
+                };
 
                 // this geometry will be of the Point type, and we'll derive
                 // two triangles from it.
@@ -248,7 +247,6 @@ impl CircleLayout {
                 bucket.vertices.get_mut().push(CircleBucket::vertex(*point, 1.0, 1.0)); // 3
                 bucket.vertices.get_mut().push(CircleBucket::vertex(*point, -1.0, 1.0)); // 4
 
-                let segment = bucket.segments.last_mut().expect("segment");
                 debug_assert!(u16::try_from(segment.vertex_length).is_ok());
                 let index = segment.vertex_length as u16;
 

@@ -361,12 +361,10 @@ impl RenderSource for RenderImageSource {
 
         // C++ swaps the image of its bucket in place; a changed image gets a
         // new bucket here (buckets are shared across threads).
-        let same_image =
-            self.bucket.as_ref().is_some_and(|bucket| bucket.image.as_ref().is_some_and(|i| Arc::ptr_eq(i, &image)));
-        if !same_image {
-            self.bucket = Some(Arc::new(RasterBucket::with_shared_image(Some(image))));
-        }
-        let bucket = self.bucket.as_ref().expect("bucket");
+        let bucket = match &mut self.bucket {
+            Some(bucket) if bucket.image.as_ref().is_some_and(|i| Arc::ptr_eq(i, &image)) => bucket,
+            slot => slot.insert(Arc::new(RasterBucket::with_shared_image(Some(image)))),
+        };
 
         // The globe bends the quad over the sphere with the tile mesh
         // granularity of its tile, like GL JS.

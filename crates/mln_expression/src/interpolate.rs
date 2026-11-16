@@ -227,13 +227,15 @@ impl Interpolate {
                 }
                 let mut result = Vec::with_capacity(a.len());
                 for (ai, bi) in a.iter().zip(b) {
-                    let ai = ai.as_number().expect("numeric array item");
-                    let bi = bi.as_number().expect("numeric array item");
-                    result.push(Value::Number(interpolate_double(ai, bi, t)));
+                    let (Value::Number(ai), Value::Number(bi)) = (ai, bi) else {
+                        let item = if matches!(ai, Value::Number(_)) { bi } else { ai };
+                        return Err(EvaluationError::type_mismatch(&Type::Number, item));
+                    };
+                    result.push(Value::Number(interpolate_double(*ai, *bi, t)));
                 }
                 Value::Array(result)
             }
-            _ => unreachable!("interpolate_outputs on mismatched types"),
+            _ => return Err(EvaluationError::type_mismatch(&type_of(lower), upper)),
         })
     }
 
@@ -325,15 +327,15 @@ pub(crate) fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContex
             x2 = interp.array_member(3).to_double();
             y2 = interp.array_member(4).to_double();
         }
-        let in_unit = |v: Option<f64>| v.is_some_and(|v| !(v < 0.0 || v > 1.0));
-        if !in_unit(x1) || !in_unit(y1) || !in_unit(x2) || !in_unit(y2) {
+        let in_unit = |v: Option<f64>| v.filter(|&v| !(v < 0.0 || v > 1.0));
+        let (Some(x1), Some(y1), Some(x2), Some(y2)) = (in_unit(x1), in_unit(y1), in_unit(x2), in_unit(y2)) else {
             ctx.error_at(
                 "Cubic bezier interpolation requires four numeric arguments with values between 0 and 1.".to_owned(),
                 1,
             );
             return None;
-        }
-        interpolator = Some(CubicBezierInterpolator::new(x1.unwrap(), y1.unwrap(), x2.unwrap(), y2.unwrap()).into());
+        };
+        interpolator = Some(CubicBezierInterpolator::new(x1, y1, x2, y2).into());
     }
 
     let Some(interpolator) = interpolator else {
@@ -397,7 +399,10 @@ pub(crate) fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContex
         i += 2;
     }
 
-    let output_type = output_type.expect("interpolate output type");
+    let Some(output_type) = output_type else {
+        ctx.error(format!("Expected at least 4 arguments, but found only {}.", length - 1));
+        return None;
+    };
 
     create_interpolate(output_type, interpolator, color_space, input, stops, ctx)
 }

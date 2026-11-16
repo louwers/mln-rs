@@ -410,15 +410,16 @@ impl Impl {
     /// non-zero rule to expand (fill) tiles between pairs of spans.
     fn next_row(&mut self) {
         // Update activeBounds for next row
-        if let Some(&(first, _)) = self.current_bounds.peek() {
-            if self.active_bounds.is_empty() && first > self.tile_y {
-                // For multi-geoms: use the next row with an edge table starting point
-                self.tile_y = first;
-            }
-            if self.tile_y == first {
-                let (_, bounds) = self.current_bounds.next().expect("peeked");
-                self.active_bounds.extend(bounds);
-            }
+        if let Some(&(first, _)) = self.current_bounds.peek()
+            && self.active_bounds.is_empty()
+            && first > self.tile_y
+        {
+            // For multi-geoms: use the next row with an edge table starting point
+            self.tile_y = first;
+        }
+        let tile_y = self.tile_y;
+        if let Some((_, bounds)) = self.current_bounds.next_if(|&(first, _)| first == tile_y) {
+            self.active_bounds.extend(bounds);
         }
         // Scan the active bounds and update currentRange with x_min, x_max pairs
         let xps = scan_row(self.tile_y, &mut self.active_bounds);
@@ -461,7 +462,7 @@ impl Iterator for Impl {
         let x = self.tile_x;
         let y = self.tile_y;
         self.tile_x += 1;
-        if self.tile_x >= self.tile_x_spans.front().expect("has_next").1 {
+        if self.tile_x_spans.front().is_some_and(|&(_, end)| self.tile_x >= end) {
             self.tile_x_spans.pop_front();
             if self.tile_x_spans.is_empty() {
                 self.tile_y = self.tile_y.wrapping_add(1);

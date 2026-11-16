@@ -327,8 +327,7 @@ impl ParsingContext {
     /// Check whether `t` is a subtype of `expected`, collecting an error if
     /// not.
     pub(crate) fn check_type(&mut self, t: &Type) -> Option<String> {
-        let expected = self.expected.as_ref().expect("check_type without an expected type");
-        let err = check_subtype(expected, t);
+        let err = check_subtype(self.expected.as_ref()?, t);
         if let Some(err) = &err {
             self.error(err.clone());
         }
@@ -373,9 +372,7 @@ impl ParsingContext {
         value: &Convertible<'_>,
         type_annotation_option: Option<TypeAnnotationOption>,
     ) -> ParseResult {
-        let mut parsed: ParseResult;
-
-        if value.is_array() {
+        let parsed = if value.is_array() {
             let length = value.array_length();
             if length == 0 {
                 self.error(
@@ -396,14 +393,14 @@ impl ParsingContext {
                 return None;
             };
 
-            parsed = if let Some(parse_function) = expression_registry(&op) {
+            if let Some(parse_function) = expression_registry(&op) {
                 parse_function(value, self)
             } else {
                 parse_compound_expression(&op, value, self)
-            };
+            }
         } else {
-            parsed = Literal::parse(value, self);
-        }
+            Literal::parse(value, self)
+        };
 
         let Some(mut expr) = parsed else {
             debug_assert!(!self.errors.borrow().is_empty());
@@ -444,14 +441,12 @@ impl ParsingContext {
                 }
             }
         }
-        parsed = Some(expr);
-        let expr = parsed.as_ref().unwrap();
 
         // If an expression's arguments are all constant, we can evaluate it
         // immediately and replace it with a literal value in the
         // parsed/compiled result. Expressions that expect an image should not
         // be resolved here so we can later get the available images.
-        if expr.literal_value().is_none() && expr.get_type() != Type::Image && is_constant(expr) {
+        if expr.literal_value().is_none() && expr.get_type() != Type::Image && is_constant(&expr) {
             let params = EvaluationContext::from_feature(None);
             let evaluated = expr.evaluate(&params);
             let evaluated = match evaluated {
@@ -462,17 +457,14 @@ impl ParsingContext {
                 }
             };
 
-            if let Type::Array(array) = expr.get_type() {
-                // keep the original expression's array type, even if the
-                // evaluated type is more specific.
-                let Value::Array(items) = evaluated else {
-                    panic!("array-typed expression evaluated to a non-array");
-                };
-                return Some(Literal::array(*array, items));
-            }
-            return Some(Expr::literal(evaluated));
+            // Keep the original expression's array type, even if the
+            // evaluated type is more specific.
+            return Some(match (expr.get_type(), evaluated) {
+                (Type::Array(array), Value::Array(items)) => Literal::array(*array, items),
+                (_, evaluated) => Expr::literal(evaluated),
+            });
         }
 
-        parsed
+        Some(expr)
     }
 }

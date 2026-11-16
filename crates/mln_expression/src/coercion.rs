@@ -73,31 +73,26 @@ fn to_color(color_value: &Value) -> EvalResult<Color> {
             Some(result) => Ok(result),
             None => Err(EvaluationError::new(format!("Could not parse color from value '{color_string}'"))),
         },
-        Value::Array(components) => {
-            let len = components.len();
-            let is_numeric = components.iter().all(|item| matches!(item, Value::Number(_)));
-            if (len == 3 || len == 4) && is_numeric {
-                let n = |i: usize| components[i].as_number().unwrap();
-                rgba(n(0), n(1), n(2), if len == 4 { n(3) } else { 1.0 })
-            } else {
-                Err(EvaluationError::new(format!(
-                    "Invalid rbga value {}: expected an array containing either three or four numeric values.",
-                    stringify(color_value)
-                )))
-            }
-        }
+        Value::Array(components) => match components.as_slice() {
+            [Value::Number(r), Value::Number(g), Value::Number(b)] => rgba(*r, *g, *b, 1.0),
+            [Value::Number(r), Value::Number(g), Value::Number(b), Value::Number(a)] => rgba(*r, *g, *b, *a),
+            _ => Err(EvaluationError::new(format!(
+                "Invalid rbga value {}: expected an array containing either three or four numeric values.",
+                stringify(color_value)
+            ))),
+        },
         _ => Err(EvaluationError::new(format!("Could not parse color from value '{}'", stringify(color_value)))),
     }
 }
 
-/// A padding from 1 to 4 values, in CSS order.
-fn padding_from_span(values: &[f32]) -> Padding {
-    match values.len() {
-        1 => Padding::new(values[0], values[0], values[0], values[0]),
-        2 => Padding::new(values[0], values[1], values[0], values[1]),
-        3 => Padding::new(values[0], values[1], values[2], values[1]),
-        4 => Padding::new(values[0], values[1], values[2], values[3]),
-        _ => panic!("Padding must have between 1 and 4 elements"),
+/// A padding from 1 to 4 values, in CSS order, or `None` for any other count.
+fn padding_from_span(values: &[f32]) -> Option<Padding> {
+    match *values {
+        [all] => Some(Padding::new(all, all, all, all)),
+        [vertical, horizontal] => Some(Padding::new(vertical, horizontal, vertical, horizontal)),
+        [top, horizontal, bottom] => Some(Padding::new(top, horizontal, bottom, horizontal)),
+        [top, right, bottom, left] => Some(Padding::new(top, right, bottom, left)),
+        _ => None,
     }
 }
 
@@ -126,11 +121,10 @@ fn to_padding(padding_value: &Value) -> EvaluationResult {
     match padding_value {
         Value::Padding(padding) => Ok(Value::Padding(*padding)),
         Value::Array(components) => {
-            let len = components.len();
-            let is_numeric = components.iter().all(|item| matches!(item, Value::Number(_)));
-            if (1..=4).contains(&len) && is_numeric {
-                let components_as_floats: Vec<f32> = components.iter().map(|c| c.as_number().unwrap() as f32).collect();
-                Ok(Value::Padding(padding_from_span(&components_as_floats)))
+            let components_as_floats: Option<Vec<f32>> =
+                components.iter().map(|c| c.as_number().map(|n| n as f32)).collect();
+            if let Some(padding) = components_as_floats.as_deref().and_then(padding_from_span) {
+                Ok(Value::Padding(padding))
             } else {
                 Err(EvaluationError::new(format!(
                     "Invalid padding value {}: expected an array containing from one to four numeric values.",
@@ -173,12 +167,12 @@ fn to_variable_anchor_offset(value: &Value) -> EvaluationResult {
                         components_value()
                     )));
                 };
-                if offset.len() != 2 {
+                let [Value::Number(x), Value::Number(y)] = offset.as_slice() else {
                     return Err(EvaluationError::new(format!(
                         "Invalid variableAnchorOffset value {}: expected a string value as the first and an array with two elements as the second element of each pair.",
                         components_value()
                     )));
-                }
+                };
 
                 let Ok(anchor) = anchor_type_string.parse::<SymbolAnchorType>() else {
                     return Err(EvaluationError::new(format!(
@@ -188,13 +182,7 @@ fn to_variable_anchor_offset(value: &Value) -> EvaluationResult {
                     )));
                 };
 
-                // C++ `get<double>()` throws on a non-number offset.
-                // mapbox::util::bad_variant_access propagates out
-                // of evaluate() in C++.
-                let x = offset[0].as_number().expect("numeric offset") as f32;
-                let y = offset[1].as_number().expect("numeric offset") as f32;
-
-                anchor_offsets.push(AnchorOffsetPair::new(anchor, [x, y]));
+                anchor_offsets.push(AnchorOffsetPair::new(anchor, [*x as f32, *y as f32]));
                 i += 2;
             }
 
@@ -267,14 +255,17 @@ impl Coercion {
             return None;
         }
 
-        let op = value.array_member(0).to_string().expect("operator name");
-        let type_ = match op.as_str() {
-            "to-boolean" => Type::Boolean,
-            "to-color" => Type::Color,
-            "to-padding" => Type::Padding,
-            "to-number" => Type::Number,
-            "to-string" => Type::String,
-            _ => unreachable!("unknown coercion {op}"),
+        let op = value.array_member(0).to_string();
+        let type_ = match op.as_deref() {
+            Some("to-boolean") => Type::Boolean,
+            Some("to-color") => Type::Color,
+            Some("to-padding") => Type::Padding,
+            Some("to-number") => Type::Number,
+            Some("to-string") => Type::String,
+            _ => {
+                ctx.error(format!("Unknown coercion {}.", op.as_deref().unwrap_or_default()));
+                return None;
+            }
         };
 
         if (type_ == Type::Boolean || type_ == Type::String || type_ == Type::Formatted || type_ == Type::Image)

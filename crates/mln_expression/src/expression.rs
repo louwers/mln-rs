@@ -66,6 +66,15 @@ impl EvaluationError {
         EvaluationError(Box::new(ErrorMessage { message: message.into() }))
     }
 
+    /// The error for a value whose type isn't the one parsing checked for.
+    pub(crate) fn type_mismatch(expected: &Type, value: &Value) -> Self {
+        EvaluationError::new(format!(
+            "Expected value to be of type {}, but found {} instead.",
+            crate::type_::to_string(expected),
+            crate::type_::to_string(&type_of(value))
+        ))
+    }
+
     /// The message the style specification's expression tests expect.
     #[must_use]
     pub fn message(&self) -> &str {

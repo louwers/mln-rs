@@ -5,7 +5,7 @@ use mln_conversion::Convertible;
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
-use crate::value::{to_string, type_of};
+use crate::value::{Value, to_string, type_of};
 
 fn is_comparable_type(t: &Type) -> bool {
     *t == Type::Boolean || *t == Type::String || *t == Type::Number || *t == Type::Null || *t == Type::Value
@@ -88,13 +88,10 @@ impl In {
             return Ok(false);
         }
 
-        if evaluated_haystack_type == Type::String {
-            let haystack_string = evaluated_haystack.as_str().unwrap();
-            let needle_string = to_string(&evaluated_needle);
-            Ok(haystack_string.contains(needle_string.as_str()))
-        } else {
-            let haystack_array = evaluated_haystack.as_array().unwrap();
-            Ok(haystack_array.contains(&evaluated_needle))
+        match &*evaluated_haystack {
+            Value::String(haystack_string) => Ok(haystack_string.contains(to_string(&evaluated_needle).as_str())),
+            Value::Array(haystack_array) => Ok(haystack_array.contains(&evaluated_needle)),
+            _ => Ok(false),
         }
     }
 

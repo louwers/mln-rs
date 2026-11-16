@@ -5,11 +5,12 @@ const TOKEN_RESERVED_CHARS: &[u8] = b"{}";
 pub fn replace_tokens(source: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
     let bytes = source.as_bytes();
     let end = bytes.len();
-    let mut result: Vec<u8> = Vec::with_capacity(end);
+    // Every index the loop slices at is an ASCII brace or the end.
+    let mut result = String::with_capacity(end);
     let mut pos = 0;
     while pos != end {
         let mut brace = bytes[pos..].iter().position(|&c| c == b'{').map_or(end, |i| pos + i);
-        result.extend_from_slice(&bytes[pos..brace]);
+        result.push_str(&source[pos..brace]);
         pos = brace;
         if pos != end {
             brace += 1;
@@ -19,21 +20,20 @@ pub fn replace_tokens(source: &str, lookup: impl Fn(&str) -> Option<String>) -> 
             if brace != end && bytes[brace] == b'}' {
                 let key = &source[pos + 1..brace];
                 if let Some(replacement) = lookup(key) {
-                    result.extend_from_slice(replacement.as_bytes());
+                    result.push_str(&replacement);
                 } else {
-                    result.push(b'{');
-                    result.extend_from_slice(key.as_bytes());
-                    result.push(b'}');
+                    result.push('{');
+                    result.push_str(key);
+                    result.push('}');
                 }
                 pos = brace + 1;
             } else {
-                result.extend_from_slice(&bytes[pos..brace]);
+                result.push_str(&source[pos..brace]);
                 pos = brace;
             }
         }
     }
-    // Only ASCII braces are inserted or split at, so this stays UTF-8.
-    String::from_utf8(result).expect("replace_tokens keeps UTF-8")
+    result
 }
 
 #[cfg(test)]

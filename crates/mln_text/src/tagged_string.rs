@@ -174,6 +174,7 @@ impl TaggedString {
         self.styled_text.0.extend_from_slice(section_text);
         let start_index = self.styled_text.0.len() as u32;
         self.sections.push(SectionOptions {
+            key_section,
             vertical_align,
             ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
         });
@@ -183,7 +184,6 @@ impl TaggedString {
         if type_ != GlyphIDType::FontPBF {
             self.has_need_shape_text_val = true;
         }
-        self.sections.last_mut().unwrap().key_section = key_section;
     }
 
     /// Appends a text section with HarfBuzz adjustments. The section's start
@@ -204,6 +204,9 @@ impl TaggedString {
         let start_index = self.styled_text.0.len() as u32;
         self.sections.push(SectionOptions {
             vertical_align,
+            adjusts: adjusts.clone(),
+            rtl,
+            key_section,
             ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
         });
         self.styled_text.0.extend_from_slice(section_text);
@@ -212,12 +215,6 @@ impl TaggedString {
         if type_ != GlyphIDType::FontPBF {
             self.has_need_shape_text_val = true;
         }
-        if let Some(adjusts) = adjusts {
-            self.sections.last_mut().unwrap().adjusts = Some(Arc::clone(adjusts));
-        }
-        let section = self.sections.last_mut().unwrap();
-        section.rtl = rtl;
-        section.key_section = key_section;
     }
 
     pub fn add_image_section(&mut self, image_id: &str, vertical_align: VerticalAlign) {
@@ -324,18 +321,15 @@ impl TaggedString {
     /// Whether the text allows vertical writing mode (cached until the next
     /// section is added).
     pub fn allows_vertical_writing_mode(&mut self) -> bool {
-        if self.supports_vertical_writing_mode.is_none() {
-            let mut allows = false;
-            for i in 0..self.styled_text.0.len() {
-                let chr = self.styled_text.0[i];
-                if self.get_section(i).type_ == GlyphIDType::FontPBF && i18n::has_upright_vertical_orientation(chr) {
-                    allows = true;
-                    break;
-                }
-            }
-            self.supports_vertical_writing_mode = Some(allows);
+        if let Some(allows) = self.supports_vertical_writing_mode {
+            return allows;
         }
-        self.supports_vertical_writing_mode.unwrap()
+        let allows = (0..self.styled_text.0.len()).any(|i| {
+            self.get_section(i).type_ == GlyphIDType::FontPBF
+                && i18n::has_upright_vertical_orientation(self.styled_text.0[i])
+        });
+        self.supports_vertical_writing_mode = Some(allows);
+        allows
     }
 
     #[must_use]

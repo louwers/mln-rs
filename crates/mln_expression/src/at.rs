@@ -4,6 +4,7 @@ use mln_util::string::to_string_double;
 use crate::expression::{EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
+use crate::value::Value;
 
 /// `["at", index, array]`.
 #[derive(Clone, PartialEq, mln_wire::Wire)]
@@ -34,7 +35,7 @@ impl At {
 
     /// The array's item type.
     pub(crate) fn get_type(&self) -> Type {
-        self.input.get_type().as_array().expect("array input").item_type.clone()
+        self.input.get_type().as_array().map_or(Type::Value, |array| array.item_type.clone())
     }
 
     pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
@@ -47,7 +48,9 @@ impl At {
         let evaluated_input = self.input.evaluate_ref(params);
         let i = evaluated_index?;
         let evaluated_input = evaluated_input?;
-        let input_array = evaluated_input.as_array().expect("array input");
+        let Value::Array(input_array) = &*evaluated_input else {
+            return Err(EvaluationError::type_mismatch(&self.input.get_type(), &evaluated_input));
+        };
 
         if i < 0.0 {
             return Err(EvaluationError::new(format!("Array index out of bounds: {} < 0.", to_string_double(i))));

@@ -112,13 +112,15 @@ impl CollatorExpression {
             evaluated_locale = Some(locale.evaluate(params)?);
         }
 
-        Collator::new(
-            case_sensitive_result.as_bool().expect("boolean option"),
-            diacritic_sensitive_result.as_bool().expect("boolean option"),
-            evaluated_locale.as_ref().map(|locale| locale.as_str().expect("string locale")),
-        )
-        .map(Value::Collator)
-        .map_err(EvaluationError::new)
+        let boolean =
+            |value: &Value| value.as_bool().ok_or_else(|| EvaluationError::type_mismatch(&Type::Boolean, value));
+        let locale = evaluated_locale
+            .as_ref()
+            .map(|locale| locale.as_str().ok_or_else(|| EvaluationError::type_mismatch(&Type::String, locale)))
+            .transpose()?;
+        Collator::new(boolean(&case_sensitive_result)?, boolean(&diacritic_sensitive_result)?, locale)
+            .map(Value::Collator)
+            .map_err(EvaluationError::new)
     }
 
     pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {

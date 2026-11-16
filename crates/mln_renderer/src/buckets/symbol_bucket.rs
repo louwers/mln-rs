@@ -219,14 +219,13 @@ impl SymbolSizeBinder {
             SymbolSizeBinder::Constant { layout_size, covering_ranges, expression } => {
                 let mut size = *layout_size;
                 let is_zoom_constant = !(covering_ranges.is_some() || expression.is_some());
-                if let Some((zoom_levels, size_levels)) = covering_ranges {
+                if let (Some((zoom_levels, size_levels)), Some(expression)) = (covering_ranges, expression) {
                     // Even though we could get the exact value of the camera
                     // function at z = currentZoom, we intentionally do not:
                     // instead, we interpolate between the camera function
                     // values at a pair of zoom stops covering [tileZoom,
                     // tileZoom + 1] in order to be consistent with this
                     // restriction on composite functions.
-                    let expression = expression.as_ref().expect("expression");
                     let t = mln_math::clamp_f32(expression.interpolation_factor(*zoom_levels, current_zoom), 0.0, 1.0);
                     size = size_levels.min + t * (size_levels.max - size_levels.min);
                 } else if let Some(expression) = expression {

@@ -114,19 +114,21 @@ impl PositionedIcon {
     /// and textFitHeight.
     #[must_use]
     pub fn apply_text_fit(&self) -> PositionedIcon {
+        let Some(content) = self.image.content else {
+            return self.clone();
+        };
         if self.image.text_fit_width.is_none() && self.image.text_fit_height.is_none() {
             return self.clone();
         }
         let width = self.right - self.left;
         let height = self.bottom - self.top;
 
-        // C++ dereferences `content` and both text fits unchecked here.
-        let content = self.image.content.expect("applyTextFit: image content");
         let content_width = content.right - content.left;
         let content_height = content.bottom - content.top;
         let content_aspect_ratio = content_width / content_height;
-        let text_fit_width = self.image.text_fit_width.expect("applyTextFit: textFitWidth");
-        let text_fit_height = self.image.text_fit_height.expect("applyTextFit: textFitHeight");
+        // The style spec's default for both.
+        let text_fit_width = self.image.text_fit_width.unwrap_or(TextFit::StretchOrShrink);
+        let text_fit_height = self.image.text_fit_height.unwrap_or(TextFit::StretchOrShrink);
         let mut new_left = self.left;
         let mut new_right = self.right;
         let mut new_top = self.top;
@@ -264,7 +266,7 @@ fn justify_line(positioned_glyphs: &mut [PositionedGlyph], justify: f32) {
         return;
     }
 
-    let last_glyph = positioned_glyphs.last().expect("justifyLine on an empty line");
+    let Some(last_glyph) = positioned_glyphs.last() else { return };
     let last_advance = last_glyph.metrics.advance as f32 * last_glyph.scale;
     let line_indent = (last_glyph.x + last_advance) * justify;
     for positioned_glyph in positioned_glyphs.iter_mut() {
@@ -1005,7 +1007,7 @@ pub fn get_shaping(
                             image_positions,
                             layout_text_size,
                         );
-                        let processed_lines = if has_shaped_sections {
+                        let mut processed_lines = if has_shaped_sections {
                             bidi.split_styled_text(sub_string, line_breaks)?
                         } else {
                             bidi.process_styled_text(sub_string, line_breaks)?
@@ -1021,21 +1023,14 @@ pub fn get_shaping(
                                 apply_line_and_pending_strings(line, pend_strings, formatted_sections, reordered_lines);
                             }
                         } else {
-                            let line_count = processed_lines.len();
-                            let mut processed_lines = processed_lines.into_iter();
-                            if line_count > 1 {
-                                for _ in 0..line_count - 1 {
-                                    let line = processed_lines.next().unwrap();
-                                    apply_line_and_pending_strings(
-                                        line,
-                                        pend_strings,
-                                        formatted_sections,
-                                        reordered_lines,
-                                    );
-                                }
+                            // The last line has no line break yet, so it waits
+                            // for the next section's text.
+                            let last_line = processed_lines.pop();
+                            for line in processed_lines {
+                                apply_line_and_pending_strings(line, pend_strings, formatted_sections, reordered_lines);
                             }
-                            if line_count != 0 {
-                                pend_strings.push(processed_lines.next().unwrap());
+                            if let Some(last_line) = last_line {
+                                pend_strings.push(last_line);
                             }
                         }
                     } else {

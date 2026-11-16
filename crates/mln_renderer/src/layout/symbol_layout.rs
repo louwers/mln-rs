@@ -3,6 +3,7 @@
 // images across worker messages.
 //
 
+use std::cmp::Ordering;
 use std::range::RangeInclusive;
 use std::sync::Arc;
 
@@ -1188,29 +1189,26 @@ impl SymbolLayout {
         let pixel_offset_br = symbol.pixel_offset_br;
         let min_font_scale = symbol.min_font_scale;
 
-        let needs_segment = match buffer.segments.last() {
-            None => true,
-            Some(last) => {
-                last.vertex_length + VERTEX_LENGTH > u16::MAX as usize
-                    || (last.sort_key - sort_key).abs() > f32::EPSILON
+        let (vertex_offset, index_offset) = (buffer.attribute_data.len(), buffer.triangles.len());
+        let segment = match buffer.segments.last_mut() {
+            Some(last)
+                if u16::try_from(last.vertex_length + VERTEX_LENGTH).is_ok()
+                    && (last.sort_key - sort_key).abs().partial_cmp(&f32::EPSILON) != Some(Ordering::Greater) =>
+            {
+                last
+            }
+            _ => {
+                // text-conformance: C++ `triangles.elements()` counts indices
+                // (three per triangle), not triangles.
+                let mut segment =
+                    mln_gfx::shaders::segment::SegmentBase::with_lengths(vertex_offset, index_offset, 0, 0);
+                segment.sort_key = sort_key;
+                buffer.segments.push_mut(segment)
             }
         };
-        if needs_segment {
-            // text-conformance: C++ `triangles.elements()` counts indices
-            // (three per triangle), not triangles.
-            let mut segment = mln_gfx::shaders::segment::SegmentBase::with_lengths(
-                buffer.attribute_data.len(),
-                buffer.triangles.len(),
-                0,
-                0,
-            );
-            segment.sort_key = sort_key;
-            buffer.segments.push(segment);
-        }
 
         // We're generating triangle fans, so we always start with the first
         // coordinate in this polygon.
-        let segment = buffer.segments.last_mut().expect("segment");
         debug_assert!(u16::try_from(segment.vertex_length).is_ok());
         let index = segment.vertex_length as u16;
 
@@ -1344,21 +1342,16 @@ impl SymbolLayout {
 
                     let index_length = if feature.along_line { 6 } else { 8 };
 
-                    if collision_buffer
-                        .segments
-                        .last()
-                        .is_none_or(|last| last.vertex_length + VERTEX_LENGTH > u16::MAX as usize)
-                    {
-                        // text-conformance: C++ `triangles/lines.elements()`
-                        // counts indices, not primitives.
-                        let index_offset = collision_buffer.indices.len();
-                        collision_buffer.segments.push(mln_gfx::shaders::segment::SegmentBase::new(
-                            collision_buffer.vertices.len(),
-                            index_offset,
-                        ));
-                    }
-
-                    let segment = collision_buffer.segments.last_mut().expect("segment");
+                    // text-conformance: C++ `triangles/lines.elements()`
+                    // counts indices, not primitives.
+                    let (vertex_offset, index_offset) =
+                        (collision_buffer.vertices.len(), collision_buffer.indices.len());
+                    let segment = match collision_buffer.segments.last_mut() {
+                        Some(last) if u16::try_from(last.vertex_length + VERTEX_LENGTH).is_ok() => last,
+                        _ => collision_buffer
+                            .segments
+                            .push_mut(mln_gfx::shaders::segment::SegmentBase::new(vertex_offset, index_offset)),
+                    };
                     let index = segment.vertex_length as u16;
 
                     let symbol_anchor = symbol_instance.get_anchor().point;
@@ -1631,8 +1624,9 @@ impl Layout for SymbolLayout {
 
                 // If this layer uses text-variable-anchor, generate shapings
                 // for all justification possibilities.
-                if !text_along_line && variable_anchor_offsets.as_ref().is_some_and(|v| !v.is_empty()) {
-                    let variable_anchor_offsets = variable_anchor_offsets.as_ref().expect("offsets");
+                if !text_along_line
+                    && let Some(variable_anchor_offsets) = variable_anchor_offsets.as_ref().filter(|v| !v.is_empty())
+                {
                     let mut justifications: Vec<TextJustifyType> = Vec::new();
                     if text_justify == TextJustifyType::Auto {
                         for anchor_offset in variable_anchor_offsets {

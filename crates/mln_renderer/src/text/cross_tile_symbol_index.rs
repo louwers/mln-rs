@@ -327,16 +327,15 @@ impl CrossTileSymbolLayerIndex {
         let mut tiles_changed = false;
         let zooms: Vec<u8> = self.indexes.keys().copied().collect();
         for zoom in zooms {
-            let stale: Vec<OverscaledTileID> = self.indexes[&zoom]
-                .iter()
-                .filter(|(_, index)| !current_ids.contains(&index.bucket_instance_id))
-                .map(|(id, _)| *id)
-                .collect();
-            for id in stale {
-                let removed = self.indexes.get_mut(&zoom).expect("zoom").remove(&id).expect("stale index");
-                remove_bucket_cross_tile_ids(&mut self.used_cross_tile_ids, zoom, &removed);
-                tiles_changed = true;
-            }
+            let Some(indexes) = self.indexes.get_mut(&zoom) else { continue };
+            indexes.retain(|_, index| {
+                let current = current_ids.contains(&index.bucket_instance_id);
+                if !current {
+                    remove_bucket_cross_tile_ids(&mut self.used_cross_tile_ids, zoom, index);
+                    tiles_changed = true;
+                }
+                current
+            });
         }
         tiles_changed
     }

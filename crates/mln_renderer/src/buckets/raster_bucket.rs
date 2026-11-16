@@ -158,12 +158,14 @@ impl RasterBucket {
                 (i32::from(tl_vertex.y) + vertex_extent) as i16,
             );
 
-            if geometry.segments.last().expect("segment").vertex_length + VERTEX_LENGTH > usize::from(u16::MAX) {
-                // Move to a new segments because the old one can't hold the
+            let geometry = &mut *geometry;
+            let (v, i) = (geometry.vertices.len(), geometry.indices.len());
+            let segment = match geometry.segments.last_mut() {
+                Some(segment) if u16::try_from(segment.vertex_length + VERTEX_LENGTH).is_ok() => segment,
+                // Move to a new segment because the old one can't hold the
                 // geometry.
-                let (v, i) = (geometry.vertices.len(), geometry.indices.len());
-                geometry.segments.push(SegmentBase::new(v, i));
-            }
+                _ => geometry.segments.push_mut(SegmentBase::new(v, i)),
+            };
 
             geometry.vertices.push(Self::layout_vertex(
                 Point::new(tl_vertex.x, tl_vertex.y),
@@ -182,7 +184,6 @@ impl RasterBucket {
                 Point::new(br_vertex.x as u16, br_vertex.y as u16),
             ));
 
-            let segment = geometry.segments.last().expect("segment");
             debug_assert!(u16::try_from(segment.vertex_length).is_ok());
             let offset = segment.vertex_length as u16;
 
@@ -191,7 +192,6 @@ impl RasterBucket {
             geometry.indices.extend_from_slice(&[offset, offset + 1, offset + 2]);
             geometry.indices.extend_from_slice(&[offset + 1, offset + 2, offset + 3]);
 
-            let segment = geometry.segments.last_mut().expect("segment");
             segment.vertex_length += VERTEX_LENGTH;
             segment.index_length += 6;
         }

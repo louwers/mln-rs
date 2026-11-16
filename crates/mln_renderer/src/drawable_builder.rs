@@ -371,23 +371,19 @@ impl DrawableBuilder {
         if !self.check_and_set_mode(Mode::Primitives) {
             return;
         }
-        let needs_segment = self.segments.is_empty();
-        let new_segment = if needs_segment {
-            Some(Box::new(DrawSegment::new(DrawMode::Triangles(), SegmentBase::new(0, 0))))
-        } else {
-            None
-        };
+        if self.segments.is_empty() {
+            self.segments.push(Box::new(DrawSegment::new(DrawMode::Triangles(), SegmentBase::new(0, 0))));
+        }
         let n = self.vertices.elements() as u16;
         self.vertices.emplace_back([x0, y0]);
         self.vertices.emplace_back([x1, y1]);
         self.vertices.emplace_back([x2, y2]);
         self.build_indexes.extend_from_slice(&[n, n.wrapping_add(1), n.wrapping_add(2)]);
-        if let Some(segment) = new_segment {
-            self.segments.push(segment);
+        if let Some(segment) = self.segments.last_mut() {
+            let segment = segment.segment_mut();
+            segment.vertex_length += 3;
+            segment.index_length += 3;
         }
-        let segment = self.segments.last_mut().unwrap().segment_mut();
-        segment.vertex_length += 3;
-        segment.index_length += 3;
     }
 
     /// Add another triangle based on the previous two points
@@ -396,11 +392,12 @@ impl DrawableBuilder {
         if !self.check_and_set_mode(Mode::Primitives) {
             return;
         }
+        debug_assert!(!self.segments.is_empty(), "append_triangle without a previous triangle");
+        let Some(segment) = self.segments.last_mut() else { return };
         let n = self.vertices.elements() as u16;
         self.vertices.emplace_back([x0, y0]);
         self.build_indexes.extend_from_slice(&[n.wrapping_sub(2), n.wrapping_sub(1), n]);
-        debug_assert!(!self.segments.is_empty());
-        let segment = self.segments.last_mut().unwrap().segment_mut();
+        let segment = segment.segment_mut();
         segment.vertex_length += 1;
         segment.index_length += 3;
     }

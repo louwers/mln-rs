@@ -395,7 +395,9 @@ impl CompoundExpression {
             Op::HasObject => {
                 let key = a[0].eval_str(params)?;
                 let object = a[1].evaluate_ref(params)?;
-                let Value::Object(object) = &*object else { unreachable!("object argument") };
+                let Value::Object(object) = &*object else {
+                    return Err(EvaluationError::type_mismatch(&Type::Object, &object));
+                };
                 object.contains_key(&*key)
             }
             Op::IsSupportedScript => is_supported_script(params, &a[0].eval_str(params)?),
@@ -423,14 +425,20 @@ impl CompoundExpression {
             }
             Op::Join => {
                 let input = a[0].evaluate_ref(params)?;
-                let Value::Array(input) = &*input else { unreachable!("array argument") };
-                let input: Vec<&str> = input.iter().map(|v| v.as_str().expect("string item")).collect();
-                input.join(&a[1].eval_str(params)?)
+                let Value::Array(items) = &*input else {
+                    return Err(EvaluationError::type_mismatch(&Type::array(Type::String), &input));
+                };
+                let Some(items) = items.iter().map(Value::as_str).collect::<Option<Vec<&str>>>() else {
+                    return Err(EvaluationError::type_mismatch(&Type::array(Type::String), &input));
+                };
+                items.join(&a[1].eval_str(params)?)
             }
             Op::ResolvedLocale => {
                 let collator = a[0].evaluate_ref(params)?;
-                let Value::Collator(collator) = &*collator else { unreachable!("collator argument") };
-                collator.resolved_locale().to_owned()
+                let Value::Collator(collator_value) = &*collator else {
+                    return Err(EvaluationError::type_mismatch(&Type::Collator, &collator));
+                };
+                collator_value.resolved_locale().to_owned()
             }
             Op::Error => return Err(self.error(params)),
             _ => return Cow::from_value(self.evaluate(params)?),
@@ -475,7 +483,9 @@ impl CompoundExpression {
             Op::GetObject => {
                 let key = a[0].eval_str(params)?;
                 let object = a[1].evaluate_ref(params)?;
-                let Value::Object(object) = &*object else { unreachable!("object argument") };
+                let Value::Object(object) = &*object else {
+                    return Err(EvaluationError::type_mismatch(&Type::Object, &object));
+                };
                 Ok(object.get(&*key).cloned().unwrap_or(Value::Null))
             }
             Op::Properties => {

@@ -243,8 +243,8 @@ impl FileSource for MBTilesFileSource {
             return;
         }
 
-        let scheme_end = resource.url.find("://");
-        if scheme_end.is_none() || !std::path::Path::new(&resource.url[scheme_end.unwrap() + 3..]).is_absolute() {
+        let path = resource.url.split_once("://").map(|(_, path)| path);
+        if !path.is_some_and(|path| std::path::Path::new(path).is_absolute()) {
             let mut response = Response::new();
             response.no_content = true;
             response.error =

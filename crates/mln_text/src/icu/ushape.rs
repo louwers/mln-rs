@@ -316,9 +316,10 @@ fn calculate_size(source: &[u16], source_length: i32) -> i32 {
     dest_size
 }
 
-/// `u_strlen` of a buffer that ICU guarantees to hold a NUL.
+/// `u_strlen` of a buffer that ICU guarantees to hold a NUL, or the buffer's
+/// length without one.
 fn u_strlen(s: &[u16]) -> i32 {
-    s.iter().position(|&c| c == 0).expect("NUL-terminated") as i32
+    s.iter().position(|&c| c == 0).unwrap_or(s.len()) as i32
 }
 
 /// Removes the `LAMALEF_SPACE_SUB` placeholders (the only work for the

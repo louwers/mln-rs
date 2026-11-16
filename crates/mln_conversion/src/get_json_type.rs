@@ -13,15 +13,11 @@ pub fn get_json_type(value: &Convertible<'_>) -> String {
     if value.is_object() {
         return "object".to_owned();
     }
-    let v = value.to_value();
-
-    // Since we've already checked the non-atomic types above, value must then
-    // be a string, number, or boolean -- thus, assume that the toValue()
-    // conversion succeeds.
-    match v.expect("to_value of a non-null scalar") {
-        Value::String(_) => "string",
-        Value::Bool(_) => "boolean",
-        _ => "number",
+    match value.to_value() {
+        None | Some(Value::Null) => "null",
+        Some(Value::String(_)) => "string",
+        Some(Value::Bool(_)) => "boolean",
+        Some(_) => "number",
     }
     .to_owned()
 }

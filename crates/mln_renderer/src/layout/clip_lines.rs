@@ -59,15 +59,10 @@ pub(crate) fn clip_lines(lines: &GeometryCollection, x1: i16, y1: i16, x2: i16, 
                 p1 = GeometryCoordinate::new(intersect(p0.x, p1.x, y2, p0.y, p1.y), y2);
             }
 
-            let start_new_line = match clipped_lines.last() {
-                None => true,
-                Some(back) => !back.is_empty() && back.last() != Some(&p0),
-            };
-            if start_new_line {
-                clipped_lines.push(vec![p0]);
+            match clipped_lines.last_mut() {
+                Some(back) if back.is_empty() || back.last() == Some(&p0) => back.push(p1),
+                _ => clipped_lines.push(vec![p0, p1]),
             }
-
-            clipped_lines.last_mut().expect("clipped_lines is not empty").push(p1);
         }
     }
 

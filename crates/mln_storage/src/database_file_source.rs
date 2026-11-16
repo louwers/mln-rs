@@ -99,26 +99,27 @@ impl<E: 'static> DatabaseWorker<E> {
     }
 
     pub(crate) fn request(&self, resource: &Resource, responder: &Responder) {
-        let mut offline_response = if resource.storage_policy == StoragePolicy::Volatile {
+        let offline_response = if resource.storage_policy == StoragePolicy::Volatile {
             None
         } else {
             self.with(|state| state.db.get(resource))
         };
-        match &mut offline_response {
+        let response = match offline_response {
             None => {
                 let mut response = Response::new();
                 response.no_content = true;
                 response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Not found in offline database")));
-                offline_response = Some(response);
+                response
             }
-            Some(response) => {
+            Some(mut response) => {
                 if !response.is_usable() {
                     response.error =
                         Some(Box::new(ResourceError::new(Reason::NotFound, "Cached resource is unusable")));
                 }
+                response
             }
-        }
-        responder.send(offline_response.expect("response"));
+        };
+        responder.send(response);
     }
 
     fn maintain(

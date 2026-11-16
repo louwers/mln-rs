@@ -169,9 +169,14 @@ impl Comparison {
                     // out not to be strings compares them as values.
                     return self.compare_values(&a, &b);
                 };
-                let collator = self.collator.as_ref().expect("collator operand").evaluate_ref(params)?;
-                let Value::Collator(collator) = &*collator else { unreachable!("collator operand") };
-                Ok(self.op.holds(Some(Collator::compare(collator, a, b))))
+                let Some(collator) = &self.collator else {
+                    return Ok(self.op.holds(Some(a.cmp(b))));
+                };
+                let collator = collator.evaluate_ref(params)?;
+                let Value::Collator(collator_value) = &*collator else {
+                    return Err(EvaluationError::type_mismatch(&Type::Collator, &collator));
+                };
+                Ok(self.op.holds(Some(Collator::compare(collator_value, a, b))))
             }
         }
     }
@@ -202,7 +207,10 @@ pub(crate) fn parse_comparison(value: &Convertible<'_>, ctx: &mut ParsingContext
         return None;
     }
 
-    let op = value.array_member(0).to_string().expect("operator name");
+    let Some(op) = value.array_member(0).to_string() else {
+        ctx.error("Expected the comparison operator to be a string.".to_owned());
+        return None;
+    };
 
     let mut lhs = ctx.parse(&value.array_member(1), 1, Some(Type::Value), None)?;
     let lhs_type = lhs.get_type();

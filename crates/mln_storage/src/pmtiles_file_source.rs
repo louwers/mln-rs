@@ -309,15 +309,13 @@ impl State {
 
         let cached = self.directory_cache.lock().get(url).is_some_and(|cache| cache.contains_key(&directory_cache_key));
         if cached {
+            if let Some(control) = self.directory_cache_control.lock().get_mut(url)
+                && control.last() != Some(&directory_cache_key)
             {
-                let mut controls = self.directory_cache_control.lock();
-                let control = controls.get_mut(url).expect("directory cache control");
-                if control.last() != Some(&directory_cache_key) {
-                    control.push(directory_cache_key.clone());
+                control.push(directory_cache_key.clone());
 
-                    if let Some(position) = control.iter().position(|key| *key == directory_cache_key) {
-                        control.remove(position);
-                    }
+                if let Some(position) = control.iter().position(|key| *key == directory_cache_key) {
+                    control.remove(position);
                 }
             }
 

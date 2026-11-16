@@ -349,17 +349,18 @@ impl CollisionIndex {
                     box_,
                 );
             }
-            projected_boxes.push(ProjectedCollisionBox::new_box(
+            let projected_collision_box = ProjectedCollisionBox::new_box(
                 collision_boundaries[0],
                 collision_boundaries[1],
                 collision_boundaries[2],
                 collision_boundaries[3],
-            ));
+            );
+            projected_boxes.push(projected_collision_box);
             if occluded
                 || avoid_edges.as_ref().is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
                 || !self.is_inside_grid(&collision_boundaries)
                 || self.collides(overlap_mode, collision_group_predicate, |grid, predicate| {
-                    grid.hit_test(projected_boxes.last().expect("pushed").box_(), predicate)
+                    grid.hit_test(projected_collision_box.box_(), predicate)
                 })
             {
                 return PlacedFeatureResult { placed: false, offscreen: false, occluded };

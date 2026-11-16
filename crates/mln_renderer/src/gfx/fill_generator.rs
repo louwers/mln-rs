@@ -41,15 +41,10 @@ fn add_fill_indices(
     let n_indices = indices.len();
     debug_assert!(n_indices.is_multiple_of(3));
 
-    let needs_segment = match fill_segments.last() {
-        None => true,
-        Some(last) => last.vertex_length + total_vertices > u16::MAX as usize,
+    let triangle_segment = match fill_segments.last_mut() {
+        Some(last) if u16::try_from(last.vertex_length + total_vertices).is_ok() => last,
+        _ => fill_segments.push_mut(SegmentBase::new(start_vertices, fill_indexes.len())),
     };
-    if needs_segment {
-        fill_segments.push(SegmentBase::new(start_vertices, fill_indexes.len()));
-    }
-
-    let triangle_segment = fill_segments.last_mut().expect("segment");
     debug_assert!(u16::try_from(triangle_segment.vertex_length + total_vertices).is_ok());
     let triangle_index = triangle_segment.vertex_length as u16;
 
@@ -78,17 +73,15 @@ fn add_outline_indices(
 
     // A segment counts its vertices from its first, so a ring that doesn't
     // follow the segment's last vertex starts one of its own.
-    let needs_segment = match line_segments.last() {
-        None => true,
-        Some(last) => {
-            last.vertex_offset + last.vertex_length != base || last.vertex_length + n_vertices > u16::MAX as usize
+    let line_segment = match line_segments.last_mut() {
+        Some(last)
+            if last.vertex_offset + last.vertex_length == base
+                && u16::try_from(last.vertex_length + n_vertices).is_ok() =>
+        {
+            last
         }
+        _ => line_segments.push_mut(SegmentBase::new(base, line_indexes.len())),
     };
-    if needs_segment {
-        line_segments.push(SegmentBase::new(base, line_indexes.len()));
-    }
-
-    let line_segment = line_segments.last_mut().expect("segment");
     debug_assert!(u16::try_from(line_segment.vertex_length).is_ok());
     let line_index = line_segment.vertex_length as u16;
 

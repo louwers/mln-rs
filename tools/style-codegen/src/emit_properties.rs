@@ -102,17 +102,20 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     if let Some(property) = heatmap_color {
         // The renderer falls back to this default when the style leaves the
         // property undefined.
-        let raw = crate::json::js_stringify(property.default().expect("heatmap-color default"));
-        assert!(!raw.contains("\"#"), "raw string delimiter in {raw}");
+        let Some(serde_json::Value::Array(items)) = property.default() else {
+            panic!("heatmap-color's default is not an array");
+        };
+        // One element per line, as rustfmt lays out the `json!` array.
+        let items: Vec<String> = items.iter().map(crate::json::js_stringify).collect();
+        assert!(!items.iter().any(|item| item.contains("\\u")), "a JSON escape Rust lacks in {items:?}");
         w.blank();
         w.line("/// The default `heatmap-color`.");
         w.line("#[must_use]");
         w.line("pub fn default_heatmap_color() -> ColorRampPropertyValue {");
         w.line("    let mut error = Error::default();");
-        w.line("    let raw_value: serde_json::Value = serde_json::from_str(");
-        w.line(&format!("        r#\"{raw}\"#,"));
-        w.line("    )");
-        w.line("    .unwrap();");
+        w.line("    let raw_value = serde_json::json!([");
+        w.line(&format!("        {}", items.join(",\n        ")));
+        w.line("    ]);");
         w.line("    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error)");
         w.line("        .expect(\"the heatmap-color default converts\")");
         w.line("}");

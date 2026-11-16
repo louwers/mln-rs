@@ -10,7 +10,7 @@ use crate::formatted::{
 };
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
-use crate::value::{Value, from_expression_value, to_string, type_of};
+use crate::value::{Value, from_expression_value, to_string};
 
 /// A section of a `format` expression: its content and options.
 #[derive(Clone, PartialEq, mln_wire::Wire)]
@@ -131,7 +131,10 @@ impl FormatExpression {
                     vertical_align = Some(ctx.parse(&option, 1, Some(Type::String), None)?);
                 }
 
-                let section = sections.last_mut().expect("a section before its options");
+                let Some(section) = sections.last_mut() else {
+                    ctx.error("First argument must be an image or text section.".to_owned());
+                    return None;
+                };
                 section.set_text_section_options(font_scale, text_font, text_color);
                 section.vertical_align = vertical_align;
             } else {
@@ -153,8 +156,7 @@ impl FormatExpression {
         for section in &self.sections {
             let content_result = section.content.evaluate(params)?;
 
-            if type_of(&content_result) == Type::Image {
-                let Value::Image(image) = &content_result else { unreachable!() };
+            if let Value::Image(image) = &content_result {
                 // Omit sections with empty image ids.
                 if !image.id().is_empty() {
                     evaluated_sections.push(FormattedSection {
@@ -171,7 +173,10 @@ impl FormatExpression {
             let mut evaluated_font_scale = None;
             if let Some(font_scale) = &section.font_scale {
                 let font_scale_result = font_scale.evaluate(params)?;
-                evaluated_font_scale = Some(font_scale_result.as_number().expect("numeric font-scale"));
+                let Some(font_scale_value) = font_scale_result.as_number() else {
+                    return Err(EvaluationError::type_mismatch(&Type::Number, &font_scale_result));
+                };
+                evaluated_font_scale = Some(font_scale_value);
             }
 
             let mut evaluated_text_font: Option<FontStack> = None;

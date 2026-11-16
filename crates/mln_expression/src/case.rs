@@ -58,9 +58,8 @@ impl Case {
             i += 2;
         }
 
-        let output_type = output_type.expect("case output type");
-
-        let otherwise = ctx.parse(&value.array_member(length - 1), length - 1, Some(output_type.clone()), None)?;
+        let otherwise = ctx.parse(&value.array_member(length - 1), length - 1, output_type.clone(), None)?;
+        let output_type = output_type.unwrap_or_else(|| otherwise.get_type());
 
         Some(Case::new_expr(output_type, branches, otherwise))
     }

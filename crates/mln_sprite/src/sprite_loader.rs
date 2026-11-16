@@ -94,7 +94,7 @@ impl Inner {
     fn emit_sprite_loaded_if_complete(self: &Rc<Self>, sprite: Sprite) {
         let (image, json, load) = {
             let data_map = self.data_map.borrow();
-            let data = data_map.get(&sprite.id).expect("sprite data");
+            let Some(data) = data_map.get(&sprite.id) else { return };
             match (&data.image, &data.json) {
                 (Some(image), Some(json)) => (Arc::clone(image), Arc::clone(json), data.load),
                 _ => return,

@@ -47,10 +47,10 @@ impl<V: bytemuck::Pod> GlobeTileMesh<V> {
                 extend_to_south_pole: canonical.y == (1u32 << canonical.z) - 1 && part.y == (1u32 << part.z) - 1,
             });
             let vertex_count = mesh.vertices.len() / 2;
-            if segments.last().is_none_or(|last| last.vertex_length + vertex_count > usize::from(u16::MAX)) {
-                segments.push(SegmentBase::new(vertices.len(), indices.len()));
-            }
-            let segment = segments.last_mut().expect("segment");
+            let segment = match segments.last_mut() {
+                Some(last) if u16::try_from(last.vertex_length + vertex_count).is_ok() => last,
+                _ => segments.push_mut(SegmentBase::new(vertices.len(), indices.len())),
+            };
             let offset = segment.vertex_length;
             let extent = EXTENT >> part.z;
             for point in mesh.vertices.as_chunks::<2>().0 {
@@ -117,25 +117,20 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
         layout_vertex: fn(Point<i16>, Point<u16>) -> V,
     ) -> &GlobeTileMesh<V> {
         let key = (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1, mask.clone());
-        if !self.meshes.contains_key(&key) {
-            // Tiles that are loading go through many masks; the one used
-            // longest ago makes room, so the meshes every frame draws stay.
-            // The drawables share the meshes' buffers, so they keep theirs.
-            if self.meshes.len() >= Self::MAX_MESHES {
-                // std::min_element: the first of the least recently used.
-                let oldest = self
-                    .meshes
-                    .iter()
-                    .reduce(|oldest, entry| if entry.1.last_use < oldest.1.last_use { entry } else { oldest })
-                    .map(|(key, _)| key.clone())
-                    .expect("meshes");
-                self.meshes.remove(&oldest);
-            }
-            let mesh = GlobeTileMesh::new(canonical, mask, layout_vertex);
-            self.meshes.insert(key.clone(), Entry { mesh, last_use: 0 });
+        // Tiles that are loading go through many masks; the one used longest
+        // ago makes room, so the meshes every frame draws stay. The drawables
+        // share the meshes' buffers, so they keep theirs.
+        if !self.meshes.contains_key(&key)
+            && self.meshes.len() >= Self::MAX_MESHES
+            && let Some(oldest) = self.meshes.iter().min_by_key(|(_, entry)| entry.last_use).map(|(key, _)| key.clone())
+        {
+            self.meshes.remove(&oldest);
         }
         self.uses += 1;
-        let entry = self.meshes.get_mut(&key).expect("mesh");
+        let entry = self
+            .meshes
+            .entry(key)
+            .or_insert_with(|| Entry { mesh: GlobeTileMesh::new(canonical, mask, layout_vertex), last_use: 0 });
         entry.last_use = self.uses;
         &entry.mesh
     }

@@ -128,15 +128,13 @@ impl Bucket for HeatmapBucket {
                     continue;
                 }
 
-                if self
-                    .segments
-                    .last()
-                    .is_none_or(|segment| segment.vertex_length + VERTEX_LENGTH > usize::from(u16::MAX))
-                {
-                    // Move to a new segments because the old one can't hold
+                let (vertex_offset, index_offset) = (self.vertices.len(), self.triangles.len());
+                let segment = match self.segments.last_mut() {
+                    Some(segment) if u16::try_from(segment.vertex_length + VERTEX_LENGTH).is_ok() => segment,
+                    // Move to a new segment because the old one can't hold
                     // the geometry.
-                    self.segments.push(SegmentBase::new(self.vertices.len(), self.triangles.len()));
-                }
+                    _ => self.segments.push_mut(SegmentBase::new(vertex_offset, index_offset)),
+                };
 
                 // this geometry will be of the Point type, and we'll derive
                 // two triangles from it.
@@ -152,7 +150,6 @@ impl Bucket for HeatmapBucket {
                 self.vertices.get_mut().push(HeatmapBucket::vertex(point, 1.0, 1.0)); // 3
                 self.vertices.get_mut().push(HeatmapBucket::vertex(point, -1.0, 1.0)); // 4
 
-                let segment = self.segments.last_mut().expect("segment");
                 debug_assert!(u16::try_from(segment.vertex_length).is_ok());
                 let index = segment.vertex_length as u16;
 

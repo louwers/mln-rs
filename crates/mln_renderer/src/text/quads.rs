@@ -113,12 +113,13 @@ pub(crate) fn stretch_zones_to_cuts(stretch_zones: &ImageStretches, fixed_size: 
     // `-border` is the `int` -1.
     let mut cuts: Cuts = vec![Cut { fixed: -i32::from(BORDER) as f32, stretch: 0.0 }];
 
+    let mut last_stretch = 0.0;
     for zone in stretch_zones {
         let c1 = zone.0;
         let c2 = zone.1;
-        let last_stretch = cuts.last().expect("cuts is never empty").stretch;
         cuts.push(Cut { fixed: c1 - last_stretch, stretch: last_stretch });
         cuts.push(Cut { fixed: c1 - last_stretch, stretch: last_stretch + (c2 - c1) });
+        last_stretch += c2 - c1;
     }
     cuts.push(Cut { fixed: fixed_size + f32::from(BORDER), stretch: stretch_size });
     cuts

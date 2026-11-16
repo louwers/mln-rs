@@ -56,7 +56,10 @@ impl Assertion {
 
         let mut i = 1;
 
-        let name = value.array_member(0).to_string().expect("operator name");
+        let Some(name) = value.array_member(0).to_string() else {
+            ctx.error("Expected the assertion name to be a string.".to_owned());
+            return None;
+        };
         let type_ = if name == "array" {
             let item_type;
             if length > 2 {
@@ -93,7 +96,11 @@ impl Assertion {
 
             type_::Array::with_n(item_type, n).into()
         } else {
-            assertion_type(&name).expect("assertion type")
+            let Some(type_) = assertion_type(&name) else {
+                ctx.error(format!("Unknown assertion type {name}."));
+                return None;
+            };
+            type_
         };
 
         let mut parsed = Vec::with_capacity(length - 1);
@@ -120,11 +127,7 @@ impl Assertion {
     }
 
     fn mismatch(&self, value: &Value) -> EvaluationError {
-        EvaluationError::new(format!(
-            "Expected value to be of type {}, but found {} instead.",
-            type_::to_string(&self.type_),
-            type_::to_string(&type_of(value))
-        ))
+        EvaluationError::type_mismatch(&self.type_, value)
     }
 
     /// The typed evaluations: an input of the asserted type evaluates typed,
