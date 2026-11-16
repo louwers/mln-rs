@@ -76,7 +76,8 @@ pub struct Renderer {
     static_data: Option<RenderStaticData>,
     /// Kept across frames; dropped in `drop` inside the hold.
     clip_masks: ClipMasks,
-    /// The texture that layers with a layer opacity draw into, between frames.
+    /// What layers drawn as a whole draw into and composite with, between
+    /// frames.
     layer_composite: LayerComposite,
     render_state: RenderState,
     frame_count: u64,

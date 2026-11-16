@@ -117,7 +117,7 @@ pub(crate) struct PaintParameters<'a> {
 
     /// The masks of the tiles that the frame's layer groups can clip to.
     pub(crate) clip_masks: ClipMasks,
-    /// The texture that the frame's layers with a layer opacity draw into.
+    /// What the frame's layers drawn as a whole draw into and composite with.
     pub(crate) layer_composite: LayerComposite,
     /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
@@ -231,22 +231,20 @@ impl<'a> PaintParameters<'a> {
         group: SimpleIdentity,
         draw: impl FnOnce(&mut dyn Gpu, &mut Self),
     ) {
-        let mut layer_composite = std::mem::take(&mut self.layer_composite);
-        let composite = self
-            .open_pass
-            .get()
-            .filter(|_| layer_composite.composites(group))
-            .and_then(|frame| Some((frame, layer_composite.pass()?)));
-        let Some((frame, composite)) = composite else {
-            self.layer_composite = layer_composite;
+        let Some((frame, composite)) =
+            self.open_pass.get().zip(self.layer_composite.pass()).filter(|_| self.layer_composite.composites(group))
+        else {
             return draw(gpu, self);
         };
+        let mut layer_composite = std::mem::take(&mut self.layer_composite);
         let mut drawn = self.end_pass(gpu);
         if drawn.is_ok()
             && let Some(backdrop) = layer_composite.backdrop_pass(group)
         {
-            drawn = self.begin_pass(gpu, backdrop).map(|()| layer_composite.copy_frame(gpu, self));
-            drawn = drawn.and_then(|()| self.end_pass(gpu));
+            drawn = self
+                .begin_pass(gpu, backdrop)
+                .map(|()| layer_composite.copy_frame(gpu, self))
+                .and_then(|()| self.end_pass(gpu));
         }
         drawn = drawn.and_then(|()| self.begin_pass(gpu, composite));
         if let Err(error) = &drawn {

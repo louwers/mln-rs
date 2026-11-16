@@ -31,8 +31,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
     ID_LAYER_COMPOSITE_UBO, ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER,
 };
-use mln_gfx::texture2d::texture_format;
-use mln_gfx::types::{ColorBlendFactorType, TextureChannelDataType, TexturePixelType};
+use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{
     AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DepthMode, DrawModeType, ShaderProgramPtr,
     ShaderRegistry, StencilMode,
@@ -100,6 +99,11 @@ impl Composite {
             LayerBlendType::Color => LAYER_COMPOSITE_BLEND_COLOR,
             LayerBlendType::Luminosity => LAYER_COMPOSITE_BLEND_LUMINOSITY,
         }
+    }
+
+    /// Whether the shader blends with the backdrop, a copy of the frame.
+    fn reads_backdrop(self) -> bool {
+        self.shader_blend() != LAYER_COMPOSITE_BLEND_NONE
     }
 
     /// The blend function that composites the shader's color: on premultiplied
@@ -190,7 +194,8 @@ impl LayerComposite {
     /// Makes what the frame composites `groups` with, each a layer group and
     /// how it composites, onto a frame of `size` whose color is of `format`,
     /// and drops it where there are none. With `overdraw`, the overdraw
-    /// inspector's, every group blends as `normal`.
+    /// inspector's, every group blends as `normal`, and without `format` so
+    /// does every group that blends in the shader.
     pub(crate) fn update(
         &mut self,
         context: &Context,
@@ -202,10 +207,7 @@ impl LayerComposite {
     ) {
         self.groups.clear();
         if groups.is_empty() || size.is_empty() {
-            self.target = None;
-            self.frame = None;
-            self.bindings.clear();
-            self.bindings_made = None;
+            self.drop_textures();
             return;
         }
         if self.shader.is_none() {
@@ -215,33 +217,30 @@ impl LayerComposite {
             return;
         }
         for &(group, mut composite) in groups {
-            if overdraw || (format.is_none() && composite.shader_blend() != LAYER_COMPOSITE_BLEND_NONE) {
+            if overdraw || (format.is_none() && composite.reads_backdrop()) {
                 composite.blend = LayerBlendType::Normal;
             }
             self.groups.push((group, composite));
         }
-        let frame_format =
-            format.filter(|_| self.groups.iter().any(|(_, c)| c.shader_blend() != LAYER_COMPOSITE_BLEND_NONE));
+        let frame_format = format.filter(|_| self.groups.iter().any(|(_, c)| c.reads_backdrop()));
         if let Err(error) = self.make(context, size, frame_format) {
             Log::warning(Event::Render, format!("Making the layer composite's textures failed: {error}"));
             self.groups.clear();
-            self.target = None;
-            self.frame = None;
+            self.drop_textures();
             return;
         }
 
         let size = size_of::<LayerCompositeUBO>();
         let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
-        let copy =
-            LayerCompositeUBO { opacity: 1.0, blend: LAYER_COMPOSITE_BLEND_NONE, ..LayerCompositeUBO::default() };
-        let ubos = self.groups.iter().map(|(_, composite)| LayerCompositeUBO {
-            opacity: composite.opacity,
-            blend: composite.shader_blend(),
-            ..LayerCompositeUBO::default()
-        });
+        let copy = Composite { opacity: 1.0, blend: LayerBlendType::Normal };
         self.bytes.clear();
         self.bytes.resize((self.groups.len() + 1) * stride, 0);
-        for (slot, ubo) in ubos.chain([copy]).enumerate() {
+        for (slot, composite) in self.groups.iter().map(|&(_, composite)| composite).chain([copy]).enumerate() {
+            let ubo = LayerCompositeUBO {
+                opacity: composite.opacity,
+                blend: composite.shader_blend(),
+                ..LayerCompositeUBO::default()
+            };
             self.bytes[slot * stride..][..size].copy_from_slice(bytemuck::bytes_of(&ubo));
         }
         context.write_uniform_buffer(&mut self.uniforms, &self.bytes);
@@ -250,19 +249,20 @@ impl LayerComposite {
         }
     }
 
+    /// Drops the textures and the bindings that read them.
+    fn drop_textures(&mut self) {
+        self.target = None;
+        self.frame = None;
+        self.bindings.clear();
+        self.bindings_made = None;
+    }
+
     /// Makes the target of `size`, unless it is made, the frame copy of
     /// `frame_format` where there is one, and the quad.
     fn make(&mut self, context: &Context, size: Size, frame_format: Option<TextureFormat>) -> Result<(), GpuError> {
         if self.target.as_ref().is_none_or(|target| target.size != size) {
-            self.target = None;
-            self.frame = None;
-            self.bindings.clear();
-            self.bindings_made = None;
-            let color = Texture::new(
-                context,
-                size,
-                texture_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte),
-            )?;
+            self.drop_textures();
+            let color = Texture::new(context, size, COLOR)?;
             let depth_stencil = Attachment::new(context, "layer composite depth and stencil", size, DEPTH_STENCIL)?;
             self.target = Some(Target { size, color, depth_stencil });
         }
@@ -303,7 +303,7 @@ impl LayerComposite {
         let frame = self.frame.as_ref()?;
         let target = self.target.as_ref()?;
         let (_, composite) = self.groups.iter().find(|(id, _)| *id == group)?;
-        (composite.shader_blend() != LAYER_COMPOSITE_BLEND_NONE).then_some(OpenPass {
+        composite.reads_backdrop().then_some(OpenPass {
             label: "layer composite backdrop",
             color: Some(ColorAttachment {
                 texture: frame.backdrop.texture,
@@ -460,7 +460,6 @@ impl LayerComposite {
             geometry
         };
 
-        let mask = ColorMode::alpha_blended().mask;
         let pipeline = context.pipeline(
             gpu,
             &PipelineKey {
@@ -470,7 +469,7 @@ impl LayerComposite {
                     primitive: DrawModeType::Triangles,
                     cull: CullFaceMode::disabled(),
                     blend,
-                    color_mask: mask,
+                    color_mask: ColorMode::alpha_blended().mask,
                     depth: DepthState::from(&depth),
                     stencil: StencilState::from(&StencilMode::disabled()),
                 },
