@@ -307,7 +307,8 @@ unsafe fn dma_buf(api: &Api, buffer: *mut c_void, drm_format: &str, color: YuvCo
     if planes.is_empty() {
         return Err("a dmabuf without planes".to_owned());
     }
-    Ok(GpuFrame::DmaBuf { fourcc, modifier, planes, color })
+    let size = Size::new(meta.width, meta.height);
+    Ok(GpuFrame::DmaBuf { fourcc, modifier, size, planes, color })
 }
 
 /// Whether caps' first structure is video, for a decoder's pad.

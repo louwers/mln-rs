@@ -78,11 +78,16 @@ impl FrameSlot {
         self.state.lock().failure.clone()
     }
 
-    /// Whether a frame or a failure came: a still render waits until then.
+    /// Whether a frame that renderers draw, or a failure, came: a still
+    /// render waits until then. A GPU frame after renderers refused GPU
+    /// frames doesn't count: the frame in memory that replaces it does.
     #[must_use]
     pub fn is_settled(&self) -> bool {
         let state = self.state.lock();
-        state.frame.is_some() || state.failure.is_some()
+        let drawable = state.frame.as_ref().is_some_and(|frame| {
+            !(matches!(frame.pixels, mln_gfx::video::FramePixels::Gpu(_)) && self.gpu_frames_refused())
+        });
+        drawable || state.failure.is_some()
     }
 
     /// Tells the player to send frames in memory from now on: a renderer
@@ -163,7 +168,7 @@ impl FrameSink {
 mod tests {
     use std::sync::atomic::AtomicUsize;
 
-    use mln_gfx::video::{CpuPlane, FramePixels};
+    use mln_gfx::video::{CpuPlane, FramePixels, GpuFrame};
     use mln_util::size::Size;
 
     use super::*;
@@ -195,6 +200,30 @@ mod tests {
         assert!(slot.newer_than(newest.generation).is_none());
         assert!(slot.is_settled());
         assert_eq!(2, wakes.load(Ordering::Relaxed));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_gpu_frame_leaves_the_slot_unsettled() {
+        let slot = FrameSlot::new();
+        let sink = FrameSink::new(Arc::clone(&slot));
+        let gpu = VideoFrame {
+            size: Size::new(1, 1),
+            pixels: FramePixels::Gpu(GpuFrame::DmaBuf {
+                fourcc: 0,
+                modifier: 0,
+                size: Size::new(1, 1),
+                planes: Vec::new(),
+                color: mln_gfx::video::YuvColor::default(),
+            }),
+            time: None,
+        };
+        sink.push(gpu);
+        assert!(slot.is_settled());
+        slot.refuse_gpu_frames();
+        assert!(!slot.is_settled());
+        sink.push(frame());
+        assert!(slot.is_settled());
     }
 
     #[test]

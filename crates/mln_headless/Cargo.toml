@@ -58,6 +58,11 @@ path = "tests/video_test.rs"
 name = "video_dma_buf_test"
 path = "tests/video_dma_buf_test.rs"
 
+# The platform's video player (GStreamer on Linux) playing a video source.
+[[test]]
+name = "video_gstreamer_test"
+path = "tests/video_gstreamer_test.rs"
+
 # gtests-core: test/renderer/feature_tracking.test.cpp.
 [[test]]
 name = "gtest_feature_tracking"
