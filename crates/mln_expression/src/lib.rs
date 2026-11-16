@@ -1,9 +1,13 @@
 //! Style expressions: their types and values, parsing, and evaluation.
 //!
 //! A parsed expression is an [`Expr`], a closed tree whose nodes the parser
-//! has type-checked, so that it evaluates typed (see [`expression`]). Each
-//! kind of node has its own module. `type`, `match`, `let` and `in` are Rust
-//! keywords, so those modules are `type_`, `match_`, `let_` and `in_`.
+//! has type-checked, so that it evaluates typed (see [`expression`]). The
+//! expression forms (`let`, `match`, `interpolate` and the others that parse
+//! their own arguments) are a closed set of nodes; every other operator is a
+//! function, which parsing resolves by name against a [`Functions`] value
+//! (see [`functions`]). Each kind of node has its own module. `type`,
+//! `match`, `let` and `in` are Rust keywords, so those modules are `type_`,
+//! `match_`, `let_` and `in_`.
 
 mod assertion;
 mod at;
@@ -24,6 +28,7 @@ mod find_zoom_curve;
 pub mod format_expression;
 pub mod format_section_override;
 pub mod formatted;
+pub mod functions;
 pub mod image;
 pub mod image_expression;
 mod in_;
@@ -53,6 +58,7 @@ pub use expression::{Dependency, EvaluationContext, EvaluationError, EvaluationR
 pub use feature_property_keys::feature_property_keys;
 pub use find_zoom_curve::{ZoomCurvePtr, find_zoom_curve_checked};
 pub use formatted::{Formatted, FormattedSection};
+pub use functions::Functions;
 pub use image::Image;
 pub use interpolate::Interpolate;
 pub use interpolator::Interpolator;

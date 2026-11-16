@@ -3,8 +3,8 @@ use std::sync::atomic::Ordering;
 
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPaintProperties};
+use mln_style::layers::Fill;
+use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -21,9 +21,9 @@ use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
 use crate::gfx::context::Context;
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
+use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
-use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
     pub struct FillBinders for FillPaintProperties::PossiblyEvaluated {
@@ -72,15 +72,15 @@ impl FillBucket {
     #[must_use]
     pub(crate) fn new(
         _layout: &FillLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Arc<EvaluatedLayer<Fill>>>,
         zoom: f32,
         _overscaling: u32,
     ) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
-            paint_property_binders.entry(id.clone()).or_insert_with(|| {
-                RwLock::new(FillBinders::new(get_evaluated::<FillLayerProperties>(properties), zoom))
-            });
+            paint_property_binders
+                .entry(id.clone())
+                .or_insert_with(|| RwLock::new(FillBinders::new(&properties.paint, zoom)));
         }
         FillBucket {
             base: BucketBase::default(),
@@ -204,10 +204,8 @@ impl Bucket for FillBucket {
         !self.triangle_segments.is_empty() || !self.basic_line_segments.is_empty()
     }
 
-    fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
-        let evaluated = get_evaluated::<FillLayerProperties>(&layer.base().evaluated_properties);
-        let translate = evaluated.fill_translate.uniform();
-        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    fn write_wire(&self, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(self, w);
     }
 
     fn update(

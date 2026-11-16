@@ -1,14 +1,14 @@
-//! maplibre-native-ffi's C ABI, as a C library (`libmaplibre_native_c`, shared
-//! and static) for hosts that link maplibre-native-ffi's.
+//! The MapLibre Native C API, as a C library (`libmaplibre_native_c`, shared
+//! and static). The README says who uses it and how to change it.
 //!
-//! The headers in `include/` are maplibre-native-ffi's. `src/generated` comes
+//! The headers in `include/` define the API. `src/generated` comes
 //! from them (`mise run generate:c-abi`): their types, and a stub for each
 //! function this crate doesn't define, which fails with
 //! `MLN_STATUS_UNSUPPORTED`. To implement a function, define it outside
 //! `generated/` as `#[unsafe(no_mangle)] pub unsafe extern "C" fn` with the
 //! header's signature and regenerate; the generated code then checks that
-//! signature. maplibre-native-ffi's ABI suite runs against the library
-//! (`mise run test:c-abi`).
+//! signature. Tests of the API go in this crate, and maplibre-native-ffi's
+//! ABI suite also runs against the library (`mise run test:c-abi`).
 //!
 //! Each header's functions live in the module of its name, except
 //! `mln_frame_pacer_create()`, which lives in `frame_pacer` beside each
@@ -47,6 +47,8 @@ mod callback;
 mod camera;
 mod completion;
 mod custom_layer;
+#[cfg(all(test, backend_d3d12))]
+mod d3d12_tests;
 mod delivery;
 mod diagnostic;
 mod error;

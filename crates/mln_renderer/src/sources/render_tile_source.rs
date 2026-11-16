@@ -25,14 +25,11 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{ColorMode, CullFaceMode};
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
-use mln_style::expression::Dependency;
-use mln_style::layer::{LayerTypeInfo, layer_type_info};
-use mln_style::layer_properties::{LayerProperties, LayerPropertiesBase};
+use mln_style::source;
 use mln_style::source::downcast_arc;
 use mln_style::sources::custom_vector_source::{CustomVectorTileData, TileDataFormat};
 use mln_style::sources::geojson_source::{GeoJSONData, TileFeatures};
 use mln_style::sources::{custom_geometry_source, custom_vector_source, geojson_source_impl, tile_source};
-use mln_style::{layer, source};
 use mln_style_types::{LineCapType, LineJoinType, SourceType, TranslateAnchorType};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
@@ -52,6 +49,7 @@ use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 // layers: debug
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
@@ -317,53 +315,6 @@ impl RenderItem for TileSourceRenderItem {
 
 // layers: debug --------------------------------------------------------------
 
-#[derive(Debug)]
-struct PolylineLayerImpl {
-    base: layer::ImplBase,
-}
-
-static POLYLINE_LAYER_TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
-    type_: "debugPolyline",
-    source: layer_type_info::Source::NotRequired,
-    pass3d: layer_type_info::Pass3D::NotRequired,
-    layout: layer_type_info::Layout::NotRequired,
-    fading_tiles: layer_type_info::FadingTiles::NotRequired,
-    cross_tile_index: layer_type_info::CrossTileIndex::NotRequired,
-    tile_kind: layer_type_info::TileKind::NotRequired,
-};
-
-impl layer::Impl for PolylineLayerImpl {
-    fn base(&self) -> &layer::ImplBase {
-        &self.base
-    }
-    fn base_mut(&mut self) -> &mut layer::ImplBase {
-        &mut self.base
-    }
-    fn has_layout_difference(&self, _other: &dyn layer::Impl) -> bool {
-        false
-    }
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        &POLYLINE_LAYER_TYPE_INFO
-    }
-}
-
-#[derive(Debug)]
-struct PolylineLayerProperties {
-    base: LayerPropertiesBase,
-}
-
-impl LayerProperties for PolylineLayerProperties {
-    fn base(&self) -> &LayerPropertiesBase {
-        &self.base
-    }
-    fn base_mut(&mut self) -> &mut LayerPropertiesBase {
-        &mut self.base
-    }
-    fn get_dependencies(&self) -> Dependency {
-        Dependency::NONE
-    }
-}
-
 /// Sets the uniforms of a debug layer group's polylines.
 pub(crate) struct PolylineLayerTweaker {
     base: LayerTweakerBase,
@@ -377,12 +328,8 @@ pub(crate) struct PolylineLayerTweaker {
 impl PolylineLayerTweaker {
     #[must_use]
     pub(crate) fn new(properties: LineEvaluatedPropsUBO) -> Self {
-        let layer_impl: Arc<dyn layer::Impl> =
-            Arc::new(PolylineLayerImpl { base: layer::ImplBase::new(String::new(), String::new()) });
-        let layer_properties: Arc<dyn LayerProperties> =
-            Arc::new(PolylineLayerProperties { base: LayerPropertiesBase::new(layer_impl) });
         PolylineLayerTweaker {
-            base: LayerTweakerBase::new("debug-polyline".to_owned(), layer_properties),
+            base: LayerTweakerBase::new("debug-polyline".to_owned(), None),
             props_ubo: properties,
             drawable_uniform_buffer: None,
             expression_uniform_buffer: None,
@@ -391,10 +338,6 @@ impl PolylineLayerTweaker {
 }
 
 impl LayerTweaker for PolylineLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -726,7 +669,7 @@ impl RenderSource for RenderTileSource {
         &mut self,
         store: &mut TileStore,
         base_impl: Arc<dyn source::Impl>,
-        layers: &[Arc<dyn LayerProperties>],
+        layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,

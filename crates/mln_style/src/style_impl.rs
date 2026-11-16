@@ -45,12 +45,14 @@ use mln_util::logging::{Event, Log};
 use crate::collection::{Collection, CollectionWithPersistentOrder, ImmutableVector};
 use crate::expression::GlobalStateMap;
 use crate::image;
-use crate::layer::{self, Layer};
+use crate::layer::Layer;
+use crate::layer_type::ErasedLayerStyle;
 use crate::light::{self, Light};
 use crate::map::camera::CameraOptions;
 use crate::observer::{NullObserver, Observer, SourceObserver};
 use crate::parser::Parser;
 use crate::projection::{self, Projection};
+use crate::registry::StyleRegistry;
 use crate::sky::{self, Sky};
 use crate::source::{self, Source};
 use crate::sprite::Sprite;
@@ -238,7 +240,7 @@ pub struct Impl {
     source_observer: Rc<dyn SourceObserver>,
     /// The loop that the style's requests and background work answer on.
     run_loop: RunLoop,
-    layers: Collection<dyn Layer>,
+    layers: Collection<Layer>,
     transition_options: TransitionOptions,
     light: Light,
     sky: Option<Sky>,
@@ -258,6 +260,7 @@ pub struct Impl {
     pixel_ratio: f32,
     /// The parsed style's sprites.
     sprites: Vec<Sprite>,
+    registry: Arc<StyleRegistry>,
 
     pub(crate) mutated: bool,
     pub(crate) loaded: bool,
@@ -274,18 +277,20 @@ impl std::fmt::Debug for Impl {
 }
 
 impl Impl {
-    /// A style without a file source (`Impl(nullptr, pixelRatio,
-    /// threadPool)`), on `run_loop`.
+    /// A style without a file source, on `run_loop`, that parses against
+    /// `registry`.
     #[must_use]
-    pub(crate) fn new(pixel_ratio: f32, run_loop: &RunLoop) -> Self {
-        Self::with_file_source(None, pixel_ratio, run_loop)
+    pub(crate) fn new(registry: Arc<StyleRegistry>, pixel_ratio: f32, run_loop: &RunLoop) -> Self {
+        Self::with_file_source(registry, None, pixel_ratio, run_loop)
     }
 
-    /// A style that loads its resources from `file_source`. Its responses and
-    /// background work answer on `run_loop`, and its background work runs on
-    /// the loop's pool, under a tag of the style's own.
+    /// A style that parses against `registry` and loads its resources from
+    /// `file_source`. Its responses and background work answer on
+    /// `run_loop`, and its background work runs on the loop's pool, under a
+    /// tag of the style's own.
     #[must_use]
     pub(crate) fn with_file_source(
+        registry: Arc<StyleRegistry>,
         file_source: Option<Arc<dyn FileSource>>,
         pixel_ratio: f32,
         run_loop: &RunLoop,
@@ -331,6 +336,7 @@ impl Impl {
             default_camera: CameraOptions::default(),
             pixel_ratio,
             sprites: Vec::new(),
+            registry,
             mutated: false,
             loaded: false,
         }
@@ -440,7 +446,7 @@ impl Impl {
     /// Replaces the style with the one `json` describes; returns whether it
     /// parsed.
     fn parse(&mut self, json: &str) -> bool {
-        let mut parser = Parser::default();
+        let mut parser = Parser::new(&self.registry);
 
         if let Err(error) = parser.parse(json) {
             let message = format!("Failed to parse style: {error}");
@@ -479,12 +485,12 @@ impl Impl {
         let sources = &self.sources;
         let existing = self.layers.size();
         self.layers.extend(std::mem::take(&mut parser.layers).into_iter().filter_map(|mut layer| {
-            if let Err(error) = check_layer_source(sources, &*layer) {
+            if let Err(error) = check_layer_source(sources, &layer) {
                 Log::error(Event::ParseStyle, error.to_string());
                 return None;
             }
             layer.reevaluate_visibility(&global_state);
-            Some(layer)
+            Some(Box::new(layer))
         }));
         // An update for each layer, as `add_layer` publishes.
         let observer = self.observer();
@@ -532,6 +538,10 @@ impl Impl {
         self.loaded = true;
         self.observer().on_style_loaded();
         true
+    }
+
+    pub(crate) fn registry(&self) -> &Arc<StyleRegistry> {
+        &self.registry
     }
 
     pub(crate) fn get_json(&self) -> String {
@@ -611,9 +621,9 @@ impl Impl {
         let global_state = Arc::clone(&self.global_state);
         let mut changed = Vec::new();
         for layer in self.layers.get_wrappers_mut() {
-            let before = layer.base_impl();
+            let before = Arc::clone(layer.style());
             layer.reevaluate_visibility(&global_state);
-            if !Arc::ptr_eq(&before, &layer.base_impl()) {
+            if !Arc::ptr_eq(&before, layer.style()) {
                 changed.push(layer.get_id());
             }
         }
@@ -677,35 +687,31 @@ impl Impl {
 
     // Layers
 
-    pub(crate) fn get_layers(&self) -> Vec<&dyn Layer> {
+    pub(crate) fn get_layers(&self) -> Vec<&Layer> {
         self.layers.get_wrappers()
     }
 
-    pub(crate) fn get_layer(&self, id: &str) -> Option<&dyn Layer> {
+    pub(crate) fn get_layer(&self, id: &str) -> Option<&Layer> {
         self.layers.get(id)
     }
 
     /// The layer `id`, for mutation: the guard notifies this style
     /// (`on_layer_changed`) when dropped if the layer changed.
     pub(crate) fn get_layer_mut(&mut self, id: &str) -> Option<LayerRefMut<'_>> {
-        let before = self.layers.get(id)?.base_impl();
+        let before = Arc::clone(self.layers.get(id)?.style());
         Some(LayerRefMut { style: self, id: id.to_owned(), before })
     }
 
     /// Adds a layer before the layer `before`, or on top. See
     /// [`Style::add_layer`](crate::Style::add_layer).
-    pub(crate) fn add_layer(
-        &mut self,
-        mut layer: Box<dyn Layer>,
-        before: Option<&str>,
-    ) -> Result<&mut dyn Layer, Error> {
-        check_layer_source(&self.sources, &*layer)?;
+    pub(crate) fn add_layer(&mut self, mut layer: Layer, before: Option<&str>) -> Result<&mut Layer, Error> {
+        check_layer_source(&self.sources, &layer)?;
         // The global state is not available while the layer itself is parsed.
         layer.reevaluate_visibility(&self.global_state);
         let observer = self.observer();
         let result = self
             .layers
-            .add_unique(layer, before)
+            .add_unique(Box::new(layer), before)
             .map_err(|layer| Error::already_exists(format!("Layer {} already exists", layer.get_id())))?;
         observer.on_update();
         Ok(result)
@@ -720,8 +726,8 @@ impl Impl {
         true
     }
 
-    pub(crate) fn remove_layer(&mut self, id: &str) -> Option<Box<dyn Layer>> {
-        let layer = self.layers.remove(id);
+    pub(crate) fn remove_layer(&mut self, id: &str) -> Option<Layer> {
+        let layer = self.layers.remove(id).map(|layer| *layer);
 
         if layer.is_some() {
             self.observer().on_update();
@@ -854,7 +860,7 @@ impl Impl {
         refreshed
     }
 
-    pub fn get_layer_impls(&self) -> ImmutableVector<dyn layer::Impl> {
+    pub fn get_layer_impls(&self) -> ImmutableVector<dyn ErasedLayerStyle> {
         self.layers.get_impls()
     }
 
@@ -951,13 +957,13 @@ impl Impl {
 
 /// Fails when `layer`'s source is in `sources` and doesn't support the
 /// layer's type.
-fn check_layer_source(sources: &CollectionWithPersistentOrder<dyn Source>, layer: &dyn Layer) -> Result<(), Error> {
+fn check_layer_source(sources: &CollectionWithPersistentOrder<dyn Source>, layer: &Layer) -> Result<(), Error> {
     // TODO: verify source
-    let impl_ = layer.base_impl_ref();
-    if let Some(source) = sources.get(&impl_.source)
-        && !source.supports_layer_type(impl_.get_type_info())
+    let impl_ = layer.style();
+    if let Some(source) = sources.get(&impl_.base().source)
+        && !source.supports_layer_type(impl_.info())
     {
-        let message = format!("Layer '{}' is not compatible with source '{}'", impl_.id, impl_.source);
+        let message = format!("Layer '{}' is not compatible with source '{}'", impl_.base().id, impl_.base().source);
         return Err(Error::invalid_argument(message));
     }
     Ok(())
@@ -1003,18 +1009,18 @@ fn state_values_equal(a: &Value, b: &Value) -> bool {
 pub struct LayerRefMut<'a> {
     style: &'a mut Impl,
     id: String,
-    before: Arc<dyn layer::Impl>,
+    before: Arc<dyn ErasedLayerStyle>,
 }
 
 impl std::ops::Deref for LayerRefMut<'_> {
-    type Target = dyn Layer;
-    fn deref(&self) -> &(dyn Layer + 'static) {
+    type Target = Layer;
+    fn deref(&self) -> &Layer {
         self.style.layers.get(&self.id).expect("LayerRefMut: layer removed")
     }
 }
 
 impl std::ops::DerefMut for LayerRefMut<'_> {
-    fn deref_mut(&mut self) -> &mut (dyn Layer + 'static) {
+    fn deref_mut(&mut self) -> &mut Layer {
         self.style.layers.get_mut(&self.id).expect("LayerRefMut: layer removed")
     }
 }
@@ -1024,7 +1030,7 @@ impl Drop for LayerRefMut<'_> {
         let Some(layer) = self.style.layers.get(&self.id) else {
             return;
         };
-        if !Arc::ptr_eq(&self.before, &layer.base_impl()) {
+        if !Arc::ptr_eq(&self.before, layer.style()) {
             let id = std::mem::take(&mut self.id);
             self.style.on_layer_changed(&id);
         }

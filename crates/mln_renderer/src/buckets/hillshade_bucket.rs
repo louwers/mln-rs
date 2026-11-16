@@ -218,4 +218,8 @@ impl Bucket for HillshadeBucket {
     fn has_data(&self) -> bool {
         self.get_dem_data().get_image().valid()
     }
+
+    fn write_wire(&self, w: &mut mln_wire::Writer) {
+        w.fail("a hillshade bucket, which no layout makes".to_owned());
+    }
 }

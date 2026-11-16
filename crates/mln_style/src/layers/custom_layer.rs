@@ -12,24 +12,10 @@
 use std::any::Any;
 use std::sync::{Arc, Weak};
 
-use feature::Value;
-use mln_conversion::{Convertible, Error};
 use mln_map_types::{FrameProjection, MapView};
 
-use crate::expression::Dependency;
-use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serialize_base};
-use crate::layer_properties::{LayerProperties, LayerPropertiesBase};
-use crate::style_property::StyleProperty;
-
-static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
-    type_: "custom",
-    source: layer_type_info::Source::NotRequired,
-    pass3d: layer_type_info::Pass3D::NotRequired,
-    layout: layer_type_info::Layout::NotRequired,
-    fading_tiles: layer_type_info::FadingTiles::NotRequired,
-    cross_tile_index: layer_type_info::CrossTileIndex::NotRequired,
-    tile_kind: layer_type_info::TileKind::NotRequired,
-};
+use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
 /// The frame that a custom layer draws into.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -89,144 +75,65 @@ pub trait CustomLayerHost: Send + Sync {
     fn context_lost(&self) {}
 }
 
-#[derive(Clone)]
-pub struct Impl {
-    pub base: ImplBase,
-    /// The host, while the style has the layer or a renderer draws it.
-    host: Weak<dyn CustomLayerHost>,
-}
+/// The `custom` layer type, whose layers a [`CustomLayerHost`] draws.
+pub struct Custom;
 
-impl std::fmt::Debug for Impl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomLayer::Impl").field("base", &self.base).finish_non_exhaustive()
+static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+impl StyleLayerType for Custom {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "custom",
+        source: SourceKind::None,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: false,
+    };
+    const PROPERTIES: &'static PropertyTable = &PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = CustomHost;
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
     }
 }
 
-impl Impl {
+/// The host of a custom layer, while the style has the layer or a renderer
+/// draws it.
+#[derive(Clone)]
+pub struct CustomHost(Weak<dyn CustomLayerHost>);
+
+impl Default for CustomHost {
+    /// No host.
+    fn default() -> Self {
+        struct NoHost;
+        impl CustomLayerHost for NoHost {}
+        CustomHost(Weak::<NoHost>::new())
+    }
+}
+
+impl LayerStyle<Custom> {
+    /// A layer named `layer_id` that `host` draws.
     #[must_use]
-    pub fn new(layer_id: String, host: &Arc<dyn CustomLayerHost>) -> Self {
-        Impl { base: ImplBase::new(layer_id, String::new()), host: Arc::downgrade(host) }
+    pub fn with_host(layer_id: String, host: &Arc<dyn CustomLayerHost>) -> Self {
+        let mut style = LayerStyle::new(layer_id, String::new());
+        style.extra = CustomHost(Arc::downgrade(host));
+        style
     }
 
     /// The layer's host, unless the style no longer has the layer and no
     /// renderer draws it.
     #[must_use]
     pub fn host(&self) -> Option<Arc<dyn CustomLayerHost>> {
-        self.host.upgrade()
+        self.extra.0.upgrade()
     }
 
     /// Whether `host` is the layer's.
     #[must_use]
     pub fn has_host(&self, host: &Arc<dyn CustomLayerHost>) -> bool {
-        std::ptr::addr_eq(self.host.as_ptr(), Arc::as_ptr(host))
-    }
-
-    #[must_use]
-    pub fn static_type_info() -> &'static LayerTypeInfo {
-        &TYPE_INFO
-    }
-}
-
-impl layer::Impl for Impl {
-    fn base(&self) -> &ImplBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut ImplBase {
-        &mut self.base
-    }
-
-    fn has_layout_difference(&self, _other: &dyn layer::Impl) -> bool {
-        false
-    }
-
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        &TYPE_INFO
-    }
-}
-
-/// A layer that the host draws.
-pub struct CustomLayer {
-    base_impl: Arc<Impl>,
-    host: Arc<dyn CustomLayerHost>,
-}
-
-impl std::fmt::Debug for CustomLayer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomLayer").field("base_impl", &self.base_impl).finish_non_exhaustive()
-    }
-}
-
-impl CustomLayer {
-    #[must_use]
-    pub fn new(layer_id: &str, host: Arc<dyn CustomLayerHost>) -> Self {
-        CustomLayer { base_impl: Arc::new(Impl::new(layer_id.to_owned(), &host)), host }
-    }
-
-    #[must_use]
-    pub fn impl_(&self) -> &Impl {
-        &self.base_impl
-    }
-}
-
-impl Layer for CustomLayer {
-    fn base_impl(&self) -> Arc<dyn layer::Impl> {
-        Arc::<Impl>::clone(&self.base_impl)
-    }
-
-    fn base_impl_ref(&self) -> &dyn layer::Impl {
-        &*self.base_impl
-    }
-
-    fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase)) {
-        let mut impl_ = (*self.base_impl).clone();
-        f(&mut impl_.base);
-        self.base_impl = Arc::new(impl_);
-    }
-
-    fn get_property(&self, _name: &str) -> StyleProperty {
-        StyleProperty::default()
-    }
-
-    fn serialize(&self) -> Value {
-        serialize_base(self)
-    }
-
-    /// The host draws one layer, so a copy shares it: both draw through it.
-    fn clone_ref(&self, id: &str) -> Box<dyn Layer> {
-        let mut impl_ = (*self.base_impl).clone();
-        impl_.base.id = id.to_owned();
-        Box::new(CustomLayer { base_impl: Arc::new(impl_), host: Arc::clone(&self.host) })
-    }
-
-    fn set_property_internal(&mut self, name: &str, _value: &Convertible<'_>) -> Option<Error> {
-        Some(Error::new(format!("layer '{}' doesn't support property '{name}'", self.get_id())))
-    }
-}
-
-#[derive(Debug)]
-pub struct CustomLayerProperties {
-    pub base: LayerPropertiesBase,
-}
-
-impl CustomLayerProperties {
-    #[must_use]
-    pub fn new(impl_: Arc<Impl>) -> Self {
-        CustomLayerProperties { base: LayerPropertiesBase::new(impl_) }
-    }
-}
-
-impl LayerProperties for CustomLayerProperties {
-    fn base(&self) -> &LayerPropertiesBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut LayerPropertiesBase {
-        &mut self.base
-    }
-
-    fn get_dependencies(&self) -> Dependency {
-        Dependency::NONE
+        std::ptr::addr_eq(self.extra.0.as_ptr(), Arc::as_ptr(host))
     }
 }
 
@@ -234,8 +141,10 @@ impl LayerProperties for CustomLayerProperties {
 mod tests {
     use std::sync::Arc;
 
-    use super::{CustomLayer, CustomLayerHost, Impl};
+    use super::{Custom, CustomLayerHost};
+    use crate::StyleRegistry;
     use crate::layer::Layer;
+    use crate::layer_type::LayerStyle;
 
     struct Host;
 
@@ -247,9 +156,8 @@ mod tests {
     #[test]
     fn the_impls_of_a_removed_layer_dont_keep_its_host() {
         let host: Arc<dyn CustomLayerHost> = Arc::new(Host);
-        let layer = CustomLayer::new("custom", Arc::clone(&host));
-        let impl_ = layer.base_impl();
-        let impl_ = impl_.downcast_ref::<Impl>().unwrap();
+        let layer = Layer::custom(&StyleRegistry::with_builtins(), "custom", Arc::clone(&host));
+        let impl_ = LayerStyle::<Custom>::recover(layer.style()).unwrap();
         assert!(impl_.has_host(&host));
         assert!(impl_.host().is_some());
         drop(layer);

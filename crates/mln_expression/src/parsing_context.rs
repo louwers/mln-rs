@@ -14,11 +14,12 @@ use crate::coalesce::Coalesce;
 use crate::coercion::Coercion;
 use crate::collator_expression::CollatorExpression;
 use crate::comparison::parse_comparison;
-use crate::compound_expression::{Op, parse_compound_expression};
+use crate::compound_expression::parse_compound_expression;
 use crate::distance::Distance;
 use crate::expression::{Dependency, EvaluationContext, Expr, Node};
 use crate::find_zoom_curve::{ZoomCurve, find_zoom_curve};
 use crate::format_expression::FormatExpression;
+use crate::functions::Functions;
 use crate::image_expression::ImageExpression;
 use crate::in_::In;
 use crate::index_of::IndexOf;
@@ -100,17 +101,15 @@ pub enum TypeAnnotationOption {
     Omit,
 }
 
+/// The state of parsing one expression: the functions its names resolve
+/// against, where in the expression it is, what type is expected there, the
+/// `let` bindings in scope and the errors so far.
 pub struct ParsingContext {
     key: String,
     expected: Option<Type>,
     scope: Option<Rc<Scope>>,
     errors: Rc<RefCell<Vec<ParsingError>>>,
-}
-
-impl Default for ParsingContext {
-    fn default() -> Self {
-        ParsingContext { key: String::new(), expected: None, scope: None, errors: Rc::new(RefCell::new(Vec::new())) }
-    }
+    functions: Arc<Functions>,
 }
 
 /// What an expression can read while it evaluates that keeps it from folding
@@ -132,7 +131,7 @@ const EVALUATION_INPUTS: Dependency = Dependency(
 fn is_constant(expression: &Expr) -> bool {
     match expression.node() {
         Node::Var(var) => return is_constant(var.bound_expression()),
-        Node::Compound(compound) if compound.signature().op == Op::Error => return false,
+        Node::Compound(compound) if compound.overload().result == Type::Error => return false,
         _ => {}
     }
 
@@ -193,40 +192,54 @@ fn expression_registry(name: &str) -> Option<ParseFunction> {
     })
 }
 
-/// Whether `name` is in the expression registry (not the compound-expression
-/// registry).
+/// Whether `name` is an expression form, which parses its own arguments,
+/// rather than a function.
 #[must_use]
-pub(crate) fn is_expression_name(name: &str) -> bool {
+pub(crate) fn is_special_form(name: &str) -> bool {
     expression_registry(name).is_some()
 }
 
 impl ParsingContext {
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn with_key(key: impl Into<String>) -> Self {
-        ParsingContext { key: key.into(), ..Default::default() }
-    }
-
-    #[must_use]
-    pub fn with_expected(expected: Type) -> Self {
-        ParsingContext { expected: Some(expected), ..Default::default() }
-    }
-
-    fn child(
-        key: String,
-        errors: Rc<RefCell<Vec<ParsingError>>>,
-        expected: Option<Type>,
-        scope: Option<Rc<Scope>>,
-    ) -> Self {
-        ParsingContext { key, expected, scope, errors }
+    pub fn new(functions: &Arc<Functions>) -> Self {
+        ParsingContext {
+            key: String::new(),
+            expected: None,
+            scope: None,
+            errors: Rc::new(RefCell::new(Vec::new())),
+            functions: Arc::clone(functions),
+        }
     }
 
     #[must_use]
-    pub(crate) fn get_key(&self) -> String {
-        self.key.clone()
+    pub fn with_expected(functions: &Arc<Functions>, expected: Type) -> Self {
+        ParsingContext { expected: Some(expected), ..ParsingContext::new(functions) }
+    }
+
+    /// A context that resolves no function names, for parsing values that
+    /// have none, such as GeoJSON.
+    pub(crate) fn without_functions() -> Self {
+        ParsingContext::new(&Arc::new(Functions::new()))
+    }
+
+    /// A context at this one's key, with its functions and errors of its own.
+    pub(crate) fn detached(&self) -> Self {
+        ParsingContext { key: self.key.clone(), ..ParsingContext::new(&self.functions) }
+    }
+
+    /// A context for an operand of this one's expression, sharing its errors.
+    fn child(&self, index: usize, expected: Option<Type>, scope: Option<Rc<Scope>>) -> Self {
+        ParsingContext {
+            key: format!("{}[{}]", self.key, index),
+            expected,
+            scope,
+            errors: Rc::clone(&self.errors),
+            functions: Arc::clone(&self.functions),
+        }
+    }
+
+    pub(crate) fn functions(&self) -> &Arc<Functions> {
+        &self.functions
     }
 
     #[must_use]
@@ -298,12 +311,7 @@ impl ParsingContext {
         expected: Option<Type>,
         type_annotation_option: Option<TypeAnnotationOption>,
     ) -> ParseResult {
-        let mut child = ParsingContext::child(
-            format!("{}[{}]", self.key, index),
-            Rc::clone(&self.errors),
-            expected,
-            self.scope.clone(),
-        );
+        let mut child = self.child(index, expected, self.scope.clone());
         child.parse_value(value, type_annotation_option)
     }
 
@@ -315,12 +323,7 @@ impl ParsingContext {
         expected: Option<Type>,
         bindings: &Bindings,
     ) -> ParseResult {
-        let mut child = ParsingContext::child(
-            format!("{}[{}]", self.key, index),
-            Rc::clone(&self.errors),
-            expected,
-            Some(Rc::new(Scope::new(bindings.clone(), self.scope.clone()))),
-        );
+        let mut child = self.child(index, expected, Some(Rc::new(Scope::new(bindings.clone(), self.scope.clone()))));
         child.parse_value(value, None)
     }
 

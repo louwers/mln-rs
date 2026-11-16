@@ -8,14 +8,15 @@
 //   (backend.rs), applies the messages and draws.
 // - ui.rs: the controls, which view.rs lays out and an overlay of the window's
 //   backend paints over the map (overlay.rs, metal_overlay.rs,
-//   vulkan_overlay.rs, gl_overlay.rs).
+//   vulkan_overlay.rs, d3d12_overlay.rs, gl_overlay.rs).
 //
 // Command line: -h/--help, -f/--fullscreen, -b/--benchmark, -o/--offline,
 // -s/--style URL, -c/--cache FILE, -x/--lon, -y/--lat, -a/--alt, --fov,
 // -z/--zoom, --bearing, -p/--pitch, -r/--roll,
 // -P/--maxPitch, --backend (metal, the default on macOS, webgpu: wgpu, the
-// default elsewhere, vulkan, elsewhere than on Apple's platforms, or opengl:
-// OpenGL ES, on Linux; see backend.rs), and for checking the app:
+// default elsewhere, vulkan, elsewhere than on Apple's platforms, d3d12, on
+// Windows, or opengl: OpenGL ES, on Linux; see backend.rs), and for checking
+// the app:
 // --readback FILE.png (write the map once it is idle, without the controls,
 // see view.rs), --quit-after SECONDS, --gesture-test (scripted input through
 // the view's handlers) and --no-system-fonts: without it, the map falls back
@@ -23,6 +24,8 @@
 // CJK (mln_system_fonts).
 
 mod backend;
+#[cfg(windows)]
+mod d3d12_overlay;
 #[cfg(target_os = "linux")]
 mod gl_overlay;
 mod host;
@@ -37,6 +40,8 @@ mod ui;
 mod view;
 #[cfg(not(target_vendor = "apple"))]
 mod vulkan_overlay;
+#[cfg(windows)]
+mod win32_window;
 
 use crate::settings::Settings;
 
@@ -62,7 +67,8 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       -r[degrees], --roll=[degrees]     Roll
       -P[degrees], --maxPitch=[degrees] Max Pitch
       --backend=[backend]               Rendering backend: metal (macOS), webgpu,
-                                        vulkan (not macOS) or opengl (Linux)
+                                        vulkan (not macOS), d3d12 (Windows) or
+                                        opengl (Linux)
       --readback=[file.png]             Write the map once it is idle
       --quit-after=[seconds]            Close the window after this time
       --gesture-test                    Replay scripted input, log the camera, quit

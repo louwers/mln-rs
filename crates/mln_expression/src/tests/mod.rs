@@ -2,6 +2,7 @@ mod dependency;
 mod expression;
 mod find_zoom_curve;
 mod format;
+mod functions;
 mod global_state;
 mod semiliteral;
 mod unavailable_images;

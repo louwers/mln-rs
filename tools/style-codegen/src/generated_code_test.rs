@@ -25,21 +25,14 @@ fn every_layer_type_is_generated() {
     let spec = std::fs::read_to_string(&spec_path).unwrap();
     let files = style_codegen::generate(&spec).unwrap();
     let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
-    for t in [
-        "fill",
-        "line",
-        "symbol",
-        "circle",
-        "heatmap",
-        "fill_extrusion",
-        "raster",
-        "hillshade",
-        "color_relief",
-        "background",
-    ] {
-        assert!(paths.contains(&format!("layers/{t}_layer_properties.rs").as_str()), "{t}");
+    let spec: serde_json::Value = serde_json::from_str(&spec).unwrap();
+    let types = spec["layer"]["type"]["values"].as_object().expect("layer.type.values");
+    assert!(!types.is_empty());
+    for t in types.keys() {
+        let path = format!("layers/{}_layer_properties.rs", t.replace('-', "_"));
+        assert!(paths.contains(&path.as_str()), "{t}");
     }
     assert!(paths.contains(&"light_properties.rs"));
     assert!(paths.contains(&"sky_properties.rs"));
-    assert_eq!(files.len(), 12);
+    assert_eq!(files.len(), types.len() + 2);
 }

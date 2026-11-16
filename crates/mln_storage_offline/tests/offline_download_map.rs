@@ -10,6 +10,7 @@ use std::sync::Arc;
 use mln_actor::{LocalObject, RunLoop};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
+use mln_renderer::Registry;
 use mln_storage::offline::{
     OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
@@ -72,8 +73,10 @@ fn resource_offline_usage_unset() {
         });
     });
     let network: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
-    *host.borrow_mut() =
-        Some((OfflineDatabase::new(filename.as_str()), Downloads::new(Some(network), Arc::clone(&post))));
+    *host.borrow_mut() = Some((
+        OfflineDatabase::new(filename.as_str()),
+        Downloads::new(Some(network), Arc::clone(&post), Arc::clone(Registry::with_builtins().style())),
+    ));
     let with = |f: &mut dyn FnMut(&mut OfflineDatabase, &mut Downloads)| {
         let mut host = host.borrow_mut();
         let (db, downloads) = host.as_mut().expect("the host");
@@ -115,6 +118,7 @@ fn resource_offline_usage_unset() {
         .into(),
         Arc::<StubFileSource>::clone(&file_source),
         Arc::clone(&post),
+        Arc::clone(Registry::with_builtins().style()),
     );
 
     let s = Rc::clone(&size);

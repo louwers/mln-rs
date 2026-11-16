@@ -3,8 +3,10 @@
 
 use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::conversion::convert_color_ramp_property_value;
-use crate::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
-use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
+use crate::expression::Functions;
+use crate::layer_type::LayerStyle;
+use crate::layers::Heatmap;
+use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 use mln_conversion::{Convertible, Error};
 
 crate::properties!(
@@ -20,11 +22,6 @@ crate::properties!(
     use mln_util::Color;
 );
 
-crate::layer_properties::layer_properties!(
-    /// The evaluated properties of a heatmap layer.
-    HeatmapLayerProperties for HeatmapLayerImpl, paint HeatmapPaintProperties
-);
-
 /// The properties, by slot.
 pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[
@@ -37,19 +34,16 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[0, 1, 2, 3, 4],
 );
 
-impl Properties for HeatmapLayerImpl {
-    const TABLE: &'static PropertyTable = &PROPERTIES;
-
-    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {
-        Some(match slot {
-            0 => visitor.paint(|s| &s.paint.heatmap_color, |s| &mut s.paint.heatmap_color),
-            1 => visitor.paint(|s| &s.paint.heatmap_intensity, |s| &mut s.paint.heatmap_intensity),
-            2 => visitor.paint(|s| &s.paint.heatmap_opacity, |s| &mut s.paint.heatmap_opacity),
-            3 => visitor.paint(|s| &s.paint.heatmap_radius, |s| &mut s.paint.heatmap_radius),
-            4 => visitor.paint(|s| &s.paint.heatmap_weight, |s| &mut s.paint.heatmap_weight),
-            _ => return None,
-        })
-    }
+/// Calls `visitor` with the field of the property in `slot`.
+pub(crate) fn visit<V: PropertyVisitor<LayerStyle<Heatmap>>>(slot: usize, visitor: V) -> Option<V::Output> {
+    Some(match slot {
+        0 => visitor.paint(|s| &s.paint.heatmap_color, |s| &mut s.paint.heatmap_color),
+        1 => visitor.paint(|s| &s.paint.heatmap_intensity, |s| &mut s.paint.heatmap_intensity),
+        2 => visitor.paint(|s| &s.paint.heatmap_opacity, |s| &mut s.paint.heatmap_opacity),
+        3 => visitor.paint(|s| &s.paint.heatmap_radius, |s| &mut s.paint.heatmap_radius),
+        4 => visitor.paint(|s| &s.paint.heatmap_weight, |s| &mut s.paint.heatmap_weight),
+        _ => return None,
+    })
 }
 
 /// The default `heatmap-color`.
@@ -73,6 +67,6 @@ pub fn default_heatmap_color() -> ColorRampPropertyValue {
         1,
         "red"
     ]);
-    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error)
+    convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error, &Functions::with_builtins())
         .expect("the heatmap-color default converts")
 }

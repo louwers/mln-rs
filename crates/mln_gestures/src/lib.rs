@@ -1,7 +1,7 @@
 //! A gesture recognizer for hosts that have none: pointer, touch, wheel,
 //! platform pinch and keyboard input turned into camera moves on a
 //! [`GestureCamera`], such as `mln_runtime::Map`, through
-//! maplibre-native-ffi's camera calls with their gesture phases
+//! the map's camera calls with their gesture phases
 //! ([`Map::apply_camera_delta`](mln_map::Map::apply_camera_delta)), and
 //! releases continued with the map's momentum.
 //!

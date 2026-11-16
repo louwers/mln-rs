@@ -7,13 +7,13 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_TILE_PROPS_UBO,
 };
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::color_relief_layer_properties::ColorReliefLayerProperties;
+use mln_style::layers::ColorRelief;
 
 use super::cast_matrix;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, to_projection_ubo};
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::paint_parameters::PaintParameters;
 
 /// Per-tile DEM properties that are set during drawable creation and read by
@@ -31,9 +31,9 @@ pub(crate) struct ColorReliefLayerTweaker {
 }
 
 impl ColorReliefLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
         ColorReliefLayerTweaker {
-            base: LayerTweakerBase::new(id, properties),
+            base: LayerTweakerBase::new(id, Some(properties)),
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
             tile_props_uniform_buffer: None,
@@ -42,18 +42,16 @@ impl ColorReliefLayerTweaker {
 }
 
 impl LayerTweaker for ColorReliefLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
 
     fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         let context = parameters.context;
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<ColorReliefLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let evaluated = &evaluated::<ColorRelief>(&properties).paint;
 
         if layer_group.empty() {
             return;

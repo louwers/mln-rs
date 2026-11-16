@@ -67,7 +67,7 @@ pub(crate) fn composite_opacity(layer_opacity: f32) -> Option<f32> {
 }
 
 /// A layer-like group of drawables, not a group of layers.
-pub struct LayerGroup {
+pub(crate) struct LayerGroup {
     pub(crate) id: SimpleIdentity,
     pub(crate) enabled: bool,
     pub(crate) layer_index: i32,

@@ -12,16 +12,15 @@ use mln_vec_map::VecSet;
 
 use super::util::parse_json;
 use crate::color_ramp_property_value::ColorRampPropertyValue;
-use crate::conversion::{Converter, Error, convert_property_value};
-use crate::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap, ParsingContext, Type};
-use crate::filter::Filter;
+use crate::conversion::{Error, convert_filter, convert_property_value};
+use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type};
 use crate::property_expression::PropertyExpression;
 
 fn parse_expression(json: &str, expected: Option<Type>) -> Option<Expr> {
     let document = parse_json(json);
     let mut ctx = match expected {
-        Some(t) => ParsingContext::with_expected(t),
-        None => ParsingContext::new(),
+        Some(t) => ParsingContext::with_expected(&Functions::with_builtins(), t),
+        None => ParsingContext::new(&Functions::with_builtins()),
     };
     ctx.parse_expression(&Convertible::from(&document), None)
 }
@@ -69,7 +68,8 @@ fn property_value_conversion_keeps_expression() {
     let json = parse_json(r#"["to-number", ["global-state", "width"]]"#);
 
     let mut error = Error::default();
-    let converted = convert_property_value::<f32>(&Convertible::from(&json), &mut error, true, false);
+    let converted =
+        convert_property_value::<f32>(&Convertible::from(&json), &mut error, true, false, &Functions::with_builtins());
     let converted = converted.unwrap_or_else(|| panic!("{}", error.message));
     // The property value must keep the expression rather than folding it into
     // a constant, so that changes to the global state can be picked up.
@@ -83,7 +83,7 @@ fn filter() {
     let json = parse_json(r#"["to-boolean", ["global-state", "showFeatures"]]"#);
 
     let mut error = Error::default();
-    let filter = <Filter as Converter>::convert(&Convertible::from(&json), &mut error);
+    let filter = convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut error);
     let filter = filter.unwrap_or_else(|| panic!("{}", error.message));
 
     let shown = state(&[("showFeatures", Value::Bool(true))]);
@@ -99,7 +99,7 @@ fn filter() {
 fn color_ramp() {
     let json = parse_json(r#"["to-color", ["global-state", "hotColor"]]"#);
 
-    let mut ctx = ParsingContext::with_expected(Type::Color);
+    let mut ctx = ParsingContext::with_expected(&Functions::with_builtins(), Type::Color);
     let parsed = ctx.parse_expression(&Convertible::from(&json), None).expect("parsed");
 
     let ramp = ColorRampPropertyValue::new(Some(Arc::from(parsed)));

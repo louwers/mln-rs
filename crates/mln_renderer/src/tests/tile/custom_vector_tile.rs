@@ -6,10 +6,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, TileFunction};
-use mln_style::layer::{Layer, downcast_arc};
-use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::fill_layer::Impl as FillLayerImpl;
-use mln_style::layers::{FillLayer, FillLayerProperties};
+use mln_style::layer::Layer;
+use mln_style::layer_type::LayerStyle;
+use mln_style::layers::Fill;
 use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVectorTileLoader, TileDataFormat};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
@@ -17,6 +16,8 @@ use mln_util::geo::{LatLng, LatLngBounds};
 use parking_lot::Mutex;
 
 use super::RasterTileTest;
+use crate::Registry;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
 use crate::tile::contents::Contents;
@@ -224,10 +225,10 @@ fn set_mlt_tile_data() {
     let root = OverscaledTileID::from_zxy(0, 0, 0);
     let mut tiles = tiles(&test, &[root], loader.self_ref());
 
-    let mut layer = FillLayer::new("water", "source");
+    let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "water", "source").unwrap();
     layer.set_source_layer("water");
-    let layer_properties: Arc<dyn LayerProperties> =
-        Arc::new(FillLayerProperties::new(downcast_arc::<FillLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
+        Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(layer.style()).unwrap()));
     tiles.set_style(&crate::tests::style(&[layer_properties]));
     tiles.set_necessity(&root, TileNecessity::Required);
     test.run_loop.wait_for_empty();

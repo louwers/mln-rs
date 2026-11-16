@@ -5,6 +5,7 @@ use std::sync::Arc;
 use mln_actor::RunLoop;
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, FeatureInfo, Map, MapDebugOptions, MapMode, MapOptions, NDCBound};
+use mln_renderer::Registry;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::PropertyValue;
@@ -12,12 +13,6 @@ use mln_style::conversion::Convertible;
 use mln_style::expression::dsl::{eq, get, literal_str};
 use mln_style::filter::Filter;
 use mln_style::layer::Layer;
-use mln_style::layers::background_layer::BackgroundLayer;
-use mln_style::layers::circle_layer::CircleLayer;
-use mln_style::layers::fill_extrusion_layer::FillExtrusionLayer;
-use mln_style::layers::fill_layer::FillLayer;
-use mln_style::layers::line_layer::LineLayer;
-use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::projection::Projection;
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_style::style_impl::LayerRefMut;
@@ -60,7 +55,7 @@ fn constant<T>(value: T) -> PropertyValue<T> {
 
 /// Sets `layer`'s property `name` from style JSON.
 #[track_caller]
-fn set(layer: &mut dyn Layer, name: &str, value: &serde_json::Value) {
+fn set(layer: &mut Layer, name: &str, value: &serde_json::Value) {
     let error = layer.set_property(name, &Convertible::from(value), None);
     assert!(error.is_none(), "{name}: {error:?}");
 }
@@ -97,19 +92,23 @@ impl FeatureTrackingTest {
         let source = GeoJSONSource::with_default_options(SOURCE_NAME);
         source.set_geojson(geojson.parse().expect("GeoJSON")).expect("set GeoJSON");
 
-        let mut background_layer = BackgroundLayer::new("background");
+        let mut background_layer =
+            Layer::new(Registry::with_builtins().style(), "background", "background", "").unwrap();
         set(&mut background_layer, "background-color", &json!("rgba(255,255,255,1)"));
 
-        let mut fill_layer = FillLayer::new(FILL_LAYER_NAME, SOURCE_NAME);
+        let mut fill_layer =
+            Layer::new(Registry::with_builtins().style(), "fill", FILL_LAYER_NAME, SOURCE_NAME).unwrap();
         fill_layer.set_visibility(VisibilityType::None);
         set(&mut fill_layer, "fill-color", &json!("rgba(0,0,255,1)"));
 
-        let mut line_layer = LineLayer::new(LINE_LAYER_NAME, SOURCE_NAME);
+        let mut line_layer =
+            Layer::new(Registry::with_builtins().style(), "line", LINE_LAYER_NAME, SOURCE_NAME).unwrap();
         line_layer.set_visibility(VisibilityType::None);
         set(&mut line_layer, "line-color", &json!("rgba(0,0,0,1)"));
         set(&mut line_layer, "line-width", &json!(2.0));
 
-        let mut circle_layer = CircleLayer::new(CIRCLE_LAYER_NAME, SOURCE_NAME);
+        let mut circle_layer =
+            Layer::new(Registry::with_builtins().style(), "circle", CIRCLE_LAYER_NAME, SOURCE_NAME).unwrap();
         circle_layer.set_visibility(VisibilityType::None);
         set(&mut circle_layer, "circle-color", &json!("rgba(0,0,0,1)"));
         set(&mut circle_layer, "circle-opacity", &json!(0.0));
@@ -117,7 +116,8 @@ impl FeatureTrackingTest {
         set(&mut circle_layer, "circle-stroke-color", &json!("rgba(0,0,0,1)"));
         set(&mut circle_layer, "circle-stroke-width", &json!(2.0));
 
-        let mut symbol_layer = SymbolLayer::new(SYMBOL_LAYER_NAME, SOURCE_NAME);
+        let mut symbol_layer =
+            Layer::new(Registry::with_builtins().style(), "symbol", SYMBOL_LAYER_NAME, SOURCE_NAME).unwrap();
         symbol_layer.set_visibility(VisibilityType::None);
         set(&mut symbol_layer, "icon-allow-overlap", &json!(false));
         set(&mut symbol_layer, "symbol-placement", &json!("point"));
@@ -145,11 +145,11 @@ impl FeatureTrackingTest {
             let style = map.style_mut();
             style.load_json(&read_file(&format!("{FIXTURE_BASE}api/empty.json")));
             style.add_source(Box::new(source)).expect("add source");
-            style.add_layer(Box::new(background_layer), None).expect("add layer");
-            style.add_layer(Box::new(fill_layer), None).expect("add layer");
-            style.add_layer(Box::new(line_layer), None).expect("add layer");
-            style.add_layer(Box::new(circle_layer), None).expect("add layer");
-            style.add_layer(Box::new(symbol_layer), None).expect("add layer");
+            style.add_layer(background_layer, None).expect("add layer");
+            style.add_layer(fill_layer, None).expect("add layer");
+            style.add_layer(line_layer, None).expect("add layer");
+            style.add_layer(circle_layer, None).expect("add layer");
+            style.add_layer(symbol_layer, None).expect("add layer");
             style.add_image(Arc::new(image));
         }
 
@@ -175,12 +175,12 @@ impl FeatureTrackingTest {
         f(&mut style.get_layer_mut(id).expect("layer"));
     }
 
-    fn with_symbol_layer(&mut self, f: impl FnOnce(&mut dyn Layer)) {
-        self.with_layer(SYMBOL_LAYER_NAME, |layer| f(&mut **layer));
+    fn with_symbol_layer(&mut self, f: impl FnOnce(&mut Layer)) {
+        self.with_layer(SYMBOL_LAYER_NAME, |layer| f(layer));
     }
 
-    fn with_circle_layer(&mut self, f: impl FnOnce(&mut dyn Layer)) {
-        self.with_layer(CIRCLE_LAYER_NAME, |layer| f(&mut **layer));
+    fn with_circle_layer(&mut self, f: impl FnOnce(&mut Layer)) {
+        self.with_layer(CIRCLE_LAYER_NAME, |layer| f(layer));
     }
 
     fn show(&mut self, id: &str) {
@@ -290,7 +290,7 @@ fn ndc_bound_symbol_offset() {
 
 /// Shows the symbol layer's pt0 label alone, at a center variable anchor
 /// pitched with the map (both translation tests).
-fn show_variable_anchor_label(layer: &mut dyn Layer) {
+fn show_variable_anchor_label(layer: &mut Layer) {
     layer.set_visibility(VisibilityType::Visible);
     set(layer, "icon-image", &serde_json::Value::Null);
     set(layer, "text-variable-anchor", &json!(["center"]));
@@ -338,7 +338,7 @@ fn ndc_bound_shared_bucket_at_another_translation() {
     {
         let style = test.map.style_mut();
         let mut follower = style.get_layer(SYMBOL_LAYER_NAME).expect("layer").clone_ref("follower");
-        set(&mut *follower, "text-translate", &json!([0.0, -50.0]));
+        set(&mut follower, "text-translate", &json!([0.0, -50.0]));
         style.add_layer(follower, None).expect("add layer");
     }
     test.run(None, 0.0);
@@ -531,10 +531,10 @@ fn zero_opacity_data_driven() {
 #[test]
 fn ndc_bound_fill_extrusion() {
     let mut test = FeatureTrackingTest::new(CameraOptions { pitch: Some(45.0), ..camera(10.0) });
-    let mut layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
+    let mut layer = Layer::new(Registry::with_builtins().style(), "fill-extrusion", "extrusion", SOURCE_NAME).unwrap();
     set(&mut layer, "fill-extrusion-color", &json!("rgba(0,0,255,1)"));
     set(&mut layer, "fill-extrusion-height", &json!(1000.0));
-    test.map.style_mut().add_layer(Box::new(layer), None).expect("add layer");
+    test.map.style_mut().add_layer(layer, None).expect("add layer");
     test.run(None, 0.0);
 
     assert_eq!(1, test.count(Some("poly0"), Some("extrusion"), Some(SOURCE_NAME)));
@@ -691,9 +691,10 @@ fn globe_ndc_bound_circle_pitch_alignment() {
 fn globe_ndc_bound_fill_extrusion() {
     let mut test = globe_test();
     test.show(FILL_LAYER_NAME);
-    let mut extrusion_layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
+    let mut extrusion_layer =
+        Layer::new(Registry::with_builtins().style(), "fill-extrusion", "extrusion", SOURCE_NAME).unwrap();
     set(&mut extrusion_layer, "fill-extrusion-height", &json!(500_000.0));
-    test.map.style_mut().add_layer(Box::new(extrusion_layer), None).expect("add layer");
+    test.map.style_mut().add_layer(extrusion_layer, None).expect("add layer");
     test.run(None, 0.0);
 
     let flat = test.bound("nearPolygon", FILL_LAYER_NAME).expect("flat");
@@ -710,11 +711,12 @@ fn globe_ndc_bound_fill_extrusion() {
 #[test]
 fn globe_fill_extrusion_above_horizon() {
     let mut test = globe_test();
-    let mut extrusion_layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
+    let mut extrusion_layer =
+        Layer::new(Registry::with_builtins().style(), "fill-extrusion", "extrusion", SOURCE_NAME).unwrap();
     set(&mut extrusion_layer, "fill-extrusion-height", &json!(500_000.0));
     set(&mut extrusion_layer, "fill-extrusion-color", &json!("rgba(0,255,0,1)"));
     extrusion_layer.set_filter(&name_filter("5"));
-    test.map.style_mut().add_layer(Box::new(extrusion_layer), None).expect("add layer");
+    test.map.style_mut().add_layer(extrusion_layer, None).expect("add layer");
     let image = test.run(None, 0.0).image;
     test.expect_captured_as_drawn("farPolygon", "extrusion", &image);
 }
@@ -728,7 +730,7 @@ fn globe_capture_during_transition() {
     set_projection(&mut test, ProjectionDefinition::between_names("mercator", "vertical-perspective", 0.1));
     test.show(FILL_LAYER_NAME);
     test.with_layer(FILL_LAYER_NAME, |layer| {
-        set(&mut **layer, "fill-color", &json!("rgba(0,255,0,1)"));
+        set(layer, "fill-color", &json!("rgba(0,255,0,1)"));
     });
     for (feature_id, name) in [("nearPolygon", "2"), ("farPolygon", "5")] {
         test.with_layer(FILL_LAYER_NAME, |layer| layer.set_filter(&name_filter(name)));
@@ -748,12 +750,12 @@ fn globe_capture_close_up() {
     let large = r#"{"type": "Feature", "id": "large", "properties": {},
         "geometry": {"type": "Polygon", "coordinates": [[[-40, -40], [40, -40], [40, 40], [-40, 40], [-40, -40]]]}}"#;
     source.set_geojson(large.parse().expect("GeoJSON")).expect("set GeoJSON");
-    let mut fill_layer = FillLayer::new("lowZoomFill", "lowZoom");
+    let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "lowZoomFill", "lowZoom").unwrap();
     set(&mut fill_layer, "fill-color", &json!("rgba(0,255,0,1)"));
     {
         let style = test.map.style_mut();
         style.add_source(Box::new(source)).expect("add source");
-        style.add_layer(Box::new(fill_layer), None).expect("add layer");
+        style.add_layer(fill_layer, None).expect("add layer");
     }
     test.map.jump_to(&CameraOptions { pitch: Some(60.0), ..camera(11.0) });
     let image = test.run(None, 0.0).image;

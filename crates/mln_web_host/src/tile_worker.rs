@@ -14,6 +14,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::{Encoded, TileWorkerHost};
 use mln_util::serialization::payload::Payload;
 use parking_lot::Mutex;
@@ -36,11 +37,13 @@ thread_local! {
 }
 
 /// Runs tile workers for the map side at the other end of `port`, until it
-/// disconnects. Call it on the instance of a Web Worker, once for each port
-/// that a map side sends it: in the Web Worker's script, after the module's
-/// `init`.
-#[wasm_bindgen(js_name = mlnWebServeTileWorker)]
-pub fn serve(port: &web_sys::MessagePort) {
+/// disconnects, laying out with `registry`, which must be filled by the
+/// same calls as the map side's: a job that names a registration it lacks
+/// fails. Call it on the
+/// instance of a Web Worker, once for each port that a map side sends it.
+/// The app's module exports it as `mlnWebServeTileWorker`, which the Web
+/// Worker's script calls after the module's `init`.
+pub fn serve(port: &web_sys::MessagePort, registry: Arc<Registry>) {
     // The Web Worker's script reports a panic's message from `mlnPanic`.
     crate::set_panic_hook();
     let scheduler = crate::install_cooperative_scheduler();
@@ -49,7 +52,7 @@ pub fn serve(port: &web_sys::MessagePort) {
     let sink = Arc::clone(&replies);
     // A raster tile's reply comes once the browser decoded its image,
     // outside a slice.
-    let host = TileWorkerHost::new(move |reply| {
+    let host = TileWorkerHost::new(registry, move |reply| {
         sink.lock().push(reply);
         pump::wake();
     });

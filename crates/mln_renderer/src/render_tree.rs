@@ -81,7 +81,7 @@ impl RenderTreeParameters {
     }
 }
 
-pub struct RenderTree {
+pub(crate) struct RenderTree {
     parameters: Box<RenderTreeParameters>,
     pub(crate) layer_render_items: VecMap<u32, LayerRenderItem>,
     source_render_items: Vec<Box<dyn RenderItem>>,

@@ -103,7 +103,8 @@ pub(crate) type Pending = Option<Box<dyn PendingReads>>;
 /// `reads`, unless they ended already.
 #[cfg(any(
     all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
-    all(feature = "metal", target_vendor = "apple")
+    all(feature = "metal", target_vendor = "apple"),
+    all(feature = "d3d12", windows)
 ))]
 fn pending(mut reads: impl PendingReads + 'static) -> Pending {
     (!reads.poll()).then(|| -> Box<dyn PendingReads> { Box::new(reads) })
@@ -135,6 +136,35 @@ impl Borrowed for mln_vulkan::BorrowedTarget {
 impl PendingReads for mln_vulkan::PendingReads {
     fn poll(&mut self) -> bool {
         mln_vulkan::PendingReads::poll(self)
+    }
+}
+
+#[cfg(all(feature = "d3d12", windows))]
+impl Borrowed for mln_d3d12::BorrowedTarget {
+    fn select(&self, slot: usize) {
+        mln_d3d12::BorrowedTarget::select(self, slot);
+    }
+    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        mln_d3d12::BorrowedTarget::release(self, slot, consumer)
+    }
+    fn discard(&self, slot: usize) {
+        mln_d3d12::BorrowedTarget::discard(self, slot);
+    }
+    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
+        let RingKind::D3d12(textures) = ring.kind else {
+            return Err(Error::unsupported("a ring of D3D12 textures takes D3D12 textures only"));
+        };
+        mln_d3d12::BorrowedTarget::replace(self, textures).map(pending)
+    }
+    fn take_pending(&self) -> Pending {
+        pending(mln_d3d12::BorrowedTarget::take_pending(self))
+    }
+}
+
+#[cfg(all(feature = "d3d12", windows))]
+impl PendingReads for mln_d3d12::PendingReads {
+    fn poll(&mut self) -> bool {
+        mln_d3d12::PendingReads::poll(self)
     }
 }
 
@@ -180,6 +210,8 @@ exported!(mln_vulkan::ExportedTarget);
 exported!(mln_mtl::ExportedTarget);
 #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
 exported!(mln_gl::ExportedTarget);
+#[cfg(all(feature = "d3d12", windows))]
+exported!(mln_d3d12::ExportedTarget);
 
 macro_rules! offscreen {
     ($type:ty) => {
@@ -218,6 +250,8 @@ offscreen!(mln_vulkan::OffscreenTarget);
 offscreen!(mln_d3d12::OffscreenTarget);
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
 presenting!(mln_vulkan::SurfaceTarget);
+#[cfg(all(feature = "d3d12", windows))]
+presenting!(mln_d3d12::SurfaceTarget);
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
 offscreen!(mln_gl::OffscreenTarget);
 #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
@@ -347,6 +381,10 @@ impl Backend {
             (Backend::Gl(backend), RingKind::Gl(textures)) => {
                 Ok(Box::new(mln_gl::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            (Backend::D3d12(backend), RingKind::D3d12(textures)) => {
+                Ok(Box::new(mln_d3d12::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
+            }
             _ => {
                 let _ = producer;
                 Err(Error::unsupported("the session's backend renders into no ring of this kind"))
@@ -382,6 +420,10 @@ impl Backend {
                     return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
                 };
                 Ok(Box::new(mln_gl::ExportedTarget::new(Rc::clone(backend), device, ring, kind, size, producer)?))
+            }
+            #[cfg(all(feature = "d3d12", windows))]
+            Backend::D3d12(backend) => {
+                Ok(Box::new(mln_d3d12::ExportedTarget::new(Rc::clone(backend), ring, kind, size, producer)?))
             }
             _ => {
                 let _ = (device, ring, kind, size, producer);
@@ -465,6 +507,26 @@ impl Backend {
                 target.set_overlay(vulkan_overlay(overlay)?);
                 Ok(Box::new(target))
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            (Backend::D3d12(backend), SurfaceKind::Window(window)) => {
+                let overlay = d3d12_overlay(overlay)?;
+                let target = mln_d3d12::SurfaceTarget::new(Rc::clone(backend), window, size)?;
+                target.set_overlay(overlay);
+                Ok(Box::new(target))
+            }
+            #[cfg(all(feature = "d3d12", windows))]
+            (Backend::D3d12(backend), SurfaceKind::D3d12Composition { composition, thread }) => {
+                if composition.is_swap_chain_panel() && thread != std::thread::current().id() {
+                    return Err(Error::unsupported(
+                        "a SwapChainPanel takes its swap chain on its UI thread, which made the surface: attach it \
+                         with Driver::CallerThread, serviced there",
+                    ));
+                }
+                let overlay = d3d12_overlay(overlay)?;
+                let target = mln_d3d12::SurfaceTarget::for_composition(Rc::clone(backend), composition, size)?;
+                target.set_overlay(overlay);
+                Ok(Box::new(target))
+            }
             _ => {
                 let _ = (size, overlay);
                 Err(Error::unsupported("the session's backend presents to no surface of this kind"))
@@ -480,6 +542,7 @@ impl Backend {
         feature = "webgpu",
         all(feature = "metal", target_vendor = "apple"),
         all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
+        all(feature = "d3d12", windows),
         all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))),
     )),
     expect(dead_code, reason = "a build without a backend that takes overlays uses none")
@@ -498,6 +561,14 @@ fn overlay_of<T>(
 fn vulkan_overlay(overlay: Option<SurfaceOverlay>) -> Result<Option<Box<dyn mln_vulkan::Overlay>>, Error> {
     overlay_of(overlay, |overlay| match overlay {
         SurfaceOverlay::Vulkan(overlay) => Ok(overlay),
+        other => Err(other),
+    })
+}
+
+#[cfg(all(feature = "d3d12", windows))]
+fn d3d12_overlay(overlay: Option<SurfaceOverlay>) -> Result<Option<Box<dyn mln_d3d12::Overlay>>, Error> {
+    overlay_of(overlay, |overlay| match overlay {
+        SurfaceOverlay::D3d12(overlay) => Ok(overlay),
         other => Err(other),
     })
 }
@@ -532,6 +603,10 @@ fn webgpu_surface(backend: &mln_webgpu::RendererBackend, kind: SurfaceKind) -> R
         SurfaceKind::Vulkan(_) => return Err(Error::unsupported("a Vulkan surface presents on a Vulkan device")),
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         SurfaceKind::Gl(_) => return Err(Error::unsupported("an EGL surface presents on an OpenGL device")),
+        #[cfg(all(feature = "d3d12", windows))]
+        SurfaceKind::D3d12Composition { .. } => {
+            return Err(Error::unsupported("a composition swap chain presents on a D3D12 device"));
+        }
     };
     made.map_err(|error| Error::native(format!("can't make a surface on the window: {error}")))
 }
@@ -938,6 +1013,10 @@ fn default_surface_device(surface: &Surface) -> Result<Device, Error> {
         SurfaceKind::Vulkan(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         SurfaceKind::Gl(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
+        #[cfg(all(feature = "d3d12", windows))]
+        SurfaceKind::D3d12Composition { .. } => {
+            Device::with_backend(super::target::BackendType::D3D12, DeviceOptions::default())
+        }
         // A WebGPU build asked the browser for a device before the build.
         #[cfg(all(target_family = "wasm", feature = "gl"))]
         SurfaceKind::WebCanvas { .. } => Ok(Device::WebGl(super::target::WebGlContext::default())),

@@ -1,5 +1,5 @@
 //! The gesture recognizers for one map, ported from Orbis's orb-camera
-//! `input/mod.rs` onto maplibre-native-ffi's camera calls
+//! `input/mod.rs` onto the map's camera calls
 //! ([`GestureCamera`]).
 
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
@@ -417,7 +417,7 @@ enum Finish {
 /// - The arrow keys pan, Shift-arrows rotate and tilt, and `+`/`=` and `-`
 ///   zoom.
 ///
-/// Every change goes through maplibre-native-ffi's camera calls with its
+/// Every change goes through the map's camera calls with its
 /// gesture phase, so the camera reports it as a gesture: a press begins a
 /// gesture, each move updates it, and the release ends it with momentum (the
 /// average velocity of its last 100 ms, slowed by the options' decays), during

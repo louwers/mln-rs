@@ -17,7 +17,7 @@ pub enum CameraChangeMode {
     Animated,
 }
 
-/// What moved the camera, as maplibre-native-ffi's
+/// What moved the camera, as the C API's
 /// `mln_camera_change_source` reports it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -57,7 +57,7 @@ pub struct RenderFrameStatus {
     pub rendering_stats: Arc<RenderingStats>,
 }
 
-/// An event of a map. The variants match maplibre-native-ffi's
+/// An event of a map. The variants match the C API's
 /// `mln_runtime_event_type` values for maps.
 ///
 /// The render events come in continuous mode only. A static map reports

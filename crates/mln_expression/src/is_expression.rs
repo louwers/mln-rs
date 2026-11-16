@@ -1,10 +1,12 @@
 use mln_conversion::Convertible;
 
-use crate::compound_expression::CompoundExpression;
-use crate::parsing_context::is_expression_name;
+use crate::functions::Functions;
+use crate::parsing_context::is_special_form;
 
+/// Whether `value` is an expression: an array whose first member names an
+/// expression form or one of `functions`.
 #[must_use]
-pub fn is_expression(value: &Convertible<'_>) -> bool {
+pub fn is_expression(value: &Convertible<'_>, functions: &Functions) -> bool {
     if !value.is_array() || value.array_length() == 0 {
         return false;
     }
@@ -12,5 +14,5 @@ pub fn is_expression(value: &Convertible<'_>) -> bool {
         return false;
     };
 
-    is_expression_name(&name) || CompoundExpression::exists(&name)
+    is_special_form(&name) || functions.contains(&name)
 }

@@ -176,7 +176,6 @@ fn point_within_polygon(point: &Point<f64>, polygon: &Polygon<f64>, true_on_boun
 
 const MIN_POINTS_SIZE: usize = 100;
 const MIN_LINE_POINTS_SIZE: usize = 50;
-const INVALID_DISTANCE: f64 = f64::NAN;
 const INFINITE_DISTANCE: f64 = f64::INFINITY;
 
 /// Inclusive index range for a multipoint or linestring container.
@@ -268,9 +267,9 @@ fn is_polygon_valid(polygon: &Polygon<f64>) -> bool {
 /// The distance between two bounding boxes: the ruler's distance from
 /// `{0, 0}` to `{dx, dy}`, the gaps between them on each axis. Zero when
 /// they overlap.
-fn bbox_to_bbox_distance(bbox1: &DistanceBBox, bbox2: &DistanceBBox, ruler: &Ruler) -> f64 {
+fn bbox_to_bbox_distance(bbox1: &DistanceBBox, bbox2: &DistanceBBox, ruler: &Ruler) -> Option<f64> {
     if *bbox1 == DEFAULT_DISTANCE_BBOX || *bbox2 == DEFAULT_DISTANCE_BBOX {
-        return INVALID_DISTANCE;
+        return None;
     }
     let mut dx = 0.0;
     let mut dy = 0.0;
@@ -290,7 +289,7 @@ fn bbox_to_bbox_distance(bbox1: &DistanceBBox, bbox2: &DistanceBBox, ruler: &Rul
     if bbox1[3] < bbox2[1] {
         dy = bbox2[1] - bbox1[3];
     }
-    ruler.distance(Point::new(0.0, 0.0), Point::new(dx, dy))
+    Some(ruler.distance(Point::new(0.0, 0.0), Point::new(dx, dy)))
 }
 
 /// The distance from `point` to the nearest point of `line`, which has at
@@ -326,22 +325,22 @@ fn line_to_line_range_distance(
     line2: &LineString<f64>,
     range2: &IndexRange,
     ruler: &Ruler,
-) -> f64 {
+) -> Option<f64> {
     let range_safe = is_range_safe(range1, line1.len()) && is_range_safe(range2, line2.len());
     if !range_safe {
-        return INVALID_DISTANCE;
+        return None;
     }
 
     let mut dist = INFINITE_DISTANCE;
     for p in line1[range1.0..=range1.1].windows(2) {
         for q in line2[range2.0..=range2.1].windows(2) {
             if segment_intersect_segment(&p[0], &p[1], &q[0], &q[1]) {
-                return 0.0;
+                return Some(0.0);
             }
             dist = dist.min(segment_to_segment_distance(&p[0], &p[1], &q[0], &q[1], ruler));
         }
     }
-    dist
+    Some(dist)
 }
 
 fn points_to_points_range_distance(
@@ -350,10 +349,10 @@ fn points_to_points_range_distance(
     points2: &MultiPoint<f64>,
     range2: &IndexRange,
     ruler: &Ruler,
-) -> f64 {
+) -> Option<f64> {
     let range_safe = is_range_safe(range1, points1.len()) && is_range_safe(range2, points2.len());
     if !range_safe {
-        return INVALID_DISTANCE;
+        return None;
     }
 
     let mut dist = INFINITE_DISTANCE;
@@ -361,11 +360,11 @@ fn points_to_points_range_distance(
         for q in &points2[range2.0..=range2.1] {
             dist = dist.min(ruler.distance(*p, *q));
             if dist == 0.0 {
-                return dist;
+                return Some(dist);
             }
         }
     }
-    dist
+    Some(dist)
 }
 
 fn point_to_polygon_distance(point: &Point<f64>, polygon: &Polygon<f64>, ruler: &Ruler) -> f64 {
@@ -400,14 +399,14 @@ fn line_to_polygon_range_distance(
     range: &IndexRange,
     polygon: &Polygon<f64>,
     ruler: &Ruler,
-) -> f64 {
+) -> Option<f64> {
     if !is_range_safe(range, line.len()) {
-        return INVALID_DISTANCE;
+        return None;
     }
     let line = &line[range.0..=range.1];
 
     if line.iter().any(|p| point_within_polygon(p, polygon, true)) {
-        return 0.0;
+        return Some(0.0);
     }
 
     let mut dist = INFINITE_DISTANCE;
@@ -415,13 +414,13 @@ fn line_to_polygon_range_distance(
         for ring in polygon {
             for (q1, q2) in ring_edges(ring) {
                 if segment_intersect_segment(&p[0], &p[1], q1, q2) {
-                    return 0.0;
+                    return Some(0.0);
                 }
                 dist = dist.min(segment_to_segment_distance(&p[0], &p[1], q1, q2, ruler));
             }
         }
     }
-    dist
+    Some(dist)
 }
 
 fn polygon_to_polygon_distance(
@@ -429,21 +428,21 @@ fn polygon_to_polygon_distance(
     polygon2: &Polygon<f64>,
     ruler: &Ruler,
     current_mini_dist: f64,
-) -> f64 {
+) -> Option<f64> {
     let bbox1 = get_polygon_bbox(polygon1);
     let bbox2 = get_polygon_bbox(polygon2);
-    if current_mini_dist != INFINITE_DISTANCE && bbox_to_bbox_distance(&bbox1, &bbox2, ruler) >= current_mini_dist {
-        return current_mini_dist;
+    if current_mini_dist != INFINITE_DISTANCE && bbox_to_bbox_distance(&bbox1, &bbox2, ruler)? >= current_mini_dist {
+        return Some(current_mini_dist);
     }
     let polygon_intersect = |poly1: &Polygon<f64>, poly2: &Polygon<f64>| {
         poly1.iter().flatten().any(|p| point_within_polygon(p, poly2, true))
     };
     if box_within_box(&bbox1, &bbox2) {
         if polygon_intersect(polygon1, polygon2) {
-            return 0.0;
+            return Some(0.0);
         }
     } else if polygon_intersect(polygon2, polygon1) {
-        return 0.0;
+        return Some(0.0);
     }
 
     let mut dist = INFINITE_DISTANCE;
@@ -452,14 +451,14 @@ fn polygon_to_polygon_distance(
             for ring2 in polygon2 {
                 for (q1, q2) in ring_edges(ring2) {
                     if segment_intersect_segment(p1, p2, q1, q2) {
-                        return 0.0;
+                        return Some(0.0);
                     }
                     dist = dist.min(segment_to_segment_distance(p1, p2, q1, q2, ruler));
                 }
             }
         }
     }
-    dist
+    Some(dist)
 }
 
 /// A distance and the two index ranges it was measured between, ordered by the
@@ -501,10 +500,10 @@ fn points_to_polygon_distance(
     polygon: &Polygon<f64>,
     ruler: &Ruler,
     current_mini_dist: f64,
-) -> f64 {
+) -> Option<f64> {
     let mut mini_dist = ruler.distance(points[0], polygon[0][0]).min(current_mini_dist);
     if mini_dist == 0.0 {
-        return mini_dist;
+        return Some(mini_dist);
     }
 
     let mut dist_queue = dist_queue();
@@ -521,19 +520,19 @@ fn points_to_polygon_distance(
         if get_range_size(&range) <= MIN_LINE_POINTS_SIZE {
             if !is_range_safe(&range, points.len()) {
                 Log::error(Event::Style, "Index is out of range");
-                return INVALID_DISTANCE;
+                return None;
             }
             for p in &points[range.0..=range.1] {
                 let temp_dist = point_to_polygon_distance(p, polygon, ruler);
                 mini_dist = mini_dist.min(temp_dist);
                 if mini_dist == 0.0 {
-                    return 0.0;
+                    return Some(0.0);
                 }
             }
         } else {
             let new_ranges_a = split_range(&range, false);
             for range_a in [new_ranges_a.0, new_ranges_a.1].into_iter().flatten() {
-                let temp_dist = bbox_to_bbox_distance(&get_range_bbox(points, &range_a), &poly_bbox, ruler);
+                let temp_dist = bbox_to_bbox_distance(&get_range_bbox(points, &range_a), &poly_bbox, ruler)?;
                 // Insert new pair to the queue if the bbox distance is less
                 // than miniDist, The pair with biggest distance will be at
                 // the top
@@ -543,7 +542,7 @@ fn points_to_polygon_distance(
             }
         }
     }
-    mini_dist
+    Some(mini_dist)
 }
 
 /// Precondition: `line` and `polygon` are valid.
@@ -552,10 +551,10 @@ fn line_to_polygon_distance(
     polygon: &Polygon<f64>,
     ruler: &Ruler,
     current_mini_dist: f64,
-) -> f64 {
+) -> Option<f64> {
     let mut mini_dist = ruler.distance(line[0], polygon[0][0]).min(current_mini_dist);
     if mini_dist == 0.0 {
-        return mini_dist;
+        return Some(mini_dist);
     }
 
     let mut dist_queue = dist_queue();
@@ -570,22 +569,22 @@ fn line_to_polygon_distance(
         // In case the set size are relatively small, we could use
         // brute-force directly
         if get_range_size(&range) <= MIN_LINE_POINTS_SIZE {
-            let temp_dist = line_to_polygon_range_distance(line, &range, polygon, ruler);
-            if temp_dist.is_nan() || temp_dist == 0.0 {
-                return temp_dist;
+            let temp_dist = line_to_polygon_range_distance(line, &range, polygon, ruler)?;
+            if temp_dist == 0.0 {
+                return Some(temp_dist);
             }
             mini_dist = mini_dist.min(temp_dist);
         } else {
             let new_ranges_a = split_range(&range, true);
             for range_a in [new_ranges_a.0, new_ranges_a.1].into_iter().flatten() {
-                let temp_dist = bbox_to_bbox_distance(&get_range_bbox(line, &range_a), &poly_bbox, ruler);
+                let temp_dist = bbox_to_bbox_distance(&get_range_bbox(line, &range_a), &poly_bbox, ruler)?;
                 if temp_dist < mini_dist {
                     dist_queue.push(DistPair(temp_dist, range_a, (0, 0)));
                 }
             }
         }
     }
-    mini_dist
+    Some(mini_dist)
 }
 
 /// The four pairs of the halves of two split ranges, in the C++ order.
@@ -602,10 +601,10 @@ fn line_to_line_distance(
     line2: &LineString<f64>,
     ruler: &Ruler,
     current_mini_dist: f64,
-) -> f64 {
+) -> Option<f64> {
     let mut mini_dist = ruler.distance(line1[0], line2[0]).min(current_mini_dist);
     if mini_dist == 0.0 {
-        return mini_dist;
+        return Some(mini_dist);
     }
 
     let mut dist_queue = dist_queue();
@@ -619,30 +618,30 @@ fn line_to_line_distance(
         // In case the set size are relatively small, we could use
         // brute-force directly
         if get_range_size(&range_a) <= MIN_LINE_POINTS_SIZE && get_range_size(&range_b) <= MIN_LINE_POINTS_SIZE {
-            let temp_dist = line_to_line_range_distance(line1, &range_a, line2, &range_b, ruler);
-            if temp_dist.is_nan() || temp_dist == 0.0 {
-                return temp_dist;
+            let temp_dist = line_to_line_range_distance(line1, &range_a, line2, &range_b, ruler)?;
+            if temp_dist == 0.0 {
+                return Some(temp_dist);
             }
             mini_dist = mini_dist.min(temp_dist);
         } else {
             let pairs = split_pairs(split_range(&range_a, true), split_range(&range_b, true));
             for (range1, range2) in pairs {
                 let temp_dist =
-                    bbox_to_bbox_distance(&get_range_bbox(line1, &range1), &get_range_bbox(line2, &range2), ruler);
+                    bbox_to_bbox_distance(&get_range_bbox(line1, &range1), &get_range_bbox(line2, &range2), ruler)?;
                 if temp_dist < mini_dist {
                     dist_queue.push(DistPair(temp_dist, range1, range2));
                 }
             }
         }
     }
-    mini_dist
+    Some(mini_dist)
 }
 
 /// Precondition: both point sets are valid.
-fn points_to_points_distance(point_set1: &MultiPoint<f64>, point_set2: &MultiPoint<f64>, ruler: &Ruler) -> f64 {
+fn points_to_points_distance(point_set1: &MultiPoint<f64>, point_set2: &MultiPoint<f64>, ruler: &Ruler) -> Option<f64> {
     let mut mini_dist = ruler.distance(point_set1[0], point_set2[0]);
     if mini_dist == 0.0 {
-        return mini_dist;
+        return Some(mini_dist);
     }
 
     let mut dist_queue = dist_queue();
@@ -656,9 +655,9 @@ fn points_to_points_distance(point_set1: &MultiPoint<f64>, point_set2: &MultiPoi
         // In case the set size are relatively small, we could use
         // brute-force directly
         if get_range_size(&range_a) <= MIN_POINTS_SIZE && get_range_size(&range_b) <= MIN_POINTS_SIZE {
-            let temp_dist = points_to_points_range_distance(point_set1, &range_a, point_set2, &range_b, ruler);
-            if temp_dist.is_nan() || temp_dist == 0.0 {
-                return temp_dist;
+            let temp_dist = points_to_points_range_distance(point_set1, &range_a, point_set2, &range_b, ruler)?;
+            if temp_dist == 0.0 {
+                return Some(temp_dist);
             }
             mini_dist = mini_dist.min(temp_dist);
         } else {
@@ -668,14 +667,14 @@ fn points_to_points_distance(point_set1: &MultiPoint<f64>, point_set2: &MultiPoi
                     &get_range_bbox(point_set1, &range1),
                     &get_range_bbox(point_set2, &range2),
                     ruler,
-                );
+                )?;
                 if temp_dist < mini_dist {
                     dist_queue.push(DistPair(temp_dist, range1, range2));
                 }
             }
         }
     }
-    mini_dist
+    Some(mini_dist)
 }
 
 /// Precondition: `points` and `line` are valid.
@@ -684,10 +683,10 @@ fn points_to_line_distance(
     line: &LineString<f64>,
     ruler: &Ruler,
     current_mini_dist: f64,
-) -> f64 {
+) -> Option<f64> {
     let mut mini_dist = current_mini_dist.min(ruler.distance(points[0], line[0]));
     if mini_dist == 0.0 {
-        return mini_dist;
+        return Some(mini_dist);
     }
 
     let mut dist_queue = dist_queue();
@@ -703,82 +702,80 @@ fn points_to_line_distance(
         if get_range_size(&range_a) <= MIN_POINTS_SIZE && get_range_size(&range_b) <= MIN_LINE_POINTS_SIZE {
             if !is_range_safe(&range_a, points.len()) || !is_range_safe(&range_b, line.len()) {
                 Log::error(Event::Style, "Index is out of range");
-                return INVALID_DISTANCE;
+                return None;
             }
             let sub_line: LineString<f64> = line[range_b.0..=range_b.1].to_vec();
             for p in &points[range_a.0..=range_a.1] {
                 mini_dist = mini_dist.min(point_to_line_distance(p, &sub_line, ruler));
                 if mini_dist == 0.0 {
-                    return 0.0;
+                    return Some(0.0);
                 }
             }
         } else {
             let pairs = split_pairs(split_range(&range_a, false), split_range(&range_b, true));
             for (range1, range2) in pairs {
                 let temp_dist =
-                    bbox_to_bbox_distance(&get_range_bbox(points, &range1), &get_range_bbox(line, &range2), ruler);
+                    bbox_to_bbox_distance(&get_range_bbox(points, &range1), &get_range_bbox(line, &range2), ruler)?;
                 if temp_dist < mini_dist {
                     dist_queue.push(DistPair(temp_dist, range1, range2));
                 }
             }
         }
     }
-    mini_dist
+    Some(mini_dist)
 }
 
-fn points_to_lines_distance(points: &MultiPoint<f64>, lines: &MultiLineString<f64>, ruler: &Ruler) -> f64 {
+fn points_to_lines_distance(points: &MultiPoint<f64>, lines: &MultiLineString<f64>, ruler: &Ruler) -> Option<f64> {
     let mut dist = INFINITE_DISTANCE;
     for line in lines {
-        dist = dist.min(points_to_line_distance(points, line, ruler, dist));
+        dist = dist.min(points_to_line_distance(points, line, ruler, dist)?);
         if dist == 0.0 {
-            return dist;
+            return Some(dist);
         }
     }
-    dist
+    Some(dist)
 }
 
-fn line_to_lines_distance(line: &LineString<f64>, lines: &MultiLineString<f64>, ruler: &Ruler) -> f64 {
+fn line_to_lines_distance(line: &LineString<f64>, lines: &MultiLineString<f64>, ruler: &Ruler) -> Option<f64> {
     let mut dist = INFINITE_DISTANCE;
     for l in lines {
-        dist = dist.min(line_to_line_distance(line, l, ruler, dist));
+        dist = dist.min(line_to_line_distance(line, l, ruler, dist)?);
         if dist == 0.0 {
-            return dist;
+            return Some(dist);
         }
     }
-    dist
+    Some(dist)
 }
 
-fn points_to_geometry_distance(points: &MultiPoint<f64>, geo_set: &Geometry<f64>) -> f64 {
+fn points_to_geometry_distance(points: &MultiPoint<f64>, geo_set: &Geometry<f64>) -> Option<f64> {
     if !is_multi_point_valid(points) {
-        return INVALID_DISTANCE;
+        return None;
     }
-    let Some(first) = points.first() else {
-        return INVALID_DISTANCE;
-    };
+    let first = points.first()?;
     let ruler = Ruler::new(first.y);
     match geo_set {
         Geometry::Point(p) => points_to_points_distance(&vec![*p], points, &ruler),
         Geometry::MultiPoint(points1) => {
             if !is_multi_point_valid(points1) {
-                return INVALID_DISTANCE;
+                return None;
             }
             points_to_points_distance(points, points1, &ruler)
         }
         Geometry::LineString(line) => {
             if !is_line_string_valid(line) {
-                return INVALID_DISTANCE;
+                return None;
             }
             points_to_line_distance(points, line, &ruler, INFINITE_DISTANCE)
         }
         Geometry::MultiLineString(lines) => {
             if !lines.iter().all(is_line_string_valid) {
-                return INVALID_DISTANCE;
+                return None;
             }
             points_to_lines_distance(points, lines, &ruler)
         }
         Geometry::Polygon(polygon) => {
             if !is_polygon_valid(polygon) {
-                return INVALID_DISTANCE;
+                return None;
             }
             points_to_polygon_distance(points, polygon, &ruler, INFINITE_DISTANCE)
         }
@@ -786,54 +783,49 @@ fn points_to_geometry_distance(points: &MultiPoint<f64>, geo_set: &Geometry<f64>
             let mut dist = INFINITE_DISTANCE;
             for polygon in polygons {
                 if !is_polygon_valid(polygon) {
-                    return INVALID_DISTANCE;
+                    return None;
                 }
-                let temp_dist = points_to_polygon_distance(points, polygon, &ruler, dist);
-                if temp_dist.is_nan() {
-                    return temp_dist;
-                }
+                let temp_dist = points_to_polygon_distance(points, polygon, &ruler, dist)?;
                 dist = dist.min(temp_dist);
                 if dist == 0.0 {
-                    return dist;
+                    return Some(dist);
                 }
             }
-            dist
+            Some(dist)
         }
-        Geometry::Collection => INVALID_DISTANCE,
+        Geometry::Collection => None,
     }
 }
 
-fn line_to_geometry_distance(line: &LineString<f64>, geo_set: &Geometry<f64>) -> f64 {
+fn line_to_geometry_distance(line: &LineString<f64>, geo_set: &Geometry<f64>) -> Option<f64> {
     if !is_line_string_valid(line) {
-        return INVALID_DISTANCE;
+        return None;
     }
-    let Some(first) = line.first() else {
-        return INVALID_DISTANCE;
-    };
+    let first = line.first()?;
     let ruler = Ruler::new(first.y);
     match geo_set {
         Geometry::Point(p) => points_to_line_distance(&vec![*p], line, &ruler, INFINITE_DISTANCE),
         Geometry::MultiPoint(points) => {
             if !is_multi_point_valid(points) {
-                return INVALID_DISTANCE;
+                return None;
             }
             points_to_line_distance(points, line, &ruler, INFINITE_DISTANCE)
         }
         Geometry::LineString(line1) => {
             if !is_line_string_valid(line1) {
-                return INVALID_DISTANCE;
+                return None;
             }
             line_to_line_distance(line, line1, &ruler, INFINITE_DISTANCE)
         }
         Geometry::MultiLineString(lines) => {
             if !lines.iter().all(is_line_string_valid) {
-                return INVALID_DISTANCE;
+                return None;
             }
             line_to_lines_distance(line, lines, &ruler)
         }
         Geometry::Polygon(polygon) => {
             if !is_polygon_valid(polygon) {
-                return INVALID_DISTANCE;
+                return None;
             }
             line_to_polygon_distance(line, polygon, &ruler, INFINITE_DISTANCE)
         }
@@ -841,94 +833,89 @@ fn line_to_geometry_distance(line: &LineString<f64>, geo_set: &Geometry<f64>) ->
             let mut dist = INFINITE_DISTANCE;
             for polygon in polygons {
                 if !is_polygon_valid(polygon) {
-                    return INVALID_DISTANCE;
+                    return None;
                 }
-                let temp_dist = line_to_polygon_distance(line, polygon, &ruler, dist);
-                if temp_dist.is_nan() {
-                    return temp_dist;
-                }
+                let temp_dist = line_to_polygon_distance(line, polygon, &ruler, dist)?;
                 dist = dist.min(temp_dist);
                 if dist == 0.0 {
-                    return dist;
+                    return Some(dist);
                 }
             }
-            dist
+            Some(dist)
         }
-        Geometry::Collection => INVALID_DISTANCE,
+        Geometry::Collection => None,
     }
 }
 
-fn polygon_to_geometry_distance(polygon: &Polygon<f64>, geo_set: &Geometry<f64>) -> f64 {
+fn polygon_to_geometry_distance(polygon: &Polygon<f64>, geo_set: &Geometry<f64>) -> Option<f64> {
     if !is_polygon_valid(polygon) {
-        return INVALID_DISTANCE;
+        return None;
     }
-    let Some(first) = polygon.first().and_then(|ring| ring.first()) else {
-        return INVALID_DISTANCE;
-    };
+    let first = polygon.first()?.first()?;
     let ruler = Ruler::new(first.y);
     match geo_set {
-        Geometry::Point(p) => point_to_polygon_distance(p, polygon, &ruler),
+        Geometry::Point(p) => Some(point_to_polygon_distance(p, polygon, &ruler)),
         Geometry::MultiPoint(points) => {
             if is_multi_point_valid(points) {
                 points_to_polygon_distance(points, polygon, &ruler, INFINITE_DISTANCE)
             } else {
-                INVALID_DISTANCE
+                None
             }
         }
         Geometry::LineString(line) => {
             if is_line_string_valid(line) {
                 line_to_polygon_distance(line, polygon, &ruler, INFINITE_DISTANCE)
             } else {
-                INVALID_DISTANCE
+                None
             }
         }
         Geometry::MultiLineString(lines) => {
             let mut dist = INFINITE_DISTANCE;
             for line in lines {
                 if !is_line_string_valid(line) {
-                    return INVALID_DISTANCE;
+                    return None;
                 }
-                let temp_dist = line_to_polygon_distance(line, polygon, &ruler, dist);
-                if temp_dist.is_nan() || temp_dist == 0.0 {
-                    return temp_dist;
+                let temp_dist = line_to_polygon_distance(line, polygon, &ruler, dist)?;
+                if temp_dist == 0.0 {
+                    return Some(temp_dist);
                 }
                 dist = dist.min(temp_dist);
             }
-            dist
+            Some(dist)
         }
         Geometry::Polygon(polygon1) => {
             if is_polygon_valid(polygon1) {
                 polygon_to_polygon_distance(polygon, polygon1, &ruler, INFINITE_DISTANCE)
             } else {
-                INVALID_DISTANCE
+                None
             }
         }
         Geometry::MultiPolygon(polygons) => {
             let mut dist = INFINITE_DISTANCE;
             for polygon1 in polygons {
                 if !is_polygon_valid(polygon1) {
-                    return INVALID_DISTANCE;
+                    return None;
                 }
-                let temp_dist = polygon_to_polygon_distance(polygon, polygon1, &ruler, dist);
-                if temp_dist.is_nan() || temp_dist == 0.0 {
-                    return temp_dist;
+                let temp_dist = polygon_to_polygon_distance(polygon, polygon1, &ruler, dist)?;
+                if temp_dist == 0.0 {
+                    return Some(temp_dist);
                 }
                 dist = dist.min(temp_dist);
             }
-            dist
+            Some(dist)
         }
-        Geometry::Collection => INVALID_DISTANCE,
+        Geometry::Collection => None,
     }
 }
 
-/// The distance from the feature to `geo_set`; NaN when either geometry is
+/// The distance from the feature to `geo_set`; None when either geometry is
 /// invalid. Fails for a feature geometry that can't be decoded, and with the
 /// error of `convert_geometry` for a point feature without rings.
 fn calculate_distance(
     feature: &dyn GeometryTileFeature,
     canonical: &CanonicalTileID,
     geo_set: &Geometry<f64>,
-) -> Result<f64, EvaluationError> {
+) -> Result<Option<f64>, EvaluationError> {
     let geometries = feature.get_geometries().map_err(|e| EvaluationError::new(e.to_string()))?;
     let geometry = convert_geometry(feature.get_type(), &geometries, canonical)
         .map_err(|e| EvaluationError::new(e.to_string()))?;
@@ -939,27 +926,31 @@ fn calculate_distance(
         Geometry::MultiLineString(lines) => {
             let mut dist = INFINITE_DISTANCE;
             for line in lines {
-                let temp_dist = line_to_geometry_distance(line, geo_set);
-                if temp_dist.is_nan() || temp_dist == 0.0 {
-                    return Ok(temp_dist);
+                let Some(temp_dist) = line_to_geometry_distance(line, geo_set) else {
+                    return Ok(None);
+                };
+                if temp_dist == 0.0 {
+                    return Ok(Some(temp_dist));
                 }
                 dist = dist.min(temp_dist);
             }
-            dist
+            Some(dist)
         }
         Geometry::Polygon(polygon) => polygon_to_geometry_distance(polygon, geo_set),
         Geometry::MultiPolygon(polygons) => {
             let mut dist = INFINITE_DISTANCE;
             for polygon in polygons {
-                let temp_dist = polygon_to_geometry_distance(polygon, geo_set);
-                if temp_dist.is_nan() || temp_dist == 0.0 {
-                    return Ok(temp_dist);
+                let Some(temp_dist) = polygon_to_geometry_distance(polygon, geo_set) else {
+                    return Ok(None);
+                };
+                if temp_dist == 0.0 {
+                    return Ok(Some(temp_dist));
                 }
                 dist = dist.min(temp_dist);
             }
-            dist
+            Some(dist)
         }
-        Geometry::Collection => INVALID_DISTANCE,
+        Geometry::Collection => None,
     })
 }
 
@@ -1040,7 +1031,7 @@ impl TryFrom<MbglValue> for Distance {
     type Error = String;
 
     fn try_from(value: MbglValue) -> Result<Self, String> {
-        let mut ctx = ParsingContext::default();
+        let mut ctx = ParsingContext::without_functions();
         parse_value(&Convertible::from(&value), &mut ctx)
             .and_then(|geojson_source| Distance::from_source(geojson_source, &mut ctx))
             .ok_or_else(|| ctx.get_combined_errors())
@@ -1078,12 +1069,11 @@ impl Distance {
             return Err(EvaluationError::new("distance expression requires valid feature and canonical information."));
         };
         let geometry_type = feature.get_type();
-        if matches!(geometry_type, FeatureType::Point | FeatureType::LineString | FeatureType::Polygon) {
-            let distance = calculate_distance(feature, canonical, &self.geometries)?;
-            if !distance.is_nan() {
-                debug_assert!(distance >= 0.0);
-                return Ok(distance);
-            }
+        if matches!(geometry_type, FeatureType::Point | FeatureType::LineString | FeatureType::Polygon)
+            && let Some(distance) = calculate_distance(feature, canonical, &self.geometries)?
+        {
+            debug_assert!(distance >= 0.0);
+            return Ok(distance);
         }
         Err(EvaluationError::new(
             "distance expression currently only evaluates valid Point/LineString/Polygon geometries.",
@@ -1109,6 +1099,7 @@ mod tests {
     use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
 
     use super::*;
+    use crate::Functions;
     use crate::dsl::create_expression_from_str;
     use crate::expression::EvaluationResult;
     use crate::value::Value;
@@ -1139,14 +1130,14 @@ mod tests {
     const CANONICAL: CanonicalTileID = CanonicalTileID { z: 15, x: 18653, y: 9484 };
 
     fn evaluate(expression: &str, feature: &Feature) -> EvaluationResult {
-        let expression =
-            create_expression_from_str(expression).unwrap_or_else(|| panic!("{expression} fails to parse"));
+        let expression = create_expression_from_str(expression, &Functions::with_builtins())
+            .unwrap_or_else(|| panic!("{expression} fails to parse"));
         expression.evaluate(&EvaluationContext::from_feature(Some(feature)).with_canonical_tile_id(Some(&CANONICAL)))
     }
 
     fn parse_errors(expression: &str) -> Vec<String> {
         let document: serde_json::Value = serde_json::from_str(expression).expect("test JSON");
-        let mut ctx = ParsingContext::new();
+        let mut ctx = ParsingContext::new(&Functions::with_builtins());
         let parsed = ctx.parse_expression(&Convertible::from(&document), None);
         assert!(parsed.is_none(), "{expression} parsed");
         ctx.get_errors().into_iter().map(|e| e.message).collect()
@@ -1207,7 +1198,7 @@ mod tests {
         let good_point = tile_feature(FeatureType::Point, vec![vec![(10, 10)]]);
         for expression in [short_line, short_ring, no_rings, empty_points] {
             let document: serde_json::Value = serde_json::from_str(expression).expect("test JSON");
-            let mut ctx = ParsingContext::new();
+            let mut ctx = ParsingContext::new(&Functions::with_builtins());
             match ctx.parse_expression(&Convertible::from(&document), None) {
                 Some(parsed) => {
                     let params =
@@ -1229,7 +1220,7 @@ mod tests {
             assert!(evaluate(point, feature).is_err(), "{:?}", feature.geometry);
         }
 
-        let expression = create_expression_from_str(point).expect("expression parses");
+        let expression = create_expression_from_str(point, &Functions::with_builtins()).expect("expression parses");
         assert!(expression.evaluate(&EvaluationContext::from_feature(Some(&good_point))).is_err());
         assert!(expression.evaluate(&EvaluationContext::default()).is_err());
     }
@@ -1237,7 +1228,7 @@ mod tests {
     #[test]
     fn serializes_its_geojson() {
         let expression = r#"["distance", {"type": "LineString", "coordinates": [[0, 0], [0, 5], [5, 5]]}]"#;
-        let parsed = create_expression_from_str(expression).expect("expression parses");
+        let parsed = create_expression_from_str(expression, &Functions::with_builtins()).expect("expression parses");
         let MbglValue::Array(serialized) = parsed.serialize() else {
             panic!("not an array");
         };
@@ -1262,6 +1253,63 @@ mod tests {
         assert!((expected - actual).abs() <= 1e-6 * expected.max(1.0), "expected {expected}, got {actual}");
     }
 
+    #[test]
+    fn invalid_distance_ranges_and_bounding_boxes_are_none() {
+        let ruler = Ruler::new(60.16);
+        let line = points(2, 7, 24.90);
+        let polygon = vec![points(3, 8, 24.94)];
+        let valid = (0, 1);
+        let bbox = get_range_bbox(&line, &valid);
+        assert_eq!(bbox_to_bbox_distance(&DEFAULT_DISTANCE_BBOX, &bbox, &ruler), None);
+        assert_eq!(bbox_to_bbox_distance(&bbox, &DEFAULT_DISTANCE_BBOX, &ruler), None);
+        assert_eq!(bbox_to_bbox_distance(&bbox, &bbox, &ruler), Some(0.0));
+        for invalid in [(1, 0), (0, 2)] {
+            assert_eq!(points_to_points_range_distance(&line, &invalid, &line, &valid, &ruler), None);
+            assert_eq!(points_to_points_range_distance(&line, &valid, &line, &invalid, &ruler), None);
+            assert_eq!(line_to_line_range_distance(&line, &invalid, &line, &valid, &ruler), None);
+            assert_eq!(line_to_line_range_distance(&line, &valid, &line, &invalid, &ruler), None);
+            assert_eq!(line_to_polygon_range_distance(&line, &invalid, &polygon, &ruler), None);
+        }
+    }
+
+    #[test]
+    fn invalid_geometries_are_none() {
+        let point = points(1, 7, 24.90);
+        let line = points(2, 8, 24.94);
+        let polygon = vec![points(3, 9, 24.95)];
+        for geometry in [
+            Geometry::MultiPoint(vec![]),
+            Geometry::LineString(point.clone()),
+            Geometry::MultiLineString(vec![point.clone()]),
+            Geometry::Polygon(vec![]),
+            Geometry::Polygon(vec![point.clone()]),
+            Geometry::MultiPolygon(vec![vec![point.clone()]]),
+            Geometry::Collection,
+        ] {
+            assert_eq!(points_to_geometry_distance(&point, &geometry), None);
+            assert_eq!(line_to_geometry_distance(&line, &geometry), None);
+            assert_eq!(polygon_to_geometry_distance(&polygon, &geometry), None);
+        }
+        let geometry = Geometry::Point(point[0]);
+        assert_eq!(points_to_geometry_distance(&vec![], &geometry), None);
+        assert_eq!(line_to_geometry_distance(&point, &geometry), None);
+        assert_eq!(polygon_to_geometry_distance(&vec![], &geometry), None);
+        assert_eq!(points_to_geometry_distance(&point, &geometry), Some(0.0));
+    }
+
+    #[test]
+    fn coincident_points_evaluate_to_zero() {
+        let canonical = CanonicalTileID { z: 0, x: 0, y: 0 };
+        let feature = tile_feature(FeatureType::Point, vec![vec![(4096, 4096)]]);
+        let expression = create_expression_from_str(
+            r#"["distance", {"type": "Point", "coordinates": [0, 0]}]"#,
+            &Functions::with_builtins(),
+        )
+        .expect("expression parses");
+        let params = EvaluationContext::from_feature(Some(&feature)).with_canonical_tile_id(Some(&canonical));
+        assert_eq!(expression.evaluate(&params).expect("distance"), Value::Number(0.0));
+    }
+
     /// The divide-and-conquer searches find the brute-force minimum.
     #[test]
     fn divide_and_conquer_matches_brute_force() {
@@ -1279,21 +1327,22 @@ mod tests {
 
             let brute =
                 set1.iter().flat_map(|p| set2.iter().map(|q| ruler.distance(*p, *q))).fold(f64::INFINITY, f64::min);
-            assert_close(brute, points_to_points_distance(&set1, &set2, &ruler));
+            assert_close(brute, points_to_points_distance(&set1, &set2, &ruler).unwrap());
 
             if size2 >= 2 {
                 let brute = set1.iter().map(|p| point_to_line_distance(p, &set2, &ruler)).fold(f64::INFINITY, f64::min);
-                assert_close(brute, points_to_line_distance(&set1, &set2, &ruler, INFINITE_DISTANCE));
+                assert_close(brute, points_to_line_distance(&set1, &set2, &ruler, INFINITE_DISTANCE).unwrap());
             }
             if size1 >= 2 && size2 >= 2 {
-                let brute = line_to_line_range_distance(&set1, &(0, size1 - 1), &set2, &(0, size2 - 1), &ruler);
-                assert_close(brute, line_to_line_distance(&set1, &set2, &ruler, INFINITE_DISTANCE));
-                let brute = line_to_polygon_range_distance(&set1, &(0, size1 - 1), &polygon, &ruler);
-                assert_close(brute, line_to_polygon_distance(&set1, &polygon, &ruler, INFINITE_DISTANCE));
+                let brute =
+                    line_to_line_range_distance(&set1, &(0, size1 - 1), &set2, &(0, size2 - 1), &ruler).unwrap();
+                assert_close(brute, line_to_line_distance(&set1, &set2, &ruler, INFINITE_DISTANCE).unwrap());
+                let brute = line_to_polygon_range_distance(&set1, &(0, size1 - 1), &polygon, &ruler).unwrap();
+                assert_close(brute, line_to_polygon_distance(&set1, &polygon, &ruler, INFINITE_DISTANCE).unwrap());
             }
             let brute =
                 set1.iter().map(|p| point_to_polygon_distance(p, &polygon, &ruler)).fold(f64::INFINITY, f64::min);
-            assert_close(brute, points_to_polygon_distance(&set1, &polygon, &ruler, INFINITE_DISTANCE));
+            assert_close(brute, points_to_polygon_distance(&set1, &polygon, &ruler, INFINITE_DISTANCE).unwrap());
         }
     }
 

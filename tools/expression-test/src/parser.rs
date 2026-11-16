@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use feature::{Feature, Identifier, Value, ValueObject};
 use mln_conversion::Convertible;
 use mln_expression::type_::{self, Type};
-use mln_expression::{Dependency, Expr, ParsingContext};
+use mln_expression::{Dependency, Expr, Functions, ParsingContext};
 use mln_tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
 
@@ -481,9 +481,10 @@ pub(crate) fn parse_expression(
     result: &mut TestResult,
 ) -> Option<Expr> {
     let expected = spec.and_then(to_expression_type);
+    let functions = Functions::with_builtins();
     let mut ctx = match &expected {
-        Some(t) => ParsingContext::with_expected(t.clone()),
-        None => ParsingContext::new(),
+        Some(t) => ParsingContext::with_expected(&functions, t.clone()),
+        None => ParsingContext::new(&functions),
     };
     let convertible = Convertible::from(value);
     let parsed;
@@ -491,7 +492,7 @@ pub(crate) fn parse_expression(
         && let Some(expected) = &expected
     {
         let mut error = mln_conversion::Error::default();
-        parsed = mln_style::conversion::function::parse_function(&convertible, expected, false, &mut error);
+        parsed = mln_style::conversion::function::parse_function(&convertible, expected, false, &functions, &mut error);
         // TODO: should the error message be checked for function conversion?
     } else {
         parsed = ctx.parse_layer_property_expression(&convertible);

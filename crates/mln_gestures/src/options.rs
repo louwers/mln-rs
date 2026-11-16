@@ -4,7 +4,7 @@ use mln_map::{MomentumDecay, MomentumSnap};
 
 /// How the recognizer turns input into camera moves. The defaults are
 /// maplibre-native-ffi's browser demo's rates where it has the gesture, GL
-/// JS's handlers' rates and thresholds where it doesn't, and ffi's C API
+/// JS's handlers' rates and thresholds where it doesn't, and the C API's
 /// momentum defaults. The crate's README compares each with ffi, Orbis,
 /// Compose and GL JS.
 ///

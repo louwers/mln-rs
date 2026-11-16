@@ -428,6 +428,9 @@ pub struct VulkanGpu {
     caps: Caps,
     set_layouts: [vk::DescriptorSetLayout; DescriptorSetType::COUNT],
     pipeline_layout: vk::PipelineLayout,
+    /// The cache that pipelines are made through, seeded with what the
+    /// last `VulkanGpu` on a GPU of the same pipeline cache UUID left.
+    pipeline_cache: vk::PipelineCache,
     descriptor_pools: [DescriptorPoolGrowable; DescriptorSetType::COUNT],
     /// The format of `Depth24PlusStencil8` textures.
     depth24_stencil8: vk::Format,
@@ -686,6 +689,7 @@ impl VulkanGpu {
             caps,
             set_layouts: [vk::DescriptorSetLayout::null(); DescriptorSetType::COUNT],
             pipeline_layout: vk::PipelineLayout::null(),
+            pipeline_cache: vk::PipelineCache::null(),
             descriptor_pools: [
                 pool(DescriptorSetType::Global, 0),
                 pool(DescriptorSetType::Layer, 0),
@@ -733,6 +737,18 @@ impl VulkanGpu {
         gpu.pipeline_layout =
             build_pipeline_layout(&gpu.backend, &gpu.set_layouts, UBO_INDEX_PUSH_CONSTANT_SIZE, "Gpu_PipelineLayout")
                 .map_err(GpuError::Invalid)?;
+        let seed = PIPELINE_CACHES
+            .lock()
+            .get_or_insert_default()
+            .get(&gpu.backend.get_device_properties().pipeline_cache_uuid)
+            .cloned()
+            .unwrap_or_default();
+        // SAFETY: the driver checks the seed's header, and ignores data
+        // of another GPU or driver.
+        gpu.pipeline_cache = unsafe {
+            gpu.device().create_pipeline_cache(&vk::PipelineCacheCreateInfo::default().initial_data(&seed), None)
+        }
+        .map_err(vk_error("the pipeline cache"))?;
         // SAFETY: the create info is valid for the device.
         gpu.placeholder_sampler = unsafe { gpu.device().create_sampler(&vk::SamplerCreateInfo::default(), None) }
             .map_err(vk_error("the placeholder sampler"))?;
@@ -1101,7 +1117,7 @@ impl VulkanGpu {
             let result = shaders::compile_program(stage, &composed)
                 .map_err(|error| GpuError::Invalid(format!("{}: {error}", source.name)))
                 .and_then(|compiled| {
-                    for ResourceUse { set, binding, size } in compiled.resources {
+                    for &ResourceUse { set, binding, size } in &compiled.resources {
                         let (type_, resource) = binding_of(source.name, source.textures, set, binding)?;
                         let set_bindings = &mut bindings[type_ as usize];
                         if !set_bindings.contains(&(binding, resource)) {
@@ -1385,9 +1401,8 @@ impl VulkanGpu {
             .render_pass(render_pass);
         // SAFETY: the create info points at live state, and the modules,
         // the layout and the render pass are this backend's.
-        let pipeline =
-            unsafe { self.device().create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None) }
-                .map_err(|(_, error)| GpuError::Invalid(format!("{name} pipeline: {error}")))?[0];
+        let pipeline = unsafe { self.device().create_graphics_pipelines(self.pipeline_cache, &[create_info], None) }
+            .map_err(|(_, error)| GpuError::Invalid(format!("{name} pipeline: {error}")))?[0];
         self.backend.set_debug_name(pipeline, &format!("{name}_pipeline"));
         Ok(pipeline)
     }
@@ -2666,6 +2681,13 @@ impl Drop for VulkanGpu {
             for fence in self.in_flight.drain(..).map(|submission| submission.fence).chain(self.free_fences.drain(..)) {
                 device.destroy_fence(fence, None);
             }
+            if let Ok(data) = device.get_pipeline_cache_data(self.pipeline_cache) {
+                PIPELINE_CACHES
+                    .lock()
+                    .get_or_insert_default()
+                    .insert(self.backend.get_device_properties().pipeline_cache_uuid, data);
+            }
+            device.destroy_pipeline_cache(self.pipeline_cache, None);
             for (_, pipeline) in self.pipelines.drain() {
                 device.destroy_pipeline(pipeline.pipeline, None);
             }
@@ -2692,3 +2714,9 @@ impl Drop for VulkanGpu {
         }
     }
 }
+
+/// What each GPU's pipeline cache held when the last `VulkanGpu` on it
+/// dropped, by its pipeline cache UUID: the renderer of each map makes the
+/// same pipelines.
+static PIPELINE_CACHES: parking_lot::Mutex<Option<HashMap<[u8; vk::UUID_SIZE], Vec<u8>>>> =
+    parking_lot::Mutex::new(None);

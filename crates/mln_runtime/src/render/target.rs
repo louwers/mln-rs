@@ -131,6 +131,8 @@ pub(crate) enum RingKind {
     Gl(mln_gl::BorrowedTextures),
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
     WebGpu(mln_webgpu::BorrowedTextures),
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12(mln_d3d12::BorrowedTextures),
 }
 
 /// The host's texture that an acquired frame was rendered into, of `size`
@@ -184,6 +186,11 @@ fn native_kind(texture: NativeTexture, device: &Device) -> Option<FrameTextureKi
             pixel_format,
         }),
         (NativeTexture::OpenGl { texture, target, .. }, _) => Some(FrameTextureKind::OpenGl { texture, target }),
+        #[cfg(all(feature = "d3d12", windows))]
+        (NativeTexture::D3d12 { resource, format, state }, Device::D3d12(device)) => {
+            use mln_d3d12::windows::core::Interface as _;
+            Some(FrameTextureKind::D3d12 { resource, device: device.device().as_raw() as usize as u64, format, state })
+        }
         _ => None,
     }
 }
@@ -201,6 +208,9 @@ pub enum FrameTextureKind {
     OpenGl { texture: u32, target: u32 },
     /// A WebGPU texture: the host's at the frame's slot of its ring.
     WebGpu,
+    /// An `ID3D12Resource*` of an `ID3D12Device*`, in a `DXGI_FORMAT`, left
+    /// in a `D3D12_RESOURCE_STATES`.
+    D3d12 { resource: u64, device: u64, format: u32, state: u32 },
     /// An image of an exported ring, and its shared memory.
     Exported(ExportedImage),
 }
@@ -236,6 +246,14 @@ impl BorrowedRing {
         BorrowedRing { kind: RingKind::WebGpu(textures) }
     }
 
+    /// A ring of the host's D3D12 textures, of the D3D12 device that renders
+    /// into them.
+    #[cfg(all(feature = "d3d12", windows))]
+    #[must_use]
+    pub fn d3d12(textures: mln_d3d12::BorrowedTextures) -> BorrowedRing {
+        BorrowedRing { kind: RingKind::D3d12(textures) }
+    }
+
     /// The backend whose device renders into the ring.
     #[must_use]
     pub fn backend(&self) -> BackendType {
@@ -248,6 +266,8 @@ impl BorrowedRing {
             RingKind::Gl(_) => BackendType::OpenGL,
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             RingKind::WebGpu(_) => BackendType::WebGPU,
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(_) => BackendType::D3D12,
             // The browser build renders into no ring.
             _ => BackendType::WebGPU,
         }
@@ -265,6 +285,8 @@ impl BorrowedRing {
             RingKind::Gl(textures) => textures.textures.len(),
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             RingKind::WebGpu(textures) => textures.textures.len(),
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(textures) => textures.textures.len(),
             _ => 0,
         }
     }
@@ -281,6 +303,8 @@ impl BorrowedRing {
             RingKind::Gl(textures) => textures.size,
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             RingKind::WebGpu(textures) => textures.size,
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(textures) => textures.size,
             _ => Size::default(),
         }
     }
@@ -318,6 +342,8 @@ impl BorrowedRing {
             RingKind::WebGpu(textures) => {
                 textures.depth_textures.first().and_then(|texture| mln_webgpu::depth_stencil_format(texture.format()))
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(textures) => textures.depth_format().and_then(mln_d3d12::depth_stencil_format),
             _ => None,
         }
     }
@@ -334,6 +360,8 @@ impl BorrowedRing {
             RingKind::Gl(textures) => !textures.depth_textures.is_empty(),
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             RingKind::WebGpu(textures) => !textures.depth_textures.is_empty(),
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(textures) => !textures.depth_textures.is_empty(),
             _ => false,
         }
     }
@@ -363,6 +391,10 @@ impl BorrowedRing {
             }
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             (RingKind::WebGpu(textures), RingKind::WebGpu(others)) => {
+                textures.textures.get(slot).is_some_and(|texture| others.textures.get(other_slot) == Some(texture))
+            }
+            #[cfg(all(feature = "d3d12", windows))]
+            (RingKind::D3d12(textures), RingKind::D3d12(others)) => {
                 textures.textures.get(slot).is_some_and(|texture| others.textures.get(other_slot) == Some(texture))
             }
             _ => false,
@@ -442,6 +474,30 @@ impl BorrowedRing {
                 depth: (!textures.depth_textures.is_empty())
                     .then_some(FrameDepth { texture: NativeTexture::WebGpu, export: None }),
             }),
+            #[cfg(all(feature = "d3d12", windows))]
+            (RingKind::D3d12(textures), Device::D3d12(device)) => {
+                use mln_d3d12::windows::core::Interface as _;
+                let depth =
+                    textures.depth_textures.get(slot).zip(textures.depth_format()).map(|(depth, format)| FrameDepth {
+                        texture: NativeTexture::D3d12 {
+                            resource: depth.as_raw() as usize as u64,
+                            format: format.0 as u32,
+                            state: textures.depth_state.0 as u32,
+                        },
+                        export: None,
+                    });
+                textures.textures.get(slot).map(|texture| FrameTexture {
+                    size: textures.size,
+                    kind: FrameTextureKind::D3d12 {
+                        resource: texture.as_raw() as usize as u64,
+                        device: device.device().as_raw() as usize as u64,
+                        format: textures.format().0 as u32,
+                        state: textures.state.0 as u32,
+                    },
+                    native: None,
+                    depth,
+                })
+            }
             _ => None,
         }
     }
@@ -464,6 +520,8 @@ pub enum SurfaceOverlay {
     Metal(mln_mtl::surface_target::Overlay),
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     Vulkan(Box<dyn mln_vulkan::Overlay>),
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12(Box<dyn mln_d3d12::Overlay>),
     #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
     Gl(mln_gl::Overlay),
 }
@@ -480,6 +538,14 @@ pub(crate) enum SurfaceKind {
     /// The host's `EGLSurface`, of the display of the session's device.
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
     Gl(mln_gl::HostSurface),
+    /// What shows a D3D12 composition swap chain: a `DirectComposition`
+    /// visual or a XAML `SwapChainPanel`, and the thread that made the
+    /// surface, which a `SwapChainPanel` takes its swap chain on.
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12Composition {
+        composition: mln_d3d12::Composition,
+        thread: std::thread::ThreadId,
+    },
     /// In the browser, an `OffscreenCanvas` or an `HTMLCanvasElement`, on
     /// the instance's one thread.
     #[cfg(target_family = "wasm")]
@@ -590,6 +656,26 @@ impl Surface {
         Surface { kind: SurfaceKind::Gl(surface), overlay: None }
     }
 
+    /// A composition swap chain that a session on D3D12 makes and presents
+    /// to, which `composition` shows: a `DirectComposition` visual shows it
+    /// once the host commits its device after the attach, and a XAML
+    /// `SwapChainPanel` at once. The composition must outlive the session's
+    /// use of it, as a window must. The swap chain has the target's size in
+    /// pixels, with premultiplied alpha; the host scales its visual for the
+    /// display's scale factor.
+    ///
+    /// A `SwapChainPanel` takes its swap chain only on its UI thread: make
+    /// the surface there, and attach it with [`Driver::CallerThread`],
+    /// serviced on that thread. A session that makes its swap chain on
+    /// another thread fails with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind).
+    #[cfg(all(feature = "d3d12", windows))]
+    #[must_use]
+    pub fn d3d12_composition(composition: mln_d3d12::Composition) -> Surface {
+        let kind = SurfaceKind::D3d12Composition { composition, thread: std::thread::current().id() };
+        Surface { kind, overlay: None }
+    }
+
     /// The surface, with `overlay` drawn over each frame that a session
     /// presents to it. Only a session whose driver is
     /// [`Driver::CallerThread`] draws it, on the thread that made it, and
@@ -653,8 +739,8 @@ impl Surface {
     /// Win32 window whose pixel format isn't the library's when OpenGL
     /// presents to it: on `device`, or without a device, in a build whose
     /// first backend is OpenGL. Windows doesn't let a pixel format change.
-    /// A session that falls back to OpenGL because Vulkan is missing finds
-    /// out as it starts.
+    /// A session that falls back to OpenGL because Vulkan and D3D12 are
+    /// missing finds out as it starts.
     #[cfg_attr(
         not(all(feature = "gl", windows)),
         expect(clippy::unnecessary_wraps, reason = "only OpenGL on Windows checks the window's pixel format")
@@ -662,7 +748,9 @@ impl Surface {
     pub(crate) fn check_pixel_format(&self, device: Option<&Device>) -> Result<(), Error> {
         #[cfg(all(feature = "gl", windows))]
         if let SurfaceKind::Window(window) = &self.kind
-            && device.map_or(cfg!(not(feature = "vulkan")), |device| device.backend() == BackendType::OpenGL)
+            && device.map_or(cfg!(not(any(feature = "vulkan", feature = "d3d12"))), |device| {
+                device.backend() == BackendType::OpenGL
+            })
         {
             mln_gl::SurfaceTarget::check_window(&**window)?;
         }
@@ -691,6 +779,8 @@ impl Surface {
             SurfaceKind::Vulkan(_) => false,
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             SurfaceKind::Gl(_) => false,
+            #[cfg(all(feature = "d3d12", windows))]
+            SurfaceKind::D3d12Composition { .. } => true,
             #[cfg(target_family = "wasm")]
             SurfaceKind::WebCanvas { .. } => true,
         }
@@ -849,7 +939,7 @@ impl SurfaceType {
             BackendType::WebGPU => {
                 cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing && self != SurfaceType::OhosNdk
             }
-            _ => false,
+            BackendType::D3D12 => cfg!(all(feature = "d3d12", windows)) && self == SurfaceType::Win32,
         }
     }
 
@@ -872,7 +962,7 @@ impl SurfaceType {
     /// surfaces of this type.
     #[must_use]
     pub fn presents_with_any(self) -> bool {
-        [BackendType::Metal, BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
+        [BackendType::Metal, BackendType::Vulkan, BackendType::D3D12, BackendType::OpenGL, BackendType::WebGPU]
             .into_iter()
             .any(|backend| self.presents_with(backend))
     }
@@ -885,7 +975,7 @@ impl SurfaceType {
         match self {
             SurfaceType::MetalLayer => self.presents_with(BackendType::Metal),
             _ if cfg!(target_vendor = "apple") => self.presents_with(BackendType::WebGPU),
-            _ => [BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
+            _ => [BackendType::Vulkan, BackendType::D3D12, BackendType::OpenGL, BackendType::WebGPU]
                 .into_iter()
                 .any(|backend| self.presents_with(backend)),
         }
@@ -971,11 +1061,12 @@ impl Device {
     }
 
     /// The library's device, on the platform's native backend: Metal on
-    /// Apple's platforms, and Vulkan elsewhere, or OpenGL where there is no
-    /// Vulkan. WebGPU (wgpu) takes the place of a native backend that isn't
-    /// there. A backend that can't name the GPU that `options` names is
-    /// skipped: only Vulkan names one by UUID or LUID. OpenGL lists one GPU,
-    /// the one its display renders on, at index 0.
+    /// Apple's platforms, and Vulkan elsewhere, then D3D12 on Windows, or
+    /// OpenGL where there is neither. WebGPU (wgpu) takes the place of a
+    /// native backend that isn't there. A backend that can't name the GPU
+    /// that `options` names is skipped: only Vulkan names one by UUID, and
+    /// only Vulkan and D3D12 by LUID. OpenGL lists one GPU, the one its
+    /// display renders on, at index 0.
     /// So is OpenGL where it can't render with `options.gl_api`.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when
@@ -1035,6 +1126,7 @@ impl Device {
             #[cfg(all(feature = "d3d12", windows))]
             BackendType::D3D12 => match adapter {
                 Some(Adapter::Luid(luid)) => mln_d3d12::Device::with_luid(luid),
+                Some(Adapter::Uuid(_)) => Err(Error::unsupported("D3D12 names no GPU by UUID")),
                 _ => mln_d3d12::Device::new(index(adapter)?),
             }
             .map(Device::D3d12),
@@ -1097,6 +1189,11 @@ impl Device {
                 textures.check()?;
                 Ok(mln_webgpu::BorrowedTextures::sync_kinds())
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            (Device::D3d12(device), RingKind::D3d12(textures)) => {
+                textures.check(device)?;
+                Ok(mln_d3d12::BorrowedTextures::sync_kinds())
+            }
             _ => Err(Error::unsupported(format!(
                 "a {:?} device renders into no ring of {:?} textures",
                 self.backend(),
@@ -1113,7 +1210,7 @@ impl Device {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Device::Vulkan(ref device) => device.depth_stencil_formats(),
             #[cfg(all(feature = "d3d12", windows))]
-            Device::D3d12(_) => DepthStencilFormats::NONE,
+            Device::D3d12(_) => mln_d3d12::BorrowedTextures::depth_stencil_formats(),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(_) => mln_mtl::BorrowedTextures::depth_stencil_formats(),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
@@ -1150,6 +1247,8 @@ impl Device {
             Device::Metal(device) => mln_mtl::exported_target::export_kinds(device),
             #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => mln_gl::exported_target::export_kinds(device),
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(device) => device.export_kinds(),
             _ => ExportKinds::NONE,
         }
     }
@@ -1180,6 +1279,12 @@ impl Device {
                 let (producer, consumer) = mln_gl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(device) => {
+                let kind = mln_d3d12::exported_target::plan(device, ring)?;
+                let (producer, consumer) = mln_d3d12::exported_target::sync_kinds();
+                Ok((kind, producer, consumer))
+            }
             _ => {
                 let _ = ring;
                 Err(Error::unsupported(format!("a {:?} device exports no ring", self.backend())))
@@ -1202,6 +1307,8 @@ impl Device {
             Device::Metal(device) => mln_mtl::exported_target::sync_kinds(device),
             #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => mln_gl::exported_target::sync_kinds(device),
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(_) => mln_d3d12::exported_target::sync_kinds(),
             _ => (SyncKinds::NONE, SyncKinds::NONE),
         }
     }
@@ -1263,11 +1370,14 @@ impl Device {
         }
     }
 
-    /// The backends [`new`](Self::new) tries, in order.
+    /// The backends [`new`](Self::new) tries, in order. Vulkan comes before
+    /// D3D12 on Windows, as it renders frames faster on the GPUs measured.
     #[cfg(not(target_family = "wasm"))]
     fn native_order() -> &'static [BackendType] {
         if cfg!(target_vendor = "apple") {
             &[BackendType::Metal, BackendType::WebGPU]
+        } else if cfg!(windows) {
+            &[BackendType::Vulkan, BackendType::D3D12, BackendType::OpenGL, BackendType::WebGPU]
         } else {
             &[BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
         }

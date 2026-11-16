@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::thread::ThreadId;
 
 use mln_actor::{AsyncTask, RunLoop, SchedulerPtr};
+use mln_renderer::Registry;
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use mln_storage::resource::Kind;
@@ -94,6 +95,7 @@ pub(crate) struct RuntimeShared {
     /// the browser, the shaper module, which loads the first time a style
     /// declares font faces.
     pub(crate) font_face_engine: Arc<dyn FontFaceEngine>,
+    pub(crate) registry: Arc<Registry>,
     /// The runtime's thread, which the drop waits for after the shutdown
     /// unless a release or disposal detached it, except in the browser,
     /// where the thread is the host's.
@@ -306,6 +308,7 @@ pub(crate) struct RuntimeCore {
     network: OnceCell<Arc<dyn FileSource>>,
     /// The runtime's thread's work.
     pub(crate) queue: CoreQueue,
+    pub(crate) registry: Arc<Registry>,
     /// The runtime's thread's loop, which its maps run their own work on.
     /// Its pool, the process's, which a runtime shares with the others and,
     /// in the browser, the instance's cooperative scheduler, is taken at its
@@ -323,7 +326,13 @@ pub(crate) struct RuntimeCore {
 }
 
 impl RuntimeCore {
-    fn new(resource_options: ResourceOptions, queue: CoreQueue, queued: Arc<AtomicUsize>, run_loop: &RunLoop) -> Self {
+    fn new(
+        resource_options: ResourceOptions,
+        queue: CoreQueue,
+        queued: Arc<AtomicUsize>,
+        registry: Arc<Registry>,
+        run_loop: &RunLoop,
+    ) -> Self {
         RuntimeCore {
             maps: BTreeMap::new(),
             event_handler: None,
@@ -335,6 +344,7 @@ impl RuntimeCore {
             online: OnceCell::new(),
             network: OnceCell::new(),
             queue,
+            registry,
             run_loop: run_loop.clone(),
             queued,
             burst_left: 0,
@@ -423,6 +433,7 @@ impl RuntimeCore {
             Arc::new(mln_storage_offline::region_database(
                 &self.resource_options.cache_path,
                 Some(Arc::clone(self.network())),
+                Arc::clone(self.registry.style()),
             ))
         })
     }
@@ -476,7 +487,7 @@ fn utf8<'a>(path: &'a Path, what: &str) -> Result<&'a str, Error> {
 }
 
 impl Runtime {
-    /// Starts a runtime and its thread.
+    /// Starts a runtime and its thread, with the built-in registrations.
     ///
     /// In the browser, the runtime's thread is the one that calls this, which
     /// a wasm instance has only one of, and the runtime never blocks it: its
@@ -487,10 +498,21 @@ impl Runtime {
     /// cache database file can't be opened or created, and in the browser
     /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a cache path.
     pub fn new(options: &RuntimeOptions) -> Result<Runtime, Error> {
+        Self::with_registry(options, Registry::with_builtins())
+    }
+
+    /// Starts a runtime and its thread, whose maps parse their styles
+    /// against `registry`, and whose renderers and tile workers use it. In
+    /// the browser, the tile workers' Web Workers must serve with registries
+    /// filled by the same calls (`mln_web_host::tile_worker::serve`).
+    ///
+    /// Fails as [`new`](Self::new) does.
+    pub fn with_registry(options: &RuntimeOptions, registry: Arc<Registry>) -> Result<Runtime, Error> {
         let resource_options = resource_options(options)?;
         let queued = Arc::new(AtomicUsize::new(0));
         let queue = CoreQueue::default();
-        let (thread, thread_end) = Self::start(resource_options, queue.clone(), Arc::clone(&queued))?;
+        let (thread, thread_end) =
+            Self::start(resource_options, queue.clone(), Arc::clone(&queued), Arc::clone(&registry))?;
         Ok(Runtime {
             shared: Arc::new(RuntimeShared {
                 queue,
@@ -500,6 +522,7 @@ impl Runtime {
                 next_map_id: AtomicU64::new(1),
                 glyph_cache: Arc::default(),
                 font_face_engine: font_face_engine(),
+                registry,
                 thread_end,
             }),
         })
@@ -512,10 +535,11 @@ impl Runtime {
         resource_options: ResourceOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
+        registry: Arc<Registry>,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         let thread = mln_util::thread::spawn("Runtime", move || {
             let run_loop = RunLoop::new();
-            let mut core = Some(RuntimeCore::new(resource_options, queue.clone(), queued, &run_loop));
+            let mut core = Some(RuntimeCore::new(resource_options, queue.clone(), queued, registry, &run_loop));
             queue.run_until_stopped(&run_loop, &mut core);
             drop(core);
         })
@@ -533,12 +557,20 @@ impl Runtime {
         resource_options: ResourceOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
+        registry: Arc<Registry>,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         crate::web::install();
         let run_loop = RunLoop::new();
-        let core = RuntimeCore::new(resource_options, queue.clone(), queued, &run_loop);
+        let core = RuntimeCore::new(resource_options, queue.clone(), queued, registry, &run_loop);
         crate::web::drive(&run_loop, queue, Some(core));
         Ok((std::thread::current().id(), None))
+    }
+
+    /// What the runtime's maps parse against, their renderers draw and
+    /// their tile workers lay out.
+    #[must_use]
+    pub fn registry(&self) -> &Arc<Registry> {
+        &self.shared.registry
     }
 
     /// Sends a command to the runtime's thread.

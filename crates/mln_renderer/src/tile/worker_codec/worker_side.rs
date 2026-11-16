@@ -1,43 +1,43 @@
 // Port-only: a worker instance's side of the worker codec (mod.rs): decodes
 // the jobs the map side sends and encodes their replies.
 
-use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
+use std::sync::Arc;
+
+use mln_style::serialization::{SharedExpression, SharedLayer};
 use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
 
 use super::envelope::{self, Encoded};
-use super::fields::{SharedAvailableImages, SharedSourceStyle};
+use super::fields::{SharedAvailableImages, SharedEvaluatedLayer, SharedSourceStyle};
+use super::session;
+use crate::Registry;
 use crate::tile::job::{Job, JobResult, JobTimes, Reply};
 
 /// A worker instance's side of its jobs.
 pub(crate) struct WorkerCodec {
     /// The values the map side defined, by key.
     tables: shared::Tables,
+    registry: Arc<Registry>,
 }
 
-impl Default for WorkerCodec {
-    fn default() -> Self {
+impl WorkerCodec {
+    pub(crate) fn new(registry: Arc<Registry>) -> Self {
         let tables = shared::Tables::new()
             .copies::<SharedSourceStyle>()
             .copies::<SharedAvailableImages>()
             .copies::<SharedLayer>()
-            .copies::<SharedLayerProperties>()
+            .copies::<SharedEvaluatedLayer>()
             .copies::<SharedExpression>();
-        WorkerCodec { tables }
-    }
-}
-
-impl WorkerCodec {
-    pub(crate) fn new() -> Self {
-        WorkerCodec::default()
+        WorkerCodec { tables, registry }
     }
 
     /// Decodes a job's body: forgets what the map side lists as gone, then
-    /// reads the job.
+    /// reads the job. Fails for a job that names a registration this side's
+    /// registry lacks.
     pub(crate) fn decode_job(&mut self, body: &[u8]) -> Result<Job, String> {
         let (forget, job): (Vec<(String, Vec<u64>)>, &[u8]) = envelope::take(body)?;
         self.tables.forget(&forget);
-        self.tables.open(|| envelope::decode(job))
+        session(&self.registry, || self.tables.open(|| envelope::decode(job)))
     }
 
     /// Encodes `reply`, with how long its stages took, its arrays as

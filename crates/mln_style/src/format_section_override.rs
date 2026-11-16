@@ -7,7 +7,7 @@ use mln_expression::format_section_override::{FormatSectionOverride, OverrideDef
 
 use crate::evaluated::Evaluated;
 use crate::expression::{Dependency, Expr, GlobalStateMap};
-use crate::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
+use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use crate::property_expression::PropertyExpression;
 

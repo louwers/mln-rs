@@ -1,7 +1,7 @@
 // The window's render session: Metal by default on macOS, WebGPU (through
 // wgpu, the default where there is no Metal) everywhere, Vulkan elsewhere
-// than on Apple's platforms and OpenGL ES on Linux, picked with --backend and
-// switched in the controls. Each backend renders in a session of its own, on
+// than on Apple's platforms, D3D12 on Windows and OpenGL ES on Linux, picked
+// with --backend and switched in the controls. Each backend renders in a session of its own, on
 // a device of its own, which the render thread drives (`Driver::CallerThread`)
 // so that the controls' overlay (overlay.rs) draws over each frame on that
 // thread. On macOS both backends present to the window's one CAMetalLayer
@@ -37,6 +37,8 @@ pub(crate) enum Kind {
     Metal,
     #[cfg(not(target_vendor = "apple"))]
     Vulkan,
+    #[cfg(windows)]
+    D3d12,
     WebGpu,
     #[cfg(target_os = "linux")]
     OpenGl,
@@ -50,6 +52,8 @@ impl Kind {
             "metal" => Ok(Kind::Metal),
             #[cfg(not(target_vendor = "apple"))]
             "vulkan" => Ok(Kind::Vulkan),
+            #[cfg(windows)]
+            "d3d12" => Ok(Kind::D3d12),
             "webgpu" => Ok(Kind::WebGpu),
             #[cfg(target_os = "linux")]
             "opengl" => Ok(Kind::OpenGl),
@@ -61,7 +65,9 @@ impl Kind {
     const NAMES: &str = "metal, webgpu";
     #[cfg(target_os = "linux")]
     const NAMES: &str = "vulkan, webgpu, opengl";
-    #[cfg(all(not(target_vendor = "apple"), not(target_os = "linux")))]
+    #[cfg(windows)]
+    const NAMES: &str = "vulkan, d3d12, webgpu";
+    #[cfg(all(not(target_vendor = "apple"), not(target_os = "linux"), not(windows)))]
     const NAMES: &str = "vulkan, webgpu";
     #[cfg(all(target_vendor = "apple", not(target_os = "macos")))]
     const NAMES: &str = "webgpu";
@@ -72,6 +78,8 @@ impl Kind {
         Kind::Metal,
         #[cfg(not(target_vendor = "apple"))]
         Kind::Vulkan,
+        #[cfg(windows)]
+        Kind::D3d12,
         Kind::WebGpu,
         #[cfg(target_os = "linux")]
         Kind::OpenGl,
@@ -90,6 +98,8 @@ impl Kind {
             Kind::Metal => "Metal",
             #[cfg(not(target_vendor = "apple"))]
             Kind::Vulkan => "Vulkan",
+            #[cfg(windows)]
+            Kind::D3d12 => "D3D12",
             Kind::WebGpu => "WebGPU",
             #[cfg(target_os = "linux")]
             Kind::OpenGl => "OpenGL ES",
@@ -102,6 +112,8 @@ impl Kind {
             Kind::Metal => BackendType::Metal,
             #[cfg(not(target_vendor = "apple"))]
             Kind::Vulkan => BackendType::Vulkan,
+            #[cfg(windows)]
+            Kind::D3d12 => BackendType::D3D12,
             Kind::WebGpu => BackendType::WebGPU,
             #[cfg(target_os = "linux")]
             Kind::OpenGl => BackendType::OpenGL,
@@ -115,6 +127,8 @@ impl Kind {
             Kind::Metal => SurfaceOverlay::Metal(crate::metal_overlay::metal_overlay(paint)),
             #[cfg(not(target_vendor = "apple"))]
             Kind::Vulkan => SurfaceOverlay::Vulkan(crate::vulkan_overlay::vulkan_overlay(paint)),
+            #[cfg(windows)]
+            Kind::D3d12 => SurfaceOverlay::D3d12(crate::d3d12_overlay::d3d12_overlay(paint)),
             Kind::WebGpu => SurfaceOverlay::WebGpu(crate::overlay::webgpu_overlay(paint)),
             #[cfg(target_os = "linux")]
             Kind::OpenGl => SurfaceOverlay::Gl(crate::gl_overlay::gl_overlay(paint)),
@@ -131,6 +145,14 @@ impl Default for Kind {
     }
 }
 
+/// The window that sessions make their surfaces of, off the window's thread:
+/// on Windows with the handles that the window's thread took
+/// (`win32_window.rs`).
+#[cfg(all(not(target_os = "macos"), not(windows)))]
+pub(crate) type SessionWindow = Arc<winit::window::Window>;
+#[cfg(windows)]
+pub(crate) type SessionWindow = Arc<crate::win32_window::SurfaceWindow>;
+
 /// Makes the window's surfaces: on macOS through the window's thread, which
 /// makes the window's Metal layer and the wgpu surfaces of it, and elsewhere
 /// from the window itself.
@@ -138,7 +160,7 @@ pub(crate) struct WindowSurfaces {
     #[cfg(target_os = "macos")]
     pub(crate) proxy: winit::event_loop::EventLoopProxy<crate::host::UserEvent>,
     #[cfg(not(target_os = "macos"))]
-    pub(crate) window: Arc<winit::window::Window>,
+    pub(crate) window: SessionWindow,
 }
 
 impl WindowSurfaces {
@@ -271,6 +293,8 @@ impl WindowSession {
             Device::Metal(device) => format!("{} (Metal)", device.name()),
             #[cfg(not(target_vendor = "apple"))]
             Device::Vulkan(device) => format!("{} (Vulkan)", crate::vulkan_overlay::device_name(device)),
+            #[cfg(windows)]
+            Device::D3d12(device) => format!("{} (D3D12)", crate::d3d12_overlay::device_name(device)),
             _ => match &paint.renderer {
                 Some(renderer) => format!("{renderer} ({})", self.kind.name()),
                 None => self.kind.name().to_owned(),

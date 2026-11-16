@@ -4,8 +4,8 @@ use mln_style_types::ProjectionDefinition;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::util::parse_json;
-use crate::conversion::{Converter, Error};
-use crate::projection::Projection;
+use crate::conversion::{Error, convert_projection};
+use crate::expression::Functions;
 use crate::style_property::Kind;
 
 /// gtest's `FloatingPoint<T>::AlmostEquals` distance: sign-and-magnitude
@@ -44,7 +44,7 @@ fn projection() {
     let mut error = Error::default();
     let parse_projection = |src: &str, error: &mut Error| {
         let json = parse_json(src);
-        <Projection as Converter>::convert(&Convertible::from(&json), error)
+        convert_projection(&Convertible::from(&json), &Functions::with_builtins(), error)
     };
 
     {
@@ -136,9 +136,13 @@ fn projection() {
     {
         let mut projection = parse_projection("{}", &mut error).expect("projection");
         let type_value = serde_json::json!("globe");
-        assert!(projection.set_property("type", &Convertible::from(&type_value)).is_none());
+        assert!(
+            projection.set_property("type", &Convertible::from(&type_value), &Functions::with_builtins()).is_none()
+        );
         assert_eq!(definition("globe"), *projection.get_type().as_constant());
-        assert!(projection.set_property("bogus", &Convertible::from(&type_value)).is_some());
+        assert!(
+            projection.set_property("bogus", &Convertible::from(&type_value), &Functions::with_builtins()).is_some()
+        );
         assert_eq!(Kind::Constant, projection.get_property("type").get_kind());
         assert_eq!(Value::String("globe".to_owned()), *projection.get_property("type").get_value());
     }
@@ -160,7 +164,7 @@ fn projection_subdivision_granularity() {
     let mut error = Error::default();
     let mut granularity = |src: &str| {
         let json = parse_json(src);
-        let projection = <Projection as Converter>::convert(&Convertible::from(&json), &mut error);
+        let projection = convert_projection(&Convertible::from(&json), &Functions::with_builtins(), &mut error);
         projection.unwrap_or_else(|| panic!("{}", error.message)).impl_.get_subdivision_granularity()
     };
     // Only a style that never renders a globe keeps the flat, unsubdivided geometry.

@@ -210,7 +210,7 @@ impl Transition {
     }
 
     /// Records why the command stops: `Cancelled` or `Replaced`. A
-    /// cancellation wins over a replacement, as maplibre-native-ffi reports
+    /// cancellation wins over a replacement, as the C API reports
     /// it.
     fn ended_by(&mut self, outcome: TransitionOutcome) {
         if self.stopped != Some(TransitionOutcome::Cancelled) {
@@ -508,8 +508,7 @@ pub struct Transform {
 
 /// A command made of several transitions, which ends once with the
 /// outcome that covers them all: cancelled if any was, otherwise closed if
-/// any was, otherwise replaced if any was (maplibre-native-ffi's
-/// `CommandTransitions`).
+/// any was, otherwise replaced if any was.
 struct JointEnd {
     command: CameraCommandId,
     remaining: u32,
@@ -528,8 +527,7 @@ struct GlobeDragHold {
     size: Size,
 }
 
-/// The gesture that camera deltas and updates with a phase make, as
-/// maplibre-native-ffi tracks it.
+/// The gesture that camera deltas and updates with a phase make.
 #[derive(Clone, Copy, Debug, Default)]
 struct GestureState {
     /// Between its first `Begin` or `Update` and its `End` or `Cancel`.
@@ -2375,9 +2373,9 @@ impl Transform {
         true
     }
 
-    /// Ends the running commands as closed, as maplibre-native-ffi does when
-    /// a map closes, without a camera change. A map's owner calls it before
-    /// it drops the map, so that it hears every command's end.
+    /// Ends the running commands as closed, without a camera change. A map's
+    /// owner calls it before it drops the map, so that it hears every
+    /// command's end.
     pub fn close(&mut self) {
         for transition in std::mem::take(&mut self.transitions) {
             let end = TransitionEnd { outcome: TransitionOutcome::Closed, ..transition.end() };
@@ -2389,7 +2387,7 @@ impl Transform {
     // MARK: - Gesture
 
     /// Moves the camera relative to where it is, as a gesture does
-    /// (maplibre-native-ffi's `mln_map_apply_camera_delta`). See
+    /// (the C API's `mln_map_apply_camera_delta`). See
     /// [`CameraDelta`].
     pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<CameraCommandId, CameraError> {
         delta.validate()?;
@@ -2456,7 +2454,7 @@ impl Transform {
     }
 
     /// Moves the camera to absolute values, as a command or a gesture
-    /// (maplibre-native-ffi's `mln_map_update_camera`). See [`CameraUpdate`].
+    /// (the C API's `mln_map_update_camera`). See [`CameraUpdate`].
     pub fn update_camera(&mut self, update: &CameraUpdate) -> CameraCommandId {
         self.command(|transform| transform.update_camera_now(update))
     }

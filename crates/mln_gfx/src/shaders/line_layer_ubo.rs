@@ -106,7 +106,10 @@ pub struct LineSDFDrawableUBO {
     /* 108 */ pub offset_t: f32,
     /* 112 */ pub width_t: f32,
     /* 116 */ pub floorwidth_t: f32,
-    /* 120 */ pub pad1: f32,
+    /// The height of the bucket's dash atlas, where the dash array differs
+    /// by feature: the shaders then read the patterns from an attribute.
+    /* 120 */
+    pub atlas_height: f32,
     /* 124 */ pub pad2: f32,
     /* 128 */
 }

@@ -17,21 +17,21 @@ use std::sync::Arc;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::{RendererBackend, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::custom_layer::Impl as CustomLayerImpl;
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::{
-    CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerProperties,
-    CustomLayerRenderParameters,
+    Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::logging::{Event, Log};
 
+use crate::bucket::NoBucket;
 use crate::change_request::UniqueChangeRequestVec;
 use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupKind};
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
+use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
@@ -79,19 +79,30 @@ impl Shared {
     }
 }
 
+impl LayerType for Custom {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+
+    fn render_layer(style: Arc<LayerStyle<Custom>>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderCustomLayer::new(style)))
+    }
+}
+
 pub(crate) struct RenderCustomLayer {
     base: RenderLayerBase,
+    style: Arc<LayerStyle<Custom>>,
     shared: Rc<Shared>,
 }
 
 impl RenderCustomLayer {
-    pub(crate) fn new(impl_: Arc<CustomLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Custom>>) -> Self {
         let host = impl_.host();
-        let properties: Arc<dyn LayerProperties> = Arc::new(CustomLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Custom>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.passes = RenderPass::Translucent;
         RenderCustomLayer {
             base,
+            style: impl_,
             shared: Rc::new(Shared {
                 host: RefCell::new(host),
                 frame: Cell::new(None),
@@ -122,6 +133,18 @@ impl RenderLayer for RenderCustomLayer {
         &mut self.base
     }
 
+    /// A new host for the same layer ID is a new layer to the host: the old
+    /// one hears that the renderer stopped.
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
+        set_style(&mut self.base, &mut self.style, style);
+        let same = self.shared.host.borrow().as_ref().is_some_and(|host| self.style.has_host(host));
+        if !same {
+            self.shared.end(false);
+            *self.shared.host.borrow_mut() = self.style.host();
+        }
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, _parameters: &TransitionParameters) {}
 
     /// The layer has no properties: `baseImpl` never changes for it.
@@ -138,22 +161,6 @@ impl RenderLayer for RenderCustomLayer {
     }
 
     fn prepare(&mut self, _parameters: &mut LayerPrepareParameters<'_>) {}
-
-    /// A new host for the same layer ID is a new layer to the host: the old
-    /// one hears that the renderer stopped.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        new_layer: &Arc<dyn layer::Impl>,
-        _changes: &mut UniqueChangeRequestVec,
-    ) {
-        let new_layer = downcast_arc::<CustomLayerImpl>(new_layer);
-        let same = self.shared.host.borrow().as_ref().is_some_and(|host| new_layer.has_host(host));
-        if !same {
-            self.shared.end(false);
-            *self.shared.host.borrow_mut() = new_layer.host();
-        }
-    }
 
     fn update(
         &mut self,

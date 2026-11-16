@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use feature::{Feature, Value as JsonValue, ValueObject};
 use mln_conversion::Convertible;
-use mln_expression::{Dependency, EvaluationContext, Expr, ParsingContext, Type, TypeAnnotationOption};
+use mln_expression::{Dependency, EvaluationContext, Expr, Functions, ParsingContext, Type, TypeAnnotationOption};
 use mln_tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
 
@@ -116,9 +116,12 @@ fn parse(json: &str, expected: Option<Type>) -> Result<Expr, Error> {
     // GL JS's createExpression() coerces a result that must be a string
     // rather than asserting it, as a string layer property does.
     let annotation = (expected == Some(Type::String)).then_some(TypeAnnotationOption::Coerce);
+    // Standalone expressions belong to no map, so to no runtime's
+    // registrations.
+    let functions = Functions::with_builtins();
     let mut context = match expected {
-        Some(expected) => ParsingContext::with_expected(expected),
-        None => ParsingContext::new(),
+        Some(expected) => ParsingContext::with_expected(&functions, expected),
+        None => ParsingContext::new(&functions),
     };
     let Some(parsed) = context.parse_expression(&Convertible::from(&document), annotation) else {
         return Err(Error::invalid_argument(format!("expression: {}", context.get_combined_errors())));

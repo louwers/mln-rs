@@ -1,92 +1,41 @@
-// C++ `Layer` is an abstract class: the virtual members are the required
-// methods of the `Layer` trait, the non-virtual ones are provided methods.
-//
 // A layer cannot point back at the style that owns it, so `Style::Impl` hands
 // out layers through `LayerRefMut` guards, which run
 // `Style::Impl::on_layer_changed` when the guard is dropped if the layer's
-// `base_impl` changed. A change copies the impl when it is shared, as it is
-// while the guard holds the impl from before, and leaves it alone when the
+// style changed. A change copies the style when it is shared, as it is
+// while the guard holds the style from before, and leaves it alone when the
 // value doesn't change. Several changes through one guard therefore notify
 // once.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
 use mln_conversion::{Convertible, Error};
 use mln_style_types::VisibilityType;
 use mln_util::logging::{Event, Log};
+use mln_vec_map::VecSet;
 
-use crate::conversion::{Converter, convert};
+use crate::conversion::{Converter, convert, convert_filter};
 use crate::expression::{
-    Dependency, EvaluationContext, Expr, GlobalStateMap, ParsingContext, Type, from_expression_value,
+    Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
 use crate::filter::Filter;
-pub(crate) use crate::layer_impl::FontStack;
-pub use crate::layer_impl::{Impl, ImplBase, downcast_arc, font_stacks};
+use crate::layer_type::{ErasedLayerStyle, LayerBase, LayerStyle, LayerTypeInfo, SourceKind};
+use crate::layers::Custom;
+use crate::layers::custom_layer::CustomLayerHost;
+use crate::property_table::SetPropertyError;
+use crate::registry::StyleRegistry;
 use crate::style_property::StyleProperty;
 
-/// The enums nested in C++ `LayerTypeInfo`.
-pub mod layer_type_info {
-    /// Whether the layer type requires a source.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Source {
-        Required,
-        NotRequired,
-    }
+pub(crate) type FontStack = Vec<String>;
 
-    /// Whether the layer type requires the 3D rendering pass.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Pass3D {
-        Required,
-        NotRequired,
+/// The font stacks `layers` use, found by statically evaluating their
+/// `text-font` values.
+pub fn font_stacks<L: AsRef<dyn ErasedLayerStyle>>(layers: impl IntoIterator<Item = L>) -> VecSet<FontStack> {
+    let mut result = VecSet::new();
+    for layer in layers {
+        layer.as_ref().populate_font_stack(&mut result);
     }
-
-    /// Whether the layer type requires layouting.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Layout {
-        Required,
-        NotRequired,
-    }
-
-    /// Whether the layer type requires rendering on fading tiles.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum FadingTiles {
-        Required,
-        NotRequired,
-    }
-
-    /// Whether the layer type requires cross-tile indexing and placement.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum CrossTileIndex {
-        Required,
-        NotRequired,
-    }
-
-    /// The supported tile type; the values correspond to `Tile::Kind`.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    #[repr(u8)]
-    pub enum TileKind {
-        Geometry,
-        Raster,
-        RasterDEM,
-        NotRequired,
-    }
-}
-
-/// Holds static data for a certain layer type. Compared by address, as in
-/// C++ (`impl->getTypeInfo() == BackgroundLayer::Impl::staticTypeInfo()`):
-/// use `std::ptr::eq`.
-#[derive(Debug)]
-pub struct LayerTypeInfo {
-    /// The layer type as defined in the style specification.
-    pub type_: &'static str,
-    pub source: layer_type_info::Source,
-    pub pass3d: layer_type_info::Pass3D,
-    pub layout: layer_type_info::Layout,
-    pub fading_tiles: layer_type_info::FadingTiles,
-    pub cross_tile_index: layer_type_info::CrossTileIndex,
-    pub tile_kind: layer_type_info::TileKind,
+    result
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,85 +44,278 @@ pub enum PropertyScope {
     Layout,
 }
 
-/// The runtime representation of a layer from the MapLibre Style Spec.
-pub trait Layer: Any + Send + Sync {
-    // --- virtual / protected members ---
+/// A layer from the MapLibre Style Spec, of any layer type: its style data,
+/// and the expression functions its property values parse against.
+pub struct Layer {
+    style: Arc<dyn ErasedLayerStyle>,
+    functions: Arc<Functions>,
+    /// A custom layer's host, which the style data only refers to.
+    host: Option<Arc<dyn CustomLayerHost>>,
+}
 
-    /// The `baseImpl` member.
-    fn base_impl(&self) -> Arc<dyn Impl>;
-
-    /// The `baseImpl` member, borrowed: reading it this way skips the
-    /// reference count.
-    fn base_impl_ref(&self) -> &dyn Impl;
-
-    /// Calls `f` on a copy of the base members and stores the result as the
-    /// new impl.
-    fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase));
-
-    fn get_property(&self, name: &str) -> StyleProperty;
-
-    /// Serializes the layer as a style JSON value; implementations start from
-    /// `serialize_base`.
-    fn serialize(&self) -> Value;
-
-    /// Create a layer, copying all properties except id and paint properties
-    /// from this layer.
-    fn clone_ref(&self, id: &str) -> Box<dyn Layer>;
-
-    fn set_property_internal(&mut self, name: &str, value: &Convertible<'_>) -> Option<Error>;
-
-    fn set_property(&mut self, name: &str, value: &Convertible<'_>, scope: Option<PropertyScope>) -> Option<Error> {
-        set_property_base(self, name, value, scope)
+impl Layer {
+    /// A layer of the type named `type_` in `registry`, named `id`, of the
+    /// source `source`, with every property undefined.
+    ///
+    /// # Errors
+    ///
+    /// When `registry` has no layer type named `type_`, or one that only
+    /// another constructor makes, such as [`Layer::custom`].
+    pub fn new(registry: &StyleRegistry, type_: &str, id: &str, source: &str) -> Result<Layer, mln_util::Error> {
+        let Some(layer_type) = registry.layer_type(type_) else {
+            return Err(mln_util::Error::invalid_argument(format!("unknown layer type '{type_}'")));
+        };
+        if !layer_type.info().from_json {
+            return Err(mln_util::Error::invalid_argument(format!("layer type '{type_}' can't be created by name")));
+        }
+        Ok(Layer::from_style(layer_type.create(id, source), Arc::clone(registry.functions())))
     }
 
-    // --- non-virtual members ---
-
-    fn get_id(&self) -> String {
-        self.base_impl_ref().id.clone()
+    /// A layer named `id` that `host` draws, whose filter and visibility
+    /// parse against `registry`'s functions.
+    #[must_use]
+    pub fn custom(registry: &StyleRegistry, id: &str, host: Arc<dyn CustomLayerHost>) -> Layer {
+        Layer {
+            style: Arc::new(LayerStyle::<Custom>::with_host(id.to_owned(), &host)),
+            functions: Arc::clone(registry.functions()),
+            host: Some(host),
+        }
     }
 
-    fn get_source_id(&self) -> String {
-        self.base_impl_ref().source.clone()
+    /// The layer of `style`, whose property values parse against
+    /// `functions`. A custom layer needs its host: [`Layer::custom`] makes
+    /// one.
+    #[must_use]
+    pub fn from_style(style: Arc<dyn ErasedLayerStyle>, functions: Arc<Functions>) -> Layer {
+        Layer { style, functions, host: None }
     }
 
-    fn get_source_layer(&self) -> String {
-        self.base_impl_ref().source_layer.clone()
+    #[must_use]
+    pub fn style(&self) -> &Arc<dyn ErasedLayerStyle> {
+        &self.style
     }
 
-    fn set_source_layer(&mut self, source_layer: &str) {
-        if self.get_source_layer() == source_layer {
+    /// Changes the base members, copying the style data if it is shared.
+    fn mutate_base(&mut self, f: &mut dyn FnMut(&mut LayerBase)) {
+        self.style.layer_type().mutate_base(&mut self.style, f);
+    }
+
+    #[must_use]
+    pub fn get_property(&self, name: &str) -> StyleProperty {
+        self.style.get_property(name)
+    }
+
+    /// The expression functions that the layer's property values, filter and
+    /// visibility parse against.
+    #[must_use]
+    pub fn functions(&self) -> &Arc<Functions> {
+        &self.functions
+    }
+
+    #[must_use]
+    pub fn serialize(&self) -> Value {
+        let mut result = ValueObject::new();
+        result.insert("id".to_owned(), Value::String(self.get_id()));
+        result.insert("type".to_owned(), Value::String(self.info().name.to_owned()));
+
+        let source = self.get_source_id();
+        if !source.is_empty() {
+            result.insert("source".to_owned(), Value::String(source));
+        }
+
+        let source_layer = self.get_source_layer();
+        if !source_layer.is_empty() {
+            result.insert("source-layer".to_owned(), Value::String(source_layer));
+        }
+
+        if self.get_filter().is_set() {
+            result.insert("filter".to_owned(), self.get_filter().serialize());
+        }
+
+        if self.get_min_zoom() != f32::NEG_INFINITY {
+            result.insert("minzoom".to_owned(), Value::Double(f64::from(self.get_min_zoom())));
+        }
+
+        if self.get_max_zoom() != f32::INFINITY {
+            result.insert("maxzoom".to_owned(), Value::Double(f64::from(self.get_max_zoom())));
+        }
+
+        if let Some(expression) = &self.style.base().visibility_expression {
+            let mut layout = ValueObject::new();
+            layout.insert("visibility".to_owned(), expression.serialize());
+            result.insert("layout".to_owned(), Value::Object(layout));
+        } else if self.get_visibility() == VisibilityType::None {
+            let mut layout = ValueObject::new();
+            layout.insert("visibility".to_owned(), Value::String("none".to_owned()));
+            result.insert("layout".to_owned(), Value::Object(layout));
+        }
+
+        self.style.serialize_properties(&mut result);
+        Value::Object(result)
+    }
+
+    /// A layer named `id` with this layer's members and properties but its
+    /// paint properties. A custom layer's copy draws through the same host.
+    #[must_use]
+    pub fn clone_ref(&self, id: &str) -> Layer {
+        Layer {
+            style: self.style.copy_without_paint(id),
+            functions: Arc::clone(&self.functions),
+            host: self.host.clone(),
+        }
+    }
+
+    /// Sets the property `name` (a property of the layer's type, its
+    /// `<name>-transition`, or a member every layer has) from a style JSON
+    /// value. Returns why it fails.
+    pub fn set_property(
+        &mut self,
+        name: &str,
+        value: &Convertible<'_>,
+        _scope: Option<PropertyScope>,
+    ) -> Option<Error> {
+        let layer_type = self.style.layer_type();
+        let mut error = match layer_type.set_property(&mut self.style, name, value, &self.functions) {
+            Ok(()) => return None,
+            Err(SetPropertyError::Invalid(error)) => error,
+            Err(SetPropertyError::Unknown) => {
+                Error::new(format!("layer '{}' doesn't support property '{}'", self.get_id(), name))
+            }
+        };
+        if name == "visibility" {
+            return self.set_visibility_value(value);
+        }
+        if name == "minzoom" {
+            if let Some(zoom) = convert::<f32>(value, &mut error) {
+                self.set_min_zoom(zoom);
+                return None;
+            }
+        } else if name == "maxzoom" {
+            if let Some(zoom) = convert::<f32>(value, &mut error) {
+                self.set_max_zoom(zoom);
+                return None;
+            }
+        } else if name == "filter" {
+            if let Some(filter) = convert_filter(value, &self.functions, &mut error) {
+                self.set_filter(&filter);
+                return None;
+            }
+        } else if name == "source-layer" {
+            if let Some(source_layer) = convert::<String>(value, &mut error) {
+                if self.info().source == SourceKind::None {
+                    // Quirk kept: no space between "to" and "the".
+                    Log::warning(
+                        Event::General,
+                        format!("'source-layer' property cannot be set tothe layer {}", self.style.base().id),
+                    );
+                    return None;
+                }
+                self.set_source_layer(&source_layer);
+                return None;
+            }
+        } else if name == "source"
+            && let Some(source_id) = convert::<String>(value, &mut error)
+        {
+            if self.info().source == SourceKind::None {
+                Log::warning(
+                    Event::General,
+                    format!("'source' property cannot be set tothe layer {}", self.style.base().id),
+                );
+                return None;
+            }
+            self.set_source_id(&source_id);
+            return None;
+        }
+        Some(error)
+    }
+
+    fn set_visibility_value(&mut self, value: &Convertible<'_>) -> Option<Error> {
+        if value.is_undefined() {
+            self.set_visibility(VisibilityType::Visible);
+            return None;
+        }
+
+        if value.is_array() {
+            // Per the style specification, visibility expressions may only use "global-state".
+            let mut ctx = ParsingContext::with_expected(&self.functions, Type::String);
+            let Some(parsed) = ctx.parse_expression(value, None) else {
+                return Some(Error::new(ctx.get_combined_errors()));
+            };
+            let allowed = Dependency::GLOBAL_STATE | Dependency::BIND | Dependency::VAR;
+            if (parsed.dependencies() | allowed) != allowed {
+                return Some(Error::new(r#"visibility expressions may only use the "global-state" expression"#));
+            }
+
+            // The layer may not belong to a style yet, so its global state is not
+            // available here. The style reevaluates the expression when the layer
+            // is added or when this change reaches its observer.
+            let expression: Arc<Expr> = Arc::from(parsed);
+            self.mutate_base(&mut |impl_| impl_.visibility_expression = Some(Arc::clone(&expression)));
+            return None;
+        }
+
+        let mut error = Error::default();
+        let visibility = <VisibilityType as Converter>::convert(value, &mut error);
+        match visibility {
+            Some(visibility) => {
+                self.set_visibility(visibility);
+                None
+            }
+            None => Some(error),
+        }
+    }
+
+    #[must_use]
+    pub fn get_id(&self) -> String {
+        self.style.base().id.clone()
+    }
+
+    #[must_use]
+    pub fn get_source_id(&self) -> String {
+        self.style.base().source.clone()
+    }
+
+    #[must_use]
+    pub fn get_source_layer(&self) -> String {
+        self.style.base().source_layer.clone()
+    }
+
+    pub fn set_source_layer(&mut self, source_layer: &str) {
+        if self.style.base().source_layer == source_layer {
             return;
         }
-        self.mutate_base_impl(&mut |impl_| impl_.source_layer = source_layer.to_owned());
+        self.mutate_base(&mut |impl_| impl_.source_layer = source_layer.to_owned());
     }
 
-    fn set_source_id(&mut self, source_id: &str) {
-        if self.get_source_id() == source_id {
+    pub fn set_source_id(&mut self, source_id: &str) {
+        if self.style.base().source == source_id {
             return;
         }
-        self.mutate_base_impl(&mut |impl_| impl_.source = source_id.to_owned());
+        self.mutate_base(&mut |impl_| impl_.source = source_id.to_owned());
     }
 
-    fn get_filter(&self) -> Filter {
-        self.base_impl_ref().filter.clone()
+    #[must_use]
+    pub fn get_filter(&self) -> Filter {
+        self.style.base().filter.clone()
     }
 
-    fn set_filter(&mut self, filter: &Filter) {
-        if self.get_filter() == *filter {
+    pub fn set_filter(&mut self, filter: &Filter) {
+        if self.style.base().filter == *filter {
             return;
         }
-        self.mutate_base_impl(&mut |impl_| impl_.filter = filter.clone());
+        self.mutate_base(&mut |impl_| impl_.filter = filter.clone());
     }
 
-    fn get_visibility(&self) -> VisibilityType {
-        self.base_impl_ref().visibility
+    #[must_use]
+    pub fn get_visibility(&self) -> VisibilityType {
+        self.style.base().visibility
     }
 
-    fn set_visibility(&mut self, value: VisibilityType) {
-        if value == self.get_visibility() && self.base_impl_ref().visibility_expression.is_none() {
+    pub fn set_visibility(&mut self, value: VisibilityType) {
+        if value == self.get_visibility() && self.style.base().visibility_expression.is_none() {
             return;
         }
-        self.mutate_base_impl(&mut |impl_| {
+        self.mutate_base(&mut |impl_| {
             impl_.visibility = value;
             // Setting a constant visibility replaces any visibility expression.
             impl_.visibility_expression = None;
@@ -182,69 +324,54 @@ pub trait Layer: Any + Send + Sync {
 
     /// Re-evaluates the layer's visibility expression (a "visibility" layout
     /// value using "global-state"), if any, against the given global state.
-    fn reevaluate_visibility(&mut self, global_state: &GlobalStateMap) {
-        let impl_ = self.base_impl_ref();
-        let Some(expression) = &impl_.visibility_expression else {
+    pub fn reevaluate_visibility(&mut self, global_state: &GlobalStateMap) {
+        let Some(expression) = &self.style.base().visibility_expression else {
             return;
         };
         let value = evaluate_visibility_expression(expression.as_ref(), global_state);
-        if value == impl_.visibility {
+        if value == self.style.base().visibility {
             return;
         }
-        self.mutate_base_impl(&mut |impl_| impl_.visibility = value);
+        self.mutate_base(&mut |impl_| impl_.visibility = value);
     }
 
     /// The serialized visibility expression, or a null value when the
     /// visibility is a constant.
-    fn get_visibility_expression(&self) -> Value {
-        match &self.base_impl_ref().visibility_expression {
+    #[must_use]
+    pub fn get_visibility_expression(&self) -> Value {
+        match &self.style.base().visibility_expression {
             Some(expression) => expression.serialize(),
             None => Value::Null,
         }
     }
 
-    fn get_min_zoom(&self) -> f32 {
-        self.base_impl_ref().min_zoom
+    #[must_use]
+    pub fn get_min_zoom(&self) -> f32 {
+        self.style.base().min_zoom
     }
 
-    fn get_max_zoom(&self) -> f32 {
-        self.base_impl_ref().max_zoom
+    #[must_use]
+    pub fn get_max_zoom(&self) -> f32 {
+        self.style.base().max_zoom
     }
 
-    fn set_min_zoom(&mut self, min_zoom: f32) {
+    pub fn set_min_zoom(&mut self, min_zoom: f32) {
         if self.get_min_zoom() == min_zoom {
             return;
         }
-        self.mutate_base_impl(&mut |impl_| impl_.min_zoom = min_zoom);
+        self.mutate_base(&mut |impl_| impl_.min_zoom = min_zoom);
     }
 
-    fn set_max_zoom(&mut self, max_zoom: f32) {
+    pub fn set_max_zoom(&mut self, max_zoom: f32) {
         if self.get_max_zoom() == max_zoom {
             return;
         }
-        self.mutate_base_impl(&mut |impl_| impl_.max_zoom = max_zoom);
+        self.mutate_base(&mut |impl_| impl_.max_zoom = max_zoom);
     }
 
-    fn get_type_info(&self) -> &'static LayerTypeInfo {
-        self.base_impl_ref().get_type_info()
-    }
-
-    /// Collect dependencies
-    fn get_dependencies(&self) -> Dependency {
-        self.base_impl_ref().get_dependencies()
-    }
-}
-
-impl dyn Layer {
-    /// `layer->as<FooLayer>()`-style checked downcast.
-    pub fn downcast_ref<T: Layer>(&self) -> Option<&T> {
-        let any: &dyn Any = self;
-        any.downcast_ref()
-    }
-
-    pub fn downcast_mut<T: Layer>(&mut self) -> Option<&mut T> {
-        let any: &mut dyn Any = self;
-        any.downcast_mut()
+    #[must_use]
+    pub fn info(&self) -> LayerTypeInfo {
+        self.style.info()
     }
 }
 
@@ -263,222 +390,12 @@ fn evaluate_visibility_expression(expression: &Expr, global_state: &GlobalStateM
     VisibilityType::Visible
 }
 
-/// Serializes the members every layer type has, for `Layer::serialize` to
-/// extend.
-pub(crate) fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
-    let mut result = ValueObject::new();
-    result.insert("id".to_owned(), Value::String(layer.get_id()));
-    result.insert("type".to_owned(), Value::String(layer.get_type_info().type_.to_owned()));
-
-    let source = layer.get_source_id();
-    if !source.is_empty() {
-        result.insert("source".to_owned(), Value::String(source));
-    }
-
-    let source_layer = layer.get_source_layer();
-    if !source_layer.is_empty() {
-        result.insert("source-layer".to_owned(), Value::String(source_layer));
-    }
-
-    if layer.get_filter().is_set() {
-        result.insert("filter".to_owned(), layer.get_filter().serialize());
-    }
-
-    if layer.get_min_zoom() != f32::NEG_INFINITY {
-        // mapbox::base::Value from float: double.
-        result.insert("minzoom".to_owned(), Value::Double(f64::from(layer.get_min_zoom())));
-    }
-
-    if layer.get_max_zoom() != f32::INFINITY {
-        result.insert("maxzoom".to_owned(), Value::Double(f64::from(layer.get_max_zoom())));
-    }
-
-    let base_impl = layer.base_impl();
-    if let Some(expression) = &base_impl.visibility_expression {
-        let mut layout = ValueObject::new();
-        layout.insert("visibility".to_owned(), expression.serialize());
-        result.insert("layout".to_owned(), Value::Object(layout));
-    } else if layer.get_visibility() == VisibilityType::None {
-        let mut layout = ValueObject::new();
-        layout.insert("visibility".to_owned(), Value::String("none".to_owned()));
-        result.insert("layout".to_owned(), Value::Object(layout));
-    }
-
-    Value::Object(result)
-}
-
-pub(crate) fn set_property_base(
-    layer: &mut (impl Layer + ?Sized),
-    name: &str,
-    value: &Convertible<'_>,
-    _scope: Option<PropertyScope>,
-) -> Option<Error> {
-    let Some(mut error) = layer.set_property_internal(name, value) else {
-        return None; // Successfully set by the derived class implementation.
-    };
-    if name == "visibility" {
-        return set_visibility_value(layer, value);
-    }
-    if name == "minzoom" {
-        if let Some(zoom) = convert::<f32>(value, &mut error) {
-            layer.set_min_zoom(zoom);
-            return None;
-        }
-    } else if name == "maxzoom" {
-        if let Some(zoom) = convert::<f32>(value, &mut error) {
-            layer.set_max_zoom(zoom);
-            return None;
-        }
-    } else if name == "filter" {
-        if let Some(filter) = convert::<Filter>(value, &mut error) {
-            layer.set_filter(&filter);
-            return None;
-        }
-    } else if name == "source-layer" {
-        if let Some(source_layer) = convert::<String>(value, &mut error) {
-            if layer.get_type_info().source != layer_type_info::Source::Required {
-                // Quirk kept: no space between "to" and "the".
-                Log::warning(
-                    Event::General,
-                    format!("'source-layer' property cannot be set tothe layer {}", layer.base_impl().id),
-                );
-                return None;
-            }
-            layer.set_source_layer(&source_layer);
-            return None;
-        }
-    } else if name == "source"
-        && let Some(source_id) = convert::<String>(value, &mut error)
-    {
-        if layer.get_type_info().source != layer_type_info::Source::Required {
-            Log::warning(
-                Event::General,
-                format!("'source' property cannot be set tothe layer {}", layer.base_impl().id),
-            );
-            return None;
-        }
-        layer.set_source_id(&source_id);
-        return None;
-    }
-    Some(error)
-}
-
-fn set_visibility_value(layer: &mut (impl Layer + ?Sized), value: &Convertible<'_>) -> Option<Error> {
-    if value.is_undefined() {
-        layer.set_visibility(VisibilityType::Visible);
-        return None;
-    }
-
-    if value.is_array() {
-        // Per the style specification, visibility expressions may only use "global-state".
-        let mut ctx = ParsingContext::with_expected(Type::String);
-        let Some(parsed) = ctx.parse_expression(value, None) else {
-            return Some(Error::new(ctx.get_combined_errors()));
-        };
-        let allowed = Dependency::GLOBAL_STATE | Dependency::BIND | Dependency::VAR;
-        if (parsed.dependencies() | allowed) != allowed {
-            return Some(Error::new(r#"visibility expressions may only use the "global-state" expression"#));
-        }
-
-        // The layer may not belong to a style yet, so its global state is not
-        // available here. The style reevaluates the expression when the layer
-        // is added or when this change reaches its observer.
-        let expression: Arc<Expr> = Arc::from(parsed);
-        layer.mutate_base_impl(&mut |impl_| impl_.visibility_expression = Some(Arc::clone(&expression)));
-        return None;
-    }
-
-    let mut error = Error::default();
-    let visibility = <VisibilityType as Converter>::convert(value, &mut error);
-    match visibility {
-        Some(visibility) => {
-            layer.set_visibility(visibility);
-            None
-        }
-        None => Some(error),
-    }
-}
-
-// Debug is not a supertrait of this trait, nor of the other layer and source
-// traits that have a `dyn` Debug impl like this one: through the vtable it
-// would keep every implementation's derived Debug (and those of everything it
-// holds) in the binary. Each prints what tells its values apart instead.
-impl std::fmt::Debug for dyn Layer {
+// Prints what tells layers apart rather than every property.
+impl std::fmt::Debug for Layer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let base = self.base_impl();
-        f.debug_struct("Layer").field("id", &base.id).field("type", &base.get_type_info().type_).finish_non_exhaustive()
+        f.debug_struct("Layer")
+            .field("id", &self.style.base().id)
+            .field("type", &self.info().name)
+            .finish_non_exhaustive()
     }
 }
-
-/// Declares the layer struct `$name` over the `Impl` in scope, whose
-/// properties implement [`Properties`](crate::property_table::Properties),
-/// and implements [`Layer`] for it through the property table.
-macro_rules! layer_type {
-    ($(#[$meta:meta])* $name:ident) => {
-        $(#[$meta])*
-        #[derive(Debug)]
-        pub struct $name {
-            base_impl: ::std::sync::Arc<Impl>,
-        }
-
-        impl $name {
-            #[must_use]
-            pub fn from_impl(impl_: ::std::sync::Arc<Impl>) -> Self {
-                $name { base_impl: impl_ }
-            }
-
-            #[must_use]
-            pub fn impl_(&self) -> &Impl {
-                &self.base_impl
-            }
-        }
-
-        impl $crate::layer::Layer for $name {
-            fn base_impl(&self) -> ::std::sync::Arc<dyn $crate::layer::Impl> {
-                ::std::sync::Arc::<Impl>::clone(&self.base_impl)
-            }
-
-            fn base_impl_ref(&self) -> &dyn $crate::layer::Impl {
-                &*self.base_impl
-            }
-
-            fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut $crate::layer::ImplBase)) {
-                f(&mut ::std::sync::Arc::make_mut(&mut self.base_impl).base);
-            }
-
-            fn get_property(&self, name: &str) -> $crate::style_property::StyleProperty {
-                $crate::property_table::get_property(&*self.base_impl, name)
-            }
-
-            fn serialize(&self) -> ::feature::Value {
-                let mut result = $crate::layer::serialize_base(self);
-                if let ::feature::Value::Object(object) = &mut result {
-                    $crate::property_table::serialize_properties(&*self.base_impl, object);
-                }
-                result
-            }
-
-            fn clone_ref(&self, id: &str) -> Box<dyn $crate::layer::Layer> {
-                let mut impl_ = (*self.base_impl).clone();
-                impl_.base.id = id.to_owned();
-                impl_.paint = Default::default();
-                Box::new($name::from_impl(::std::sync::Arc::new(impl_)))
-            }
-
-            fn set_property_internal(
-                &mut self,
-                name: &str,
-                value: &::mln_conversion::Convertible<'_>,
-            ) -> Option<::mln_conversion::Error> {
-                match $crate::property_table::set_property(&mut self.base_impl, name, value) {
-                    Ok(()) => None,
-                    Err($crate::property_table::SetPropertyError::Invalid(error)) => Some(error),
-                    Err($crate::property_table::SetPropertyError::Unknown) => Some(::mln_conversion::Error::new(
-                        format!("layer '{}' doesn't support property '{}'", self.get_id(), name),
-                    )),
-                }
-            }
-        }
-    };
-}
-pub(crate) use layer_type;

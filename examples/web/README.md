@@ -112,12 +112,13 @@ doesn't have. `--module` picks mln_web_webgl or mln_web_shaper instead.
 
 It fails when a frame differs too much, when the page or a worker logs an error,
 or when a view's tiles get no worker replies. Two views also drag and pinch the
-map over a slow network first, and fail if that makes the map fetch URLs again.
-It also runs mln_gfx's conformance case of writes from JS arrays on a GPU of the
-map's backend, and checks that a panic stops the page, and that the GL JS
-comparison lines up. The page's frames come from SwiftShader and the native ones
-from lavapipe, which match in most views. check/check.mjs documents the options,
-and check/views.mjs lists the views.
+map over a slow network first, and log the URLs it fetches again
+(`crates/mln_renderer/src/tests/fast_camera_test.rs` tests the gestures' tile
+requests on a modeled network). It also runs mln_gfx's conformance case of
+writes from JS arrays on a GPU of the map's backend, and checks that a panic
+stops the page, and that the GL JS comparison lines up. The page's frames come
+from SwiftShader and the native ones from lavapipe, which match in most views.
+check/check.mjs documents the options, and check/views.mjs lists the views.
 
 Before the first run, install the Chromium that the lockfile's playwright-core
 pins, and keep lavapipe installed for the native runner (`VK_DRIVER_FILES`):

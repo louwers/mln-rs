@@ -29,6 +29,12 @@ impl Property {
         self.spec.get("property-type").and_then(Value::as_str)
     }
 
+    /// Whether the spec sets the boolean `key` true.
+    #[must_use]
+    pub(crate) fn flag(&self, key: &str) -> bool {
+        self.spec.get(key).and_then(Value::as_bool) == Some(true)
+    }
+
     /// `property.default` (None when the key is absent, i.e. `undefined`).
     #[must_use]
     pub(crate) fn default(&self) -> Option<&Value> {
@@ -71,9 +77,6 @@ pub(crate) fn load(text: &str) -> Result<Value, String> {
 
     // https://github.com/maplibre/maplibre-native/issues/4517
     zoom_only(&mut spec, "layout_symbol", "icon-rotation-alignment", "data-constant")?;
-
-    // https://github.com/maplibre/maplibre-native/issues/744
-    zoom_only(&mut spec, "paint_line", "line-dasharray", "cross-faded")?;
 
     // internal use
     spec["layout_symbol"]["symbol-screen-space"] = json!({

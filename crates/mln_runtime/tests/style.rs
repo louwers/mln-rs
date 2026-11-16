@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use mln_runtime::{CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, ResourceRequest, SourceKind};
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
+use mln_style::expression::Functions;
 use mln_style::sources::TileDataFormat;
 use mln_style::sources::custom_geometry_source::TileOptions;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
@@ -136,7 +137,7 @@ fn a_geojson_source_checks_its_options() {
 
     // Cluster properties parse on the runtime's thread.
     let plain = GeoJsonSourceOptions { cluster_properties: Some(r#"{"total":5}"#.to_owned()), ..defaults() };
-    assert!(plain.check_cluster_properties().is_err());
+    assert!(plain.check_cluster_properties(&Functions::with_builtins()).is_err());
     let error = wait_err(map.add_geojson_source("plain", plain));
     assert_eq!(error.kind, ErrorKind::InvalidArgument, "{}", error.message);
     assert!(wait(map.style_source("plain")).is_none());

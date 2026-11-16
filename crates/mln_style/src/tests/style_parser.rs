@@ -5,6 +5,7 @@ use mln_util::logging::{Event, EventSeverity, Log};
 use mln_vec_map::VecSet;
 
 use super::util::FixtureLog;
+use crate::StyleRegistry;
 use crate::layer::FontStack;
 use crate::parser::Parser;
 use crate::style_property::Kind;
@@ -35,7 +36,7 @@ fn parse_style_fixture(name: &str) -> Result<(), String> {
         serde_json::from_str(&std::fs::read_to_string(base.with_extension("info.json")).unwrap()).unwrap();
     let style_json = std::fs::read_to_string(base.with_extension("style.json")).unwrap();
 
-    let mut parser = Parser::default();
+    let mut parser = Parser::new(&StyleRegistry::with_builtins());
     if let Err(error) = parser.parse(&style_json) {
         Log::error(Event::ParseStyle, format!("Failed to parse style: {error}"));
     }
@@ -80,7 +81,7 @@ fn parse_style() {
 // gtest: StyleParser.SpriteAsString
 #[test]
 fn sprite_as_string() {
-    let mut parser = Parser::default();
+    let mut parser = Parser::new(&StyleRegistry::with_builtins());
     parser
         .parse(
             r#"{
@@ -98,7 +99,7 @@ fn sprite_as_string() {
 // gtest: StyleParser.SpriteAsArrayEmpty
 #[test]
 fn sprite_as_array_empty() {
-    let mut parser = Parser::default();
+    let mut parser = Parser::new(&StyleRegistry::with_builtins());
     parser
         .parse(
             r#"{
@@ -113,7 +114,7 @@ fn sprite_as_array_empty() {
 // gtest: StyleParser.SpriteAsArraySingle
 #[test]
 fn sprite_as_array_single() {
-    let mut parser = Parser::default();
+    let mut parser = Parser::new(&StyleRegistry::with_builtins());
     parser
         .parse(
             r#"{
@@ -134,7 +135,7 @@ fn sprite_as_array_single() {
 // gtest: StyleParser.SpriteAsArrayMultiple
 #[test]
 fn sprite_as_array_multiple() {
-    let mut parser = Parser::default();
+    let mut parser = Parser::new(&StyleRegistry::with_builtins());
     parser
         .parse(
             r#"{
@@ -160,7 +161,7 @@ fn sprite_as_array_multiple() {
 // gtest: StyleParser.FontStacks
 #[test]
 fn font_stacks() {
-    let mut parser = Parser::default();
+    let mut parser = Parser::new(&StyleRegistry::with_builtins());
     let _ = parser.parse(&std::fs::read_to_string(fixtures_dir().join("font_stacks.json")).unwrap());
     let expected: VecSet<FontStack> = [vec!["a"], vec!["a", "b"], vec!["a", "b", "c"]]
         .into_iter()
@@ -171,7 +172,7 @@ fn font_stacks() {
 }
 
 fn symbol_font_stacks(layout: &str) -> VecSet<FontStack> {
-    let mut parser = Parser::default();
+    let mut parser = Parser::new(&StyleRegistry::with_builtins());
     let _ = parser.parse(&format!(
         r#"{{
         "version": 8,
@@ -268,7 +269,7 @@ fn zoom_curve() {
 // inside a multibyte character; the range is then invalid, not a panic.
 #[test]
 fn font_face_unicode_range_with_multibyte_character() {
-    let mut parser = Parser::default();
+    let mut parser = Parser::new(&StyleRegistry::with_builtins());
     parser
         .parse(
             r#"{
@@ -315,7 +316,7 @@ fn fallback_font_faces() {
 fn nesting_depth_limit() {
     let parse = |depth: usize| {
         let json = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
-        Parser::default().parse(&json).unwrap_err().to_string()
+        Parser::new(&StyleRegistry::with_builtins()).parse(&json).unwrap_err().to_string()
     };
 
     assert_eq!(parse(127), "style must be an object");
@@ -349,7 +350,7 @@ fn deepest_admitted_style_parses_on_a_1_mib_stack() {
     std::thread::Builder::new()
         .stack_size(1024 * 1024)
         .spawn(move || {
-            let mut parser = Parser::default();
+            let mut parser = Parser::new(&StyleRegistry::with_builtins());
             parser.parse(&json).unwrap();
             assert_eq!(parser.layers.len(), 1);
         })
@@ -364,7 +365,7 @@ fn deepest_admitted_style_parses_on_a_1_mib_stack() {
 #[test]
 fn invalid_properties_are_skipped() {
     let log = FixtureLog::new();
-    let mut parser = Parser::default();
+    let mut parser = Parser::new(&StyleRegistry::with_builtins());
     parser
         .parse(
             r#"{
@@ -380,7 +381,7 @@ fn invalid_properties_are_skipped() {
         )
         .unwrap();
 
-    let ids: Vec<_> = parser.layers.iter().map(|layer| layer.get_id()).collect();
+    let ids: Vec<_> = parser.layers.iter().map(super::super::layer::Layer::get_id).collect();
     assert_eq!(ids, ["a", "b"]);
     let property = |layer: usize, name: &str| {
         let property = parser.layers[layer].get_property(name);

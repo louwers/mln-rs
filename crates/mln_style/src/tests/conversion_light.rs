@@ -3,8 +3,8 @@ use mln_style_types::Position;
 use mln_util::Color;
 
 use super::util::parse_json;
-use crate::conversion::{Converter, Error};
-use crate::light::Light;
+use crate::conversion::{Error, convert_light};
+use crate::expression::Functions;
 
 // gtest: StyleConversion.Light
 #[test]
@@ -12,27 +12,27 @@ fn light() {
     let mut error = Error::default();
     let parse_light = |src: &str, error: &mut Error| {
         let json = parse_json(src);
-        <Light as Converter>::convert(&Convertible::from(&json), error)
+        convert_light(&Convertible::from(&json), &Functions::with_builtins(), error)
     };
 
     {
         let mut light = parse_light("{}", &mut error).expect("light");
 
         let color_value = serde_json::json!("blue");
-        light.set_property("color", &Convertible::from(&color_value));
+        light.set_property("color", &Convertible::from(&color_value), &Functions::with_builtins());
 
         assert!(!light.impl_.properties.light_color.value.is_undefined());
         assert!(light.impl_.properties.light_color.value.is_constant());
         assert_eq!(*light.impl_.properties.light_color.value.as_constant(), Color::blue());
 
         let intensity_value = serde_json::json!(0.5);
-        light.set_property("intensity", &Convertible::from(&intensity_value));
+        light.set_property("intensity", &Convertible::from(&intensity_value), &Functions::with_builtins());
         assert!(!light.impl_.properties.light_intensity.value.is_undefined());
         assert!(light.impl_.properties.light_intensity.value.is_constant());
         assert_eq!(*light.impl_.properties.light_intensity.value.as_constant(), 0.5);
 
         let position_value = serde_json::json!([1.0, 2.0, 3.0]);
-        light.set_property("position", &Convertible::from(&position_value));
+        light.set_property("position", &Convertible::from(&position_value), &Functions::with_builtins());
         assert!(!light.impl_.properties.light_position.value.is_undefined());
         assert!(light.impl_.properties.light_position.value.is_constant());
         assert_eq!(*light.impl_.properties.light_position.value.as_constant(), Position::new([1.0, 2.0, 3.0]));

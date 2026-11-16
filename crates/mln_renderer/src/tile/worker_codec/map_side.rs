@@ -1,12 +1,16 @@
 // Port-only: the map side of the worker codec (mod.rs), for one worker
 // instance: encodes the jobs for that instance and decodes their replies.
 
-use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
+use std::sync::Arc;
+
+use mln_style::serialization::{SharedExpression, SharedLayer};
 use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
 
 use super::envelope::{self, Encoded};
-use super::fields::{SharedAvailableImages, SharedSourceStyle};
+use super::fields::{SharedAvailableImages, SharedEvaluatedLayer, SharedSourceStyle};
+use super::session;
+use crate::Registry;
 use crate::tile::job::{JobResult, Run};
 
 /// The map side of one worker instance's jobs.
@@ -14,22 +18,24 @@ pub(crate) struct MapCodec {
     /// The keys of what the instance has of this side's: source styles,
     /// layers, their properties and expressions, and sets of images.
     tables: shared::Tables,
+    registry: Arc<Registry>,
 }
 
-impl Default for MapCodec {
-    fn default() -> Self {
+impl MapCodec {
+    /// The map side of a new instance, whose jobs name `registry`'s
+    /// registrations.
+    pub(crate) fn new(registry: Arc<Registry>) -> Self {
         MapCodec {
             tables: shared::Tables::new()
                 .origin::<SharedSourceStyle>()
                 .origin::<SharedAvailableImages>()
                 .origin::<SharedLayer>()
-                .origin::<SharedLayerProperties>()
+                .origin::<SharedEvaluatedLayer>()
                 .origin::<SharedExpression>(),
+            registry,
         }
     }
-}
 
-impl MapCodec {
     /// The frame of `run`: its header, then the keys of the shared values
     /// that are gone on this side, then the job. Fails for what can't cross,
     /// which then defines nothing.
@@ -52,7 +58,9 @@ impl MapCodec {
     /// `Failed`.
     pub(crate) fn decode_result(&mut self, body: Encoded) -> JobResult {
         let Encoded { bytes, payloads } = body;
-        payload::decode(payloads, || self.tables.open(|| envelope::decode::<JobResult>(&bytes)))
+        let Self { tables, registry } = self;
+        let decode = || tables.open(|| envelope::decode::<JobResult>(&bytes));
+        payload::decode(payloads, || session(registry, decode))
             .unwrap_or_else(|error| JobResult::Failed(Error::native(format!("a tile worker's reply: {error}"))))
     }
 }

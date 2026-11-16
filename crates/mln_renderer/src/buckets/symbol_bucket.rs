@@ -15,11 +15,9 @@ use std::sync::{Arc, OnceLock};
 use glam::Vec2;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::EvaluationContext;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
-use mln_style::layers::symbol_layer_properties::{
-    SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties,
-};
+use mln_style::layers::Symbol;
+use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
+use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
 use mln_style_types::TextWritingModeType;
@@ -36,6 +34,7 @@ use parking_lot::{Mutex, MutexGuard, RwLock};
 use crate::bucket::{Bucket, BucketBase, FeatureStates};
 use crate::bucket_geometry::GeometryVec;
 use crate::gfx::context::Context;
+use crate::layer_type::EvaluatedLayer;
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::paint_property_binder::PaintPropertyBinder;
 
@@ -524,7 +523,7 @@ impl SymbolBucket {
     #[must_use]
     pub(crate) fn new(
         layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
-        paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
+        paint_properties: &VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
         text_size: &PropertyValue<f32>,
         icon_size: &PropertyValue<f32>,
         zoom: f32,
@@ -542,7 +541,7 @@ impl SymbolBucket {
             && (!icon_size.as_expression().is_feature_constant() || !icon_size.as_expression().is_zoom_constant());
         let mut binders = VecMap::new();
         for (id, properties) in paint_properties {
-            let evaluated = get_evaluated::<SymbolLayerProperties>(properties);
+            let evaluated = &properties.paint;
             binders.entry(id.clone()).or_insert_with(|| {
                 RwLock::new(PaintProperties {
                     icon_binders: SymbolIconBinders::new(evaluated, zoom),
@@ -832,6 +831,10 @@ impl Bucket for SymbolBucket {
         &mut self.base
     }
 
+    fn max_content_elevation(&self) -> f32 {
+        self.max_height_offset
+    }
+
     fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
@@ -844,6 +847,10 @@ impl Bucket for SymbolBucket {
             || self.has_text_collision_box_data()
             || self.has_icon_collision_circle_data()
             || self.has_text_collision_circle_data()
+    }
+
+    fn write_wire(&self, w: &mut mln_wire::Writer) {
+        mln_wire::Wire::write(self, w);
     }
 
     /// Re-evaluates the feature-state dependent attribute values.

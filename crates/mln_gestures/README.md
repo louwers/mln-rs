@@ -11,9 +11,8 @@ and gesture momentum, for hosts that have no gesture recognizer of their own
 (the desktop app, the browser build). MapLibre Native has no counterpart: its
 platform SDKs each recognize gestures. This one is ported from
 [Orbis](https://github.com/sargunv/orbis)'s `orb-camera` input, and drives the
-map through maplibre-native-ffi's camera calls (`Map::apply_camera_delta` and
-`Map::update_camera`, with their gesture phases), which mln-rs implements in its
-core.
+map through its camera calls (`Map::apply_camera_delta` and
+`Map::update_camera`, with their gesture phases), which mirror the C API's.
 
 ## Where each mechanism comes from
 
@@ -22,10 +21,10 @@ references, in this order:
 
 1. Measurements of the native map apps and platform scrolling, where someone has
    made them: maplibre/maplibre-native-ffi#1705 measured Apple Maps', Google
-   Maps', UIScrollView's and Android's glides, and ffi's C API defaults follow
+   Maps', UIScrollView's and Android's glides, and the C API's defaults follow
    them.
-2. maplibre-native-ffi's C API, the contract that mln-rs, Orbis and Compose
-   converge on, and its browser demo, which feels right.
+2. mln-rs's C API, the contract that Orbis and Compose converge on, and
+   maplibre-native-ffi's browser demo, which feels right.
 3. Compose, Orbis and GL JS where they do better than both, or have the
    mechanism alone. Each such row says why.
 

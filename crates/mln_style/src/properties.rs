@@ -294,6 +294,9 @@ macro_rules! __property_evaluation {
     (cross_faded_data_driven) => {
         $crate::evaluated::Evaluated::cross_faded_per_feature
     };
+    (cross_faded_or_data_driven) => {
+        $crate::evaluated::Evaluated::cross_faded_or_per_feature
+    };
     ($kind:ident) => {
         $crate::evaluated::Evaluated::plain
     };
@@ -309,6 +312,9 @@ macro_rules! __property_data_driven {
         true
     };
     (cross_faded_data_driven) => {
+        true
+    };
+    (cross_faded_or_data_driven) => {
         true
     };
     ($kind:ident) => {
@@ -333,7 +339,9 @@ pub(crate) use __property_data_driven;
 /// A property's kind is its style-spec property type: `constant`,
 /// `data_driven`, `cross_faded`, `cross_faded_data_driven` or `color_ramp`,
 /// or `integer_zoom` for a data-driven property that evaluates at the integer
-/// zoom below. A `paint` set transitions; a `layout` set doesn't.
+/// zoom below. `cross_faded_data_driven` is the patterns' kind;
+/// `cross_faded_or_data_driven`, `line-dasharray`'s, cross-fades a value that
+/// doesn't read the feature as `cross_faded` does. A `paint` set transitions; a `layout` set doesn't.
 ///
 /// A paint set's `derived { field: kind T = default => source, }` values
 /// aren't style properties: each takes `source`'s value, and transitions with
@@ -412,6 +420,25 @@ macro_rules! properties {
                     let mut result = $crate::expression::Dependency::NONE;
                     $(result |= self.$field.value.get_dependencies();)+
                     result
+                }
+            }
+
+            impl $crate::layer_type::PaintSet for Transitionable {
+                type Evaluated = PossiblyEvaluated;
+
+                fn evaluated_dependencies(evaluated: &PossiblyEvaluated) -> $crate::expression::Dependency {
+                    evaluated.get_dependencies()
+                }
+
+                fn constants_mask(evaluated: &PossiblyEvaluated) -> u64 {
+                    evaluated.constants_mask()
+                }
+
+                fn collect_evaluated_global_state_refs(
+                    evaluated: &PossiblyEvaluated,
+                    refs: &mut mln_vec_map::VecSet<String>,
+                ) {
+                    evaluated.collect_global_state_refs(refs);
                 }
             }
 
@@ -557,6 +584,16 @@ macro_rules! properties {
                     $(if let Some(property_refs) = self.$field.get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
+                }
+            }
+
+            impl $crate::layer_type::LayoutSet for Unevaluated {
+                fn dependencies(&self) -> $crate::expression::Dependency {
+                    self.get_dependencies()
+                }
+
+                fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
+                    Unevaluated::collect_global_state_refs(self, refs);
                 }
             }
 

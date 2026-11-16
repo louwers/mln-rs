@@ -19,8 +19,10 @@
 //!   their parsed node trees (`mln_style::serialization`), and tile data as
 //!   what it is made from (`mln_tile::TileData`); an instance keeps the tile
 //!   data of its jobs in a cache of its own, so a later job can name it.
-//! - Trait objects cross as the types they can be (fields.rs): layers and
-//!   their properties as their layer type's, buckets as their bucket type's.
+//! - Trait objects cross as the types they can be (fields.rs): layers'
+//!   style data and evaluated properties, and compound expressions, as
+//!   their layer type's or function's name, which the reading side resolves
+//!   against its own [`Registry`]; buckets as their bucket type's.
 //!
 //! Glyphs and images stay on the map side: a job gets where they are in the
 //! map's atlas (`Resolved`), never their pixels.
@@ -30,6 +32,12 @@
 //! (host.rs) runs an instance's jobs behind its `WorkerCodec`, and
 //! `RemoteWorkers` (transport.rs) is the map side of the instances, as
 //! `TileWorkers`.
+
+use std::cell::Cell;
+use std::sync::Arc;
+
+use crate::Registry;
+use crate::layer_type::ErasedLayerType;
 
 mod envelope;
 pub(crate) mod fields;
@@ -42,6 +50,38 @@ pub use envelope::Encoded;
 pub use host::TileWorkerHost;
 pub(crate) use transport::RemoteJobs;
 pub use transport::{RemoteWorkers, ReplySink, ThreadWorkerInstances, WorkerInstances};
+
+thread_local! {
+    /// The registry of the enclosing `session` on this thread.
+    static DECODING: Cell<Option<Arc<Registry>>> = const { Cell::new(None) };
+}
+
+/// Runs `f`, in which the values that the codec reads resolve the
+/// registrations they name against `registry`. Sessions nest: the innermost
+/// wins.
+fn session<R>(registry: &Arc<Registry>, f: impl FnOnce() -> R) -> R {
+    struct Restore(Option<Arc<Registry>>);
+
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            DECODING.set(self.0.take());
+        }
+    }
+
+    let _restore = Restore(DECODING.replace(Some(Arc::clone(registry))));
+    mln_style::decode_with(registry.style(), f)
+}
+
+/// The layer type named `name` in the registry of the enclosing `session`.
+fn decoding_layer_type(name: &str) -> Result<&'static dyn ErasedLayerType, &'static str> {
+    let registry = DECODING.take();
+    let layer_type = match &registry {
+        None => Err("a layer outside of a decoding session"),
+        Some(registry) => registry.layer_type(name).ok_or("unknown layer type"),
+    };
+    DECODING.set(registry);
+    layer_type
+}
 
 #[cfg(test)]
 mod tests;

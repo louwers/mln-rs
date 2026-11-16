@@ -1,6 +1,6 @@
 // C++ `Source::Impl` is an abstract class with data members; the data is
-// `ImplBase` and the virtual interface is the `Impl` trait (as for
-// `Layer::Impl`). `dyn Impl` derefs to its `ImplBase`.
+// `ImplBase` and the virtual interface is the `Impl` trait. `dyn Impl`
+// derefs to its `ImplBase`.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -122,8 +122,8 @@ pub fn downcast_arc<T: Impl>(impl_: &Arc<dyn Impl>) -> Arc<T> {
     any.downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))
 }
 
-// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
-// (layer.rs).
+// Debug is not a supertrait, for the reason at
+// `impl Debug for dyn ErasedLayerStyle` (layer_type.rs).
 impl std::fmt::Debug for dyn Impl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let base = self.base();

@@ -29,11 +29,10 @@ use mln_gfx::{
     VertexAttributeArray,
 };
 use mln_map_types::TransformState;
-use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
-use mln_style::layers::raster_layer_properties::{RasterLayerProperties, RasterPaintProperties};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layers::Raster;
+use mln_style::layers::raster_layer_properties::RasterPaintProperties;
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::hash::HashMap;
@@ -42,6 +41,7 @@ use mln_util::time::Instant;
 
 use super::raster_layer_tweaker::RasterLayerTweaker;
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
+use crate::bucket::NoBucket;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
@@ -50,9 +50,12 @@ use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerPrepareParameters, RenderLayer, RenderLayerBase, activate_layer_group, change_layer_index,
+    LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, activate_layer_group, change_layer_index,
+    set_style,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -60,13 +63,18 @@ use crate::render_tree::RenderTree;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &RasterLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), RasterLayerImpl::static_type_info()));
-    impl_.downcast_ref::<RasterLayerImpl>().expect("RenderRasterLayer: not a raster layer impl")
+impl LayerType for Raster {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+
+    fn render_layer(style: Arc<LayerStyle<Raster>>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderRasterLayer::new(style)))
+    }
 }
 
 pub(crate) struct RenderRasterLayer {
     base: RenderLayerBase,
+    style: Arc<LayerStyle<Raster>>,
     // Paint properties
     unevaluated: RasterPaintProperties::Unevaluated,
 
@@ -85,13 +93,14 @@ pub(crate) struct RenderRasterLayer {
 }
 
 impl RenderRasterLayer {
-    pub(crate) fn new(impl_: Arc<RasterLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Raster>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(RasterLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Raster>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderRasterLayer {
             base,
+            style: impl_,
             unevaluated,
             raster_shader: None,
             static_data_vertices: None,
@@ -125,7 +134,7 @@ impl RenderRasterLayer {
     /// The sampler of the layer's tile textures for the evaluated
     /// properties.
     fn sampler_state(&self) -> SamplerState {
-        let evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<Raster>(&self.base.evaluated_properties).paint;
         // GL JS draws Nearest when either property asks for it.
         let nearest = *evaluated.raster_resampling.uniform() == RasterResamplingType::Nearest
             || *evaluated.resampling.uniform() == ResamplingType::Nearest;
@@ -251,25 +260,27 @@ impl RenderLayer for RenderRasterLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = RasterLayerProperties::with_evaluated(
-            downcast_arc::<RasterLayerImpl>(&self.base.base_impl),
+        let previous_evaluated = evaluated::<Raster>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Raster>::with_paint(
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.raster_opacity.uniform() > 0.0 {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        self.base.passes =
+            if *properties.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
@@ -433,7 +444,7 @@ impl RenderLayer for RenderRasterLayer {
 
         // Drop the textures of buckets that are no longer rendered.
         let live_buckets: mln_util::hash::HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.base_impl).map(|b| b.get_id())).collect();
+            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
         self.textures.retain(|id, _| live_buckets.contains(id));
         // Existing drawables keep their textures, so a changed filter is
         // applied to the textures themselves.
@@ -445,8 +456,8 @@ impl RenderLayer for RenderRasterLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let bucket_ptr = tile.get_bucket(&*base_impl).filter(|b| b.has_data()).cloned();
+            let style = Arc::clone(&self.base.style);
+            let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
             let Some(bucket_ptr) = bucket_ptr else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;

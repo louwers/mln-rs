@@ -1,33 +1,26 @@
-use std::sync::Arc;
+use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+use crate::layers::heatmap_layer_properties::{self, HeatmapPaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-use crate::layer::{LayerTypeInfo, layer_type_info};
-pub use crate::layers::heatmap_layer_impl::Impl;
+/// The `heatmap` layer type.
+pub struct Heatmap;
 
-static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
-    type_: "heatmap",
-    source: layer_type_info::Source::Required,
-    pass3d: layer_type_info::Pass3D::Required,
-    layout: layer_type_info::Layout::NotRequired,
-    fading_tiles: layer_type_info::FadingTiles::NotRequired,
-    cross_tile_index: layer_type_info::CrossTileIndex::NotRequired,
-    tile_kind: layer_type_info::TileKind::Geometry,
-};
+impl StyleLayerType for Heatmap {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "heatmap",
+        source: SourceKind::Geometry,
+        pass_3d: true,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &heatmap_layer_properties::PROPERTIES;
 
-impl Impl {
-    #[must_use]
-    pub fn static_type_info() -> &'static LayerTypeInfo {
-        &TYPE_INFO
-    }
-}
+    type LayoutProperties = NoProperties;
+    type PaintProperties = HeatmapPaintProperties::Transitionable;
+    type Extra = ();
 
-crate::layer::layer_type!(
-    /// A `heatmap` layer.
-    HeatmapLayer
-);
-
-impl HeatmapLayer {
-    #[must_use]
-    pub fn new(layer_id: &str, source_id: &str) -> Self {
-        HeatmapLayer::from_impl(Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())))
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
+        heatmap_layer_properties::visit(slot, visitor)
     }
 }

@@ -4,8 +4,10 @@ use geojson::GeoJson;
 use mln_style_types::SourceType;
 use mln_util::constants;
 
+use super::geojson_options::convert_geojson_options;
 use super::tileset::{convert_tileset, optional_member};
 use super::{Converter, Convertible, Error};
+use crate::expression::Functions;
 use crate::source::Source;
 use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::tile_source::TileSource;
@@ -29,14 +31,19 @@ fn convert_tile_source(id: &str, value: &Convertible<'_>, source_type: SourceTyp
     }))
 }
 
-fn convert_geojson_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
+fn convert_geojson_source(
+    id: &str,
+    value: &Convertible<'_>,
+    functions: &Arc<Functions>,
+    error: &mut Error,
+) -> Option<Box<dyn Source>> {
     let Some(data_value) = value.object_member("data") else {
         error.message = "GeoJSON source must have a data value".to_owned();
         return None;
     };
 
     let mut options = GeoJSONOptions::default_options();
-    if let Some(converted) = GeoJSONOptions::convert(value, error) {
+    if let Some(converted) = convert_geojson_options(value, functions, error) {
         options = Arc::new(converted);
     }
 
@@ -96,7 +103,14 @@ fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) ->
     Some(Box::new(result))
 }
 
-pub fn convert_source(value: &Convertible<'_>, error: &mut Error, id: &str) -> Option<Box<dyn Source>> {
+/// Converts the source `id`. A GeoJSON source's `clusterProperties`
+/// expressions parse against `functions`.
+pub fn convert_source(
+    value: &Convertible<'_>,
+    error: &mut Error,
+    id: &str,
+    functions: &Arc<Functions>,
+) -> Option<Box<dyn Source>> {
     if !value.is_object() {
         error.message = "source must be an object".to_owned();
         return None;
@@ -115,7 +129,7 @@ pub fn convert_source(value: &Convertible<'_>, error: &mut Error, id: &str) -> O
         "raster" => SourceType::Raster,
         "vector" => SourceType::Vector,
         "raster-dem" => SourceType::RasterDEM, // dem-heatmap
-        "geojson" => return convert_geojson_source(id, value, error),
+        "geojson" => return convert_geojson_source(id, value, functions, error),
         "image" => return convert_image_source(id, value, error), // conformance
         _ => {
             error.message = "invalid source type".to_owned();

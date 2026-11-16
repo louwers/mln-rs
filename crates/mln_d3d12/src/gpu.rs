@@ -4,6 +4,7 @@ use std::any::Any;
 use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpu_allocator::MemoryLocation;
 use mln_gfx::gpu::validation::{
@@ -25,21 +26,21 @@ use mln_util::size::Size;
 use windows::Win32::Foundation::{HANDLE, RECT};
 use windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY;
 use windows::Win32::Graphics::Direct3D12::{
-    D3D12_BOX, D3D12_CLEAR_VALUE, D3D12_CLEAR_VALUE_0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-    D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_DEPTH_STENCIL_VALUE,
-    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-    D3D12_FENCE_FLAG_NONE, D3D12_GRAPHICS_PIPELINE_STATE_DESC, D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED,
-    D3D12_INDEX_BUFFER_VIEW, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
-    D3D12_INPUT_ELEMENT_DESC, D3D12_INPUT_LAYOUT_DESC, D3D12_PLACED_SUBRESOURCE_FOOTPRINT, D3D12_RANGE,
-    D3D12_RENDER_PASS_BEGINNING_ACCESS, D3D12_RENDER_PASS_BEGINNING_ACCESS_0,
-    D3D12_RENDER_PASS_BEGINNING_ACCESS_CLEAR_PARAMETERS, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR,
-    D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE,
-    D3D12_RENDER_PASS_DEPTH_STENCIL_DESC, D3D12_RENDER_PASS_ENDING_ACCESS,
-    D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
-    D3D12_RENDER_PASS_FLAG_NONE, D3D12_RENDER_PASS_RENDER_TARGET_DESC, D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION,
-    D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-    D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_DESC,
-    D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
+    D3D12_BOX, D3D12_CLEAR_FLAG_DEPTH, D3D12_CLEAR_FLAG_STENCIL, D3D12_CLEAR_VALUE, D3D12_CLEAR_VALUE_0,
+    D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT, D3D12_CPU_DESCRIPTOR_HANDLE,
+    D3D12_DEPTH_STENCIL_VALUE, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
+    D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_FENCE_FLAG_NONE, D3D12_GRAPHICS_PIPELINE_STATE_DESC,
+    D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED, D3D12_INDEX_BUFFER_VIEW, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA,
+    D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, D3D12_INPUT_ELEMENT_DESC, D3D12_INPUT_LAYOUT_DESC,
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT, D3D12_PRIMITIVE_TOPOLOGY_TYPE, D3D12_RANGE, D3D12_RENDER_PASS_BEGINNING_ACCESS,
+    D3D12_RENDER_PASS_BEGINNING_ACCESS_0, D3D12_RENDER_PASS_BEGINNING_ACCESS_CLEAR_PARAMETERS,
+    D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
+    D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE, D3D12_RENDER_PASS_DEPTH_STENCIL_DESC,
+    D3D12_RENDER_PASS_ENDING_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+    D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE, D3D12_RENDER_PASS_FLAG_NONE, D3D12_RENDER_PASS_RENDER_TARGET_DESC,
+    D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0,
+    D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+    D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
     D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE, D3D12_RESOURCE_FLAG_NONE,
     D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE,
     D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -48,7 +49,7 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT,
     D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, D3D12_TEXTURE_LAYOUT_UNKNOWN, D3D12_VERTEX_BUFFER_VIEW, D3D12_VIEWPORT,
     ID3D12CommandAllocator, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12GraphicsCommandList4, ID3D12PipelineState,
-    ID3D12Resource, ID3D12RootSignature,
+    ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_R16_UINT, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC,
@@ -115,7 +116,8 @@ struct Texture {
 
 /// A compiled program, what it reads from its bindings, and where.
 struct Shader {
-    program: Rc<CompiledProgram>,
+    key: ShaderKey,
+    program: Arc<CompiledProgram>,
     reads: Vec<ShaderBinding>,
     /// The buffers it reads, by id, with their root parameter and view.
     buffers: Vec<(u32, u32, View)>,
@@ -228,7 +230,7 @@ enum Garbage {
 
 /// A [`Gpu`] on a D3D12 [`Device`].
 ///
-/// Every pipeline has one root signature (`root_signature`), so a draw
+/// Every pipeline has the device's root signature (`root_signature`), so a draw
 /// binds its buffers as root CBVs and SRVs, its textures as a table that
 /// its bindings made, and its samplers through the indices that its
 /// bindings point at.
@@ -240,13 +242,15 @@ enum Garbage {
 /// a command list that runs ahead of each flush's. Textures rest in one
 /// state, which passes and copies return them to.
 ///
+/// A process compiles each program once, and a device makes each pipeline
+/// state once for the backends on it.
+///
 /// Destroying a resource frees it once the work recorded until then has
 /// finished, as each flush signals a fence.
 pub struct D3d12Gpu {
     device: Device,
     compiler: ShaderCompiler,
     caps: Caps,
-    root_signature: ID3D12RootSignature,
     fence: ID3D12Fence,
     /// The batch that the work being recorded will be.
     serial: u64,
@@ -290,6 +294,13 @@ pub struct D3d12Gpu {
     free_recordings: Vec<Recording>,
     in_flight: VecDeque<(u64, Recording)>,
     garbage: Vec<(u64, Garbage)>,
+    /// The fences and values that the queue waits for before the next
+    /// submit, and signals after it.
+    waits: Vec<(ID3D12Fence, u64)>,
+    signals: Vec<(ID3D12Fence, u64)>,
+    /// The fences and values that the first pass to draw into a texture has
+    /// the queue wait for: the host's reads of it.
+    texture_waits: HashMap<TextureId, (ID3D12Fence, u64)>,
     /// Last, so that what holds memory drops before it.
     memory: Memory,
 }
@@ -398,7 +409,6 @@ impl D3d12Gpu {
     pub fn new(device: &Device) -> Result<D3d12Gpu, GpuError> {
         let d3d = device.device();
         let compiler = ShaderCompiler::new()?;
-        let root_signature = root_signature::create(d3d)?;
         // SAFETY: a plain call.
         let fence: ID3D12Fence =
             unsafe { d3d.CreateFence(0, D3D12_FENCE_FLAG_NONE) }.map_err(invalid("CreateFence"))?;
@@ -416,7 +426,6 @@ impl D3d12Gpu {
         Ok(D3d12Gpu {
             compiler,
             caps,
-            root_signature,
             fence,
             serial: 1,
             window: (0, 0),
@@ -447,6 +456,9 @@ impl D3d12Gpu {
             free_recordings: Vec::new(),
             in_flight: VecDeque::new(),
             garbage: Vec::new(),
+            waits: Vec::new(),
+            signals: Vec::new(),
+            texture_waits: HashMap::default(),
             memory: Memory::new(d3d)?,
             device: device.clone(),
         })
@@ -508,6 +520,52 @@ impl D3d12Gpu {
         self.textures.get(texture).map(|texture| (&texture.memory.resource, texture.rest))
     }
 
+    /// The GPU address of `buffer`'s memory, for a host that binds the
+    /// buffer itself, such as an overlay's vertex and index buffers.
+    #[must_use]
+    pub fn buffer_address(&self, buffer: BufferId) -> Option<u64> {
+        self.buffers.get(buffer).map(|buffer| buffer.memory.address())
+    }
+
+    /// Keeps `object` until the work recorded so far has finished, as a
+    /// destroyed resource is kept: an overlay's own pipeline state, root
+    /// signature or descriptor heap that its last frames still use.
+    pub fn destroy_later(&mut self, object: Box<dyn Any>) {
+        self.garbage.push((self.serial, Garbage::Held(object)));
+    }
+
+    /// Has the queue wait for `fence` to reach `value` before the submit of
+    /// the next pass that draws into `texture`: the host's reads of it. It
+    /// replaces what the texture waited for.
+    pub fn wait_before_using(&mut self, texture: TextureId, fence: ID3D12Fence, value: u64) {
+        self.texture_waits.insert(texture, (fence, value));
+    }
+
+    /// Has the next submit wait for what `texture` waits for, though no pass
+    /// drew into it.
+    pub fn take_waits_into_next_submit(&mut self, texture: TextureId) {
+        self.waits.extend(self.texture_waits.remove(&texture));
+    }
+
+    /// Drops what `texture` waits for, which no submit takes.
+    pub fn forget_waits(&mut self, texture: TextureId) {
+        self.texture_waits.remove(&texture);
+    }
+
+    /// The fence that the backend's submits signal, and the value of the
+    /// last one's: once the fence reaches it, the work submitted so far has
+    /// finished.
+    #[must_use]
+    pub fn last_submit(&self) -> (ID3D12Fence, u64) {
+        (self.fence.clone(), self.serial - 1)
+    }
+
+    /// Has the queue signal `fence` with `value` once the next flush's work
+    /// has finished, for a host that waits for a frame.
+    pub fn signal_after_next_submit(&mut self, fence: ID3D12Fence, value: u64) {
+        self.signals.push((fence, value));
+    }
+
     fn completed(&self) -> u64 {
         // SAFETY: a plain query.
         unsafe { self.fence.GetCompletedValue() }
@@ -552,6 +610,39 @@ impl D3d12Gpu {
             }
         }
         Ok(self.textures.insert(texture))
+    }
+
+    /// Clears the new render target `texture` to zeros in the copy list, as
+    /// new memory holds: D3D12 can't use a placed render target until a
+    /// discard, clear or copy, and the renderer reads a depth it didn't
+    /// clear in `fill-extrusion-multiple/stencil-wrap`.
+    fn clear_new_target(&mut self, texture: TextureId, depth: bool) -> Result<(), GpuError> {
+        let list = self.copy_list()?;
+        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        let (resource, rest) = (&entry.memory.resource, entry.rest);
+        let target = if depth { D3D12_RESOURCE_STATE_DEPTH_WRITE } else { D3D12_RESOURCE_STATE_RENDER_TARGET };
+        // SAFETY: no work uses the new texture, its views are its own, and
+        // the barriers return it to its rest.
+        unsafe {
+            if rest != target {
+                list.ResourceBarrier(&[transition(resource, rest, target)]);
+            }
+            match (entry.rtv, entry.dsv) {
+                (Some(rtv), _) => list.ClearRenderTargetView(rtv.handle, &[0.0; 4], None),
+                (_, Some(dsv)) => {
+                    let mut flags = D3D12_CLEAR_FLAG_DEPTH;
+                    if entry.info.format.is_some_and(TextureFormat::has_stencil) {
+                        flags |= D3D12_CLEAR_FLAG_STENCIL;
+                    }
+                    list.ClearDepthStencilView(dsv.handle, flags, 0.0, 0, None);
+                }
+                (None, None) => {}
+            }
+            if rest != target {
+                list.ResourceBarrier(&[transition(resource, target, rest)]);
+            }
+        }
+        Ok(())
     }
 
     fn info(&self) -> (impl Fn(BufferId) -> Option<BufferInfo> + '_, impl Fn(TextureId) -> Option<TextureInfo> + '_) {
@@ -637,7 +728,7 @@ impl D3d12Gpu {
         // backend, which keeps the list's work alive until it finishes.
         unsafe {
             list.SetDescriptorHeaps(&[Some(self.tables.heap.clone()), Some(self.sampler_heap.heap.clone())]);
-            list.SetGraphicsRootSignature(&self.root_signature);
+            list.SetGraphicsRootSignature(self.device.root_signature());
             list.SetGraphicsRootDescriptorTable(
                 SAMPLER_TABLE,
                 self.sampler_heap.heap.GetGPUDescriptorHandleForHeapStart(),
@@ -698,10 +789,17 @@ impl D3d12Gpu {
             submitted.push(Some(recording.list.cast().map_err(invalid("ID3D12CommandList"))?));
         }
         let queue = self.device.queue();
-        // SAFETY: as above.
+        // SAFETY: as above, and the fences live until the calls return: the
+        // queue holds what it waits on and signals.
         unsafe {
+            for (fence, value) in std::mem::take(&mut self.waits) {
+                queue.Wait(&fence, value).map_err(|error| self.failed("ID3D12CommandQueue::Wait", &error))?;
+            }
             if !submitted.is_empty() {
                 queue.ExecuteCommandLists(&submitted);
+            }
+            for (fence, value) in std::mem::take(&mut self.signals) {
+                queue.Signal(&fence, value).map_err(|error| self.failed("ID3D12CommandQueue::Signal", &error))?;
             }
             queue
                 .Signal(&self.fence, self.serial)
@@ -893,8 +991,13 @@ impl Gpu for D3d12Gpu {
         };
         let info = TextureInfo { format: Some(desc.format), size: desc.size, usage: desc.usage };
         let rest = rest_state(info.format, desc.usage);
-        let memory = self.memory.texture(self.device.device(), &resource_desc, rest)?;
-        self.insert_texture(memory, format, info, rest)
+        let bytes = u64::from(width) * u64::from(height) * u64::from(desc.format.bytes_per_texel().unwrap_or(8));
+        let memory = self.memory.texture(self.device.device(), &resource_desc, bytes, rest)?;
+        let id = self.insert_texture(memory, format, info, rest)?;
+        if desc.usage.render_target {
+            self.clear_new_target(id, depth)?;
+        }
+        Ok(id)
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
@@ -998,7 +1101,7 @@ impl Gpu for D3d12Gpu {
                 }
             }
         }
-        Ok(self.shaders.insert(Shader { program: Rc::new(program), reads, buffers, textures }))
+        Ok(self.shaders.insert(Shader { key: key.clone(), program, reads, buffers, textures }))
     }
 
     fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
@@ -1006,66 +1109,8 @@ impl Gpu for D3d12Gpu {
         let program = &shader.program;
         let (topology_type, topology) = conv::topology(desc.state.primitive)
             .ok_or_else(|| GpuError::Unsupported(format!("{:?} primitives", desc.state.primitive)))?;
-        let mut elements = Vec::new();
-        for (slot, layout) in desc.vertex_buffers.iter().enumerate() {
-            let (table, class, rate) = match layout.step {
-                VertexStep::Vertex => (program.attributes, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0),
-                VertexStep::Instance => (program.instance_attributes, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1),
-            };
-            for attribute in &layout.attributes {
-                let format = conv::vertex_format(attribute.format)
-                    .ok_or_else(|| GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)))?;
-                let location = table
-                    .iter()
-                    .find(|info| info.id == attribute.id as usize)
-                    .ok_or_else(|| GpuError::Invalid(format!("{} has no attribute {}", program.name, attribute.id)))?
-                    .index;
-                elements.push(D3D12_INPUT_ELEMENT_DESC {
-                    // naga's HLSL names a vertex input of location N `LOC`N.
-                    SemanticName: s!("LOC"),
-                    SemanticIndex: location as u32,
-                    Format: format,
-                    InputSlot: slot as u32,
-                    AlignedByteOffset: attribute.offset,
-                    InputSlotClass: class,
-                    InstanceDataStepRate: rate,
-                });
-            }
-        }
-        let mut rtv_formats = [DXGI_FORMAT_UNKNOWN; 8];
-        if let Some(color) = desc.targets.color {
-            rtv_formats[0] = conv::texture_format(color);
-        }
-        let bytecode =
-            |code: &[u8]| D3D12_SHADER_BYTECODE { pShaderBytecode: code.as_ptr().cast(), BytecodeLength: code.len() };
-        let pso_desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
-            // SAFETY: a copy of the pointer without a reference, which the
-            // description's ManuallyDrop never releases.
-            pRootSignature: unsafe { std::mem::transmute_copy(&self.root_signature) },
-            VS: bytecode(&program.vertex),
-            PS: bytecode(&program.fragment),
-            BlendState: conv::blend(&desc.state),
-            SampleMask: u32::MAX,
-            RasterizerState: conv::rasterizer(&desc.state),
-            DepthStencilState: conv::depth_stencil(&desc.state, desc.targets.depth_stencil.is_some()),
-            InputLayout: D3D12_INPUT_LAYOUT_DESC {
-                pInputElementDescs: elements.as_ptr(),
-                NumElements: elements.len() as u32,
-            },
-            IBStripCutValue: D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED,
-            PrimitiveTopologyType: topology_type,
-            NumRenderTargets: u32::from(desc.targets.color.is_some()),
-            RTVFormats: rtv_formats,
-            DSVFormat: desc.targets.depth_stencil.map_or(DXGI_FORMAT_UNKNOWN, conv::texture_format),
-            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-            ..Default::default()
-        };
-        // SAFETY: the description, its bytecode and its elements outlive
-        // the call.
-        let state: ID3D12PipelineState = unsafe {
-            self.device.device().CreateGraphicsPipelineState(&raw const pso_desc)
-        }
-        .map_err(|error| GpuError::Invalid(format!("{}: CreateGraphicsPipelineState: {error}", program.name)))?;
+        let key = (shader.key.clone(), desc.vertex_buffers.to_vec(), desc.state, desc.targets);
+        let state = self.device.pipeline(key, || create_pipeline_state(&self.device, program, desc, topology_type))?;
         let layout = self.layout_tags.tag(desc.shader, desc.vertex_buffers);
         let tags = PipelineTags { shader: desc.shader, layout, targets: desc.targets };
         Ok(self.pipelines.insert(Pipeline { state, topology, tags }))
@@ -1180,7 +1225,10 @@ impl Gpu for D3d12Gpu {
                 }
                 buffer => held(buffer.map(|buffer| buffer.memory)),
             },
-            ResourceId::Texture(id) => self.textures.remove(id).map(Garbage::Texture),
+            ResourceId::Texture(id) => {
+                self.texture_waits.remove(&id);
+                self.textures.remove(id).map(Garbage::Texture)
+            }
             ResourceId::Sampler(id) => {
                 self.samplers.remove(id);
                 None
@@ -1210,6 +1258,12 @@ impl Gpu for D3d12Gpu {
         let window = self.open_window()?;
         let list = self.frame_list()?;
         let list = list.cast::<ID3D12GraphicsCommandList4>().map_err(invalid("ID3D12GraphicsCommandList4"))?;
+        // The pass's submit waits for the host's reads of its attachments.
+        for texture in
+            desc.color.map(|color| color.texture).into_iter().chain(desc.depth_stencil.map(|depth| depth.texture))
+        {
+            self.take_waits_into_next_submit(texture);
+        }
         let mut barriers = Vec::new();
         let mut color = None;
         if let Some(attachment) = desc.color {
@@ -1597,4 +1651,71 @@ impl Drop for D3d12Gpu {
     fn drop(&mut self) {
         let _ = self.wait_for(self.serial - 1);
     }
+}
+
+/// A pipeline state of `program` for `desc`, with the device's root signature.
+fn create_pipeline_state(
+    device: &Device,
+    program: &CompiledProgram,
+    desc: &PipelineDesc<'_>,
+    topology_type: D3D12_PRIMITIVE_TOPOLOGY_TYPE,
+) -> Result<ID3D12PipelineState, GpuError> {
+    let mut elements = Vec::new();
+    for (slot, layout) in desc.vertex_buffers.iter().enumerate() {
+        let (table, class, rate) = match layout.step {
+            VertexStep::Vertex => (program.attributes, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0),
+            VertexStep::Instance => (program.instance_attributes, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1),
+        };
+        for attribute in &layout.attributes {
+            let format = conv::vertex_format(attribute.format)
+                .ok_or_else(|| GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)))?;
+            let location = table
+                .iter()
+                .find(|info| info.id == attribute.id as usize)
+                .ok_or_else(|| GpuError::Invalid(format!("{} has no attribute {}", program.name, attribute.id)))?
+                .index;
+            elements.push(D3D12_INPUT_ELEMENT_DESC {
+                // naga's HLSL names a vertex input of location N `LOC`N.
+                SemanticName: s!("LOC"),
+                SemanticIndex: location as u32,
+                Format: format,
+                InputSlot: slot as u32,
+                AlignedByteOffset: attribute.offset,
+                InputSlotClass: class,
+                InstanceDataStepRate: rate,
+            });
+        }
+    }
+    let mut rtv_formats = [DXGI_FORMAT_UNKNOWN; 8];
+    if let Some(color) = desc.targets.color {
+        rtv_formats[0] = conv::texture_format(color);
+    }
+    let bytecode =
+        |code: &[u8]| D3D12_SHADER_BYTECODE { pShaderBytecode: code.as_ptr().cast(), BytecodeLength: code.len() };
+    let pso_desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
+        // SAFETY: a copy of the pointer without a reference, which the
+        // description's ManuallyDrop never releases.
+        pRootSignature: unsafe { std::mem::transmute_copy(device.root_signature()) },
+        VS: bytecode(&program.vertex),
+        PS: bytecode(&program.fragment),
+        BlendState: conv::blend(&desc.state),
+        SampleMask: u32::MAX,
+        RasterizerState: conv::rasterizer(&desc.state),
+        DepthStencilState: conv::depth_stencil(&desc.state, desc.targets.depth_stencil.is_some()),
+        InputLayout: D3D12_INPUT_LAYOUT_DESC {
+            pInputElementDescs: elements.as_ptr(),
+            NumElements: elements.len() as u32,
+        },
+        IBStripCutValue: D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED,
+        PrimitiveTopologyType: topology_type,
+        NumRenderTargets: u32::from(desc.targets.color.is_some()),
+        RTVFormats: rtv_formats,
+        DSVFormat: desc.targets.depth_stencil.map_or(DXGI_FORMAT_UNKNOWN, conv::texture_format),
+        SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+        ..Default::default()
+    };
+    // SAFETY: the description, its bytecode and its elements outlive
+    // the call.
+    unsafe { device.device().CreateGraphicsPipelineState(&raw const pso_desc) }
+        .map_err(|error| GpuError::Invalid(format!("{}: CreateGraphicsPipelineState: {error}", program.name)))
 }

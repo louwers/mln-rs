@@ -3127,6 +3127,7 @@ struct VertexInput {
     @location(9) offset: vec2<f32>,
     @location(10) width: vec2<f32>,
     @location(11) floorwidth: vec2<f32>,
+    @location(12) dasharray: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -3142,6 +3143,9 @@ struct VertexOutput {
     @location(8) v_lineprogress: f32,
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
+#endif
+#ifndef HAS_UNIFORM_u_dasharray
+    @location(10) @interpolate(flat) v_dash_width: f32,
 #endif
 };
 
@@ -3159,7 +3163,7 @@ struct LineSDFDrawableUBO {
     offset_t: f32,
     width_t: f32,
     floorwidth_t: f32,
-    pad1: f32,
+    atlas_height: f32,
     pad2: f32,
 };
 
@@ -3299,13 +3303,25 @@ fn main(in: VertexInput) -> VertexOutput {
     let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
 
     // Calculate texture coordinates
+    var patternscale_a = drawable.patternscale_a;
+    var patternscale_b = drawable.patternscale_b;
+    var tex_y_a = drawable.tex_y_a;
+    var tex_y_b = drawable.tex_y_b;
+#ifndef HAS_UNIFORM_u_dasharray
+    // The dash attribute: the pattern's middle row, row span and length.
+    patternscale_a = vec2<f32>(drawable.patternscale_a.x / in.dasharray.z, -in.dasharray.y / 2.0 / drawable.atlas_height);
+    patternscale_b = vec2<f32>(drawable.patternscale_b.x / in.dasharray.z, patternscale_a.y);
+    tex_y_a = (in.dasharray.x + 0.5) / drawable.atlas_height;
+    tex_y_b = tex_y_a;
+    out.v_dash_width = in.dasharray.z;
+#endif
     let tex_a = vec2<f32>(
-        v_linesofar * drawable.patternscale_a.x / floorwidth,
-        v_normal.y * drawable.patternscale_a.y + drawable.tex_y_a
+        v_linesofar * patternscale_a.x / floorwidth,
+        v_normal.y * patternscale_a.y + tex_y_a
     );
     let tex_b = vec2<f32>(
-        v_linesofar * drawable.patternscale_b.x / floorwidth,
-        v_normal.y * drawable.patternscale_b.y + drawable.tex_y_b
+        v_linesofar * patternscale_b.x / floorwidth,
+        v_normal.y * patternscale_b.y + tex_y_b
     );
 
     out.position = position;
@@ -3337,6 +3353,9 @@ struct FragmentInput {
     @location(8) v_lineprogress: f32,
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
+#endif
+#ifndef HAS_UNIFORM_u_dasharray
+    @location(10) @interpolate(flat) v_dash_width: f32,
 #endif
 };
 
@@ -3400,9 +3419,13 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let dist_a = textureSample(dash_texture, dash_sampler, in.v_tex_a).r;
     let dist_b = textureSample(dash_texture, dash_sampler, in.v_tex_b).r;
     let sdfdist = mix(dist_a, dist_b, tileProps.mix);
+    var sdfgamma = tileProps.sdfgamma;
+#ifndef HAS_UNIFORM_u_dasharray
+    sdfgamma = sdfgamma / in.v_dash_width;
+#endif
 
     // Calculate SDF alpha
-    let sdf_alpha = smoothstep(0.5 - tileProps.sdfgamma / in.v_floorwidth, 0.5 + tileProps.sdfgamma / in.v_floorwidth, sdfdist);
+    let sdf_alpha = smoothstep(0.5 - sdfgamma / in.v_floorwidth, 0.5 + sdfgamma / in.v_floorwidth, sdfdist);
 
     // The gradient ramp is stored in a texture indexed by the ratio along the entire line
     let color = textureSample(gradient_texture, gradient_sampler, vec2<f32>(in.v_lineprogress, 0.5));
@@ -3997,6 +4020,7 @@ struct VertexInput {
     @location(10) offset: vec2<f32>,
     @location(11) width: vec2<f32>,
     @location(12) floorwidth: vec2<f32>,
+    @location(13) dasharray: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -4012,6 +4036,9 @@ struct VertexOutput {
     @location(8) v_floorwidth: f32,
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
+#endif
+#ifndef HAS_UNIFORM_u_dasharray
+    @location(10) @interpolate(flat) v_dash_width: f32,
 #endif
 };
 
@@ -4029,7 +4056,7 @@ struct LineSDFDrawableUBO {
     offset_t: f32,
     width_t: f32,
     floorwidth_t: f32,
-    pad1: f32,
+    atlas_height: f32,
     pad2: f32,
 };
 
@@ -4188,13 +4215,25 @@ fn main(in: VertexInput) -> VertexOutput {
     let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
 
     // Calculate texture coordinates
+    var patternscale_a = drawable.patternscale_a;
+    var patternscale_b = drawable.patternscale_b;
+    var tex_y_a = drawable.tex_y_a;
+    var tex_y_b = drawable.tex_y_b;
+#ifndef HAS_UNIFORM_u_dasharray
+    // The dash attribute: the pattern's middle row, row span and length.
+    patternscale_a = vec2<f32>(drawable.patternscale_a.x / in.dasharray.z, -in.dasharray.y / 2.0 / drawable.atlas_height);
+    patternscale_b = vec2<f32>(drawable.patternscale_b.x / in.dasharray.z, patternscale_a.y);
+    tex_y_a = (in.dasharray.x + 0.5) / drawable.atlas_height;
+    tex_y_b = tex_y_a;
+    out.v_dash_width = in.dasharray.z;
+#endif
     let tex_a = vec2<f32>(
-        v_linesofar * drawable.patternscale_a.x / floorwidth,
-        v_normal.y * drawable.patternscale_a.y + drawable.tex_y_a
+        v_linesofar * patternscale_a.x / floorwidth,
+        v_normal.y * patternscale_a.y + tex_y_a
     );
     let tex_b = vec2<f32>(
-        v_linesofar * drawable.patternscale_b.x / floorwidth,
-        v_normal.y * drawable.patternscale_b.y + drawable.tex_y_b
+        v_linesofar * patternscale_b.x / floorwidth,
+        v_normal.y * patternscale_b.y + tex_y_b
     );
 
     out.position = position;
@@ -4226,6 +4265,9 @@ struct FragmentInput {
     @location(8) v_floorwidth: f32,
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
+#endif
+#ifndef HAS_UNIFORM_u_dasharray
+    @location(10) @interpolate(flat) v_dash_width: f32,
 #endif
 };
 
@@ -4287,9 +4329,13 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let dist_a = textureSample(sdf_texture, sdf_sampler, in.v_tex_a).r;
     let dist_b = textureSample(sdf_texture, sdf_sampler, in.v_tex_b).r;
     let sdfdist = mix(dist_a, dist_b, tileProps.mix);
+    var sdfgamma = tileProps.sdfgamma;
+#ifndef HAS_UNIFORM_u_dasharray
+    sdfgamma = sdfgamma / in.v_dash_width;
+#endif
 
     // Calculate SDF alpha
-    let sdf_alpha = smoothstep(0.5 - tileProps.sdfgamma / in.v_floorwidth, 0.5 + tileProps.sdfgamma / in.v_floorwidth, sdfdist);
+    let sdf_alpha = smoothstep(0.5 - sdfgamma / in.v_floorwidth, 0.5 + sdfgamma / in.v_floorwidth, sdfdist);
 
     return in.v_color * (alpha * in.v_opacity * sdf_alpha);
 }

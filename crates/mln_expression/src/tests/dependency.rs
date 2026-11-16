@@ -1,3 +1,4 @@
+use crate::Functions;
 use crate::collator_expression::CollatorExpression;
 use crate::dsl::*;
 use crate::expression::Dependency;
@@ -36,7 +37,9 @@ fn convert() {
     // See `collator_expression.cpp`, `extraDependency`
     assert_eq!(
         Dependency::FEATURE,
-        create_expression_from_str(r#"["resolved-locale",["collator",{"locale": "de"}]]"#).unwrap().dependencies()
+        create_expression_from_str(r#"["resolved-locale",["collator",{"locale": "de"}]]"#, &Functions::with_builtins())
+            .unwrap()
+            .dependencies()
     );
     assert_eq!(
         Dependency::FEATURE | Dependency::ZOOM,
@@ -86,7 +89,7 @@ fn distance() {
          "type": "Point",
          "coordinates":[24.938492774963375,60.16980226227959]}"#;
     let expr_str = format!(r#"["distance", {point_geo_source} ]"#);
-    let expression = create_expression_from_str(&expr_str).expect("distance expression");
+    let expression = create_expression_from_str(&expr_str, &Functions::with_builtins()).expect("distance expression");
     assert_eq!(Dependency::FEATURE, expression.dependencies());
 }
 

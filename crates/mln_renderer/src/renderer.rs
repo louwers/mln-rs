@@ -20,6 +20,7 @@ use mln_util::Color;
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
+use crate::Registry;
 use crate::clip_masks::ClipMasks;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::{Context, Stats};
@@ -109,18 +110,24 @@ impl Renderer {
         run_loop: &mln_actor::RunLoop,
     ) -> Self {
         let engine = crate::text::font_face_engine::default_engine();
-        Self::with_fonts(backend, pixel_ratio, local_font_family, glyph_cache, engine, run_loop)
+        let registry = Registry::with_builtins();
+        Self::with_fonts(backend, pixel_ratio, local_font_family, glyph_cache, engine, registry, run_loop)
     }
 
-    /// A renderer that uses `glyph_cache`, and loads the font files of a
-    /// style's font faces with `font_face_engine` instead of
-    /// `font_face_engine::default_engine()`.
+    /// A renderer that uses `glyph_cache`, loads the font files of a style's
+    /// font faces with `font_face_engine` instead of
+    /// `font_face_engine::default_engine()`, and draws the layer types of
+    /// `registry` instead of the built-in ones.
+    ///
+    /// The map that the renderer draws must have a registry filled by the
+    /// same calls: a layer whose type `registry` lacks isn't drawn.
     pub fn with_fonts(
         backend: Rc<dyn RendererBackend>,
         pixel_ratio: f32,
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
         font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
+        registry: Arc<Registry>,
         run_loop: &mln_actor::RunLoop,
     ) -> Self {
         Renderer {
@@ -129,6 +136,7 @@ impl Renderer {
                 local_font_family,
                 glyph_cache,
                 font_face_engine,
+                registry,
                 run_loop,
             )),
             context: Rc::new(Context::new(Rc::clone(&backend))),

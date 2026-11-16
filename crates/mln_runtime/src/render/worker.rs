@@ -18,7 +18,7 @@ use mln_actor::RunLoop;
 use mln_gfx::{ConsumerSync, Handoff, RendererBackend, SyncKind};
 use mln_map::{MapView, RenderMode};
 use mln_renderer::text::font_face_engine::FontFaceEngine;
-use mln_renderer::{Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
+use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
 use mln_style::collection::ImmutableVector;
 use mln_style::source_impl;
 use mln_style::sources::{GeoJSONData, geojson_source_impl};
@@ -102,6 +102,8 @@ pub(crate) struct Init {
     pub(crate) glyph_cache: Arc<GlyphCache>,
     /// What the renderer loads a style's font faces with.
     pub(crate) font_face_engine: Arc<dyn FontFaceEngine>,
+    /// What the renderer's tile workers lay out with.
+    pub(crate) registry: Arc<Registry>,
     /// Whether the renderer keeps tiles that left the view.
     pub(crate) tile_cache_enabled: bool,
     /// The font family, a CSS font-family list, that the renderer draws CJK
@@ -232,6 +234,8 @@ struct Gfx {
     backend: Rc<dyn RendererBackend>,
     glyph_cache: Arc<GlyphCache>,
     font_face_engine: Arc<dyn FontFaceEngine>,
+    /// What the renderer's tile workers lay out with (`Init`).
+    registry: Arc<Registry>,
     /// The font family the renderer draws CJK glyphs in (`Init`).
     local_font_family: Option<String>,
     /// The loop that the renderer runs its own work on.
@@ -250,6 +254,7 @@ impl Gfx {
             scale_factor,
             glyph_cache,
             font_face_engine,
+            registry,
             tile_cache_enabled,
             local_font_family,
             failure,
@@ -274,16 +279,18 @@ impl Gfx {
             local_font_family.clone(),
             Arc::clone(&glyph_cache),
             Arc::clone(&font_face_engine),
+            Arc::clone(&registry),
             run_loop,
         );
         renderer.set_tile_cache_enabled(tile_cache_enabled);
-        set_tile_workers(&mut renderer, run_loop);
+        set_tile_workers(&mut renderer, &registry, run_loop);
         Ok(Gfx {
             renderer,
             target,
             backend,
             glyph_cache,
             font_face_engine,
+            registry,
             local_font_family,
             run_loop: run_loop.clone(),
         })
@@ -310,24 +317,26 @@ impl Gfx {
             self.local_font_family.clone(),
             Arc::clone(&self.glyph_cache),
             Arc::clone(&self.font_face_engine),
+            Arc::clone(&self.registry),
             &self.run_loop,
         );
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
-        set_tile_workers(&mut renderer, &self.run_loop);
+        set_tile_workers(&mut renderer, &self.registry, &self.run_loop);
         self.renderer = renderer;
     }
 }
 
 /// In the browser, puts the renderer's tile workers in the instance's Web
-/// Workers. Elsewhere they stay on the background threads.
-fn set_tile_workers(renderer: &mut Renderer, run_loop: &RunLoop) {
+/// Workers, which lay out with `registry`. Elsewhere they stay on the
+/// background threads.
+fn set_tile_workers(renderer: &mut Renderer, registry: &Arc<Registry>, run_loop: &RunLoop) {
     #[cfg(target_family = "wasm")]
-    if let Some(workers) = crate::web::tile_workers(&run_loop.scheduler()) {
+    if let Some(workers) = crate::web::tile_workers(&run_loop.scheduler(), registry) {
         renderer.set_tile_workers(&workers);
     }
     #[cfg(not(target_family = "wasm"))]
-    let _ = (renderer, run_loop);
+    let _ = (renderer, registry, run_loop);
 }
 
 /// A host's frame demand on its way, and the last command sent before it.

@@ -4861,6 +4861,10 @@ layout(location = 7) in vec2 in_width;
 layout(location = 8) in vec2 in_floorwidth;
 #endif
 
+#if !defined(HAS_UNIFORM_u_dasharray)
+layout(location = 9) in vec4 in_dasharray;
+#endif
+
 layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
@@ -4880,7 +4884,7 @@ struct LineSDFDrawableUBO {
     float offset_t;
     float width_t;
     float floorwidth_t;
-    float pad1;
+    float atlas_height;
     float pad2;
 };
 
@@ -4928,6 +4932,10 @@ layout(location = 8) out float frag_floorwidth;
 
 #ifdef PROJECTION_GLOBE
 layout(location = 9) out float frag_tile_x;
+#endif
+
+#if !defined(HAS_UNIFORM_u_dasharray)
+layout(location = 10) flat out float frag_dash_width;
 #endif
 
 void main() {
@@ -5024,8 +5032,21 @@ void main() {
 
     frag_width2 = vec2(outset, inset);
 
-    frag_tex_a = vec2(linesofar * drawable.patternscale_a.x / floorwidth, frag_normal.y * drawable.patternscale_a.y + drawable.tex_y_a);
-    frag_tex_b = vec2(linesofar * drawable.patternscale_b.x / floorwidth, frag_normal.y * drawable.patternscale_b.y + drawable.tex_y_b);
+#ifdef HAS_UNIFORM_u_dasharray
+    const vec2 patternscale_a = drawable.patternscale_a;
+    const vec2 patternscale_b = drawable.patternscale_b;
+    const float tex_y_a = drawable.tex_y_a;
+    const float tex_y_b = drawable.tex_y_b;
+#else
+    // The dash attribute: the pattern's middle row, row span and length.
+    const vec2 patternscale_a = vec2(drawable.patternscale_a.x / in_dasharray.z, -in_dasharray.y / 2.0 / drawable.atlas_height);
+    const vec2 patternscale_b = vec2(drawable.patternscale_b.x / in_dasharray.z, patternscale_a.y);
+    const float tex_y_a = (in_dasharray.x + 0.5) / drawable.atlas_height;
+    const float tex_y_b = tex_y_a;
+    frag_dash_width = in_dasharray.z;
+#endif
+    frag_tex_a = vec2(linesofar * patternscale_a.x / floorwidth, frag_normal.y * patternscale_a.y + tex_y_a);
+    frag_tex_b = vec2(linesofar * patternscale_b.x / floorwidth, frag_normal.y * patternscale_b.y + tex_y_b);
 }
 ",
     fragment: r"
@@ -5091,6 +5112,10 @@ layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform 
 layout(location = 9) in float frag_tile_x;
 #endif
 
+#if !defined(HAS_UNIFORM_u_dasharray)
+layout(location = 10) flat in float frag_dash_width;
+#endif
+
 void main() {
 #ifdef PROJECTION_GLOBE
     if (clippedAtAntimeridian(frag_tile_x)) {
@@ -5139,8 +5164,13 @@ void main() {
     const float sdfdist_a = texture(sampler2D(image0_texture, image0_sampler), frag_tex_a).a;
     const float sdfdist_b = texture(sampler2D(image0_texture, image0_sampler), frag_tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
+#ifdef HAS_UNIFORM_u_dasharray
+    const float sdfgamma = tileProps.sdfgamma;
+#else
+    const float sdfgamma = tileProps.sdfgamma / frag_dash_width;
+#endif
     const float alpha = clamp(min(dist - (frag_width2.y - blur2), frag_width2.x - dist) / blur2, 0.0, 1.0) *
-                        smoothstep(0.5 - tileProps.sdfgamma / floorwidth, 0.5 + tileProps.sdfgamma / floorwidth, sdfdist);
+                        smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     out_color = color * (alpha * opacity);
 }
@@ -5180,6 +5210,10 @@ layout(location = 6) in vec2 in_width;
 layout(location = 7) in vec2 in_floorwidth;
 #endif
 
+#if !defined(HAS_UNIFORM_u_dasharray)
+layout(location = 8) in vec4 in_dasharray;
+#endif
+
 layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
@@ -5199,7 +5233,7 @@ struct LineSDFDrawableUBO {
     float offset_t;
     float width_t;
     float floorwidth_t;
-    float pad1;
+    float atlas_height;
     float pad2;
 };
 
@@ -5244,6 +5278,10 @@ layout(location = 8) out float frag_floorwidth;
 
 #ifdef PROJECTION_GLOBE
 layout(location = 9) out float frag_tile_x;
+#endif
+
+#if !defined(HAS_UNIFORM_u_dasharray)
+layout(location = 10) flat out float frag_dash_width;
 #endif
 
 void main() {
@@ -5337,8 +5375,21 @@ void main() {
 
     frag_width2 = vec2(outset, inset);
 
-    frag_tex_a = vec2(linesofar * drawable.patternscale_a.x / floorwidth, frag_normal.y * drawable.patternscale_a.y + drawable.tex_y_a);
-    frag_tex_b = vec2(linesofar * drawable.patternscale_b.x / floorwidth, frag_normal.y * drawable.patternscale_b.y + drawable.tex_y_b);
+#ifdef HAS_UNIFORM_u_dasharray
+    const vec2 patternscale_a = drawable.patternscale_a;
+    const vec2 patternscale_b = drawable.patternscale_b;
+    const float tex_y_a = drawable.tex_y_a;
+    const float tex_y_b = drawable.tex_y_b;
+#else
+    // The dash attribute: the pattern's middle row, row span and length.
+    const vec2 patternscale_a = vec2(drawable.patternscale_a.x / in_dasharray.z, -in_dasharray.y / 2.0 / drawable.atlas_height);
+    const vec2 patternscale_b = vec2(drawable.patternscale_b.x / in_dasharray.z, patternscale_a.y);
+    const float tex_y_a = (in_dasharray.x + 0.5) / drawable.atlas_height;
+    const float tex_y_b = tex_y_a;
+    frag_dash_width = in_dasharray.z;
+#endif
+    frag_tex_a = vec2(linesofar * patternscale_a.x / floorwidth, frag_normal.y * patternscale_a.y + tex_y_a);
+    frag_tex_b = vec2(linesofar * patternscale_b.x / floorwidth, frag_normal.y * patternscale_b.y + tex_y_b);
 }
 ",
     fragment: r"
@@ -5364,6 +5415,10 @@ layout(location = 8) in float frag_floorwidth;
 
 #ifdef PROJECTION_GLOBE
 layout(location = 9) in float frag_tile_x;
+#endif
+
+#if !defined(HAS_UNIFORM_u_dasharray)
+layout(location = 10) flat in float frag_dash_width;
 #endif
 
 layout(location = 0) out vec4 out_color;
@@ -5445,8 +5500,13 @@ void main() {
     const float sdfdist_a = texture(sampler2D(image1_texture, image1_sampler), frag_tex_a).a;
     const float sdfdist_b = texture(sampler2D(image1_texture, image1_sampler), frag_tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
+#ifdef HAS_UNIFORM_u_dasharray
+    const float sdfgamma = tileProps.sdfgamma;
+#else
+    const float sdfgamma = tileProps.sdfgamma / frag_dash_width;
+#endif
     const float alpha = clamp(min(dist - (frag_width2.y - blur2), frag_width2.x - dist) / blur2, 0.0, 1.0) *
-                        smoothstep(0.5 - tileProps.sdfgamma / floorwidth, 0.5 + tileProps.sdfgamma / floorwidth, sdfdist);
+                        smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     // The gradient ramp is stored in a texture indexed by the ratio along the entire line.
     const vec4 color = texture(sampler2D(image0_texture, image0_sampler), vec2(frag_lineprogress, 0.5));

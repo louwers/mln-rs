@@ -17,7 +17,8 @@ use raw_window_handle::{
 use crate::completion::{self, Generations, PendingCompletion};
 use crate::error::Error;
 use crate::generated::types::{
-    MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_EXPORTED_RING,
+    MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_D3D12_BORROWED_TEXTURES,
+    MLN_RENDER_TARGET_KIND_D3D12_COMPOSITION, MLN_RENDER_TARGET_KIND_EXPORTED_RING,
     MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_METAL_LAYER,
     MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_RENDER_TARGET_KIND_OHOS_WINDOW,
     MLN_RENDER_TARGET_KIND_OPEN_GL_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_OPEN_GL_SURFACE,
@@ -92,6 +93,12 @@ enum Target {
         size: Size,
         surface: Surface,
     },
+    /// What shows a D3D12 composition swap chain.
+    #[cfg(backend_d3d12)]
+    Composition {
+        size: Size,
+        composition: PendingComposition,
+    },
     /// A target that this library doesn't render to.
     Unsupported(&'static str),
 }
@@ -162,6 +169,9 @@ enum PendingRing {
     /// Metal textures, which the ring retains.
     #[cfg(target_vendor = "apple")]
     Metal { textures: Vec<NonNull<c_void>>, depth: Vec<NonNull<c_void>>, physical: Size },
+    /// D3D12 resources, which the ring references, and their states.
+    #[cfg(backend_d3d12)]
+    D3d12 { textures: Vec<NonNull<c_void>>, depth: Vec<NonNull<c_void>>, physical: Size, state: u32, depth_state: u32 },
 }
 
 impl PendingRing {
@@ -180,7 +190,60 @@ impl PendingRing {
             PendingRing::Metal { textures, depth, physical } => {
                 BorrowedRing::metal(unsafe { mln_mtl::BorrowedTextures::from_raw(&textures, &depth, physical) })
             }
+            #[cfg(backend_d3d12)]
+            PendingRing::D3d12 { textures, depth, physical, state, depth_state } => {
+                use mln_d3d12::windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_STATES, ID3D12Resource};
+                use mln_d3d12::windows::core::Interface as _;
+                let resources = |pointers: &[NonNull<c_void>]| {
+                    pointers
+                        .iter()
+                        .filter_map(|pointer| {
+                            let raw = pointer.as_ptr();
+                            // SAFETY: the caller's contract; the clones are
+                            // the ring's references from here on.
+                            unsafe { ID3D12Resource::from_raw_borrowed(&raw) }.cloned()
+                        })
+                        .collect()
+                };
+                BorrowedRing::d3d12(mln_d3d12::BorrowedTextures {
+                    textures: resources(&textures),
+                    size: physical,
+                    state: D3D12_RESOURCE_STATES(state as i32),
+                    depth_textures: resources(&depth),
+                    depth_state: D3D12_RESOURCE_STATES(depth_state as i32),
+                })
+            }
         }
+    }
+}
+
+/// A D3D12 composition target's visual or panel, which the surface
+/// references once the call's handles check out.
+#[cfg(backend_d3d12)]
+struct PendingComposition {
+    kind: crate::generated::types::mln_d3d12_composition_kind,
+    object: NonNull<c_void>,
+}
+
+#[cfg(backend_d3d12)]
+impl PendingComposition {
+    /// The surface of a composition swap chain that the object shows.
+    ///
+    /// Fails with an invalid argument for a `SwapChainPanel` that isn't one.
+    ///
+    /// # Safety
+    ///
+    /// The object is the host's live COM object, which the header's contract
+    /// keeps alive through the call.
+    unsafe fn into_surface(self) -> Result<Surface, Error> {
+        let composition = if self.kind == crate::generated::types::MLN_D3D12_COMPOSITION_KIND_VISUAL {
+            // SAFETY: the caller's contract.
+            unsafe { mln_d3d12::Composition::from_visual(self.object.as_ptr()) }
+        } else {
+            // SAFETY: the caller's contract.
+            unsafe { mln_d3d12::Composition::from_swap_chain_panel(self.object.as_ptr()) }
+        }?;
+        Ok(Surface::d3d12_composition(composition))
     }
 }
 
@@ -194,6 +257,8 @@ impl Target {
             | Target::Exported { size, .. } => Some(*size),
             #[cfg(target_family = "wasm")]
             Target::WebCanvas { size, .. } => Some(*size),
+            #[cfg(backend_d3d12)]
+            Target::Composition { size, .. } => Some(*size),
             Target::Unsupported(_) => None,
         }
     }
@@ -538,6 +603,12 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
             MLN_RENDER_TARGET_KIND_EXPORTED_RING => {
                 (target.data.exported_ring.logical_size, "mln_exported_ring_target")
             }
+            MLN_RENDER_TARGET_KIND_D3D12_BORROWED_TEXTURES => {
+                (target.data.d3d12_borrowed_textures.logical_size, "mln_d3d12_borrowed_textures_target")
+            }
+            MLN_RENDER_TARGET_KIND_D3D12_COMPOSITION => {
+                (target.data.d3d12_composition.logical_size, "mln_d3d12_composition_target")
+            }
             _ => return Err(Error::invalid_argument("mln_render_target.kind is invalid")),
         }
     };
@@ -742,6 +813,60 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 )
             }
             MLN_RENDER_TARGET_KIND_EXPORTED_RING => exported_ring(size, &target.data.exported_ring, name)?,
+            MLN_RENDER_TARGET_KIND_D3D12_BORROWED_TEXTURES => {
+                let ring = target.data.d3d12_borrowed_textures;
+                let textures = ring_textures(
+                    ring.textures,
+                    ring.texture_count,
+                    ring.physical_width,
+                    ring.physical_height,
+                    name,
+                    |t| t.resource,
+                )?;
+                let depth = depth_textures(ring.depth_textures, ring.depth_texture_count, textures, name)?;
+                if textures.iter().chain(depth).any(|texture| texture.resource.is_null()) {
+                    return Err(Error::invalid_argument(format!("{name} textures must not be null")));
+                }
+                #[cfg(backend_d3d12)]
+                {
+                    // The loop above turned down null textures.
+                    let pointers = |textures: &[crate::generated::types::mln_d3d12_borrowed_texture]| {
+                        textures.iter().filter_map(|texture| NonNull::new(texture.resource)).collect()
+                    };
+                    let ring = PendingRing::D3d12 {
+                        textures: pointers(textures),
+                        depth: pointers(depth),
+                        physical: Size::new(ring.physical_width, ring.physical_height),
+                        state: ring.state,
+                        depth_state: ring.depth_state,
+                    };
+                    Target::Borrowed { size, ring }
+                }
+                #[cfg(not(backend_d3d12))]
+                Target::Unsupported("D3D12 textures are not supported by this build")
+            }
+            MLN_RENDER_TARGET_KIND_D3D12_COMPOSITION => {
+                use crate::generated::types::{
+                    MLN_D3D12_COMPOSITION_KIND_SWAP_CHAIN_PANEL, MLN_D3D12_COMPOSITION_KIND_VISUAL,
+                };
+                let composition = target.data.d3d12_composition;
+                let object = required(composition.object, &field("object"))?;
+                if !matches!(
+                    composition.kind,
+                    MLN_D3D12_COMPOSITION_KIND_VISUAL | MLN_D3D12_COMPOSITION_KIND_SWAP_CHAIN_PANEL
+                ) {
+                    return Err(Error::invalid_argument(format!("{} is invalid", field("kind"))));
+                }
+                #[cfg(backend_d3d12)]
+                {
+                    Target::Composition { size, composition: PendingComposition { kind: composition.kind, object } }
+                }
+                #[cfg(not(backend_d3d12))]
+                {
+                    let _ = object;
+                    Target::Unsupported("D3D12 composition swap chains are not supported by this build")
+                }
+            }
             _ => return Err(Error::invalid_argument("mln_render_target.kind is invalid")),
         }
     };
@@ -925,6 +1050,23 @@ pub(crate) unsafe extern "C" fn mln_map_attach(
             // Either driver runs on the instance's one thread.
             #[cfg(target_family = "wasm")]
             Target::WebCanvas { size, surface } => RenderTarget::Surface { size, surface, device },
+            #[cfg(backend_d3d12)]
+            Target::Composition { size, composition } => {
+                if device.as_ref().is_some_and(|device| device.backend() != ::mln_runtime::BackendType::D3D12) {
+                    return Err(unsupported("a composition swap chain presents on a D3D12 device"));
+                }
+                let panel = composition.kind == crate::generated::types::MLN_D3D12_COMPOSITION_KIND_SWAP_CHAIN_PANEL;
+                // SAFETY: the caller's contract.
+                let surface = unsafe { composition.into_surface() }?;
+                if panel {
+                    options.require_caller_thread(
+                        "a SwapChainPanel takes its swap chain on its UI thread, which drives the session",
+                    )?;
+                } else {
+                    options.require_core_worker("a DirectComposition visual's session renders on a core worker")?;
+                }
+                RenderTarget::Surface { size, surface, device }
+            }
             Target::Unsupported(message) => return Err(unsupported(message)),
         };
         render_session::attach(&map, target, options, |handle, attached| {
@@ -984,6 +1126,12 @@ pub(crate) unsafe extern "C" fn mln_render_session_set_target(
             Target::HostSurface { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
             #[cfg(target_family = "wasm")]
             Target::WebCanvas { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
+            #[cfg(backend_d3d12)]
+            Target::Composition { size, composition } => {
+                // SAFETY: the caller's contract.
+                let surface = unsafe { composition.into_surface() }?;
+                Box::new(move |session| session.set_surface(size, surface))
+            }
             Target::Borrowed { size, ring } => {
                 // SAFETY: the caller's contract.
                 let ring = unsafe { ring.into_ring() };

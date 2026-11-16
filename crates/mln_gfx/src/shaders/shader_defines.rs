@@ -103,6 +103,7 @@ pub const ID_LINE_WIDTH_VERTEX_ATTRIBUTE: usize = 7;
 pub const ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE: usize = 8;
 pub const ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 9;
 pub const ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 10;
+pub const ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE: usize = 11;
 pub const MAX_ATTRIBUTE_COUNT_PER_SHADER: usize = 12;
 
 // --- conformance: raster, fill-extrusion, hillshade, heatmap, color-relief

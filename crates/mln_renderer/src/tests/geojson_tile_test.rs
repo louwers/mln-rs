@@ -4,16 +4,17 @@ use feature::Feature;
 use geo_types::Point;
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map_types::MapMode;
-use mln_style::layer::{Layer, downcast_arc};
-use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
-use mln_style::layers::{CircleLayer, CircleLayerProperties};
+use mln_style::layer::Layer;
+use mln_style::layer_type::LayerStyle;
+use mln_style::layers::Circle;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style::sources::geojson_source::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 
+use crate::Registry;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tests::{OneTile, style};
 use crate::tile::loading::DataOrigin;
 use crate::tile::tile::TileKind;
@@ -105,9 +106,9 @@ fn point_data() -> Arc<dyn GeoJSONData> {
     Arc::new(FakeGeoJSONData { features })
 }
 
-fn circle_layer_properties() -> Arc<dyn LayerProperties> {
-    let layer = CircleLayer::new("circle", "source");
-    Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())))
+fn circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
+    let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
+    Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))
 }
 
 fn root() -> OverscaledTileID {
@@ -178,9 +179,9 @@ fn issue_9927() {
 
 /// A circle layer as its render layer evaluates it, which records what the
 /// worker codec sends to evaluate it again.
-fn evaluated_circle_layer_properties() -> Arc<dyn LayerProperties> {
-    let layer = CircleLayer::new("circle", "source");
-    let render_layer = crate::layermanager::create_render_layer(&layer.base_impl()).unwrap();
+fn evaluated_circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
+    let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
+    let render_layer = crate::tests::render_layer(layer.style());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }

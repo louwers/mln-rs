@@ -12,16 +12,9 @@ use mln_map_types::{
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, RequestOrder, Resource, Responder, Response};
-use mln_style::layer::{Layer, downcast_arc};
-use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
-use mln_style::layers::hillshade_layer::Impl as HillshadeLayerImpl;
-use mln_style::layers::line_layer::Impl as LineLayerImpl;
-use mln_style::layers::raster_layer::Impl as RasterLayerImpl;
-use mln_style::layers::{
-    CircleLayer, CircleLayerProperties, HillshadeLayer, HillshadeLayerProperties, LineLayer, LineLayerProperties,
-    RasterLayer, RasterLayerProperties,
-};
+use mln_style::layer::Layer;
+use mln_style::layer_type::LayerStyle;
+use mln_style::layers::{Circle, Hillshade, Line, Raster};
 use mln_style::observer::SourceObserver;
 use mln_style::source::{self, Source};
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
@@ -41,6 +34,8 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
 use parking_lot::Mutex;
 
+use crate::Registry;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::{self as render_source, RenderSource};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
@@ -198,21 +193,21 @@ enum Tiled {
 
 impl Tiled {
     /// A raster, hillshade or line (source-layer "water") layer "id" on
-    /// "source", as layer properties.
-    fn layers(self) -> Vec<Arc<dyn LayerProperties>> {
-        let properties: Arc<dyn LayerProperties> = match self {
+    /// "source", as evaluated values.
+    fn layers(self) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
+        let properties: Arc<dyn ErasedEvaluatedLayer> = match self {
             Tiled::Raster => {
-                let layer = RasterLayer::new("id", "source");
-                Arc::new(RasterLayerProperties::new(downcast_arc::<RasterLayerImpl>(&layer.base_impl())))
+                let layer = Layer::new(Registry::with_builtins().style(), "raster", "id", "source").unwrap();
+                Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::RasterDEM => {
-                let layer = HillshadeLayer::new("id", "source");
-                Arc::new(HillshadeLayerProperties::new(downcast_arc::<HillshadeLayerImpl>(&layer.base_impl())))
+                let layer = Layer::new(Registry::with_builtins().style(), "hillshade", "id", "source").unwrap();
+                Arc::new(EvaluatedLayer::<Hillshade>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::Vector => {
-                let mut layer = LineLayer::new("id", "source");
+                let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
                 layer.set_source_layer("water");
-                Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())))
+                Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
         };
         vec![properties]
@@ -649,10 +644,10 @@ fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (CustomGeom
         CustomGeometrySource::new("source", CustomGeometrySourceOptions::default(), test.run_loop.pool()).unwrap();
     source.load_description(&file_source, &test.run_loop);
 
-    let mut layer = LineLayer::new("id", "source");
+    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
-    let layer_properties: Arc<dyn LayerProperties> =
-        Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
+        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
     let mut render_source = render_source::create(&source.base_impl(), store);
@@ -725,10 +720,10 @@ fn custom_vector_source_set_tile_data() {
     let source = CustomVectorSource::new("source", CustomVectorSourceOptions::default(), test.run_loop.pool());
     source.load_description(&file_source, &test.run_loop);
 
-    let mut layer = LineLayer::new("id", "source");
+    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
-    let layer_properties: Arc<dyn LayerProperties> =
-        Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
+        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
 
     let mut store = test.store();
     let mut render_source = render_source::create(&source.base_impl(), &mut store);
@@ -818,9 +813,9 @@ fn geojson_source_tiles_after_data_reset() {
     let mut store = test.store();
     let mut render_source = render_source::create(&source.base_impl(), &mut store);
 
-    let layer = CircleLayer::new("id", "source");
-    let layer_properties: Arc<dyn LayerProperties> =
-        Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())));
+    let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
+    let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
+        Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
     let continuous = test.tile_parameters(MapMode::Continuous);
@@ -841,10 +836,10 @@ fn geojson_source_tiles_after_data_reset() {
     assert!(render_source.is_loaded(&store)); // Tiles are reset in static mode.
 }
 
-/// A circle layer "id" on "source", as layer properties.
-fn circle_layers() -> Vec<Arc<dyn LayerProperties>> {
-    let layer = CircleLayer::new("id", "source");
-    vec![Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())))]
+/// A circle layer "id" on "source", as evaluated values.
+fn circle_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
+    let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
+    vec![Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))]
 }
 
 /// A GeoJSON source rendered with a circle layer. Its data is clustered,
@@ -855,7 +850,7 @@ struct SynchronousUpdateSource {
     source: GeoJSONSource,
     store: TileStore,
     render_source: Box<dyn RenderSource>,
-    layers: Vec<Arc<dyn LayerProperties>>,
+    layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
 }
 
 impl SynchronousUpdateSource {
@@ -1133,7 +1128,7 @@ struct TurningSource {
     source: Box<dyn Source>,
     store: TileStore,
     render_source: Box<dyn RenderSource>,
-    layers: Vec<Arc<dyn LayerProperties>>,
+    layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     prefetch_zoom_delta: u8,
     latitude: f64,
 }

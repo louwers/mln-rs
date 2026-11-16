@@ -4,6 +4,7 @@
 use mln_conversion::Convertible;
 use mln_vec_map::VecSet;
 
+use crate::Functions;
 use crate::expression::{EvaluationContext, Expr};
 use crate::image_expression::UnavailableImages;
 use crate::parsing_context::ParsingContext;
@@ -12,7 +13,9 @@ use crate::type_::Type;
 fn coalesce() -> Expr {
     let document: serde_json::Value =
         serde_json::from_str(r#"["coalesce", ["image", "late"], ["image", ""], ["image", "fallback"]]"#).unwrap();
-    ParsingContext::with_expected(Type::Image).parse_expression(&Convertible::from(&document), None).unwrap()
+    ParsingContext::with_expected(&Functions::with_builtins(), Type::Image)
+        .parse_expression(&Convertible::from(&document), None)
+        .unwrap()
 }
 
 fn evaluate(expression: &Expr, available: &VecSet<String>, unavailable: Option<&UnavailableImages>) {

@@ -4,12 +4,12 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_TILE_PROPS_UBO,
 };
 use mln_gfx::shaders::symbol_layer_ubo::{CollisionDrawableUBO, CollisionTilePropsUBO};
-use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::PaintParameters;
 
 #[derive(Clone, Copy, Debug)]
@@ -23,16 +23,12 @@ pub(crate) struct CollisionLayerTweaker {
 }
 
 impl CollisionLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
-        CollisionLayerTweaker { base: LayerTweakerBase::new(id, properties) }
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
+        CollisionLayerTweaker { base: LayerTweakerBase::new(id, Some(properties)) }
     }
 }
 
 impl LayerTweaker for CollisionLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

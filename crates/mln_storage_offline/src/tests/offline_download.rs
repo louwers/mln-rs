@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::{AsyncTask, LocalObject, RunLoop};
+use mln_renderer::Registry;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
     OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
@@ -170,7 +171,7 @@ impl OfflineTest {
         let network: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
         let host = Rc::new(RefCell::new(Host {
             db: OfflineDatabase::new(path),
-            downloads: Downloads::new(Some(network), Arc::clone(&post)),
+            downloads: Downloads::new(Some(network), Arc::clone(&post), Arc::clone(Registry::with_builtins().style())),
         }));
         let _ = slot.set(LocalObject::from_rc(Rc::clone(&host)));
         OfflineTest { run_loop, file_source, host, post, size: Rc::new(Cell::new(0)) }
@@ -187,7 +188,13 @@ impl OfflineTest {
         definition: OfflineRegionDefinition,
         file_source: Arc<dyn FileSource>,
     ) -> TestDownload {
-        let download = OfflineDownload::new(region_id, definition, file_source, Arc::clone(&self.post));
+        let download = OfflineDownload::new(
+            region_id,
+            definition,
+            file_source,
+            Arc::clone(&self.post),
+            Arc::clone(Registry::with_builtins().style()),
+        );
         self.host.borrow_mut().downloads.insert(download);
         TestDownload { host: Rc::clone(&self.host), post: Arc::clone(&self.post), id: region_id }
     }

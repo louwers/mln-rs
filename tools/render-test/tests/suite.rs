@@ -3,7 +3,8 @@
 // the HTML report and the actual/diff images in target/tmp/<name>. Fill
 // outlines are 2 px wide, as C++ draws them on OpenGL, so OpenGL, Vulkan and
 // WebGPU take C++'s OpenGL or Vulkan expectations; WebGPU on a CPU
-// rasterizer draws them 1 px wide (ignores/rust-port-1px-outlines.json).
+// rasterizer and D3D12 draw them 1 px wide (ignores/rust-port-1px-outlines.json):
+// D3D12 has no wide lines, and takes WebGPU's manifest.
 // macOS adds the C++ WebGPU ignore list, since wgpu renders through Metal
 // there, and ignores the tests whose expected images are C++ Metal's, which
 // triangulates them (ignores/rust-port-metal-outlines.json).
@@ -26,6 +27,7 @@ pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i3
         match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
             Ok("gl" | "gl-desktop") => "manifests/linux-opengl.json",
             Ok("vulkan") => "manifests/linux-vulkan.json",
+            Ok("d3d12") => "manifests/windows-d3d12.json",
             _ => "manifests/linux-wgpu.json",
         }
     };

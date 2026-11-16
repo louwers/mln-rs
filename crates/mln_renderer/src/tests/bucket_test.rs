@@ -9,17 +9,16 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::MapMode;
+use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::evaluated::Evaluated;
-use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::LayerProperties;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
-use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPaintProperties};
+use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style::layers::{FillLayer, LineLayer};
+use mln_style::layers::{Fill, Line};
 use mln_style::property_value::PropertyValue;
-use mln_style::{CrossfadeParameters, PropertyEvaluationParameters};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
@@ -32,6 +31,7 @@ use mln_vec_map::VecMap;
 use mln_webgpu::Device;
 use parking_lot::Mutex;
 
+use crate::Registry;
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, paint_vertices};
 use crate::buckets::circle_bucket::CircleBucket;
@@ -43,6 +43,7 @@ use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::upload::{upload_indexes, vertex_buffer};
+use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;
 
@@ -179,13 +180,12 @@ fn fill_extrusion_bucket_rounds_corners() {
 fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     let json = serde_json::json!({"type": "fill", "id": "fill", "source": "s", "paint": {"fill-color": fill_color}});
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message));
     let evaluated = FillPaintProperties::PossiblyEvaluated {
         fill_color: Evaluated::PerFeature {
-            expression: layer
-                .downcast_ref::<FillLayer>()
+            expression: LayerStyle::<Fill>::recover_ref(&**layer.style())
                 .expect("fill layer")
-                .impl_()
                 .paint
                 .fill_color
                 .value
@@ -195,11 +195,8 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         },
         ..FillPaintProperties::PossiblyEvaluated::default()
     };
-    let properties: Arc<dyn LayerProperties> = Arc::new(FillLayerProperties::with_evaluated(
-        downcast_arc(&layer.base_impl()),
-        CrossfadeParameters::default(),
-        evaluated,
-    ));
+    let properties =
+        Arc::new(EvaluatedLayer::<Fill>::with_paint(LayerStyle::recover(layer.style()).unwrap(), evaluated));
     let mut bucket = FillBucket::new(
         &FillLayoutProperties::PossiblyEvaluated::default(),
         &VecMap::from_iter([("fill".to_owned(), properties)]),
@@ -704,11 +701,10 @@ fn line_bucket_vertices(
 ) -> Vec<LineLayoutVertex> {
     let json = serde_json::json!({"type": "line", "id": "line", "source": "s", "layout": layout});
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
-    let layout = layer
-        .downcast_ref::<LineLayer>()
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message));
+    let layout = LayerStyle::<Line>::recover_ref(&**layer.style())
         .expect("line layer")
-        .impl_()
         .layout
         .evaluate(&PropertyEvaluationParameters::new(10.0));
     let mut bucket = LineBucket::new(layout, &VecMap::new(), 10.0, 1);

@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use geojson::{GeoJson, GeometryValue};
+use mln_style::expression::Functions;
 use mln_style::image::Impl as StyleImage;
 use mln_style::source::{Source, same_source, set_volatile};
 use mln_style::sources::custom_geometry_source::{self, TileOptions};
@@ -130,19 +131,20 @@ impl GeoJsonSourceOptions {
         Ok(())
     }
 
-    /// Parses the cluster properties on this thread, for a caller that must
-    /// reject them before it sends the source, which
+    /// Parses the cluster properties on this thread against `functions`, for
+    /// a caller that must reject them before it sends the source, which
     /// [`Map::add_geojson_source`] otherwise parses on the runtime's thread.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
     /// text that isn't a `clusterProperties` object.
-    pub fn check_cluster_properties(&self) -> Result<(), Error> {
-        self.cluster_properties.as_deref().map_or(Ok(()), |json| parse_cluster_properties(json).map(drop))
+    pub fn check_cluster_properties(&self, functions: &Arc<Functions>) -> Result<(), Error> {
+        self.cluster_properties.as_deref().map_or(Ok(()), |json| parse_cluster_properties(json, functions).map(drop))
     }
 
-    /// The core's options, with the cluster properties parsed.
-    fn into_core(self) -> Result<GeoJSONOptions, Error> {
+    /// The core's options, with the cluster properties parsed against
+    /// `functions`.
+    fn into_core(self, functions: &Arc<Functions>) -> Result<GeoJSONOptions, Error> {
         let cluster_properties = match &self.cluster_properties {
-            Some(json) => parse_cluster_properties(json)?,
+            Some(json) => parse_cluster_properties(json, functions)?,
             None => mln_style::sources::geojson_source::ClusterProperties::default(),
         };
         Ok(GeoJSONOptions {
@@ -166,7 +168,10 @@ impl GeoJsonSourceOptions {
 /// GeoJSON source, as its one member. Fails with
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for text that isn't
 /// such an object.
-fn parse_cluster_properties(json: &str) -> Result<mln_style::sources::geojson_source::ClusterProperties, Error> {
+fn parse_cluster_properties(
+    json: &str,
+    functions: &Arc<Functions>,
+) -> Result<mln_style::sources::geojson_source::ClusterProperties, Error> {
     let value: serde_json::Value = serde_json::from_str(json)
         .map_err(|error| Error::invalid_argument(format!("cluster_properties is not valid JSON: {error}")))?;
     if !value.is_object() {
@@ -174,8 +179,9 @@ fn parse_cluster_properties(json: &str) -> Result<mln_style::sources::geojson_so
     }
     let wrapper = serde_json::json!({ "clusterProperties": value });
     let mut error = mln_conversion::Error::default();
-    let options = <GeoJSONOptions as mln_style::conversion::Converter>::convert(
+    let options = mln_style::conversion::convert_geojson_options(
         &mln_conversion::Convertible::from(&wrapper),
+        functions,
         &mut error,
     )
     .ok_or_else(|| Error::invalid_argument(format!("GeoJSON source options: {}", error.message)))?;
@@ -438,10 +444,10 @@ fn source_info(source: &dyn Source) -> SourceInfo {
     info
 }
 
-fn layer_info(layer: &dyn mln_style::Layer) -> LayerInfo {
+fn layer_info(layer: &mln_style::Layer) -> LayerInfo {
     LayerInfo {
         id: layer.get_id(),
-        layer_type: layer.get_type_info().type_,
+        layer_type: layer.info().name,
         source_id: Some(layer.get_source_id()).filter(|id| !id.is_empty()),
         source_layer: Some(layer.get_source_layer()).filter(|id| !id.is_empty()),
         min_zoom: Some(f64::from(layer.get_min_zoom())).filter(|zoom| zoom.is_finite()),
@@ -554,7 +560,8 @@ impl Map {
         options.check()?;
         let source_id = source_id.into();
         self.command(move |map| {
-            let options = options.into_core()?;
+            let functions = Arc::clone(map.style().registry().functions());
+            let options = options.into_core(&functions)?;
             let style = map.style_mut();
             require_new_source(style, &source_id)?;
             style.add_source(Box::new(GeoJSONSource::new(source_id, Arc::new(options))))

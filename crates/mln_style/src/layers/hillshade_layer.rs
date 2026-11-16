@@ -1,33 +1,26 @@
-use std::sync::Arc;
+use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+use crate::layers::hillshade_layer_properties::{self, HillshadePaintProperties};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 
-use crate::layer::{LayerTypeInfo, layer_type_info};
-pub use crate::layers::hillshade_layer_impl::Impl;
+/// The `hillshade` layer type.
+pub struct Hillshade;
 
-static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
-    type_: "hillshade",
-    source: layer_type_info::Source::Required,
-    pass3d: layer_type_info::Pass3D::Required,
-    layout: layer_type_info::Layout::NotRequired,
-    fading_tiles: layer_type_info::FadingTiles::NotRequired,
-    cross_tile_index: layer_type_info::CrossTileIndex::NotRequired,
-    tile_kind: layer_type_info::TileKind::RasterDEM,
-};
+impl StyleLayerType for Hillshade {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "hillshade",
+        source: SourceKind::RasterDem,
+        pass_3d: true,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &hillshade_layer_properties::PROPERTIES;
 
-impl Impl {
-    #[must_use]
-    pub fn static_type_info() -> &'static LayerTypeInfo {
-        &TYPE_INFO
-    }
-}
+    type LayoutProperties = NoProperties;
+    type PaintProperties = HillshadePaintProperties::Transitionable;
+    type Extra = ();
 
-crate::layer::layer_type!(
-    /// A `hillshade` layer.
-    HillshadeLayer
-);
-
-impl HillshadeLayer {
-    #[must_use]
-    pub fn new(layer_id: &str, source_id: &str) -> Self {
-        HillshadeLayer::from_impl(Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())))
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
+        hillshade_layer_properties::visit(slot, visitor)
     }
 }

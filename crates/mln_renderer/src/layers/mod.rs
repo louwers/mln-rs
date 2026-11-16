@@ -30,29 +30,23 @@ use std::sync::Arc;
 
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_style::CrossfadeParameters;
-use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::{BackgroundLayerProperties, BackgroundPaintProperties};
-pub(crate) use render_background_layer::RenderBackgroundLayer;
-pub(crate) use render_circle_layer::RenderCircleLayer;
-pub(crate) use render_fill_extrusion_layer::RenderFillExtrusionLayer;
-pub(crate) use render_fill_layer::RenderFillLayer;
-pub(crate) use render_line_layer::RenderLineLayer;
-pub(crate) use render_raster_layer::RenderRasterLayer;
-pub(crate) use render_symbol_layer::RenderSymbolLayer;
+use mln_style::layer_type::ErasedLayerStyle;
+use mln_style::layers::{Background, BackgroundPaintProperties};
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::drawable::Drawable;
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::render_tile::RenderTile;
 
 pub(crate) fn background_layer_properties(
-    properties: &Arc<dyn LayerProperties>,
+    properties: &Arc<dyn ErasedEvaluatedLayer>,
 ) -> &BackgroundPaintProperties::PossiblyEvaluated {
-    get_evaluated::<BackgroundLayerProperties>(properties)
+    &evaluated::<Background>(properties).paint
 }
 
-pub(crate) fn background_crossfade(properties: &Arc<dyn LayerProperties>) -> &CrossfadeParameters {
-    get_crossfade::<BackgroundLayerProperties>(properties)
+pub(crate) fn background_crossfade(properties: &Arc<dyn ErasedEvaluatedLayer>) -> &CrossfadeParameters {
+    &evaluated::<Background>(properties).crossfade
 }
 
 /// The bucket a drawable's data comes from, kept alive by the drawable, and
@@ -154,11 +148,11 @@ pub(crate) fn check_tweak_drawable_ptr<T: ?Sized>(drawable: &Drawable, self_ptr:
 /// borrows only the tile (the layers mutate themselves while they hold it).
 pub(crate) fn render_data_for_pass<'a>(
     tile: &'a RenderTile,
-    base_impl: &dyn mln_style::layer::Impl,
+    style: &dyn ErasedLayerStyle,
     pass: crate::render_pass::RenderPass,
 ) -> Option<&'a crate::render_layer::LayerRenderData> {
-    let render_data = tile.get_layer_render_data(base_impl)?;
-    if (render_data.layer_properties.render_passes & pass.underlying_type()) != 0 { Some(render_data) } else { None }
+    let render_data = tile.get_layer_render_data(style)?;
+    if (render_data.layer.render_passes() & pass.underlying_type()) != 0 { Some(render_data) } else { None }
 }
 
 #[must_use]

@@ -219,6 +219,10 @@ impl Bucket for RasterBucket {
     fn has_data(&self) -> bool {
         self.image.is_some()
     }
+
+    fn write_wire(&self, w: &mut mln_wire::Writer) {
+        w.fail("a raster bucket, which no layout makes".to_owned());
+    }
 }
 
 #[cfg(test)]

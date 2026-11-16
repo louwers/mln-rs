@@ -30,12 +30,12 @@ use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
-use mln_style::layers::fill_extrusion_layer_properties::{FillExtrusionLayerProperties, FillExtrusionPaintProperties};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layers::FillExtrusion;
+use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::AlignmentType;
+use mln_util::error::Error;
 use mln_util::hash::HashSet;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
@@ -43,8 +43,8 @@ use super::{DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_lay
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{
-    FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutVertex, FillExtrusionStaticVertex,
-    FillExtrusionWallVertex,
+    FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
+    FillExtrusionStaticVertex, FillExtrusionWallVertex,
 };
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
@@ -52,19 +52,19 @@ use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::{LayoutParameters, SourceLayer};
+use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{CaptureView, RenderLayer, RenderLayerBase, Stats, vertex_color_alpha};
+use crate::render_layer::{
+    CaptureView, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, set_style, vertex_color_alpha,
+};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
-
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillExtrusionLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), FillExtrusionLayerImpl::static_type_info()));
-    impl_.downcast_ref::<FillExtrusionLayerImpl>().expect("RenderFillExtrusionLayer: not a fill-extrusion layer impl")
-}
 
 fn capture_rendered_features(
     stats: &mut Stats,
@@ -307,8 +307,36 @@ fn create_builder(
     builder
 }
 
+impl LayerType for FillExtrusion {
+    type Layout = PatternLayout<FillExtrusionLayoutSpec>;
+    type Bucket = FillExtrusionBucket;
+
+    /// Whether a layer of the group has a pattern.
+    fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<FillExtrusion>>]) -> bool {
+        uses_pattern::<FillExtrusionLayoutSpec>(group)
+    }
+
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<FillExtrusion>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<PatternLayout<FillExtrusionLayoutSpec>>, Error> {
+        PatternLayout::new(parameters, group, source_layer).map(Some)
+    }
+
+    fn query_radius(_bucket: &FillExtrusionBucket, layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
+        let translate = layer.paint.fill_extrusion_translate.uniform();
+        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    }
+
+    fn render_layer(style: Arc<LayerStyle<FillExtrusion>>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderFillExtrusionLayer::new(style)))
+    }
+}
+
 pub(crate) struct RenderFillExtrusionLayer {
     base: RenderLayerBase,
+    style: Arc<LayerStyle<FillExtrusion>>,
     // Paint properties
     unevaluated: FillExtrusionPaintProperties::Unevaluated,
 
@@ -328,13 +356,15 @@ pub(crate) struct RenderFillExtrusionLayer {
 }
 
 impl RenderFillExtrusionLayer {
-    pub(crate) fn new(impl_: Arc<FillExtrusionLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<FillExtrusion>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(FillExtrusionLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> =
+            Arc::new(EvaluatedLayer::<FillExtrusion>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderFillExtrusionLayer {
             base,
+            style: impl_,
             unevaluated,
             fill_extrusion_group: None,
             fill_extrusion_pattern_group: None,
@@ -355,26 +385,33 @@ impl RenderLayer for RenderFillExtrusionLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = get_evaluated::<FillExtrusionLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = FillExtrusionLayerProperties::with_evaluated(
-            downcast_arc::<FillExtrusionLayerImpl>(&self.base.base_impl),
-            parameters.get_crossfade_parameters(),
-            self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-        );
+        let previous_evaluated = evaluated::<FillExtrusion>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<FillExtrusion> {
+            crossfade: parameters.get_crossfade_parameters(),
+            ..EvaluatedLayer::with_paint(
+                Arc::clone(&self.style),
+                self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
+            )
+        };
 
-        self.base.passes = if *properties.evaluated.fill_extrusion_opacity.uniform() > 0.0 {
+        self.base.passes = if *properties.paint.fill_extrusion_opacity.uniform() > 0.0 {
             RenderPass::Translucent
         } else {
             RenderPass::None
         };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
@@ -387,7 +424,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
     }
 
     fn has_crossfade(&self) -> bool {
-        get_crossfade::<FillExtrusionLayerProperties>(&self.base.evaluated_properties).t != 1.0
+        evaluated::<FillExtrusion>(&self.base.evaluated_properties).crossfade.t != 1.0
     }
 
     fn is_3d(&self) -> bool {
@@ -406,7 +443,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
-        let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<FillExtrusion>(&self.base.evaluated_properties).paint;
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
             *evaluated.fill_extrusion_translate.uniform(),
@@ -479,7 +516,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         }
 
         let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&evaluated_properties);
+        let evaluated = &evaluated::<FillExtrusion>(&evaluated_properties).paint;
 
         let draw_pass = RenderPass::Translucent;
 
@@ -537,8 +574,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let render_data = super::render_data_for_pass(tile, &*base_impl, draw_pass);
+            let style = Arc::clone(&self.base.style);
+            let render_data = super::render_data_for_pass(tile, &*style, draw_pass);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.remove_tile(draw_pass, &tile_id);
                 continue;

@@ -1,5 +1,5 @@
 //! Thread-safe handles over mln-rs's maps, which mirror
-//! maplibre-native-ffi's C API one to one.
+//! the C API (`mln-rs-c`) one to one.
 //!
 //! A [`Runtime`] owns a thread, and the file sources, cache and offline
 //! regions of its maps. Each [`Map`] lives on its runtime's thread, and its
@@ -40,6 +40,7 @@ mod offline;
 #[path = "offline_web.rs"]
 mod offline;
 mod queue;
+pub mod registry;
 mod render;
 mod resources;
 mod runtime;

@@ -228,6 +228,9 @@ pub enum NativeTexture {
     OpenGl { texture: u32, target: u32, internal_format: u32 },
     /// A WebGPU texture, which the host gave.
     WebGpu,
+    /// An `ID3D12Resource*`, in a `DXGI_FORMAT`, left in a
+    /// `D3D12_RESOURCE_STATES`.
+    D3d12 { resource: u64, format: u32, state: u32 },
 }
 
 /// An exported ring's frame: the shared memory of its image, and its

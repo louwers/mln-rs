@@ -279,6 +279,85 @@ impl DashPatternTexture {
     }
 }
 
+/// Where a dash pattern is in a [`DashAtlas`], in texels: the row at its
+/// middle, the distance between its first and last rows, and its length in
+/// dash array units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DashEntry {
+    pub(crate) y: f32,
+    pub(crate) height: f32,
+    pub(crate) width: f32,
+}
+
+/// The dash patterns of one bucket's features, for a `line-dasharray` that
+/// differs by feature: a texture 256 texels wide with a pattern every row,
+/// or every 15 rows for round caps, and where each pattern is. The first row
+/// is solid. The texture's height is a power of two, as the patterns repeat
+/// horizontally.
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
+pub(crate) struct DashAtlas {
+    image: AlphaImage,
+    #[wire(skip)]
+    next_row: u32,
+    /// The patterns added so far, by dash array (as float bits) and cap.
+    #[wire(skip)]
+    entries: Vec<(Vec<u32>, LinePatternCap, DashEntry)>,
+}
+
+/// The tallest a [`DashAtlas`] grows; WebGPU guarantees 8192.
+const MAX_DASH_ATLAS_HEIGHT: u32 = 4096;
+const DASH_ATLAS_WIDTH: u32 = 256;
+
+/// The solid pattern. Its width is large so that its edges stay sharp.
+const SOLID_DASH: DashEntry = DashEntry { y: 0.0, height: 0.0, width: DASH_ATLAS_WIDTH as f32 };
+
+impl DashAtlas {
+    /// The pattern of `dasharray` with `cap` ends, added if it isn't yet. A
+    /// dash array with fewer than two parts or no length is solid, as is
+    /// every pattern once the atlas is full.
+    pub(crate) fn add(&mut self, dasharray: &[f32], cap: LinePatternCap) -> DashEntry {
+        if self.next_row == 0 {
+            self.image = AlphaImage::from_vec(Size::new(DASH_ATLAS_WIDTH, 1), vec![255; DASH_ATLAS_WIDTH as usize]);
+            self.next_row = 1;
+        }
+        let length: f32 = dasharray.iter().sum();
+        if dasharray.len() < 2 || length.is_nan() || length <= 0.0 {
+            return SOLID_DASH;
+        }
+        let key: Vec<u32> = dasharray.iter().map(|v| v.to_bits()).collect();
+        if let Some((_, _, entry)) = self.entries.iter().find(|(k, c, _)| *k == key && *c == cap) {
+            return *entry;
+        }
+        let rows: u32 = if cap == LinePatternCap::Round { 15 } else { 1 };
+        let y_offset = self.next_row;
+        let end = y_offset + rows;
+        if end > MAX_DASH_ATLAS_HEIGHT {
+            Log::warning(Event::Render, "line-dasharray: too many dash patterns in one tile");
+            return SOLID_DASH;
+        }
+        if end > self.image.size.height {
+            self.image.resize(Size::new(DASH_ATLAS_WIDTH, end.next_power_of_two()));
+        }
+        let mut pattern = AlphaImage::new(Size::new(DASH_ATLAS_WIDTH, rows));
+        let pos = add_dash_pattern(&mut pattern, 0, dasharray, cap);
+        let start = (y_offset * DASH_ATLAS_WIDTH) as usize;
+        self.image.data[start..start + pattern.data.len()].copy_from_slice(&pattern.data);
+        self.next_row = end;
+
+        // The height spans from the first row's middle to the last's, so
+        // that sampling stays within the pattern's rows.
+        let entry = DashEntry { y: (y_offset + rows / 2) as f32, height: (rows - 1) as f32, width: pos.width };
+        self.entries.push((key, cap, entry));
+        entry
+    }
+
+    /// The atlas, empty when no feature has been added.
+    #[must_use]
+    pub(crate) fn image(&self) -> &AlphaImage {
+        &self.image
+    }
+}
+
 type DashKey = (Vec<u32>, Vec<u32>, LinePatternCap);
 
 fn dash_key(from: &[f32], to: &[f32], cap: LinePatternCap) -> DashKey {

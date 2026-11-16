@@ -21,41 +21,70 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
-use mln_style::layers::heatmap_layer_properties::{
-    HeatmapLayerProperties, HeatmapPaintProperties, default_heatmap_color,
-};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layers::Heatmap;
+use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_tile_id::OverscaledTileID;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use super::heatmap_layer_tweaker::HeatmapLayerTweaker;
 use super::heatmap_texture_layer_tweaker::HeatmapTextureLayerTweaker;
 use super::render_line_layer::apply_color_ramp;
-use super::{DrawableBinders, DrawableRenderTile, drawable_has_layer_tweaker, shared_vertices};
+use super::{
+    DrawableBinders, DrawableRenderTile, drawable_has_layer_tweaker, refresh_if_bucket_updated, shared_vertices,
+};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_indexes};
-use crate::buckets::heatmap_bucket::{HeatmapBucket, HeatmapLayoutVertex};
+use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable::Drawable;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::heatmap_layout::HeatmapLayout;
+use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase};
+use crate::render_layer::{RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::{RenderTarget, RenderTargetPtr};
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HeatmapLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), HeatmapLayerImpl::static_type_info()));
-    impl_.downcast_ref::<HeatmapLayerImpl>().expect("RenderHeatmapLayer: not a heatmap layer impl")
+fn read_heatmap_attributes(
+    attrs: &mut VertexAttributeArray,
+    b: &HeatmapBinders,
+    shared: &VertexVectorBasePtr,
+    evaluated: &HeatmapPaintProperties::PossiblyEvaluated,
+    pau: &mut StringIDSetsPair,
+) {
+    let buffer = &b.interleaved_vertex_buffer;
+    let mut id = ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE;
+    read_data_driven_paint_property(
+        attrs,
+        &b.heatmap_weight,
+        buffer,
+        shared,
+        &["a_weight"],
+        evaluated.heatmap_weight.is_constant(),
+        pau,
+        &mut id,
+    );
+    read_data_driven_paint_property(
+        attrs,
+        &b.heatmap_radius,
+        buffer,
+        shared,
+        &["a_radius"],
+        evaluated.heatmap_radius.is_constant(),
+        pau,
+        &mut id,
+    );
 }
 
 const HEATMAP_SHADER_GROUP_NAME: &str = "HeatmapShader";
@@ -78,8 +107,26 @@ pub(crate) fn activate_render_target(
     }
 }
 
+impl LayerType for Heatmap {
+    type Layout = HeatmapLayout;
+    type Bucket = HeatmapBucket;
+
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Heatmap>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<HeatmapLayout>, Error> {
+        HeatmapLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
+    }
+
+    fn render_layer(style: Arc<LayerStyle<Heatmap>>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderHeatmapLayer::new(style)))
+    }
+}
+
 pub(crate) struct RenderHeatmapLayer {
     base: RenderLayerBase,
+    style: Arc<LayerStyle<Heatmap>>,
     // Paint properties
     unevaluated: HeatmapPaintProperties::Unevaluated,
     color_ramp: Rc<PremultipliedImage>,
@@ -101,13 +148,14 @@ pub(crate) struct RenderHeatmapLayer {
 }
 
 impl RenderHeatmapLayer {
-    pub(crate) fn new(impl_: Arc<HeatmapLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Heatmap>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(HeatmapLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Heatmap>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderHeatmapLayer {
             base,
+            style: impl_,
             unevaluated,
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
@@ -188,16 +236,21 @@ impl RenderLayer for RenderHeatmapLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
     fn layer_changed(
         &mut self,
         _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn layer::Impl>,
+        _new_layer: &Arc<dyn ErasedLayerStyle>,
         _changes: &mut UniqueChangeRequestVec,
     ) {
         // RenderLayer::layerChanged
@@ -227,18 +280,18 @@ impl RenderLayer for RenderHeatmapLayer {
             self.update_color_ramp();
         }
 
-        let previous_evaluated = get_evaluated::<HeatmapLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = HeatmapLayerProperties::with_evaluated(
-            downcast_arc::<HeatmapLayerImpl>(&self.base.base_impl),
+        let previous_evaluated = evaluated::<Heatmap>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Heatmap>::with_paint(
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.heatmap_opacity.uniform() > 0.0 {
+        self.base.passes = if *properties.paint.heatmap_opacity.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
             RenderPass::None
         };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
@@ -331,7 +384,7 @@ impl RenderLayer for RenderHeatmapLayer {
 
         let render_pass = RenderPass::Translucent;
 
-        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes) == 0 {
+        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
             return;
         }
 
@@ -344,7 +397,7 @@ impl RenderLayer for RenderHeatmapLayer {
         }
 
         let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = get_evaluated::<HeatmapLayerProperties>(&evaluated_properties);
+        let evaluated = &evaluated::<Heatmap>(&evaluated_properties).paint;
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 
         let mut heatmap_shader: Option<ShaderProgramPtr> = None;
@@ -352,8 +405,8 @@ impl RenderLayer for RenderHeatmapLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let Some(render_data) = super::render_data_for_pass(tile, &*base_impl, render_pass) else {
+            let style = Arc::clone(&self.base.style);
+            let Some(render_data) = super::render_data_for_pass(tile, &*style, render_pass) else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;
             };
@@ -377,10 +430,30 @@ impl RenderLayer for RenderHeatmapLayer {
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
+            let paint = || {
+                paint_vertices(
+                    geometry,
+                    bucket,
+                    &paint_property_binders.interleaved_vertex_buffer,
+                    paint_property_binders.depends_on_feature_state(),
+                )
+            };
             let update_existing = |drawable: &mut Drawable| {
                 // A drawable produced on a previous style/bucket should not
                 // be updated.
-                drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref())
+                let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
+                if current {
+                    refresh_if_bucket_updated(drawable, |attrs| {
+                        read_heatmap_attributes(
+                            attrs,
+                            paint_property_binders,
+                            &paint(),
+                            evaluated,
+                            &mut Default::default(),
+                        );
+                    });
+                }
+                current
             };
             if self.update_tile(&tile_layer_group, render_pass, &tile_id, update_existing) {
                 continue;
@@ -390,35 +463,13 @@ impl RenderLayer for RenderHeatmapLayer {
             properties_as_uniforms.1.clear();
 
             let heatmap_vertex_attrs = VertexAttributeArray::new_ptr();
-            {
-                let buffer = &paint_property_binders.interleaved_vertex_buffer;
-                let shared =
-                    paint_vertices(geometry, bucket, buffer, paint_property_binders.depends_on_feature_state());
-                let mut attrs = heatmap_vertex_attrs.borrow_mut();
-                let mut id = ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE;
-                let b = paint_property_binders;
-                let pau = &mut properties_as_uniforms;
-                read_data_driven_paint_property(
-                    &mut attrs,
-                    &b.heatmap_weight,
-                    buffer,
-                    &shared,
-                    &["a_weight"],
-                    evaluated.heatmap_weight.is_constant(),
-                    pau,
-                    &mut id,
-                );
-                read_data_driven_paint_property(
-                    &mut attrs,
-                    &b.heatmap_radius,
-                    buffer,
-                    &shared,
-                    &["a_radius"],
-                    evaluated.heatmap_radius.is_constant(),
-                    pau,
-                    &mut id,
-                );
-            }
+            read_heatmap_attributes(
+                &mut heatmap_vertex_attrs.borrow_mut(),
+                paint_property_binders,
+                &paint(),
+                evaluated,
+                &mut properties_as_uniforms,
+            );
 
             if heatmap_shader.is_none() {
                 heatmap_shader =

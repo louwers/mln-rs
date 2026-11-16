@@ -10,7 +10,6 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
 use mln_util::constants::TILE_SIZE_D;
 
@@ -18,6 +17,7 @@ use super::{background_crossfade, background_layer_properties};
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::PaintParameters;
 
 pub(crate) struct BackgroundLayerTweaker {
@@ -26,8 +26,8 @@ pub(crate) struct BackgroundLayerTweaker {
 }
 
 impl BackgroundLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
-        BackgroundLayerTweaker { base: LayerTweakerBase::new(id, properties), drawable_uniform_buffer: None }
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
+        BackgroundLayerTweaker { base: LayerTweakerBase::new(id, Some(properties)), drawable_uniform_buffer: None }
     }
 }
 
@@ -36,10 +36,6 @@ fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
 }
 
 impl LayerTweaker for BackgroundLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -51,7 +47,9 @@ impl LayerTweaker for BackgroundLayerTweaker {
 
         let context = parameters.context;
 
-        let properties = Arc::clone(&self.base.evaluated_properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
         let evaluated = background_layer_properties(&properties);
         let crossfade = *background_crossfade(&properties);
         let state = parameters.state;

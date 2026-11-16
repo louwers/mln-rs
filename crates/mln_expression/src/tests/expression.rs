@@ -4,11 +4,11 @@ use mln_conversion::Convertible;
 use mln_text::glyph::{FontFace, FontFaces};
 use mln_tile_id::CanonicalTileID;
 
-use crate::dsl;
 use crate::expression::{EvaluationContext, Expr, FeatureState, GlobalStateMap, evaluate_feature_with_context};
 use crate::is_expression::is_expression;
 use crate::parsing_context::ParsingContext;
 use crate::value::Value;
+use crate::{Functions, dsl};
 
 /// A path relative to the C++ repository, in the copy of the files these
 /// tests read (testdata/).
@@ -32,14 +32,14 @@ fn is_expression_() {
 
     for name in all_expressions.keys() {
         let document = serde_json::json!([name]);
-        assert!(is_expression(&Convertible::from(&document)), "{name}");
+        assert!(is_expression(&Convertible::from(&document), &Functions::with_builtins()), "{name}");
     }
 }
 
 /// `parse(filename, error)` of `ExpressionEquality`.
 fn parse(filename: &str) -> Result<Expr, String> {
     let document: serde_json::Value = serde_json::from_str(&read_file(filename)).unwrap();
-    let mut ctx = ParsingContext::new();
+    let mut ctx = ParsingContext::new(&Functions::with_builtins());
     let parsed = ctx.parse_expression(&Convertible::from(&document), None);
     parsed.ok_or_else(|| {
         let errors = ctx.get_errors();
@@ -102,7 +102,7 @@ fn is_supported_script_accepts_scripts_that_font_faces_cover() {
     // REQUIRED_PROPS).
     let evaluate = |text: &str, font_faces: Option<&FontFaces>| {
         let document = serde_json::json!(["is-supported-script", ["to-string", ["global-state", "text"]]]);
-        let mut ctx = ParsingContext::new();
+        let mut ctx = ParsingContext::new(&Functions::with_builtins());
         let parsed = ctx.parse_expression(&Convertible::from(&document), None).expect("parsed");
         let state: GlobalStateMap =
             [("text".to_owned(), feature::Value::String(text.to_owned()))].into_iter().collect();
@@ -122,7 +122,7 @@ fn is_supported_script_accepts_scripts_that_font_faces_cover() {
 #[test]
 fn evaluate_feature_with_context_uses_every_input() {
     let parse = |document: serde_json::Value| {
-        let mut ctx = ParsingContext::new();
+        let mut ctx = ParsingContext::new(&Functions::with_builtins());
         ctx.parse_expression(&Convertible::from(&document), None).expect("parsed")
     };
     let mut feature = feature::Feature::new(geo_types::Point::new(2.0, 2.0));
@@ -165,7 +165,7 @@ fn evaluate_feature_with_context_uses_every_input() {
 fn upcase_and_downcase_use_full_case_mapping() {
     let evaluate = |op: &str, text: &str| {
         let document = serde_json::json!([op, text]);
-        let mut ctx = ParsingContext::new();
+        let mut ctx = ParsingContext::new(&Functions::with_builtins());
         let parsed = ctx.parse_expression(&Convertible::from(&document), None).expect("parsed");
         parsed.evaluate(&EvaluationContext::default())
     };
@@ -185,6 +185,11 @@ fn upcase_and_downcase_use_full_case_mapping() {
 fn non_spec_forms_fail_to_parse() {
     for json in [r#"["image", "a", "b"]"#, r#"["array", "image", ["literal", []]]"#] {
         let document: serde_json::Value = serde_json::from_str(json).unwrap();
-        assert!(ParsingContext::new().parse_expression(&Convertible::from(&document), None).is_none(), "{json}");
+        assert!(
+            ParsingContext::new(&Functions::with_builtins())
+                .parse_expression(&Convertible::from(&document), None)
+                .is_none(),
+            "{json}"
+        );
     }
 }

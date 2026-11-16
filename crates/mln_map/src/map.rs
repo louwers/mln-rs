@@ -13,14 +13,14 @@ use mln_map_types::{
     MapView, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
-    FeatureInfo, LayerFeaturesMap, RendererEvent, RendererEvents, RenderingStats, SourceLayerID, UpdateParameters,
-    UpdateReader, UpdateSlot,
+    FeatureInfo, LayerFeaturesMap, Registry, RendererEvent, RendererEvents, RenderingStats, SourceLayerID,
+    UpdateParameters, UpdateReader, UpdateSlot,
 };
 use mln_storage::{FileSource, Loader, ResourceOptions};
 use mln_style::observer::{Observer as StyleObserver, SourceObserver};
 use mln_style::source::Source;
 use mln_style::sprite::Sprite;
-use mln_style::{Style, StyleLoadError};
+use mln_style::{Style, StyleLoadError, StyleRegistry};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
@@ -190,7 +190,8 @@ impl Map {
         resource_options: &ResourceOptions,
         run_loop: &RunLoop,
     ) -> Result<Map, Error> {
-        Self::create(Some(Arc::new(Loader::new(resource_options))), &map_options, run_loop)
+        let loader: Arc<dyn FileSource> = Arc::new(Loader::new(resource_options));
+        Self::with_registry(loader, map_options, Arc::clone(Registry::with_builtins().style()), run_loop)
     }
 
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
@@ -201,19 +202,27 @@ impl Map {
         map_options: MapOptions,
         run_loop: &RunLoop,
     ) -> Result<Map, Error> {
-        Self::create(Some(file_source), &map_options, run_loop)
+        Self::with_registry(file_source, map_options, Arc::clone(Registry::with_builtins().style()), run_loop)
     }
 
-    fn create(
-        file_source: Option<Arc<dyn FileSource>>,
-        map_options: &MapOptions,
+    /// A map whose resources come from `file_source` and whose style parses
+    /// against `registry`, on `run_loop`. The other constructors use the
+    /// built-in registrations.
+    ///
+    /// The renderer that draws the map must be given a registry filled by
+    /// the same calls as `registry` ([`mln_renderer::Registry::style`]): it
+    /// finds a layer's type by name, and draws no layer whose type it lacks.
+    pub fn with_registry(
+        file_source: Arc<dyn FileSource>,
+        map_options: MapOptions,
+        registry: Arc<StyleRegistry>,
         run_loop: &RunLoop,
     ) -> Result<Map, Error> {
         let events = EventQueue::new();
         let style_events = EventQueue::new();
         let renderer_events = RendererEvents::new();
         let pixel_ratio = map_options.pixel_ratio;
-        let mut style = Style::with_file_source(file_source.clone(), pixel_ratio, run_loop);
+        let mut style = Style::with_file_source(registry, Some(Arc::clone(&file_source)), pixel_ratio, run_loop);
         style.impl_.set_observer(Some(Rc::new(StyleEvents(style_events.clone()))));
         let mut transform = Transform::new(map_options.constrain_mode, map_options.viewport_mode);
         transform.set_north_orientation(map_options.north_orientation);
@@ -250,7 +259,7 @@ impl Map {
             renderer_events,
             events,
             command_ends: Vec::new(),
-            file_source,
+            file_source: Some(file_source),
             run_loop: run_loop.clone(),
         };
         map.share_projection_with_transform();
@@ -806,7 +815,7 @@ impl Map {
     }
 
     /// Moves the camera relative to where it is, as a gesture does
-    /// (maplibre-native-ffi's `mln_map_apply_camera_delta`): a pan, a zoom,
+    /// (the C API's `mln_map_apply_camera_delta`): a pan, a zoom,
     /// turn and tilt around an anchor, a gesture phase, and the momentum a
     /// gesture's end continues with. See [`CameraDelta`]. Returns the
     /// command, whose end [`drain_command_ends`](Self::drain_command_ends)
@@ -819,7 +828,7 @@ impl Map {
     }
 
     /// Moves the camera to absolute values, by a jump, an ease or a flight,
-    /// as a command or as part of a gesture (maplibre-native-ffi's
+    /// as a command or as part of a gesture (the C API's
     /// `mln_map_update_camera`). See [`CameraUpdate`]. Returns the command,
     /// whose end [`drain_command_ends`](Self::drain_command_ends) reports.
     pub fn update_camera(&mut self, update: &CameraUpdate) -> CameraCommandId {

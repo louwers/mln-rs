@@ -6,9 +6,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::symbol_layer_ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use mln_map_types::{Projection, ProjectionData};
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::SymbolLayoutProperties;
-use mln_style::layers::symbol_layer_properties::SymbolLayerProperties;
+use mln_style::layers::{Symbol, SymbolLayoutProperties};
 use mln_style_types::{AlignmentType, IconTextFitType};
 use mln_util::mat4::{Mat4, matrix};
 
@@ -19,6 +17,7 @@ use crate::drawable::Drawable;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::PaintParameters;
 use crate::render_tile::RenderTile;
@@ -31,9 +30,9 @@ pub(crate) struct SymbolLayerTweaker {
 }
 
 impl SymbolLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
         SymbolLayerTweaker {
-            base: LayerTweakerBase::new(id, properties),
+            base: LayerTweakerBase::new(id, Some(properties)),
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
             tile_props_uniform_buffer: None,
@@ -52,10 +51,6 @@ fn get_tex_size(drawable: &Drawable, tex_id: usize) -> [f32; 2] {
 }
 
 impl LayerTweaker for SymbolLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -67,10 +62,11 @@ impl LayerTweaker for SymbolLayerTweaker {
 
         let context = parameters.context;
         let state = parameters.state;
-        let properties = Arc::clone(&self.base.evaluated_properties);
-        let symbol_layer_properties =
-            (*properties).downcast_ref::<SymbolLayerProperties>().expect("SymbolLayerTweaker: symbol layer properties");
-        let evaluated = get_evaluated::<SymbolLayerProperties>(&properties);
+        let Some(properties) = self.base.evaluated_properties.clone() else {
+            return;
+        };
+        let layer = evaluated::<Symbol>(&properties);
+        let evaluated = &layer.paint;
 
         let zoom = state.get_zoom() as f32;
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
@@ -102,7 +98,7 @@ impl LayerTweaker for SymbolLayerTweaker {
         let mut projection_ubo_vector = Vec::with_capacity(count);
 
         let cam_dist = state.get_camera_to_center_distance();
-        let screen_space_prop = &symbol_layer_properties.layer_impl().layout.symbol_screen_space;
+        let screen_space_prop = &layer.style.layout.symbol_screen_space;
         let is_screen_space = if screen_space_prop.is_constant() {
             *screen_space_prop.as_constant()
         } else {

@@ -9,7 +9,7 @@ use mln_vec_map::VecSet;
 use super::util::{StubGeometryTileFeature, property_map};
 use crate::evaluated::Evaluated;
 use crate::expression::dsl::{get, get_str, image, interpolate, linear, literal, literal_str, number, step, zoom};
-use crate::expression::{Dependency, EvaluationContext, Image, Value};
+use crate::expression::{Dependency, EvaluationContext, Functions, Image, Value};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -289,7 +289,7 @@ fn polygon(rings: Vec<LineString<f64>>) -> Geometry<f64> {
 }
 
 fn create_geo_expression(op: &str, geojson: &str) -> Option<crate::expression::Expr> {
-    create_expression_from_str(&format!(r#"["{op}", {geojson} ]"#))
+    create_expression_from_str(&format!(r#"["{op}", {geojson} ]"#), &Functions::with_builtins())
 }
 
 // gtest: PropertyExpression.WithinExpression
@@ -517,7 +517,10 @@ fn distance_expression() {
             "type": "Point",
             "coordinates": [0, 0],
             }"#;
-        let expression = create_expression_from_str(&format!(r#"["distance", {invalid_geo_source}, "ExtraArgument"]"#));
+        let expression = create_expression_from_str(
+            &format!(r#"["distance", {invalid_geo_source}, "ExtraArgument"]"#),
+            &Functions::with_builtins(),
+        );
         assert!(expression.is_none());
     }
 

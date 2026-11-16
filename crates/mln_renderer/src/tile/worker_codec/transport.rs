@@ -30,6 +30,7 @@ use mln_util::time::Instant;
 use super::TileWorkerHost;
 use super::envelope::{self, Encoded};
 use super::map_side::MapCodec;
+use crate::Registry;
 use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::{JobId, JobResult, JobTimes, Run};
 use crate::tile::tile_workers::{Lane, ReplyBody, TileWorkers};
@@ -100,10 +101,10 @@ pub struct RemoteWorkers {
 struct State {
     instances: Box<dyn WorkerInstances>,
     lanes: Vec<RemoteLane>,
+    registry: Arc<Registry>,
 }
 
 /// One instance's jobs.
-#[derive(Default)]
 struct RemoteLane {
     codec: MapCodec,
     in_flight: HashSet<JobId>,
@@ -112,19 +113,35 @@ struct RemoteLane {
     instance: u64,
 }
 
+impl RemoteLane {
+    /// The lane of its `instance`th instance, with tables of its own.
+    fn new(registry: &Arc<Registry>, instance: u64) -> Self {
+        RemoteLane { codec: MapCodec::new(Arc::clone(registry)), in_flight: HashSet::default(), instance }
+    }
+}
+
 impl RemoteWorkers {
     /// Workers in the instances `instances` creates, with the sink for their
     /// replies. The replies are handled in tasks of `scheduler`, the
     /// renderer's loop, which runs on this thread, the one that uses the
-    /// workers.
-    pub fn new(scheduler: &SchedulerPtr, instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>) -> Rc<Self> {
+    /// workers. The jobs name `registry`'s registrations, so each instance's
+    /// host needs a registry filled by the same calls.
+    pub fn new(
+        scheduler: &SchedulerPtr,
+        registry: Arc<Registry>,
+        instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>,
+    ) -> Rc<Self> {
         Rc::new_cyclic(|self_weak: &Weak<RemoteWorkers>| {
             let workers = Arc::new(LocalObject::new(Weak::clone(self_weak)));
             let instances = instances(ReplySink { scheduler: Arc::clone(scheduler), workers });
             let count = instances.count();
             assert!(count > 0, "RemoteWorkers need a worker instance");
             RemoteWorkers {
-                state: RefCell::new(State { instances, lanes: (0..count).map(|_| RemoteLane::default()).collect() }),
+                state: RefCell::new(State {
+                    instances,
+                    lanes: (0..count).map(|_| RemoteLane::new(&registry, 0)).collect(),
+                    registry,
+                }),
                 live: (0..count).map(|_| Cell::new(true)).collect(),
                 inbox: OnceCell::new(),
                 bytes: Cell::new((0, 0)),
@@ -190,7 +207,7 @@ impl RemoteWorkers {
             };
             Log::error(Event::General, format!("Tile worker {} was lost", lane.0));
             live.set(state.instances.replace(lane.0));
-            *remote = RemoteLane { instance: remote.instance + 1, ..RemoteLane::default() };
+            *remote = RemoteLane::new(&state.registry, remote.instance + 1);
         }
         self.send(TileEvent::LaneLost(lane));
     }
@@ -261,21 +278,23 @@ impl TileWorkers for RemoteJobs {
 /// thread.
 pub struct ThreadWorkerInstances {
     threads: Vec<Thread<TileWorkerHost>>,
+    registry: Arc<Registry>,
     replies: ReplySink,
 }
 
 impl ThreadWorkerInstances {
-    /// `count` instances that send their replies to `replies`.
+    /// `count` instances, whose hosts resolve their jobs' registrations
+    /// against `registry` and send their replies to `replies`.
     #[must_use]
-    pub fn new(count: usize, replies: &ReplySink) -> Self {
-        let threads = (0..count).map(|instance| Self::start(instance, replies)).collect();
-        ThreadWorkerInstances { threads, replies: replies.clone() }
+    pub fn new(count: usize, registry: Arc<Registry>, replies: &ReplySink) -> Self {
+        let threads = (0..count).map(|instance| Self::start(instance, &registry, replies)).collect();
+        ThreadWorkerInstances { threads, registry, replies: replies.clone() }
     }
 
-    fn start(instance: usize, replies: &ReplySink) -> Thread<TileWorkerHost> {
-        let replies = replies.clone();
+    fn start(instance: usize, registry: &Arc<Registry>, replies: &ReplySink) -> Thread<TileWorkerHost> {
+        let (registry, replies) = (Arc::clone(registry), replies.clone());
         Thread::new(&format!("TileWorker {instance}"), move |_, _| {
-            TileWorkerHost::new(move |reply| replies.send(instance, reply))
+            TileWorkerHost::new(registry, move |reply| replies.send(instance, reply))
         })
     }
 }
@@ -290,7 +309,7 @@ impl WorkerInstances for ThreadWorkerInstances {
     }
 
     fn replace(&mut self, instance: usize) -> bool {
-        self.threads[instance] = Self::start(instance, &self.replies);
+        self.threads[instance] = Self::start(instance, &self.registry, &self.replies);
         true
     }
 }

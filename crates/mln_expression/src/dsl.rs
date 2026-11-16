@@ -2,6 +2,8 @@
 // type-checking, and is intended for use only by test and other non-production
 // code.
 
+use std::sync::Arc;
+
 use mln_conversion::Convertible;
 use mln_util::ColorSpace;
 
@@ -12,6 +14,7 @@ use crate::compound_expression::create_compound_expression;
 use crate::expression::Expr;
 use crate::format_expression::{FormatExpression, FormatExpressionSection};
 use crate::formatted::Formatted;
+use crate::functions::Functions;
 use crate::image_expression::ImageExpression;
 use crate::interpolate::create_interpolate;
 use crate::interpolator::{ExponentialInterpolator, Interpolator};
@@ -21,24 +24,26 @@ use crate::stops::Stops;
 use crate::type_::Type;
 use crate::value::Value;
 
+/// The call of the built-in function `op` with `args`.
 #[must_use]
 pub fn compound(op: &str, args: Vec<Expr>) -> Expr {
-    let mut ctx = ParsingContext::new();
+    let mut ctx = ParsingContext::new(&Functions::with_builtins());
     let result = create_compound_expression(op, args, &mut ctx);
     result.expect("dsl::compound")
 }
 
-/// Parses an expression from JSON text.
+/// Parses an expression from JSON text against `functions`.
 #[must_use]
-pub fn create_expression_from_str(expr: &str) -> Option<Expr> {
+pub fn create_expression_from_str(expr: &str, functions: &Arc<Functions>) -> Option<Expr> {
     let document: serde_json::Value = serde_json::from_str(expr).ok()?;
-    let mut ctx = ParsingContext::new();
+    let mut ctx = ParsingContext::new(functions);
     ctx.parse_expression(&Convertible::from(&document), None)
 }
 
+/// Parses an expression against `functions`.
 #[must_use]
-pub fn create_expression(expr: &Convertible<'_>) -> Option<Expr> {
-    let mut ctx = ParsingContext::new();
+pub fn create_expression(expr: &Convertible<'_>, functions: &Arc<Functions>) -> Option<Expr> {
+    let mut ctx = ParsingContext::new(functions);
     ctx.parse_expression(expr, None)
 }
 
@@ -172,7 +177,7 @@ pub fn interpolate(interpolator: Interpolator, input: Expr, stops_in: Vec<(f64, 
     for (k, v) in stops_in {
         stops.insert_or_assign(k, v);
     }
-    let mut ctx = ParsingContext::new();
+    let mut ctx = ParsingContext::without_functions();
     let result = create_interpolate(type_, interpolator, ColorSpace::Rgb, input, stops, &mut ctx);
     result.expect("dsl::interpolate")
 }

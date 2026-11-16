@@ -1,0 +1,388 @@
+//! The render half of the layer types: each marker type's [`LayerType`]
+//! impl, which says how a tile lays out the type's layers and which render
+//! layer draws them. The registry holds the types as
+//! `&'static dyn ErasedLayerType` ([`entry`]).
+//!
+//! A layer's values for a frame are an [`EvaluatedLayer<T>`], shared as an
+//! `Arc<dyn ErasedEvaluatedLayer>`. An erased value gets back to its type
+//! only through [`EvaluatedLayer::recover`] or [`evaluated`].
+
+use std::any::Any;
+use std::sync::Arc;
+
+use mln_style::CrossfadeParameters;
+use mln_style::expression::Dependency;
+use mln_style::layer_type::{
+    ErasedLayerStyle, ErasedStyleLayerType, LayerStyle, LayerTypeEntry, PaintSet, StyleLayerType,
+};
+use mln_style::serialization::shared_layer;
+use mln_util::error::Error;
+use mln_vec_map::VecSet;
+use mln_wire::{Reader, Wire, Writer};
+use smallvec::SmallVec;
+
+use crate::bucket::{Bucket, BucketPtr};
+use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
+use crate::layout::tile_layout::{Built, Resolved};
+use crate::render_layer::{LayerRenderData, RenderLayerPtr};
+
+/// A layer type that the renderer draws.
+pub(crate) trait LayerType: StyleLayerType {
+    /// How a tile lays out a group of the type's layers.
+    /// [`NoLayout`](crate::layout::layout::NoLayout) for a type that
+    /// doesn't lay out.
+    type Layout: Layout<Self>;
+
+    /// The bucket the layout makes. [`NoBucket`](crate::bucket::NoBucket)
+    /// for a type that doesn't lay out.
+    type Bucket: Bucket + Wire;
+
+    /// Whether the layout of `group` can need glyphs or images. A tile
+    /// makes such a group's layout before the dependencies are resolved,
+    /// and every other group's once they are.
+    fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Self>>]) -> bool {
+        false
+    }
+
+    /// The layout of `group`, layers of the same layout on `source_layer`,
+    /// with the dependencies it records in `parameters`. `None` for a type
+    /// that doesn't lay out.
+    fn create_layout(
+        _group: &[Arc<EvaluatedLayer<Self>>],
+        _parameters: &mut LayoutParameters<'_>,
+        _source_layer: SourceLayer,
+    ) -> Result<Option<Self::Layout>, Error> {
+        Ok(None)
+    }
+
+    /// How far outside a feature of `bucket` a query still hits it, from
+    /// `layer`'s current values and the bucket's statistics of them.
+    fn query_radius(_bucket: &Self::Bucket, _layer: &EvaluatedLayer<Self>) -> f32 {
+        0.0
+    }
+
+    fn render_layer(style: Arc<LayerStyle<Self>>) -> RenderLayerPtr;
+}
+
+/// The values of a layer of the type `T` for a frame.
+pub(crate) struct EvaluatedLayer<T: LayerType> {
+    pub(crate) style: Arc<LayerStyle<T>>,
+    pub(crate) paint: <T::PaintProperties as PaintSet>::Evaluated,
+    /// The default for a type without cross-faded properties.
+    pub(crate) crossfade: CrossfadeParameters,
+    /// The `RenderPass` bits the layer draws in.
+    pub(crate) render_passes: u8,
+}
+
+impl<T: LayerType> EvaluatedLayer<T> {
+    /// `layer` as a `T` layer's values, the same allocation, or `None` for
+    /// another type's.
+    pub(crate) fn recover(layer: &Arc<dyn ErasedEvaluatedLayer>) -> Option<Arc<Self>> {
+        let any: Arc<dyn Any + Send + Sync> = Arc::<dyn ErasedEvaluatedLayer>::clone(layer);
+        any.downcast().ok()
+    }
+
+    pub(crate) fn new(style: Arc<LayerStyle<T>>) -> Self {
+        EvaluatedLayer::with_paint(style, Default::default())
+    }
+
+    /// The values of the layer `style` with its paint properties evaluated
+    /// to `paint`, without a cross-fade or render passes.
+    pub(crate) fn with_paint(style: Arc<LayerStyle<T>>, paint: <T::PaintProperties as PaintSet>::Evaluated) -> Self {
+        EvaluatedLayer { style, paint, crossfade: CrossfadeParameters::default(), render_passes: 0 }
+    }
+}
+
+impl<T: LayerType> std::fmt::Debug for EvaluatedLayer<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EvaluatedLayer")
+            .field("type", &T::INFO.name)
+            .field("id", &self.style.id)
+            .field("render_passes", &self.render_passes)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A layer's values for a frame, whichever its type.
+pub(crate) trait ErasedEvaluatedLayer: Any + Send + Sync {
+    fn entry(&self) -> &'static dyn ErasedLayerType;
+
+    fn style(&self) -> &dyn ErasedLayerStyle;
+
+    fn shared_style(&self) -> Arc<dyn ErasedLayerStyle>;
+
+    /// The `RenderPass` bits the layer draws in.
+    fn render_passes(&self) -> u8;
+
+    /// Bit i is set when the i-th data-driven paint property is the same for
+    /// every feature.
+    fn constants_mask(&self) -> u64;
+
+    /// The combined dependencies of the evaluated paint properties that still
+    /// differ by feature.
+    fn evaluated_dependencies(&self) -> Dependency;
+
+    /// Adds the global-state keys that the evaluated paint properties still
+    /// read to `refs`.
+    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>);
+
+    /// Writes the values for their type's [`ErasedLayerType::read_evaluated`].
+    fn write(&self, w: &mut Writer);
+}
+
+impl<T: LayerType> ErasedEvaluatedLayer for EvaluatedLayer<T> {
+    fn entry(&self) -> &'static dyn ErasedLayerType {
+        entry::<T>()
+    }
+
+    fn style(&self) -> &dyn ErasedLayerStyle {
+        &*self.style
+    }
+
+    fn shared_style(&self) -> Arc<dyn ErasedLayerStyle> {
+        Arc::<LayerStyle<T>>::clone(&self.style)
+    }
+
+    fn render_passes(&self) -> u8 {
+        self.render_passes
+    }
+
+    fn constants_mask(&self) -> u64 {
+        T::PaintProperties::constants_mask(&self.paint)
+    }
+
+    fn evaluated_dependencies(&self) -> Dependency {
+        T::PaintProperties::evaluated_dependencies(&self.paint)
+    }
+
+    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>) {
+        T::PaintProperties::collect_evaluated_global_state_refs(&self.paint, refs);
+    }
+
+    fn write(&self, w: &mut Writer) {
+        shared_layer::write(&self.shared_style(), w);
+        self.paint.write(w);
+        self.crossfade.write(w);
+        self.render_passes.write(w);
+    }
+}
+
+// Debug is not a supertrait, for the reason at mln_style's
+// `impl Debug for dyn ErasedLayerStyle`.
+impl std::fmt::Debug for dyn ErasedEvaluatedLayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EvaluatedLayer")
+            .field("id", &self.style().base().id)
+            .field("type", &self.style().info().name)
+            .finish_non_exhaustive()
+    }
+}
+
+/// `layer` as a `T` layer's values.
+///
+/// # Panics
+///
+/// If `layer` is another type's.
+pub(crate) fn evaluated<T: LayerType>(layer: &Arc<dyn ErasedEvaluatedLayer>) -> &EvaluatedLayer<T> {
+    let any: &dyn Any = &**layer;
+    match any.downcast_ref() {
+        Some(layer) => layer,
+        None => panic!("the evaluated values of a {} layer, not a {} layer", layer.style().info().name, T::INFO.name),
+    }
+}
+
+/// A layer type that the renderer draws, whichever it is.
+pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
+    /// The render layer that draws the layer `style`, or `None` if `style`
+    /// is another type's.
+    fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<RenderLayerPtr>;
+
+    /// [`LayerType::layout_can_need_dependencies`]; false for a layer of
+    /// another type.
+    fn layout_can_need_dependencies(&self, group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool;
+
+    /// [`LayerType::create_layout`]. Fails for a layer of another type.
+    fn create_layout(
+        &self,
+        group: &[Arc<dyn ErasedEvaluatedLayer>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<Box<dyn ErasedLayout>>, Error>;
+
+    /// [`LayerType::query_radius`]; 0 for a bucket or layer of another type.
+    fn query_radius(&self, bucket: &dyn Bucket, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32;
+
+    /// Reads the values that [`ErasedEvaluatedLayer::write`] wrote for a
+    /// layer of the type.
+    fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>>;
+
+    /// Reads a bucket of the type, which [`Bucket::write_wire`] wrote.
+    fn read_bucket(&self, r: &mut Reader<'_>) -> Option<BucketPtr>;
+}
+
+impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
+    fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<RenderLayerPtr> {
+        LayerStyle::<T>::recover(style).map(T::render_layer)
+    }
+
+    fn layout_can_need_dependencies(&self, group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool {
+        recover_group::<T>(group).is_ok_and(|group| T::layout_can_need_dependencies(&group))
+    }
+
+    fn create_layout(
+        &self,
+        group: &[Arc<dyn ErasedEvaluatedLayer>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<Box<dyn ErasedLayout>>, Error> {
+        let layout = T::create_layout(&recover_group::<T>(group)?, parameters, source_layer)?;
+        Ok(layout.map(|layout| -> Box<dyn ErasedLayout> { Box::new(TypedLayout::<T>(layout)) }))
+    }
+
+    fn query_radius(&self, bucket: &dyn Bucket, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32 {
+        let any: &dyn Any = bucket;
+        match (any.downcast_ref::<T::Bucket>(), EvaluatedLayer::<T>::recover(layer)) {
+            (Some(bucket), Some(layer)) => T::query_radius(bucket, &layer),
+            _ => 0.0,
+        }
+    }
+
+    fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
+        let style = shared_layer::read(r)?;
+        let Some(style) = LayerStyle::<T>::recover(&style) else {
+            return r.fail("the evaluated values of a layer of another type");
+        };
+        Some(Arc::new(EvaluatedLayer::<T> {
+            style,
+            paint: Wire::read(r)?,
+            crossfade: Wire::read(r)?,
+            render_passes: Wire::read(r)?,
+        }))
+    }
+
+    fn read_bucket(&self, r: &mut Reader<'_>) -> Option<BucketPtr> {
+        Some(Arc::new(T::Bucket::read(r)?))
+    }
+}
+
+/// `group`'s layers as `T` layers' values; fails if one is another type's.
+// Inline for small groups, since a tile's layout recovers each of its groups.
+fn recover_group<T: LayerType>(
+    group: &[Arc<dyn ErasedEvaluatedLayer>],
+) -> Result<SmallVec<[Arc<EvaluatedLayer<T>>; 4]>, Error> {
+    group
+        .iter()
+        .map(|layer| {
+            EvaluatedLayer::recover(layer).ok_or_else(|| {
+                Error::native(format!("a {} layer in a group of {} layers", layer.style().info().name, T::INFO.name))
+            })
+        })
+        .collect()
+}
+
+/// A layout, whichever its layer type.
+pub(crate) trait ErasedLayout: Send {
+    fn has_dependencies(&self) -> bool;
+
+    /// Makes the bucket ([`Layout::create_bucket`]) and, if it has data,
+    /// adds it to `built` for each of its layers that has none yet.
+    fn create_bucket(
+        &mut self,
+        resolved: Option<&Resolved>,
+        built: &mut Built,
+        build: &BuildParams,
+    ) -> Result<(), Error>;
+}
+
+struct TypedLayout<T: LayerType>(T::Layout);
+
+impl<T: LayerType> ErasedLayout for TypedLayout<T> {
+    fn has_dependencies(&self) -> bool {
+        self.0.has_dependencies()
+    }
+
+    fn create_bucket(
+        &mut self,
+        resolved: Option<&Resolved>,
+        built: &mut Built,
+        build: &BuildParams,
+    ) -> Result<(), Error> {
+        let Some(bucket) = self.0.create_bucket(resolved, &mut built.feature_index, build)? else {
+            return Ok(());
+        };
+        if !bucket.has_data() {
+            return Ok(());
+        }
+        let bucket: BucketPtr = Arc::new(bucket);
+        for (id, layer) in self.0.layers() {
+            built.render_data.entry(id.clone()).or_insert_with(|| LayerRenderData {
+                bucket: Arc::clone(&bucket),
+                layer: Arc::<EvaluatedLayer<T>>::clone(layer),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// The layer type `T` as a value.
+pub(crate) const fn entry<T: LayerType>() -> &'static dyn ErasedLayerType {
+    LayerTypeEntry::<T>::INSTANCE
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_map_types::MapMode;
+    use mln_style::evaluated::Evaluated;
+    use mln_style::layers::{Background, BackgroundPaintProperties, Circle, Symbol};
+    use mln_util::Color;
+    use mln_vec_map::VecMap;
+
+    use super::*;
+    use crate::buckets::circle_bucket::CircleBucket;
+
+    fn background() -> Arc<dyn ErasedEvaluatedLayer> {
+        let paint = BackgroundPaintProperties::PossiblyEvaluated {
+            background_color: Evaluated::Constant(Color::new(0.25, 0.5, 0.75, 1.0)),
+            background_opacity: Evaluated::Constant(0.5),
+            ..BackgroundPaintProperties::PossiblyEvaluated::default()
+        };
+        let style = Arc::new(LayerStyle::<Background>::new("background".to_owned(), String::new()));
+        let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
+        Arc::new(EvaluatedLayer { style, paint, crossfade, render_passes: 0 })
+    }
+
+    #[test]
+    fn evaluated_gets_the_values_of_their_type() {
+        let layer = background();
+        let layer = evaluated::<Background>(&layer);
+        assert_eq!(*layer.paint.background_color.uniform(), Color::new(0.25, 0.5, 0.75, 1.0));
+        assert_eq!(*layer.paint.background_opacity.uniform(), 0.5);
+        assert_eq!(layer.crossfade.t, 0.25);
+    }
+
+    #[test]
+    #[should_panic(expected = "background layer, not a circle layer")]
+    fn evaluated_panics_for_another_type() {
+        let layer = background();
+        let _ = evaluated::<Circle>(&layer);
+    }
+
+    #[test]
+    fn recover_keeps_the_allocation() {
+        let layer = background();
+        let recovered = EvaluatedLayer::<Background>::recover(&layer).unwrap();
+        assert!(std::ptr::addr_eq(Arc::as_ptr(&recovered), Arc::as_ptr(&layer)));
+        assert!(EvaluatedLayer::<Circle>::recover(&layer).is_none());
+    }
+
+    #[test]
+    fn a_type_reads_no_other_types_values() {
+        let layer = background();
+        let circles = entry::<Circle>();
+        assert!(!circles.layout_can_need_dependencies(std::slice::from_ref(&layer)));
+        let bucket = CircleBucket::new(&VecMap::new(), MapMode::Static, 0.0);
+        assert_eq!(circles.query_radius(&bucket, &layer), 0.0);
+        let symbols = entry::<Symbol>();
+        assert!(!symbols.layout_can_need_dependencies(&[layer]));
+    }
+}

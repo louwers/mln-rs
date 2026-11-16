@@ -91,7 +91,10 @@ pub(crate) fn remote_workers(
     count: usize,
 ) -> std::rc::Rc<crate::tile::worker_codec::RemoteWorkers> {
     use crate::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
-    RemoteWorkers::new(&run_loop.scheduler(), |replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
+    let registry = crate::Registry::with_builtins();
+    RemoteWorkers::new(&run_loop.scheduler(), Arc::clone(&registry), |replies| {
+        Box::new(ThreadWorkerInstances::new(count, registry, &replies))
+    })
 }
 
 /// Port-only: an opaque PNG whose pixels differ from their neighbours.

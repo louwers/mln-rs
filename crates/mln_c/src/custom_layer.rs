@@ -109,18 +109,24 @@ impl CustomLayerHost for Host {
 /// The header's variants of the backends' commands. A backend without one,
 /// such as WebGPU outside a browser, gives the host nothing to draw with.
 mod native {
-    #[cfg(backend_vulkan)]
+    #[cfg(any(backend_vulkan, backend_d3d12))]
     use core::ffi::c_void;
 
     use super::{Any, mln_custom_layer_encoder_data, mln_custom_layer_pass_data, mln_render_backend};
 
     #[cfg_attr(
-        not(any(backend_vulkan, target_vendor = "apple", backend_gl, all(target_family = "wasm", feature = "gl"))),
+        not(any(
+            backend_vulkan,
+            backend_d3d12,
+            target_vendor = "apple",
+            backend_gl,
+            all(target_family = "wasm", feature = "gl")
+        )),
         expect(unused_variables, reason = "the build has no backend with commands for the host")
     )]
     #[cfg_attr(
-        not(any(backend_vulkan, target_vendor = "apple")),
-        expect(unused_mut, reason = "only Vulkan and Metal fill in the data")
+        not(any(backend_vulkan, backend_d3d12, target_vendor = "apple")),
+        expect(unused_mut, reason = "only Vulkan, D3D12 and Metal fill in the data")
     )]
     pub(super) fn encoder(encoder: &mut dyn Any) -> Option<(mln_render_backend, mln_custom_layer_encoder_data)> {
         // SAFETY: zeros are a valid union of pointers and integers.
@@ -133,6 +139,15 @@ mod native {
                 command_buffer: encoder.command_buffer.as_raw() as *mut c_void,
             };
             return Some((crate::generated::types::MLN_RENDER_BACKEND_VULKAN, data));
+        }
+        #[cfg(backend_d3d12)]
+        if let Some(encoder) = encoder.downcast_ref::<mln_d3d12::CustomLayerEncoder>() {
+            use mln_d3d12::windows::core::Interface as _;
+            data.d3d12 = crate::generated::types::mln_d3d12_custom_layer_encoder {
+                device: encoder.device.as_raw(),
+                command_list: encoder.command_list.as_raw(),
+            };
+            return Some((crate::generated::types::MLN_RENDER_BACKEND_D3D12, data));
         }
         #[cfg(target_vendor = "apple")]
         if let Some(encoder) = encoder.downcast_ref::<mln_mtl::CustomLayerEncoder>() {
@@ -149,7 +164,13 @@ mod native {
     }
 
     #[cfg_attr(
-        not(any(backend_vulkan, target_vendor = "apple", backend_gl, all(target_family = "wasm", feature = "gl"))),
+        not(any(
+            backend_vulkan,
+            backend_d3d12,
+            target_vendor = "apple",
+            backend_gl,
+            all(target_family = "wasm", feature = "gl")
+        )),
         expect(unused_variables, unused_mut, reason = "the build has no backend with commands for the host")
     )]
     pub(super) fn pass(pass: &mut dyn Any) -> Option<(mln_render_backend, mln_custom_layer_pass_data)> {
@@ -168,6 +189,19 @@ mod native {
                 depth_stencil_format: pass.depth_stencil_format.as_raw() as u32,
             };
             return Some((crate::generated::types::MLN_RENDER_BACKEND_VULKAN, data));
+        }
+        #[cfg(backend_d3d12)]
+        if let Some(pass) = pass.downcast_ref::<mln_d3d12::CustomLayerPass>() {
+            use mln_d3d12::windows::core::Interface as _;
+            data.d3d12 = crate::generated::types::mln_d3d12_custom_layer_pass {
+                device: pass.device.as_raw(),
+                command_list: pass.command_list.as_raw(),
+                render_target_view: pass.render_target.ptr as u64,
+                color_format: pass.color_format.0 as u32,
+                depth_stencil_view: pass.depth_stencil.map_or(0, |view| view.ptr as u64),
+                depth_stencil_format: pass.depth_stencil_format.0 as u32,
+            };
+            return Some((crate::generated::types::MLN_RENDER_BACKEND_D3D12, data));
         }
         #[cfg(target_vendor = "apple")]
         if let Some(pass) = pass.downcast_ref::<mln_mtl::CustomLayerPass>() {

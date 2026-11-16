@@ -2,10 +2,14 @@
 //! share.
 
 use std::ffi::c_void;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use mln_gfx::ExportKinds;
+use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, TargetFormats, VertexBufferLayout};
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log};
+use parking_lot::Mutex;
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
 use windows::Win32::Graphics::Direct3D12::{
@@ -14,7 +18,8 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION,
     D3D12_MESSAGE_SEVERITY_ERROR, D3D12_MESSAGE_SEVERITY_WARNING, D3D12CreateDevice, D3D12GetDebugInterface,
     ID3D12CommandQueue, ID3D12Debug, ID3D12Debug1, ID3D12Device, ID3D12DeviceRemovedExtendedData,
-    ID3D12DeviceRemovedExtendedDataSettings, ID3D12InfoQueue, ID3D12InfoQueue1,
+    ID3D12DeviceRemovedExtendedDataSettings, ID3D12InfoQueue, ID3D12InfoQueue1, ID3D12PipelineState,
+    ID3D12RootSignature,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_CREATE_FACTORY_DEBUG, DXGI_CREATE_FACTORY_FLAGS,
@@ -22,6 +27,7 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows::core::{Interface, PCSTR};
 
+use crate::root_signature;
 use crate::shaders::ShaderCompiler;
 
 /// What `MLN_D3D12_VALIDATION` asks for: D3D12's debug layer with
@@ -44,13 +50,27 @@ impl Validation {
     }
 }
 
+/// The pipeline states of a device, by what made them: the program and its
+/// defines, the vertex buffers' layouts, the fixed state and the formats.
+pub(crate) type PipelineKey = (ShaderKey, Vec<VertexBufferLayout>, FixedState, TargetFormats);
+
 struct Shared {
     device: ID3D12Device,
     queue: ID3D12CommandQueue,
+    /// The factory that found the adapter, which makes swap chains.
+    factory: IDXGIFactory4,
     /// The adapter's name and whether it rasterizes on the CPU, as WARP
     /// does.
     name: String,
     software: bool,
+    /// The root signature of every pipeline on the device.
+    root_signature: ID3D12RootSignature,
+    /// The pipeline states that the device's backends made, which the next
+    /// backend to need one takes: a renderer for each map makes the same.
+    pipelines: Mutex<HashMap<PipelineKey, ID3D12PipelineState>>,
+    /// The kinds of exported ring that the device shares textures in, found
+    /// when first asked for.
+    export_kinds: OnceLock<ExportKinds>,
 }
 
 /// A D3D12 device on one adapter, and its direct queue. Clones share them.
@@ -171,17 +191,68 @@ impl Device {
         if validation != Validation::Off {
             log_messages(&device, validation == Validation::Abort);
         }
+        let queue_desc = D3D12_COMMAND_QUEUE_DESC { Type: D3D12_COMMAND_LIST_TYPE_DIRECT, ..Default::default() };
+        // SAFETY: plain calls.
+        let queue: ID3D12CommandQueue =
+            unsafe { device.CreateCommandQueue(&raw const queue_desc) }.map_err(native("CreateCommandQueue"))?;
+        Self::finish(device, queue, factory, &adapter)
+    }
+
+    /// The host's `device` and direct `queue` on it, which the device keeps
+    /// references to. The debug layer is the host's to turn on.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// device that runs no shader model 6.0, a queue that isn't a direct
+    /// queue of the device, or without DXC (`dxcompiler.dll`), and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when a D3D12 or DXGI call
+    /// fails.
+    pub fn wrap(device: ID3D12Device, queue: ID3D12CommandQueue) -> Result<Device, Error> {
+        ShaderCompiler::new().map_err(|error| Error::unsupported(error.to_string()))?;
+        check_shader_model(&device)?;
+        // SAFETY: plain queries.
+        let (queue_desc, queue_device) = unsafe {
+            let mut owner: Option<ID3D12Device> = None;
+            let _ = queue.GetDevice(&raw mut owner);
+            (queue.GetDesc(), owner)
+        };
+        if queue_device.as_ref() != Some(&device) || queue_desc.Type != D3D12_COMMAND_LIST_TYPE_DIRECT {
+            return Err(Error::unsupported("a D3D12 device's queue is a direct queue of the device"));
+        }
+        // SAFETY: plain calls.
+        let factory: IDXGIFactory4 =
+            unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }.map_err(native("CreateDXGIFactory2"))?;
+        // SAFETY: plain calls.
+        let adapter: IDXGIAdapter1 = unsafe { factory.EnumAdapterByLuid(device.GetAdapterLuid()) }
+            .map_err(native("finding the device's DXGI adapter"))?;
+        Self::finish(device, queue, factory, &adapter)
+    }
+
+    /// A device on `adapter`, with its root signature.
+    fn finish(
+        device: ID3D12Device,
+        queue: ID3D12CommandQueue,
+        factory: IDXGIFactory4,
+        adapter: &IDXGIAdapter1,
+    ) -> Result<Device, Error> {
         // SAFETY: plain calls.
         let desc = unsafe { adapter.GetDesc1() }.map_err(native("IDXGIAdapter1::GetDesc1"))?;
         let name_len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
         let name = String::from_utf16_lossy(&desc.Description[..name_len]);
         let software = desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0;
-        let queue_desc = D3D12_COMMAND_QUEUE_DESC { Type: D3D12_COMMAND_LIST_TYPE_DIRECT, ..Default::default() };
-        // SAFETY: plain calls.
-        let queue: ID3D12CommandQueue =
-            unsafe { device.CreateCommandQueue(&raw const queue_desc) }.map_err(native("CreateCommandQueue"))?;
         Log::info(Event::Render, format!("graphics device uses D3D12 adapter {name}"));
-        Ok(Device { shared: Arc::new(Shared { device, queue, name, software }) })
+        let root_signature = root_signature::create(&device).map_err(|error| Error::native(error.to_string()))?;
+        Ok(Device {
+            shared: Arc::new(Shared {
+                device,
+                queue,
+                factory,
+                name,
+                software,
+                root_signature,
+                pipelines: Mutex::default(),
+                export_kinds: OnceLock::new(),
+            }),
+        })
     }
 
     /// The device.
@@ -200,6 +271,18 @@ impl Device {
     #[must_use]
     pub fn adapter_name(&self) -> &str {
         &self.shared.name
+    }
+
+    /// The adapter's 8-byte LUID, as Vulkan's `deviceLUID` has it and
+    /// [`with_luid`](Self::with_luid) takes it.
+    #[must_use]
+    pub fn adapter_luid(&self) -> [u8; 8] {
+        // SAFETY: a plain query.
+        let luid = unsafe { self.shared.device.GetAdapterLuid() };
+        let mut bytes = [0; 8];
+        bytes[..4].copy_from_slice(&luid.LowPart.to_le_bytes());
+        bytes[4..].copy_from_slice(&luid.HighPart.to_le_bytes());
+        bytes
     }
 
     /// Whether the adapter rasterizes on the CPU, as WARP does.
@@ -235,6 +318,12 @@ fn create_device(adapter: &IDXGIAdapter1) -> Result<ID3D12Device, Error> {
     unsafe { D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, &raw mut device) }
         .map_err(|error| Error::unsupported(format!("D3D12CreateDevice: {error}")))?;
     let device = device.ok_or_else(|| Error::unsupported("D3D12CreateDevice made no device"))?;
+    check_shader_model(&device)?;
+    Ok(device)
+}
+
+/// Fails with `Unsupported` for a device that runs no shader model 6.0.
+fn check_shader_model(device: &ID3D12Device) -> Result<(), Error> {
     let mut model = D3D12_FEATURE_DATA_SHADER_MODEL { HighestShaderModel: D3D_SHADER_MODEL_6_0 };
     // SAFETY: the data is of the feature's type and size.
     let supported = unsafe {
@@ -248,7 +337,7 @@ fn create_device(adapter: &IDXGIAdapter1) -> Result<ID3D12Device, Error> {
     if !supported || model.HighestShaderModel.0 < D3D_SHADER_MODEL_6_0.0 {
         return Err(Error::unsupported("the D3D12 device runs no shader model 6.0"));
     }
-    Ok(device)
+    Ok(())
 }
 
 impl Device {
@@ -313,5 +402,39 @@ fn log_messages(device: &ID3D12Device, abort: bool) {
             let _ = queue.SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
             let _ = queue.SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
         }
+    }
+}
+
+impl Device {
+    /// The kinds of exported ring that sessions on the device share their
+    /// textures in: DXGI shared handles, once the device has shared one.
+    #[must_use]
+    pub fn export_kinds(&self) -> ExportKinds {
+        *self.shared.export_kinds.get_or_init(|| crate::exported_target::probe(&self.shared.device))
+    }
+
+    /// The DXGI factory of the device's adapter.
+    pub(crate) fn factory(&self) -> &IDXGIFactory4 {
+        &self.shared.factory
+    }
+
+    /// The root signature of every pipeline on the device.
+    pub(crate) fn root_signature(&self) -> &ID3D12RootSignature {
+        &self.shared.root_signature
+    }
+
+    /// The pipeline state of `key` that a backend on the device made, or
+    /// the one `create` makes.
+    pub(crate) fn pipeline(
+        &self,
+        key: PipelineKey,
+        create: impl FnOnce() -> Result<ID3D12PipelineState, GpuError>,
+    ) -> Result<ID3D12PipelineState, GpuError> {
+        if let Some(pipeline) = self.shared.pipelines.lock().get(&key) {
+            return Ok(pipeline.clone());
+        }
+        let pipeline = create()?;
+        self.shared.pipelines.lock().insert(key, pipeline.clone());
+        Ok(pipeline)
     }
 }

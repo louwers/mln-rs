@@ -28,10 +28,11 @@ use crate::coalesce::Coalesce;
 use crate::coercion::Coercion;
 use crate::collator_expression::CollatorExpression;
 use crate::comparison::Comparison;
-use crate::compound_expression::{CompoundExpression, Op};
+use crate::compound_expression::CompoundExpression;
 use crate::distance::Distance;
 use crate::format_expression::FormatExpression;
 use crate::format_section_override::FormatSectionOverride;
+use crate::functions::Role;
 use crate::image_expression::{ImageExpression, UnavailableImages};
 use crate::in_::In;
 use crate::index_of::IndexOf;
@@ -88,7 +89,8 @@ impl fmt::Debug for EvaluationError {
     }
 }
 
-pub(crate) type EvalResult<T> = Result<T, EvaluationError>;
+/// The result of a typed evaluation.
+pub type EvalResult<T> = Result<T, EvaluationError>;
 
 pub type EvaluationResult = Result<Value, EvaluationError>;
 
@@ -469,7 +471,7 @@ impl Expr {
     pub fn get_type(&self) -> Type {
         match &self.node {
             Node::Literal(l) => l.get_type().clone(),
-            Node::Compound(c) => c.signature().result.clone(),
+            Node::Compound(c) => c.overload().result.clone(),
             Node::Assertion(a) => a.get_type().clone(),
             Node::Coercion(c) => c.get_type().clone(),
             Node::Comparison(_) | Node::All(_) | Node::Any(_) | Node::In(_) | Node::Within(_) => Type::Boolean,
@@ -525,7 +527,7 @@ impl Expr {
     pub fn get_operator(&self) -> &str {
         match &self.node {
             Node::Literal(_) => "literal",
-            Node::Compound(c) => c.signature().name,
+            Node::Compound(c) => c.overload().name(),
             Node::Assertion(a) => a.get_operator(),
             Node::Coercion(c) => c.get_operator(),
             Node::Comparison(c) => c.get_operator(),
@@ -603,7 +605,7 @@ impl Expr {
         match &self.node {
             Node::Literal(l) => vec![Some(l.get_value().clone())],
             Node::Compound(c) => {
-                if c.signature().op == Op::Error {
+                if c.overload().result == Type::Error {
                     Vec::new()
                 } else {
                     vec![None]
@@ -639,7 +641,7 @@ impl Expr {
         discriminant(&self.node).hash(&mut state);
         match &self.node {
             Node::Literal(l) => hash_value(l.get_value(), state),
-            Node::Compound(c) => c.signature().name.hash(&mut state),
+            Node::Compound(c) => c.overload().name().hash(&mut state),
             Node::Comparison(c) => c.get_operator().hash(&mut state),
             Node::Assertion(_) | Node::Coercion(_) => self.get_type().hash(&mut state),
             Node::Var(v) => v.name().hash(&mut state),
@@ -857,7 +859,7 @@ impl Node {
     /// The inputs the node itself reads, apart from its operands'.
     fn own_dependencies(&self) -> Dependency {
         match self {
-            Node::Compound(c) => c.signature().dependencies,
+            Node::Compound(c) => c.overload().dependencies,
             Node::Let(_) => Dependency::BIND,
             Node::Var(v) => Dependency::VAR | v.bound_expression().deps,
             Node::Collator(_) | Node::Within(_) | Node::Distance(_) => Dependency::FEATURE,
@@ -903,7 +905,7 @@ pub fn collect_global_state_refs(expression: &Expr, refs: &mut VecSet<String>) {
         return;
     }
     if let Some(compound) = expression.as_compound()
-        && compound.signature().op == Op::GlobalState
+        && compound.overload().role == Role::GlobalState
     {
         // The property name argument is enforced to be a string literal
         // at parse time.

@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use feature::{Value, ValueObject};
 use mln_conversion::Convertible;
-use mln_style::conversion::{Converter, Error};
+use mln_style::conversion::{Error, convert_sky};
+use mln_style::expression::Functions;
 use mln_style::property_value::PropertyValue;
 use mln_style::sky::Sky;
 use mln_style::style_property::Kind;
@@ -21,13 +22,13 @@ use crate::render_sky::RenderSky;
 
 fn parse_sky(source: &str, error: &mut Error) -> Option<Sky> {
     let json: serde_json::Value = serde_json::from_str(source).expect("JSON");
-    <Sky as Converter>::convert(&Convertible::from(&json), error)
+    convert_sky(&Convertible::from(&json), &Functions::with_builtins(), error)
 }
 
 /// Sets the sky's property `name` from style JSON.
 #[track_caller]
 fn set(sky: &mut Sky, name: &str, value: &serde_json::Value) {
-    let error = sky.set_property(name, &Convertible::from(value));
+    let error = sky.set_property(name, &Convertible::from(value), &Functions::with_builtins());
     assert!(error.is_none(), "{name}: {error:?}");
 }
 

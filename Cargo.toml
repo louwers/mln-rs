@@ -526,6 +526,7 @@ geojson_vt.workspace = true
 geometry.workspace = true
 kdbush.workspace = true
 mln_conversion.workspace = true
+mln_d3d12.workspace = true
 mln_expression.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true

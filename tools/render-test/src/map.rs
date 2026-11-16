@@ -5,6 +5,7 @@ use std::sync::Arc;
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
+use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_util::image::PremultipliedImage;
@@ -47,17 +48,18 @@ impl Impl {
             cache_path: resource_options.cache_path.clone(),
             ..mln_storage::ResourceOptions::default()
         };
+        let registry = Registry::with_builtins();
         let mut frontend =
             HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, run_loop).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let workers = RemoteWorkers::new(&run_loop.scheduler(), |replies| {
-                Box::new(ThreadWorkerInstances::new(count, &replies))
+            let workers = RemoteWorkers::new(&run_loop.scheduler(), Arc::clone(&registry), |replies| {
+                Box::new(ThreadWorkerInstances::new(count, Arc::clone(&registry), &replies))
             });
             frontend.renderer().set_tile_workers(&workers);
         }
         let file_source = proxy_loader(&resource_options);
-        let mut map = Map::with_file_source(
+        let mut map = Map::with_registry(
             Arc::clone(&file_source),
             MapOptions {
                 map_mode: map_mode(metadata.map_mode),
@@ -66,6 +68,7 @@ impl Impl {
                 cross_source_collisions: metadata.cross_source_collisions,
                 ..Default::default()
             },
+            Arc::clone(registry.style()),
             run_loop,
         )
         .map_err(|e| e.to_string())?;
@@ -280,8 +283,9 @@ impl TestRunnerImpl for Impl {
         let filter = match &options.filter {
             Some(json) => {
                 let mut error = mln_conversion::Error::default();
-                match mln_style::conversion::convert::<mln_style::filter::Filter>(
+                match mln_style::conversion::convert_filter(
                     &mln_conversion::Convertible::from(json),
+                    self.map.style().registry().functions(),
                     &mut error,
                 ) {
                     Some(filter) => Some(filter),

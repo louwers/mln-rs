@@ -1,4 +1,4 @@
-// A layer's `Layer::Impl` crosses (as a tile worker in another
+// A layer's style data crosses (as a tile worker in another
 // wasm instance gets its layers) to one that encodes the same, and serializes
 // to style JSON that parses back. tools/render-test's layer_round_trip test
 // checks every layer of the render and query suites.
@@ -9,26 +9,29 @@ use std::sync::Arc;
 use feature::Value;
 use mln_conversion::{Convertible, Error};
 
-use super::util::parse_json;
+use super::util::{parse_json, style_of};
+use crate::StyleRegistry;
 use crate::conversion::convert_layer;
+use crate::expression::Functions;
 use crate::layer::Layer;
-use crate::layer_impl::Impl;
-use crate::layers::fill_extrusion_layer::FillExtrusionLayer;
+use crate::layer_type::ErasedLayerStyle;
+use crate::layers::FillExtrusion;
 
-fn parse(json: &serde_json::Value) -> Box<dyn Layer> {
+fn parse(json: &serde_json::Value) -> Layer {
     let mut error = Error::default();
-    convert_layer(&Convertible::from(json), &mut error).unwrap_or_else(|| panic!("{json}: {}", error.message))
+    convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(json), &mut error)
+        .unwrap_or_else(|| panic!("{json}: {}", error.message))
 }
 
 #[derive(mln_wire::Wire)]
-struct Crossing(#[wire(with = "crate::serialization::shared_layer")] Arc<dyn Impl>);
+struct Crossing(#[wire(with = "crate::serialization::shared_layer")] Arc<dyn ErasedLayerStyle>);
 
-/// The layer's serialized value, after checking that its `Impl` crosses
+/// The layer's serialized value, after checking that its style data crosses
 /// to one that encodes the same.
-fn round_trip(layer: &dyn Layer) -> Value {
-    let encoded = mln_wire::to_vec(&Crossing(layer.base_impl())).unwrap();
-    let decoded: Crossing =
-        mln_wire::from_slice(&encoded).unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
+fn round_trip(layer: &Layer) -> Value {
+    let encoded = mln_wire::to_vec(&Crossing(Arc::clone(layer.style()))).unwrap();
+    let decoded: Crossing = crate::decode_with(&StyleRegistry::with_builtins(), || mln_wire::from_slice(&encoded))
+        .unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
     assert_eq!(mln_wire::to_vec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());
     layer.serialize()
 }
@@ -43,7 +46,7 @@ fn json(value: &Value) -> serde_json::Value {
     super::util::value_to_json(value)
 }
 
-fn layer(type_: &str, kind: &str, properties: &str) -> Box<dyn Layer> {
+fn layer(type_: &str, kind: &str, properties: &str) -> Layer {
     parse(&parse_json(&format!(
         r#"{{"id": "l", "type": "{type_}", "source": "s", "source-layer": "sl", "{kind}": {properties}}}"#
     )))
@@ -56,7 +59,7 @@ fn categorical_function_without_default() {
         "paint",
         r#"{"line-width": {"property": "class", "type": "categorical", "stops": [["path", 1], ["service", 3]]}}"#,
     );
-    let serialized = round_trip(line.as_ref());
+    let serialized = round_trip(&line);
     assert_eq!(
         json(&property(&serialized, "paint", "line-width")),
         parse_json(r#"["match", ["get", "class"], "path", 1.0, "service", 3.0, ["error", "replaced with default"]]"#)
@@ -67,7 +70,7 @@ fn categorical_function_without_default() {
 fn interval_function_with_one_stop() {
     let circle =
         layer("circle", "paint", r#"{"circle-color": {"type": "interval", "property": "p", "stops": [[0, "blue"]]}}"#);
-    let serialized = round_trip(circle.as_ref());
+    let serialized = round_trip(&circle);
     let Value::Array(step) = property(&serialized, "paint", "circle-color") else { panic!("not an expression") };
     // `["step", input, blue, 0, blue]`: a stop with the same output.
     assert_eq!(step.len(), 5, "{step:?}");
@@ -82,7 +85,7 @@ fn zoom_and_property_categorical_function() {
         r#"{"text-field": {"type": "categorical", "property": "foo",
             "stops": [[{"value": "bar", "zoom": 0}, "xxx"], [{"value": "bar", "zoom": 2}, "XXX"]]}}"#,
     );
-    let serialized = round_trip(symbol.as_ref());
+    let serialized = round_trip(&symbol);
     let Value::Array(step) = property(&serialized, "layout", "text-field") else { panic!("not an expression") };
     // The first stop's output is the base output; its label (0) is gone.
     assert_eq!(step.len(), 5, "{step:?}");
@@ -96,16 +99,16 @@ fn constant_images_and_formatted_text() {
         "layout",
         r#"{"icon-image": "marker", "text-field": ["format", "a", {"font-scale": 1.5, "text-color": "red"}, "b", {}]}"#,
     );
-    round_trip(symbol.as_ref());
-    round_trip(layer("fill", "paint", r#"{"fill-pattern": "dots"}"#).as_ref());
+    round_trip(&symbol);
+    round_trip(&layer("fill", "paint", r#"{"fill-pattern": "dots"}"#));
 }
 
 #[test]
 fn zoom_functions_of_images() {
     let symbol = layer("symbol", "layout", r#"{"icon-image": {"stops": [[0, "{icon}"], [10, "plain"]]}}"#);
-    round_trip(symbol.as_ref());
+    round_trip(&symbol);
     let extrusion = layer("fill-extrusion", "paint", r#"{"fill-extrusion-pattern": {"stops": [[0, "a"], [19, "b"]]}}"#);
-    let serialized = round_trip(extrusion.as_ref());
+    let serialized = round_trip(&extrusion);
     // The literal images become names, which convert back to coercions:
     // runtime constant like the literals (an "image" expression is not), so
     // the property evaluates to a constant at each zoom as before.
@@ -113,14 +116,13 @@ fn zoom_functions_of_images() {
         json(&property(&serialized, "paint", "fill-extrusion-pattern")),
         parse_json(r#"["step", ["zoom"], "a", 19.0, "b"]"#)
     );
-    let runtime_constant = |layer: &dyn Layer| {
-        let layer = layer.downcast_ref::<FillExtrusionLayer>().unwrap();
-        layer.impl_().paint.fill_extrusion_pattern.value.as_expression().is_runtime_constant()
+    let runtime_constant = |layer: &Layer| {
+        style_of::<FillExtrusion>(layer).paint.fill_extrusion_pattern.value.as_expression().is_runtime_constant()
     };
-    assert!(runtime_constant(extrusion.as_ref()));
-    assert!(runtime_constant(parse(&json(&serialized)).as_ref()));
+    assert!(runtime_constant(&extrusion));
+    assert!(runtime_constant(&parse(&json(&serialized))));
     let fill = layer("fill", "paint", r#"{"fill-pattern": ["get", "pattern"]}"#);
-    let serialized = round_trip(fill.as_ref());
+    let serialized = round_trip(&fill);
     assert_eq!(json(&property(&serialized, "paint", "fill-pattern")), parse_json(r#"["get", "pattern"]"#));
 }
 
@@ -132,13 +134,13 @@ fn variable_anchor_offsets() {
         r#"{"text-variable-anchor-offset": ["interpolate", ["linear"], ["number", ["get", "x"]],
             1, ["literal", ["top", [-3, -3]]], 10, ["literal", ["top", [3, 3]]]]}"#,
     );
-    round_trip(interpolated.as_ref());
+    round_trip(&interpolated);
     let coalesced = layer(
         "symbol",
         "layout",
         r#"{"text-variable-anchor-offset": ["coalesce", ["get", "tvao"], ["literal", ["left", [-4.5, 0]]]]}"#,
     );
-    round_trip(coalesced.as_ref());
+    round_trip(&coalesced);
 }
 
 #[test]
@@ -148,7 +150,7 @@ fn cubic_bezier_control_points() {
         "layout",
         r#"{"text-size": ["interpolate", ["cubic-bezier", 0, 0.9, 0.1, 1], ["zoom"], 0, 2, 1, 24]}"#,
     );
-    let serialized = round_trip(symbol.as_ref());
+    let serialized = round_trip(&symbol);
     let Value::Array(interpolate) = property(&serialized, "layout", "text-size") else { panic!("not an expression") };
     assert_eq!(json(&interpolate[1]), parse_json(r#"["cubic-bezier", 0.0, 0.9, 0.1, 1.0]"#));
 }
@@ -160,13 +162,13 @@ fn colors_that_c_plus_plus_rounds() {
         "paint",
         r#"{"line-color": ["match", ["get", "k"], "a", "rgba(170, 255, 0, 0.6)", "rgba(1, 2, 3, 0.678)"]}"#,
     );
-    round_trip(line.as_ref());
+    round_trip(&line);
 }
 
 #[test]
 fn non_finite_numbers() {
     let symbol = layer("symbol", "layout", r#"{"text-field": "a", "text-size": ["sqrt", -1]}"#);
-    let serialized = round_trip(symbol.as_ref());
+    let serialized = round_trip(&symbol);
     assert!(matches!(property(&serialized, "layout", "text-size"), Value::Double(d) if d.is_nan()));
 }
 
@@ -175,10 +177,11 @@ fn boolean_filters() {
     let mut fill = layer("fill", "paint", "{}");
     let mut error = Error::default();
     // What `setFilter(null)` sets.
-    let filter = crate::conversion::convert::<crate::filter::Filter>(&Convertible::from(&Value::Null), &mut error)
-        .unwrap_or_else(|| panic!("{}", error.message));
+    let filter =
+        crate::conversion::convert_filter(&Convertible::from(&Value::Null), &Functions::with_builtins(), &mut error)
+            .unwrap_or_else(|| panic!("{}", error.message));
     fill.set_filter(&filter);
-    round_trip(fill.as_ref());
+    round_trip(&fill);
 }
 
 /// Every layer of the style parser fixtures (`test/fixtures/style_parser`)
@@ -196,8 +199,10 @@ fn style_parser_fixture_layers() {
             continue;
         };
         for json in style.get("layers").and_then(|layers| layers.as_array()).into_iter().flatten() {
-            if let Some(layer) = convert_layer(&Convertible::from(json), &mut Error::default()) {
-                round_trip(layer.as_ref());
+            if let Some(layer) =
+                convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(json), &mut Error::default())
+            {
+                round_trip(&layer);
                 count += 1;
             }
         }
@@ -226,13 +231,14 @@ fn expressions_cross_as_data() {
     ];
     for json in expressions {
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let mut context = crate::expression::ParsingContext::new();
+        let mut context = crate::expression::ParsingContext::new(&Functions::with_builtins());
         let expression = context
             .parse_expression(&Convertible::from(&value), None)
             .unwrap_or_else(|| panic!("{json}: {}", context.get_combined_errors()));
         let encoded = mln_wire::to_vec(&expression).unwrap();
         let decoded: crate::expression::Expr =
-            mln_wire::from_slice(&encoded).unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
+            crate::decode_with(&StyleRegistry::with_builtins(), || mln_wire::from_slice(&encoded))
+                .unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
         assert!(decoded == expression, "{json}");
         assert_eq!(decoded.dependencies(), expression.dependencies(), "{json}");
         assert_eq!(decoded.serialize(), expression.serialize(), "{json}");

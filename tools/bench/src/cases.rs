@@ -20,7 +20,7 @@ use crate::scene::{
     basemap_style, cjk_center, prepare_basemap_mlt, write_frame,
 };
 use crate::stats::{median, percentile};
-use crate::{Context, Metrics};
+use crate::{Context, Metrics, expressions};
 
 pub struct Case {
     pub name: String,
@@ -144,6 +144,8 @@ pub fn all() -> Vec<Case> {
     }
     cases.push(Case::new("Style/Replace600", style_replace));
     cases.push(Case::new("Style/Load", style_load));
+    cases.push(Case::new("Expression/Evaluate", expressions::evaluate));
+    cases.push(Case::new("Expression/Parse", expressions::parse));
     cases.push(Case::new("Runtime/Lifecycle", |cx| runtime_lifecycle(cx, false)));
     cases.push(Case::new("Runtime/Startup", |cx| runtime_lifecycle(cx, true)));
     cases.push(Case::new("Map/FourOnOneRuntime", map_four_on_one_runtime));
@@ -616,7 +618,7 @@ fn planet_style(fixtures: &std::path::Path) -> String {
         "projection": {"type": "globe"},
         "sky": {"atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0]},
         "light": {"anchor": "map", "position": [1.5, 90, 80]},
-        "glyphs": format!("file://{}/basemap/glyphs/{{fontstack}}/{{range}}.pbf", fixtures.display()),
+        "glyphs": format!("{}basemap/glyphs/{{fontstack}}/{{range}}.pbf", crate::scene::file_url(fixtures)),
         "sources": {
             "world": {"type": "vector", "tiles": ["local://tiles/{z}-{x}-{y}.osm_basemap.pbf"], "maxzoom": 1},
             "places": {"type": "geojson", "data": "local://data/places.geojson"}

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
 use mln_gfx::shaders::shader_defines::{ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO};
-use mln_style::layer_properties::LayerProperties;
 use mln_util::constants::EXTENT;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::tileset::RasterEncoding;
@@ -11,6 +10,7 @@ use super::cast_matrix;
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase};
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::PaintParameters;
 
 #[derive(Clone, Copy, Debug)]
@@ -25,16 +25,12 @@ pub(crate) struct HillshadePrepareLayerTweaker {
 }
 
 impl HillshadePrepareLayerTweaker {
-    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
-        HillshadePrepareLayerTweaker { base: LayerTweakerBase::new(id, properties) }
+    pub(crate) fn new(id: String, properties: Arc<dyn ErasedEvaluatedLayer>) -> Self {
+        HillshadePrepareLayerTweaker { base: LayerTweakerBase::new(id, Some(properties)) }
     }
 }
 
 impl LayerTweaker for HillshadePrepareLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
-    }
-
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

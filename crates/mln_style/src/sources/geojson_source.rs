@@ -18,8 +18,7 @@ use super::geojson_source_impl::{self, Impl};
 use crate::conversion::Error;
 use crate::conversion::geojson::convert_json_geojson;
 use crate::expression::Expr;
-use crate::layer::LayerTypeInfo;
-use crate::layer::layer_type_info::TileKind;
+use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl;
 
@@ -367,8 +366,8 @@ impl Source for GeoJSONSource {
         *self.inner.req.borrow_mut() = Some(req);
     }
 
-    fn supports_layer_type(&self, info: &LayerTypeInfo) -> bool {
-        TileKind::Geometry as u8 == info.tile_kind as u8
+    fn supports_layer_type(&self, info: LayerTypeInfo) -> bool {
+        info.source == SourceKind::Geometry
     }
 
     fn create_mutable(&self) -> Box<dyn source_impl::Impl> {
@@ -376,8 +375,8 @@ impl Source for GeoJSONSource {
     }
 }
 
-// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
-// (layer.rs).
+// Debug is not a supertrait, for the reason at
+// `impl Debug for dyn ErasedLayerStyle` (layer_type.rs).
 impl std::fmt::Debug for dyn GeoJSONData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GeoJSONData").finish_non_exhaustive()

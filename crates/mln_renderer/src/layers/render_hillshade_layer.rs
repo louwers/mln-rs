@@ -28,11 +28,10 @@ use mln_gfx::{
     VertexAttributeArray,
 };
 use mln_map_types::TransformState;
-use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
-use mln_style::layers::hillshade_layer_properties::{HillshadeLayerProperties, HillshadePaintProperties};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layers::Hillshade;
+use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::ResamplingType;
 use mln_util::constants;
 use mln_util::hash::{HashMap, HashSet};
@@ -43,6 +42,7 @@ use super::hillshade_layer_tweaker::HillshadeLayerTweaker;
 use super::hillshade_prepare_layer_tweaker::{HillshadePrepareDrawableData, HillshadePrepareLayerTweaker};
 use super::render_heatmap_layer::activate_render_target;
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
+use crate::bucket::NoBucket;
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable::Drawable;
@@ -51,24 +51,31 @@ use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::{RenderTarget, RenderTargetPtr};
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HillshadeLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), HillshadeLayerImpl::static_type_info()));
-    impl_.downcast_ref::<HillshadeLayerImpl>().expect("RenderHillshadeLayer: not a hillshade layer impl")
-}
-
 const HILLSHADE_PREPARE_SHADER_GROUP_NAME: &str = "HillshadePrepareShader";
 const HILLSHADE_SHADER_GROUP_NAME: &str = "HillshadeShader";
 
+impl LayerType for Hillshade {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+
+    fn render_layer(style: Arc<LayerStyle<Hillshade>>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderHillshadeLayer::new(style)))
+    }
+}
+
 pub(crate) struct RenderHillshadeLayer {
     base: RenderLayerBase,
+    style: Arc<LayerStyle<Hillshade>>,
     // Paint properties
     unevaluated: HillshadePaintProperties::Unevaluated,
     maxzoom: u8,
@@ -88,13 +95,14 @@ pub(crate) struct RenderHillshadeLayer {
 }
 
 impl RenderHillshadeLayer {
-    pub(crate) fn new(impl_: Arc<HillshadeLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Hillshade>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(HillshadeLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Hillshade>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderHillshadeLayer {
             base,
+            style: impl_,
             unevaluated,
             maxzoom: constants::TERRAIN_RGB_MAXZOOM,
             hillshade_prepare_shader: None,
@@ -158,16 +166,21 @@ impl RenderLayer for RenderHillshadeLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
     fn layer_changed(
         &mut self,
         _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn layer::Impl>,
+        _new_layer: &Arc<dyn ErasedLayerStyle>,
         _changes: &mut UniqueChangeRequestVec,
     ) {
         // RenderLayer::layerChanged
@@ -176,18 +189,18 @@ impl RenderLayer for RenderHillshadeLayer {
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = get_evaluated::<HillshadeLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = HillshadeLayerProperties::with_evaluated(
-            downcast_arc::<HillshadeLayerImpl>(&self.base.base_impl),
+        let previous_evaluated = evaluated::<Hillshade>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Hillshade>::with_paint(
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.hillshade_exaggeration.uniform() > 0.0 {
+        self.base.passes = if *properties.paint.hillshade_exaggeration.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
             RenderPass::None
         };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
             layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
@@ -295,7 +308,7 @@ impl RenderLayer for RenderHillshadeLayer {
         };
 
         let render_pass = RenderPass::Translucent;
-        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes) == 0 {
+        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
             return;
         }
 
@@ -319,7 +332,7 @@ impl RenderLayer for RenderHillshadeLayer {
 
         // `resampling` filters the prepared texture the tile drawable
         // samples; the prepare pass reads the DEM with Nearest regardless.
-        let evaluated = get_evaluated::<HillshadeLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<Hillshade>(&self.base.evaluated_properties).paint;
         let resampling_filter = match *evaluated.resampling.uniform() {
             ResamplingType::Linear => TextureFilterType::Linear,
             ResamplingType::Nearest => TextureFilterType::Nearest,
@@ -328,14 +341,14 @@ impl RenderLayer for RenderHillshadeLayer {
         // Drop the render targets of buckets that are no longer rendered
         // (C++ releases them with the bucket).
         let live_buckets: HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.base_impl).map(|b| b.get_id())).collect();
+            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
         self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let bucket_ptr = tile.get_bucket(&*base_impl).filter(|b| b.has_data()).cloned();
+            let style = Arc::clone(&self.base.style);
+            let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
             let Some(bucket_ptr) = bucket_ptr else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;

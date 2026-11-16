@@ -1,7 +1,7 @@
 use mln_util::logging::{Event, Log};
 
-use crate::compound_expression::Op;
 use crate::expression::{Dependency, Expr, Node};
+use crate::functions::Role;
 use crate::interpolate::Interpolate;
 use crate::parsing_context::ParsingError;
 use crate::step::Step;
@@ -53,7 +53,7 @@ impl ZoomCurvePtr<'_> {
 }
 
 fn zoom_input(input: &Expr) -> bool {
-    input.as_compound().is_some_and(|z| z.signature().op == Op::Zoom)
+    input.as_compound().is_some_and(|z| z.overload().role == Role::Zoom)
 }
 
 /// Find a zoom curve in the expression tree: the relevant step or

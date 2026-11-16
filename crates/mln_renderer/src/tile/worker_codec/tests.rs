@@ -6,7 +6,7 @@ use std::sync::Arc;
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::Layer;
-use mln_style::layer_properties::LayerProperties;
+use mln_style::layers::Fill;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style::renderer::transition_parameters::TransitionParameters;
 use mln_style::transition_options::TransitionOptions;
@@ -22,8 +22,9 @@ use mln_vec_map::VecSet;
 use super::map_side::MapCodec;
 use super::worker_side::WorkerCodec;
 use super::{Encoded, TileWorkerHost, envelope, fields};
+use crate::Registry;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::layermanager;
+use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::text::glyph_store::HBShapeResults;
 use crate::tile::contents::LayoutResult;
@@ -42,25 +43,26 @@ fn tile_data() -> TileData {
     TileData::Mvt(MvtTile::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mvt"))))
 }
 
-fn convert(json: &str) -> Box<dyn Layer> {
+fn convert(json: &str) -> Layer {
     let json: serde_json::Value = serde_json::from_str(json).unwrap();
     let mut error = ConversionError::default();
-    convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message))
+    convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message))
 }
 
 /// A layer from its style JSON, evaluated at `z` by its render layer, as
 /// the `RenderOrchestrator` evaluates it.
-fn layer(json: &str, z: f32) -> Arc<dyn LayerProperties> {
-    let render_layer = layermanager::create_render_layer(&convert(json).base_impl()).unwrap();
+fn layer(json: &str, z: f32) -> Arc<dyn ErasedEvaluatedLayer> {
+    let render_layer = crate::tests::render_layer(convert(json).style());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(z));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }
 
-fn layers(jsons: &[&str]) -> Vec<Arc<dyn LayerProperties>> {
+fn layers(jsons: &[&str]) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
     jsons.iter().map(|json| layer(json, 0.0)).collect()
 }
 
-fn style(layers: &[Arc<dyn LayerProperties>]) -> Arc<SourceStyle> {
+fn style(layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Arc<SourceStyle> {
     Arc::new(SourceStyle { version: 0, layers: layers.to_vec(), global_state: None, font_faces: None })
 }
 
@@ -152,7 +154,7 @@ fn direct_result(run: Run) -> JobResult {
 /// Runs the job of `layers` and `data` until it lays out, answering its
 /// `NeedsDeps` with `run`.
 fn lay_out(
-    layers: &[Arc<dyn LayerProperties>],
+    layers: &[Arc<dyn ErasedEvaluatedLayer>],
     data: &TileData,
     mut run: impl FnMut(Run) -> JobResult,
 ) -> LayoutOutput {
@@ -179,7 +181,11 @@ struct ThroughCodec {
 
 impl ThroughCodec {
     fn new() -> Self {
-        ThroughCodec { map: MapCodec::default(), worker: WorkerCodec::new(), cache: DataCache::new(1 << 20) }
+        ThroughCodec {
+            map: MapCodec::new(Registry::with_builtins()),
+            worker: WorkerCodec::new(Registry::with_builtins()),
+            cache: DataCache::new(1 << 20),
+        }
     }
 
     /// The reply to `run`, encoded on the worker's side.
@@ -221,7 +227,7 @@ fn comparable(result: &LayoutResult) -> [Vec<u8>; 2] {
 /// directly (in that order: decoding MLT data drops its bytes, and a tile
 /// sends its data before anything decodes it), checks that both layouts
 /// are the same, and returns the one that crossed.
-fn cross(layers: &[Arc<dyn LayerProperties>], data: &TileData) -> LayoutResult {
+fn cross(layers: &[Arc<dyn ErasedEvaluatedLayer>], data: &TileData) -> LayoutResult {
     let mut codec = ThroughCodec::new();
     let result = lay_out(layers, data, |run| codec.run(&run)).result;
     assert_eq!(result.layer_render_data.len(), layers.len());
@@ -300,8 +306,7 @@ fn every_geometry_layer_type_crosses() {
     ];
     for type_ in types {
         let layer = convert(&format!(r#"{{"id": "l", "type": "{type_}", "source": "s", "source-layer": "sl"}}"#));
-        let takes_geometry_tiles =
-            layer.get_type_info().tile_kind == mln_style::layer::layer_type_info::TileKind::Geometry;
+        let takes_geometry_tiles = layer.info().source == mln_style::layer_type::SourceKind::Geometry;
         assert_eq!(
             takes_geometry_tiles,
             layers_of_type.iter().any(|(t, _)| *t == type_),
@@ -312,8 +317,8 @@ fn every_geometry_layer_type_crosses() {
     let layers: Vec<_> = layers_of_type.iter().flat_map(|(_, jsons)| jsons).map(|json| layer(json, 0.0)).collect();
     let result = cross(&layers, &tile_data());
     for (layer_id, render_data) in &result.layer_render_data {
-        let sent = layers.iter().find(|layer| &layer.base_impl.id == layer_id).unwrap();
-        assert!(Arc::ptr_eq(&render_data.layer_properties, sent));
+        let sent = layers.iter().find(|layer| &layer.style().base().id == layer_id).unwrap();
+        assert!(Arc::ptr_eq(&render_data.layer, sent));
         assert!(render_data.bucket.has_data());
     }
 }
@@ -357,7 +362,7 @@ fn format_section_overrides_cross() {
             "text-field": ["format", ["to-string", ["get", "admin_level"]], {"text-color": "red"}]},
         "paint": {"text-color": "blue"}}"#,
     );
-    let render_layer = layermanager::create_render_layer(&layer.base_impl()).unwrap();
+    let render_layer = crate::tests::render_layer(layer.style());
     render_layer.borrow_mut().transition(&TransitionParameters::new(None, TransitionOptions::default()));
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     let layers = vec![Arc::clone(&render_layer.borrow().base().evaluated_properties)];
@@ -474,31 +479,28 @@ fn geojson_tiles_cross() {
 fn properties_cross_while_a_paint_property_transitions() {
     use std::time::Duration;
 
-    use mln_style::layer_properties::get_evaluated;
-    use mln_style::layers::fill_layer_properties::FillLayerProperties;
     use mln_style::map::zoom_history::ZoomHistory;
     use mln_util::time::Instant;
 
     let constant = FILL.replace(r#"["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]"#, r#""red""#);
-    let render_layer = layermanager::create_render_layer(&convert(FILL).base_impl()).unwrap();
+    let render_layer = crate::tests::render_layer(convert(FILL).style());
     let mut render_layer = render_layer.borrow_mut();
     let start = Instant::now();
     let at = |now| PropertyEvaluationParameters::with_zoom_history(ZoomHistory::default(), Some(now), Duration::ZERO);
     render_layer.transition(&TransitionParameters::new(Some(start), TransitionOptions::default()));
     render_layer.evaluate(&at(start));
     let transition = TransitionOptions::new(Some(Duration::from_millis(300)), None, true);
-    render_layer
-        .transition_with_impl(&TransitionParameters::new(Some(start), transition), convert(&constant).base_impl());
+    render_layer.restyle(&TransitionParameters::new(Some(start), transition), convert(&constant).style());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
-    assert!(!get_evaluated::<FillLayerProperties>(&transitioning).fill_color.is_constant());
+    assert!(!evaluated::<Fill>(&transitioning).paint.fill_color.is_constant());
 
     let mut codec = ThroughCodec::new();
     let style = style(std::slice::from_ref(&transitioning));
     let JobResult::Laid(output) = codec.run(&job(&style, full(&tile_data()), Resolved::default())) else {
         panic!("not a layout");
     };
-    assert!(Arc::ptr_eq(&output.result.layer_render_data["water"].layer_properties, &transitioning));
+    assert!(Arc::ptr_eq(&output.result.layer_render_data["water"].layer, &transitioning));
 }
 
 /// A layout's render data has the layers of its job, not of a job sent
@@ -518,7 +520,7 @@ fn layouts_have_the_layers_they_answer() {
         panic!("not a layout");
     };
     for render_data in output.result.layer_render_data.values() {
-        assert!(sent.layers.iter().any(|layer| Arc::ptr_eq(layer, &render_data.layer_properties)));
+        assert!(sent.layers.iter().any(|layer| Arc::ptr_eq(layer, &render_data.layer)));
     }
 }
 
@@ -533,7 +535,7 @@ fn forgotten(request: &[u8]) -> Vec<(String, Vec<u64>)> {
 /// forgets each value when it is gone on the map side.
 #[test]
 fn styles_and_layers_are_defined_once() {
-    let mut map = MapCodec::default();
+    let mut map = MapCodec::new(Registry::with_builtins());
     let data = DataInput::Cached(key(1));
     let layers = layers(&[FILL, LINE]);
     let first_style = style(&layers);
@@ -543,7 +545,7 @@ fn styles_and_layers_are_defined_once() {
 
     // Evaluated again (another zoom), the line layer's properties travel
     // again, but not the layer or its expressions, and the fill layer by key.
-    let line = layermanager::create_render_layer(&layers[1].base_impl).unwrap();
+    let line = crate::tests::render_layer(&layers[1].shared_style());
     line.borrow_mut().evaluate(&PropertyEvaluationParameters::new(1.0));
     let again = style(&[Arc::clone(&layers[0]), Arc::clone(&line.borrow().base().evaluated_properties)]);
     drop(line);
@@ -557,7 +559,7 @@ fn styles_and_layers_are_defined_once() {
     drop(layers);
     let forget = forgotten(&map.encode_run(&job(&fill_only, data_input(&data), Resolved::default())).unwrap());
     let count = |table: &str| forget.iter().find(|(name, _)| name == table).map_or(0, |(_, keys)| keys.len());
-    assert_eq!((count("source style"), count("layer"), count("expression"), count("layer properties")), (2, 1, 1, 2));
+    assert_eq!((count("source style"), count("layer"), count("expression"), count("evaluated layer")), (2, 1, 1, 2));
 }
 
 fn data_input(data: &DataInput) -> DataInput {
@@ -571,7 +573,7 @@ fn data_input(data: &DataInput) -> DataInput {
 /// a CJK tile's resume stays small.
 #[test]
 fn answers_cross_without_pixels() {
-    let mut map = MapCodec::default();
+    let mut map = MapCodec::new(Registry::with_builtins());
     let ids = (0..256).map(mln_text::glyph::GlyphID::new).collect();
     let dependencies = Dependencies {
         glyphs: mln_text::glyph::GlyphDependencies {
@@ -589,19 +591,31 @@ fn answers_cross_without_pixels() {
     assert!(resumed.len() - empty.len() < 256 * 40, "{} bytes", resumed.len() - empty.len());
 }
 
-/// Layer properties of a type without a wire form.
-#[derive(Debug)]
-struct Unknown(mln_style::layer_properties::LayerPropertiesBase);
+/// Evaluated values without a wire form.
+struct Unknown(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
 
-impl LayerProperties for Unknown {
-    fn base(&self) -> &mln_style::layer_properties::LayerPropertiesBase {
-        &self.0
+impl ErasedEvaluatedLayer for Unknown {
+    fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
+        crate::layer_type::entry::<mln_style::layers::Line>()
     }
-    fn base_mut(&mut self) -> &mut mln_style::layer_properties::LayerPropertiesBase {
-        &mut self.0
+    fn style(&self) -> &dyn mln_style::layer_type::ErasedLayerStyle {
+        &*self.0
     }
-    fn get_dependencies(&self) -> mln_style::expression::Dependency {
+    fn shared_style(&self) -> Arc<dyn mln_style::layer_type::ErasedLayerStyle> {
+        Arc::clone(&self.0)
+    }
+    fn render_passes(&self) -> u8 {
+        0
+    }
+    fn constants_mask(&self) -> u64 {
+        0
+    }
+    fn evaluated_dependencies(&self) -> mln_style::expression::Dependency {
         mln_style::expression::Dependency::NONE
+    }
+    fn collect_evaluated_global_state_refs(&self, _refs: &mut VecSet<String>) {}
+    fn write(&self, w: &mut mln_wire::Writer) {
+        w.fail("no wire form".to_owned());
     }
 }
 
@@ -609,21 +623,37 @@ impl LayerProperties for Unknown {
 /// is still defined with the next job.
 #[test]
 fn failed_jobs_define_nothing() {
-    let mut map = MapCodec::default();
+    let mut map = MapCodec::new(Registry::with_builtins());
     let fill = layer(FILL, 0.0);
-    let unknown: Arc<dyn LayerProperties> = Arc::new(Unknown(mln_style::layer_properties::LayerPropertiesBase::new(
-        Arc::clone(&layer(LINE, 0.0).base_impl),
-    )));
+    let unknown: Arc<dyn ErasedEvaluatedLayer> = Arc::new(Unknown(layer(LINE, 0.0).shared_style()));
     let failed = style(&[Arc::clone(&fill), unknown]);
     assert!(map.encode_run(&job(&failed, DataInput::Cached(key(1)), Resolved::default())).is_err());
 
     // Decoded without the failed job, the next one defines the layer.
     let request = map.encode_run(&job(&style(&[fill]), DataInput::Cached(key(1)), Resolved::default())).unwrap();
     let (_, body) = envelope::read_job_id(&request).unwrap();
-    let Job::Layout(job) = WorkerCodec::new().decode_job(body).unwrap() else {
+    let Job::Layout(job) = WorkerCodec::new(Registry::with_builtins()).decode_job(body).unwrap() else {
         panic!("not a layout job");
     };
-    assert_eq!(job.style.layers[0].base_impl.id, "water");
+    assert_eq!(job.style.layers[0].style().base().id, "water");
+}
+
+/// A worker whose registry lacks a layer type that a job names fails that
+/// job's decoding.
+#[test]
+fn a_missing_layer_type_fails_its_job() {
+    let mut map = MapCodec::new(Registry::with_builtins());
+    let request =
+        map.encode_run(&job(&style(&layers(&[FILL])), DataInput::Cached(key(1)), Resolved::default())).unwrap();
+    let (_, body) = envelope::read_job_id(&request).unwrap();
+
+    let mut builder = crate::RegistryBuilder::new();
+    mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
+    builder.add_layer_type::<mln_style::layers::Line>().unwrap();
+    let Err(error) = WorkerCodec::new(builder.build()).decode_job(body) else {
+        panic!("decoded a fill layer without its type");
+    };
+    assert!(error.contains("unknown layer type"), "{error}");
 }
 
 /// A host that can't decode a job's body replies `Failed` with the job's
@@ -632,7 +662,7 @@ fn failed_jobs_define_nothing() {
 fn an_undecodable_body_fails_its_job() {
     let replies = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink = Arc::clone(&replies);
-    let host = TileWorkerHost::new(move |reply| sink.lock().push(reply));
+    let host = TileWorkerHost::new(Registry::with_builtins(), move |reply| sink.lock().push(reply));
     let mut request = Vec::new();
     envelope::write_job_header(&mut request, &id(4));
     request.extend_from_slice(&[0xff; 16]);
@@ -771,7 +801,7 @@ fn malformed_dems_fail() {
     for (dim, stride, image) in dems {
         let mut bytes = Vec::new();
         envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image)).unwrap();
-        let JobResult::Failed(_) = MapCodec::default().decode_result(Encoded::from(bytes)) else {
+        let JobResult::Failed(_) = MapCodec::new(Registry::with_builtins()).decode_result(Encoded::from(bytes)) else {
             panic!("dim {dim}, stride {stride}: not a failure");
         };
     }

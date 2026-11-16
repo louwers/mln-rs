@@ -4,6 +4,7 @@
 pub(crate) mod circle_layout;
 pub(crate) mod clip_lines;
 pub(crate) mod filter_groups;
+pub(crate) mod heatmap_layout;
 #[expect(
     clippy::module_inception,
     reason = "`layout::layout` holds the `Layout` trait that the other modules' layouts implement"

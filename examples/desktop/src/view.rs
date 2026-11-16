@@ -70,7 +70,7 @@ pub(crate) struct Launch {
     pub settings: Settings,
     /// The window, which the render sessions make their surfaces of.
     #[cfg(not(target_os = "macos"))]
-    pub window: Arc<winit::window::Window>,
+    pub window: backend::SessionWindow,
     /// The controls' egui context, which the window's thread feeds.
     pub ui: egui::Context,
     /// The window's scale factor when it opened: the map's first pixel

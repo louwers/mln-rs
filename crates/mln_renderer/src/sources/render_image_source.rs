@@ -9,7 +9,6 @@ use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
-use mln_style::layer_properties::LayerProperties;
 use mln_style::source::{self, downcast_arc};
 use mln_style::sources::image_source;
 use mln_tile_id::{GeometryCoordinate, GeometryCoordinates, UnwrappedTileID};
@@ -23,6 +22,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::bucket::Bucket;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::gfx::context::Context;
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
 use crate::render_tree::RenderItem;
 use crate::tile::store::TileStore;
@@ -242,7 +242,7 @@ impl RenderSource for RenderImageSource {
         &mut self,
         _store: &mut TileStore,
         base_impl: Arc<dyn source::Impl>,
-        _layers: &[Arc<dyn LayerProperties>],
+        _layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         _needs_relayout: bool,
         parameters: &TileParameters<'_>,

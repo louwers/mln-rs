@@ -1,5 +1,7 @@
 // The property table of a layer type, the light or the sky, and the
-// `Properties` impl that maps its slots to fields.
+// function that maps its slots to fields: a layer type's `visit`, which its
+// `StyleLayerType` impl forwards to, or the light's or sky's `Properties`
+// impl.
 
 use crate::spec::Property;
 use crate::types::{is_data_driven, snake};
@@ -20,8 +22,11 @@ impl Entry<'_> {
         if is_data_driven(self.property) {
             info.push_str(".data_driven()");
         }
-        if self.property.name == "icon-image" || self.property.name == "text-field" {
+        if self.property.flag("tokens") {
             info.push_str(".tokens()");
+        }
+        if self.property.flag("overridable") {
+            info.push_str(".overridable()");
         }
         info
     }
@@ -39,13 +44,24 @@ pub(crate) fn layer_entries<'a>(paint: &'a [Property], layout: &'a [Property]) -
     paint.chain(layout).collect()
 }
 
-/// The `use` paths the table needs.
-pub(crate) fn imports() -> Vec<String> {
-    vec!["crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor}".into()]
+/// How the table's slots map to fields.
+pub(crate) enum Visit {
+    /// A free `visit` function over the layer type's style data.
+    Function,
+    /// `impl Properties` for the owner.
+    Impl,
 }
 
-/// Writes `PROPERTIES` and `impl Properties for {owner}`.
-pub(crate) fn emit(w: &mut Writer, owner: &str, entries: &[Entry<'_>]) {
+/// The `use` paths the table needs.
+pub(crate) fn imports(visit: &Visit) -> Vec<String> {
+    match visit {
+        Visit::Function => vec!["crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor}".into()],
+        Visit::Impl => vec!["crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor}".into()],
+    }
+}
+
+/// Writes `PROPERTIES`, and `visit` or `impl Properties for {owner}`.
+pub(crate) fn emit(w: &mut Writer, owner: &str, entries: &[Entry<'_>], visit: &Visit) {
     w.line("/// The properties, by slot.");
     w.line("pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(");
     w.line("    &[");
@@ -77,23 +93,34 @@ pub(crate) fn emit(w: &mut Writer, owner: &str, entries: &[Entry<'_>]) {
     w.line(");");
     w.blank();
 
-    w.line(&format!("impl Properties for {owner} {{"));
-    w.line("    const TABLE: &'static PropertyTable = &PROPERTIES;");
-    w.blank();
-    w.line("    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {");
-    w.line("        Some(match slot {");
+    // The function's body, indented for a free function; an impl's method
+    // is indented once more.
+    let indent = match visit {
+        Visit::Function => {
+            w.line("/// Calls `visitor` with the field of the property in `slot`.");
+            w.line(&format!(
+                "pub(crate) fn visit<V: PropertyVisitor<{owner}>>(slot: usize, visitor: V) -> Option<V::Output> {{"
+            ));
+            ""
+        }
+        Visit::Impl => {
+            w.line(&format!("impl Properties for {owner} {{"));
+            w.line("    const TABLE: &'static PropertyTable = &PROPERTIES;");
+            w.blank();
+            w.line("    fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output> {");
+            "    "
+        }
+    };
+    w.line(&format!("{indent}    Some(match slot {{"));
     for (slot, entry) in entries.iter().enumerate() {
         let kind = if entry.paint { "paint" } else { "layout" };
         let field = &entry.field;
-        let one_line = format!("            {slot} => visitor.{kind}(|s| &s.{field}, |s| &mut s.{field}),");
-        if one_line.len() <= MAX_WIDTH {
-            w.line(&one_line);
-        } else {
-            w.line(&format!("            {slot} => visitor.{kind}(|s| &s.{field}, |s| &mut s.{field}),"));
-        }
+        w.line(&format!("{indent}        {slot} => visitor.{kind}(|s| &s.{field}, |s| &mut s.{field}),"));
     }
-    w.line("            _ => return None,");
-    w.line("        })");
-    w.line("    }");
-    w.line("}");
+    w.line(&format!("{indent}        _ => return None,"));
+    w.line(&format!("{indent}    }})"));
+    w.line(&format!("{indent}}}"));
+    if let Visit::Impl = visit {
+        w.line("}");
+    }
 }

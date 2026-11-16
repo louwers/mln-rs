@@ -8,10 +8,11 @@
 //!   `OffscreenCanvas`, with the browser's WebGPU, or its WebGL2 in the
 //!   `webgl` build. The runtime's and the session's work runs in the slices
 //!   of `mln_web_host::pump`, and the page's animation frames demand frames.
-//! - In each tile worker's Web Worker, `mln_web_host`'s tile worker side: a
-//!   `TileWorkerHost`, which runs the tiles' jobs: layouts, and raster and
-//!   raster-dem tiles' image decodes. The session's renderer sends them only
-//!   bytes, over a `MessageChannel` between the two Web Workers.
+//! - In each tile worker's Web Worker, `mln_web_host`'s tile worker side
+//!   (`serve_tile_worker`): a `TileWorkerHost`, which runs the tiles' jobs:
+//!   layouts, and raster and raster-dem tiles' image decodes. The session's
+//!   renderer sends them only bytes, over a `MessageChannel` between the two
+//!   Web Workers. Both sides make their registry with `registry`.
 //! - In the map's Web Worker again, once a style declares font faces: the
 //!   shaper module (`crates/mln_web_shaper`), which shapes and rasterizes them
 //!   (`mln_web_host::shaper`). Only the map's Web Worker loads it, and maps
@@ -31,7 +32,10 @@
 mod gpu_check;
 mod map;
 
+use std::sync::Arc;
+
 pub use map::{WebMap, set_preloads};
+use mln_runtime::registry::{Registry, RegistryBuilder, register_builtins};
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use wasm_bindgen::prelude::*;
 
@@ -43,6 +47,22 @@ fn start() {
     mln_web_host::set_panic_hook();
     Log::set_observer(Box::new(ConsoleLog));
     let _ = mln_web_host::install_cooperative_scheduler();
+}
+
+/// The registrations of the map's runtime and of the tile workers, which
+/// must agree.
+fn registry() -> Arc<Registry> {
+    let mut builder = RegistryBuilder::new();
+    register_builtins(&mut builder).expect("the built-ins register into no registrations");
+    builder.build()
+}
+
+/// Runs tile workers for the map side at the other end of `port`, until it
+/// disconnects. web/tile-worker.ts calls it for each port that a map's Web
+/// Worker sends it.
+#[wasm_bindgen(js_name = mlnWebServeTileWorker)]
+pub fn serve_tile_worker(port: &web_sys::MessagePort) {
+    mln_web_host::tile_worker::serve(port, registry());
 }
 
 /// Panics with `message`. Only check/check.mjs calls it (the page's `panic`

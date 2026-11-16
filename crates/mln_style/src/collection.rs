@@ -20,19 +20,19 @@ pub(crate) trait CollectionElement {
     fn impl_id(impl_: &Self::Impl) -> &str;
 }
 
-impl CollectionElement for dyn crate::layer::Layer {
-    type Impl = dyn crate::layer::Impl;
+impl CollectionElement for crate::layer::Layer {
+    type Impl = dyn crate::layer_type::ErasedLayerStyle;
     fn base_impl(&self) -> Arc<Self::Impl> {
-        crate::layer::Layer::base_impl(self)
+        Arc::clone(self.style())
     }
     fn get_id(&self) -> String {
         crate::layer::Layer::get_id(self)
     }
     fn has_id(&self, id: &str) -> bool {
-        crate::layer::Layer::base_impl_ref(self).id == id
+        self.style().base().id == id
     }
     fn impl_id(impl_: &Self::Impl) -> &str {
-        &impl_.id
+        &impl_.base().id
     }
 }
 

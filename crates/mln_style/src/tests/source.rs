@@ -16,6 +16,7 @@ use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding}
 use super::util::parse_json;
 use crate::conversion::Error;
 use crate::conversion::source::convert_source;
+use crate::expression::Functions;
 use crate::observer::SourceObserver;
 use crate::source::Source;
 use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
@@ -198,7 +199,7 @@ fn geojson_source_keeps_the_style_attribution() {
     let value = parse_json(
         r#"{"type": "geojson", "attribution": "Fixture data", "data": {"type": "FeatureCollection", "features": []}}"#,
     );
-    let converted = convert_source(&Convertible::from(&value), &mut error, "source");
+    let converted = convert_source(&Convertible::from(&value), &mut error, "source", &Functions::with_builtins());
     let converted = converted.unwrap_or_else(|| panic!("{}", error.message));
     let source = converted.downcast_ref::<GeoJSONSource>().expect("a GeoJSONSource");
     assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
@@ -573,7 +574,8 @@ fn image_source_image_update() {
 /// The source the style JSON `json` converts to.
 fn converted_source(json: &str) -> Result<Box<dyn Source>, String> {
     let mut error = Error::default();
-    convert_source(&Convertible::from(&parse_json(json)), &mut error, "source").ok_or(error.message)
+    convert_source(&Convertible::from(&parse_json(json)), &mut error, "source", &Functions::with_builtins())
+        .ok_or(error.message)
 }
 
 // A vector source's tileset takes the style's sparse, over a TileJSON or inline.

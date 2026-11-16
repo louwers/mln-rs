@@ -3,29 +3,26 @@ use std::sync::Arc;
 use feature::Value;
 
 use super::function::{conversion_errors, get, literal, matchable, number, op, owned};
-use super::{Converter, Convertible, Error};
-use crate::expression::{ParsingContext, Type};
+use super::{Convertible, Error};
+use crate::expression::{Functions, ParsingContext, Type};
 use crate::filter::Filter;
 
-impl Converter for Filter {
-    fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Filter> {
-        let legacy = if is_expression(value) { None } else { Some(legacy_filter_expression(value, error)?) };
-        let mut parsing_context = ParsingContext::with_expected(Type::Boolean);
-        let parsed = match &legacy {
-            Some(legacy) => parsing_context.parse_expression(&Convertible::from(legacy), None),
-            None => parsing_context.parse_expression(value, None),
-        };
-        let Some(parsed) = parsed else {
-            error.message = if legacy.is_some() {
-                conversion_errors(&parsing_context)
-            } else {
-                parsing_context.get_combined_errors()
-            };
-            return None;
-        };
-        let legacy_filter = legacy.is_some().then(|| owned(value)).filter(|_| !value.is_undefined());
-        Some(Filter::new(Some(Arc::new(parsed)), legacy_filter))
-    }
+/// Converts a filter: an expression, which parses against `functions`, or a
+/// legacy filter, which becomes the expression it stands for.
+pub fn convert_filter(value: &Convertible<'_>, functions: &Arc<Functions>, error: &mut Error) -> Option<Filter> {
+    let legacy = if is_expression(value) { None } else { Some(legacy_filter_expression(value, error)?) };
+    let mut parsing_context = ParsingContext::with_expected(functions, Type::Boolean);
+    let parsed = match &legacy {
+        Some(legacy) => parsing_context.parse_expression(&Convertible::from(legacy), None),
+        None => parsing_context.parse_expression(value, None),
+    };
+    let Some(parsed) = parsed else {
+        error.message =
+            if legacy.is_some() { conversion_errors(&parsing_context) } else { parsing_context.get_combined_errors() };
+        return None;
+    };
+    let legacy_filter = legacy.is_some().then(|| owned(value)).filter(|_| !value.is_undefined());
+    Some(Filter::new(Some(Arc::new(parsed)), legacy_filter))
 }
 
 // This is a port from

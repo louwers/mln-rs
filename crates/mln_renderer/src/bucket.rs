@@ -17,10 +17,10 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::error::Error;
 use mln_util::feature::feature_id_to_string;
 use mln_util::identity::SimpleIdentity;
+use mln_wire::{Reader, Wire, Writer};
 
 use crate::gfx::context::Context;
 use crate::layout::pattern_layout::PatternLayerMap;
-use crate::render_layer::RenderLayer;
 
 pub(crate) type BucketPtr = Arc<dyn Bucket>;
 
@@ -110,6 +110,12 @@ pub(crate) trait Bucket: Any + Send + Sync {
     ) {
     }
 
+    /// How far above the ground the bucket's highest content is raised,
+    /// for a layer whose content elevation is an expression.
+    fn max_content_elevation(&self) -> f32 {
+        0.0
+    }
+
     /// The `version` counter (see `BucketBase::version`).
     fn get_version(&self) -> u64 {
         self.base().version.load(Ordering::SeqCst)
@@ -127,9 +133,10 @@ pub(crate) trait Bucket: Any + Send + Sync {
 
     fn has_data(&self) -> bool;
 
-    fn get_query_radius(&self, _layer: &dyn RenderLayer) -> f32 {
-        0.0
-    }
+    /// Writes the bucket for its layer type's
+    /// [`read_bucket`](crate::layer_type::ErasedLayerType::read_bucket).
+    /// A bucket that no layout makes fails `w`.
+    fn write_wire(&self, w: &mut Writer);
 
     fn needs_upload(&self) -> bool {
         self.has_data() && !self.base().uploaded.load(Ordering::SeqCst)
@@ -150,6 +157,41 @@ pub(crate) trait Bucket: Any + Send + Sync {
 
     fn get_retained_features(&self) -> &[RetainedFeature] {
         &self.base().retained_features
+    }
+}
+
+/// The bucket of a layer type that doesn't lay out: there is no value.
+pub(crate) enum NoBucket {}
+
+impl Bucket for NoBucket {
+    fn base(&self) -> &BucketBase {
+        match *self {}
+    }
+
+    fn base_mut(&mut self) -> &mut BucketBase {
+        match *self {}
+    }
+
+    fn upload(&self, _context: &Context) {
+        match *self {}
+    }
+
+    fn has_data(&self) -> bool {
+        match *self {}
+    }
+
+    fn write_wire(&self, _w: &mut Writer) {
+        match *self {}
+    }
+}
+
+impl Wire for NoBucket {
+    fn write(&self, _w: &mut Writer) {
+        match *self {}
+    }
+
+    fn read(r: &mut Reader<'_>) -> Option<Self> {
+        r.fail("a bucket of a layer type that doesn't lay out")
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::emit_table::Entry;
+use crate::emit_table::{Entry, Visit};
 use crate::spec::Property;
 use crate::types::snake;
 use crate::writer::Writer;
@@ -23,7 +23,7 @@ pub(crate) fn emit(object_name: &str, properties: &[Property]) -> String {
     w.line("// (tools/style-codegen/v8.json). Do not edit.");
     w.blank();
 
-    let mut imports = crate::emit_table::imports();
+    let mut imports = crate::emit_table::imports(&Visit::Impl);
     imports.push(format!("crate::{object_name}::Impl"));
     w.imports(imports);
     w.blank();
@@ -32,6 +32,6 @@ pub(crate) fn emit(object_name: &str, properties: &[Property]) -> String {
         .iter()
         .map(|property| Entry { property, paint: true, field: field(object_name, property) })
         .collect();
-    crate::emit_table::emit(&mut w, "Impl", &entries);
+    crate::emit_table::emit(&mut w, "Impl", &entries, &Visit::Impl);
     w.finish()
 }

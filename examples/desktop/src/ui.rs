@@ -443,15 +443,17 @@ enum Piece {
 /// next backend.
 fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions: &mut Vec<Action>) {
     // The logos are 18 points high; Vulkan's is 708 by 570, and OpenGL's is a
-    // wordmark of 12 by 5.
-    let (logo, width) = match backend {
+    // wordmark of 12 by 5. D3D12 shows its name alone.
+    let logo = match backend {
         #[cfg(target_os = "macos")]
-        Kind::Metal => (egui::include_image!("../assets/metal.svg"), 18.0),
+        Kind::Metal => Some((egui::include_image!("../assets/metal.svg"), 18.0)),
         #[cfg(not(target_vendor = "apple"))]
-        Kind::Vulkan => (egui::include_image!("../assets/vulkan.svg"), 22.4),
-        Kind::WebGpu => (egui::include_image!("../assets/webgpu.svg"), 18.0),
+        Kind::Vulkan => Some((egui::include_image!("../assets/vulkan.svg"), 22.4)),
+        #[cfg(windows)]
+        Kind::D3d12 => None,
+        Kind::WebGpu => Some((egui::include_image!("../assets/webgpu.svg"), 18.0)),
         #[cfg(target_os = "linux")]
-        Kind::OpenGl => (egui::include_image!("../assets/opengl.svg"), 43.2),
+        Kind::OpenGl => Some((egui::include_image!("../assets/opengl.svg"), 43.2)),
     };
     layer("backend", Align2::LEFT_BOTTOM, vec2(GAP, -GAP)).show(ctx, |ui| {
         let response = palette
@@ -460,7 +462,9 @@ fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions:
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.add(egui::Image::new(logo).fit_to_exact_size(vec2(width, 18.0)));
+                    if let Some((logo, width)) = logo {
+                        ui.add(egui::Image::new(logo).fit_to_exact_size(vec2(width, 18.0)));
+                    }
                     ui.add(
                         egui::Label::new(RichText::new(backend.name()).size(12.0).color(palette.ink)).selectable(false),
                     );

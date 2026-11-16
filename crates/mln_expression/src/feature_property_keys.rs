@@ -1,5 +1,5 @@
-use crate::compound_expression::Op;
 use crate::expression::{Dependency, Expr, Node};
+use crate::functions::Role;
 use crate::value::Value;
 
 /// The property keys `expression` reads, sorted and without
@@ -22,11 +22,11 @@ fn collect_feature_property_keys(expression: &Expr, keys: &mut Vec<String>) -> b
     match expression.node() {
         Node::Within(_) | Node::Distance(_) | Node::FormatSectionOverride(_) => return false,
         Node::Compound(e) => {
-            let signature = e.signature();
-            if signature.dependencies.intersects(Dependency::FEATURE) {
-                let reads_key = match signature.op {
-                    Op::Get | Op::Has => true,
-                    Op::GeometryType => false,
+            let overload = e.overload();
+            if overload.dependencies.intersects(Dependency::FEATURE) {
+                let reads_key = match overload.role {
+                    Role::FeatureProperty => true,
+                    Role::GeometryType => false,
                     _ => return false,
                 };
                 if reads_key {

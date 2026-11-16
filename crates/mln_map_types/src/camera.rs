@@ -65,7 +65,7 @@ pub struct AnimationOptions {
     pub transition_id: Option<u64>,
 }
 
-/// How a camera command ended, as maplibre-native-ffi's
+/// How a camera command ended, as the C API's
 /// `mln_camera_transition_outcome` reports it. A command that ended in more
 /// than one way reports [`Cancelled`](Self::Cancelled) if any of it was
 /// cancelled, otherwise [`Closed`](Self::Closed) if any of it was closed,
@@ -104,8 +104,7 @@ pub struct CameraVelocity {
 /// How a camera command ended, once every field of it has: completed,
 /// cancelled, replaced by later commands, or closed with the map. Other
 /// commands may still be animating. It replaces C++'s `transitionFinishFn`,
-/// which can't tell those apart; maplibre-native-ffi's C API reports the
-/// same outcomes.
+/// which can't tell those apart; the C API reports the same outcomes.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TransitionEnd {
     pub outcome: TransitionOutcome,
@@ -145,7 +144,7 @@ pub struct FreeCameraOptions {
     pub orientation: Option<Vec4>,
 }
 
-/// Where a camera change stands in a gesture, as maplibre-native-ffi's
+/// Where a camera change stands in a gesture, as the C API's
 /// `mln_gesture_phase` defines it. `Begin` and `Update` mark a gesture in
 /// progress, and `End` and `Cancel` end it; a gesture whose end starts
 /// momentum stays in progress until the momentum ends.
@@ -168,7 +167,7 @@ pub enum GesturePhase {
 }
 
 /// A change to the camera from where it is now, as a gesture makes it
-/// (maplibre-native-ffi's `mln_camera_delta`).
+/// (the C API's `mln_camera_delta`).
 ///
 /// The pan and the anchored change are separate camera commands, because an
 /// explicit center overrides an anchor; the anchored change reads the camera
@@ -209,7 +208,7 @@ pub enum CameraUpdateMode {
     Fly,
 }
 
-/// Moves the camera to absolute values, as maplibre-native-ffi's
+/// Moves the camera to absolute values, as the C API's
 /// `mln_camera_update` does: the counterpart of [`CameraDelta`] for
 /// commands and gestures that know where the camera should go.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -220,7 +219,7 @@ pub struct CameraUpdate {
     pub phase: GesturePhase,
 }
 
-/// Why a [`CameraDelta`] was rejected, as maplibre-native-ffi rejects it.
+/// Why a [`CameraDelta`] was rejected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum CameraError {
     /// An offset, anchor, bearing or pitch isn't finite.
@@ -247,8 +246,7 @@ pub enum CameraError {
 }
 
 impl CameraDelta {
-    /// Checks the delta as maplibre-native-ffi's `validate_camera_delta`
-    /// does, except that an anchor with only an offset is the point a drag
+    /// Checks the delta. An anchor with only an offset is the point a drag
     /// holds, which the globe needs.
     pub fn validate(&self) -> Result<(), CameraError> {
         let finite_point = |p: Option<ScreenCoordinate>| p.is_none_or(|p| p.x.is_finite() && p.y.is_finite());

@@ -1,12 +1,13 @@
 use mln_conversion::Convertible;
 use mln_style_types::types::VerticalAlign;
 
+use crate::Functions;
 use crate::expression::EvaluationContext;
 use crate::parsing_context::ParsingContext;
 use crate::value::{Value, to_mbgl_value};
 
 fn evaluate(document: &Convertible<'_>) -> Value {
-    let mut ctx = ParsingContext::new();
+    let mut ctx = ParsingContext::new(&Functions::with_builtins());
     let expression = ctx.parse_expression(document, None).unwrap_or_else(|| panic!("{:?}", ctx.get_errors()));
     expression.evaluate(&EvaluationContext::default()).unwrap()
 }

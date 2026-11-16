@@ -2,10 +2,10 @@
 //! depth-tested against it.
 //!
 //! The renderer draws with OpenGL's projection matrices, whose clip z runs
-//! from -w to w. Metal, Vulkan and WebGPU clip z below 0, so their 3D layers
-//! write `depth_range_size * z / w` and drop what is nearer than the plane
-//! where z is 0. OpenGL's 3D layers draw through [`zero_to_one_clip_z`] to
-//! write the same depth, so the depth of a frame means one thing on every
+//! from -w to w. Metal, Vulkan, D3D12 and WebGPU clip z below 0, so their 3D
+//! layers write `depth_range_size * z / w` and drop what is nearer than the
+//! plane where z is 0. OpenGL's 3D layers draw through [`zero_to_one_clip_z`]
+//! to write the same depth, so the depth of a frame means one thing on every
 //! backend.
 
 use mln_gfx::gpu::ClipDepth;
@@ -62,8 +62,8 @@ pub(crate) fn compute(
     }
 }
 
-/// Makes a 3D layer's OpenGL matrix clip and write depth as Metal, Vulkan
-/// and WebGPU do with it: clip z from -w to w becomes `2z - w`, so that
+/// Makes a 3D layer's OpenGL matrix clip and write depth as Metal, Vulkan,
+/// D3D12 and WebGPU do with it: clip z from -w to w becomes `2z - w`, so that
 /// OpenGL clips what was below 0 and writes the depth range times the old z
 /// over w.
 pub(crate) fn zero_to_one_clip_z(matrix: &mut Mat4) {
@@ -152,8 +152,8 @@ mod tests {
         assert_eq!(ClipDepthRange::ZeroToOne, zero_to_one.clip_depth_range);
         assert_eq!(ClipDepthRange::NegativeOneToOne, negative_one_to_one.clip_depth_range);
         let far_depth = zero_to_one.far_depth;
-        // A 3D layer's OpenGL matrix, as Metal, Vulkan and WebGPU draw it,
-        // and as OpenGL does through `zero_to_one_clip_z`.
+        // A 3D layer's OpenGL matrix, as Metal, Vulkan, D3D12 and WebGPU draw
+        // it, and as OpenGL does through `zero_to_one_clip_z`.
         let world_size = Projection::world_size(transform.state.get_scale());
         let mut layer = [0.0; 16];
         matrix::scale(&mut layer, &transform.near_clipped_proj_matrix, world_size, world_size, 1.0);

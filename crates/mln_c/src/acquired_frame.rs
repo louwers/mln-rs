@@ -14,10 +14,10 @@ use parking_lot::Mutex;
 
 use crate::error::Error;
 use crate::generated::types::{
-    mln_acquired_frame, mln_android_hardware_buffer_frame, mln_diagnostic, mln_dma_buf_frame, mln_dma_buf_plane,
-    mln_dxgi_shared_texture_frame, mln_gpu_sync, mln_io_surface_frame, mln_metal_texture_frame, mln_opaque_fd_frame,
-    mln_open_gl_texture_frame, mln_render_frame_result, mln_render_session, mln_status, mln_vulkan_texture_frame,
-    mln_web_gpu_texture_frame,
+    mln_acquired_frame, mln_android_hardware_buffer_frame, mln_d3d12_texture_frame, mln_diagnostic, mln_dma_buf_frame,
+    mln_dma_buf_plane, mln_dxgi_shared_texture_frame, mln_gpu_sync, mln_io_surface_frame, mln_metal_texture_frame,
+    mln_opaque_fd_frame, mln_open_gl_texture_frame, mln_render_frame_result, mln_render_session, mln_status,
+    mln_vulkan_texture_frame, mln_web_gpu_texture_frame,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::{abi, render_session};
@@ -33,7 +33,8 @@ abi::versioned!(
     mln_dma_buf_frame,
     mln_android_hardware_buffer_frame,
     mln_dxgi_shared_texture_frame,
-    mln_opaque_fd_frame
+    mln_opaque_fd_frame,
+    mln_d3d12_texture_frame
 );
 
 /// An acquired frame, until the host releases or discards it.
@@ -416,6 +417,49 @@ pub(crate) unsafe extern "C" fn mln_acquired_frame_get_vulkan_texture(
                 depth_image_view,
                 depth_format,
                 depth_layout,
+            },
+            _ => return Err(different_backend()),
+        };
+        // SAFETY: the caller's contract.
+        unsafe { abi::write_sized(out_frame, &record) }
+    })
+}
+
+/// `mln_acquired_frame_get_d3d12_texture()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_d3d12_texture(
+    frame: mln_acquired_frame,
+    out_frame: *mut mln_d3d12_texture_frame,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, non_null(out_frame), {
+        // SAFETY: the caller's contract.
+        unsafe { abi::check_out_size(out_frame) }?;
+        let (texture, scale_factor, slot) = frame_texture(frame)?;
+        let (depth_resource, depth_format, depth_state) = match texture.depth {
+            Some(FrameDepth { texture: NativeTexture::D3d12 { resource, format, state }, .. }) => {
+                (resource as usize as *mut c_void, format, state)
+            }
+            _ => (core::ptr::null_mut(), 0, 0),
+        };
+        let record = match texture.native_kind() {
+            Some(&FrameTextureKind::D3d12 { resource, device, format, state }) => mln_d3d12_texture_frame {
+                size: size_of::<mln_d3d12_texture_frame>() as u32,
+                width: texture.size.width,
+                height: texture.size.height,
+                scale_factor,
+                slot,
+                resource: resource as usize as *mut c_void,
+                device: device as usize as *mut c_void,
+                format,
+                state,
+                depth_resource,
+                depth_format,
+                depth_state,
             },
             _ => return Err(different_backend()),
         };

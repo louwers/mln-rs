@@ -12,7 +12,6 @@ use geometry::Point;
 use mln_map_types::{ProjectionData, TileProjector, TransformState};
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
-use mln_style::layer::layer_type_info;
 use mln_style_types::TranslateAnchorType;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
@@ -388,8 +387,7 @@ impl FeatureIndex {
                 continue;
             };
 
-            let needs_cross_tile_index = render_layer.base().base_impl.get_type_info().cross_tile_index
-                == layer_type_info::CrossTileIndex::Required;
+            let needs_cross_tile_index = render_layer.base().style.info().cross_tile_index;
             // we use the float camera zoom here, not the integer tile ID zoom,
             // because for the query we take into account the actual rendered
             // size of the geometry (#2781)
@@ -419,7 +417,7 @@ impl FeatureIndex {
 
             let converted = mln_tile::convert_feature(&feature, &geometry, &tile_id.canonical)?;
             let mut converted = Feature::from(converted);
-            converted.source = render_layer.base().base_impl.source.clone();
+            converted.source = render_layer.base().style.base().source.clone();
             converted.source_layer = source_layer_id.clone();
             converted.state = state.clone();
             result.entry(layer_id.clone()).or_default().push(converted);

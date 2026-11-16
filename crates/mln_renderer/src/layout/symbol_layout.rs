@@ -15,7 +15,7 @@ use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
-use mln_style::layer_properties::LayerProperties;
+use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::property_value::PropertyValue;
 use mln_style_types::image::{ImagePositions, ImageType};
@@ -34,24 +34,24 @@ use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::error::Error;
 use mln_util::feature::feature_id_to_string;
 use mln_util::geometry::FeatureType;
-use mln_util::hash::HashMap;
 use mln_util::i18n;
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketPtr, get_retain_feature_id};
+use crate::bucket::{Bucket, get_retain_feature_id};
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBuffer, PlacedSymbol, SortKeyRange, SymbolBucket, SymbolBucketState,
 };
 use crate::geometry::anchor::{Anchor, Anchors};
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
+use crate::layer_type::EvaluatedLayer;
 use crate::layout::clip_lines::clip_lines;
-use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
+use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layout::merge_lines::merge_lines;
 use crate::layout::symbol_feature::SymbolFeature;
 use crate::layout::symbol_instance::{ShapedTextOrientations, SymbolContent, SymbolInstance, SymbolInstanceSharedData};
-use crate::render_layer::LayerRenderData;
+use crate::layout::tile_layout::Resolved;
 use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
 use crate::text::glyph_store::{HBShapeResult, HBShapeResults};
@@ -292,7 +292,7 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32;
 }
 
 pub(crate) struct SymbolLayout {
-    pub(crate) layer_paint_properties: VecMap<String, Arc<dyn LayerProperties>>,
+    pub(crate) layer_paint_properties: VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
     pub(crate) bucket_leader_id: String,
     pub(crate) symbol_instances: Vec<SymbolInstance>,
     pub(crate) sort_key_ranges: Vec<SortKeyRange>,
@@ -335,11 +335,9 @@ pub(crate) struct SymbolLayout {
 }
 
 impl SymbolLayout {
-    pub(crate) const INVALID_OFFSET_VALUE: f32 = f32::MAX;
-
     pub(crate) fn new(
         parameters: &BucketParameters,
-        layers: &[Arc<dyn LayerProperties>],
+        layers: &[Arc<EvaluatedLayer<Symbol>>],
         source_layer: SourceLayer,
         layout_parameters: &mut LayoutParameters<'_>,
     ) -> Result<Self, Error> {
@@ -349,10 +347,7 @@ impl SymbolLayout {
             }
         }
 
-        let leader = layers[0]
-            .base_impl
-            .downcast_ref::<mln_style::layers::symbol_layer_impl::Impl>()
-            .expect("SymbolLayout: not a symbol layer");
+        let leader = &*layers[0].style;
         let overscaling = parameters.tile_id.overscale_factor() as f32;
         let zoom = f32::from(parameters.tile_id.overscaled_z);
         let tile_size = (TILE_SIZE_D * f64::from(overscaling)) as u32;
@@ -361,7 +356,7 @@ impl SymbolLayout {
 
         let mut this = SymbolLayout {
             layer_paint_properties: VecMap::new(),
-            bucket_leader_id: layers[0].base_impl.id.clone(),
+            bucket_leader_id: leader.id.clone(),
             symbol_instances: Vec::new(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
@@ -432,9 +427,7 @@ impl SymbolLayout {
             this.placement_modes = placement_modes;
         }
 
-        for layer in layers {
-            this.layer_paint_properties.entry(layer.base_impl.id.clone()).or_insert_with(|| Arc::clone(layer));
-        }
+        this.layer_paint_properties = layers_by_id(layers);
 
         // Determine glyph dependencies
         let source_layer = this.source_layer.clone();
@@ -651,10 +644,14 @@ impl SymbolLayout {
     }
 
     #[must_use]
-    pub(crate) fn evaluate_variable_offset(anchor: SymbolAnchorType, mut offset: [f32; 2]) -> [f32; 2] {
-        if offset[1] == Self::INVALID_OFFSET_VALUE {
-            return evaluate_radial_offset(anchor, offset[0]);
-        }
+    pub(crate) fn evaluate_variable_offset(
+        anchor: SymbolAnchorType,
+        offset: Option<[f32; 2]>,
+        radial_offset: f32,
+    ) -> [f32; 2] {
+        let Some(mut offset) = offset else {
+            return evaluate_radial_offset(anchor, radial_offset);
+        };
         let mut result = [0.0_f32, 0.0_f32];
         offset[0] = offset[0].abs();
         offset[1] = offset[1].abs();
@@ -721,25 +718,23 @@ impl SymbolLayout {
         if variable_text_anchor.is_empty() {
             return None;
         }
-        let variable_text_offset = if self.text_radial_offset.is_undefined() {
+        let (variable_text_offset, radial_offset) = if self.text_radial_offset.is_undefined() {
             let text_offset = self.layout.text_offset.evaluate(
                 &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
             );
-            [text_offset[0] * ONE_EM, text_offset[1] * ONE_EM]
+            (Some([text_offset[0] * ONE_EM, text_offset[1] * ONE_EM]), 0.0)
         } else {
-            [
-                self.layout.text_radial_offset.evaluate(
-                    &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-                ) * ONE_EM,
-                Self::INVALID_OFFSET_VALUE,
-            ]
+            let radial_offset = self.layout.text_radial_offset.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+            );
+            (None, radial_offset * ONE_EM)
         };
 
         let anchor_offset_pairs = variable_text_anchor
             .into_iter()
             .map(|anchor| AnchorOffsetPair {
                 anchor_type: anchor,
-                offset: Self::evaluate_variable_offset(anchor, variable_text_offset),
+                offset: Self::evaluate_variable_offset(anchor, variable_text_offset, radial_offset),
             })
             .collect();
         Some(VariableAnchorOffsetCollection::new(anchor_offset_pairs))
@@ -1421,19 +1416,39 @@ impl ToRadiansCpp for f32 {
     }
 }
 
-impl Layout for SymbolLayout {
+impl Layout<Symbol> for SymbolLayout {
     fn has_dependencies(&self) -> bool {
         !self.features.is_empty()
     }
 
-    fn has_symbol_instances(&self) -> bool {
-        !self.symbol_instances.is_empty()
+    /// With `resolved`, applies the shaping of the text that font faces
+    /// draw and prepares the symbols, and has no bucket without symbols.
+    fn create_bucket(
+        &mut self,
+        resolved: Option<&Resolved>,
+        _feature_index: &mut FeatureIndex,
+        build: &BuildParams,
+    ) -> Result<Option<SymbolBucket>, Error> {
+        if let Some(resolved) = resolved {
+            if self.need_finalize_symbols_val {
+                self.finalize_symbols(&resolved.shaping);
+            }
+            self.prepare_symbols(&resolved.glyphs, &resolved.icons);
+            if self.symbol_instances.is_empty() {
+                return Ok(None);
+            }
+        }
+        Ok(Some(self.build_bucket(build.first_load, build.show_collision_boxes, &build.canonical)))
     }
 
-    fn need_finalize_symbols(&self) -> bool {
-        self.need_finalize_symbols_val
+    fn layers(&self) -> &VecMap<String, Arc<EvaluatedLayer<Symbol>>> {
+        &self.layer_paint_properties
     }
+}
 
+impl SymbolLayout {
+    /// Applies the HarfBuzz shaping of the text that font faces draw,
+    /// before `prepare_symbols`.
     fn finalize_symbols(&mut self, results: &HBShapeResults) {
         let unshaped = HBShapeResult::default();
         for feature in &mut self.features {
@@ -1512,6 +1527,7 @@ impl Layout for SymbolLayout {
         self.need_finalize_symbols_val = false;
     }
 
+    /// Prepares the symbols once their glyphs and images are available.
     #[expect(
         clippy::unnecessary_unwrap,
         reason = "the text is borrowed where it is used, as `feature` is also passed on in between"
@@ -1780,15 +1796,12 @@ impl Layout for SymbolLayout {
         self.compare_text.clear();
     }
 
-    fn create_bucket(
+    fn build_bucket(
         &mut self,
-        _pattern_positions: &ImagePositions,
-        _feature_index: &mut FeatureIndex,
-        render_data: &mut HashMap<String, LayerRenderData>,
         first_load: bool,
         show_collision_boxes: bool,
         canonical: &CanonicalTileID,
-    ) -> Result<(), Error> {
+    ) -> SymbolBucket {
         let mut bucket = SymbolBucket::new(
             Arc::clone(&self.layout),
             &self.layer_paint_properties,
@@ -2000,16 +2013,7 @@ impl Layout for SymbolLayout {
             }
         }
 
-        if bucket.has_data() {
-            let bucket: BucketPtr = Arc::new(bucket);
-            for (id, properties) in &self.layer_paint_properties {
-                render_data.entry(id.clone()).or_insert_with(|| LayerRenderData {
-                    bucket: Arc::clone(&bucket),
-                    layer_properties: Arc::clone(properties),
-                });
-            }
-        }
-        Ok(())
+        bucket
     }
 }
 
@@ -2019,7 +2023,37 @@ mod tests {
 
     use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
 
-    use super::GlyphTypeTable;
+    use super::{BASELINE_OFFSET, GlyphTypeTable, SymbolAnchorType, SymbolLayout, evaluate_radial_offset};
+
+    #[test]
+    fn variable_offset_distinguishes_cartesian_and_radial_offsets() {
+        for anchor in [
+            SymbolAnchorType::Center,
+            SymbolAnchorType::Top,
+            SymbolAnchorType::Bottom,
+            SymbolAnchorType::Left,
+            SymbolAnchorType::Right,
+            SymbolAnchorType::TopLeft,
+            SymbolAnchorType::TopRight,
+            SymbolAnchorType::BottomLeft,
+            SymbolAnchorType::BottomRight,
+        ] {
+            for radial_offset in [-12.0, 0.0, 12.0] {
+                assert_eq!(
+                    SymbolLayout::evaluate_variable_offset(anchor, None, radial_offset),
+                    evaluate_radial_offset(anchor, radial_offset),
+                );
+            }
+        }
+        assert_eq!(
+            SymbolLayout::evaluate_variable_offset(SymbolAnchorType::TopRight, Some([-12.0, -24.0]), 0.0),
+            [-12.0, 24.0 - BASELINE_OFFSET],
+        );
+        assert_eq!(
+            SymbolLayout::evaluate_variable_offset(SymbolAnchorType::TopLeft, Some([12.0, f32::MAX]), 0.0),
+            [12.0, f32::MAX],
+        );
+    }
 
     /// The faces' rule, read off them for each code unit.
     fn scan(unit: u16, stack: &[String], faces: &FontFaces, previous: GlyphIDType) -> GlyphIDType {

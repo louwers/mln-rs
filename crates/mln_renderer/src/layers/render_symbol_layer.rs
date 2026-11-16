@@ -26,19 +26,18 @@ use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::VertexVector;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
 use mln_map_types::{TileProjector, TransformState};
-use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::symbol_layer_impl::{Impl as SymbolLayerImpl, SymbolLayerPaintPropertyOverrides};
-use mln_style::layers::symbol_layer_properties::{
-    SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties,
-};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layers::Symbol;
+use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
+use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
+use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
 };
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
+use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::interpolate::Interpolate;
 use mln_util::mat4::{Mat4, matrix};
@@ -58,22 +57,20 @@ use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::{LayerTweakerPtr, get_tile_matrix_for};
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layout::layout::{LayoutParameters, SourceLayer};
+use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    BucketPlacementData, LayerPrepareParameters, RenderLayer, RenderLayerBase, Stats, SymbolTranslate,
-    activate_layer_group, change_layer_index, compute_feature_ndc_bound, vertex_color_alpha, vertex_opacity,
+    BucketPlacementData, LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, SymbolTranslate,
+    activate_layer_group, change_layer_index, compute_feature_ndc_bound, set_style, vertex_color_alpha, vertex_opacity,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
-
-fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &SymbolLayerImpl {
-    debug_assert!(std::ptr::eq(impl_.get_type_info(), SymbolLayerImpl::static_type_info()));
-    impl_.downcast_ref::<SymbolLayerImpl>().expect("RenderSymbolLayer: not a symbol layer impl")
-}
 
 const SYMBOL_ICON_SHADER_NAME: &str = "SymbolIconShader";
 const SYMBOL_SDF_SHADER_NAME: &str = "SymbolSDFShader";
@@ -862,8 +859,31 @@ impl SegmentGroup {
     }
 }
 
+impl LayerType for Symbol {
+    type Layout = SymbolLayout;
+    type Bucket = SymbolBucket;
+
+    /// A symbol layout always waits for its glyphs and images.
+    fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {
+        true
+    }
+
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Symbol>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<SymbolLayout>, Error> {
+        SymbolLayout::new(parameters.bucket_parameters, group, source_layer, parameters).map(Some)
+    }
+
+    fn render_layer(style: Arc<LayerStyle<Symbol>>) -> RenderLayerPtr {
+        Rc::new(RefCell::new(RenderSymbolLayer::new(style)))
+    }
+}
+
 pub(crate) struct RenderSymbolLayer {
     base: RenderLayerBase,
+    style: Arc<LayerStyle<Symbol>>,
     unevaluated: SymbolPaintProperties::Unevaluated,
     has_format_section_overrides: bool,
 
@@ -884,13 +904,14 @@ pub(crate) struct RenderSymbolLayer {
 }
 
 impl RenderSymbolLayer {
-    pub(crate) fn new(impl_: Arc<SymbolLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LayerStyle<Symbol>>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn LayerProperties> = Arc::new(SymbolLayerProperties::new(impl_));
+        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Symbol>::new(Arc::clone(&impl_)));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderSymbolLayer {
             base,
+            style: impl_,
             unevaluated,
             has_format_section_overrides: false,
             icon_size: 1.0,
@@ -1053,31 +1074,36 @@ impl RenderLayer for RenderSymbolLayer {
         &mut self.base
     }
 
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
+        set_style(&mut self.base, &mut self.style, style);
+        self.transition(parameters);
+    }
+
     fn transition(&mut self, parameters: &TransitionParameters) {
         let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
+        self.unevaluated = self.style.paint.transitioned(parameters, prior);
         self.has_format_section_overrides =
-            SymbolLayerPaintPropertyOverrides::has_overrides(&impl_cast(&self.base.base_impl).layout.text_field);
+            SymbolLayerPaintPropertyOverrides::has_overrides(&self.style.layout.text_field);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = get_evaluated::<SymbolLayerProperties>(&self.base.evaluated_properties).clone();
-        let mut properties = SymbolLayerProperties::with_evaluated(
-            downcast_arc::<SymbolLayerImpl>(&self.base.base_impl),
+        let previous_evaluated = evaluated::<Symbol>(&self.base.evaluated_properties).paint.clone();
+        let mut properties = EvaluatedLayer::<Symbol>::with_paint(
+            Arc::clone(&self.style),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
         if self.has_format_section_overrides {
             mln_style::format_section_override::set_overrides(
-                &impl_cast(&self.base.base_impl).layout,
-                &mut properties.evaluated,
+                &self.style.layout,
+                &mut properties.paint,
                 &self.unevaluated,
                 &parameters.global_state,
             );
         }
 
-        let evaluated = &properties.evaluated;
+        let evaluated = &properties.paint;
         let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
             || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
         let has_text_opacity = evaluated.text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
@@ -1091,7 +1117,7 @@ impl RenderLayer for RenderSymbolLayer {
             } else {
                 RenderPass::None
             };
-        properties.base.render_passes = self.base.passes.underlying_type();
+        properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
         // The symbol tweaker supports updating properties. When the style
@@ -1162,7 +1188,7 @@ impl RenderLayer for RenderSymbolLayer {
         self.base.placement_data.clear();
         self.base.follower_data.clear();
 
-        let evaluated = &get_evaluated::<SymbolLayerProperties>(&self.base.evaluated_properties);
+        let evaluated = &evaluated::<Symbol>(&self.base.evaluated_properties).paint;
         let text_translate = SymbolTranslate {
             offset: *evaluated.text_translate.uniform(),
             anchor: *evaluated.text_translate_anchor.uniform(),
@@ -1177,7 +1203,7 @@ impl RenderLayer for RenderSymbolLayer {
         };
         let owner = Rc::clone(render_tiles.owner());
         for render_tile in render_tiles.iter() {
-            let Some(bucket_ptr) = render_tile.get_bucket(&*self.base.base_impl) else {
+            let Some(bucket_ptr) = render_tile.get_bucket(&*self.base.style) else {
                 continue;
             };
             let Some(bucket) = (**bucket_ptr).downcast_ref::<SymbolBucket>() else {
@@ -1192,7 +1218,7 @@ impl RenderLayer for RenderSymbolLayer {
                     tile_owner: Rc::clone(&owner),
                     tile_index,
                     feature_index: None,
-                    source_id: self.base.base_impl.source.clone(),
+                    source_id: self.base.style.base().source.clone(),
                     sort_key_range: None,
                     text_translate,
                     icon_translate,
@@ -1208,7 +1234,7 @@ impl RenderLayer for RenderSymbolLayer {
                     tile_owner: Rc::clone(&owner),
                     tile_index,
                     feature_index,
-                    source_id: self.base.base_impl.source.clone(),
+                    source_id: self.base.style.base().source.clone(),
                     sort_key_range: None,
                     text_translate,
                     icon_translate,
@@ -1220,7 +1246,7 @@ impl RenderLayer for RenderSymbolLayer {
                         tile_owner: Rc::clone(&owner),
                         tile_index,
                         feature_index: feature_index.clone(),
-                        source_id: self.base.base_impl.source.clone(),
+                        source_id: self.base.style.base().source.clone(),
                         sort_key_range: Some(*sort_key_range),
                         text_translate,
                         icon_translate,
@@ -1327,7 +1353,7 @@ impl RenderLayer for RenderSymbolLayer {
         let render_tile_ids = &self.base.render_tile_ids;
         self.tile_bucket_versions.retain(|id, _| render_tile_ids.contains_key(id));
 
-        let layout = &impl_cast(&self.base.base_impl).layout;
+        let layout = &self.style.layout;
         let sort_features_by_key = layout.symbol_sort_key.is_expression();
         let constant_sort_key = layout.symbol_sort_key.is_constant();
         // Screen-space symbols are drawn over the view, not projected onto
@@ -1352,8 +1378,8 @@ impl RenderLayer for RenderSymbolLayer {
         for (tile_index, tile) in tiles.iter().enumerate() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let render_data = super::render_data_for_pass(tile, &*base_impl, passes);
+            let style = Arc::clone(&self.base.style);
+            let render_data = super::render_data_for_pass(tile, &*style, passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.remove_tile_all(passes, &tile_id);
                 self.tile_bucket_versions.remove(&tile_id);
@@ -1390,13 +1416,13 @@ impl RenderLayer for RenderSymbolLayer {
                 continue;
             }
 
-            let evaluated = get_evaluated::<SymbolLayerProperties>(&render_data.layer_properties);
+            let evaluated = &evaluated::<Symbol>(&render_data.layer).paint;
 
             if update_parameters.capture_rendered_features {
                 let params = &render_tree.get_parameters().transform_params;
                 capture_rendered_features(
                     &mut self.base.stats,
-                    &self.base.base_impl.id,
+                    &self.base.style.base().id,
                     tile,
                     bucket,
                     evaluated,
@@ -1521,8 +1547,8 @@ impl RenderLayer for RenderSymbolLayer {
 
             let tile = tiles[group.tile_index];
             let tile_id = tile.id.overscale_to(group.overscaled_z);
-            let base_impl = Arc::clone(&self.base.base_impl);
-            let Some(render_data) = super::render_data_for_pass(tile, &*base_impl, passes) else {
+            let style = Arc::clone(&self.base.style);
+            let Some(render_data) = super::render_data_for_pass(tile, &*style, passes) else {
                 continue;
             };
             let Some(bucket) = (*render_data.bucket).downcast_ref::<SymbolBucket>() else {
@@ -1542,7 +1568,7 @@ impl RenderLayer for RenderSymbolLayer {
             }
             let visible = buffer.segment_has_visible_vertices(group.segment);
 
-            let evaluated = get_evaluated::<SymbolLayerProperties>(&render_data.layer_properties);
+            let evaluated = &evaluated::<Symbol>(&render_data.layer).paint;
             let Some(bucket_paint_properties) = bucket.paint_properties.get(self.get_id()) else {
                 continue;
             };
@@ -1671,7 +1697,7 @@ impl RenderLayer for RenderSymbolLayer {
                     drawable.tile_id = Some(tile_id);
                     drawable.layer_tweaker = layer_tweaker.clone();
                     drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
-                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &base_impl.id));
+                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &style.base().id));
 
                     let has_variable_placement = state_guard.has_variable_placement;
                     drawable.data = Some(crate::drawable::DrawableData::Symbol(SymbolDrawableData {

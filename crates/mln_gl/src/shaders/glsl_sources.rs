@@ -3182,7 +3182,7 @@ layout (std140) uniform LineSDFDrawableUBO {
     lowp float u_offset_t;
     lowp float u_width_t;
     lowp float u_floorwidth_t;
-    lowp float drawable_pad1;
+    highp float u_atlas_height;
     lowp float drawable_pad2;
 };
 
@@ -3226,6 +3226,10 @@ out mediump float width;
 #ifndef HAS_UNIFORM_u_floorwidth
 layout (location = 7) in lowp vec2 a_floorwidth;
 out lowp float floorwidth;
+#endif
+#ifndef HAS_UNIFORM_u_dasharray
+layout (location = 8) in highp vec4 a_dasharray;
+flat out highp float v_dash_width;
 #endif
 
 #ifdef PROJECTION_GLOBE
@@ -3320,8 +3324,21 @@ lowp float floorwidth = u_floorwidth;
     float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * u_units_to_pixels);
     v_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
-    v_tex_a = vec2(a_linesofar * u_patternscale_a.x / floorwidth, normal.y * u_patternscale_a.y + u_tex_y_a);
-    v_tex_b = vec2(a_linesofar * u_patternscale_b.x / floorwidth, normal.y * u_patternscale_b.y + u_tex_y_b);
+#ifdef HAS_UNIFORM_u_dasharray
+    highp vec2 patternscale_a = u_patternscale_a;
+    highp vec2 patternscale_b = u_patternscale_b;
+    highp float tex_y_a = u_tex_y_a;
+    highp float tex_y_b = u_tex_y_b;
+#else
+    // The dash attribute: the pattern's middle row, row span and length.
+    highp vec2 patternscale_a = vec2(u_patternscale_a.x / a_dasharray.z, -a_dasharray.y / 2.0 / u_atlas_height);
+    highp vec2 patternscale_b = vec2(u_patternscale_b.x / a_dasharray.z, patternscale_a.y);
+    highp float tex_y_a = (a_dasharray.x + 0.5) / u_atlas_height;
+    highp float tex_y_b = tex_y_a;
+    v_dash_width = a_dasharray.z;
+#endif
+    v_tex_a = vec2(a_linesofar * patternscale_a.x / floorwidth, normal.y * patternscale_a.y + tex_y_a);
+    v_tex_b = vec2(a_linesofar * patternscale_b.x / floorwidth, normal.y * patternscale_b.y + tex_y_b);
 
     v_width2 = vec2(outset, inset);
 }
@@ -3367,6 +3384,9 @@ in mediump float width;
 #ifndef HAS_UNIFORM_u_floorwidth
 in lowp float floorwidth;
 #endif
+#ifndef HAS_UNIFORM_u_dasharray
+flat in highp float v_dash_width;
+#endif
 
 #ifdef PROJECTION_GLOBE
 in highp float v_tile_x;
@@ -3403,7 +3423,12 @@ lowp float floorwidth = u_floorwidth;
     float sdfdist_a = texture(u_image_dash, v_tex_a).a;
     float sdfdist_b = texture(u_image_dash, v_tex_b).a;
     float sdfdist = mix(sdfdist_a, sdfdist_b, u_mix);
-    alpha *= smoothstep(0.5 - u_sdfgamma / floorwidth, 0.5 + u_sdfgamma / floorwidth, sdfdist);
+#ifdef HAS_UNIFORM_u_dasharray
+    highp float sdfgamma = u_sdfgamma;
+#else
+    highp float sdfgamma = u_sdfgamma / v_dash_width;
+#endif
+    alpha *= smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     // For gradient lines, v_lineprogress is the ratio along the entire line,
     // scaled to [0, 2^15), and the gradient ramp is stored in a texture.
@@ -4016,7 +4041,7 @@ layout (std140) uniform LineSDFDrawableUBO {
     lowp float u_offset_t;
     lowp float u_width_t;
     lowp float u_floorwidth_t;
-    lowp float drawable_pad1;
+    highp float u_atlas_height;
     lowp float drawable_pad2;
 };
 
@@ -4063,6 +4088,10 @@ out mediump float width;
 #ifndef HAS_UNIFORM_u_floorwidth
 layout (location = 8) in lowp vec2 a_floorwidth;
 out lowp float floorwidth;
+#endif
+#ifndef HAS_UNIFORM_u_dasharray
+layout (location = 9) in highp vec4 a_dasharray;
+flat out highp float v_dash_width;
 #endif
 
 #ifdef PROJECTION_GLOBE
@@ -4161,8 +4190,21 @@ lowp float floorwidth = u_floorwidth;
     float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * u_units_to_pixels);
     v_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
-    v_tex_a = vec2(a_linesofar * u_patternscale_a.x / floorwidth, normal.y * u_patternscale_a.y + u_tex_y_a);
-    v_tex_b = vec2(a_linesofar * u_patternscale_b.x / floorwidth, normal.y * u_patternscale_b.y + u_tex_y_b);
+#ifdef HAS_UNIFORM_u_dasharray
+    highp vec2 patternscale_a = u_patternscale_a;
+    highp vec2 patternscale_b = u_patternscale_b;
+    highp float tex_y_a = u_tex_y_a;
+    highp float tex_y_b = u_tex_y_b;
+#else
+    // The dash attribute: the pattern's middle row, row span and length.
+    highp vec2 patternscale_a = vec2(u_patternscale_a.x / a_dasharray.z, -a_dasharray.y / 2.0 / u_atlas_height);
+    highp vec2 patternscale_b = vec2(u_patternscale_b.x / a_dasharray.z, patternscale_a.y);
+    highp float tex_y_a = (a_dasharray.x + 0.5) / u_atlas_height;
+    highp float tex_y_b = tex_y_a;
+    v_dash_width = a_dasharray.z;
+#endif
+    v_tex_a = vec2(a_linesofar * patternscale_a.x / floorwidth, normal.y * patternscale_a.y + tex_y_a);
+    v_tex_b = vec2(a_linesofar * patternscale_b.x / floorwidth, normal.y * patternscale_b.y + tex_y_b);
 
     v_width2 = vec2(outset, inset);
 }
@@ -4209,6 +4251,9 @@ in mediump float width;
 #ifndef HAS_UNIFORM_u_floorwidth
 in lowp float floorwidth;
 #endif
+#ifndef HAS_UNIFORM_u_dasharray
+flat in highp float v_dash_width;
+#endif
 
 #ifdef PROJECTION_GLOBE
 in highp float v_tile_x;
@@ -4248,7 +4293,12 @@ lowp float floorwidth = u_floorwidth;
     float sdfdist_a = texture(u_image, v_tex_a).a;
     float sdfdist_b = texture(u_image, v_tex_b).a;
     float sdfdist = mix(sdfdist_a, sdfdist_b, u_mix);
-    alpha *= smoothstep(0.5 - u_sdfgamma / floorwidth, 0.5 + u_sdfgamma / floorwidth, sdfdist);
+#ifdef HAS_UNIFORM_u_dasharray
+    highp float sdfgamma = u_sdfgamma;
+#else
+    highp float sdfgamma = u_sdfgamma / v_dash_width;
+#endif
+    alpha *= smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     fragColor = color * (alpha * opacity);
 

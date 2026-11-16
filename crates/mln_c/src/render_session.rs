@@ -155,6 +155,13 @@ impl AttachRequest {
         if self.driver == Driver::CoreWorker { Ok(()) } else { Err(Error::new(ErrorKind::Unsupported, message)) }
     }
 
+    /// Fails with `MLN_STATUS_UNSUPPORTED` unless the caller asked to drive
+    /// the session on its own graphics thread.
+    #[cfg(backend_d3d12)]
+    pub(crate) fn require_caller_thread(&self, message: &'static str) -> Result<(), Error> {
+        if self.driver == Driver::CallerThread { Ok(()) } else { Err(Error::new(ErrorKind::Unsupported, message)) }
+    }
+
     fn wakes(&self) -> [&Wake; 3] {
         [&self.frame_wake, &self.redraw_wake, &self.driver_work_wake]
     }

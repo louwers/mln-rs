@@ -2,10 +2,12 @@
 // these follow the region lifecycle that maplibre-native-ffi's ABI tests
 // drive through it (tests/native/abi/resources/offline.c).
 
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use httpmock::MockServer;
+use mln_renderer::Registry;
 use mln_storage::OnlineFileSource;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
@@ -28,7 +30,11 @@ fn wait<T: Send + 'static>(operation: impl FnOnce(Box<dyn FnOnce(T) + Send>)) ->
 
 /// A database file source with its database in `dir`.
 fn database_file_source(dir: &TempDir) -> RegionDatabase {
-    region_database(&dir.path("cache.db"), Some(std::sync::Arc::new(OnlineFileSource::new())))
+    region_database(
+        &dir.path("cache.db"),
+        Some(Arc::new(OnlineFileSource::new())),
+        Arc::clone(Registry::with_builtins().style()),
+    )
 }
 
 fn definition(style_url: &str) -> OfflineRegionDefinition {

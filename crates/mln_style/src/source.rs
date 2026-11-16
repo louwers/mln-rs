@@ -22,7 +22,7 @@ use mln_storage::FileSource;
 use mln_style_types::SourceType;
 use mln_util::logging::{Event, Log};
 
-use crate::layer::LayerTypeInfo;
+use crate::layer_type::LayerTypeInfo;
 use crate::observer::SourceObserver;
 pub use crate::source_impl::{Impl, downcast_arc};
 
@@ -94,7 +94,7 @@ pub trait Source: Any {
     /// one to load. Its responses and background work answer on `run_loop`.
     fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop);
 
-    fn supports_layer_type(&self, type_info: &LayerTypeInfo) -> bool;
+    fn supports_layer_type(&self, type_info: LayerTypeInfo) -> bool;
 
     /// A copy of the current impl.
     fn create_mutable(&self) -> Box<dyn Impl>;
@@ -201,8 +201,8 @@ pub fn set_max_overscale_factor_for_parent_tiles(source: &dyn Source, overscale_
     mutate_impl(source, |impl_| impl_.base_mut().set_max_overscale_factor_for_parent_tiles(overscale_factor));
 }
 
-// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
-// (layer.rs).
+// Debug is not a supertrait, for the reason at
+// `impl Debug for dyn ErasedLayerStyle` (layer_type.rs).
 impl std::fmt::Debug for dyn Source {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let base = self.base_impl();

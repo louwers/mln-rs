@@ -93,7 +93,9 @@ fn device_of(backend: BackendType) -> Option<Device> {
     }
 }
 
-const BACKENDS: [BackendType; 4] = [BackendType::Vulkan, BackendType::OpenGL, BackendType::Metal, BackendType::WebGPU];
+/// The backends, in the order that `Device::new` tries them.
+const BACKENDS: [BackendType; 5] =
+    [BackendType::Vulkan, BackendType::D3D12, BackendType::OpenGL, BackendType::Metal, BackendType::WebGPU];
 
 fn exported_image(frame: &AcquiredFrame) -> (Size, ExportedImage) {
     let texture = frame.texture().expect("an exported frame has its image");
@@ -681,9 +683,8 @@ mod linux {
     }
 }
 
-#[cfg(all(feature = "vulkan", windows))]
+#[cfg(all(windows, any(feature = "vulkan", feature = "d3d12")))]
 mod win32 {
-    use mln_vulkan::ash::{self, vk};
     use windows::Win32::Foundation::{CloseHandle, GENERIC_ALL, HANDLE, HMODULE, LUID};
     use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
     use windows::Win32::Graphics::Direct3D11::{
@@ -700,23 +701,37 @@ mod win32 {
     /// Red, as a B8G8R8A8 texture holds it.
     const BGRA_RED: [u8; 4] = [0, 0, 255, 255];
 
-    /// The Vulkan device of the library's, if it exports D3D11 textures.
-    fn dxgi_device() -> Option<mln_vulkan::Device> {
-        let Some(Device::Vulkan(library)) = device_of(BackendType::Vulkan) else { return None };
-        if !library.export_kinds().contains(ExportKind::DxgiSharedHandle) {
-            eprintln!("skipped: the Vulkan device shares no D3D11 textures");
-            return None;
+    /// The library's devices that share DXGI textures, each with its GPU's
+    /// LUID: Vulkan's, which makes them with D3D11, and D3D12's.
+    fn dxgi_devices() -> Vec<(Device, [u8; 8])> {
+        let mut devices = Vec::new();
+        #[cfg(feature = "vulkan")]
+        if let Some(Device::Vulkan(library)) = device_of(BackendType::Vulkan) {
+            let luid = vulkan_luid(&library);
+            devices.push((Device::Vulkan(library), luid));
         }
-        Some(library)
+        #[cfg(feature = "d3d12")]
+        if let Some(Device::D3d12(library)) = device_of(BackendType::D3D12) {
+            let luid = library.adapter_luid();
+            devices.push((Device::D3d12(library), luid));
+        }
+        devices.retain(|(device, _)| {
+            let shares = device.export_kinds().contains(ExportKind::DxgiSharedHandle);
+            if !shares {
+                eprintln!("skipped: the {:?} device shares no DXGI textures", device.backend());
+            }
+            shares
+        });
+        devices
     }
 
-    /// A D3D11 device on the adapter of `library`'s GPU, as a host makes one
-    /// to open the ring's textures.
-    fn host_device(library: &mln_vulkan::Device) -> (ID3D11Device5, ID3D11DeviceContext4) {
+    /// The LUID of `library`'s GPU.
+    #[cfg(feature = "vulkan")]
+    fn vulkan_luid(library: &mln_vulkan::Device) -> [u8; 8] {
+        use mln_vulkan::ash::{self, vk};
         let raw = library.raw();
         let mut ids = vk::PhysicalDeviceIDProperties::default();
-        // SAFETY: plain queries of the library device's live GPU, and D3D11
-        // calls whose out pointers they fill.
+        // SAFETY: plain queries of the library device's live GPU.
         unsafe {
             let entry =
                 ash::Entry::from_static_fn(ash::StaticFn { get_instance_proc_addr: raw.get_instance_proc_addr });
@@ -724,7 +739,16 @@ mod win32 {
             let mut properties = vk::PhysicalDeviceProperties2::default().push_next(&mut ids);
             instance.get_physical_device_properties2(raw.physical_device, &mut properties);
             assert_eq!(vk::TRUE, ids.device_luid_valid);
-            let [l0, l1, l2, l3, h0, h1, h2, h3] = ids.device_luid;
+        }
+        ids.device_luid
+    }
+
+    /// A D3D11 device on the adapter of `luid`, as a host makes one to open
+    /// the ring's textures.
+    fn host_device(luid: [u8; 8]) -> (ID3D11Device5, ID3D11DeviceContext4) {
+        // SAFETY: D3D11 calls whose out pointers they fill.
+        unsafe {
+            let [l0, l1, l2, l3, h0, h1, h2, h3] = luid;
             let luid =
                 LUID { LowPart: u32::from_ne_bytes([l0, l1, l2, l3]), HighPart: i32::from_ne_bytes([h0, h1, h2, h3]) };
             let factory: IDXGIFactory4 = CreateDXGIFactory1().unwrap();
@@ -789,22 +813,52 @@ mod win32 {
 
     #[test]
     fn a_dxgi_ring_renders_into_d3d11_textures_that_the_host_opens() {
-        let Some(library) = dxgi_device() else { return };
-        let (device, context) = host_device(&library);
+        for (library, luid) in dxgi_devices() {
+            let backend = library.backend();
+            let (device, context) = host_device(luid);
+            let runtime = runtime();
+            let map = red_map(&runtime);
+            let session = attach(&map, ring(&[ExportKind::DxgiSharedHandle]), Some(library), SyncKinds::NONE).unwrap();
+            let capabilities = session.capabilities().unwrap();
+            assert_eq!(Some(ExportKind::DxgiSharedHandle), capabilities.export_kind, "{backend:?}");
+            assert_eq!(Some(SyncKind::CpuComplete), capabilities.producer_sync_kind, "{backend:?}");
+            for token in 1..=2 * DEPTH as u64 {
+                let frame = render_and_acquire(&session, token);
+                assert_eq!(GpuSync::of(SyncKind::CpuComplete), frame.producer_sync(), "{backend:?}");
+                assert_eq!(BGRA_RED, texture_pixel(&device, &context, &frame), "{backend:?}");
+                frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
+            }
+            detach(session);
+        }
+    }
+
+    /// A D3D12 ring's frames also name their textures on the device, and
+    /// keep their depth on it when the ring keeps depth.
+    #[cfg(feature = "d3d12")]
+    #[test]
+    fn a_d3d12_dxgi_ring_names_its_textures_on_the_device() {
+        let Some((library, _)) = dxgi_devices().into_iter().find(|(device, _)| device.backend() == BackendType::D3D12)
+        else {
+            return;
+        };
         let runtime = runtime();
         let map = red_map(&runtime);
-        let session =
-            attach(&map, ring(&[ExportKind::DxgiSharedHandle]), Some(Device::Vulkan(library)), SyncKinds::NONE)
-                .unwrap();
-        let capabilities = session.capabilities().unwrap();
-        assert_eq!(Some(ExportKind::DxgiSharedHandle), capabilities.export_kind);
-        assert_eq!(Some(SyncKind::CpuComplete), capabilities.producer_sync_kind);
-        for token in 1..=2 * DEPTH as u64 {
-            let frame = render_and_acquire(&session, token);
-            assert_eq!(GpuSync::of(SyncKind::CpuComplete), frame.producer_sync());
-            assert_eq!(BGRA_RED, texture_pixel(&device, &context, &frame));
-            frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
-        }
+        let mut exported = ring(&[ExportKind::DxgiSharedHandle]);
+        exported.keep_depth = true;
+        let session = attach(&map, exported, Some(library), SyncKinds::NONE).unwrap();
+        let frame = render_and_acquire(&session, 1);
+        let texture = frame.texture().expect("a texture");
+        let Some(FrameTextureKind::D3d12 { resource, format, state, .. }) = texture.native_kind() else {
+            panic!("the frame names no D3D12 texture: {texture:?}")
+        };
+        assert_ne!(0, *resource);
+        assert_eq!(DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32, *format);
+        assert_eq!(0, *state, "the texture rests in the common state");
+        let depth = texture.depth.clone().expect("a depth texture");
+        assert!(matches!(depth.texture, mln_runtime::NativeTexture::D3d12 { .. }), "{depth:?}");
+        assert_eq!(None, depth.export);
+        frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
+        detach(session);
     }
 
     /// Each frame hands over with the session's D3D12 fence, which the host
@@ -812,18 +866,22 @@ mod win32 {
     /// the next frame into the texture waits for.
     #[test]
     fn a_dxgi_ring_hands_frames_over_with_d3d12_fences() {
-        let Some(library) = dxgi_device() else { return };
-        let (producer, consumer) = mln_vulkan::exported_target::sync_kinds(&library);
+        for (library, luid) in dxgi_devices() {
+            hands_frames_over_with_d3d12_fences(library, luid);
+        }
+    }
+
+    fn hands_frames_over_with_d3d12_fences(library: Device, luid: [u8; 8]) {
+        let (producer, consumer) = library.export_sync_kinds();
         if !producer.contains(SyncKind::D3d12Fence) || !consumer.contains(SyncKind::D3d12Fence) {
-            eprintln!("skipped: the Vulkan device shares no D3D12 fences");
+            eprintln!("skipped: the {:?} device shares no D3D12 fences", library.backend());
             return;
         }
-        let (device, context) = host_device(&library);
+        let (device, context) = host_device(luid);
         let runtime = runtime();
         let map = red_map(&runtime);
         let fences = SyncKinds::of(&[SyncKind::D3d12Fence]);
-        let session =
-            attach(&map, ring(&[ExportKind::DxgiSharedHandle]), Some(Device::Vulkan(library)), fences).unwrap();
+        let session = attach(&map, ring(&[ExportKind::DxgiSharedHandle]), Some(library), fences).unwrap();
         let capabilities = session.capabilities().unwrap();
         assert_eq!(Some(SyncKind::D3d12Fence), capabilities.producer_sync_kind);
         assert!(capabilities.consumer_sync_kinds.contains(SyncKind::D3d12Fence));

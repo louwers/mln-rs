@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
 use mln_conversion::{Convertible, Error};
-use mln_expression::EvaluationContext;
 use mln_expression::dsl::{create_expression_from_str, interpolate, linear, literal, zoom};
+use mln_expression::{EvaluationContext, Functions};
 use mln_style::conversion::convert_property_value;
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
@@ -51,7 +51,9 @@ fn interpolate_expression() {
     // Parse expression from JSON, verify that expansion from number/array is handled correctly.
     {
         let json = r#"["interpolate", ["linear"], ["zoom"], 0, ["to-padding", 0], 1, ["to-padding", ["literal",[8, 16, -32]]]]"#;
-        let expr = PropertyExpression::<Padding>::new(Arc::from(create_expression_from_str(json).unwrap()));
+        let expr = PropertyExpression::<Padding>::new(Arc::from(
+            create_expression_from_str(json, &Functions::with_builtins()).unwrap(),
+        ));
         let result = expr.evaluate(&EvaluationContext::new(0.5), Padding::default());
         assert_eq!(Padding::new(4.0, 8.0, -16.0, 8.0), result);
     }
@@ -64,9 +66,14 @@ fn function() {
         let mut error = Error::default();
         let value: serde_json::Value = serde_json::from_str(json).unwrap();
         // convertJSON<PropertyValue<Padding>>(json, error, allowDataExpressions = true, convertTokens = false)
-        let function: PropertyValue<Padding> =
-            convert_property_value::<Padding>(&Convertible::from(&value), &mut error, true, false)
-                .unwrap_or_else(|| panic!("{json}: {}", error.message));
+        let function: PropertyValue<Padding> = convert_property_value::<Padding>(
+            &Convertible::from(&value),
+            &mut error,
+            true,
+            false,
+            &Functions::with_builtins(),
+        )
+        .unwrap_or_else(|| panic!("{json}: {}", error.message));
         function.as_expression().clone()
     };
     let eval_in_context = |expr: &PropertyExpression<Padding>, properties: &[(&str, MbglValue)]| -> Padding {

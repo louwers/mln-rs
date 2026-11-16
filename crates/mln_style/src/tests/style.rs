@@ -12,10 +12,10 @@ use mln_util::size::Size;
 use mln_util::tileset::PartialTileset;
 use mln_util::{Color, LatLng};
 
-use super::util::{FixtureLog, parse_json, read_file};
-use crate::image;
-use crate::layer::Layer;
-use crate::layers::line_layer::{Impl as LineLayerImpl, LineLayer};
+use super::util::{FixtureLog, new_layer, parse_json, read_file};
+use crate::expression::Functions;
+use crate::layer_type::LayerStyle;
+use crate::layers::Line;
 use crate::observer::{Observer, SourceObserver};
 use crate::projection::Projection;
 use crate::property_value::PropertyValue;
@@ -24,6 +24,7 @@ use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::tile_source::TileSource;
 use crate::style::{Impl, Style};
 use crate::transition_options::TransitionOptions;
+use crate::{StyleRegistry, image};
 
 /// A style impl over a stub file source, with pixel ratio 1.
 fn stub_style() -> Impl {
@@ -32,7 +33,7 @@ fn stub_style() -> Impl {
         &run_loop,
         mln_storage::stub_file_source::ResponseType::Asynchronous,
     );
-    Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop)
+    Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop)
 }
 
 // gtest: Style.Properties
@@ -188,7 +189,7 @@ fn add_remove_remove_image() {
 fn layer_transition_refreshes_immutable_collection() {
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    style.add_layer(Box::new(LineLayer::new("line", "source")), None).unwrap();
+    style.add_layer(new_layer("line", "line", "source"), None).unwrap();
     let before = style.get_layer_impls();
 
     {
@@ -199,8 +200,8 @@ fn layer_transition_refreshes_immutable_collection() {
     let after = style.get_layer_impls();
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(1, after.len());
-    assert!(Arc::ptr_eq(&style.get_layer("line").unwrap().base_impl(), &after[0]));
-    let impl_ = after[0].downcast_ref::<LineLayerImpl>().unwrap();
+    assert!(Arc::ptr_eq(style.get_layer("line").unwrap().style(), &after[0]));
+    let impl_ = LayerStyle::<Line>::recover_ref(&*after[0]).unwrap();
     assert_eq!(Some(Duration::from_millis(123)), impl_.paint.line_color.options.duration);
     assert_eq!(Some(Duration::from_millis(45)), impl_.paint.line_color.options.delay);
 }
@@ -224,7 +225,7 @@ fn source_collection_publishes_updates() {
     // the sources after each (see transition_options_publish_updates).
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    style.add_layer(Box::new(LineLayer::new("line", "late")), None).unwrap();
+    style.add_layer(new_layer("line", "line", "late"), None).unwrap();
     let observer = Rc::new(CountingObserver::default());
     style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
 
@@ -344,12 +345,14 @@ fn layer_changes_leave_earlier_snapshots_unchanged() {
     );
     // An update for each layer.
     assert_eq!(without_layers + 2, observer.updates.replace(0));
-    let ids = |impls: &[Arc<dyn crate::layer::Impl>]| impls.iter().map(|impl_| impl_.id.clone()).collect::<Vec<_>>();
+    let ids = |impls: &[Arc<dyn crate::layer_type::ErasedLayerStyle>]| {
+        impls.iter().map(|impl_| impl_.base().id.clone()).collect::<Vec<_>>()
+    };
     let loaded = style.get_layer_impls();
     assert_eq!(["a", "b"], *ids(&loaded));
 
-    style.add_layer(Box::new(LineLayer::new("c", "source")), Some("b")).unwrap();
-    let error = style.add_layer(Box::new(LineLayer::new("a", "source")), Some("b")).err().unwrap();
+    style.add_layer(new_layer("line", "c", "source"), Some("b")).unwrap();
+    let error = style.add_layer(new_layer("line", "a", "source"), Some("b")).err().unwrap();
     assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
     assert_eq!("Layer a already exists", error.message);
     assert_eq!(1, observer.updates.get());
@@ -534,12 +537,12 @@ fn layer_added_after_global_state_update_uses_current_state() {
     style.load_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
     style.set_global_state_property("showLayer", &Value::Bool(false));
 
-    let mut layer = LineLayer::new("line", "source");
+    let mut layer = new_layer("line", "line", "source");
     let json = parse_json(r#"["case", ["to-boolean", ["global-state", "showLayer"]], "visible", "none"]"#);
     assert!(layer.set_property("visibility", &Convertible::from(&json), None).is_none());
     assert_eq!(VisibilityType::Visible, layer.get_visibility());
 
-    let added_layer = style.add_layer(Box::new(layer), None).unwrap();
+    let added_layer = style.add_layer(layer, None).unwrap();
     assert_eq!(VisibilityType::None, added_layer.get_visibility());
 }
 
@@ -585,7 +588,11 @@ fn sky_presence_and_replacement() {
     assert_float_eq(0.4, *sky.impl_.properties.sky_atmosphere_blend.value.as_constant());
 
     let mut replacement = Sky::new();
-    assert!(replacement.set_property("fog-color", &Convertible::from(&serde_json::json!("red"))).is_none());
+    assert!(
+        replacement
+            .set_property("fog-color", &Convertible::from(&serde_json::json!("red")), &Functions::with_builtins())
+            .is_none()
+    );
     style.set_sky(Some(replacement));
     let sky = style.get_sky().expect("sky");
     assert!(sky.impl_.properties.sky_color.value.is_undefined());
@@ -663,7 +670,7 @@ fn remove_source_in_use() {
 
     style.load_json(&read_file("test/fixtures/resources/style-unused-sources.json"));
     style.add_source(Box::new(vector_source("sourceId"))).unwrap();
-    style.add_layer(Box::new(LineLayer::new("layerId", "sourceId")), None).unwrap();
+    style.add_layer(new_layer("line", "layerId", "sourceId"), None).unwrap();
 
     // Should not remove the source
     let removed = style.remove_source("sourceId");
@@ -681,7 +688,8 @@ fn public_load_state_does_not_wait_for_resources() {
         &run_loop,
         mln_storage::stub_file_source::ResponseType::Manual,
     );
-    let mut style = Style::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
+    let mut style =
+        Style::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop);
 
     assert!(!style.is_loaded());
 
@@ -754,7 +762,7 @@ fn stub_with_style_response(
         mln_storage::stub_file_source::ResponseType::Asynchronous,
     );
     file_source.set_response(mln_storage::Kind::Style, responder);
-    let mut style = Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
+    let mut style = Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop);
     let observer = Rc::new(ResponseObserver::default());
     style.set_observer(Some(Rc::<ResponseObserver>::clone(&observer)));
     (style, observer, run_loop)
@@ -870,6 +878,7 @@ fn load_json_cancels_pending_load_url() {
         Some(response)
     });
     let mut style = Impl::with_file_source(
+        StyleRegistry::with_builtins(),
         Some(Arc::<mln_storage::stub_file_source::StubFileSource>::clone(&file_source)),
         1.0,
         &run_loop,

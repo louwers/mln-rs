@@ -18,10 +18,11 @@ use mln_util::time::Instant;
 use mln_util::{Color, UnitBezier};
 
 use super::util::FixtureLog;
-use crate::layer::downcast_arc;
-use crate::layers::BackgroundPaintProperties;
-use crate::layers::background_layer::Impl as BackgroundLayerImpl;
+use crate::expression::Functions;
+use crate::layer_type::LayerStyle;
+use crate::layers::{Background, BackgroundPaintProperties};
 use crate::map::zoom_history::ZoomHistory;
+use crate::registry::StyleRegistry;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::transition_parameters::TransitionParameters;
 use crate::style::Impl;
@@ -52,24 +53,24 @@ fn load(test: &str) -> Impl {
     };
     file_source.set_response(mln_storage::Kind::SpriteJSON, failed);
     file_source.set_response(mln_storage::Kind::SpriteImage, failed);
-    let mut style = Impl::with_file_source(Some(Arc::new(file_source)), 1.0, &run_loop);
+    let mut style = Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop);
     style.load_json(&json);
     assert!(style.loaded, "{test} did not load");
     assert!(style.is_loaded(), "{test}: style not fully loaded");
     style
 }
 
-fn background_impl(style: &Impl, id: &str) -> Arc<BackgroundLayerImpl> {
+fn background_impl(style: &Impl, id: &str) -> Arc<LayerStyle<Background>> {
     let impls = style.get_layer_impls();
-    let impl_ = impls.iter().find(|impl_| impl_.id == id).unwrap_or_else(|| panic!("no layer {id}"));
-    assert!(std::ptr::eq(impl_.get_type_info(), BackgroundLayerImpl::static_type_info()));
-    downcast_arc::<BackgroundLayerImpl>(impl_)
+    let impl_ = impls.iter().find(|impl_| impl_.base().id == id).unwrap_or_else(|| panic!("no layer {id}"));
+    assert_eq!(impl_.info().name, "background");
+    LayerStyle::recover(impl_).unwrap()
 }
 
 /// One `RenderOrchestrator` update: `layer->transition(transitionParameters)`
 /// then `layer->evaluate(evaluationParameters)`.
 fn transition_and_evaluate(
-    impl_: &BackgroundLayerImpl,
+    impl_: &LayerStyle<Background>,
     unevaluated: BackgroundPaintProperties::Unevaluated,
     zoom_history: &mut ZoomHistory,
     zoom: f32,
@@ -121,7 +122,7 @@ fn background_color_default() {
     let style = load("background-color/default");
     let evaluated = evaluate_static(&style, "background");
     assert_background(&evaluated, Color::black(), 1.0);
-    assert_eq!(style.get_layer_impls()[0].visibility, VisibilityType::Visible);
+    assert_eq!(style.get_layer_impls()[0].base().visibility, VisibilityType::Visible);
 }
 
 #[test]
@@ -141,9 +142,10 @@ fn background_color_function() {
 
 /// The colorSpace tests' stops, interpolated by `operator` at their zoom, 5.
 fn color_space_expected(operator: &str) -> Color {
-    let expression = crate::expression::dsl::create_expression_from_str(&format!(
-        r#"["{operator}", ["linear"], ["zoom"], 0, "rgb(118,0,118)", 10, "rgb(255,155,0)"]"#
-    ))
+    let expression = crate::expression::dsl::create_expression_from_str(
+        &format!(r#"["{operator}", ["linear"], ["zoom"], 0, "rgb(118,0,118)", 10, "rgb(255,155,0)"]"#),
+        &Functions::with_builtins(),
+    )
     .unwrap();
     crate::property_expression::PropertyExpression::<Color>::from_expr(expression)
         .evaluate(&crate::expression::EvaluationContext::new(5.0), Color::black())
@@ -252,7 +254,7 @@ fn background_opacity_overlay() {
 #[test]
 fn background_visibility_none() {
     let style = load("background-visibility/none");
-    assert_eq!(style.get_layer_impls()[0].visibility, VisibilityType::None);
+    assert_eq!(style.get_layer_impls()[0].base().visibility, VisibilityType::None);
     let evaluated = evaluate_static(&style, "background");
     assert_background(&evaluated, Color::black(), 1.0);
 }
@@ -260,7 +262,7 @@ fn background_visibility_none() {
 #[test]
 fn background_visibility_visible() {
     let style = load("background-visibility/visible");
-    assert_eq!(style.get_layer_impls()[0].visibility, VisibilityType::Visible);
+    assert_eq!(style.get_layer_impls()[0].base().visibility, VisibilityType::Visible);
     let evaluated = evaluate_static(&style, "background");
     assert_background(&evaluated, Color::black(), 1.0);
 }

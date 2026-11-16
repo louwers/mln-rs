@@ -10,12 +10,8 @@ use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, Tile
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer::downcast_arc;
-use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::{
-    CircleLayerProperties, FillExtrusionLayerProperties, FillLayerProperties, LineLayerProperties,
-    SymbolLayerProperties,
-};
+use mln_style::layer_type::LayerStyle;
+use mln_style::layers::{Circle, Fill, FillExtrusion, Line, Symbol};
 use mln_style::sources::tile_source::TileSource;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
@@ -28,9 +24,10 @@ use mln_util::tileset::PartialTileset;
 use proptest::prelude::*;
 use serde_json::json;
 
-use crate::render_source;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tile::store::StoreEvent;
 use crate::tile_parameters::TileParameters;
+use crate::{Registry, render_source};
 
 /// What the render source reported for the tile.
 #[derive(Debug, PartialEq)]
@@ -40,23 +37,24 @@ enum Outcome {
 }
 
 /// A layer of the given style JSON, as the worker gets it.
-fn layer(json: &serde_json::Value) -> Arc<dyn LayerProperties> {
+fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
-    let base_impl = layer.base_impl();
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(json), &mut error)
+        .unwrap_or_else(|| panic!("{}", error.message));
+    let style = layer.style();
     match json["type"].as_str().unwrap() {
-        "line" => Arc::new(LineLayerProperties::new(downcast_arc(&base_impl))),
-        "fill" => Arc::new(FillLayerProperties::new(downcast_arc(&base_impl))),
-        "fill-extrusion" => Arc::new(FillExtrusionLayerProperties::new(downcast_arc(&base_impl))),
-        "circle" => Arc::new(CircleLayerProperties::new(downcast_arc(&base_impl))),
-        "symbol" => Arc::new(SymbolLayerProperties::new(downcast_arc(&base_impl))),
+        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(style).unwrap())),
+        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(style).unwrap())),
+        "fill-extrusion" => Arc::new(EvaluatedLayer::<FillExtrusion>::new(LayerStyle::recover(style).unwrap())),
+        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(style).unwrap())),
+        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(style).unwrap())),
         other => panic!("no properties for {other}"),
     }
 }
 
 /// Loads the z0 tile of a vector source whose tiles are `tile`, with
 /// `layers`, and returns what the render source reports.
-fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
+fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..Default::default() };
     let run_loop = RunLoop::new();
     let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
@@ -227,11 +225,11 @@ fn tile_with_bad_value() -> Vec<u8> {
     tile(&[feature(1, &[1, 1, 0, 7], POLYGON, &polygon)])
 }
 
-fn fill_layer() -> Arc<dyn LayerProperties> {
+fn fill_layer() -> Arc<dyn ErasedEvaluatedLayer> {
     layer(&json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" }))
 }
 
-fn line_layer(filter: Option<serde_json::Value>) -> Arc<dyn LayerProperties> {
+fn line_layer(filter: Option<serde_json::Value>) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut json = json!({ "id": "line", "type": "line", "source": "source", "source-layer": "l" });
     if let Some(filter) = filter {
         json["filter"] = filter;
@@ -241,7 +239,7 @@ fn line_layer(filter: Option<serde_json::Value>) -> Arc<dyn LayerProperties> {
 
 /// A layer of each type that has a worker path, reading values in filters,
 /// sort keys and layout properties.
-fn all_layers() -> Vec<Arc<dyn LayerProperties>> {
+fn all_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
     vec![
         line_layer(Some(json!(["==", ["get", "k"], "v"]))),
         layer(&json!({

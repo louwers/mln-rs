@@ -6,12 +6,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_map_types::MapDebugOptions;
-use mln_style::layer_properties::LayerProperties;
 use mln_style::source;
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::error::Error;
 
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::TransformParameters;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderItem;
@@ -77,7 +77,7 @@ pub(crate) trait RenderSource {
         &mut self,
         store: &mut TileStore,
         impl_: Arc<dyn source::Impl>,
-        layers: &[Arc<dyn LayerProperties>],
+        layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,

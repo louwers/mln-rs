@@ -4,16 +4,16 @@ use feature::{PropertyMap, Value};
 use geojson::{GeoJson, Geometry};
 use mln_actor::RunLoop;
 use mln_map::{CameraOptions, MapMode};
+use mln_renderer::Registry;
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::conversion::{Convertible, Error, convert};
-use mln_style::expression::Value as ExpressionValue;
+use mln_style::Layer;
+use mln_style::conversion::{Convertible, Error, convert_filter};
 use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_style::expression::expression::FeatureState;
+use mln_style::expression::{Functions, Value as ExpressionValue};
 use mln_style::filter::Filter;
-use mln_style::layers::circle_layer::CircleLayer;
-use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::source::Source;
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_util::ErrorKind;
@@ -74,7 +74,8 @@ fn ll(lat: f64, lon: f64) -> LatLng {
 fn parse_filter(expression: &str) -> Filter {
     let json: serde_json::Value = serde_json::from_str(expression).expect("filter JSON");
     let mut error = Error::default();
-    convert::<Filter>(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("filter: {}", error.message))
+    convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut error)
+        .unwrap_or_else(|| panic!("filter: {}", error.message))
 }
 
 fn filter(expression: mln_style::expression::Expr) -> Filter {
@@ -322,7 +323,12 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
             let source = style.get_source("source1").expect("source1");
             let source = source.downcast_ref::<GeoJSONSource>().expect("GeoJSONSource");
             source.set_geojson(GeoJson::from(Geometry::new_point([1.003, 1.003]))).unwrap();
-            style.add_layer(Box::new(CircleLayer::new("circle_layer", "source1")), None).unwrap();
+            style
+                .add_layer(
+                    Layer::new(Registry::with_builtins().style(), "circle", "circle_layer", "source1").unwrap(),
+                    None,
+                )
+                .unwrap();
         }
         // std::to_string(int).
         let tile_zoom = camera_zoom as i32;
@@ -562,13 +568,14 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     source.set_url("http://url");
     source.load_description(&*test.0.file_source, &test.0.run_loop);
 
-    let mut cluster_layer = SymbolLayer::new("cluster_layer", "cluster_source");
+    let mut cluster_layer =
+        Layer::new(Registry::with_builtins().style(), "symbol", "cluster_layer", "cluster_source").unwrap();
     set(&mut cluster_layer, "icon-image", &json!("test-icon"));
     set(&mut cluster_layer, "icon-size", &json!(12.0));
 
     test.map().jump_to(&CameraOptions { center: Some(coordinate), zoom: Some(0.0), ..Default::default() });
     test.map().style_mut().add_source(Box::new(source)).unwrap();
-    test.map().style_mut().add_layer(Box::new(cluster_layer), None).unwrap();
+    test.map().style_mut().add_layer(cluster_layer, None).unwrap();
     test.0.run_loop.run_once();
     test.render();
 

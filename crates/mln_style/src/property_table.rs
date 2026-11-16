@@ -4,7 +4,7 @@
 //!
 //! A table lists each property's name, whether it is paint or layout, and how
 //! its value converts. A property's slot is its index in the table. The type
-//! that holds the values implements [`Properties`], which maps a slot to the
+//! that holds the values implements `Properties`, which maps a slot to the
 //! field that holds it, typed, so that reading, converting and comparing a
 //! value needs no downcast.
 
@@ -18,7 +18,7 @@ use crate::conversion::{Converter, convert_color_ramp_property_value, convert_pr
 use crate::conversion_impl::{
     ValueFactory, make_color_ramp_style_property, make_style_property, make_transition_style_property,
 };
-use crate::expression::ValueConverter;
+use crate::expression::{Functions, ValueConverter};
 use crate::layer::PropertyScope;
 use crate::properties::Transitionable;
 use crate::property_value::PropertyValue;
@@ -27,7 +27,7 @@ use crate::transition_options::TransitionOptions;
 
 /// One property in a [`PropertyTable`].
 #[derive(Debug)]
-pub(crate) struct PropertyInfo {
+pub struct PropertyInfo {
     /// The style-spec name.
     pub(crate) name: &'static str,
     pub(crate) scope: PropertyScope,
@@ -35,17 +35,20 @@ pub(crate) struct PropertyInfo {
     pub(crate) data_driven: bool,
     /// Whether a string constant's `{token}`s become an expression.
     pub(crate) tokens: bool,
+    /// Whether a section of a formatted value can override the paint
+    /// property's value.
+    pub(crate) overridable: bool,
 }
 
 impl PropertyInfo {
     #[must_use]
     pub(crate) const fn paint(name: &'static str) -> Self {
-        PropertyInfo { name, scope: PropertyScope::Paint, data_driven: false, tokens: false }
+        PropertyInfo { name, scope: PropertyScope::Paint, data_driven: false, tokens: false, overridable: false }
     }
 
     #[must_use]
     pub(crate) const fn layout(name: &'static str) -> Self {
-        PropertyInfo { name, scope: PropertyScope::Layout, data_driven: false, tokens: false }
+        PropertyInfo { name, scope: PropertyScope::Layout, data_driven: false, tokens: false, overridable: false }
     }
 
     #[must_use]
@@ -57,12 +60,17 @@ impl PropertyInfo {
     pub(crate) const fn tokens(self) -> Self {
         PropertyInfo { tokens: true, ..self }
     }
+
+    #[must_use]
+    pub(crate) const fn overridable(self) -> Self {
+        PropertyInfo { overridable: true, ..self }
+    }
 }
 
 /// The properties of one layer type, the light or the sky, in the style
 /// spec's order: paint properties, then layout properties.
 #[derive(Debug)]
-pub(crate) struct PropertyTable {
+pub struct PropertyTable {
     properties: &'static [PropertyInfo],
     /// The slots, sorted by property name.
     by_name: &'static [u8],
@@ -71,7 +79,7 @@ pub(crate) struct PropertyTable {
 impl PropertyTable {
     /// `by_name` lists the slots of `properties` sorted by name.
     #[must_use]
-    pub(crate) const fn new(properties: &'static [PropertyInfo], by_name: &'static [u8]) -> Self {
+    pub const fn new(properties: &'static [PropertyInfo], by_name: &'static [u8]) -> Self {
         PropertyTable { properties, by_name }
     }
 
@@ -94,41 +102,69 @@ impl PropertyTable {
 }
 
 /// A style value a property holds: a [`PropertyValue`], or a color ramp.
-pub(crate) trait StyleValue: Clone + Default + PartialEq + 'static {
-    /// Converts a style JSON value for the property `info`.
-    fn convert(value: &Convertible<'_>, info: &PropertyInfo) -> Result<Self, Error>;
+pub trait StyleValue: Clone + Default + PartialEq + 'static {
+    /// Converts a style JSON value for the property `info`, parsing
+    /// expressions against `functions`.
+    fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error>;
 
     fn style_property(&self) -> StyleProperty;
+
+    /// Whether the values differ and either may differ by feature.
+    fn has_data_driven_property_difference(&self, other: &Self) -> bool;
+
+    /// Whether both values are constants, and differ.
+    fn constant_differs(&self, other: &Self) -> bool;
 }
 
 impl<T> StyleValue for PropertyValue<T>
 where
     T: Converter + ValueConverter + ValueFactory + Clone + PartialEq + 'static,
 {
-    fn convert(value: &Convertible<'_>, info: &PropertyInfo) -> Result<Self, Error> {
+    fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error> {
         let mut error = Error::default();
-        convert_property_value::<T>(value, &mut error, info.data_driven, info.tokens).ok_or(error)
+        convert_property_value::<T>(value, &mut error, info.data_driven, info.tokens, functions).ok_or(error)
     }
 
     fn style_property(&self) -> StyleProperty {
         make_style_property(self)
     }
+
+    fn has_data_driven_property_difference(&self, other: &Self) -> bool {
+        PropertyValue::has_data_driven_property_difference(self, other)
+    }
+
+    fn constant_differs(&self, other: &Self) -> bool {
+        match (self, other) {
+            (PropertyValue::Constant(a), PropertyValue::Constant(b)) => a != b,
+            _ => false,
+        }
+    }
 }
 
 impl StyleValue for ColorRampPropertyValue {
-    fn convert(value: &Convertible<'_>, _info: &PropertyInfo) -> Result<Self, Error> {
+    /// A color ramp is always an expression, so `info`'s flags don't apply.
+    fn convert(value: &Convertible<'_>, _info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error> {
         let mut error = Error::default();
-        convert_color_ramp_property_value(value, &mut error).ok_or(error)
+        convert_color_ramp_property_value(value, &mut error, functions).ok_or(error)
     }
 
     fn style_property(&self) -> StyleProperty {
         make_color_ramp_style_property(self)
     }
+
+    fn has_data_driven_property_difference(&self, other: &Self) -> bool {
+        ColorRampPropertyValue::has_data_driven_property_difference(self, other)
+    }
+
+    /// A color ramp is never a constant.
+    fn constant_differs(&self, _other: &Self) -> bool {
+        false
+    }
 }
 
 /// What to do with the field that holds a property, given functions that
 /// borrow it from the properties' owner `S`.
-pub(crate) trait PropertyVisitor<S> {
+pub trait PropertyVisitor<S> {
     type Output;
 
     fn paint<V: StyleValue>(
@@ -149,9 +185,9 @@ pub(crate) trait Properties: Clone + 'static {
     fn visit<V: PropertyVisitor<Self>>(slot: usize, visitor: V) -> Option<V::Output>;
 }
 
-/// Why [`set_property`] failed.
+/// Why setting a property failed.
 #[derive(Debug)]
-pub(crate) enum SetPropertyError {
+pub enum SetPropertyError {
     /// The table has no property of that name.
     Unknown,
     /// The value doesn't convert.
@@ -203,17 +239,41 @@ fn paint_style_property<V: StyleValue>(property: &Transitionable<V>, transition:
     if transition { make_transition_style_property(&property.options) } else { property.value.style_property() }
 }
 
+/// Where the owner of properties is kept, for [`set_property`] to read it
+/// and to change it in place.
+pub(crate) trait OwnerSlot<S> {
+    /// The owner; `None` when the slot holds something else.
+    fn get(&self) -> Option<&S>;
+
+    /// The owner, to change: copied first if it is shared.
+    fn make_mut(&mut self) -> Option<&mut S>;
+}
+
+impl<S: Clone> OwnerSlot<S> for Arc<S> {
+    fn get(&self) -> Option<&S> {
+        Some(self)
+    }
+
+    #[inline(never)]
+    fn make_mut(&mut self) -> Option<&mut S> {
+        Some(Arc::make_mut(self))
+    }
+}
+
 /// Sets the property `name` (or a paint property's `<name>-transition`) of
-/// `owner` from a style JSON value. `owner` is copied only if the value
-/// changes it and it is shared.
-pub(crate) fn set_property<S: Properties>(
-    owner: &mut Arc<S>,
+/// the owner in `owner` from a style JSON value, whose expressions parse
+/// against `functions`. The owner is copied only if the value changes it and
+/// it is shared.
+pub(crate) fn set_property<S: Properties, O: OwnerSlot<S>>(
+    owner: &mut O,
     name: &str,
     value: &Convertible<'_>,
+    functions: &Arc<Functions>,
 ) -> Result<(), SetPropertyError> {
-    struct Set<'a, 'v, S> {
-        owner: &'a mut Arc<S>,
+    struct Set<'a, 'v, O> {
+        owner: &'a mut O,
         value: &'a Convertible<'v>,
+        functions: &'a Arc<Functions>,
         info: &'static PropertyInfo,
         transition: bool,
         error: &'a mut Option<Error>,
@@ -222,7 +282,7 @@ pub(crate) fn set_property<S: Properties>(
     // The change passes through a slot of the caller's, rather than by value,
     // so that this code, compiled for each pair of owner and value type, is
     // only calls.
-    impl<S: Clone> PropertyVisitor<S> for Set<'_, '_, S> {
+    impl<S, O: OwnerSlot<S>> PropertyVisitor<S> for Set<'_, '_, O> {
         type Output = ();
 
         #[inline(never)]
@@ -232,16 +292,29 @@ pub(crate) fn set_property<S: Properties>(
             get_mut: fn(&mut S) -> &mut Transitionable<V>,
         ) {
             let mut change = PaintChange::None;
-            if paint_change(get(self.owner), self.value, self.info, self.transition, &mut change, self.error) {
-                apply_paint_change(get_mut(make_mut(self.owner)), &mut change);
+            let Some(current) = self.owner.get() else { return };
+            if paint_change(
+                get(current),
+                self.value,
+                self.functions,
+                self.info,
+                self.transition,
+                &mut change,
+                self.error,
+            ) && let Some(owner) = self.owner.make_mut()
+            {
+                apply_paint_change(get_mut(owner), &mut change);
             }
         }
 
         #[inline(never)]
         fn layout<V: StyleValue>(self, get: fn(&S) -> &V, get_mut: fn(&mut S) -> &mut V) {
             let mut change = None;
-            if changed_value(get(self.owner), self.value, self.info, &mut change, self.error) {
-                store(get_mut(make_mut(self.owner)), &mut change);
+            let Some(current) = self.owner.get() else { return };
+            if changed_value(get(current), self.value, self.functions, self.info, &mut change, self.error)
+                && let Some(owner) = self.owner.make_mut()
+            {
+                store(get_mut(owner), &mut change);
             }
         }
     }
@@ -249,7 +322,8 @@ pub(crate) fn set_property<S: Properties>(
     let (slot, transition) = S::TABLE.resolve(name).ok_or(SetPropertyError::Unknown)?;
     let info = &S::TABLE.properties[slot];
     let mut error = None;
-    S::visit(slot, Set { owner, value, info, transition, error: &mut error }).ok_or(SetPropertyError::Unknown)?;
+    S::visit(slot, Set { owner, value, functions, info, transition, error: &mut error })
+        .ok_or(SetPropertyError::Unknown)?;
     error.map_or(Ok(()), |error| Err(SetPropertyError::Invalid(error)))
 }
 
@@ -260,11 +334,12 @@ pub(crate) fn set_property<S: Properties>(
 fn changed_value<V: StyleValue>(
     current: &V,
     value: &Convertible<'_>,
+    functions: &Arc<Functions>,
     info: &PropertyInfo,
     change: &mut Option<V>,
     error: &mut Option<Error>,
 ) -> bool {
-    match V::convert(value, info) {
+    match V::convert(value, info, functions) {
         Ok(value) if *current != value => {
             *change = Some(value);
             true
@@ -291,6 +366,7 @@ enum PaintChange<V> {
 fn paint_change<V: StyleValue>(
     current: &Transitionable<V>,
     value: &Convertible<'_>,
+    functions: &Arc<Functions>,
     info: &PropertyInfo,
     transition: bool,
     change: &mut PaintChange<V>,
@@ -305,7 +381,7 @@ fn paint_change<V: StyleValue>(
         }
     } else {
         let mut new_value = None;
-        changed_value(&current.value, value, info, &mut new_value, error);
+        changed_value(&current.value, value, functions, info, &mut new_value, error);
         if let Some(value) = new_value {
             *change = PaintChange::Value(value);
         }
@@ -323,15 +399,68 @@ fn apply_paint_change<V>(property: &mut Transitionable<V>, change: &mut PaintCha
 }
 
 #[inline(never)]
-fn make_mut<S: Clone>(owner: &mut Arc<S>) -> &mut S {
-    Arc::make_mut(owner)
-}
-
-#[inline(never)]
 fn store<V>(slot: &mut V, change: &mut Option<V>) {
     if let Some(value) = change.take() {
         *slot = value;
     }
+}
+
+/// Whether going from `a` to `b` changes a property that tiles are laid out
+/// with: a layout property, a paint property named in `layout_paint`, a
+/// data-driven paint property while either value differs by feature, or,
+/// with `section_overrides`, an overridable paint property's constant.
+pub(crate) fn layout_properties_differ<S: Properties>(
+    a: &S,
+    b: &S,
+    layout_paint: &[&str],
+    section_overrides: bool,
+) -> bool {
+    /// Which differences of a property's values count.
+    #[derive(Clone, Copy)]
+    struct Checks {
+        any: bool,
+        data_driven: bool,
+        constant: bool,
+    }
+
+    struct Differs<'a, S> {
+        a: &'a S,
+        b: &'a S,
+        checks: Checks,
+    }
+
+    impl<S> PropertyVisitor<S> for Differs<'_, S> {
+        type Output = bool;
+
+        fn paint<V: StyleValue>(
+            self,
+            get: fn(&S) -> &Transitionable<V>,
+            _: fn(&mut S) -> &mut Transitionable<V>,
+        ) -> bool {
+            values_differ(&get(self.a).value, &get(self.b).value, self.checks)
+        }
+
+        fn layout<V: StyleValue>(self, get: fn(&S) -> &V, _: fn(&mut S) -> &mut V) -> bool {
+            values_differ(get(self.a), get(self.b), self.checks)
+        }
+    }
+
+    #[inline(never)]
+    fn values_differ<V: StyleValue>(a: &V, b: &V, checks: Checks) -> bool {
+        (checks.any && a != b)
+            || (checks.data_driven && a.has_data_driven_property_difference(b))
+            || (checks.constant && a.constant_differs(b))
+    }
+
+    S::TABLE.properties.iter().enumerate().any(|(slot, info)| {
+        let checks = Checks {
+            any: info.scope == PropertyScope::Layout || layout_paint.contains(&info.name),
+            data_driven: info.data_driven,
+            constant: section_overrides && info.overridable,
+        };
+        (checks.any || checks.data_driven || checks.constant)
+            && S::visit(slot, Differs { a, b, checks }).unwrap_or_default()
+    })
 }
 
 /// Each defined property of `owner` and paint property transition, in table

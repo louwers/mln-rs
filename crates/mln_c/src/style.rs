@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ::mln_runtime::{Applied, CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind};
+use mln_expression::Functions;
 use mln_style::TransitionOptions;
 use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
 use mln_style::sources::TileDataFormat;
@@ -374,12 +375,16 @@ fn whole_zoom_level(zoom: f64, name: &str) -> Result<u8, Error> {
 }
 
 /// The options of a GeoJSON source, with the defaults for the fields that
-/// `options` leaves unset, or for all of them when it is null.
+/// `options` leaves unset, or for all of them when it is null. Its cluster
+/// properties are checked against `functions`.
 ///
 /// # Safety
 ///
 /// `options` is null or valid for the header's use of it.
-unsafe fn geojson_options(options: *const mln_geo_json_source_options) -> Result<GeoJsonSourceOptions, Error> {
+unsafe fn geojson_options(
+    options: *const mln_geo_json_source_options,
+    functions: &Arc<Functions>,
+) -> Result<GeoJsonSourceOptions, Error> {
     let mut result = GeoJsonSourceOptions::default();
     if options.is_null() {
         return Ok(result);
@@ -427,8 +432,8 @@ unsafe fn geojson_options(options: *const mln_geo_json_source_options) -> Result
         result.cluster_properties = Some(properties.to_owned());
         // The header rejects malformed cluster properties from the call
         // itself, so they parse here first, on the parse thread.
-        let checked = result.clone();
-        parse_thread::run(move || checked.check_cluster_properties())??;
+        let (checked, functions) = (result.clone(), Arc::clone(functions));
+        parse_thread::run(move || checked.check_cluster_properties(&functions))??;
     }
     Ok(result)
 }
@@ -907,12 +912,13 @@ pub(crate) unsafe extern "C" fn mln_map_add_geo_json_source(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
+        let functions = Arc::clone(map::resolve(map)?.map.registry().functions());
         // SAFETY: the caller's contract, for each input.
         let (id, attribution, mut options) = unsafe {
             (
                 required_text(source_id, "source_id")?,
                 optional_text(attribution, "attribution")?,
-                geojson_options(options)?,
+                geojson_options(options, &functions)?,
             )
         };
         options.attribution = attribution;
@@ -2051,7 +2057,7 @@ mod tests {
         };
         let check = |properties| {
             // SAFETY: local options, whose text outlives the call.
-            unsafe { geojson_options(&options(properties)) }
+            unsafe { geojson_options(&options(properties), &Functions::with_builtins()) }
         };
         let parsed = check(r#"{"total":["+",["get","weight"]]}"#).unwrap();
         assert_eq!(parsed.cluster_properties.as_deref(), Some(r#"{"total":["+",["get","weight"]]}"#));

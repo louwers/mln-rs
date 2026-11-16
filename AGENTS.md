@@ -15,6 +15,13 @@ correctness, not the C++ or GL JS code.
 - `examples/`: apps that run mln-rs.
 - `tools/`: tools for developing mln-rs.
 
+## The C API
+
+`crates/mln_c` holds the MapLibre Native C API's headers and implements them.
+maplibre-native-ffi builds that crate and generates its language bindings from
+the headers. Read `crates/mln_c/README.md` before you design, change or review
+the C API.
+
 ## Dev tool commands
 
 `mise install` installs the tools that mise.toml pins. `mise tasks` lists every

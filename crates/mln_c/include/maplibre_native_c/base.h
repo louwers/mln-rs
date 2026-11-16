@@ -92,6 +92,7 @@ typedef enum MLN_BINDING("kind=bitmask") mln_render_backend_flag : uint32_t {
   MLN_RENDER_BACKEND_FLAG_VULKAN = 1u << 1u,
   MLN_RENDER_BACKEND_FLAG_OPEN_GL = 1u << 2u,
   MLN_RENDER_BACKEND_FLAG_WEB_GPU = 1u << 3u,
+  MLN_RENDER_BACKEND_FLAG_D3D12 = 1u << 4u,
 } mln_render_backend_flag;
 
 /** A set of mln_render_backend_flag bits. */
@@ -103,6 +104,14 @@ typedef enum mln_render_backend : uint32_t {
   MLN_RENDER_BACKEND_VULKAN = 2u,
   MLN_RENDER_BACKEND_OPEN_GL = 3u,
   MLN_RENDER_BACKEND_WEB_GPU = 4u,
+  /**
+   * D3D12, on Windows. It compiles its shaders at run time with DXC, which
+   * your app ships: `dxcompiler.dll`, 1.8.2502 or later, beside your app's
+   * executable or in another directory of the DLL search path, which doesn't
+   * take the library's own directory. Without it, the library renders on
+   * another backend.
+   */
+  MLN_RENDER_BACKEND_D3D12 = 5u,
 } mln_render_backend;
 
 /** The handle that names no object. */
