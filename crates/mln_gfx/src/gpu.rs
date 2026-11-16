@@ -62,7 +62,7 @@ pub enum GpuError {
 /// The clip-space depth range of a backend's API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipDepth {
-    /// Clip z over w from 0 to 1: Metal, Vulkan and WebGPU.
+    /// Clip z over w from 0 to 1: Metal, Vulkan, D3D12 and WebGPU.
     ZeroToOne,
     /// Clip z over w from -1 to 1: OpenGL.
     NegativeOneToOne,

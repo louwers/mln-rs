@@ -330,8 +330,10 @@ impl ApplicationHandler<UserEvent> for Host {
             None,
         );
         let launch = Launch {
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(all(not(target_os = "macos"), not(windows)))]
             window: Arc::clone(&window),
+            #[cfg(windows)]
+            window: Arc::new(crate::win32_window::SurfaceWindow::new(Arc::clone(&window))),
             ui,
             args,
             settings,

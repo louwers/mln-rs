@@ -53,6 +53,9 @@ pub const MLN_RENDER_BACKEND_METAL: mln_render_backend = 1;
 pub const MLN_RENDER_BACKEND_VULKAN: mln_render_backend = 2;
 pub const MLN_RENDER_BACKEND_OPEN_GL: mln_render_backend = 3;
 pub const MLN_RENDER_BACKEND_WEB_GPU: mln_render_backend = 4;
+/** D3D12, on Windows. It compiles its shaders at run time with DXC, which
+ your app ships: `dxcompiler.dll`, 1.8.2502 or later, beside the library.
+ Without it, the library renders on another backend.*/
 pub const MLN_RENDER_BACKEND_D3D12: mln_render_backend = 5;
 /// A render backend.
 pub type mln_render_backend = u32;

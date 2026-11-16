@@ -12,6 +12,11 @@ and diff images, and HTML reports that show the failed and errored tests, to
 `cargo run -p mln-rs-render-test -- --help` lists the runner's options, such as
 `--filter`, `--jobs` and `--tileWorkerCodec`.
 
+The tests render on WebGPU, or on the backend that `MLN_RENDER_BACKEND` names:
+`vulkan`, `d3d12` (Windows; DXC's `dxcompiler.dll` on the DLL search path),
+`gl`, `gl-desktop`, or `metal` (macOS). Each backend takes the expectations and
+ignores of its manifest in `manifests/`.
+
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core.

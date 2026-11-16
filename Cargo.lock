@@ -2586,6 +2586,7 @@ dependencies = [
  "egui-winit",
  "egui_extras",
  "egui_glow",
+ "mln-rs-d3d12",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",

@@ -8,8 +8,9 @@ license.workspace = true
 repository.workspace = true
 include.workspace = true
 # The desktop example app: the map in a winit window, on the WebGPU backend
-# (or Metal on macOS, Vulkan elsewhere than on Apple's platforms, or OpenGL ES
-# on Linux), with egui's controls over it; never released.
+# (or Metal on macOS, Vulkan elsewhere than on Apple's platforms, D3D12 on
+# Windows, or OpenGL ES on Linux), with egui's controls over it; never
+# released.
 publish = false
 autotests = false
 
@@ -56,6 +57,11 @@ raw-window-metal.workspace = true
 ash.workspace = true
 mln_gfx.workspace = true
 mln_vulkan.workspace = true
+
+# The D3D12 backend and the controls drawn on D3D12 (d3d12_overlay.rs). The
+# build puts DXC's DLL beside the app (build.rs).
+[target.'cfg(windows)'.dependencies]
+mln_d3d12.workspace = true
 
 # The OpenGL ES backend, which presents to the window through EGL, and the
 # controls drawn in its context (gl_overlay.rs).
