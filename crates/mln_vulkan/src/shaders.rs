@@ -1,8 +1,12 @@
 //! The Vulkan shaders: `mln_glsl`'s GLSL, which naga writes as SPIR-V when a
 //! program is first used.
 
+use std::sync::Arc;
+
 use mln_glsl::{Module, ResourceUse, Stage};
+use mln_util::hash::HashMap;
 use naga::back::spv;
+use parking_lot::Mutex;
 
 /// Compiles Vulkan GLSL, whose clip space is y-down, to SPIR-V 1.0, with the
 /// entry point `main`.
@@ -18,11 +22,21 @@ pub(crate) struct Compiled {
 }
 
 /// Compiles a `ShaderSource::compose`d stage, whose clip space is y-up, and
-/// finds the resources it uses.
-pub(crate) fn compile_program(stage: Stage, source: &str) -> Result<Compiled, String> {
+/// finds the resources it uses, once a process: SPIR-V doesn't depend on
+/// the device, and every renderer compiles the same stages.
+pub(crate) fn compile_program(stage: Stage, source: &str) -> Result<Arc<Compiled>, String> {
+    /// A stage's source, and whether the stage is the vertex stage.
+    type Key = (bool, String);
+    static COMPILED: Mutex<Option<HashMap<Key, Arc<Compiled>>>> = Mutex::new(None);
+    let key = (stage == Stage::Vertex, source.to_owned());
+    if let Some(compiled) = COMPILED.lock().get_or_insert_default().get(&key) {
+        return Ok(Arc::clone(compiled));
+    }
     let module = Module::parse(stage, source)?;
     let spirv = write(stage, &module, spv::WriterFlags::ADJUST_COORDINATE_SPACE)?;
-    Ok(Compiled { spirv, resources: module.resources()? })
+    let compiled = Arc::new(Compiled { spirv, resources: module.resources()? });
+    COMPILED.lock().get_or_insert_default().insert(key, Arc::clone(&compiled));
+    Ok(compiled)
 }
 
 fn write(stage: Stage, module: &Module, flags: spv::WriterFlags) -> Result<Vec<u32>, String> {
