@@ -204,8 +204,9 @@ proptest = { version = "1.12.0" }
 # The windows of window targets (mln_gfx::Window), as winit and others hand them out.
 raw-window-handle = { version = "0.6.2" }
 regex = { version = "1.13.1" }
-# tools/render-test's JSON (with serde_json), and the types that cross to a
-# tile worker in another wasm instance (rc: the values behind their `Arc`s).
+# tools/render-test's JSON (with serde_json), mln_sprite's sprite index, and
+# the types that cross to a tile worker in another wasm instance (rc: the
+# values behind their `Arc`s).
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 # The same engine as the C++ core's vendored SQLite, built from source like it
 # where the platform has none (crates/mln_storage).

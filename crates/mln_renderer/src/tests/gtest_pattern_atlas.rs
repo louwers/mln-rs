@@ -53,7 +53,7 @@ fn basic() {
 
     let images = mln_sprite::parse_sprite(
         "default",
-        &read_file("test/fixtures/annotations/emerald.png"),
+        &decode_image(&read_file("test/fixtures/annotations/emerald.png")).unwrap(),
         &read_file("test/fixtures/annotations/emerald.json"),
     )
     .expect("parseSprite");

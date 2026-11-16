@@ -8,13 +8,17 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_image::decode_image;
+use mln_actor::scheduler::Respond;
+use mln_image::decoder;
+use mln_storage::Data;
 use mln_style_types::image::{Image, ImageContent, ImageStretches, Impl, TextFit};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::string::to_string_double;
+use serde::Deserialize;
+use serde::de::Deserializer;
 use serde_json::Value as JSValue;
 
 /// Extracts an individual image from a spritesheet at the given location.
@@ -95,189 +99,205 @@ pub(crate) fn create_style_image(
     }
 }
 
-/// The member `property` of `value`, if `value` is an object that has it.
-fn member<'a>(value: &'a JSValue, property: &str) -> Option<&'a JSValue> {
-    value.as_object().and_then(|object| object.get(property))
+/// A member of a sprite entry: absent, of the type it should be, or of
+/// another type, which the entry warns about and treats as absent.
+///
+/// It deserializes from a `serde_json::Value` member, which a type error
+/// leaves as it was, so the error can stand for the member.
+#[derive(Default)]
+enum Lenient<T> {
+    #[default]
+    Absent,
+    Valid(T),
+    Invalid,
 }
 
-fn get_u_int16(value: &JSValue, property: &str, name: &str, def: u16) -> u16 {
-    if let Some(v) = member(value, property) {
-        // rapidjson `IsUint() && GetUint() <= 65535`.
-        match v.as_u64() {
-            Some(u) if u16::try_from(u).is_ok() => return u as u16,
-            _ => Log::warning(
-                Event::Sprite,
-                format!("Invalid sprite image '{name}': value of '{property}' must be an integer between 0 and 65535"),
-            ),
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Lenient<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(T::deserialize(deserializer).map_or(Lenient::Invalid, Lenient::Valid))
+    }
+}
+
+/// An image of a sprite index. serde's conversions check what the members
+/// hold: a `u16` takes an integer from 0 to 65535, an `f64` any number, and a
+/// pair or a quad exactly that many numbers.
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct SpriteEntry {
+    x: Lenient<u16>,
+    y: Lenient<u16>,
+    width: Lenient<u16>,
+    height: Lenient<u16>,
+    pixel_ratio: Lenient<f64>,
+    sdf: Lenient<bool>,
+    stretch_x: Lenient<Vec<Lenient<(f64, f64)>>>,
+    stretch_y: Lenient<Vec<Lenient<(f64, f64)>>>,
+    content: Lenient<[f64; 4]>,
+    text_fit_width: Lenient<String>,
+    text_fit_height: Lenient<String>,
+}
+
+/// What a sprite entry describes, with the defaults for what it lacks or
+/// gets wrong.
+struct Metrics {
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    pixel_ratio: f64,
+    sdf: bool,
+    stretch_x: ImageStretches,
+    stretch_y: ImageStretches,
+    content: Option<ImageContent>,
+    text_fit_width: Option<TextFit>,
+    text_fit_height: Option<TextFit>,
+}
+
+fn warn(name: &str, message: std::fmt::Arguments<'_>) {
+    Log::warning(Event::Sprite, format!("Invalid sprite image '{name}': {message}"));
+}
+
+/// The value of a member, or `default` with the warning `invalid` gives
+/// when it has another type.
+fn value_or<T>(member: Lenient<T>, default: T, invalid: impl FnOnce()) -> T {
+    match member {
+        Lenient::Absent => default,
+        Lenient::Valid(value) => value,
+        Lenient::Invalid => {
+            invalid();
+            default
         }
     }
-
-    def
 }
 
-fn get_double(value: &JSValue, property: &str, name: &str, def: f64) -> f64 {
-    if let Some(v) = member(value, property) {
-        match v.as_f64() {
-            Some(d) => return d,
-            None => Log::warning(
-                Event::Sprite,
-                format!("Invalid sprite image '{name}': value of '{property}' must be a number"),
-            ),
-        }
-    }
-
-    def
+fn integer(member: Lenient<u16>, name: &str, property: &str) -> u16 {
+    value_or(member, 0, || warn(name, format_args!("value of '{property}' must be an integer between 0 and 65535")))
 }
 
-fn get_boolean(value: &JSValue, property: &str, name: &str, def: bool) -> bool {
-    if let Some(v) = member(value, property) {
-        match v.as_bool() {
-            Some(b) => return b,
-            None => Log::warning(
-                Event::Sprite,
-                format!("Invalid sprite image '{name}': value of '{property}' must be a boolean"),
-            ),
-        }
-    }
-
-    def
+fn number(member: Lenient<f64>, name: &str, property: &str, default: f64) -> f64 {
+    value_or(member, default, || warn(name, format_args!("value of '{property}' must be a number")))
 }
 
-fn get_stretches(value: &JSValue, property: &str, name: &str) -> ImageStretches {
-    let mut stretches = ImageStretches::new();
+fn boolean(member: Lenient<bool>, name: &str, property: &str) -> bool {
+    value_or(member, false, || warn(name, format_args!("value of '{property}' must be a boolean")))
+}
 
-    if let Some(v) = member(value, property) {
-        if let Some(array) = v.as_array() {
-            for stretch in array {
-                match stretch.as_array() {
-                    Some(pair) if pair.len() == 2 && pair[0].is_number() && pair[1].is_number() => {
-                        // GetFloat() is static_cast<float>(GetDouble()).
-                        stretches
-                            .push((pair[0].as_f64().unwrap_or(0.0) as f32, pair[1].as_f64().unwrap_or(0.0) as f32));
-                    }
-                    _ => Log::warning(
-                        Event::Sprite,
-                        format!(
-                            "Invalid sprite image '{name}': members of '{property}' must be an array of two numbers"
-                        ),
-                    ),
-                }
+fn stretches(member: Lenient<Vec<Lenient<(f64, f64)>>>, name: &str, property: &str) -> ImageStretches {
+    let pairs = value_or(member, Vec::new(), || warn(name, format_args!("value of '{property}' must be an array")));
+    pairs
+        .into_iter()
+        .filter_map(|pair| match pair {
+            Lenient::Valid((start, end)) => Some((start as f32, end as f32)),
+            Lenient::Absent | Lenient::Invalid => {
+                warn(name, format_args!("members of '{property}' must be an array of two numbers"));
+                None
             }
-        } else {
-            Log::warning(
-                Event::Sprite,
-                format!("Invalid sprite image '{name}': value of '{property}' must be an array"),
-            );
-        }
-    }
-
-    stretches
+        })
+        .collect()
 }
 
-fn get_content(value: &JSValue, property: &str, name: &str) -> Option<ImageContent> {
-    if let Some(content) = member(value, property) {
-        match content.as_array() {
-            Some(c) if c.len() == 4 && c.iter().all(JSValue::is_number) => {
-                let f = |i: usize| c[i].as_f64().unwrap_or(0.0) as f32;
-                return Some(ImageContent { left: f(0), top: f(1), right: f(2), bottom: f(3) });
-            }
-            _ => Log::warning(
-                Event::Sprite,
-                format!("Invalid sprite image '{name}': value of '{property}' must be an array of four numbers"),
-            ),
-        }
-    }
-
-    None
+fn content(member: Lenient<[f64; 4]>, name: &str, property: &str) -> Option<ImageContent> {
+    let content = value_or(member.map(Some), None, || {
+        warn(name, format_args!("value of '{property}' must be an array of four numbers"));
+    })?;
+    let [left, top, right, bottom] = content.map(|value| value as f32);
+    Some(ImageContent { left, top, right, bottom })
 }
 
-fn parse_text_fit(value: &str) -> Option<TextFit> {
-    match value {
+fn text_fit(member: Lenient<String>, name: &str, property: &str) -> Option<TextFit> {
+    let value =
+        value_or(member.map(Some), None, || warn(name, format_args!("value of '{property}' must be a string")))?;
+    let text_fit = match value.as_str() {
         "stretchOrShrink" => Some(TextFit::StretchOrShrink),
         "stretchOnly" => Some(TextFit::StretchOnly),
         "proportional" => Some(TextFit::Proportional),
         _ => None,
+    };
+    if text_fit.is_none() {
+        warn(name, format_args!("value of '{property}' is an invalid value '{value}'"));
     }
+    text_fit
 }
 
-fn get_text_fit(value: &JSValue, property: &str, name: &str) -> Option<TextFit> {
-    if let Some(v) = member(value, property) {
-        if let Some(value_string) = v.as_str() {
-            let text_fit = parse_text_fit(value_string);
-            if text_fit.is_none() {
-                Log::warning(
-                    Event::Sprite,
-                    format!(
-                        "Invalid sprite image '{name}': value of '{property}' is an invalid value '{value_string}'"
-                    ),
-                );
-            }
-            return text_fit;
+impl<T> Lenient<T> {
+    fn map<U>(self, f: impl FnOnce(T) -> U) -> Lenient<U> {
+        match self {
+            Lenient::Absent => Lenient::Absent,
+            Lenient::Valid(value) => Lenient::Valid(f(value)),
+            Lenient::Invalid => Lenient::Invalid,
         }
-        Log::warning(Event::Sprite, format!("Invalid sprite image '{name}': value of '{property}' must be a string"));
     }
-
-    None
 }
 
-/// Parses an image and an associated JSON file and returns the sprite
-/// objects. Fails where C++ throws `std::runtime_error` or the image
-/// decoder's exception.
-pub fn parse_sprite(id: &str, encoded_image: &[u8], json: &[u8]) -> Result<Vec<Arc<Impl>>, Error> {
-    let raster = decode_image(encoded_image)?;
-    parse_sprite_images(id, &raster, json)
+impl SpriteEntry {
+    /// The entry's metrics, warning about each member of the wrong type, in
+    /// the order of the fields.
+    fn metrics(self, name: &str) -> Metrics {
+        Metrics {
+            x: integer(self.x, name, "x"),
+            y: integer(self.y, name, "y"),
+            width: integer(self.width, name, "width"),
+            height: integer(self.height, name, "height"),
+            pixel_ratio: number(self.pixel_ratio, name, "pixelRatio", 1.0),
+            sdf: boolean(self.sdf, name, "sdf"),
+            stretch_x: stretches(self.stretch_x, name, "stretchX"),
+            stretch_y: stretches(self.stretch_y, name, "stretchY"),
+            content: content(self.content, name, "content"),
+            text_fit_width: text_fit(self.text_fit_width, name, "textFitWidth"),
+            text_fit_height: text_fit(self.text_fit_height, name, "textFitHeight"),
+        }
+    }
 }
 
-/// Port-only: `parseSprite` after its `decodeImage`, for an image decoded
-/// elsewhere (the `SpriteLoader` decodes through `mln_image`'s
-/// `decoder`, which may answer later).
-pub(crate) fn parse_sprite_images(id: &str, raster: &PremultipliedImage, json: &[u8]) -> Result<Vec<Arc<Impl>>, Error> {
+/// Decodes `image` and cuts it into the images that `json`, a sprite index,
+/// lists, as [`parse_sprite`] does. Answers through `respond`, at once or,
+/// where the platform decodes images asynchronously (the browser), later.
+#[expect(clippy::needless_pass_by_value, reason = "a job owns its inputs, as one sent to another thread does")]
+pub fn load_sprite(id: String, image: Data, json: Data, respond: Respond<Result<Vec<Arc<Impl>>, Error>>) {
+    decoder::decode(&image, move |raster| respond(raster.and_then(|raster| parse_sprite(&id, &raster, &json))));
+}
+
+/// Cuts `image`, a decoded sprite sheet, into the images that `json`, a
+/// sprite index, lists. An image named `name` is `name` in the sprite
+/// `default` and `id:name` in another. Fails when `json` isn't JSON or isn't
+/// an object. An entry that isn't an object is skipped, a member of the
+/// wrong type is logged and treated as absent, and an image whose metrics
+/// don't fit the sheet is logged and skipped.
+pub fn parse_sprite(id: &str, image: &PremultipliedImage, json: &[u8]) -> Result<Vec<Arc<Impl>>, Error> {
     // `doc.Parse<0>(json.c_str())`: the string ends at the first NUL.
     let json = match json.iter().position(|&b| b == 0) {
         Some(nul) => &json[..nul],
         None => json,
     };
     let doc: JSValue = serde_json::from_slice(json).map_err(|e| Error::native(format!("Failed to parse JSON: {e}")))?;
-
-    let Some(properties) = doc.as_object() else {
+    let JSValue::Object(entries) = doc else {
         return Err(Error::native("Sprite JSON root must be an object"));
     };
 
-    let mut images = Vec::with_capacity(properties.len());
-    for (name, value) in properties {
+    let mut images = Vec::with_capacity(entries.len());
+    for (name, value) in &entries {
+        let Some(members) = value.as_object() else { continue };
+        // An object always deserializes: each member is `Lenient`.
+        let Ok(entry) = SpriteEntry::deserialize(members) else { continue };
+        let metrics = entry.metrics(name);
         let complete_name = if id == "default" { name.clone() } else { format!("{id}:{name}") };
-
-        if value.is_object() {
-            let x = get_u_int16(value, "x", name, 0);
-            let y = get_u_int16(value, "y", name, 0);
-            let width = get_u_int16(value, "width", name, 0);
-            let height = get_u_int16(value, "height", name, 0);
-            let pixel_ratio = get_double(value, "pixelRatio", name, 1.0);
-            let sdf = get_boolean(value, "sdf", name, false);
-            let stretch_x = get_stretches(value, "stretchX", name);
-            let stretch_y = get_stretches(value, "stretchY", name);
-            let content = get_content(value, "content", name);
-            let text_fit_width = get_text_fit(value, "textFitWidth", name);
-            let text_fit_height = get_text_fit(value, "textFitHeight", name);
-
-            let image = create_style_image(
-                &complete_name,
-                raster,
-                i32::from(x),
-                i32::from(y),
-                i32::from(width),
-                i32::from(height),
-                pixel_ratio,
-                sdf,
-                stretch_x,
-                stretch_y,
-                content,
-                text_fit_width,
-                text_fit_height,
-            );
-            if let Some(image) = image {
-                images.push(image.base_impl);
-            }
+        let image = create_style_image(
+            &complete_name,
+            image,
+            i32::from(metrics.x),
+            i32::from(metrics.y),
+            i32::from(metrics.width),
+            i32::from(metrics.height),
+            metrics.pixel_ratio,
+            metrics.sdf,
+            metrics.stretch_x,
+            metrics.stretch_y,
+            metrics.content,
+            metrics.text_fit_width,
+            metrics.text_fit_height,
+        );
+        if let Some(image) = image {
+            images.push(image.base_impl);
         }
     }
 

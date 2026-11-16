@@ -3001,6 +3001,7 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
  "parking_lot",
+ "serde",
  "serde_json",
 ]
 

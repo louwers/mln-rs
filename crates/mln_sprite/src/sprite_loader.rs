@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use mln_actor::scheduler::Respond;
 use mln_actor::{SchedulerPtr, TaggedScheduler};
-use mln_image::decoder;
 use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
@@ -18,7 +17,7 @@ use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
 use crate::sprite_loader_observer::{NullSpriteLoaderObserver, SpriteLoaderObserver};
-use crate::sprite_parser::parse_sprite_images;
+use crate::sprite_parser::load_sprite;
 
 #[derive(Default)]
 struct SpriteData {
@@ -101,21 +100,25 @@ impl Inner {
             }
         };
 
-        let parse_sprite_copy = sprite.clone();
+        let id = sprite.id.clone();
         let factory: Weak<Inner> = Rc::downgrade(self);
-        // `parseSprite`, whose image decodes through the `decoder`, which
-        // may answer after the closure returns (the browser's).
+        // The image decodes through the `decoder`, which may answer after
+        // the closure returns (the browser's).
         self.thread_pool.schedule_and_reply_later(
             &self.queue,
             /* parseClosure */
             move |respond: Respond<ParseResult>| {
-                decoder::decode(&image, move |raster| {
-                    let parsed = raster.and_then(|raster| parse_sprite_images(&parse_sprite_copy.id, &raster, &json));
-                    respond(match parsed {
-                        Ok(images) => ParseResult { images, error: None },
-                        Err(error) => ParseResult { images: Vec::new(), error: Some(error) },
-                    });
-                });
+                load_sprite(
+                    id,
+                    image,
+                    json,
+                    Box::new(move |parsed| {
+                        respond(match parsed {
+                            Ok(images) => ParseResult { images, error: None },
+                            Err(error) => ParseResult { images: Vec::new(), error: Some(error) },
+                        });
+                    }),
+                );
             },
             /* resultClosure */
             move |result: ParseResult| {

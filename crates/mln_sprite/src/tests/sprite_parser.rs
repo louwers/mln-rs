@@ -168,7 +168,7 @@ fn sprite_image_creation_1_5x() {
 // gtest: Sprite.SpriteParsing
 #[test]
 fn sprite_parsing() {
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
     let json_1x = read_file("test/fixtures/annotations/emerald.json");
 
     let images = parse_sprite("default", &image_1x, &json_1x).unwrap();
@@ -265,7 +265,7 @@ fn sprite_parsing() {
 // gtest: Sprite.SpriteParsingInvalidJSON
 #[test]
 fn sprite_parsing_invalid_json() {
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
     let json_1x = br#"{ "image": " }"#;
 
     let err = parse_sprite("default", &image_1x, json_1x).expect_err("Expected exception");
@@ -295,7 +295,7 @@ fn interstate(extra: &str) -> Vec<u8> {
 fn sprite_parsing_invalid_stretches() {
     let log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
 
     parse_sprite("default", &image_1x, &interstate(r#""stretchX": {}"#)).unwrap();
     assert_eq!(1, sprite_warning(&log, "Invalid sprite image 'interstate_1': value of 'stretchX' must be an array"));
@@ -327,7 +327,7 @@ fn sprite_parsing_invalid_stretches() {
 fn sprite_parsing_invalid_content() {
     let log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
 
     parse_sprite("default", &image_1x, &interstate(r#""content": []"#)).unwrap();
     assert_eq!(
@@ -355,7 +355,7 @@ fn sprite_parsing_invalid_content() {
 fn sprite_parsing_stretch_and_content() {
     let _log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
 
     let images = parse_sprite(
         "default",
@@ -386,7 +386,7 @@ fn sprite_parsing_stretch_and_content() {
 fn sprite_parsing_empty_image() {
     let log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
     let images = parse_sprite("default", &image_1x, br#"{ "image": {} }"#).unwrap();
     assert_eq!(0, images.len());
 
@@ -398,7 +398,7 @@ fn sprite_parsing_empty_image() {
 fn sprite_parsing_simple_width_height() {
     let _log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
     let images = parse_sprite("default", &image_1x, br#"{ "image": { "width": 32, "height": 32 } }"#).unwrap();
     assert_eq!(1, images.len());
 }
@@ -408,7 +408,7 @@ fn sprite_parsing_simple_width_height() {
 fn sprite_parsing_width_too_big() {
     let log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
     let images = parse_sprite("default", &image_1x, br#"{ "image": { "width": 65536, "height": 32 } }"#).unwrap();
     assert_eq!(0, images.len());
 
@@ -424,7 +424,7 @@ fn sprite_parsing_width_too_big() {
 fn sprite_parsing_negative_width() {
     let log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
     let images = parse_sprite("default", &image_1x, br#"{ "image": { "width": -1, "height": 32 } }"#).unwrap();
     assert_eq!(0, images.len());
 
@@ -440,7 +440,7 @@ fn sprite_parsing_negative_width() {
 fn sprite_parsing_null_ratio() {
     let log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
     let images =
         parse_sprite("default", &image_1x, br#"{ "image": { "width": 32, "height": 32, "pixelRatio": 0 } }"#).unwrap();
     assert_eq!(0, images.len());
@@ -469,7 +469,7 @@ fn text_fit_json(extra: &str) -> Vec<u8> {
 fn sprite_parsing_text_fit() {
     let _log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
     let images = parse_sprite(
         "default",
         &image_1x,
@@ -487,7 +487,7 @@ fn sprite_parsing_text_fit() {
 fn sprite_parsing_null_text_fit() {
     let _log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
     let images = parse_sprite("default", &image_1x, &text_fit_json(r#""textFitHeight": "stretchOnly""#)).unwrap();
     assert_eq!(1, images.len());
     assert_eq!("image", images[0].id);
@@ -500,7 +500,7 @@ fn sprite_parsing_null_text_fit() {
 fn sprite_parsing_invalid_text_fit() {
     let log = FixtureLog::new();
 
-    let image_1x = read_file("test/fixtures/annotations/emerald.png");
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
 
     parse_sprite("default", &image_1x, &text_fit_json(r#""textFitWidth": "invalid", "textFitHeight": "stretchOnly""#))
         .unwrap();
@@ -511,4 +511,102 @@ fn sprite_parsing_invalid_text_fit() {
 
     parse_sprite("default", &image_1x, &text_fit_json(r#""textFitHeight": 0"#)).unwrap();
     assert_eq!(1, sprite_warning(&log, "Invalid sprite image 'image': value of 'textFitHeight' must be a string"));
+}
+
+#[test]
+fn sprite_parsing_warns_about_members_of_the_wrong_kind() {
+    let log = FixtureLog::new();
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
+
+    let cases = [
+        (r#""width": 32.5"#, "value of 'width' must be an integer between 0 and 65535"),
+        (r#""x": "1""#, "value of 'x' must be an integer between 0 and 65535"),
+        (r#""y": 1e3"#, "value of 'y' must be an integer between 0 and 65535"),
+        (r#""height": 18446744073709551616"#, "value of 'height' must be an integer between 0 and 65535"),
+        (r#""pixelRatio": "2""#, "value of 'pixelRatio' must be a number"),
+        (r#""pixelRatio": null"#, "value of 'pixelRatio' must be a number"),
+        (r#""sdf": 1"#, "value of 'sdf' must be a boolean"),
+        (r#""stretchY": [[1, 2, 3]]"#, "members of 'stretchY' must be an array of two numbers"),
+        (r#""stretchY": "[[1, 2]]""#, "value of 'stretchY' must be an array"),
+        (r#""content": [1, 2, 3, 4, 5]"#, "value of 'content' must be an array of four numbers"),
+        (r#""content": {"left": 1}"#, "value of 'content' must be an array of four numbers"),
+        (r#""textFitWidth": null"#, "value of 'textFitWidth' must be a string"),
+    ];
+    for (member, message) in cases {
+        parse_sprite("default", &image_1x, &interstate(member)).unwrap();
+        let message = format!("Invalid sprite image 'interstate_1': {message}");
+        assert_eq!(1, sprite_warning(&log, &message), "{member}");
+        // A width or height of the wrong kind is 0, which the metrics reject.
+        let rejected = if member.contains("width") {
+            Some("0x42@100,44")
+        } else if member.contains("height") {
+            Some("40x0@100,44")
+        } else {
+            None
+        };
+        if let Some(metrics) = rejected {
+            let error = format!("Can't create image with invalid metrics: {metrics} in 200x299@1x sprite");
+            assert_eq!(1, sprite_error(&log, &error), "{member}");
+        }
+        assert_eq!(0, log.unchecked_count(), "{member}");
+    }
+}
+
+#[test]
+fn sprite_parsing_keeps_the_valid_members_of_a_lenient_entry() {
+    let log = FixtureLog::new();
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
+
+    let json = interstate(r#""sdf": "yes", "stretchX": [[2, 4], [6], [8.5, 10]], "content": [1, 2, 3, 4.25]"#);
+    let images = parse_sprite("default", &image_1x, &json).unwrap();
+    assert_eq!(1, images.len());
+    let image = &images[0];
+    assert!(!image.sdf);
+    assert_eq!(vec![(2.0f32, 4.0f32), (8.5f32, 10.0f32)], image.stretch_x);
+    assert_eq!(Some(ImageContent { left: 1.0, top: 2.0, right: 3.0, bottom: 4.25 }), image.content);
+    assert_eq!(1, sprite_warning(&log, "Invalid sprite image 'interstate_1': value of 'sdf' must be a boolean"));
+    assert_eq!(
+        1,
+        sprite_warning(
+            &log,
+            "Invalid sprite image 'interstate_1': members of 'stretchX' must be an array of two numbers"
+        )
+    );
+    assert_eq!(0, log.unchecked_count());
+}
+
+#[test]
+fn sprite_parsing_skips_entries_that_arent_objects() {
+    let log = FixtureLog::new();
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
+
+    let json = br#"{ "a": 1, "b": [], "c": null, "image": { "width": 16, "height": 16 } }"#;
+    let images = parse_sprite("default", &image_1x, json).unwrap();
+    assert_eq!(["image"], images.iter().map(|image| image.id.as_str()).collect::<Vec<_>>().as_slice());
+    assert_eq!(0, log.unchecked_count());
+}
+
+#[test]
+fn sprite_parsing_names_the_images_of_another_sprite_by_its_id() {
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
+    let images = parse_sprite("extra", &image_1x, br#"{ "image": { "width": 16, "height": 16 } }"#).unwrap();
+    assert_eq!("extra:image", images[0].id);
+}
+
+#[test]
+fn sprite_parsing_fails_when_the_root_isnt_an_object() {
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
+    for json in [&b"[]"[..], b"null", b"1"] {
+        let err = parse_sprite("default", &image_1x, json).expect_err("a root that isn't an object");
+        assert_eq!("Sprite JSON root must be an object", err.message, "{}", String::from_utf8_lossy(json));
+    }
+}
+
+#[test]
+fn sprite_parsing_takes_the_last_of_duplicate_entries() {
+    let image_1x = read_image("test/fixtures/annotations/emerald.png");
+    let json = br#"{ "image": { "width": 16, "height": 16 }, "image": { "width": 8, "height": 8 } }"#;
+    let images = parse_sprite("default", &image_1x, json).unwrap();
+    assert_eq!(1, images.len());
+    assert_eq!(8, images[0].image.size.width);
 }

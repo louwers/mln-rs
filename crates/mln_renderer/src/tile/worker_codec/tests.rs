@@ -116,7 +116,7 @@ fn answer(dependencies: &Dependencies) -> Resolved {
     }
     let sprite = mln_sprite::sprite_parser::parse_sprite(
         "default",
-        &fixture("test/fixtures/annotations/emerald.png"),
+        &mln_image::decode_image(&fixture("test/fixtures/annotations/emerald.png")).unwrap(),
         &fixture("test/fixtures/annotations/emerald.json"),
     )
     .unwrap();
