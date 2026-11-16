@@ -7,16 +7,14 @@ use std::sync::Arc;
 
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
-use mln_style::source_type::SourceData;
-use mln_style::sources::ImageSourceType;
 use mln_util::constants;
 use mln_util::error::Error;
 
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::TransformParameters;
+use crate::registry::Registry;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderItem;
-use crate::sources::render_tile_source::RenderTileSource;
 use crate::tile::job::SourceKey;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
@@ -150,12 +148,13 @@ pub(crate) trait RenderSource {
     }
 }
 
-/// Creates the render source of a style source, whose tiles, if it has
-/// any, `store` keeps.
-pub(crate) fn create(impl_: &Source, store: &mut TileStore) -> Box<dyn RenderSource> {
-    if SourceData::<ImageSourceType>::recover(impl_).is_some() {
-        Box::new(crate::sources::render_image_source::RenderImageSource::new(impl_.clone()))
-    } else {
-        Box::new(RenderTileSource::new(impl_.clone(), store))
-    }
+/// Creates the render source of a style source through its type in
+/// `registry`, whose tiles, if it has any, `store` keeps. `None` for a type
+/// that the registry lacks, which breaks the contract that a map and its
+/// renderer register the same types.
+pub(crate) fn create(registry: &Registry, source: &Source, store: &mut TileStore) -> Option<Box<dyn RenderSource>> {
+    let name = source.info().name;
+    let render_source = registry.source_type(name).map(|source_type| source_type.create_render_source(source, store));
+    debug_assert!(render_source.is_some(), "the renderer's registry has no source type '{name}'");
+    render_source
 }

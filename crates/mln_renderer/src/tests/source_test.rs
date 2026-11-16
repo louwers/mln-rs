@@ -35,7 +35,7 @@ use parking_lot::Mutex;
 
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
-use crate::render_source::{self as render_source, RenderSource};
+use crate::render_source::RenderSource;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile_parameters::TileParameters;
@@ -249,7 +249,7 @@ fn run_tile_case(
     source.load_description(&*file_source, &test.run_loop);
 
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
     let fs: Arc<dyn FileSource> = file_source;
     render_source.update(
         &mut store,
@@ -412,7 +412,7 @@ fn tile_out_of_view_keeps_loading() {
     let source = Tiled::Vector.source(None, tiles_tileset());
     source.load_description(&*file_source, &test.run_loop);
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
     let fs: Arc<dyn FileSource> = file_source;
     // Requests made so far, after an update with the camera at `bearing`.
     let mut turn = |test: &mut SourceTest, bearing: f64, needs_relayout: bool| {
@@ -452,7 +452,7 @@ fn tile_requests_follow_the_view() {
     let source = Tiled::Vector.source(None, tiles_tileset());
     source.load_description(&*file_source, &test.run_loop);
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
     let fs: Arc<dyn FileSource> = file_source;
     // The tiles requested so far and where their requests stand now, after
     // an update with the camera at `center`.
@@ -604,7 +604,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
     source.load_description(&*file_source, &test.run_loop);
 
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     render_source.update(
         &mut store,
@@ -649,7 +649,7 @@ fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (CustomGeom
         Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
-    let mut render_source = render_source::create(&source.base_impl(), store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), store);
     render_source.update(store, source.base_impl(), &layers, true, true, &test.tile_parameters(MapMode::Continuous));
     (source, render_source)
 }
@@ -725,7 +725,7 @@ fn custom_vector_source_set_tile_data() {
         Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
 
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
     render_source.update(
         &mut store,
         source.base_impl(),
@@ -749,7 +749,7 @@ fn empty_tileset() {
     let source = TileSource::vector("source", None, PartialTileset::default());
     source.load_description(&*file_source, &test.run_loop);
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
 
     let layers = Tiled::Vector.layers();
     let fs: Arc<dyn FileSource> = file_source;
@@ -782,7 +782,7 @@ fn empty_raster_tilesets_make_no_tiles() {
         let source = kind.source(None, PartialTileset::default());
         source.load_description(&*file_source, &test.run_loop);
         let mut store = test.store();
-        let mut render_source = render_source::create(&source.base_impl(), &mut store);
+        let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
 
         let fs: Arc<dyn FileSource> = file_source;
         let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs));
@@ -810,7 +810,7 @@ fn geojson_source_tiles_after_data_reset() {
         create_geojson_data(geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
     source.set_geojson_data(Some(Arc::clone(&geojson_data)));
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
 
     let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
@@ -858,7 +858,7 @@ impl SynchronousUpdateSource {
             Arc::new(GeoJSONOptions { cluster: true, synchronous_update, ..Default::default() });
         let source = GeoJSONSource::new("source", Arc::clone(&options));
         let mut store = test.store();
-        let render_source = render_source::create(&source.base_impl(), &mut store);
+        let render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
         SynchronousUpdateSource { options, source, store, render_source, layers: circle_layers() }
     }
 
@@ -938,7 +938,7 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
         create_geojson_data(geojson, Arc::<HeldScheduler>::clone(&slicer), &GeoJSONOptions::default_options()).unwrap(),
     ));
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
     let layers = circle_layers();
     let update = |render_source: &mut Box<dyn RenderSource>, store: &mut TileStore| {
         let mut parameters = test.tile_parameters(MapMode::Continuous);
@@ -1052,7 +1052,7 @@ fn set_max_parent_overscale_factor() {
     let base_impl = source.base_impl();
 
     let mut store = test.store();
-    let mut render_source = render_source::create(&base_impl, &mut store);
+    let mut render_source = crate::tests::create_render_source(&base_impl, &mut store);
     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
     render_source.update(&mut store, base_impl.clone(), &layers, true, true, &parameters);
@@ -1094,7 +1094,7 @@ fn raster_dem_tile_rounds_covering_zoom() {
     source.load_description(&*file_source, &test.run_loop);
 
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     render_source.update(
         &mut store,
@@ -1163,7 +1163,7 @@ impl TurningSource {
             &test.thread_pool,
             Box::new(crate::tile::tile_workers::InlineWorkers),
         );
-        let render_source = render_source::create(&source.base_impl(), &mut store);
+        let render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
         TurningSource {
             test,
             file_source,
@@ -1405,7 +1405,7 @@ fn raster_dem_borders_across_a_world_wrap() {
     let source = Tiled::RasterDEM.source(None, tiles_tileset());
     source.load_description(&*file_source, &test.run_loop);
     let mut store = test.store();
-    let mut render_source = render_source::create(&source.base_impl(), &mut store);
+    let mut render_source = crate::tests::create_render_source(&source.base_impl(), &mut store);
     let fs: Arc<dyn FileSource> = file_source;
     let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
     let mut relayout = true;

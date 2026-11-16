@@ -330,3 +330,12 @@ pub(crate) fn render_layer(
     let layer_type = registry.layer_type(style.info().name).expect("a built-in layer type");
     layer_type.create_render_layer(style).expect("a layer of its type")
 }
+
+/// The render source of `source`, through the built-in registry.
+pub(crate) fn create_render_source(
+    source: &mln_style::Source,
+    store: &mut crate::tile::store::TileStore,
+) -> Box<dyn crate::render_source::RenderSource> {
+    crate::render_source::create(&crate::registry::Registry::with_builtins(), source, store)
+        .expect("a built-in source type")
+}

@@ -33,7 +33,7 @@ use mln_util::tileset::PartialTileset;
 
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
-use crate::render_source::{self as render_source, RenderSource};
+use crate::render_source::RenderSource;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{SourceInfo, TileStore};
 use crate::tile_parameters::TileParameters;
@@ -207,8 +207,8 @@ impl Scene {
 
         let mut store = crate::tests::pool_store(&run_loop, &thread_pool);
         Scene {
-            vector_render_source: render_source::create(&vector.base_impl(), &mut store),
-            raster_render_source: render_source::create(&raster.base_impl(), &mut store),
+            vector_render_source: crate::tests::create_render_source(&vector.base_impl(), &mut store),
+            raster_render_source: crate::tests::create_render_source(&raster.base_impl(), &mut store),
             store,
             run_loop,
             thread_pool,

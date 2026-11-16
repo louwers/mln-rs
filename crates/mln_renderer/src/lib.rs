@@ -43,6 +43,7 @@ mod renderer;
 mod renderer_event;
 mod sky_pass;
 pub mod source_state;
+mod source_type;
 mod sources;
 pub mod text;
 pub mod tile;

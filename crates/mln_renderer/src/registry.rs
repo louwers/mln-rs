@@ -14,7 +14,7 @@ use mln_style::layer_type::ErasedStyleLayerType;
 use mln_style::layers::{
     Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
 };
-use mln_style::source_type::{ErasedStyleSourceType, StyleSourceType, style_source_entry};
+use mln_style::source_type::ErasedStyleSourceType;
 use mln_style::sources::{
     CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
     RasterSourceType, VectorSourceType,
@@ -22,13 +22,14 @@ use mln_style::sources::{
 use mln_vec_map::VecMap;
 
 use crate::layer_type::{ErasedLayerType, LayerType, entry};
+use crate::source_type::{self, ErasedSourceType, SourceType};
 
 /// What a [`Registry`] is built from.
 #[derive(Default)]
 pub struct RegistryBuilder {
     functions: Functions,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
-    source_types: VecMap<&'static str, &'static dyn ErasedStyleSourceType>,
+    source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
 }
 
 impl std::fmt::Debug for RegistryBuilder {
@@ -62,23 +63,27 @@ impl RegistryBuilder {
     }
 
     /// Adds the source type `T`. Fails for a name that an earlier type took.
-    pub(crate) fn add_source_type<T: StyleSourceType>(&mut self) -> Result<(), RegisterError> {
+    pub(crate) fn add_source_type<T: SourceType>(&mut self) -> Result<(), RegisterError> {
         let name = T::INFO.name;
         if self.source_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
-        self.source_types.insert(name, style_source_entry::<T>());
+        self.source_types.insert(name, source_type::entry::<T>());
         Ok(())
     }
 
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        Registry::new(Arc::new(self.functions), self.layer_types, &self.source_types)
+        Registry::new(Arc::new(self.functions), self.layer_types, self.source_types)
     }
 }
 
 fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedStyleLayerType {
     layer_type
+}
+
+fn style_source_half(source_type: &'static dyn ErasedSourceType) -> &'static dyn ErasedStyleSourceType {
+    source_type
 }
 
 /// Adds the style specification's expression functions, layer types and
@@ -128,6 +133,7 @@ fn register_builtin_source_types(builder: &mut RegistryBuilder) -> Result<(), Re
 pub struct Registry {
     style: Arc<StyleRegistry>,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
+    source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
 }
 
 impl std::fmt::Debug for Registry {
@@ -148,7 +154,7 @@ impl Registry {
             // Into no types, the built-ins register.
             let registered = register_builtin_types(&mut builder);
             debug_assert_eq!(registered, Ok(()));
-            Registry::new(Functions::with_builtins(), builder.layer_types, &builder.source_types)
+            Registry::new(Functions::with_builtins(), builder.layer_types, builder.source_types)
         });
         Arc::clone(&BUILTINS)
     }
@@ -156,11 +162,12 @@ impl Registry {
     fn new(
         functions: Arc<Functions>,
         layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
-        source_types: &VecMap<&'static str, &'static dyn ErasedStyleSourceType>,
+        source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
-        let style = StyleRegistry::new(functions, style_halves, source_types.values().copied());
-        Arc::new(Registry { style: Arc::new(style), layer_types })
+        let style_source_halves = source_types.values().map(|&source_type| style_source_half(source_type));
+        let style = StyleRegistry::new(functions, style_halves, style_source_halves);
+        Arc::new(Registry { style: Arc::new(style), layer_types, source_types })
     }
 
     #[must_use]
@@ -175,6 +182,10 @@ impl Registry {
 
     pub(crate) fn layer_type(&self, name: &str) -> Option<&'static dyn ErasedLayerType> {
         self.layer_types.get(name).copied()
+    }
+
+    pub(crate) fn source_type(&self, name: &str) -> Option<&'static dyn ErasedSourceType> {
+        self.source_types.get(name).copied()
     }
 }
 

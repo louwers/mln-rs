@@ -24,10 +24,10 @@ use mln_util::tileset::PartialTileset;
 use proptest::prelude::*;
 use serde_json::json;
 
+use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tile::store::StoreEvent;
 use crate::tile_parameters::TileParameters;
-use crate::{Registry, render_source};
 
 /// What the render source reported for the tile.
 #[derive(Debug, PartialEq)]
@@ -82,7 +82,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
         ImageImpl::new("v".to_owned(), icon, 1.0, false, Vec::new(), Vec::new(), None, None, None).unwrap(),
     ));
     store.images_mut().set_loaded(true);
-    let mut render_source = render_source::create(&base_impl, &mut store);
+    let mut render_source = crate::tests::create_render_source(&base_impl, &mut store);
     let file_source: Arc<dyn FileSource> = file_source;
     render_source.update(
         &mut store,

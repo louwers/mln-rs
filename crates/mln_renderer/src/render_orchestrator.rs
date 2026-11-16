@@ -661,7 +661,9 @@ impl RenderOrchestrator {
                 // `emplace` keeps an existing entry.
                 continue;
             }
-            let mut render_source = render_source::create(impl_, &mut self.tile_store);
+            let Some(mut render_source) = render_source::create(&self.registry, impl_, &mut self.tile_store) else {
+                continue;
+            };
             render_source.set_fast_pfor_enabled(update_parameters.fast_pfor_enabled);
             self.render_sources.insert(id.clone(), render_source);
         }
