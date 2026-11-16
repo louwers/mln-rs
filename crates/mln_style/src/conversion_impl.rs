@@ -154,6 +154,7 @@ enum_value_factory!(
     mln_style_types::SymbolPlacementType,
     mln_style_types::SymbolZOrderType,
     mln_style_types::TextJustifyType,
+    mln_style_types::TextRotationAlignmentType,
     mln_style_types::TextTransformType,
     mln_style_types::TextWritingModeType,
     mln_style_types::TranslateAnchorType,

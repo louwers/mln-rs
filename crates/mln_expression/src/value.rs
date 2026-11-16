@@ -6,8 +6,8 @@ use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconOverlapType,
     IconTextFitType, LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType,
     ResamplingType, RotateAnchorType, Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
-    TextJustifyType, TextTransformType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection,
-    VisibilityType,
+    TextJustifyType, TextRotationAlignmentType, TextTransformType, TextWritingModeType, TranslateAnchorType,
+    VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::string::to_string_double;
 use mln_util::{Color, Padding};
@@ -663,6 +663,7 @@ enum_value_converter!(
     SymbolPlacementType,
     SymbolZOrderType,
     TextJustifyType,
+    TextRotationAlignmentType,
     TextTransformType,
     TextWritingModeType,
     TranslateAnchorType,

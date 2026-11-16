@@ -20,7 +20,8 @@ use mln_style::property_value::PropertyValue;
 use mln_style_types::image::{ImagePositions, ImageType};
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
-    TextJustifyType, TextTransformType, TextVariableAnchorType, TextWritingModeType, VariableAnchorOffsetCollection,
+    TextJustifyType, TextRotationAlignmentType, TextTransformType, TextVariableAnchorType, TextWritingModeType,
+    VariableAnchorOffsetCollection,
 };
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping, WritingModeType};
 use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
@@ -196,17 +197,23 @@ fn create_layout(
         });
     }
 
-    if *layout.text_rotation_alignment.uniform() == AlignmentType::Auto {
+    if *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Auto {
         layout.text_rotation_alignment = Evaluated::Constant(if *placement.uniform() == SymbolPlacementType::Point {
-            AlignmentType::Viewport
+            TextRotationAlignmentType::Viewport
         } else {
-            AlignmentType::Map
+            TextRotationAlignmentType::Map
         });
     }
 
-    // If unspecified `*-pitch-alignment` inherits `*-rotation-alignment`
+    // If unspecified `*-pitch-alignment` inherits `*-rotation-alignment`, and
+    // `viewport-glyph` pitches with the viewport.
     if *layout.text_pitch_alignment.uniform() == AlignmentType::Auto {
-        layout.text_pitch_alignment = layout.text_rotation_alignment.clone();
+        layout.text_pitch_alignment =
+            Evaluated::Constant(if *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Map {
+                AlignmentType::Map
+            } else {
+                AlignmentType::Viewport
+            });
     }
     if *layout.icon_pitch_alignment.uniform() == AlignmentType::Auto {
         layout.icon_pitch_alignment = layout.icon_rotation_alignment.clone();
@@ -562,7 +569,8 @@ impl SymbolLayout {
                     add_sub_string(&mut sub_string, sub_string_type, true, &mut formatted_text);
                 }
 
-                let can_verticalize_text = *layout.text_rotation_alignment.uniform() == AlignmentType::Map
+                let can_verticalize_text = *layout.text_rotation_alignment.uniform()
+                    != TextRotationAlignmentType::Viewport
                     && *layout.symbol_placement.uniform() != SymbolPlacementType::Point
                     && formatted_text.allows_vertical_writing_mode();
                 let allows_vertical = formatted_text.allows_vertical_writing_mode();
@@ -796,10 +804,10 @@ impl SymbolLayout {
             0.0
         };
 
-        let text_placement = if *layout.text_rotation_alignment.uniform() == AlignmentType::Map {
-            *layout.symbol_placement.uniform()
-        } else {
+        let text_placement = if *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Viewport {
             SymbolPlacementType::Point
+        } else {
+            *layout.symbol_placement.uniform()
         };
 
         let text_repeat_distance = symbol_spacing / 2.0;
@@ -1520,7 +1528,8 @@ impl Layout for SymbolLayout {
         let zoom = self.zoom;
         let canonical = self.canonical_id;
         let is_point_placement = *layout.symbol_placement.uniform() == SymbolPlacementType::Point;
-        let text_along_line = *layout.text_rotation_alignment.uniform() == AlignmentType::Map && !is_point_placement;
+        let text_along_line =
+            *layout.text_rotation_alignment.uniform() != TextRotationAlignmentType::Viewport && !is_point_placement;
 
         let mut features = std::mem::take(&mut self.features);
         for (feature_index, feature) in features.iter_mut().enumerate() {

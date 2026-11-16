@@ -134,6 +134,19 @@ pub enum AlignmentType {
     Auto,
 }
 
+/// `text-rotation-alignment`: [`AlignmentType`] plus `viewport-glyph`, which
+/// places line labels' glyphs along the line but keeps each one level with
+/// the viewport.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
+#[repr(u8)]
+pub enum TextRotationAlignmentType {
+    #[default]
+    Map,
+    Viewport,
+    ViewportGlyph,
+    Auto,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 #[repr(u8)]
 pub enum TextJustifyType {
@@ -351,6 +364,13 @@ style_spec_names!(AlignmentType {
     Auto => "auto",
 });
 
+style_spec_names!(TextRotationAlignmentType {
+    Map => "map",
+    Viewport => "viewport",
+    ViewportGlyph => "viewport-glyph",
+    Auto => "auto",
+});
+
 style_spec_names!(IconTextFitType {
     None => "none",
     Both => "both",
@@ -411,6 +431,7 @@ uninterpolated_enums!(
     SymbolPlacementType,
     SymbolZOrderType,
     AlignmentType,
+    TextRotationAlignmentType,
     TextJustifyType,
     SymbolAnchorType,
     TextTransformType,

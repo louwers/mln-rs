@@ -127,9 +127,11 @@ fn evaluated_type_of(q: &TypeQuery<'_>) -> EvaluatedType {
     if name.ends_with("-translate-anchor") {
         return EvaluatedType::Enum("TranslateAnchorType".into());
     }
-    if ["-rotation-alignment", "-pitch-alignment", "-illumination-alignment"]
-        .iter()
-        .any(|suffix| name.ends_with(suffix))
+    // `text-rotation-alignment` has its own enum, for `viewport-glyph`.
+    if name != "text-rotation-alignment"
+        && ["-rotation-alignment", "-pitch-alignment", "-illumination-alignment"]
+            .iter()
+            .any(|suffix| name.ends_with(suffix))
     {
         return EvaluatedType::Enum("AlignmentType".into());
     }

@@ -208,3 +208,20 @@ fn image_array_not_an_expression() {
     assert!(convert_layer(&Convertible::from(&parse_json(src)), &mut error).is_none());
     assert_eq!(error.message, "value must be a string");
 }
+
+// `viewport-glyph` is a value of `text-rotation-alignment` only.
+#[test]
+fn viewport_glyph_only_for_text_rotation_alignment() {
+    for (property, parses) in [
+        ("text-rotation-alignment", true),
+        ("text-pitch-alignment", false),
+        ("icon-rotation-alignment", false),
+        ("icon-pitch-alignment", false),
+    ] {
+        let src = format!(
+            r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{"{property}": "viewport-glyph"}}}}"#
+        );
+        let mut error = Error::default();
+        assert_eq!(convert_layer(&Convertible::from(&parse_json(&src)), &mut error).is_some(), parses, "{property}");
+    }
+}

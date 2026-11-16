@@ -48,14 +48,14 @@ crate::properties!(
         text_pitch_alignment: constant AlignmentType = AlignmentType::Auto,
         text_radial_offset: data_driven f32 = 0.0_f32,
         text_rotate: data_driven f32 = 0.0_f32,
-        text_rotation_alignment: constant AlignmentType = AlignmentType::Auto,
+        text_rotation_alignment: constant TextRotationAlignmentType = TextRotationAlignmentType::Auto,
         text_size: data_driven f32 = 16.0_f32,
         text_transform: data_driven TextTransformType = TextTransformType::None,
         text_variable_anchor: constant Vec<TextVariableAnchorType> = Vec::new(),
         text_variable_anchor_offset: data_driven VariableAnchorOffsetCollection = VariableAnchorOffsetCollection::default(),
         text_writing_mode: constant Vec<TextWritingModeType> = Vec::new(),
     }
-    use crate::expression::Formatted, crate::expression::Image, mln_style_types::AlignmentType, mln_style_types::IconOverlapType, mln_style_types::IconTextFitType, mln_style_types::SymbolAnchorType, mln_style_types::SymbolPlacementType, mln_style_types::SymbolZOrderType, mln_style_types::TextJustifyType, mln_style_types::TextOverlapType, mln_style_types::TextTransformType, mln_style_types::TextVariableAnchorType, mln_style_types::TextWritingModeType, mln_style_types::VariableAnchorOffsetCollection, mln_util::Padding;
+    use crate::expression::Formatted, crate::expression::Image, mln_style_types::AlignmentType, mln_style_types::IconOverlapType, mln_style_types::IconTextFitType, mln_style_types::SymbolAnchorType, mln_style_types::SymbolPlacementType, mln_style_types::SymbolZOrderType, mln_style_types::TextJustifyType, mln_style_types::TextOverlapType, mln_style_types::TextRotationAlignmentType, mln_style_types::TextTransformType, mln_style_types::TextVariableAnchorType, mln_style_types::TextWritingModeType, mln_style_types::VariableAnchorOffsetCollection, mln_util::Padding;
 );
 
 crate::properties!(

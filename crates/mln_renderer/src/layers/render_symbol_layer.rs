@@ -33,7 +33,9 @@ use mln_style::layers::symbol_layer_properties::{
     SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties,
 };
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
-use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType, TranslateAnchorType};
+use mln_style_types::{
+    AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
+};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
@@ -87,7 +89,10 @@ pub(crate) enum SymbolType {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SymbolPropertyValues {
     pub(crate) pitch_alignment: AlignmentType,
+    /// `Map` when the symbols rotate with the map, otherwise `Viewport`.
     pub(crate) rotation_alignment: AlignmentType,
+    /// Whether the symbols' glyphs or icons are placed along their lines.
+    pub(crate) along_line: bool,
     pub(crate) translate: [f32; 2],
     pub(crate) translate_anchor: TranslateAnchorType,
 }
@@ -99,7 +104,7 @@ pub(crate) struct SymbolDrawableData {
     pub(crate) symbol_type: SymbolType,
     pub(crate) pitch_alignment: AlignmentType,
     pub(crate) rotation_alignment: AlignmentType,
-    pub(crate) placement: SymbolPlacementType,
+    pub(crate) along_line: bool,
     pub(crate) text_fit: IconTextFitType,
     pub(crate) is_offset: bool,
     /// The bucket segment the drawable draws (`sortFeaturesByKey`), or all
@@ -132,9 +137,12 @@ pub(crate) fn icon_property_values(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
 ) -> SymbolPropertyValues {
+    let rotation_alignment = *layout.icon_rotation_alignment.uniform();
     SymbolPropertyValues {
         pitch_alignment: *layout.icon_pitch_alignment.uniform(),
-        rotation_alignment: *layout.icon_rotation_alignment.uniform(),
+        rotation_alignment,
+        along_line: rotation_alignment == AlignmentType::Map
+            && *layout.symbol_placement.uniform() != SymbolPlacementType::Point,
         translate: *evaluated.icon_translate.uniform(),
         translate_anchor: *evaluated.icon_translate_anchor.uniform(),
     }
@@ -145,9 +153,16 @@ pub(crate) fn text_property_values(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
 ) -> SymbolPropertyValues {
+    let rotation_alignment = *layout.text_rotation_alignment.uniform();
     SymbolPropertyValues {
         pitch_alignment: *layout.text_pitch_alignment.uniform(),
-        rotation_alignment: *layout.text_rotation_alignment.uniform(),
+        rotation_alignment: if rotation_alignment == TextRotationAlignmentType::Map {
+            AlignmentType::Map
+        } else {
+            AlignmentType::Viewport
+        },
+        along_line: rotation_alignment != TextRotationAlignmentType::Viewport
+            && *layout.symbol_placement.uniform() != SymbolPlacementType::Point,
         translate: *evaluated.text_translate.uniform(),
         translate_anchor: *evaluated.text_translate_anchor.uniform(),
     }
@@ -232,7 +247,6 @@ fn capture_rendered_features(
     let aspect_ratio = f64::from(state.get_size().aspect_ratio());
 
     let bucket_layout = &*bucket.layout;
-    let placement = &bucket_layout.symbol_placement;
     let text_fit = &bucket_layout.icon_text_fit;
 
     let get_tile_matrix = |translation: &[f32; 2], anchor: TranslateAnchorType| {
@@ -283,8 +297,7 @@ fn capture_rendered_features(
         };
         let pitch_with_map = values.pitch_alignment == AlignmentType::Map;
         let rotate_with_map = values.rotation_alignment == AlignmentType::Map;
-        let along_line =
-            *placement.uniform() != SymbolPlacementType::Point && values.rotation_alignment == AlignmentType::Map;
+        let along_line = values.along_line;
         let has_variable_placement =
             bucket_state.has_variable_placement && (is_text || *text_fit.uniform() != IconTextFitType::None);
 
@@ -1667,7 +1680,7 @@ impl RenderLayer for RenderSymbolLayer {
                         symbol_type: group.type_,
                         pitch_alignment: values.pitch_alignment,
                         rotation_alignment: values.rotation_alignment,
-                        placement: *bucket_layout.symbol_placement.uniform(),
+                        along_line: values.along_line,
                         text_fit: *bucket_layout.icon_text_fit.uniform(),
                         is_offset,
                         segment: group.segment,

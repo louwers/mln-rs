@@ -61,9 +61,6 @@ pub(crate) struct LayerSpec {
 pub(crate) fn load(text: &str) -> Result<Value, String> {
     let mut spec: Value = serde_json::from_str(text).map_err(|e| format!("v8.json: {e}"))?;
 
-    // https://github.com/maplibre/maplibre-native/issues/250
-    remove(&mut spec, &["layout_symbol", "text-rotation-alignment", "values"], "viewport-glyph")?;
-
     // Without terrain, the ground and sea level are the same height.
     remove(&mut spec, &["layout_symbol"], "symbol-height-anchor")?;
 

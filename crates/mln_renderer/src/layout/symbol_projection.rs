@@ -579,6 +579,7 @@ fn place_glyphs_along_line(
     font_size: f32,
     flip: bool,
     keep_upright: bool,
+    rotate_to_line: bool,
     label_plane: &LabelPlaneProjector<'_>,
     projections: &mut LineProjectionCache,
     dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,
@@ -699,12 +700,16 @@ fn place_glyphs_along_line(
         dynamic_vertex_array.reserve(4 * placed_glyphs.len());
     }
     for placed_glyph in &placed_glyphs {
-        add_dynamic_attributes(placed_glyph.point, placed_glyph.angle, dynamic_vertex_array);
+        let angle = if rotate_to_line { placed_glyph.angle } else { 0.0 };
+        add_dynamic_attributes(placed_glyph.point, angle, dynamic_vertex_array);
     }
 
     PlacementResult::Ok
 }
 
+/// Places each glyph of the line labels along its line, for the current
+/// camera. Glyphs that rotate with the map turn to follow the line; others
+/// (`text-rotation-alignment: viewport-glyph`) stay level with the viewport.
 #[expect(
     clippy::too_many_arguments,
     reason = "the tile's symbols, projector and size binder, the alignment flags and the vertices it writes"
@@ -778,6 +783,7 @@ pub(crate) fn reproject_line_labels(
             pitch_scaled_font_size,
             false, /*unflipped*/
             keep_upright,
+            rotate_with_map,
             &label_plane,
             &mut projections,
             dynamic_vertex_array,
@@ -795,6 +801,7 @@ pub(crate) fn reproject_line_labels(
                     pitch_scaled_font_size,
                     true, /*flipped*/
                     keep_upright,
+                    rotate_with_map,
                     &label_plane,
                     &mut projections,
                     dynamic_vertex_array,

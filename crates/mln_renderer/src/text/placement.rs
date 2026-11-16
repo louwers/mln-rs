@@ -33,7 +33,7 @@ use mln_style::TransitionOptions;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
-    TextWritingModeType,
+    TextRotationAlignmentType, TextWritingModeType,
 };
 use mln_text::glyph::WritingModeType;
 use mln_text::{AnchorAlignment, get_anchor_justification};
@@ -346,7 +346,7 @@ impl PlacementContext {
         let pixel_ratio = (TILE_SIZE_D * f64::from(overscaled_id.overscale_factor()) / f64::from(EXTENT)) as f32;
 
         let layout = &*bucket.layout;
-        let rotate_text_with_map = *layout.text_rotation_alignment.uniform() == AlignmentType::Map;
+        let rotate_text_with_map = *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Map;
         let pitch_text_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
         let rotate_icon_with_map = *layout.icon_rotation_alignment.uniform() == AlignmentType::Map;
         let pitch_icon_with_map = *layout.icon_pitch_alignment.uniform() == AlignmentType::Map;
@@ -1694,7 +1694,8 @@ impl Placement {
                 }
             }
 
-            if has_text && *layout.text_rotation_alignment.uniform() == AlignmentType::Map {
+            let text_rotation_alignment = *layout.text_rotation_alignment.uniform();
+            if has_text && text_rotation_alignment != TextRotationAlignmentType::Viewport {
                 let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
                 let keep_upright = &layout.text_keep_upright;
                 let (positions, placed_symbols) = bs.text.positions_and_symbols(layer_id);
@@ -1703,7 +1704,7 @@ impl Placement {
                     placed_symbols,
                     &tile_projector,
                     pitch_with_map,
-                    true, /*rotateWithMap*/
+                    text_rotation_alignment == TextRotationAlignmentType::Map,
                     *keep_upright.uniform(),
                     tile,
                     &bucket.text_size_binder,
@@ -1717,7 +1718,7 @@ impl Placement {
 
             let partially_evaluated_size = bucket.text_size_binder.evaluate_for_zoom(state.get_zoom() as f32);
             let tile_scale = 2f64.powf(state.get_zoom() - f64::from(tile.get_overscaled_tile_id().overscaled_z)) as f32;
-            let rotate_with_map = *layout.text_rotation_alignment.uniform() == AlignmentType::Map;
+            let rotate_with_map = *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Map;
             let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
             let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.get_zoom() as f32);
             // The shader leaves the translation to us for variable anchors,
@@ -1937,7 +1938,7 @@ impl Placement {
 
         let text_always_overlap = OverlapMode::text(layout) == OverlapMode::Always;
         let icon_always_overlap = OverlapMode::icon(layout) == OverlapMode::Always;
-        let rotate_with_map = *layout.text_rotation_alignment.uniform() == AlignmentType::Map;
+        let rotate_with_map = *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Map;
         let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
         let has_icon_text_fit = *layout.icon_text_fit.uniform() != IconTextFitType::None;
         let screen_space = &layout.symbol_screen_space;

@@ -9,7 +9,7 @@ use mln_map_types::{Projection, ProjectionData};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::SymbolLayoutProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayerProperties;
-use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType};
+use mln_style_types::{AlignmentType, IconTextFitType};
 use mln_util::mat4::{Mat4, matrix};
 
 use super::render_symbol_layer::{SymbolType, get_screen_matrix};
@@ -184,8 +184,7 @@ impl LayerTweaker for SymbolLayerTweaker {
             let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, current_zoom);
             let pitch_with_map = symbol_data.pitch_alignment == AlignmentType::Map;
             let rotate_with_map = symbol_data.rotation_alignment == AlignmentType::Map;
-            let along_line = symbol_data.placement != SymbolPlacementType::Point
-                && symbol_data.rotation_alignment == AlignmentType::Map;
+            let along_line = symbol_data.along_line;
             let has_variable_placement =
                 symbol_data.bucket_variable_placement && (is_text || symbol_data.text_fit != IconTextFitType::None);
             let label_plane_matrix = if along_line || has_variable_placement {

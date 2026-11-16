@@ -2,7 +2,7 @@ use glam::Vec2;
 use mln_math::{deg2radf, fmaxf, fminf};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::image::{ImagePosition, ImagePositions, ImageStretches, RectU16};
-use mln_style_types::{AlignmentType, SymbolPlacementType};
+use mln_style_types::{SymbolPlacementType, TextRotationAlignmentType};
 use mln_text::PositionedIcon;
 use mln_text::glyph::{Shaping, WritingModeType};
 use mln_util::constants::ONE_EM;
@@ -287,7 +287,8 @@ pub(crate) fn get_glyph_quads(
     allow_vertical_placement: bool,
 ) -> SymbolQuads {
     let text_rotate = deg2radf(layout.text_rotate);
-    let along_line = layout.text_rotation_alignment == AlignmentType::Map && placement != SymbolPlacementType::Point;
+    let along_line = layout.text_rotation_alignment != TextRotationAlignmentType::Viewport
+        && placement != SymbolPlacementType::Point;
 
     let mut quads = SymbolQuads::new();
 
