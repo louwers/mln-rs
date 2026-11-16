@@ -8,7 +8,8 @@
 The D3D12 backend: mln-rs's GPU interface on D3D12 through the `windows` crate,
 its shaders and offscreen frames. Its shaders are mln-rs-glsl's GLSL, which naga
 writes as HLSL and DXC compiles at run time, so apps that use it ship DXC's
-`dxcompiler.dll` and `dxil.dll`. It is empty except on Windows.
+`dxcompiler.dll`, 1.8.2502 or later, which signs what it compiles; an older one
+needs `dxil.dll` beside it. It is empty except on Windows.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
