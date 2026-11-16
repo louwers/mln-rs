@@ -104,7 +104,9 @@ fn sessions_of_two_maps_share(device: Device, what: &str) {
 
 #[test]
 fn sessions_of_two_maps_share_each_backends_device() {
-    for backend in [BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU, BackendType::Metal] {
+    for backend in
+        [BackendType::Vulkan, BackendType::D3D12, BackendType::OpenGL, BackendType::WebGPU, BackendType::Metal]
+    {
         let Some(device) = device_of(backend) else { continue };
         sessions_of_two_maps_share(device, &format!("{backend:?}"));
     }
@@ -840,6 +842,349 @@ mod vulkan {
         wait(session.detach());
         // SAFETY: nothing uses the surface since the detach.
         unsafe { ash::khr::surface::Instance::new(&entry, &instance).destroy_surface(surface, None) };
+    }
+}
+
+// Rings of the host's D3D12 textures, which the host reads on the device's
+// queue: after the session's shared fence, or in the queue's order.
+#[cfg(all(feature = "d3d12", windows))]
+mod d3d12_ring {
+    use windows::Win32::Foundation::{CloseHandle, GENERIC_ALL, HANDLE};
+    use windows::Win32::Graphics::Direct3D12::{
+        D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_FENCE_FLAG_SHARED, D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES,
+        D3D12_HEAP_TYPE_DEFAULT, D3D12_HEAP_TYPE_READBACK, D3D12_PLACED_SUBRESOURCE_FOOTPRINT, D3D12_RESOURCE_DESC,
+        D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
+        D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_FLAGS,
+        D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        D3D12_SUBRESOURCE_FOOTPRINT, D3D12_TEXTURE_COPY_LOCATION, D3D12_TEXTURE_COPY_LOCATION_0,
+        D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+        D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_TEXTURE_LAYOUT_UNKNOWN, ID3D12CommandAllocator, ID3D12CommandQueue,
+        ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
+    };
+    use windows::Win32::Graphics::Dxgi::Common::{
+        DXGI_FORMAT, DXGI_FORMAT_D32_FLOAT_S8X24_UINT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN,
+        DXGI_SAMPLE_DESC,
+    };
+    use windows::core::{Interface as _, PCWSTR};
+
+    use super::*;
+
+    /// The bytes of a row of a texture's copy: 64 pixels of 4 bytes, which
+    /// D3D12's 256-byte row pitch takes as it is.
+    const ROW_PITCH: u32 = SIZE.width * 4;
+
+    /// The host's D3D12 objects, on the session's device.
+    struct Host {
+        device: ID3D12Device,
+        queue: ID3D12CommandQueue,
+        allocator: ID3D12CommandAllocator,
+        list: ID3D12GraphicsCommandList,
+        readback: ID3D12Resource,
+        /// The fence that the host's reads signal, and its value.
+        reads: ID3D12Fence,
+        reads_value: u64,
+    }
+
+    impl Host {
+        fn new() -> Option<(Device, Host)> {
+            let device = device_of(BackendType::D3D12)?;
+            let Device::D3d12(d3d12) = &device else { unreachable!() };
+            let (d3d, queue) = (d3d12.device().clone(), d3d12.queue().clone());
+            // SAFETY: plain calls of the session's live device.
+            let host = unsafe {
+                let allocator: ID3D12CommandAllocator =
+                    d3d.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT).unwrap();
+                let list: ID3D12GraphicsCommandList =
+                    d3d.CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, &allocator, None).unwrap();
+                list.Close().unwrap();
+                let readback = resource(
+                    &d3d,
+                    D3D12_HEAP_TYPE_READBACK,
+                    &D3D12_RESOURCE_DESC {
+                        Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
+                        Width: u64::from(ROW_PITCH * SIZE.height),
+                        Height: 1,
+                        DepthOrArraySize: 1,
+                        MipLevels: 1,
+                        Format: DXGI_FORMAT_UNKNOWN,
+                        SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                        Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+                        Flags: D3D12_RESOURCE_FLAG_NONE,
+                        Alignment: 0,
+                    },
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                );
+                let reads: ID3D12Fence = d3d.CreateFence(0, D3D12_FENCE_FLAG_SHARED).unwrap();
+                Host { device: d3d, queue, allocator, list, readback, reads, reads_value: 0 }
+            };
+            Some((device, host))
+        }
+
+        /// A texture of the ring's size, of `format` and `flags`, made in the
+        /// common state or `DEPTH_WRITE` for a depth texture.
+        fn texture(&self, format: DXGI_FORMAT, flags: D3D12_RESOURCE_FLAGS) -> ID3D12Resource {
+            let state = if flags == D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL {
+                D3D12_RESOURCE_STATE_DEPTH_WRITE
+            } else {
+                D3D12_RESOURCE_STATE_COMMON
+            };
+            resource(
+                &self.device,
+                D3D12_HEAP_TYPE_DEFAULT,
+                &D3D12_RESOURCE_DESC {
+                    Dimension: D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+                    Width: u64::from(SIZE.width),
+                    Height: SIZE.height,
+                    DepthOrArraySize: 1,
+                    MipLevels: 1,
+                    Format: format,
+                    SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                    Layout: D3D12_TEXTURE_LAYOUT_UNKNOWN,
+                    Flags: flags,
+                    Alignment: 0,
+                },
+                state,
+            )
+        }
+
+        fn color(&self) -> ID3D12Resource {
+            self.texture(DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET)
+        }
+
+        fn ring(textures: &[ID3D12Resource], depth_textures: &[ID3D12Resource]) -> BorrowedRing {
+            BorrowedRing::d3d12(mln_d3d12::BorrowedTextures {
+                textures: textures.to_vec(),
+                size: SIZE,
+                state: D3D12_RESOURCE_STATE_COMMON,
+                depth_textures: depth_textures.to_vec(),
+                depth_state: D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            })
+        }
+
+        /// Reads `texture`'s center pixel on the device's queue, after the
+        /// queue waits for `wait` if any, and signals the host's reads
+        /// fence. Returns the pixel and the fence's value.
+        fn read(&mut self, texture: &ID3D12Resource, wait: Option<(&ID3D12Fence, u64)>) -> ([u8; 4], u64) {
+            self.reads_value += 1;
+            let dst = D3D12_TEXTURE_COPY_LOCATION {
+                // SAFETY: copies of the pointers without references, which
+                // the locations' ManuallyDrop never releases.
+                pResource: unsafe { std::mem::transmute_copy(&self.readback) },
+                Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+                Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
+                    PlacedFootprint: D3D12_PLACED_SUBRESOURCE_FOOTPRINT {
+                        Offset: 0,
+                        Footprint: D3D12_SUBRESOURCE_FOOTPRINT {
+                            Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                            Width: SIZE.width,
+                            Height: SIZE.height,
+                            Depth: 1,
+                            RowPitch: ROW_PITCH,
+                        },
+                    },
+                },
+            };
+            let src = D3D12_TEXTURE_COPY_LOCATION {
+                // SAFETY: as above.
+                pResource: unsafe { std::mem::transmute_copy(texture) },
+                Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+                Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 { SubresourceIndex: 0 },
+            };
+            // SAFETY: the host's live objects; the texture rests in the
+            // common state, which a copy promotes from and decays back to,
+            // and the CPU waits for the copy before it reads the buffer.
+            unsafe {
+                self.allocator.Reset().unwrap();
+                self.list.Reset(&self.allocator, None).unwrap();
+                self.list.CopyTextureRegion(&raw const dst, 0, 0, 0, &raw const src, None);
+                self.list.Close().unwrap();
+                if let Some((fence, value)) = wait {
+                    self.queue.Wait(fence, value).unwrap();
+                }
+                self.queue.ExecuteCommandLists(&[Some(self.list.cast().unwrap())]);
+                self.queue.Signal(&self.reads, self.reads_value).unwrap();
+                self.reads.SetEventOnCompletion(self.reads_value, HANDLE::default()).unwrap();
+                let mut data = std::ptr::null_mut();
+                self.readback.Map(0, None, Some(&raw mut data)).unwrap();
+                let offset = ((SIZE.height / 2) * ROW_PITCH + SIZE.width / 2 * 4) as usize;
+                let mut pixel = [0; 4];
+                std::ptr::copy_nonoverlapping(data.cast::<u8>().add(offset), pixel.as_mut_ptr(), 4);
+                self.readback.Unmap(0, None);
+                (pixel, self.reads_value)
+            }
+        }
+
+        /// The NT handle of the host's reads fence, which the caller closes.
+        fn share_reads(&self) -> HANDLE {
+            // SAFETY: a plain call of the live device.
+            unsafe { self.device.CreateSharedHandle(&self.reads, None, GENERIC_ALL.0, PCWSTR::null()) }.unwrap()
+        }
+
+        /// The fence whose NT handle the session's frame names.
+        fn open(&self, handle: u64) -> ID3D12Fence {
+            let mut fence: Option<ID3D12Fence> = None;
+            // SAFETY: the session's live handle, which the call doesn't take.
+            unsafe { self.device.OpenSharedHandle(HANDLE(handle as usize as *mut _), &raw mut fence) }.unwrap();
+            fence.unwrap()
+        }
+    }
+
+    /// A committed resource of `desc` in a heap of `heap`, made in `state`.
+    fn resource(
+        device: &ID3D12Device,
+        heap: windows::Win32::Graphics::Direct3D12::D3D12_HEAP_TYPE,
+        desc: &D3D12_RESOURCE_DESC,
+        state: windows::Win32::Graphics::Direct3D12::D3D12_RESOURCE_STATES,
+    ) -> ID3D12Resource {
+        let heap = D3D12_HEAP_PROPERTIES { Type: heap, ..Default::default() };
+        let mut resource: Option<ID3D12Resource> = None;
+        // SAFETY: the descriptions outlive the call, which fills `resource`.
+        unsafe {
+            device
+                .CreateCommittedResource(&raw const heap, D3D12_HEAP_FLAG_NONE, desc, state, None, &raw mut resource)
+                .unwrap();
+        }
+        resource.unwrap()
+    }
+
+    // Each frame hands over with the session's shared fence, which the host
+    // waits for on the device's queue before it reads the texture, and comes
+    // back with the host's, which the next frame into the texture waits for.
+    #[test]
+    fn a_d3d12_ring_hands_frames_over_with_fences() {
+        let Some((device, mut host)) = Host::new() else { return };
+        let textures = [host.color(), host.color()];
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&textures, &[]), device };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::D3d12Fence]));
+        let capabilities = session.capabilities().unwrap();
+        assert_eq!(Some(SyncKind::D3d12Fence), capabilities.producer_sync_kind);
+        assert!(capabilities.consumer_sync_kinds.contains(SyncKind::D3d12Fence));
+        let reads_handle = host.share_reads();
+        let mut last_value = 0;
+        for _ in 0..4 {
+            assert_eq!(FrameDisposition::Rendered, render(&session));
+            let frame = session.acquire_frame().unwrap().expect("a frame");
+            let sync = frame.producer_sync();
+            assert_eq!(SyncKind::D3d12Fence, sync.kind);
+            assert!(sync.value > last_value, "the session's fence counts up");
+            last_value = sync.value;
+            let Some(mln_runtime::FrameTextureKind::D3d12 { resource, .. }) =
+                frame.texture().map(|texture| &texture.kind)
+            else {
+                panic!("the frame has no D3D12 texture")
+            };
+            let texture = textures.iter().find(|texture| texture.as_raw() as usize as u64 == *resource).unwrap();
+            let fence = host.open(sync.handle);
+            let (pixel, value) = host.read(texture, Some((&fence, sync.value)));
+            assert_eq!(RED, pixel);
+            let done = GpuSync { kind: SyncKind::D3d12Fence, handle: reads_handle.0 as usize as u64, value };
+            frame.release(ConsumerSync::of(done)).unwrap();
+        }
+        wait(session.detach());
+        // SAFETY: the test's handle, which the detached session let go of.
+        unsafe { CloseHandle(reads_handle).unwrap() };
+    }
+
+    // A frame into a texture that the host released with a fence waits for
+    // the fence to reach the release's value before it signals its own.
+    #[test]
+    fn a_d3d12_ring_waits_for_the_hosts_fence() {
+        let Some((device, mut host)) = Host::new() else { return };
+        let textures = [host.color()];
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&textures, &[]), device };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::D3d12Fence]));
+        let reads_handle = host.share_reads();
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let (_, value) =
+            host.read(&textures[0], Some((&host.open(frame.producer_sync().handle), frame.producer_sync().value)));
+        // The host's reads reach `value + 1` only when the test signals it.
+        let held = GpuSync { kind: SyncKind::D3d12Fence, handle: reads_handle.0 as usize as u64, value: value + 1 };
+        frame.release(ConsumerSync::of(held)).unwrap();
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let sync = frame.producer_sync();
+        let fence = host.open(sync.handle);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        // SAFETY: plain calls of live fences.
+        unsafe {
+            assert!(fence.GetCompletedValue() < sync.value, "the frame didn't wait for the host's fence");
+            host.reads.Signal(value + 1).unwrap();
+        }
+        // SAFETY: as above.
+        assert!(eventually(|| unsafe { fence.GetCompletedValue() } >= sync.value));
+        drop(frame);
+        wait(session.detach());
+        // SAFETY: the test's handle, which the detached session let go of.
+        unsafe { CloseHandle(reads_handle).unwrap() };
+    }
+
+    // A host that submits its reads to the device's queue needs no fence,
+    // and a ring with depth textures hands each frame's over with it.
+    #[test]
+    fn a_d3d12_ring_with_depth_hands_frames_over_in_queue_order() {
+        let Some((device, mut host)) = Host::new() else { return };
+        let textures = [host.color()];
+        let depth = [host.texture(DXGI_FORMAT_D32_FLOAT_S8X24_UINT, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)];
+        let ring = Host::ring(&textures, &depth);
+        assert!(ring.takes_depth_on(&device));
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring, device };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::QueueOrder]));
+        for _ in 0..3 {
+            assert_eq!(FrameDisposition::Rendered, render(&session));
+            let frame = session.acquire_frame().unwrap().expect("a frame");
+            assert_eq!(SyncKind::QueueOrder, frame.producer_sync().kind);
+            let depth_texture = frame.texture().and_then(|texture| texture.depth.clone()).expect("a depth texture");
+            assert_eq!(
+                mln_runtime::NativeTexture::D3d12 {
+                    resource: depth[0].as_raw() as usize as u64,
+                    format: DXGI_FORMAT_D32_FLOAT_S8X24_UINT.0 as u32,
+                    state: D3D12_RESOURCE_STATE_DEPTH_WRITE.0 as u32,
+                },
+                depth_texture.texture
+            );
+            assert_eq!(RED, host.read(&textures[0], None).0);
+            frame.release(ConsumerSync::of(GpuSync::of(SyncKind::QueueOrder))).unwrap();
+        }
+        wait(session.detach());
+    }
+
+    // A ring takes no texture of another device (WARP's, where the session
+    // renders on another adapter: D3D12 has one device per adapter), and a
+    // new ring keeps the ring's format.
+    #[test]
+    fn a_d3d12_ring_rejects_what_it_cannot_take() {
+        let Some((device, host)) = Host::new() else { return };
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let warp = DeviceOptions { adapter: Some(Adapter::Index(1)), ..DeviceOptions::default() };
+        if let Some(Device::D3d12(other)) = device_with(BackendType::D3D12, warp)
+            && other.device() != &host.device
+        {
+            let texture = Host { device: other.device().clone(), ..Host::new().unwrap().1 }.color();
+            let foreign =
+                RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&[texture], &[]), device: device.clone() };
+            let Err(refused) = map.attach(foreign, AttachOptions::default()) else {
+                panic!("a foreign texture attached")
+            };
+            assert_eq!(ErrorKind::InvalidArgument, refused.kind, "{refused:?}");
+        }
+
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&[host.color()], &[]), device };
+        let session = attach(&map, target, SyncKinds::NONE);
+        let bgra = host.texture(
+            windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+            D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+        );
+        let refused = session.set_ring(SIZE, Host::ring(&[bgra], &[])).unwrap().wait().unwrap_err();
+        assert_eq!(ErrorKind::Unsupported, refused.kind, "{refused:?}");
+        wait(session.detach());
     }
 }
 

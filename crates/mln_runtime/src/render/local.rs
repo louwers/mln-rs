@@ -103,7 +103,8 @@ pub(crate) type Pending = Option<Box<dyn PendingReads>>;
 /// `reads`, unless they ended already.
 #[cfg(any(
     all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
-    all(feature = "metal", target_vendor = "apple")
+    all(feature = "metal", target_vendor = "apple"),
+    all(feature = "d3d12", windows)
 ))]
 fn pending(mut reads: impl PendingReads + 'static) -> Pending {
     (!reads.poll()).then(|| -> Box<dyn PendingReads> { Box::new(reads) })
@@ -135,6 +136,35 @@ impl Borrowed for mln_vulkan::BorrowedTarget {
 impl PendingReads for mln_vulkan::PendingReads {
     fn poll(&mut self) -> bool {
         mln_vulkan::PendingReads::poll(self)
+    }
+}
+
+#[cfg(all(feature = "d3d12", windows))]
+impl Borrowed for mln_d3d12::BorrowedTarget {
+    fn select(&self, slot: usize) {
+        mln_d3d12::BorrowedTarget::select(self, slot);
+    }
+    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        mln_d3d12::BorrowedTarget::release(self, slot, consumer)
+    }
+    fn discard(&self, slot: usize) {
+        mln_d3d12::BorrowedTarget::discard(self, slot);
+    }
+    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
+        let RingKind::D3d12(textures) = ring.kind else {
+            return Err(Error::unsupported("a ring of D3D12 textures takes D3D12 textures only"));
+        };
+        mln_d3d12::BorrowedTarget::replace(self, textures).map(pending)
+    }
+    fn take_pending(&self) -> Pending {
+        pending(mln_d3d12::BorrowedTarget::take_pending(self))
+    }
+}
+
+#[cfg(all(feature = "d3d12", windows))]
+impl PendingReads for mln_d3d12::PendingReads {
+    fn poll(&mut self) -> bool {
+        mln_d3d12::PendingReads::poll(self)
     }
 }
 
@@ -180,6 +210,8 @@ exported!(mln_vulkan::ExportedTarget);
 exported!(mln_mtl::ExportedTarget);
 #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
 exported!(mln_gl::ExportedTarget);
+#[cfg(all(feature = "d3d12", windows))]
+exported!(mln_d3d12::ExportedTarget);
 
 macro_rules! offscreen {
     ($type:ty) => {
@@ -349,6 +381,10 @@ impl Backend {
             (Backend::Gl(backend), RingKind::Gl(textures)) => {
                 Ok(Box::new(mln_gl::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            (Backend::D3d12(backend), RingKind::D3d12(textures)) => {
+                Ok(Box::new(mln_d3d12::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
+            }
             _ => {
                 let _ = producer;
                 Err(Error::unsupported("the session's backend renders into no ring of this kind"))
@@ -384,6 +420,10 @@ impl Backend {
                     return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
                 };
                 Ok(Box::new(mln_gl::ExportedTarget::new(Rc::clone(backend), device, ring, kind, size, producer)?))
+            }
+            #[cfg(all(feature = "d3d12", windows))]
+            Backend::D3d12(backend) => {
+                Ok(Box::new(mln_d3d12::ExportedTarget::new(Rc::clone(backend), ring, kind, size, producer)?))
             }
             _ => {
                 let _ = (device, ring, kind, size, producer);

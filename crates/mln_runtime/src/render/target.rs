@@ -131,6 +131,8 @@ pub(crate) enum RingKind {
     Gl(mln_gl::BorrowedTextures),
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
     WebGpu(mln_webgpu::BorrowedTextures),
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12(mln_d3d12::BorrowedTextures),
 }
 
 /// The host's texture that an acquired frame was rendered into, of `size`
@@ -184,6 +186,11 @@ fn native_kind(texture: NativeTexture, device: &Device) -> Option<FrameTextureKi
             pixel_format,
         }),
         (NativeTexture::OpenGl { texture, target, .. }, _) => Some(FrameTextureKind::OpenGl { texture, target }),
+        #[cfg(all(feature = "d3d12", windows))]
+        (NativeTexture::D3d12 { resource, format, state }, Device::D3d12(device)) => {
+            use mln_d3d12::windows::core::Interface as _;
+            Some(FrameTextureKind::D3d12 { resource, device: device.device().as_raw() as usize as u64, format, state })
+        }
         _ => None,
     }
 }
@@ -201,6 +208,9 @@ pub enum FrameTextureKind {
     OpenGl { texture: u32, target: u32 },
     /// A WebGPU texture: the host's at the frame's slot of its ring.
     WebGpu,
+    /// An `ID3D12Resource*` of an `ID3D12Device*`, in a `DXGI_FORMAT`, left
+    /// in a `D3D12_RESOURCE_STATES`.
+    D3d12 { resource: u64, device: u64, format: u32, state: u32 },
     /// An image of an exported ring, and its shared memory.
     Exported(ExportedImage),
 }
@@ -236,6 +246,14 @@ impl BorrowedRing {
         BorrowedRing { kind: RingKind::WebGpu(textures) }
     }
 
+    /// A ring of the host's D3D12 textures, of the D3D12 device that renders
+    /// into them.
+    #[cfg(all(feature = "d3d12", windows))]
+    #[must_use]
+    pub fn d3d12(textures: mln_d3d12::BorrowedTextures) -> BorrowedRing {
+        BorrowedRing { kind: RingKind::D3d12(textures) }
+    }
+
     /// The backend whose device renders into the ring.
     #[must_use]
     pub fn backend(&self) -> BackendType {
@@ -248,6 +266,8 @@ impl BorrowedRing {
             RingKind::Gl(_) => BackendType::OpenGL,
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             RingKind::WebGpu(_) => BackendType::WebGPU,
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(_) => BackendType::D3D12,
             // The browser build renders into no ring.
             _ => BackendType::WebGPU,
         }
@@ -265,6 +285,8 @@ impl BorrowedRing {
             RingKind::Gl(textures) => textures.textures.len(),
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             RingKind::WebGpu(textures) => textures.textures.len(),
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(textures) => textures.textures.len(),
             _ => 0,
         }
     }
@@ -281,6 +303,8 @@ impl BorrowedRing {
             RingKind::Gl(textures) => textures.size,
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             RingKind::WebGpu(textures) => textures.size,
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(textures) => textures.size,
             _ => Size::default(),
         }
     }
@@ -318,6 +342,8 @@ impl BorrowedRing {
             RingKind::WebGpu(textures) => {
                 textures.depth_textures.first().and_then(|texture| mln_webgpu::depth_stencil_format(texture.format()))
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(textures) => textures.depth_format().and_then(mln_d3d12::depth_stencil_format),
             _ => None,
         }
     }
@@ -334,6 +360,8 @@ impl BorrowedRing {
             RingKind::Gl(textures) => !textures.depth_textures.is_empty(),
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             RingKind::WebGpu(textures) => !textures.depth_textures.is_empty(),
+            #[cfg(all(feature = "d3d12", windows))]
+            RingKind::D3d12(textures) => !textures.depth_textures.is_empty(),
             _ => false,
         }
     }
@@ -363,6 +391,10 @@ impl BorrowedRing {
             }
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             (RingKind::WebGpu(textures), RingKind::WebGpu(others)) => {
+                textures.textures.get(slot).is_some_and(|texture| others.textures.get(other_slot) == Some(texture))
+            }
+            #[cfg(all(feature = "d3d12", windows))]
+            (RingKind::D3d12(textures), RingKind::D3d12(others)) => {
                 textures.textures.get(slot).is_some_and(|texture| others.textures.get(other_slot) == Some(texture))
             }
             _ => false,
@@ -442,6 +474,30 @@ impl BorrowedRing {
                 depth: (!textures.depth_textures.is_empty())
                     .then_some(FrameDepth { texture: NativeTexture::WebGpu, export: None }),
             }),
+            #[cfg(all(feature = "d3d12", windows))]
+            (RingKind::D3d12(textures), Device::D3d12(device)) => {
+                use mln_d3d12::windows::core::Interface as _;
+                let depth =
+                    textures.depth_textures.get(slot).zip(textures.depth_format()).map(|(depth, format)| FrameDepth {
+                        texture: NativeTexture::D3d12 {
+                            resource: depth.as_raw() as usize as u64,
+                            format: format.0 as u32,
+                            state: textures.depth_state.0 as u32,
+                        },
+                        export: None,
+                    });
+                textures.textures.get(slot).map(|texture| FrameTexture {
+                    size: textures.size,
+                    kind: FrameTextureKind::D3d12 {
+                        resource: texture.as_raw() as usize as u64,
+                        device: device.device().as_raw() as usize as u64,
+                        format: textures.format().0 as u32,
+                        state: textures.state.0 as u32,
+                    },
+                    native: None,
+                    depth,
+                })
+            }
             _ => None,
         }
     }
@@ -1133,6 +1189,11 @@ impl Device {
                 textures.check()?;
                 Ok(mln_webgpu::BorrowedTextures::sync_kinds())
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            (Device::D3d12(device), RingKind::D3d12(textures)) => {
+                textures.check(device)?;
+                Ok(mln_d3d12::BorrowedTextures::sync_kinds())
+            }
             _ => Err(Error::unsupported(format!(
                 "a {:?} device renders into no ring of {:?} textures",
                 self.backend(),
@@ -1149,7 +1210,7 @@ impl Device {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Device::Vulkan(ref device) => device.depth_stencil_formats(),
             #[cfg(all(feature = "d3d12", windows))]
-            Device::D3d12(_) => DepthStencilFormats::NONE,
+            Device::D3d12(_) => mln_d3d12::BorrowedTextures::depth_stencil_formats(),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(_) => mln_mtl::BorrowedTextures::depth_stencil_formats(),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
@@ -1186,6 +1247,8 @@ impl Device {
             Device::Metal(device) => mln_mtl::exported_target::export_kinds(device),
             #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => mln_gl::exported_target::export_kinds(device),
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(device) => device.export_kinds(),
             _ => ExportKinds::NONE,
         }
     }
@@ -1216,6 +1279,12 @@ impl Device {
                 let (producer, consumer) = mln_gl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(device) => {
+                let kind = mln_d3d12::exported_target::plan(device, ring)?;
+                let (producer, consumer) = mln_d3d12::exported_target::sync_kinds();
+                Ok((kind, producer, consumer))
+            }
             _ => {
                 let _ = ring;
                 Err(Error::unsupported(format!("a {:?} device exports no ring", self.backend())))
@@ -1238,6 +1307,8 @@ impl Device {
             Device::Metal(device) => mln_mtl::exported_target::sync_kinds(device),
             #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => mln_gl::exported_target::sync_kinds(device),
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(_) => mln_d3d12::exported_target::sync_kinds(),
             _ => (SyncKinds::NONE, SyncKinds::NONE),
         }
     }

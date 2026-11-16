@@ -2,8 +2,9 @@
 //! share.
 
 use std::ffi::c_void;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use mln_gfx::ExportKinds;
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, TargetFormats, VertexBufferLayout};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
@@ -67,6 +68,9 @@ struct Shared {
     /// The pipeline states that the device's backends made, which the next
     /// backend to need one takes: a renderer for each map makes the same.
     pipelines: Mutex<HashMap<PipelineKey, ID3D12PipelineState>>,
+    /// The kinds of exported ring that the device shares textures in, found
+    /// when first asked for.
+    export_kinds: OnceLock<ExportKinds>,
 }
 
 /// A D3D12 device on one adapter, and its direct queue. Clones share them.
@@ -207,6 +211,7 @@ impl Device {
                 software,
                 root_signature,
                 pipelines: Mutex::default(),
+                export_kinds: OnceLock::new(),
             }),
         })
     }
@@ -227,6 +232,18 @@ impl Device {
     #[must_use]
     pub fn adapter_name(&self) -> &str {
         &self.shared.name
+    }
+
+    /// The adapter's 8-byte LUID, as Vulkan's `deviceLUID` has it and
+    /// [`with_luid`](Self::with_luid) takes it.
+    #[must_use]
+    pub fn adapter_luid(&self) -> [u8; 8] {
+        // SAFETY: a plain query.
+        let luid = unsafe { self.shared.device.GetAdapterLuid() };
+        let mut bytes = [0; 8];
+        bytes[..4].copy_from_slice(&luid.LowPart.to_le_bytes());
+        bytes[4..].copy_from_slice(&luid.HighPart.to_le_bytes());
+        bytes
     }
 
     /// Whether the adapter rasterizes on the CPU, as WARP does.
@@ -344,6 +361,13 @@ fn log_messages(device: &ID3D12Device, abort: bool) {
 }
 
 impl Device {
+    /// The kinds of exported ring that sessions on the device share their
+    /// textures in: DXGI shared handles, once the device has shared one.
+    #[must_use]
+    pub fn export_kinds(&self) -> ExportKinds {
+        *self.shared.export_kinds.get_or_init(|| crate::exported_target::probe(&self.shared.device))
+    }
+
     /// The DXGI factory of the device's adapter.
     pub(crate) fn factory(&self) -> &IDXGIFactory4 {
         &self.shared.factory

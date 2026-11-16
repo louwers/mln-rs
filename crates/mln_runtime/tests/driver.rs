@@ -371,7 +371,8 @@ fn an_abandon_on_the_drivers_thread_keeps_only_open_gl_objects() {
     let map = map_of(&runtime, "#ff0000");
     // What an abandon keeps before the first frame and after it: an OpenGL
     // session's target, and its renderer's objects once it drew.
-    for (backend, kept) in [(BackendType::Vulkan, [0, 0]), (BackendType::OpenGL, [1, 2])] {
+    for (backend, kept) in [(BackendType::Vulkan, [0, 0]), (BackendType::D3D12, [0, 0]), (BackendType::OpenGL, [1, 2])]
+    {
         let Some(device) = device_of(backend) else { continue };
         for (rendered, kept) in kept.into_iter().enumerate() {
             let target = RenderTarget::Offscreen { size: SIZE, device: Some(device.clone()) };

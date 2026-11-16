@@ -106,10 +106,12 @@ winit.workspace = true
 libc.workspace = true
 
 # The D3D11 device of the exported ring tests, which opens the ring's
-# textures and fences as a host does, and the windows and DirectComposition
-# visuals of the Win32 surface tests.
+# textures and fences as a host does, the host's D3D12 textures and fences of
+# the borrowed ring tests, and the windows and DirectComposition visuals of
+# the Win32 surface tests.
 [target.'cfg(windows)'.dev-dependencies]
 windows = { workspace = true, features = [
+  "Win32_Graphics_Direct3D12",
   "Win32_Graphics_DirectComposition",
   "Win32_UI_WindowsAndMessaging",
 ] }
