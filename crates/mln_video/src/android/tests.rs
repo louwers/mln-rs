@@ -1,10 +1,10 @@
-// The player on a device: tests/fixtures/quarters.mp4 is a second of 64x48
+// The player on a device: tests/fixtures/quarters-android.mp4 is a second of 64x48
 // H.264 at 30 frames a second, BT.601 limited range, whose quarters are red,
 // green, blue and white for its first half and cyan, magenta, yellow and
 // black for its second. It was encoded from raw frames with
 // `gst-launch-1.0 filesrc location=quarters.yuv ! rawvideoparse width=64
 // height=48 format=i420 framerate=30/1 ! openh264enc gop-size=10 !
-// h264parse ! mp4mux faststart=true ! filesink location=quarters.mp4`.
+// h264parse ! mp4mux faststart=true ! filesink location=quarters-android.mp4`.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -15,7 +15,7 @@ use mln_storage::{FileSource, Resource, Responder};
 use super::*;
 use crate::slot::FrameSlot;
 
-const VIDEO: &[u8] = include_bytes!("../../tests/fixtures/quarters.mp4");
+const VIDEO: &[u8] = include_bytes!("../../tests/fixtures/quarters-android.mp4");
 const FIRST_HALF: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]];
 const SECOND_HALF: [[u8; 3]; 4] = [[0, 255, 255], [255, 0, 255], [255, 255, 0], [0, 0, 0]];
 

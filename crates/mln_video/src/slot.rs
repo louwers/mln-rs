@@ -168,7 +168,7 @@ impl FrameSink {
 mod tests {
     use std::sync::atomic::AtomicUsize;
 
-    use mln_gfx::video::{CpuPlane, FramePixels, GpuFrame};
+    use mln_gfx::video::{CpuPlane, FramePixels};
     use mln_util::size::Size;
 
     use super::*;
@@ -209,7 +209,7 @@ mod tests {
         let sink = FrameSink::new(Arc::clone(&slot));
         let gpu = VideoFrame {
             size: Size::new(1, 1),
-            pixels: FramePixels::Gpu(GpuFrame::DmaBuf {
+            pixels: FramePixels::Gpu(mln_gfx::video::GpuFrame::DmaBuf {
                 fourcc: 0,
                 modifier: 0,
                 size: Size::new(1, 1),

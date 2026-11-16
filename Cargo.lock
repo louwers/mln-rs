@@ -3257,6 +3257,8 @@ dependencies = [
  "parking_lot",
  "wasm-bindgen",
  "web-sys",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

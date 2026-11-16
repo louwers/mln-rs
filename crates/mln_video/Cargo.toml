@@ -42,5 +42,16 @@ web-sys = { workspace = true, features = [
 [target.'cfg(target_os = "android")'.dependencies]
 libloading.workspace = true
 
+# The Media Foundation player: its media engine, the D3D11 device it decodes
+# on, and the byte stream it reads through a ByteSource.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Media_MediaFoundation",
+  "Win32_System_Com",
+  "Win32_System_Threading",
+] }
+# For the code that windows' #[implement] generates.
+windows-core.workspace = true
+
 [lints]
 workspace = true

@@ -20,6 +20,8 @@ mod slot;
 mod urls;
 #[cfg(target_family = "wasm")]
 mod web;
+#[cfg(windows)]
+mod windows;
 
 use std::sync::Arc;
 
@@ -34,8 +36,8 @@ pub use web::{VideoHost, WebPlayers};
 
 /// The players of the platform the library runs on: GStreamer's on Linux and
 /// the BSDs, which fail to open each video, saying so, where GStreamer 1.x
-/// isn't installed, and the NDK's media API on Android. A platform without
-/// players fails to open each video too.
+/// isn't installed, the NDK's media API on Android, and Media Foundation on
+/// Windows. A platform without players fails to open each video too.
 #[cfg(not(target_family = "wasm"))]
 #[must_use]
 pub fn platform_players() -> Arc<dyn VideoPlayers> {
@@ -43,7 +45,9 @@ pub fn platform_players() -> Arc<dyn VideoPlayers> {
     let players: Arc<dyn VideoPlayers> = Arc::new(gstreamer::GstreamerPlayers);
     #[cfg(target_os = "android")]
     let players: Arc<dyn VideoPlayers> = Arc::new(android::AndroidPlayers);
-    #[cfg(not(all(unix, not(target_vendor = "apple"))))]
+    #[cfg(windows)]
+    let players: Arc<dyn VideoPlayers> = Arc::new(windows::MediaFoundationPlayers);
+    #[cfg(not(any(all(unix, not(target_vendor = "apple")), windows)))]
     let players: Arc<dyn VideoPlayers> = Arc::new(NoPlayers);
     players
 }
