@@ -1055,9 +1055,16 @@ pub(crate) unsafe extern "C" fn mln_map_attach(
                 if device.as_ref().is_some_and(|device| device.backend() != ::mln_runtime::BackendType::D3D12) {
                     return Err(unsupported("a composition swap chain presents on a D3D12 device"));
                 }
-                options.require_core_worker("a composition session renders on a core worker")?;
+                let panel = composition.kind == crate::generated::types::MLN_D3D12_COMPOSITION_KIND_SWAP_CHAIN_PANEL;
                 // SAFETY: the caller's contract.
                 let surface = unsafe { composition.into_surface() }?;
+                if panel {
+                    options.require_caller_thread(
+                        "a SwapChainPanel takes its swap chain on its UI thread, which drives the session",
+                    )?;
+                } else {
+                    options.require_core_worker("a DirectComposition visual's session renders on a core worker")?;
+                }
                 RenderTarget::Surface { size, surface, device }
             }
             Target::Unsupported(message) => return Err(unsupported(message)),

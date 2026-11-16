@@ -193,8 +193,10 @@ typedef struct mln_render_session_attach_options {
    *
    * - MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD for a borrowed ring of WebGPU
    *   textures.
-   * - MLN_RENDER_DRIVER_CORE_WORKER for an offscreen target, a window, a D3D12
-   *   composition swap chain, or an exported ring.
+   * - MLN_RENDER_DRIVER_CORE_WORKER for an offscreen target, a window, a
+   *   DirectComposition visual, or an exported ring.
+   * - MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD for a XAML `SwapChainPanel`,
+   *   on the panel's UI thread.
    * - Either one for a web canvas. In a browser both run on the thread that
    *   loaded the library: MLN_RENDER_DRIVER_CORE_WORKER in the library's own
    *   tasks, and MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD when you service the
@@ -865,10 +867,12 @@ typedef enum mln_d3d12_composition_kind : uint32_t {
  * one that it makes without a device. It makes a flip-model swap chain for
  * composition of `logical_size` at the map's scale factor, with premultiplied
  * alpha, and sets it as the visual's content or the panel's swap chain. Commit
- * your DirectComposition device once the attach completes. Scale the visual or
- * the panel to show the swap chain at the display's scale. The session
- * references `object` until a replacement or release of the target completes,
- * or the session ends.
+ * your DirectComposition device once the attach completes. A panel takes its
+ * swap chain only on its UI thread: attach it there with
+ * MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD, and service the session there.
+ * Scale the visual or the panel to show the swap chain at the display's scale.
+ * The session references `object` until a replacement or release of the target
+ * completes, or the session ends.
  */
 typedef struct mln_d3d12_composition_target {
   mln_logical_size logical_size MLN_BINDING("required=true");
