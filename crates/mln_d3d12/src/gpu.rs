@@ -294,6 +294,10 @@ pub struct D3d12Gpu {
     free_recordings: Vec<Recording>,
     in_flight: VecDeque<(u64, Recording)>,
     garbage: Vec<(u64, Garbage)>,
+    /// The fences and values that the queue waits for before the next
+    /// submit, and signals after it.
+    waits: Vec<(ID3D12Fence, u64)>,
+    signals: Vec<(ID3D12Fence, u64)>,
     /// Last, so that what holds memory drops before it.
     memory: Memory,
 }
@@ -449,6 +453,8 @@ impl D3d12Gpu {
             free_recordings: Vec::new(),
             in_flight: VecDeque::new(),
             garbage: Vec::new(),
+            waits: Vec::new(),
+            signals: Vec::new(),
             memory: Memory::new(d3d)?,
             device: device.clone(),
         })
@@ -508,6 +514,32 @@ impl D3d12Gpu {
     #[must_use]
     pub fn native_texture(&self, texture: TextureId) -> Option<(&ID3D12Resource, D3D12_RESOURCE_STATES)> {
         self.textures.get(texture).map(|texture| (&texture.memory.resource, texture.rest))
+    }
+
+    /// The GPU address of `buffer`'s memory, for a host that binds the
+    /// buffer itself, such as an overlay's vertex and index buffers.
+    #[must_use]
+    pub fn buffer_address(&self, buffer: BufferId) -> Option<u64> {
+        self.buffers.get(buffer).map(|buffer| buffer.memory.address())
+    }
+
+    /// Keeps `object` until the work recorded so far has finished, as a
+    /// destroyed resource is kept: an overlay's own pipeline state, root
+    /// signature or descriptor heap that its last frames still use.
+    pub fn destroy_later(&mut self, object: Box<dyn Any>) {
+        self.garbage.push((self.serial, Garbage::Held(object)));
+    }
+
+    /// Has the queue wait for `fence` to reach `value` before the next
+    /// flush's work: the host's reads of a texture that the frame draws into.
+    pub fn wait_before_next_submit(&mut self, fence: ID3D12Fence, value: u64) {
+        self.waits.push((fence, value));
+    }
+
+    /// Has the queue signal `fence` with `value` once the next flush's work
+    /// has finished, for a host that waits for a frame.
+    pub fn signal_after_next_submit(&mut self, fence: ID3D12Fence, value: u64) {
+        self.signals.push((fence, value));
     }
 
     fn completed(&self) -> u64 {
@@ -700,10 +732,17 @@ impl D3d12Gpu {
             submitted.push(Some(recording.list.cast().map_err(invalid("ID3D12CommandList"))?));
         }
         let queue = self.device.queue();
-        // SAFETY: as above.
+        // SAFETY: as above, and the fences live until the calls return: the
+        // queue holds what it waits on and signals.
         unsafe {
+            for (fence, value) in std::mem::take(&mut self.waits) {
+                queue.Wait(&fence, value).map_err(|error| self.failed("ID3D12CommandQueue::Wait", &error))?;
+            }
             if !submitted.is_empty() {
                 queue.ExecuteCommandLists(&submitted);
+            }
+            for (fence, value) in std::mem::take(&mut self.signals) {
+                queue.Signal(&fence, value).map_err(|error| self.failed("ID3D12CommandQueue::Signal", &error))?;
             }
             queue
                 .Signal(&self.fence, self.serial)

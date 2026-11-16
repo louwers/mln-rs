@@ -56,6 +56,8 @@ pub(crate) type PipelineKey = (ShaderKey, Vec<VertexBufferLayout>, FixedState, T
 struct Shared {
     device: ID3D12Device,
     queue: ID3D12CommandQueue,
+    /// The factory that found the adapter, which makes swap chains.
+    factory: IDXGIFactory4,
     /// The adapter's name and whether it rasterizes on the CPU, as WARP
     /// does.
     name: String,
@@ -197,7 +199,15 @@ impl Device {
         Log::info(Event::Render, format!("graphics device uses D3D12 adapter {name}"));
         let root_signature = root_signature::create(&device).map_err(|error| Error::native(error.to_string()))?;
         Ok(Device {
-            shared: Arc::new(Shared { device, queue, name, software, root_signature, pipelines: Mutex::default() }),
+            shared: Arc::new(Shared {
+                device,
+                queue,
+                factory,
+                name,
+                software,
+                root_signature,
+                pipelines: Mutex::default(),
+            }),
         })
     }
 
@@ -334,6 +344,11 @@ fn log_messages(device: &ID3D12Device, abort: bool) {
 }
 
 impl Device {
+    /// The DXGI factory of the device's adapter.
+    pub(crate) fn factory(&self) -> &IDXGIFactory4 {
+        &self.shared.factory
+    }
+
     /// The root signature of every pipeline on the device.
     pub(crate) fn root_signature(&self) -> &ID3D12RootSignature {
         &self.shared.root_signature

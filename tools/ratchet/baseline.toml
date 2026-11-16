@@ -76,6 +76,7 @@
 "crates/mln_c/src/render_session.rs" = 3
 "crates/mln_c/src/web.rs" = 5
 "crates/mln_d3d12/src/renderer_backend.rs" = 2
+"crates/mln_d3d12/src/surface_target.rs" = 3
 "crates/mln_expression/src/parsing_context.rs" = 11
 "crates/mln_gfx/src/shader_group.rs" = 1
 "crates/mln_gfx/src/vertex_vector.rs" = 13

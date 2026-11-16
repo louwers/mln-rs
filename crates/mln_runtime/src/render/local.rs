@@ -218,6 +218,8 @@ offscreen!(mln_vulkan::OffscreenTarget);
 offscreen!(mln_d3d12::OffscreenTarget);
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
 presenting!(mln_vulkan::SurfaceTarget);
+#[cfg(all(feature = "d3d12", windows))]
+presenting!(mln_d3d12::SurfaceTarget);
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
 offscreen!(mln_gl::OffscreenTarget);
 #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
@@ -465,6 +467,20 @@ impl Backend {
                 target.set_overlay(vulkan_overlay(overlay)?);
                 Ok(Box::new(target))
             }
+            #[cfg(all(feature = "d3d12", windows))]
+            (Backend::D3d12(backend), SurfaceKind::Window(window)) => {
+                let overlay = d3d12_overlay(overlay)?;
+                let target = mln_d3d12::SurfaceTarget::new(Rc::clone(backend), window, size)?;
+                target.set_overlay(overlay);
+                Ok(Box::new(target))
+            }
+            #[cfg(all(feature = "d3d12", windows))]
+            (Backend::D3d12(backend), SurfaceKind::D3d12Composition(composition)) => {
+                let overlay = d3d12_overlay(overlay)?;
+                let target = mln_d3d12::SurfaceTarget::for_composition(Rc::clone(backend), composition, size)?;
+                target.set_overlay(overlay);
+                Ok(Box::new(target))
+            }
             _ => {
                 let _ = (size, overlay);
                 Err(Error::unsupported("the session's backend presents to no surface of this kind"))
@@ -480,6 +496,7 @@ impl Backend {
         feature = "webgpu",
         all(feature = "metal", target_vendor = "apple"),
         all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
+        all(feature = "d3d12", windows),
         all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))),
     )),
     expect(dead_code, reason = "a build without a backend that takes overlays uses none")
@@ -498,6 +515,14 @@ fn overlay_of<T>(
 fn vulkan_overlay(overlay: Option<SurfaceOverlay>) -> Result<Option<Box<dyn mln_vulkan::Overlay>>, Error> {
     overlay_of(overlay, |overlay| match overlay {
         SurfaceOverlay::Vulkan(overlay) => Ok(overlay),
+        other => Err(other),
+    })
+}
+
+#[cfg(all(feature = "d3d12", windows))]
+fn d3d12_overlay(overlay: Option<SurfaceOverlay>) -> Result<Option<Box<dyn mln_d3d12::Overlay>>, Error> {
+    overlay_of(overlay, |overlay| match overlay {
+        SurfaceOverlay::D3d12(overlay) => Ok(overlay),
         other => Err(other),
     })
 }
@@ -532,6 +557,10 @@ fn webgpu_surface(backend: &mln_webgpu::RendererBackend, kind: SurfaceKind) -> R
         SurfaceKind::Vulkan(_) => return Err(Error::unsupported("a Vulkan surface presents on a Vulkan device")),
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         SurfaceKind::Gl(_) => return Err(Error::unsupported("an EGL surface presents on an OpenGL device")),
+        #[cfg(all(feature = "d3d12", windows))]
+        SurfaceKind::D3d12Composition(_) => {
+            return Err(Error::unsupported("a composition swap chain presents on a D3D12 device"));
+        }
     };
     made.map_err(|error| Error::native(format!("can't make a surface on the window: {error}")))
 }
@@ -938,6 +967,10 @@ fn default_surface_device(surface: &Surface) -> Result<Device, Error> {
         SurfaceKind::Vulkan(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         SurfaceKind::Gl(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
+        #[cfg(all(feature = "d3d12", windows))]
+        SurfaceKind::D3d12Composition(_) => {
+            Device::with_backend(super::target::BackendType::D3D12, DeviceOptions::default())
+        }
         // A WebGPU build asked the browser for a device before the build.
         #[cfg(all(target_family = "wasm", feature = "gl"))]
         SurfaceKind::WebCanvas { .. } => Ok(Device::WebGl(super::target::WebGlContext::default())),

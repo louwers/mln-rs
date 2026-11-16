@@ -23,6 +23,8 @@ pub use geojson_vt;
 pub use geometry;
 pub use kdbush;
 pub use mln_conversion;
+/// Empty except on Windows.
+pub use mln_d3d12;
 pub use mln_expression;
 pub use mln_gestures;
 pub use mln_gfx;

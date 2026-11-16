@@ -464,6 +464,8 @@ pub enum SurfaceOverlay {
     Metal(mln_mtl::surface_target::Overlay),
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     Vulkan(Box<dyn mln_vulkan::Overlay>),
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12(Box<dyn mln_d3d12::Overlay>),
     #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
     Gl(mln_gl::Overlay),
 }
@@ -480,6 +482,10 @@ pub(crate) enum SurfaceKind {
     /// The host's `EGLSurface`, of the display of the session's device.
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
     Gl(mln_gl::HostSurface),
+    /// What shows a D3D12 composition swap chain: a `DirectComposition`
+    /// visual or a XAML `SwapChainPanel`.
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12Composition(mln_d3d12::Composition),
     /// In the browser, an `OffscreenCanvas` or an `HTMLCanvasElement`, on
     /// the instance's one thread.
     #[cfg(target_family = "wasm")]
@@ -590,6 +596,19 @@ impl Surface {
         Surface { kind: SurfaceKind::Gl(surface), overlay: None }
     }
 
+    /// A composition swap chain that a session on D3D12 makes and presents
+    /// to, which `composition` shows: a `DirectComposition` visual shows it
+    /// once the host commits its device after the attach, and a XAML
+    /// `SwapChainPanel` at once. The composition must outlive the session's
+    /// use of it, as a window must. The swap chain has the target's size in
+    /// pixels, with premultiplied alpha; the host scales its visual for the
+    /// display's scale factor.
+    #[cfg(all(feature = "d3d12", windows))]
+    #[must_use]
+    pub fn d3d12_composition(composition: mln_d3d12::Composition) -> Surface {
+        Surface { kind: SurfaceKind::D3d12Composition(composition), overlay: None }
+    }
+
     /// The surface, with `overlay` drawn over each frame that a session
     /// presents to it. Only a session whose driver is
     /// [`Driver::CallerThread`] draws it, on the thread that made it, and
@@ -653,8 +672,8 @@ impl Surface {
     /// Win32 window whose pixel format isn't the library's when OpenGL
     /// presents to it: on `device`, or without a device, in a build whose
     /// first backend is OpenGL. Windows doesn't let a pixel format change.
-    /// A session that falls back to OpenGL because Vulkan is missing finds
-    /// out as it starts.
+    /// A session that falls back to OpenGL because Vulkan and D3D12 are
+    /// missing finds out as it starts.
     #[cfg_attr(
         not(all(feature = "gl", windows)),
         expect(clippy::unnecessary_wraps, reason = "only OpenGL on Windows checks the window's pixel format")
@@ -662,7 +681,9 @@ impl Surface {
     pub(crate) fn check_pixel_format(&self, device: Option<&Device>) -> Result<(), Error> {
         #[cfg(all(feature = "gl", windows))]
         if let SurfaceKind::Window(window) = &self.kind
-            && device.map_or(cfg!(not(feature = "vulkan")), |device| device.backend() == BackendType::OpenGL)
+            && device.map_or(cfg!(not(any(feature = "vulkan", feature = "d3d12"))), |device| {
+                device.backend() == BackendType::OpenGL
+            })
         {
             mln_gl::SurfaceTarget::check_window(&**window)?;
         }
@@ -691,6 +712,8 @@ impl Surface {
             SurfaceKind::Vulkan(_) => false,
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             SurfaceKind::Gl(_) => false,
+            #[cfg(all(feature = "d3d12", windows))]
+            SurfaceKind::D3d12Composition(_) => true,
             #[cfg(target_family = "wasm")]
             SurfaceKind::WebCanvas { .. } => true,
         }
@@ -849,7 +872,7 @@ impl SurfaceType {
             BackendType::WebGPU => {
                 cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing && self != SurfaceType::OhosNdk
             }
-            _ => false,
+            BackendType::D3D12 => cfg!(all(feature = "d3d12", windows)) && self == SurfaceType::Win32,
         }
     }
 
@@ -872,7 +895,7 @@ impl SurfaceType {
     /// surfaces of this type.
     #[must_use]
     pub fn presents_with_any(self) -> bool {
-        [BackendType::Metal, BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
+        [BackendType::Metal, BackendType::Vulkan, BackendType::D3D12, BackendType::OpenGL, BackendType::WebGPU]
             .into_iter()
             .any(|backend| self.presents_with(backend))
     }
@@ -885,7 +908,7 @@ impl SurfaceType {
         match self {
             SurfaceType::MetalLayer => self.presents_with(BackendType::Metal),
             _ if cfg!(target_vendor = "apple") => self.presents_with(BackendType::WebGPU),
-            _ => [BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
+            _ => [BackendType::Vulkan, BackendType::D3D12, BackendType::OpenGL, BackendType::WebGPU]
                 .into_iter()
                 .any(|backend| self.presents_with(backend)),
         }
@@ -971,11 +994,12 @@ impl Device {
     }
 
     /// The library's device, on the platform's native backend: Metal on
-    /// Apple's platforms, and Vulkan elsewhere, or OpenGL where there is no
-    /// Vulkan. WebGPU (wgpu) takes the place of a native backend that isn't
-    /// there. A backend that can't name the GPU that `options` names is
-    /// skipped: only Vulkan names one by UUID or LUID. OpenGL lists one GPU,
-    /// the one its display renders on, at index 0.
+    /// Apple's platforms, and Vulkan elsewhere, then D3D12 on Windows, or
+    /// OpenGL where there is neither. WebGPU (wgpu) takes the place of a
+    /// native backend that isn't there. A backend that can't name the GPU
+    /// that `options` names is skipped: only Vulkan names one by UUID, and
+    /// only Vulkan and D3D12 by LUID. OpenGL lists one GPU, the one its
+    /// display renders on, at index 0.
     /// So is OpenGL where it can't render with `options.gl_api`.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when
@@ -1035,6 +1059,7 @@ impl Device {
             #[cfg(all(feature = "d3d12", windows))]
             BackendType::D3D12 => match adapter {
                 Some(Adapter::Luid(luid)) => mln_d3d12::Device::with_luid(luid),
+                Some(Adapter::Uuid(_)) => Err(Error::unsupported("D3D12 names no GPU by UUID")),
                 _ => mln_d3d12::Device::new(index(adapter)?),
             }
             .map(Device::D3d12),
@@ -1263,11 +1288,14 @@ impl Device {
         }
     }
 
-    /// The backends [`new`](Self::new) tries, in order.
+    /// The backends [`new`](Self::new) tries, in order. Vulkan comes before
+    /// D3D12 on Windows, as it renders frames faster on the GPUs measured.
     #[cfg(not(target_family = "wasm"))]
     fn native_order() -> &'static [BackendType] {
         if cfg!(target_vendor = "apple") {
             &[BackendType::Metal, BackendType::WebGPU]
+        } else if cfg!(windows) {
+            &[BackendType::Vulkan, BackendType::D3D12, BackendType::OpenGL, BackendType::WebGPU]
         } else {
             &[BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
         }

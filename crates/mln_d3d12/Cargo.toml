@@ -27,6 +27,8 @@ parking_lot.workspace = true
 windows = { workspace = true, features = [
   "Win32_Graphics_Direct3D12",
   "Win32_Graphics_Direct3D_Dxc",
+  "Win32_Graphics_DirectComposition",
+  "Win32_System_Threading",
 ] }
 
 # The conformance suite that `D3d12Gpu`'s tests run, and the sets of defines

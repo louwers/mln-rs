@@ -62,6 +62,14 @@ impl ShaderCompiler {
         self.compile_source(source, &defines).map_err(|error| GpuError::Invalid(format!("{}: {error}", source.name)))
     }
 
+    /// Compiles the HLSL `source` of a `stage`, whose entry point is
+    /// `entry_point`, to DXIL for shader model 6.0: a host's own shaders, such
+    /// as an overlay's, which bind through a root signature of the host's.
+    pub fn compile_hlsl(&self, stage: Stage, source: &str, entry_point: &str) -> Result<Vec<u8>, GpuError> {
+        let hlsl = hlsl::Hlsl { source: source.to_owned(), entry_point: entry_point.to_owned() };
+        self.dxc.compile(stage, &hlsl).map_err(GpuError::Invalid)
+    }
+
     /// Compiles `source` with `defines` (`#define` lines).
     pub(crate) fn compile_source(
         &self,

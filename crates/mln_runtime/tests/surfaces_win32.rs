@@ -193,7 +193,7 @@ fn surface(window: &Arc<TestWindow>) -> Surface {
 fn a_minimized_window_takes_no_session_and_no_frames_on_each_backend() {
     let runtime = runtime();
     let map = map(&runtime);
-    for backend in [BackendType::Vulkan, BackendType::WebGPU] {
+    for backend in [BackendType::Vulkan, BackendType::D3D12, BackendType::WebGPU] {
         let Some(device) = device_of(backend) else { continue };
         let (minimized, shown) = (TestWindow::new(), TestWindow::new());
         minimized.set_minimized(true);
@@ -217,13 +217,14 @@ fn a_minimized_window_takes_no_session_and_no_frames_on_each_backend() {
     }
 }
 
-/// Draws a frame that clears `target`, a Vulkan target on `backend`, as a
-/// renderer would: where it went, or `None` when the target took no frame.
-#[cfg(feature = "vulkan")]
-fn vulkan_frame(backend: &mln_vulkan::RendererBackend, target: &mln_vulkan::SurfaceTarget) -> Option<mln_gfx::Handoff> {
-    use mln_gfx::FrameTarget as _;
+/// Draws a frame that clears `target`, a target on `backend`, as a renderer
+/// would: where it went, or `None` when the target took no frame.
+#[cfg(any(feature = "vulkan", feature = "d3d12"))]
+fn clear_frame(
+    backend: &dyn mln_gfx::renderer_backend::RendererBackend,
+    target: &dyn mln_gfx::FrameTarget,
+) -> Option<mln_gfx::Handoff> {
     use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, PassDesc};
-    use mln_gfx::renderer_backend::RendererBackend as _;
 
     let image = target.begin_frame()?;
     let pass = PassDesc {
@@ -263,13 +264,13 @@ fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
     let window = TestWindow::new();
     let (backend, target) =
         mln_vulkan::SurfaceTarget::with_backend(&device, Arc::<TestWindow>::clone(&window), SIZE, true).unwrap();
-    assert_eq!(Some(Handoff::Presented), vulkan_frame(&backend, &target));
+    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
     window.set_minimized(true);
     let refused = mln_vulkan::SurfaceTarget::new(Rc::clone(&backend), Arc::<TestWindow>::clone(&window), SIZE, true)
         .err()
         .unwrap();
     assert_eq!(ErrorKind::InvalidState, refused.kind, "{refused:?}");
-    let frames: Vec<_> = (0..12).map(|_| vulkan_frame(&backend, &target)).collect();
+    let frames: Vec<_> = (0..12).map(|_| clear_frame(&*backend, &target)).collect();
     let presented = frames.iter().take_while(|frame| **frame == Some(Handoff::Presented)).count();
     let rest = &frames[presented..];
     assert!(
@@ -278,7 +279,78 @@ fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
     );
     assert_eq!(None, *frames.last().unwrap(), "the frames to the minimized window: {frames:?}");
     window.set_minimized(false);
-    assert_eq!(Some(Handoff::Presented), vulkan_frame(&backend, &target));
+    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
     drop(target);
     drop(backend);
+}
+
+// A D3D12 target takes no frame while its window is minimized, and no target
+// is made on a minimized window: DXGI's flip-model swap chains present
+// nothing to one.
+#[cfg(feature = "d3d12")]
+#[test]
+fn a_d3d12_target_takes_no_frame_while_its_window_is_minimized() {
+    use mln_gfx::Handoff;
+
+    let Some(Device::D3d12(device)) = device_of(BackendType::D3D12) else { return };
+    let backend = Rc::new(mln_d3d12::RendererBackend::new(&device).unwrap());
+    let window = TestWindow::new();
+    let target = mln_d3d12::SurfaceTarget::new(Rc::clone(&backend), Arc::<TestWindow>::clone(&window), SIZE).unwrap();
+    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
+    // A resize takes buffers of the new size before the next frame.
+    target.resize(Size::new(32, 48));
+    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
+    target.resize(SIZE);
+    window.set_minimized(true);
+    let refused =
+        mln_d3d12::SurfaceTarget::new(Rc::clone(&backend), Arc::<TestWindow>::clone(&window), SIZE).err().unwrap();
+    assert_eq!(ErrorKind::InvalidState, refused.kind, "{refused:?}");
+    assert_eq!(None, clear_frame(&*backend, &target));
+    window.set_minimized(false);
+    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
+    drop(target);
+    drop(backend);
+}
+
+// A session on D3D12 presents to a DirectComposition visual through a
+// composition swap chain, which the visual shows once its device commits.
+#[cfg(feature = "d3d12")]
+#[test]
+fn a_d3d12_session_presents_to_a_direct_composition_visual() {
+    use windows::Win32::Graphics::DirectComposition::{
+        DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionVisual,
+    };
+    use windows::core::{IUnknown, Interface as _};
+
+    let Some(device) = device_of(BackendType::D3D12) else { return };
+    let runtime = runtime();
+    let map = map(&runtime);
+    let window = TestWindow::new();
+    // SAFETY: plain calls, of a device without a rendering device, on the
+    // live window.
+    let (composition, _target, visual) = unsafe {
+        let composition: IDCompositionDesktopDevice = DCompositionCreateDevice2(None::<&IUnknown>).unwrap();
+        let target = composition.CreateTargetForHwnd(window.handle(), true).unwrap();
+        let visual: IDCompositionVisual = composition.CreateVisual().unwrap().cast().unwrap();
+        target.SetRoot(&visual).unwrap();
+        (composition, target, visual)
+    };
+    // SAFETY: the visual lives until the session is released.
+    let surface = Surface::d3d12_composition(unsafe { mln_d3d12::Composition::from_visual(visual.as_raw()) }.unwrap());
+    let target = RenderTarget::Surface { size: SIZE, surface, device: Some(device) };
+    let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
+    attached.wait().unwrap();
+    // SAFETY: a plain call.
+    unsafe { composition.Commit() }.unwrap();
+    assert_eq!(FrameDisposition::Rendered, frame(&session, 1).disposition);
+    assert_eq!(FrameDisposition::Rendered, frame(&session, 2).disposition);
+    session.release().unwrap().wait().unwrap();
+    // Without a device, the session makes a D3D12 one.
+    // SAFETY: as above.
+    let surface = Surface::d3d12_composition(unsafe { mln_d3d12::Composition::from_visual(visual.as_raw()) }.unwrap());
+    let target = RenderTarget::Surface { size: SIZE, surface, device: None };
+    let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
+    attached.wait().unwrap();
+    assert_eq!(FrameDisposition::Rendered, frame(&session, 3).disposition);
+    session.release().unwrap().wait().unwrap();
 }

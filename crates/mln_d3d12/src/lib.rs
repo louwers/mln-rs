@@ -6,7 +6,7 @@
 //! (`ShaderCompiler`).
 //!
 //! A `RendererBackend` renders on a `Device`, which backends on any thread
-//! share, into an `OffscreenTarget` built on it.
+//! share, into an `OffscreenTarget` or a `SurfaceTarget` built on it.
 //!
 //! The crate is empty except on Windows.
 
@@ -22,6 +22,7 @@ mod memory;
 mod renderer_backend;
 mod root_signature;
 mod shaders;
+mod surface_target;
 mod upload;
 
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
@@ -29,8 +30,10 @@ pub use device::Device;
 pub use gpu::D3d12Gpu;
 /// Frames drawn into textures of the library's and read back.
 pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
+pub use mln_glsl::Stage as ShaderStage;
 pub use renderer_backend::RendererBackend;
 pub use shaders::{CompiledProgram, ShaderCompiler};
+pub use surface_target::{Composition, Overlay, OverlayTarget, SurfaceTarget};
 pub use windows;
 
 #[cfg(test)]
