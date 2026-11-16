@@ -244,7 +244,7 @@ impl std::fmt::Debug for CustomSourceCallbacks {
 
 /// The core's tile functions over `callbacks`, which the map holds weakly,
 /// so that they drop when the map lets go of the source rather than when
-/// the core's background loader does.
+/// the source's provider does.
 fn tile_functions(
     callbacks: &Arc<CustomSourceCallbacks>,
 ) -> (Option<mln_style::custom_tile_loader::TileFunction>, Option<mln_style::custom_tile_loader::TileFunction>) {

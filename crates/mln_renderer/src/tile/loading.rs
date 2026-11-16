@@ -1,6 +1,6 @@
 //! Where a source's tiles get their data: a tileset's tiles through the
 //! file source, a GeoJSON source's from its data, and a custom source's from
-//! its loader. Each load takes a value of the source's counter, and its
+//! its provider. Each load takes a value of the source's counter, and its
 //! responses arrive in the store's inbox naming it, from whatever thread
 //! answers; the store applies one only while the tile still waits for that
 //! load.
@@ -8,10 +8,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::actor::PoolActorRef;
 use mln_storage::response::Reason;
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
-use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, SubscriberKey};
+use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, SubscriberKey};
+use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
 use mln_style::sources::geojson::{GeoJSONData, TileFeatures};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
@@ -54,57 +54,85 @@ pub(crate) enum DataOrigin {
     Tileset { tileset: Tileset, encoding: VectorTileEncoding, file_source: Option<Arc<dyn FileSource>> },
     /// A GeoJSON source's data, cut into tiles.
     GeoJson(Arc<dyn GeoJSONData>),
-    /// A custom source's loader, which fetches only the tiles that are
-    /// required.
-    Custom(Arc<dyn CustomLoader>),
+    /// A custom source's provider, which fetches only the tiles that are
+    /// required, and whose MLT tiles decode with `fast_pfor_enabled`.
+    Custom { loader: Arc<dyn CustomLoader>, fast_pfor_enabled: bool },
 }
 
-/// A custom source's loader, whatever data it hands its tiles.
+/// A custom source's provider, whatever data it hands its tiles.
 pub(crate) trait CustomLoader {
     /// Asks for tile `id`'s data, for the subscription `key`, whose data and
-    /// errors go to `inbox` as load `key`.
-    fn fetch(&self, id: OverscaledTileID, key: SubscriberKey, tile: TileKey, inbox: &InboxSender);
+    /// errors go to `inbox` as load `key`, MLT decoded with
+    /// `fast_pfor_enabled`.
+    fn fetch(
+        &self,
+        id: OverscaledTileID,
+        key: SubscriberKey,
+        tile: TileKey,
+        inbox: &InboxSender,
+        fast_pfor_enabled: bool,
+    );
     /// The tile no longer needs its data: the loader may stop.
     fn cancel(&self, id: OverscaledTileID, key: SubscriberKey);
     /// The tile is gone.
     fn remove(&self, id: OverscaledTileID, key: SubscriberKey);
 }
 
-/// Turns the data a custom loader hands a tile into the tile's data.
-pub(crate) type DataConverter<D> = Arc<dyn Fn(D) -> Option<TileData> + Send + Sync>;
-
-/// A custom loader of data `D`.
-pub(crate) struct CustomLoaderOf<D: Clone + Send + 'static> {
-    pub(crate) loader: PoolActorRef<CustomTileLoader<D>>,
-    pub(crate) convert: DataConverter<D>,
+/// What a custom source's host gives a tile, as the tile's data.
+pub(crate) trait CustomTileData: Clone + Send + 'static {
+    /// The tile's data, MLT decoded with `fast_pfor_enabled`.
+    fn into_tile_data(self, fast_pfor_enabled: bool) -> Option<TileData>;
 }
 
-impl<D: Clone + Send + 'static> CustomLoader for CustomLoaderOf<D> {
-    fn fetch(&self, id: OverscaledTileID, key: SubscriberKey, tile: TileKey, inbox: &InboxSender) {
-        let subscriber = Subscriber { inbox: inbox.clone(), tile, load: key, convert: Arc::clone(&self.convert) };
-        self.loader.invoke(move |loader| loader.fetch_tile(&id, key, Box::new(subscriber)));
+impl CustomTileData for Arc<TileFeatures> {
+    fn into_tile_data(self, _fast_pfor_enabled: bool) -> Option<TileData> {
+        Some(TileData::Features(self))
+    }
+}
+
+impl CustomTileData for CustomVectorTileData {
+    fn into_tile_data(self, fast_pfor_enabled: bool) -> Option<TileData> {
+        let (data, format) = self;
+        data.map(|data| match format {
+            TileDataFormat::Mvt => TileData::Mvt(mln_tile::MvtTile::new(data)),
+            TileDataFormat::Mlt => TileData::Mlt(mln_tile::MltTile::new(data, fast_pfor_enabled)),
+        })
+    }
+}
+
+impl<D: CustomTileData> CustomLoader for CustomProvider<D> {
+    fn fetch(
+        &self,
+        id: OverscaledTileID,
+        key: SubscriberKey,
+        tile: TileKey,
+        inbox: &InboxSender,
+        fast_pfor_enabled: bool,
+    ) {
+        let subscriber = Subscriber { inbox: inbox.clone(), tile, load: key, fast_pfor_enabled };
+        self.fetch_tile(id, key, Box::new(subscriber));
     }
 
     fn cancel(&self, id: OverscaledTileID, key: SubscriberKey) {
-        self.loader.invoke(move |loader| loader.cancel_tile(&id, key));
+        self.cancel_tile(id, key);
     }
 
     fn remove(&self, id: OverscaledTileID, key: SubscriberKey) {
-        self.loader.invoke(move |loader| loader.remove_tile(&id, key));
+        self.remove_tile(id, key);
     }
 }
 
-/// How a custom loader reaches a tile: through the store's inbox.
-struct Subscriber<D> {
+/// How a custom provider reaches a tile: through the store's inbox.
+struct Subscriber {
     inbox: InboxSender,
     tile: TileKey,
     load: u64,
-    convert: DataConverter<D>,
+    fast_pfor_enabled: bool,
 }
 
-impl<D: Send + 'static> CustomTileSubscriber<D> for Subscriber<D> {
+impl<D: CustomTileData> CustomTileSubscriber<D> for Subscriber {
     fn set_tile_data(&self, data: D) {
-        let data = SourceData::Data((self.convert)(data));
+        let data = SourceData::Data(data.into_tile_data(self.fast_pfor_enabled));
         self.inbox.send(TileEvent::Data { tile: self.tile, load: self.load, data });
     }
 
@@ -179,7 +207,7 @@ impl TileLoad {
                 })
             }
             DataOrigin::GeoJson(_) => TileLoad::GeoJson,
-            DataOrigin::Custom(_) => {
+            DataOrigin::Custom { .. } => {
                 TileLoad::Custom(CustomLoad { necessity: TileNecessity::Optional, stale: true, subscription: None })
             }
         }
@@ -223,14 +251,14 @@ impl SourceInfo {
                 let data = Arc::clone(data);
                 self.load_geojson(tile, ctx, &data, false);
             }
-            Some(DataOrigin::Custom(_)) | None => {}
+            Some(DataOrigin::Custom { .. }) | None => {}
         }
     }
 
     fn file_source(&self) -> Option<Arc<dyn FileSource>> {
         match &self.origin {
             Some(DataOrigin::Tileset { file_source, .. }) => file_source.clone(),
-            Some(DataOrigin::GeoJson(_) | DataOrigin::Custom(_)) | None => None,
+            Some(DataOrigin::GeoJson(_) | DataOrigin::Custom { .. }) | None => None,
         }
     }
 
@@ -436,10 +464,10 @@ impl SourceInfo {
                     return;
                 }
                 custom.necessity = necessity;
-                let Some(DataOrigin::Custom(loader)) = &self.origin else {
+                let Some(DataOrigin::Custom { loader, fast_pfor_enabled }) = &self.origin else {
                     return;
                 };
-                let loader = Arc::clone(loader);
+                let (loader, fast_pfor_enabled) = (Arc::clone(loader), *fast_pfor_enabled);
                 let subscription = custom.subscription;
                 if necessity == TileNecessity::Required {
                     let stale = std::mem::replace(&mut custom.stale, false);
@@ -453,7 +481,7 @@ impl SourceInfo {
                         }
                     };
                     let key = TileKey { source: self.key, id: tile.id };
-                    loader.fetch(tile.id, subscription, key, &ctx.inbox);
+                    loader.fetch(tile.id, subscription, key, &ctx.inbox, fast_pfor_enabled);
                 } else if let Some(subscription) = subscription
                     && !tile.is_renderable()
                 {
@@ -573,7 +601,7 @@ impl SourceInfo {
     pub(crate) fn abandon_load(&self, tile: &Tile) {
         if let (
             TileLoad::Custom(CustomLoad { subscription: Some(subscription), .. }),
-            Some(DataOrigin::Custom(loader)),
+            Some(DataOrigin::Custom { loader, .. }),
         ) = (&tile.load, &self.origin)
         {
             loader.remove(tile.id, *subscription);

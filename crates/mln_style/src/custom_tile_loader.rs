@@ -1,26 +1,26 @@
-// C++ has one loader class per custom source kind, each calling its own tile
-// class. The loader is generic over the data it hands to tiles, and reaches a
-// tile through `CustomTileSubscriber`, since the tiles live in mln_renderer.
-//
-// The loader is an actor on the background scheduler (see
-// `CustomGeometrySource`): the host's fetch and cancel functions run there,
-// and tiles hear about data through their own mailboxes on the render
-// thread.
+//! The provider of a custom source's tile data: [`CustomProvider`] asks the
+//! host for each canonical tile that a tile needs, and hands the host's
+//! answers to the tiles. It is generic over the data it hands them, and
+//! reaches a tile through [`CustomTileSubscriber`], since the tiles live in
+//! `mln_renderer`.
 
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Weak};
 
+use mln_actor::SchedulerPtr;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 use mln_util::hash::HashMap;
+use parking_lot::Mutex;
 
 /// Called with the canonical ID of a tile that the map needs, or no longer
-/// needs. It runs on a background thread.
+/// needs. It runs on a pool thread (see [`CustomProvider`]).
 pub type TileFunction = Arc<dyn Fn(&CanonicalTileID) + Send + Sync>;
 
 /// A tile that receives a canonical tile's data from a custom source's
-/// loader. Each call sends a message to the tile, which runs it on the
+/// provider. Each call sends a message to the tile, which runs it on the
 /// tile's own thread.
 pub trait CustomTileSubscriber<D>: Send {
     fn set_tile_data(&self, data: D);
@@ -30,7 +30,7 @@ pub trait CustomTileSubscriber<D>: Send {
     fn invalidate_tile_data(&self);
 }
 
-/// Identifies a tile to the loader. Wrapped and overscaled tiles share their
+/// Identifies a tile to the provider. Wrapped and overscaled tiles share their
 /// canonical tile's data, and `TilePyramid` changes the wrap of a tile's ID,
 /// so a tile is identified by this key rather than by its ID.
 pub type SubscriberKey = u64;
@@ -65,36 +65,32 @@ impl<D> TileState<D> {
     }
 }
 
-/// Asks the host for each canonical tile that a tile needs, once, and hands
-/// the host's answer to every tile that shares it.
-pub struct CustomTileLoader<D: Clone> {
-    fetch_tile_function: Option<TileFunction>,
-    cancel_tile_function: Option<TileFunction>,
+/// What a provider asks of the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HostCall {
+    Fetch(CanonicalTileID),
+    Cancel(CanonicalTileID),
+}
+
+/// Which canonical tiles the tiles need, and the host's answers: it asks
+/// the host for each canonical tile once, and hands the answer to every
+/// tile that shares it. It records what to ask of the host in `calls`.
+struct CustomTileLoader<D: Clone> {
     tile_states: HashMap<CanonicalTileID, TileState<D>>,
     /// Keep around a cache of tile data to serve back for wrapped and
     /// over-zoomed tiles.
     data_cache: HashMap<CanonicalTileID, D>,
+    calls: Vec<HostCall>,
 }
 
 impl<D: Clone> CustomTileLoader<D> {
-    #[must_use]
-    pub fn new(fetch_tile_function: Option<TileFunction>, cancel_tile_function: Option<TileFunction>) -> Self {
-        CustomTileLoader {
-            fetch_tile_function,
-            cancel_tile_function,
-            tile_states: HashMap::default(),
-            data_cache: HashMap::default(),
-        }
+    fn new() -> Self {
+        CustomTileLoader { tile_states: HashMap::default(), data_cache: HashMap::default(), calls: Vec::new() }
     }
 
     /// Records that the tile needs its data. It gets the cached data if there
     /// is any; otherwise the host is asked for it, unless it already was.
-    pub fn fetch_tile(
-        &mut self,
-        tile_id: &OverscaledTileID,
-        key: SubscriberKey,
-        tile: Box<dyn CustomTileSubscriber<D>>,
-    ) {
+    fn fetch_tile(&mut self, tile_id: &OverscaledTileID, key: SubscriberKey, tile: Box<dyn CustomTileSubscriber<D>>) {
         let canonical = tile_id.canonical;
         let state = self.tile_states.entry(canonical).or_default();
         let index = if let Some(index) = state.subscribers.iter().position(|subscriber| subscriber.key == key) {
@@ -108,13 +104,13 @@ impl<D: Clone> CustomTileLoader<D> {
             state.subscribers[index].tile.set_tile_data(cached.clone());
         } else if !state.fetching {
             state.fetching = true;
-            self.invoke_tile_fetch(&canonical);
+            self.calls.push(HostCall::Fetch(canonical));
         }
     }
 
     /// Records that the tile no longer needs its data. It stays subscribed, so
     /// it fetches again when it is next needed.
-    pub fn cancel_tile(&mut self, tile_id: &OverscaledTileID, key: SubscriberKey) {
+    fn cancel_tile(&mut self, tile_id: &OverscaledTileID, key: SubscriberKey) {
         let canonical = tile_id.canonical;
         let Some(state) = self.tile_states.get_mut(&canonical) else {
             return;
@@ -131,7 +127,7 @@ impl<D: Clone> CustomTileLoader<D> {
 
     /// Forgets a tile that is gone. The cached data goes with the last tile
     /// that shares it.
-    pub fn remove_tile(&mut self, tile_id: &OverscaledTileID, key: SubscriberKey) {
+    fn remove_tile(&mut self, tile_id: &OverscaledTileID, key: SubscriberKey) {
         let canonical = tile_id.canonical;
         let Some(state) = self.tile_states.get_mut(&canonical) else {
             return;
@@ -152,13 +148,13 @@ impl<D: Clone> CustomTileLoader<D> {
 
     /// Whether a tile still needs the canonical tile's data, so that an
     /// answer from the host would be used.
-    pub(crate) fn is_required(&self, tile_id: &CanonicalTileID) -> bool {
+    fn is_required(&self, tile_id: &CanonicalTileID) -> bool {
         self.tile_states.get(tile_id).is_some_and(TileState::required)
     }
 
     /// Hands over the host's data for a tile. It is dropped unless a tile
     /// needs it.
-    pub fn set_tile_data(&mut self, tile_id: &CanonicalTileID, data: D) {
+    fn set_tile_data(&mut self, tile_id: &CanonicalTileID, data: D) {
         let Some(state) = self.tile_states.get_mut(tile_id) else {
             return;
         };
@@ -174,7 +170,7 @@ impl<D: Clone> CustomTileLoader<D> {
 
     /// Reports that the host failed to load a tile. The tiles stay subscribed,
     /// so invalidating the failed tile or needing it again fetches it again.
-    pub fn set_tile_error(&mut self, tile_id: &CanonicalTileID, error: &Error) {
+    fn set_tile_error(&mut self, tile_id: &CanonicalTileID, error: &Error) {
         let Some(state) = self.tile_states.get_mut(tile_id) else {
             return;
         };
@@ -188,14 +184,14 @@ impl<D: Clone> CustomTileLoader<D> {
         self.data_cache.remove(tile_id);
     }
 
-    pub fn invalidate_tile(&mut self, tile_id: &CanonicalTileID) {
+    fn invalidate_tile(&mut self, tile_id: &CanonicalTileID) {
         if let Some(state) = self.tile_states.remove(tile_id) {
             self.invalidate(tile_id, &state);
         }
     }
 
     /// Invalidates each tile that `bounds` intersect, at the tile's own zoom.
-    pub fn invalidate_region(&mut self, bounds: &LatLngBounds) {
+    fn invalidate_region(&mut self, bounds: &LatLngBounds) {
         let mut tile_ranges: HashMap<u8, TileRange> = HashMap::default();
         let intersecting: Vec<CanonicalTileID> = self
             .tile_states
@@ -220,7 +216,7 @@ impl<D: Clone> CustomTileLoader<D> {
             subscriber.tile.invalidate_tile_data();
         }
         if state.required() {
-            self.invoke_tile_cancel(tile_id);
+            self.calls.push(HostCall::Cancel(*tile_id));
         }
         self.data_cache.remove(tile_id);
     }
@@ -233,19 +229,217 @@ impl<D: Clone> CustomTileLoader<D> {
         };
         if !state.required() {
             state.fetching = false;
-            self.invoke_tile_cancel(tile_id);
+            self.calls.push(HostCall::Cancel(*tile_id));
+        }
+    }
+}
+
+/// A call that waits its turn on a provider's strand.
+type Call<D> = Box<dyn FnOnce(&CustomProvider<D>) + Send>;
+
+/// What a provider's lock guards: the tiles' state and the calls that wait.
+struct State<D: Clone + Send + 'static> {
+    loader: CustomTileLoader<D>,
+    queue: VecDeque<Call<D>>,
+    /// Whether a pool job is running the queue's calls.
+    draining: bool,
+}
+
+/// The provider of a custom source's tile data, between the tiles and the
+/// host: it asks the host for each canonical tile that a tile needs, once,
+/// and hands the host's answer to every tile that shares it.
+///
+/// Every call, from the tiles or from the host, waits its turn on the
+/// provider's strand: a queue under its lock, which one pool job at a time
+/// runs in order. The host's fetch and cancel functions run on that pool
+/// thread, one call at a time, in the order the tiles asked, and outside the
+/// lock, so a host may answer from inside its fetch function, on any thread.
+/// A call made after the provider is gone does nothing.
+pub struct CustomProvider<D: Clone + Send + 'static> {
+    fetch_tile_function: Option<TileFunction>,
+    cancel_tile_function: Option<TileFunction>,
+    state: Mutex<State<D>>,
+    pool: SchedulerPtr,
+    this: Weak<Self>,
+}
+
+impl<D: Clone + Send + 'static> CustomProvider<D> {
+    /// A provider whose host functions run on `pool`.
+    #[must_use]
+    pub fn new(
+        fetch_tile_function: Option<TileFunction>,
+        cancel_tile_function: Option<TileFunction>,
+        pool: SchedulerPtr,
+    ) -> Arc<Self> {
+        Arc::new_cyclic(|this| CustomProvider {
+            fetch_tile_function,
+            cancel_tile_function,
+            state: Mutex::new(State { loader: CustomTileLoader::new(), queue: VecDeque::new(), draining: false }),
+            pool,
+            this: Weak::clone(this),
+        })
+    }
+
+    /// Records that the tile `key`, `tile_id`, needs its data, which goes to
+    /// `tile`: the cached data if there is any, or else the host's answer.
+    pub fn fetch_tile(&self, tile_id: OverscaledTileID, key: SubscriberKey, tile: Box<dyn CustomTileSubscriber<D>>) {
+        self.with_loader(move |loader| loader.fetch_tile(&tile_id, key, tile));
+    }
+
+    /// Records that the tile no longer needs its data. It stays subscribed,
+    /// so it fetches again when it is next needed.
+    pub fn cancel_tile(&self, tile_id: OverscaledTileID, key: SubscriberKey) {
+        self.with_loader(move |loader| loader.cancel_tile(&tile_id, key));
+    }
+
+    /// Forgets a tile that is gone. The cached data goes with the last tile
+    /// that shares it.
+    pub fn remove_tile(&self, tile_id: OverscaledTileID, key: SubscriberKey) {
+        self.with_loader(move |loader| loader.remove_tile(&tile_id, key));
+    }
+
+    /// Hands over the host's data for a tile. It is dropped unless a tile
+    /// needs it.
+    pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: D) {
+        self.with_loader(move |loader| loader.set_tile_data(&tile_id, data));
+    }
+
+    /// Hands over the data that `make` makes, on the strand and outside
+    /// the lock, if a tile needs the canonical tile's data.
+    pub fn set_tile_data_with(&self, tile_id: CanonicalTileID, make: impl FnOnce() -> D + Send + 'static) {
+        self.enqueue(Box::new(move |provider| {
+            if provider.state.lock().loader.is_required(&tile_id) {
+                let data = make();
+                provider.locked(|loader| loader.set_tile_data(&tile_id, data));
+            }
+        }));
+    }
+
+    /// Reports that the host failed to load a tile. The tiles stay
+    /// subscribed, so invalidating the tile or needing it again fetches it
+    /// again.
+    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
+        self.with_loader(move |loader| loader.set_tile_error(&tile_id, &error));
+    }
+
+    /// Drops the tile's data, and asks the host for it again if a tile
+    /// needs it.
+    pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
+        self.with_loader(move |loader| loader.invalidate_tile(&tile_id));
+    }
+
+    /// Invalidates each tile that `bounds` intersect, at the tile's own zoom.
+    pub fn invalidate_region(&self, bounds: LatLngBounds) {
+        self.with_loader(move |loader| loader.invalidate_region(&bounds));
+    }
+
+    /// Runs `change` on the tiles' state on the strand, then the host calls
+    /// it asked for.
+    fn with_loader(&self, change: impl FnOnce(&mut CustomTileLoader<D>) + Send + 'static) {
+        self.enqueue(Box::new(move |provider| provider.locked(change)));
+    }
+
+    /// Runs `change` under the lock, then, outside it, the host calls it
+    /// asked for. Only the strand calls it.
+    fn locked(&self, change: impl FnOnce(&mut CustomTileLoader<D>)) {
+        let calls = {
+            let mut state = self.state.lock();
+            change(&mut state.loader);
+            std::mem::take(&mut state.loader.calls)
+        };
+        for call in calls {
+            let (function, tile_id) = match call {
+                HostCall::Fetch(tile_id) => (&self.fetch_tile_function, tile_id),
+                HostCall::Cancel(tile_id) => (&self.cancel_tile_function, tile_id),
+            };
+            if let Some(function) = function {
+                function(&tile_id);
+            }
         }
     }
 
-    fn invoke_tile_fetch(&self, tile_id: &CanonicalTileID) {
-        if let Some(fetch) = &self.fetch_tile_function {
-            fetch(tile_id);
+    /// Queues `call`, and starts a pool job that runs the queue unless one
+    /// runs.
+    fn enqueue(&self, call: Call<D>) {
+        let start = {
+            let mut state = self.state.lock();
+            state.queue.push_back(call);
+            !std::mem::replace(&mut state.draining, true)
+        };
+        if start {
+            let this = Weak::clone(&self.this);
+            self.pool.schedule(Box::new(move || {
+                if let Some(provider) = this.upgrade() {
+                    provider.drain();
+                }
+            }));
         }
     }
 
-    fn invoke_tile_cancel(&self, tile_id: &CanonicalTileID) {
-        if let Some(cancel) = &self.cancel_tile_function {
-            cancel(tile_id);
+    /// Runs the queued calls in order until the queue is empty.
+    fn drain(&self) {
+        loop {
+            let call = {
+                let mut state = self.state.lock();
+                if let Some(call) = state.queue.pop_front() { call } else {
+                    state.draining = false;
+                    return;
+                }
+            };
+            call(self);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::OnceLock;
+    use std::thread::ThreadId;
+
+    use super::*;
+
+    /// A tile that records the data it receives.
+    struct Recorder(Arc<Mutex<Vec<u32>>>);
+
+    impl CustomTileSubscriber<u32> for Recorder {
+        fn set_tile_data(&self, data: u32) {
+            self.0.lock().push(data);
+        }
+        fn set_tile_error(&self, _error: Error) {}
+        fn invalidate_tile_data(&self) {}
+    }
+
+    // The host's fetches run on a pool thread, in the order the tiles asked,
+    // and a fetch that answers from inside itself doesn't deadlock.
+    #[test]
+    fn host_calls_run_off_the_calling_thread_in_order_and_may_reenter() {
+        let pool = mln_actor::scheduler::get_background();
+        let fetches: Arc<Mutex<Vec<(ThreadId, CanonicalTileID)>>> = Arc::default();
+        let provider_cell: Arc<OnceLock<Weak<CustomProvider<u32>>>> = Arc::default();
+        let fetch: TileFunction = {
+            let (fetches, provider_cell) = (Arc::clone(&fetches), Arc::clone(&provider_cell));
+            Arc::new(move |tile_id: &CanonicalTileID| {
+                fetches.lock().push((std::thread::current().id(), *tile_id));
+                if let Some(provider) = provider_cell.get().and_then(Weak::upgrade) {
+                    provider.set_tile_data(*tile_id, tile_id.x);
+                }
+            })
+        };
+        let provider = CustomProvider::new(Some(fetch), None, Arc::clone(&pool));
+        let _ = provider_cell.set(Arc::downgrade(&provider));
+
+        let received: Arc<Mutex<Vec<u32>>> = Arc::default();
+        let tiles: Vec<_> = (0..8).map(|x| CanonicalTileID::new(3, x, 0)).collect();
+        for (key, tile) in tiles.iter().enumerate() {
+            let id = OverscaledTileID::new(3, 0, *tile);
+            provider.fetch_tile(id, key as SubscriberKey, Box::new(Recorder(Arc::clone(&received))));
+        }
+        pool.wait_for_empty();
+
+        let fetches = fetches.lock();
+        assert_eq!(tiles, fetches.iter().map(|(_, tile)| *tile).collect::<Vec<_>>());
+        let caller = std::thread::current().id();
+        assert!(fetches.iter().all(|(thread, _)| *thread != caller));
+        assert_eq!((0..8).collect::<Vec<u32>>(), *received.lock());
     }
 }

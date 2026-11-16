@@ -2,18 +2,17 @@
 //! demand. As for a custom geometry source, the host answers its tile
 //! functions through a [`CustomVectorSourceHandle`].
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
-use mln_actor::actor::{Actor, PoolActorRef};
 use mln_storage::Data;
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 use mln_util::range::Range;
 
+pub use super::custom::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
 use super::custom::{CustomVectorSourceOptions, CustomVectorSourceType};
-pub use super::custom::{CustomVectorTileData, CustomVectorTileLoader, TileDataFormat};
-use crate::custom_tile_loader::{CustomTileLoader, TileFunction};
+use crate::custom_tile_loader::{CustomProvider, TileFunction};
 use crate::source_type::{Source, SourceData};
 
 #[derive(Clone)]
@@ -42,12 +41,12 @@ impl std::fmt::Debug for Options {
     }
 }
 
-/// A `Send` handle to a custom vector source's loader, for the host to
+/// A `Send` handle to a custom vector source's provider, for the host to
 /// answer its tile functions from any thread. It does nothing once the
 /// source is gone.
 #[derive(Clone)]
 pub struct CustomVectorSourceHandle {
-    loader: PoolActorRef<CustomVectorTileLoader>,
+    provider: Weak<CustomVectorProvider>,
 }
 
 impl std::fmt::Debug for CustomVectorSourceHandle {
@@ -61,39 +60,44 @@ impl CustomVectorSourceHandle {
     #[must_use]
     pub fn of(source: &Source) -> Option<Self> {
         let data = SourceData::<CustomVectorSourceType>::recover(source)?;
-        Some(CustomVectorSourceHandle { loader: data.options.loader.self_ref() })
+        Some(CustomVectorSourceHandle { provider: Arc::downgrade(&data.options.provider) })
     }
 
     /// Hands over the tile's encoded bytes. `None` is a tile without data.
     pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: Option<Data>, format: TileDataFormat) {
-        self.loader.invoke(move |loader| loader.set_tile_data(&tile_id, (data, format)));
+        if let Some(provider) = self.provider.upgrade() {
+            provider.set_tile_data(tile_id, (data, format));
+        }
     }
 
     /// Reports that the host failed to load the tile. Invalidating the tile, or
     /// needing it again, asks for it again.
     pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
-        self.loader.invoke(move |loader| loader.set_tile_error(&tile_id, &error));
+        if let Some(provider) = self.provider.upgrade() {
+            provider.set_tile_error(tile_id, error);
+        }
     }
 
     /// Drops the tile's data, and asks the host for it again if a tile needs
     /// it.
     pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
-        self.loader.invoke(move |loader| loader.invalidate_tile(&tile_id));
+        if let Some(provider) = self.provider.upgrade() {
+            provider.invalidate_tile(tile_id);
+        }
     }
 
     /// Invalidates every tile that `bounds` intersect.
     pub fn invalidate_region(&self, bounds: LatLngBounds) {
-        self.loader.invoke(move |loader| loader.invalidate_region(&bounds));
+        if let Some(provider) = self.provider.upgrade() {
+            provider.invalidate_region(bounds);
+        }
     }
 }
 
 /// The custom vector source `id`, whose tile functions run on `pool`.
 #[must_use]
 pub fn create(id: &str, options: Options, pool: mln_actor::SchedulerPtr) -> Source {
-    let loader = Arc::new(Actor::new(pool, |_| {
-        CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function)
-    }));
-    let description = loader.self_ref();
-    let options = CustomVectorSourceOptions { zoom_range: options.zoom_range, loader };
-    Source::new(id, SourceData::<CustomVectorSourceType>::with_description(options, description))
+    let provider = CustomProvider::new(options.fetch_tile_function, options.cancel_tile_function, pool);
+    let options = CustomVectorSourceOptions { zoom_range: options.zoom_range, provider };
+    Source::new(id, SourceData::<CustomVectorSourceType>::new(options))
 }

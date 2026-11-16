@@ -1,16 +1,16 @@
 //! Custom geometry and custom vector sources: tiles whose data the host
-//! gives on demand, through tile functions that run on a background thread.
+//! gives on demand, through tile functions that run on a pool thread. Both
+//! types' sources hold a [`CustomProvider`] of their data.
 
 use std::sync::Arc;
 
-use mln_actor::actor::{Actor, PoolActorRef};
 use mln_storage::Data;
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::range::Range;
 
 use super::geojson::TileFeatures;
-use crate::custom_tile_loader::CustomTileLoader;
+use crate::custom_tile_loader::CustomProvider;
 use crate::layer_type::SourceKind;
 use crate::source_type::{SourceData, SourceTypeInfo, StyleSourceType};
 
@@ -45,12 +45,12 @@ pub enum TileDataFormat {
 /// The data a custom vector tile gets: its bytes, if any, and their format.
 pub type CustomVectorTileData = (Option<Data>, TileDataFormat);
 
-/// The loader of a custom geometry source: it hands tiles their features,
+/// The provider of a custom geometry source: it hands tiles their features,
 /// cut from the host's GeoJSON.
-pub type CustomGeometryTileLoader = CustomTileLoader<Arc<TileFeatures>>;
+pub type CustomGeometryProvider = CustomProvider<Arc<TileFeatures>>;
 
-/// The loader of a custom vector source.
-pub type CustomVectorTileLoader = CustomTileLoader<CustomVectorTileData>;
+/// The provider of a custom vector source.
+pub type CustomVectorProvider = CustomProvider<CustomVectorTileData>;
 
 /// The custom geometry source type, whose tiles' GeoJSON the host gives.
 pub struct CustomGeometrySourceType;
@@ -60,8 +60,8 @@ pub struct CustomGeometrySourceType;
 pub struct CustomGeometrySourceOptions {
     pub tile_options: Arc<TileOptions>,
     pub zoom_range: Range<u8>,
-    /// The tile loader, which lives as long as a version of the source.
-    pub loader: Arc<Actor<CustomGeometryTileLoader>>,
+    /// The provider of the source's tiles' data.
+    pub provider: Arc<CustomGeometryProvider>,
 }
 
 impl std::fmt::Debug for CustomGeometrySourceOptions {
@@ -82,8 +82,8 @@ impl StyleSourceType for CustomGeometrySourceType {
     };
 
     type Options = CustomGeometrySourceOptions;
-    /// A reference to the options' tile loader.
-    type Description = PoolActorRef<CustomGeometryTileLoader>;
+    /// None: the provider gives the source's data.
+    type Description = ();
 }
 
 impl SourceData<CustomGeometrySourceType> {
@@ -92,7 +92,7 @@ impl SourceData<CustomGeometrySourceType> {
     pub fn differs(&self, other: &Self) -> bool {
         !Arc::ptr_eq(&self.options.tile_options, &other.options.tile_options)
             || self.options.zoom_range != other.options.zoom_range
-            || self.description.is_some() != other.description.is_some()
+            || !Arc::ptr_eq(&self.options.provider, &other.options.provider)
     }
 }
 
@@ -103,8 +103,8 @@ pub struct CustomVectorSourceType;
 #[derive(Clone)]
 pub struct CustomVectorSourceOptions {
     pub zoom_range: Range<u8>,
-    /// The tile loader, which lives as long as a version of the source.
-    pub loader: Arc<Actor<CustomVectorTileLoader>>,
+    /// The provider of the source's tiles' data.
+    pub provider: Arc<CustomVectorProvider>,
 }
 
 impl std::fmt::Debug for CustomVectorSourceOptions {
@@ -122,14 +122,15 @@ impl StyleSourceType for CustomVectorSourceType {
     };
 
     type Options = CustomVectorSourceOptions;
-    /// A reference to the options' tile loader.
-    type Description = PoolActorRef<CustomVectorTileLoader>;
+    /// None: the provider gives the source's data.
+    type Description = ();
 }
 
 impl SourceData<CustomVectorSourceType> {
     /// Whether tiles made for one source don't suit the other.
     #[must_use]
     pub fn differs(&self, other: &Self) -> bool {
-        self.options.zoom_range != other.options.zoom_range || self.description.is_some() != other.description.is_some()
+        self.options.zoom_range != other.options.zoom_range
+            || !Arc::ptr_eq(&self.options.provider, &other.options.provider)
     }
 }

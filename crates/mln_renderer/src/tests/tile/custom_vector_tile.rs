@@ -1,15 +1,14 @@
-// As in custom_geometry_tile.rs, the loader is an actor on the test's run
-// loop, which the test reaches through messages.
+// As in custom_geometry_tile.rs, the provider's strand runs on the test's
+// run loop.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_actor::actor::{Actor, PoolActorRef};
-use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, TileFunction};
+use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, TileFunction};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
-use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVectorTileLoader, TileDataFormat};
+use mln_style::sources::custom_vector_source::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
@@ -21,17 +20,17 @@ use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
 use crate::tile::contents::Contents;
-use crate::tile::loading::{CustomLoaderOf, DataOrigin};
+use crate::tile::loading::DataOrigin;
 use crate::tile::tile::{TileKind, TileNecessity};
 use crate::tile::tile_workers::InlineWorkers;
 
-/// The loader actor, on the test's run loop.
+/// The provider, whose strand runs on the test's run loop.
 fn loader(
     run_loop: &mln_actor::RunLoop,
     fetch: Option<TileFunction>,
     cancel: Option<TileFunction>,
-) -> Actor<CustomVectorTileLoader> {
-    Actor::new(run_loop.scheduler(), |_| CustomTileLoader::new(fetch, cancel))
+) -> Arc<CustomVectorProvider> {
+    CustomProvider::new(fetch, cancel, run_loop.scheduler())
 }
 
 /// A tile function that counts its calls.
@@ -53,18 +52,10 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
     (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().push(*id)))
 }
 
-/// Tiles `ids` of a custom vector source whose loader is `loader`.
-fn tiles(test: &RasterTileTest, ids: &[OverscaledTileID], loader: PoolActorRef<CustomVectorTileLoader>) -> OneTile {
+/// Tiles `ids` of a custom vector source whose provider is `loader`.
+fn tiles(test: &RasterTileTest, ids: &[OverscaledTileID], loader: Arc<CustomVectorProvider>) -> OneTile {
     let store = crate::tests::tile_store(&test.run_loop, &test.thread_pool, Box::new(InlineWorkers));
-    let origin = DataOrigin::Custom(Arc::new(CustomLoaderOf {
-        loader,
-        convert: Arc::new(|(data, format): CustomVectorTileData| {
-            data.map(|data| match format {
-                TileDataFormat::Mvt => mln_tile::TileData::Mvt(mln_tile::MvtTile::new(data)),
-                TileDataFormat::Mlt => mln_tile::TileData::Mlt(mln_tile::MltTile::new(data, false)),
-            })
-        }),
-    }));
+    let origin = DataOrigin::Custom { loader, fast_pfor_enabled: false };
     OneTile::with_origin(store, TileKind::Geometry, false, origin, ids, mln_map_types::MapMode::Static)
 }
 
@@ -85,17 +76,17 @@ fn invalidate_failed_tile() {
     let loader = loader(&test.run_loop, Some(fetch), None);
 
     let root = OverscaledTileID::from_zxy(0, 0, 0);
-    let mut tiles = tiles(&test, &[root], loader.self_ref());
+    let mut tiles = tiles(&test, &[root], Arc::clone(&loader));
     tiles.set_necessity(&root, TileNecessity::Required);
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     let id = CanonicalTileID::new(0, 0, 0);
-    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, &Error::native("failed")));
+    loader.set_tile_error(id, Error::native("failed"));
     test.run_loop.wait_for_empty();
     tiles.store.receive();
 
-    loader.self_ref().invoke(move |loader| loader.invalidate_tile(&id));
+    loader.invalidate_tile(id);
     test.run_loop.wait_for_empty();
     tiles.store.receive();
 
@@ -113,14 +104,14 @@ fn fetch_failed_tile_again() {
     let loader = loader(&test.run_loop, Some(fetch), None);
 
     let id = OverscaledTileID::from_zxy(0, 0, 0);
-    loader.self_ref().invoke(move |loader| loader.fetch_tile(&id, 0, Box::new(NullSubscriber)));
+    loader.fetch_tile(id, 0, Box::new(NullSubscriber));
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
-    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id.canonical, &Error::native("failed")));
+    loader.set_tile_error(id.canonical, Error::native("failed"));
 
     // A tile that still shows older data doesn't cancel when it leaves the
     // view, so the next request for it has to ask the host again.
-    loader.self_ref().invoke(move |loader| loader.fetch_tile(&id, 0, Box::new(NullSubscriber)));
+    loader.fetch_tile(id, 0, Box::new(NullSubscriber));
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
@@ -136,7 +127,7 @@ fn cancel_one_copy() {
     // Two copies of one tile in neighboring worlds share its data.
     let root = OverscaledTileID::from_zxy(0, 0, 0);
     let second = OverscaledTileID::new(0, 1, CanonicalTileID::new(0, 0, 0));
-    let mut tiles = tiles(&test, &[root, second], loader.self_ref());
+    let mut tiles = tiles(&test, &[root, second], Arc::clone(&loader));
     tiles.set_necessity(&root, TileNecessity::Required);
     tiles.set_necessity(&second, TileNecessity::Required);
     test.run_loop.wait_for_empty();
@@ -153,7 +144,7 @@ fn cancel_one_copy() {
 
     // The copy that is still needed is still invalidated, and fetches again.
     let id = CanonicalTileID::new(0, 0, 0);
-    loader.self_ref().invoke(move |loader| loader.invalidate_tile(&id));
+    loader.invalidate_tile(id);
     test.run_loop.wait_for_empty();
     tiles.store.receive();
     tiles.set_necessity(&first, TileNecessity::Required);
@@ -180,7 +171,7 @@ fn invalidate_region() {
             tile_ids.push(OverscaledTileID::from_zxy(1, x, y));
         }
     }
-    let mut tiles = tiles(&test, &tile_ids, loader.self_ref());
+    let mut tiles = tiles(&test, &tile_ids, Arc::clone(&loader));
     for tile_id in &tile_ids {
         tiles.set_necessity(tile_id, TileNecessity::Required);
     }
@@ -190,7 +181,7 @@ fn invalidate_region() {
     // Cached data would otherwise answer the refetch.
     for tile_id in &tile_ids {
         let id = tile_id.canonical;
-        loader.self_ref().invoke(move |loader| loader.set_tile_data(&id, (None, TileDataFormat::Mvt)));
+        loader.set_tile_data(id, (None, TileDataFormat::Mvt));
     }
     test.run_loop.wait_for_empty();
     tiles.store.receive();
@@ -198,7 +189,7 @@ fn invalidate_region() {
 
     // Northeast of the origin, so it intersects the root tile, 1/1/0, and 2/2/1.
     let bounds = LatLngBounds::hull(LatLng::new(10.0, 10.0).unwrap(), LatLng::new(20.0, 20.0).unwrap());
-    loader.self_ref().invoke(move |loader| loader.invalidate_region(&bounds));
+    loader.invalidate_region(bounds);
     test.run_loop.wait_for_empty();
     tiles.store.receive();
 
@@ -223,7 +214,7 @@ fn set_mlt_tile_data() {
     let test = RasterTileTest::new();
     let loader = loader(&test.run_loop, None, None);
     let root = OverscaledTileID::from_zxy(0, 0, 0);
-    let mut tiles = tiles(&test, &[root], loader.self_ref());
+    let mut tiles = tiles(&test, &[root], Arc::clone(&loader));
 
     let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "water", "source").unwrap();
     layer.set_source_layer("water");
@@ -235,7 +226,7 @@ fn set_mlt_tile_data() {
 
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test/fixtures/map/issue12432/0-0-0.mlt");
     let data = Arc::new(std::fs::read(path).unwrap());
-    loader.self_ref().invoke(move |loader| loader.set_tile_data(&root.canonical, (Some(data), TileDataFormat::Mlt)));
+    loader.set_tile_data(root.canonical, (Some(data), TileDataFormat::Mlt));
     while !tiles.tile().is_complete() {
         test.run_loop.run_once();
         tiles.update();

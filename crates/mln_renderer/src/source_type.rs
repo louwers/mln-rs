@@ -14,11 +14,10 @@ use mln_map_types::MapMode;
 use mln_storage::FileSource;
 use mln_style::Source;
 use mln_style::source_type::{ErasedStyleSourceType, SourceData, SourceTypeEntry, StyleSourceType};
-use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
-use mln_style::sources::geojson::{GeoJSONData, TileFeatures};
+use mln_style::sources::custom::{CustomGeometryProvider, CustomVectorProvider};
+use mln_style::sources::geojson::GeoJSONData;
 use mln_style::sources::tileset::{RasterDemKind, RasterKind, TilesetKind, TilesetSourceType, VectorKind};
 use mln_style::sources::{CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType};
-use mln_tile::TileData;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
@@ -29,7 +28,7 @@ use crate::query::FeatureExtensionValue;
 use crate::render_source::RenderSource;
 use crate::sources::render_image_source::RenderImageSource;
 use crate::sources::render_tile_source::RenderTileSource;
-use crate::tile::loading::{CustomLoader, CustomLoaderOf, DataOrigin, VectorTileEncoding};
+use crate::tile::loading::{CustomLoader, DataOrigin, VectorTileEncoding};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreContext, TileStore};
 use crate::tile::tile::TileKind;
@@ -358,16 +357,16 @@ impl SourceType for CustomVectorSourceType {
     }
 }
 
-/// Points the tiles of a custom source at its loader. New options, zoom
-/// range or loader clear them.
+/// Points the tiles of a custom source at its provider. New options, zoom
+/// range or provider clear them.
 fn update_custom<T: StyleSourceType>(
     previous: &Source,
     source: &Source,
     tiles: &mut SourceTiles,
     ctx: &mut StoreContext,
+    update: &OriginUpdate<'_, '_>,
     differs: impl FnOnce(&SourceData<T>, &SourceData<T>) -> bool,
-    loader: impl FnOnce(&SourceData<T>) -> Option<Arc<dyn CustomLoader>>,
-    zoom_range: impl FnOnce(&SourceData<T>) -> (u16, Range<u8>),
+    parts: impl FnOnce(&SourceData<T>) -> (Arc<dyn CustomLoader>, u16, Range<u8>),
 ) -> Option<Cover> {
     let data = SourceData::<T>::recover(source)?;
     let same = Source::ptr_eq(previous, source);
@@ -375,17 +374,15 @@ fn update_custom<T: StyleSourceType>(
     if !same && differs {
         tiles.clear_all(ctx);
     }
-    let loader = loader(data);
-    let has_loader = loader.is_some();
+    let (loader, tile_size, zoom_range) = parts(data);
     if tiles.info.origin.is_none() || !same {
-        tiles.info.origin = loader.map(DataOrigin::Custom);
+        tiles.info.origin = Some(DataOrigin::Custom { loader, fast_pfor_enabled: update.fast_pfor_enabled });
     }
-    let (tile_size, zoom_range) = zoom_range(data);
-    has_loader.then_some(Cover { tile_size, zoom_range, bounds: None })
+    Some(Cover { tile_size, zoom_range, bounds: None })
 }
 
 /// A custom geometry source's tiles, which take their features from its
-/// loader.
+/// provider.
 struct CustomGeometryOrigin;
 
 impl TileOrigin for CustomGeometryOrigin {
@@ -395,28 +392,26 @@ impl TileOrigin for CustomGeometryOrigin {
         source: &Source,
         tiles: &mut SourceTiles,
         ctx: &mut StoreContext,
-        _update: &OriginUpdate<'_, '_>,
+        update: &OriginUpdate<'_, '_>,
     ) -> Option<Cover> {
         update_custom::<CustomGeometrySourceType>(
             previous,
             source,
             tiles,
             ctx,
+            update,
             SourceData::<CustomGeometrySourceType>::differs,
             |data| {
-                data.description.as_ref().map(|loader| -> Arc<dyn CustomLoader> {
-                    Arc::new(CustomLoaderOf {
-                        loader: loader.clone(),
-                        convert: Arc::new(|features: Arc<TileFeatures>| Some(TileData::Features(features))),
-                    })
-                })
+                let options = &data.options;
+                let provider: Arc<dyn CustomLoader> = Arc::<CustomGeometryProvider>::clone(&options.provider);
+                (provider, options.tile_options.tile_size, options.zoom_range)
             },
-            |data| (data.options.tile_options.tile_size, data.options.zoom_range),
         )
     }
 }
 
-/// A custom vector source's tiles, which decode the bytes its loader gives.
+/// A custom vector source's tiles, which decode the bytes its provider
+/// gives.
 struct CustomVectorOrigin;
 
 impl TileOrigin for CustomVectorOrigin {
@@ -428,27 +423,17 @@ impl TileOrigin for CustomVectorOrigin {
         ctx: &mut StoreContext,
         update: &OriginUpdate<'_, '_>,
     ) -> Option<Cover> {
-        let fast_pfor_enabled = update.fast_pfor_enabled;
         update_custom::<CustomVectorSourceType>(
             previous,
             source,
             tiles,
             ctx,
+            update,
             SourceData::<CustomVectorSourceType>::differs,
             |data| {
-                data.description.as_ref().map(|loader| -> Arc<dyn CustomLoader> {
-                    Arc::new(CustomLoaderOf {
-                        loader: loader.clone(),
-                        convert: Arc::new(move |(data, format): CustomVectorTileData| {
-                            data.map(|data| match format {
-                                TileDataFormat::Mvt => TileData::Mvt(mln_tile::MvtTile::new(data)),
-                                TileDataFormat::Mlt => TileData::Mlt(mln_tile::MltTile::new(data, fast_pfor_enabled)),
-                            })
-                        }),
-                    })
-                })
+                let provider: Arc<dyn CustomLoader> = Arc::<CustomVectorProvider>::clone(&data.options.provider);
+                (provider, constants::TILE_SIZE_I, data.options.zoom_range)
             },
-            |data| (constants::TILE_SIZE_I, data.options.zoom_range),
         )
     }
 }

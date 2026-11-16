@@ -1,11 +1,10 @@
 //! Custom geometry sources, whose tiles' GeoJSON the host gives on demand.
-//! The host answers its tile functions, which run on a background thread,
-//! through a [`CustomGeometrySourceHandle`].
+//! The host answers its tile functions, which run on a pool thread, through
+//! a [`CustomGeometrySourceHandle`].
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use geojson::GeoJson;
-use mln_actor::actor::{Actor, PoolActorRef};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
@@ -13,10 +12,10 @@ use mln_util::geo::LatLngBounds;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 
+pub use super::custom::{CustomGeometryProvider, TileOptions};
 use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType};
-pub use super::custom::{CustomGeometryTileLoader, TileOptions};
 use super::geojson::TileFeatures;
-use crate::custom_tile_loader::{CustomTileLoader, TileFunction};
+use crate::custom_tile_loader::{CustomProvider, TileFunction};
 use crate::source_type::{Source, SourceData};
 
 #[derive(Clone)]
@@ -87,12 +86,12 @@ fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options: &TileOpti
         .features
 }
 
-/// A `Send` handle to a custom geometry source's loader, for the host to
+/// A `Send` handle to a custom geometry source's provider, for the host to
 /// answer its tile functions from any thread. It does nothing once the
 /// source is gone.
 #[derive(Clone)]
 pub struct CustomGeometrySourceHandle {
-    loader: PoolActorRef<CustomGeometryTileLoader>,
+    provider: Weak<CustomGeometryProvider>,
     tile_options: Arc<TileOptions>,
 }
 
@@ -108,38 +107,41 @@ impl CustomGeometrySourceHandle {
     pub fn of(source: &Source) -> Option<Self> {
         let data = SourceData::<CustomGeometrySourceType>::recover(source)?;
         Some(CustomGeometrySourceHandle {
-            loader: data.options.loader.self_ref(),
+            provider: Arc::downgrade(&data.options.provider),
             tile_options: Arc::clone(&data.options.tile_options),
         })
     }
 
     /// Hands over the tile's features. The GeoJSON is cut to the tile on the
-    /// background thread, and only if a tile needs it.
+    /// provider's pool thread, and only if a tile needs it.
     pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJson) {
-        let options = Arc::clone(&self.tile_options);
-        self.loader.invoke(move |loader| {
-            if loader.is_required(&tile_id) {
-                let features = tile_features(data, &tile_id, &options);
-                loader.set_tile_data(&tile_id, Arc::new(features));
-            }
-        });
+        if let Some(provider) = self.provider.upgrade() {
+            let options = Arc::clone(&self.tile_options);
+            provider.set_tile_data_with(tile_id, move || Arc::new(tile_features(data, &tile_id, &options)));
+        }
     }
 
     /// Reports that the host failed to load the tile. Invalidating the tile, or
     /// needing it again, asks for it again.
     pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
-        self.loader.invoke(move |loader| loader.set_tile_error(&tile_id, &error));
+        if let Some(provider) = self.provider.upgrade() {
+            provider.set_tile_error(tile_id, error);
+        }
     }
 
     /// Drops the tile's data, and asks the host for it again if a tile needs
     /// it.
     pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
-        self.loader.invoke(move |loader| loader.invalidate_tile(&tile_id));
+        if let Some(provider) = self.provider.upgrade() {
+            provider.invalidate_tile(tile_id);
+        }
     }
 
     /// Invalidates every tile that `bounds` intersect.
     pub fn invalidate_region(&self, bounds: LatLngBounds) {
-        self.loader.invoke(move |loader| loader.invalidate_region(&bounds));
+        if let Some(provider) = self.provider.upgrade() {
+            provider.invalidate_region(bounds);
+        }
     }
 }
 
@@ -150,16 +152,13 @@ pub fn create(id: &str, options: Options, pool: mln_actor::SchedulerPtr) -> Resu
     if !tile_size.is_power_of_two() || i32::from(tile_size) > constants::EXTENT {
         return Err(CustomGeometrySourceError::InvalidTileSize(tile_size));
     }
-    let loader = Arc::new(Actor::new(pool, |_| {
-        CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function)
-    }));
-    let description = loader.self_ref();
+    let provider = CustomProvider::new(options.fetch_tile_function, options.cancel_tile_function, pool);
     let options = CustomGeometrySourceOptions {
         tile_options: Arc::new(options.tile_options),
         zoom_range: options.zoom_range,
-        loader,
+        provider,
     };
-    Ok(Source::new(id, SourceData::<CustomGeometrySourceType>::with_description(options, description)))
+    Ok(Source::new(id, SourceData::<CustomGeometrySourceType>::new(options)))
 }
 
 #[cfg(test)]
