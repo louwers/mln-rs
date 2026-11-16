@@ -60,28 +60,32 @@ const COLOR: TextureFormat = TextureFormat::Bgra8Unorm;
 const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 const FLAGS: DXGI_SWAP_CHAIN_FLAG = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 
-/// What a composition swap chain is shown by.
-pub enum Composition {
-    /// An `IDCompositionVisual`, whose content the target sets to its swap
-    /// chain.
+/// What a composition swap chain is shown by: an `IDCompositionVisual`,
+/// whose content the target sets to its swap chain, or a XAML
+/// `SwapChainPanel`'s `ISwapChainPanelNative`, of `WinUI` or UWP, whose swap
+/// chain the target sets. A `SwapChainPanel` takes its swap chain only on its
+/// UI thread, so make the target there.
+pub struct Composition(Shown);
+
+enum Shown {
     Visual(IDCompositionVisual),
-    /// A XAML `SwapChainPanel`'s `ISwapChainPanelNative`, of `WinUI` or UWP,
-    /// whose swap chain the target sets.
+    /// An object that a query found to be an `ISwapChainPanelNative`.
     SwapChainPanel(IUnknown),
 }
 
-// SAFETY: DirectComposition's visuals and a `SwapChainPanel`'s native
-// interface may be called from any thread; the target that holds one is on
-// one at a time.
+// SAFETY: DirectComposition's objects may be called from any thread, and a
+// `SwapChainPanel`'s native interface is only moved, and called on its UI
+// thread (`SurfaceTarget::for_composition`); the target that holds one is on
+// one thread at a time.
 unsafe impl Send for Composition {}
 // SAFETY: as above.
 unsafe impl Sync for Composition {}
 
 impl std::fmt::Debug for Composition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Composition::Visual(_) => f.write_str("Composition::Visual"),
-            Composition::SwapChainPanel(_) => f.write_str("Composition::SwapChainPanel"),
+        match self.0 {
+            Shown::Visual(_) => f.write_str("Composition::Visual"),
+            Shown::SwapChainPanel(_) => f.write_str("Composition::SwapChainPanel"),
         }
     }
 }
@@ -102,7 +106,7 @@ impl Composition {
         // SAFETY: the caller's contract; the clone adds a reference.
         unsafe { IDCompositionVisual::from_raw_borrowed(&visual) }
             .cloned()
-            .map(Composition::Visual)
+            .map(|visual| Composition(Shown::Visual(visual)))
             .ok_or_else(|| Error::invalid_argument("a DirectComposition visual is a live IDCompositionVisual"))
     }
 
@@ -124,15 +128,22 @@ impl Composition {
             .ok()
             .map_err(|_| Error::invalid_argument("the object is no ISwapChainPanelNative"))?;
         // SAFETY: the query returned a referenced interface pointer.
-        Ok(Composition::SwapChainPanel(unsafe { IUnknown::from_raw(native) }))
+        Ok(Composition(Shown::SwapChainPanel(unsafe { IUnknown::from_raw(native) })))
+    }
+
+    /// Whether it is a `SwapChainPanel`, which takes its swap chain only on
+    /// its UI thread.
+    #[must_use]
+    pub fn is_swap_chain_panel(&self) -> bool {
+        matches!(self.0, Shown::SwapChainPanel(_))
     }
 
     /// Shows `swap_chain`.
     fn show(&self, swap_chain: &IDXGISwapChain1) -> windows::core::Result<()> {
-        match self {
+        match &self.0 {
             // SAFETY: plain calls of live objects.
-            Composition::Visual(visual) => unsafe { visual.SetContent(swap_chain) },
-            Composition::SwapChainPanel(panel) => {
+            Shown::Visual(visual) => unsafe { visual.SetContent(swap_chain) },
+            Shown::SwapChainPanel(panel) => {
                 // `ISwapChainPanelNative::SetSwapChain`, the method after
                 // IUnknown's: windows-rs has no XAML.
                 type SetSwapChain = unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT;
@@ -257,7 +268,8 @@ impl SurfaceTarget {
 
     /// A target on `backend` that presents through a composition swap chain
     /// of `size` pixels, which `composition` shows. A `DirectComposition`
-    /// visual shows it once the host commits its device.
+    /// visual shows it once the host commits its device. Make the target of a
+    /// `SwapChainPanel` on the panel's UI thread.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when DXGI makes
     /// no swap chain, or `composition` takes none.

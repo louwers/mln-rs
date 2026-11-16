@@ -483,9 +483,13 @@ pub(crate) enum SurfaceKind {
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
     Gl(mln_gl::HostSurface),
     /// What shows a D3D12 composition swap chain: a `DirectComposition`
-    /// visual or a XAML `SwapChainPanel`.
+    /// visual or a XAML `SwapChainPanel`, and the thread that made the
+    /// surface, which a `SwapChainPanel` takes its swap chain on.
     #[cfg(all(feature = "d3d12", windows))]
-    D3d12Composition(mln_d3d12::Composition),
+    D3d12Composition {
+        composition: mln_d3d12::Composition,
+        thread: std::thread::ThreadId,
+    },
     /// In the browser, an `OffscreenCanvas` or an `HTMLCanvasElement`, on
     /// the instance's one thread.
     #[cfg(target_family = "wasm")]
@@ -603,10 +607,17 @@ impl Surface {
     /// use of it, as a window must. The swap chain has the target's size in
     /// pixels, with premultiplied alpha; the host scales its visual for the
     /// display's scale factor.
+    ///
+    /// A `SwapChainPanel` takes its swap chain only on its UI thread: make
+    /// the surface there, and attach it with [`Driver::CallerThread`],
+    /// serviced on that thread. A session that makes its swap chain on
+    /// another thread fails with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind).
     #[cfg(all(feature = "d3d12", windows))]
     #[must_use]
     pub fn d3d12_composition(composition: mln_d3d12::Composition) -> Surface {
-        Surface { kind: SurfaceKind::D3d12Composition(composition), overlay: None }
+        let kind = SurfaceKind::D3d12Composition { composition, thread: std::thread::current().id() };
+        Surface { kind, overlay: None }
     }
 
     /// The surface, with `overlay` drawn over each frame that a session
@@ -713,7 +724,7 @@ impl Surface {
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             SurfaceKind::Gl(_) => false,
             #[cfg(all(feature = "d3d12", windows))]
-            SurfaceKind::D3d12Composition(_) => true,
+            SurfaceKind::D3d12Composition { .. } => true,
             #[cfg(target_family = "wasm")]
             SurfaceKind::WebCanvas { .. } => true,
         }

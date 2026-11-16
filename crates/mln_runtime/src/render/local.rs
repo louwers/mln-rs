@@ -475,7 +475,13 @@ impl Backend {
                 Ok(Box::new(target))
             }
             #[cfg(all(feature = "d3d12", windows))]
-            (Backend::D3d12(backend), SurfaceKind::D3d12Composition(composition)) => {
+            (Backend::D3d12(backend), SurfaceKind::D3d12Composition { composition, thread }) => {
+                if composition.is_swap_chain_panel() && thread != std::thread::current().id() {
+                    return Err(Error::unsupported(
+                        "a SwapChainPanel takes its swap chain on its UI thread, which made the surface: attach it \
+                         with Driver::CallerThread, serviced there",
+                    ));
+                }
                 let overlay = d3d12_overlay(overlay)?;
                 let target = mln_d3d12::SurfaceTarget::for_composition(Rc::clone(backend), composition, size)?;
                 target.set_overlay(overlay);
@@ -558,7 +564,7 @@ fn webgpu_surface(backend: &mln_webgpu::RendererBackend, kind: SurfaceKind) -> R
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         SurfaceKind::Gl(_) => return Err(Error::unsupported("an EGL surface presents on an OpenGL device")),
         #[cfg(all(feature = "d3d12", windows))]
-        SurfaceKind::D3d12Composition(_) => {
+        SurfaceKind::D3d12Composition { .. } => {
             return Err(Error::unsupported("a composition swap chain presents on a D3D12 device"));
         }
     };
@@ -968,7 +974,7 @@ fn default_surface_device(surface: &Surface) -> Result<Device, Error> {
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         SurfaceKind::Gl(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
         #[cfg(all(feature = "d3d12", windows))]
-        SurfaceKind::D3d12Composition(_) => {
+        SurfaceKind::D3d12Composition { .. } => {
             Device::with_backend(super::target::BackendType::D3D12, DeviceOptions::default())
         }
         // A WebGPU build asked the browser for a device before the build.
