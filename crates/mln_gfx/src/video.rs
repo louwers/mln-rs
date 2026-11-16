@@ -139,9 +139,13 @@ pub enum GpuFrame {
     /// A `CVPixelBufferRef` backed by an IOSurface, which the frame
     /// retains: BGRA, or biplanar 4:2:0 YUV.
     CvPixelBuffer { buffer: *mut std::ffi::c_void, color: YuvColor },
-    /// A D3D11 texture's shared NT handle, which the frame owns: BGRA or
-    /// NV12.
-    DxgiSharedHandle { handle: isize, layout: PlaneLayout, color: YuvColor },
+    /// A D3D11 or D3D12 texture's shared NT handle, which the frame closes
+    /// when it drops: BGRA ([`PlaneLayout::Rgba`]) or NV12. The producer's
+    /// writes to the texture have finished when it hands the frame over, and
+    /// it doesn't write the texture again: the importer waits for no keyed
+    /// mutex or fence.
+    #[cfg(windows)]
+    DxgiSharedHandle { handle: std::os::windows::io::OwnedHandle, layout: PlaneLayout, color: YuvColor },
     /// A JS `ImageBitmap` or `VideoFrame`, in the browser.
     #[cfg(target_family = "wasm")]
     Web(WebImage),
@@ -236,6 +240,7 @@ impl GpuFrame {
             GpuFrame::DmaBuf { .. } => "dmabuf",
             GpuFrame::AndroidHardwareBuffer { .. } => "Android hardware buffer",
             GpuFrame::CvPixelBuffer { .. } => "CVPixelBuffer",
+            #[cfg(windows)]
             GpuFrame::DxgiSharedHandle { .. } => "DXGI shared handle",
             #[cfg(target_family = "wasm")]
             GpuFrame::Web(_) => "browser image",
