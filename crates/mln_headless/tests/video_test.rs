@@ -11,6 +11,7 @@ use mln_gfx::video::{CpuPlane, FramePixels, VideoFrame, YuvColor, YuvMatrix, Yuv
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
 use mln_storage::FileSource;
+use mln_style_types::VisibilityType;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_video::{OpenRequest, VideoPlayer, VideoPlayers};
@@ -208,6 +209,16 @@ fn shows_quarters(image: &PremultipliedImage, expected: [[u8; 3]; 4], tolerance:
 /// Checks the center of each quarter of the view.
 fn assert_quarters(image: &PremultipliedImage, what: &str) {
     assert!(shows_quarters(image, QUARTERS, 3), "{what}: {:?}, expected {QUARTERS:?}", quarter_colors(image));
+}
+
+#[test]
+fn a_hidden_video_lets_a_still_finish() {
+    let mut video = VideoMap::new(Arc::new(OneFrame(Mutex::new(Some(rgba_frame(Size::new(16, 16)))))), None);
+    let layer = video.map.style_mut().get_layer_mut("video");
+    layer.expect("the video layer").set_visibility(VisibilityType::None);
+    video.render();
+    video.map.style_mut().get_layer_mut("video").expect("the video layer").set_visibility(VisibilityType::Visible);
+    assert_quarters(&video.render(), "shown after it was hidden");
 }
 
 #[test]
