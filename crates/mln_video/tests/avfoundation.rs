@@ -31,7 +31,7 @@ mod apple {
     /// A two-second, 10 fps, 128x96 H.264 video whose quarters are four
     /// colors for its first second, and the same colors in other places for
     /// its second.
-    const QUARTERS: &[u8] = include_bytes!("fixtures/quarters.mp4");
+    const QUARTERS: &[u8] = include_bytes!("fixtures/quarters-apple.mp4");
     const SIZE: Size = Size { width: 128, height: 96 };
     const FIRST: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [64, 128, 192]];
     const SECOND: [[u8; 3]; 4] = [FIRST[2], FIRST[0], FIRST[3], FIRST[1]];
