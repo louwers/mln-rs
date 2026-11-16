@@ -3264,8 +3264,7 @@ fn main(in: VertexInput) -> VertexOutput {
     var tex_y_a = drawable.tex_y_a;
     var tex_y_b = drawable.tex_y_b;
 #ifndef HAS_UNIFORM_u_dasharray
-    // The feature's pattern in the bucket's atlas: its middle row, its rows
-    // and its length.
+    // The dash attribute: the pattern's middle row, row span and length.
     patternscale_a = vec2<f32>(drawable.patternscale_a.x / in.dasharray.z, -in.dasharray.y / 2.0 / drawable.atlas_height);
     patternscale_b = vec2<f32>(drawable.patternscale_b.x / in.dasharray.z, patternscale_a.y);
     tex_y_a = (in.dasharray.x + 0.5) / drawable.atlas_height;
@@ -4177,8 +4176,7 @@ fn main(in: VertexInput) -> VertexOutput {
     var tex_y_a = drawable.tex_y_a;
     var tex_y_b = drawable.tex_y_b;
 #ifndef HAS_UNIFORM_u_dasharray
-    // The feature's pattern in the bucket's atlas: its middle row, its rows
-    // and its length.
+    // The dash attribute: the pattern's middle row, row span and length.
     patternscale_a = vec2<f32>(drawable.patternscale_a.x / in.dasharray.z, -in.dasharray.y / 2.0 / drawable.atlas_height);
     patternscale_b = vec2<f32>(drawable.patternscale_b.x / in.dasharray.z, patternscale_a.y);
     tex_y_a = (in.dasharray.x + 0.5) / drawable.atlas_height;

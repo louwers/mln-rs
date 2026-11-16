@@ -3300,8 +3300,7 @@ lowp float floorwidth = u_floorwidth;
     highp float tex_y_a = u_tex_y_a;
     highp float tex_y_b = u_tex_y_b;
 #else
-    // The feature's pattern in the bucket's atlas: its middle row, its rows
-    // and its length.
+    // The dash attribute: the pattern's middle row, row span and length.
     highp vec2 patternscale_a = vec2(u_patternscale_a.x / a_dasharray.z, -a_dasharray.y / 2.0 / u_atlas_height);
     highp vec2 patternscale_b = vec2(u_patternscale_b.x / a_dasharray.z, patternscale_a.y);
     highp float tex_y_a = (a_dasharray.x + 0.5) / u_atlas_height;
@@ -4167,8 +4166,7 @@ lowp float floorwidth = u_floorwidth;
     highp float tex_y_a = u_tex_y_a;
     highp float tex_y_b = u_tex_y_b;
 #else
-    // The feature's pattern in the bucket's atlas: its middle row, its rows
-    // and its length.
+    // The dash attribute: the pattern's middle row, row span and length.
     highp vec2 patternscale_a = vec2(u_patternscale_a.x / a_dasharray.z, -a_dasharray.y / 2.0 / u_atlas_height);
     highp vec2 patternscale_b = vec2(u_patternscale_b.x / a_dasharray.z, patternscale_a.y);
     highp float tex_y_a = (a_dasharray.x + 0.5) / u_atlas_height;

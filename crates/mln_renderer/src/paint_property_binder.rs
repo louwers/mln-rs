@@ -611,11 +611,9 @@ impl CrossFadedPaintPropertyBinder<Image> {
     }
 }
 
-/// The binder of `line-dasharray`. A dash array that differs by feature puts
-/// each feature's pattern, at the tile's zoom, in the bucket's [`DashAtlas`],
-/// and gives its vertices the pattern's place there (`DashEntry`: the middle
-/// row, the rows and the length) as four floats, the last unused. As the
-/// patterns, it doesn't fade from the pattern at the zoom before.
+/// The binder of `line-dasharray`. Where the dash array differs by feature,
+/// each feature's vertices hold its pattern's [`DashEntry`] in the bucket's
+/// [`DashAtlas`], as four floats with the last unused.
 #[derive(Debug, mln_wire::Wire)]
 pub(crate) enum DashArrayBinder {
     Constant,
@@ -628,7 +626,6 @@ pub(crate) struct PerFeatureDashes {
     expression: PropertyExpression<Vec<f32>>,
     default_value: Vec<f32>,
     zoom: f32,
-    /// `line-cap`, which gives a feature round dashes.
     cap: Evaluated<LineCapType>,
     atlas: DashAtlas,
     vertex_data: InterleavedVertexData,
@@ -653,7 +650,7 @@ impl DashArrayBinder {
         }
     }
 
-    /// Sets the bucket's `line-cap`.
+    /// Sets the `line-cap` that gives a feature round dashes.
     pub(crate) fn set_line_cap(&mut self, line_cap: &Evaluated<LineCapType>) {
         if let DashArrayBinder::PerFeature(dashes) = self {
             dashes.cap.clone_from(line_cap);

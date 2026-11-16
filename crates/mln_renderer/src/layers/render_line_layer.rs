@@ -789,8 +789,8 @@ impl RenderLayer for RenderLineLayer {
 
             let has_dasharray =
                 !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
-            // Where the dash array differs by feature, the bucket's patterns;
-            // otherwise the tweaker binds the layer's from the line atlas.
+            // A constant dash array's texture comes from the line atlas, in
+            // the tweaker.
             let dash_texture = if evaluated.line_dasharray.is_constant() {
                 None
             } else {

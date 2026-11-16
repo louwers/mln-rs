@@ -57,9 +57,9 @@ pub(crate) struct LineDrawableData {
     pub(crate) line_pattern_cap: LinePatternCap,
 }
 
-/// Where a dash drawable samples its patterns. With a dash array that
-/// differs by feature, the scales' x is the tile ratio, which the shaders
-/// divide by each pattern's length, and the gamma is divided by it too.
+/// Where a dash drawable samples its patterns. Where the dash array differs
+/// by feature, the shaders divide the scales' x and the gamma by each
+/// pattern's length.
 struct SdfPatterns {
     patternscale_a: [f32; 2],
     patternscale_b: [f32; 2],
@@ -306,11 +306,9 @@ impl LayerTweaker for LineLayerTweaker {
                         if line_type == LineType::GradientSdf { ID_LINE_DASH_TEXTURE } else { ID_LINE_IMAGE_TEXTURE };
                     let tile_ratio = |scale: f32| 1.0 / tile_id.pixels_to_tile_units(scale, f32::from(int_zoom));
                     let sdf = if let Some(atlas) = binders.line_dasharray.atlas() {
-                        // The vertices hold the patterns' places in the
-                        // bucket's atlas, the drawable's texture. Both
-                        // samples are of the pattern at this zoom, at the
-                        // cross-fade's two scales, as for a constant pattern
-                        // that doesn't change with the zoom.
+                        // Per-feature patterns don't fade from the zoom
+                        // before: both samples are of this zoom's pattern,
+                        // at the cross-fade's two scales.
                         let atlas_size = atlas.image().size;
                         let min_scale = crossfade.from_scale.min(crossfade.to_scale);
                         Some(SdfPatterns {

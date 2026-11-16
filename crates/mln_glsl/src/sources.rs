@@ -4996,8 +4996,7 @@ void main() {
     const float tex_y_a = drawable.tex_y_a;
     const float tex_y_b = drawable.tex_y_b;
 #else
-    // The feature's pattern in the bucket's atlas: its middle row, its rows
-    // and its length.
+    // The dash attribute: the pattern's middle row, row span and length.
     const vec2 patternscale_a = vec2(drawable.patternscale_a.x / in_dasharray.z, -in_dasharray.y / 2.0 / drawable.atlas_height);
     const vec2 patternscale_b = vec2(drawable.patternscale_b.x / in_dasharray.z, patternscale_a.y);
     const float tex_y_a = (in_dasharray.x + 0.5) / drawable.atlas_height;
@@ -5340,8 +5339,7 @@ void main() {
     const float tex_y_a = drawable.tex_y_a;
     const float tex_y_b = drawable.tex_y_b;
 #else
-    // The feature's pattern in the bucket's atlas: its middle row, its rows
-    // and its length.
+    // The dash attribute: the pattern's middle row, row span and length.
     const vec2 patternscale_a = vec2(drawable.patternscale_a.x / in_dasharray.z, -in_dasharray.y / 2.0 / drawable.atlas_height);
     const vec2 patternscale_b = vec2(drawable.patternscale_b.x / in_dasharray.z, patternscale_a.y);
     const float tex_y_a = (in_dasharray.x + 0.5) / drawable.atlas_height;

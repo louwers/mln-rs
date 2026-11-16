@@ -4653,8 +4653,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float tex_y_a = drawable.tex_y_a;
     const float tex_y_b = drawable.tex_y_b;
 #else
-    // The feature's pattern in the bucket's atlas: its middle row, its rows
-    // and its length.
+    // The dash attribute: the pattern's middle row, row span and length.
     const float2 patternscale_a = float2(drawable.patternscale_a.x / vertx.dasharray.z, -vertx.dasharray.y / 2.0 / drawable.atlas_height);
     const float2 patternscale_b = float2(drawable.patternscale_b.x / vertx.dasharray.z, patternscale_a.y);
     const float tex_y_a = (vertx.dasharray.x + 0.5) / drawable.atlas_height;
@@ -5855,8 +5854,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float tex_y_a = drawable.tex_y_a;
     const float tex_y_b = drawable.tex_y_b;
 #else
-    // The feature's pattern in the bucket's atlas: its middle row, its rows
-    // and its length.
+    // The dash attribute: the pattern's middle row, row span and length.
     const float2 patternscale_a = float2(drawable.patternscale_a.x / vertx.dasharray.z, -vertx.dasharray.y / 2.0 / drawable.atlas_height);
     const float2 patternscale_b = float2(drawable.patternscale_b.x / vertx.dasharray.z, patternscale_a.y);
     const float tex_y_a = (vertx.dasharray.x + 0.5) / drawable.atlas_height;
