@@ -2,10 +2,10 @@
 // the host, with what the host waits for before it reads them, and what the
 // target waits for before it draws into a texture the host read.
 //
-// The waits and signals are fences on the device's queue: the frame's first
-// submit waits for the host's reads of its texture, and its last signals the
-// ring's fence. A host that submits its reads to the device's queue needs
-// neither.
+// The waits and signals are fences on the device's queue: the submit of the
+// frame's first pass into a texture waits for the host's reads of it, and the
+// frame's last submit signals the ring's fence. A host that submits its reads
+// to the device's queue needs neither.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -207,12 +207,13 @@ impl SharedFence {
 }
 
 /// What the next frame drawn into a slot waits for: the host's fence and
-/// the value its reads reach, and whether the frame begun on the slot has
-/// handed it to the queue.
+/// the value its reads reach.
 #[derive(Clone, Default)]
 struct Slot {
     wait: Option<(ID3D12Fence, u64)>,
-    attached: bool,
+    /// The texture that has the next pass that draws into it wait for
+    /// `wait`, from the frame begun on the slot until it ends.
+    attached: Option<TextureId>,
 }
 
 /// The format of the depth and stencil texture of the target's own.
@@ -372,7 +373,8 @@ impl BorrowedTarget {
         let Some(state) = slots.get_mut(slot) else {
             return Err(Error::invalid_argument("the ring has no such slot"));
         };
-        *state = Slot { wait, attached: false };
+        self.detach(state);
+        state.wait = wait;
         Ok(())
     }
 
@@ -396,8 +398,23 @@ impl BorrowedTarget {
     /// again.
     pub fn discard(&self, slot: usize) {
         if let Some(state) = self.slots.borrow_mut().get_mut(slot) {
-            *state = Slot::default();
+            self.detach(state);
+            state.wait = None;
         }
+    }
+
+    /// Has no submit wait for what `slot` waits for.
+    fn detach(&self, slot: &mut Slot) {
+        if let Some(texture) = slot.attached.take() {
+            self.backend.d3d12_gpu().forget_waits(texture);
+        }
+    }
+
+    /// The host's reads that `waits` end with, and the frames submitted so
+    /// far, which the host may use the textures after.
+    fn pending(&self, waits: impl IntoIterator<Item = (ID3D12Fence, u64)>) -> PendingReads {
+        let submitted = self.backend.d3d12_gpu().last_submit();
+        PendingReads { waits: waits.into_iter().chain([submitted]).collect() }
     }
 
     /// Draws into `textures` from now on, which must be as many, of the
@@ -424,8 +441,9 @@ impl BorrowedTarget {
             }
         }
         textures.check(self.backend.d3d12_gpu().device())?;
-        // The old imports go: the `Gpu` keeps the textures until the work
-        // that uses them finishes.
+        // The old imports go, and what they wait for with them: the `Gpu`
+        // keeps the textures until the work that uses them finishes, and the
+        // slots keep the host's fences.
         *self.imports.borrow_mut() = Imports::new(&self.backend, &textures)?;
 
         let old = std::mem::replace(&mut *self.textures.borrow_mut(), textures);
@@ -445,17 +463,21 @@ impl BorrowedTarget {
                     .and_then(|index| previous.get_mut(index))
                     .and_then(|slot| slot.wait.take())
             })
-            .map(|wait| Slot { wait, attached: false })
+            .map(|wait| Slot { wait, attached: None })
             .collect();
         *slots = kept;
-        Ok(PendingReads { waits: previous.into_iter().filter_map(|slot| slot.wait).collect() })
+        Ok(self.pending(previous.into_iter().filter_map(|slot| slot.wait)))
     }
 
     /// Takes what the ring's textures still wait for, the host's reads of
-    /// them, for the ring to wait for before it lets go of the textures.
+    /// them, and the frames submitted so far, for the ring to wait for before
+    /// it lets go of the textures.
     pub fn take_pending(&self) -> PendingReads {
         let mut slots = self.slots.borrow_mut();
-        PendingReads { waits: slots.iter_mut().filter_map(|slot| std::mem::take(slot).wait).collect() }
+        for slot in slots.iter_mut() {
+            self.detach(slot);
+        }
+        self.pending(slots.iter_mut().filter_map(|slot| slot.wait.take()).collect::<Vec<_>>())
     }
 
     /// The sync the host waits for, once the frame was submitted.
@@ -479,18 +501,19 @@ impl BorrowedTarget {
 }
 
 impl FrameTarget for BorrowedTarget {
-    /// The selected slot's texture, whose frame's submits wait for the
-    /// host's reads first.
+    /// The selected slot's texture, which the frame's first pass that draws
+    /// into it waits for the host's reads before.
     fn begin_frame(&self) -> Option<FrameImage> {
         let slot = self.selected.get();
         let image = self.imports.borrow().frame_image(slot)?;
         let mut slots = self.slots.borrow_mut();
+        // A frame begun again keeps the wait it attached.
         if let Some(state) = slots.get_mut(slot)
-            && !state.attached
+            && state.attached != Some(image.color)
             && let Some((fence, value)) = &state.wait
         {
-            self.backend.d3d12_gpu().wait_before_next_submit(fence.clone(), *value);
-            state.attached = true;
+            self.backend.d3d12_gpu().wait_before_using(image.color, fence.clone(), *value);
+            state.attached = Some(image.color);
         }
         Some(image)
     }
@@ -499,11 +522,13 @@ impl FrameTarget for BorrowedTarget {
     /// after it.
     fn end_frame(&self) -> Handoff {
         let slot = self.selected.get();
-        if self.imports.borrow().color.get(slot).is_none() {
+        let Some(color) = self.imports.borrow().color.get(slot).copied() else {
             return Handoff::Dropped;
-        }
+        };
         let submitted = {
             let mut gpu = self.backend.d3d12_gpu();
+            // What no pass took yet, such as where the frame drew nothing.
+            gpu.take_waits_into_next_submit(color);
             if let Some(fence) = &self.fence {
                 let value = self.fence_value.get() + 1;
                 self.fence_value.set(value);
@@ -513,9 +538,9 @@ impl FrameTarget for BorrowedTarget {
         };
         // The frame's submits took what the slot waited for.
         if let Some(state) = self.slots.borrow_mut().get_mut(slot)
-            && state.attached
+            && state.attached.take() == Some(color)
         {
-            *state = Slot::default();
+            state.wait = None;
         }
         if let Err(error) = submitted {
             Log::error(Event::Render, format!("Submitting a borrowed texture's frame failed: {error}"));
@@ -528,9 +553,9 @@ impl FrameTarget for BorrowedTarget {
     }
 }
 
-/// The host's reads of textures that a ring let go of, which the ring
-/// waits for before the host may use or destroy the textures. Dropping it
-/// stops waiting.
+/// The host's reads of textures that a ring let go of, and the ring's frames
+/// into them, which the ring waits for before the host may use or destroy the
+/// textures. Dropping it stops waiting.
 pub struct PendingReads {
     waits: Vec<(ID3D12Fence, u64)>,
 }
@@ -542,14 +567,6 @@ impl PendingReads {
         // SAFETY: a plain query.
         self.waits.retain(|(fence, value)| unsafe { fence.GetCompletedValue() } < *value);
         self.waits.is_empty()
-    }
-}
-
-impl Drop for BorrowedTarget {
-    /// Waits for the frames' work, which the host may destroy the textures
-    /// after.
-    fn drop(&mut self) {
-        let _ = self.backend.d3d12_gpu().flush(true);
     }
 }
 

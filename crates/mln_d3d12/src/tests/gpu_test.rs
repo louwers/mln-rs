@@ -196,3 +196,54 @@ fn small_readbacks_waiting_at_once_read_their_rows() {
         assert_eq!(read, texels[y * 16..(y + 1) * 16], "row {y}");
     }
 }
+
+// A texture's wait holds back only the submit of a pass that draws into it:
+// a pass into another texture runs at once, and the wait, once forgotten,
+// holds back nothing.
+#[test]
+fn a_textures_wait_holds_back_only_its_passes() {
+    use mln_gfx::gpu::{ColorAttachment, LoadOp, PassDesc, TextureDesc, TextureFormat, TextureUsage};
+    use mln_util::size::Size;
+    use windows::Win32::Graphics::Direct3D12::{D3D12_FENCE_FLAG_NONE, ID3D12Fence};
+
+    let mut gpu = gpu();
+    let texture = |gpu: &mut D3d12Gpu| {
+        let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
+        let desc = TextureDesc { label: "target", size: Size::new(4, 4), format: TextureFormat::Rgba8Unorm, usage };
+        gpu.create_texture(&desc).expect("a texture")
+    };
+    let (held, free) = (texture(&mut gpu), texture(&mut gpu));
+    // SAFETY: a plain call of the live device.
+    let host: ID3D12Fence = unsafe { gpu.device().device().CreateFence(0, D3D12_FENCE_FLAG_NONE) }.unwrap();
+    gpu.wait_before_using(held, host.clone(), 1);
+    let clear = |gpu: &mut D3d12Gpu, texture| {
+        let color = Some(ColorAttachment { texture, load: LoadOp::Clear(mln_util::Color::new(1.0, 0.0, 0.0, 1.0)) });
+        gpu.begin_pass(&PassDesc { label: "clear", color, depth_stencil: None }).unwrap();
+        gpu.end_pass().unwrap();
+        gpu.flush(false).unwrap();
+    };
+    // Whether the work submitted so far finishes within a second.
+    let finishes = |gpu: &D3d12Gpu| {
+        let (fence, value) = gpu.last_submit();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        // SAFETY: a plain query.
+        while unsafe { fence.GetCompletedValue() } < value {
+            if std::time::Instant::now() > deadline {
+                return false;
+            }
+            std::thread::yield_now();
+        }
+        true
+    };
+    clear(&mut gpu, free);
+    assert!(finishes(&gpu), "a pass into another texture waited for the host");
+    gpu.forget_waits(held);
+    clear(&mut gpu, held);
+    assert!(finishes(&gpu), "a forgotten wait held the pass back");
+    gpu.wait_before_using(held, host.clone(), 1);
+    clear(&mut gpu, held);
+    assert!(!finishes(&gpu), "the pass didn't wait for the host");
+    // SAFETY: a plain call of the live fence.
+    unsafe { host.Signal(1) }.unwrap();
+    assert!(finishes(&gpu));
+}

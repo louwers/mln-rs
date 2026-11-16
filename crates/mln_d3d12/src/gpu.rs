@@ -298,6 +298,9 @@ pub struct D3d12Gpu {
     /// submit, and signals after it.
     waits: Vec<(ID3D12Fence, u64)>,
     signals: Vec<(ID3D12Fence, u64)>,
+    /// The fences and values that the first pass to draw into a texture has
+    /// the queue wait for: the host's reads of it.
+    texture_waits: HashMap<TextureId, (ID3D12Fence, u64)>,
     /// Last, so that what holds memory drops before it.
     memory: Memory,
 }
@@ -455,6 +458,7 @@ impl D3d12Gpu {
             garbage: Vec::new(),
             waits: Vec::new(),
             signals: Vec::new(),
+            texture_waits: HashMap::default(),
             memory: Memory::new(d3d)?,
             device: device.clone(),
         })
@@ -530,10 +534,30 @@ impl D3d12Gpu {
         self.garbage.push((self.serial, Garbage::Held(object)));
     }
 
-    /// Has the queue wait for `fence` to reach `value` before the next
-    /// flush's work: the host's reads of a texture that the frame draws into.
-    pub fn wait_before_next_submit(&mut self, fence: ID3D12Fence, value: u64) {
-        self.waits.push((fence, value));
+    /// Has the queue wait for `fence` to reach `value` before the submit of
+    /// the next pass that draws into `texture`: the host's reads of it. It
+    /// replaces what the texture waited for.
+    pub fn wait_before_using(&mut self, texture: TextureId, fence: ID3D12Fence, value: u64) {
+        self.texture_waits.insert(texture, (fence, value));
+    }
+
+    /// Has the next submit wait for what `texture` waits for, though no pass
+    /// drew into it.
+    pub fn take_waits_into_next_submit(&mut self, texture: TextureId) {
+        self.waits.extend(self.texture_waits.remove(&texture));
+    }
+
+    /// Drops what `texture` waits for, which no submit takes.
+    pub fn forget_waits(&mut self, texture: TextureId) {
+        self.texture_waits.remove(&texture);
+    }
+
+    /// The fence that the backend's submits signal, and the value of the
+    /// last one's: once the fence reaches it, the work submitted so far has
+    /// finished.
+    #[must_use]
+    pub fn last_submit(&self) -> (ID3D12Fence, u64) {
+        (self.fence.clone(), self.serial - 1)
     }
 
     /// Has the queue signal `fence` with `value` once the next flush's work
@@ -1163,7 +1187,10 @@ impl Gpu for D3d12Gpu {
                 }
                 buffer => held(buffer.map(|buffer| buffer.memory)),
             },
-            ResourceId::Texture(id) => self.textures.remove(id).map(Garbage::Texture),
+            ResourceId::Texture(id) => {
+                self.texture_waits.remove(&id);
+                self.textures.remove(id).map(Garbage::Texture)
+            }
             ResourceId::Sampler(id) => {
                 self.samplers.remove(id);
                 None
@@ -1193,6 +1220,12 @@ impl Gpu for D3d12Gpu {
         let window = self.open_window()?;
         let list = self.frame_list()?;
         let list = list.cast::<ID3D12GraphicsCommandList4>().map_err(invalid("ID3D12GraphicsCommandList4"))?;
+        // The pass's submit waits for the host's reads of its attachments.
+        for texture in
+            desc.color.map(|color| color.texture).into_iter().chain(desc.depth_stencil.map(|depth| depth.texture))
+        {
+            self.take_waits_into_next_submit(texture);
+        }
         let mut barriers = Vec::new();
         let mut color = None;
         if let Some(attachment) = desc.color {
