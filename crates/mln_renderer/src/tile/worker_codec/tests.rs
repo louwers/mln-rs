@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
-use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::Layer;
 use mln_style::layers::Fill;
@@ -47,7 +46,7 @@ fn tile_data() -> TileData {
 fn convert(json: &str) -> Layer {
     let json: serde_json::Value = serde_json::from_str(json).unwrap();
     let mut error = ConversionError::default();
-    convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
+    convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message))
 }
 

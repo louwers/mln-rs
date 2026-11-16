@@ -9,6 +9,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::MapMode;
+use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::evaluated::Evaluated;
 use mln_style::layer_type::LayerStyle;
@@ -18,7 +19,6 @@ use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::layers::{Fill, Line};
 use mln_style::property_value::PropertyValue;
-use mln_style::{PropertyEvaluationParameters, StyleRegistry};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
@@ -31,6 +31,7 @@ use mln_vec_map::VecMap;
 use mln_webgpu::Device;
 use parking_lot::Mutex;
 
+use crate::Registry;
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, paint_vertices};
 use crate::buckets::circle_bucket::CircleBucket;
@@ -179,7 +180,7 @@ fn fill_extrusion_bucket_rounds_corners() {
 fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     let json = serde_json::json!({"type": "fill", "id": "fill", "source": "s", "paint": {"fill-color": fill_color}});
     let mut error = ConversionError::default();
-    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let evaluated = FillPaintProperties::PossiblyEvaluated {
         fill_color: Evaluated::PerFeature {
@@ -700,7 +701,7 @@ fn line_bucket_vertices(
 ) -> Vec<LineLayoutVertex> {
     let json = serde_json::json!({"type": "line", "id": "line", "source": "s", "layout": layout});
     let mut error = ConversionError::default();
-    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let layout = LayerStyle::<Line>::recover_ref(&**layer.style())
         .expect("line layer")

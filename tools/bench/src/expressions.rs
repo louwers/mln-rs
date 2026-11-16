@@ -2,10 +2,9 @@
 //! parsing a style's layers, without a map or a renderer.
 
 use std::hint::black_box;
-use std::sync::Arc;
 
 use feature::{Feature, Identifier, Value};
-use mln_style::StyleRegistry;
+use mln_renderer::Registry;
 use mln_style::conversion::{Convertible, Error, convert_layer};
 use mln_style::expression::expression::with_geojson_feature;
 use mln_style::expression::{EvaluationContext, Expr, Functions, ParsingContext};
@@ -87,13 +86,13 @@ pub(crate) fn evaluate(cx: &Context) -> Metrics {
 pub(crate) fn parse(cx: &Context) -> Metrics {
     let style: serde_json::Value = serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the style is JSON");
     let layers = style["layers"].as_array().expect("the style has layers");
-    let registry: Arc<StyleRegistry> = StyleRegistry::with_builtins();
+    let registry = Registry::with_builtins();
     let mut meter = Meter::new();
     for _ in 0..cx.iterations(30) {
         meter.time(|| {
             for layer in std::iter::repeat_n(layers, PARSES).flatten() {
                 let mut error = Error::default();
-                let parsed = convert_layer(&registry, &Convertible::from(layer), &mut error);
+                let parsed = convert_layer(registry.style(), &Convertible::from(layer), &mut error);
                 black_box(parsed.unwrap_or_else(|| panic!("a basemap layer: {}", error.message)));
             }
         });

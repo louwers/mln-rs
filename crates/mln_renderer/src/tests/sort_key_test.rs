@@ -4,7 +4,6 @@ use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
 use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
-use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Fill, Line, Symbol};
@@ -18,6 +17,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde_json::json;
 
+use crate::Registry;
 use crate::bucket::BucketPtr;
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::circle_bucket::CircleBucket;
@@ -73,7 +73,7 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
         json["layout"][sort_key_name] = sort_key;
     }
     let mut error = ConversionError::default();
-    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let style = layer.style();
     match json["type"].as_str().unwrap() {

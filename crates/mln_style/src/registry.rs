@@ -2,14 +2,14 @@
 //! and its layer types.
 
 use std::cell::Cell;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};
 use mln_vec_map::VecMap;
 
 use crate::expression::{Functions, functions};
 use crate::layer::Layer;
-use crate::layer_type::{BUILTIN_STYLE_TYPES, ErasedStyleLayerType, SourceKind};
+use crate::layer_type::{ErasedStyleLayerType, SourceKind};
 
 /// The expression functions and layer types that a style's JSON, its layers'
 /// property values and its filters parse against.
@@ -33,29 +33,41 @@ impl StyleRegistry {
         StyleRegistry { functions, layer_types: by_name }
     }
 
-    /// The built-in layer types and expression functions. Every call
-    /// returns the same value, built on the first: it never changes, so
-    /// sharing it is a cache.
-    #[must_use]
-    pub fn with_builtins() -> Arc<Self> {
-        static BUILTINS: LazyLock<Arc<StyleRegistry>> =
-            LazyLock::new(|| Arc::new(StyleRegistry::new(Functions::with_builtins(), BUILTIN_STYLE_TYPES)));
-        Arc::clone(&BUILTINS)
+    /// The built-in layer types and expression functions, for this crate's
+    /// tests, which can't reach the renderer's `Registry::with_builtins`.
+    #[cfg(test)]
+    pub(crate) fn with_builtins() -> Arc<Self> {
+        use crate::layer_type::style_entry;
+        use crate::layers::{
+            Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
+        };
+        let layer_types = [
+            style_entry::<Fill>(),
+            style_entry::<Line>(),
+            style_entry::<Circle>(),
+            style_entry::<Symbol>(),
+            style_entry::<Raster>(),
+            style_entry::<Background>(),
+            style_entry::<Hillshade>(),
+            style_entry::<ColorRelief>(),
+            style_entry::<FillExtrusion>(),
+            style_entry::<Heatmap>(),
+            style_entry::<Custom>(),
+        ];
+        Arc::new(StyleRegistry::new(Functions::with_builtins(), layer_types))
     }
 
-    /// The expression functions.
     #[must_use]
     pub fn functions(&self) -> &Arc<Functions> {
         &self.functions
     }
 
-    /// The layer type named `name`.
     #[must_use]
     pub fn layer_type(&self, name: &str) -> Option<&'static dyn ErasedStyleLayerType> {
         self.layer_types.get(name).copied()
     }
 
-    /// The layer types, by name.
+    /// The layer types, in name order.
     pub fn layer_types(&self) -> impl Iterator<Item = &'static dyn ErasedStyleLayerType> + '_ {
         self.layer_types.values().copied()
     }

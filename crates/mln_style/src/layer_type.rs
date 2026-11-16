@@ -1,16 +1,11 @@
 //! Layer types as values.
 //!
-//! A layer type is a marker type that implements [`StyleLayerType`]: its
-//! [`LayerTypeInfo`], its property table and property sets, and the hooks
-//! that tell its layers apart. Each layer of the type holds a
-//! [`LayerStyle<T>`], which the style and the renderer share as an
-//! `Arc<dyn ErasedLayerStyle>`. A [`StyleRegistry`](crate::StyleRegistry)
-//! holds the types themselves as `&'static dyn ErasedStyleLayerType`
-//! ([`style_entry`]), keyed by name.
-//!
-//! An erased value gets back to its type only through
-//! [`LayerStyle::recover`] and [`LayerStyle::recover_ref`], which check the
-//! value's type.
+//! A layer type is a marker type that implements [`StyleLayerType`]. Each
+//! layer of the type holds a [`LayerStyle<T>`], shared as an
+//! `Arc<dyn ErasedLayerStyle>`, and a [`StyleRegistry`](crate::StyleRegistry)
+//! holds the types as `&'static dyn ErasedStyleLayerType`, by name. An erased
+//! value gets back to its type only through [`LayerStyle::recover`] and
+//! [`LayerStyle::recover_ref`].
 
 use std::any::Any;
 use std::marker::PhantomData;
@@ -25,9 +20,6 @@ use mln_wire::{Reader, Wire, Writer};
 use crate::expression::{Dependency, Expr, Functions};
 use crate::filter::Filter;
 use crate::layer::FontStack;
-use crate::layers::{
-    Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
-};
 use crate::property_table::{self, OwnerSlot, Properties, PropertyTable, PropertyVisitor, SetPropertyError};
 use crate::property_value::PropertyValue;
 use crate::serialization::shared_expression;
@@ -40,9 +32,7 @@ pub enum SourceKind {
     None,
     /// Vector or GeoJSON tiles, laid out into buckets.
     Geometry,
-    /// Raster tiles.
     Raster,
-    /// Raster DEM tiles.
     RasterDem,
 }
 
@@ -70,7 +60,6 @@ pub trait LayoutSet: Clone + Default + PartialEq + std::fmt::Debug + Wire + Send
     /// The combined dependencies of the expressions.
     fn dependencies(&self) -> Dependency;
 
-    /// Adds the global-state keys that the expressions read to `refs`.
     fn collect_global_state_refs(&self, refs: &mut VecSet<String>);
 }
 
@@ -142,15 +131,13 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
     type Extra: Clone + Default + Send + Sync + 'static;
 
     /// Calls `visitor` with the field of the property in `slot` of
-    /// [`PROPERTIES`](Self::PROPERTIES); the generated `visit` in
-    /// `<type>_layer_properties.rs`.
+    /// [`PROPERTIES`](Self::PROPERTIES).
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output>;
 
     /// Paint properties whose constant values tiles are also laid out
     /// with, so that changing one lays them out again.
     const LAYOUT_PAINT_PROPERTIES: &'static [&'static str] = &[];
 
-    /// Adds the font stacks that `style` uses to `out`.
     fn populate_font_stack(_style: &LayerStyle<Self>, _out: &mut VecSet<FontStack>) {}
 
     /// Whether a section of a formatted value of `style` overrides the
@@ -206,7 +193,6 @@ impl LayerBase {
         }
     }
 
-    /// Adds the global-state keys that the filter reads to `refs`.
     pub(crate) fn collect_filter_global_state_refs(&self, refs: &mut VecSet<String>) {
         if let Some(expression) = &self.filter.expression {
             crate::expression::collect_global_state_refs(expression.as_ref(), refs);
@@ -278,7 +264,6 @@ impl<T: StyleLayerType> LayerStyle<T> {
     }
 }
 
-/// The base members read as `style.id`, `style.visibility`, and so on.
 impl<T: StyleLayerType> std::ops::Deref for LayerStyle<T> {
     type Target = LayerBase;
     fn deref(&self) -> &LayerBase {
@@ -302,10 +287,8 @@ impl<T: StyleLayerType> Properties for LayerStyle<T> {
 
 /// A layer's style data, whichever its type.
 pub trait ErasedLayerStyle: Any + Send + Sync {
-    /// The members every layer has.
     fn base(&self) -> &LayerBase;
 
-    /// The layer's type.
     fn info(&self) -> LayerTypeInfo;
 
     /// Whether going from `self` to `other` changes what the layer's tiles
@@ -321,14 +304,10 @@ pub trait ErasedLayerStyle: Any + Send + Sync {
     /// to `refs`.
     fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>);
 
-    /// Adds the font stacks that the layer uses to `out`.
     fn populate_font_stack(&self, out: &mut VecSet<FontStack>);
 
-    /// The layout property that raises the layer's content above the
-    /// ground, if its type has one.
     fn content_elevation(&self) -> Option<&PropertyValue<f32>>;
 
-    /// The layer's type.
     fn layer_type(&self) -> &'static dyn ErasedStyleLayerType;
 
     /// The property `name` (or a paint property's `<name>-transition`),
@@ -400,10 +379,6 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
     }
 }
 
-/// Whether going from `a` to `b` changes what the layer's tiles lay out. Only
-/// a type whose layers have geometry sources lays out; for one, the filter,
-/// the visibility and the properties that
-/// [`property_table::layout_properties_differ`] counts do.
 fn layout_difference<T: StyleLayerType>(a: &LayerStyle<T>, b: &LayerStyle<T>) -> bool {
     T::INFO.source == SourceKind::Geometry
         && (a.base.filter != b.base.filter
@@ -422,8 +397,7 @@ pub trait ErasedStyleLayerType: Send + Sync + 'static {
     /// Sets the property `name` (or a paint property's `<name>-transition`)
     /// of `style`, which must be of the type, from a style JSON value whose
     /// expressions parse against `functions`. `style` is copied only when
-    /// the value changes it and it is shared, so a second change to a copy
-    /// changes it in place.
+    /// the value changes it and it is shared.
     ///
     /// # Errors
     ///
@@ -449,7 +423,6 @@ pub trait ErasedStyleLayerType: Send + Sync + 'static {
 pub struct LayerTypeEntry<T>(PhantomData<fn() -> T>);
 
 impl<T: 'static> LayerTypeEntry<T> {
-    /// The entry of `T`.
     pub const INSTANCE: &'static Self = &LayerTypeEntry(PhantomData);
 }
 
@@ -513,22 +486,6 @@ impl<T: StyleLayerType> OwnerSlot<LayerStyle<T>> for ErasedSlot<'_, T> {
 pub const fn style_entry<T: StyleLayerType>() -> &'static dyn ErasedStyleLayerType {
     LayerTypeEntry::<T>::INSTANCE
 }
-
-/// The built-in layer types.
-#[doc(hidden)]
-pub static BUILTIN_STYLE_TYPES: [&dyn ErasedStyleLayerType; 11] = [
-    style_entry::<Fill>(),
-    style_entry::<Line>(),
-    style_entry::<Circle>(),
-    style_entry::<Symbol>(),
-    style_entry::<Raster>(),
-    style_entry::<Background>(),
-    style_entry::<Hillshade>(),
-    style_entry::<ColorRelief>(),
-    style_entry::<FillExtrusion>(),
-    style_entry::<Heatmap>(),
-    style_entry::<Custom>(),
-];
 
 // Debug is not a supertrait of this trait, nor of the other layer and source
 // traits that have a `dyn` Debug impl like this one: through the vtable it

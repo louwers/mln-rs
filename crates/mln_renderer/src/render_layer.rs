@@ -447,7 +447,6 @@ pub(crate) fn compute_globe_feature_ndc_bound(
 /// The data members of `RenderLayer`.
 pub(crate) struct RenderLayerBase {
     pub(crate) evaluated_properties: Arc<dyn ErasedEvaluatedLayer>,
-    /// The layer's style data.
     pub(crate) style: Arc<dyn ErasedLayerStyle>,
 
     pub(crate) passes: RenderPass,

@@ -90,7 +90,6 @@ impl Layer {
         Layer { style, functions, host: None }
     }
 
-    /// The style data.
     #[must_use]
     pub fn style(&self) -> &Arc<dyn ErasedLayerStyle> {
         &self.style
@@ -113,7 +112,6 @@ impl Layer {
         &self.functions
     }
 
-    /// Serializes the layer as a style JSON value.
     #[must_use]
     pub fn serialize(&self) -> Value {
         let mut result = ValueObject::new();
@@ -371,7 +369,6 @@ impl Layer {
         self.mutate_base(&mut |impl_| impl_.max_zoom = max_zoom);
     }
 
-    /// The layer's type.
     #[must_use]
     pub fn info(&self) -> LayerTypeInfo {
         self.style.info()

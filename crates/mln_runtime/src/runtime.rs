@@ -95,8 +95,6 @@ pub(crate) struct RuntimeShared {
     /// the browser, the shaper module, which loads the first time a style
     /// declares font faces.
     pub(crate) font_face_engine: Arc<dyn FontFaceEngine>,
-    /// What the runtime's maps parse against, their renderers draw and
-    /// their tile workers lay out.
     pub(crate) registry: Arc<Registry>,
     /// The runtime's thread, which the drop waits for after the shutdown
     /// unless a release or disposal detached it, except in the browser,
@@ -310,7 +308,6 @@ pub(crate) struct RuntimeCore {
     network: OnceCell<Arc<dyn FileSource>>,
     /// The runtime's thread's work.
     pub(crate) queue: CoreQueue,
-    /// [`RuntimeShared::registry`].
     pub(crate) registry: Arc<Registry>,
     /// The runtime's thread's loop, which its maps run their own work on.
     /// Its pool, the process's, which a runtime shares with the others and,

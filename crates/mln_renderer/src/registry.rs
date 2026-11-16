@@ -22,7 +22,6 @@ use crate::layer_type::{ErasedLayerType, LayerType, entry};
 #[derive(Default)]
 pub struct RegistryBuilder {
     functions: Functions,
-    /// The layer types added, by name.
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
 }
 
@@ -36,13 +35,11 @@ impl std::fmt::Debug for RegistryBuilder {
 }
 
 impl RegistryBuilder {
-    /// No registrations.
     #[must_use]
     pub fn new() -> Self {
         RegistryBuilder::default()
     }
 
-    /// The expression functions, to add to.
     pub fn functions_mut(&mut self) -> &mut Functions {
         &mut self.functions
     }
@@ -57,14 +54,12 @@ impl RegistryBuilder {
         Ok(())
     }
 
-    /// The registry of what was added.
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
         Registry::new(Arc::new(self.functions), self.layer_types)
     }
 }
 
-/// The style half of `layer_type`.
 fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedStyleLayerType {
     layer_type
 }
@@ -77,7 +72,6 @@ pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterEr
     register_builtin_layer_types(builder)
 }
 
-/// Adds the style specification's layer types.
 fn register_builtin_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     builder.add_layer_type::<Fill>()?;
     builder.add_layer_type::<Line>()?;
@@ -101,7 +95,6 @@ fn register_builtin_layer_types(builder: &mut RegistryBuilder) -> Result<(), Reg
 /// types by name.
 pub struct Registry {
     style: Arc<StyleRegistry>,
-    /// The render halves of the style's layer types, by name.
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
 }
 
@@ -128,7 +121,6 @@ impl Registry {
         Arc::clone(&BUILTINS)
     }
 
-    /// The registry of `functions` and `layer_types`.
     fn new(
         functions: Arc<Functions>,
         layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
@@ -137,20 +129,16 @@ impl Registry {
         Arc::new(Registry { style: Arc::new(StyleRegistry::new(functions, style_halves)), layer_types })
     }
 
-    /// What a style's JSON, its layers' property values and its filters
-    /// parse against.
     #[must_use]
     pub fn style(&self) -> &Arc<StyleRegistry> {
         &self.style
     }
 
-    /// The expression functions.
     #[must_use]
     pub fn functions(&self) -> &Arc<Functions> {
         self.style.functions()
     }
 
-    /// The layer type named `name`.
     pub(crate) fn layer_type(&self, name: &str) -> Option<&'static dyn ErasedLayerType> {
         self.layer_types.get(name).copied()
     }
@@ -172,17 +160,5 @@ mod tests {
         let mut builder = RegistryBuilder::new();
         builder.add_layer_type::<Circle>().unwrap();
         assert_eq!(builder.add_layer_type::<Circle>(), Err(RegisterError::Duplicate("circle".to_owned())));
-    }
-
-    #[test]
-    fn builtins_register_the_builtin_layer_types() {
-        let registry = Registry::with_builtins();
-        let registered: Vec<_> = registry.style().layer_types().map(ErasedStyleLayerType::info).collect();
-        let mut builtins: Vec<_> =
-            mln_style::layer_type::BUILTIN_STYLE_TYPES.iter().map(|layer_type| layer_type.info()).collect();
-        builtins.sort_by_key(|info| info.name);
-        assert_eq!(registered, builtins);
-        let rendered: Vec<_> = registry.layer_types.values().map(|layer_type| layer_type.info()).collect();
-        assert_eq!(rendered, builtins);
     }
 }

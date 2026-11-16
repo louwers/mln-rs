@@ -912,7 +912,6 @@ pub(crate) unsafe extern "C" fn mln_map_add_geo_json_source(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        // The cluster properties parse against the functions of the map.
         let functions = Arc::clone(map::resolve(map)?.map.registry().functions());
         // SAFETY: the caller's contract, for each input.
         let (id, attribution, mut options) = unsafe {

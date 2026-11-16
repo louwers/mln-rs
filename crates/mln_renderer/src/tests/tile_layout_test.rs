@@ -6,7 +6,6 @@ use std::sync::Arc;
 use feature::{Feature, Identifier, PropertyMap};
 use geo_types::{Geometry, LineString, Polygon};
 use mln_map_types::MapMode;
-use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style_types::image::ImageType;
@@ -17,6 +16,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde_json::json;
 
+use crate::Registry;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, Run, SourceKey, TileKey, run_job};
@@ -27,7 +27,7 @@ use crate::tile::tile_workers::InlineWorkers;
 fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     json["source"] = json!("s");
     let mut error = ConversionError::default();
-    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error)
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let render_layer = crate::tests::render_layer(layer.style());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));

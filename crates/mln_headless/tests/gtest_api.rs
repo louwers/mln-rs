@@ -7,9 +7,9 @@ use geojson::{Feature, GeoJson, Geometry};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
+use mln_renderer::Registry;
 use mln_storage::ResourceOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::StyleRegistry;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
@@ -88,12 +88,12 @@ fn grid() {
     handle.set(source.handle()).unwrap();
     map.style_mut().add_source(Box::new(source)).unwrap();
 
-    let mut fill_layer = Layer::new(&StyleRegistry::with_builtins(), "fill", "landcover", "mapbox").unwrap();
+    let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
     fill_layer.set_source_layer("landcover");
     set(&mut fill_layer, "fill-color", &json!("rgba(255,255,0,1)"));
     map.style_mut().add_layer(fill_layer, None).unwrap();
 
-    let mut layer = Layer::new(&StyleRegistry::with_builtins(), "line", "grid", "custom").unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "grid", "custom").unwrap();
     set(&mut layer, "line-color", &json!("rgba(255,255,255,1)"));
     map.style_mut().add_layer(layer, None).unwrap();
 
@@ -123,7 +123,7 @@ fn recycle_map_update_images() {
         let source = GeoJSONSource::with_default_options("geometry");
         source.set_geojson(GeoJson::from(Geometry::new_point([0.0, 0.0]))).unwrap();
 
-        let mut layer = Layer::new(&StyleRegistry::with_builtins(), "symbol", "geometry", "geometry").unwrap();
+        let mut layer = Layer::new(Registry::with_builtins().style(), "symbol", "geometry", "geometry").unwrap();
         set(&mut layer, "icon-image", &json!(marker_name));
 
         map.style_mut().load_json(&read_file("test/fixtures/api/empty.json"));

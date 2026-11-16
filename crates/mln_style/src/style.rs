@@ -61,7 +61,6 @@ impl Style {
         Style { impl_: Box::new(Impl::with_file_source(registry, file_source, pixel_ratio, run_loop)) }
     }
 
-    /// What the style's JSON, layers and filters parse against.
     #[must_use]
     pub fn registry(&self) -> &Arc<StyleRegistry> {
         self.impl_.registry()

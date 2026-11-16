@@ -101,7 +101,6 @@ pub struct RemoteWorkers {
 struct State {
     instances: Box<dyn WorkerInstances>,
     lanes: Vec<RemoteLane>,
-    /// What the jobs name.
     registry: Arc<Registry>,
 }
 

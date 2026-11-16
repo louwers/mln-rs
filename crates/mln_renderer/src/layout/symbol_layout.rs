@@ -1796,7 +1796,6 @@ impl SymbolLayout {
         self.compare_text.clear();
     }
 
-    /// Makes the bucket of the prepared symbols.
     fn build_bucket(
         &mut self,
         first_load: bool,

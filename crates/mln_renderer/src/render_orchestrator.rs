@@ -165,7 +165,6 @@ fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -
 }
 
 pub(crate) struct RenderOrchestrator {
-    /// The layer types that the render layers come from.
     registry: Arc<Registry>,
     events: EventSink,
 

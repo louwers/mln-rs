@@ -21,7 +21,7 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
 };
-use mln_renderer::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
+use mln_renderer::{OverscaledTileID, Registry, TileOperation, UpdateParameters, UpdateReader};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -45,7 +45,7 @@ use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::tile_source::TileSource;
 use mln_style::sprite::Sprite;
 use mln_style::style_property::Kind as StylePropertyKind;
-use mln_style::{PropertyValue, StyleRegistry, TransitionOptions, source};
+use mln_style::{PropertyValue, TransitionOptions, source};
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_test_server::HttpServer;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
@@ -78,7 +78,7 @@ pub fn style_image(id: &str, image: PremultipliedImage, pixel_ratio: f32) -> Arc
 }
 
 fn red_background(id: &str) -> Layer {
-    let mut layer = Layer::new(&StyleRegistry::with_builtins(), "background", id, "").unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "background", id, "").unwrap();
     set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
     layer
 }
@@ -906,7 +906,7 @@ fn style_expired() {
     // response.
     test.map()
         .style_mut()
-        .add_layer(Layer::new(&StyleRegistry::with_builtins(), "background", "bg", "").unwrap(), None)
+        .add_layer(Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(), None)
         .unwrap();
     assert_eq!(1, test.file_source.requests_len());
 
@@ -989,7 +989,7 @@ fn style_early_mutation() {
     test.map().style_mut().load_url("https://example.com/maps/test");
     test.map()
         .style_mut()
-        .add_layer(Layer::new(&StyleRegistry::with_builtins(), "background", "bg", "").unwrap(), None)
+        .add_layer(Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(), None)
         .unwrap();
 
     let response = file_response("test/fixtures/api/water.json");
@@ -1620,7 +1620,7 @@ fn issue15216() {
     test.map().style_mut().add_source(Box::new(ImageSource::new("ImageSource", [LatLng::default(); 4]))).unwrap();
     test.map()
         .style_mut()
-        .add_layer(Layer::new(&StyleRegistry::with_builtins(), "raster", "RasterLayer", "ImageSource").unwrap(), None)
+        .add_layer(Layer::new(Registry::with_builtins().style(), "raster", "RasterLayer", "ImageSource").unwrap(), None)
         .unwrap();
     // Passes, if there is no assertion hit.
     test.run_loop.run_once();
@@ -1643,7 +1643,7 @@ fn globe_image_source_below_zoom_zero() {
     test.map().style_mut().add_source(Box::new(source)).unwrap();
     test.map()
         .style_mut()
-        .add_layer(Layer::new(&StyleRegistry::with_builtins(), "raster", "raster", "image").unwrap(), None)
+        .add_layer(Layer::new(Registry::with_builtins().style(), "raster", "raster", "image").unwrap(), None)
         .unwrap();
     test.map().jump_to(&CameraOptions { center: Some(ll(80.0, 0.0)), zoom: Some(-1.5), ..Default::default() });
     assert_near(-1.5, CameraOptions::from(test.map().snapshot().view.camera).zoom.unwrap(), 1e-9);
@@ -1665,7 +1665,7 @@ fn image_source_beyond_mercator_latitudes() {
     test.map().style_mut().add_source(Box::new(source)).unwrap();
     test.map()
         .style_mut()
-        .add_layer(Layer::new(&StyleRegistry::with_builtins(), "raster", "image", "image").unwrap(), None)
+        .add_layer(Layer::new(Registry::with_builtins().style(), "raster", "image", "image").unwrap(), None)
         .unwrap();
 
     // Passes, if rendering a frame doesn't crash.
@@ -2860,7 +2860,7 @@ fn still_image_after_tile_error() {
     // and as it retries the tile, it reports the tile's error again.
     test.map()
         .style_mut()
-        .add_layer(Layer::new(&StyleRegistry::with_builtins(), "line", "line", "mapbox").unwrap(), None)
+        .add_layer(Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(), None)
         .unwrap();
     test.map().process_events();
     test.map().render_still().unwrap();
@@ -2894,7 +2894,7 @@ fn continuous_map_finishes_loading_when_its_tile_requests_fail() {
 
     test.map()
         .style_mut()
-        .add_layer(Layer::new(&StyleRegistry::with_builtins(), "line", "line", "mapbox").unwrap(), None)
+        .add_layer(Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(), None)
         .unwrap();
     {
         let run_loop = test.run_loop.clone();
@@ -2933,7 +2933,7 @@ fn stencil_overflow() {
     test.map().style_mut().add_source(Box::new(custom)).unwrap();
     test.map()
         .style_mut()
-        .add_layer(Layer::new(&StyleRegistry::with_builtins(), "fill", "fill", "custom").unwrap(), None)
+        .add_layer(Layer::new(Registry::with_builtins().style(), "fill", "fill", "custom").unwrap(), None)
         .unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(5.0), ..Default::default() });
@@ -3074,7 +3074,7 @@ fn observe_tile_lifecycle() {
     .unwrap();
     frontend.attach(&map);
     map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
-    let mut layer = Layer::new(&StyleRegistry::with_builtins(), "fill", "landcover", "mapbox").unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
     layer.set_source_layer("landcover");
     set(&mut layer, "fill-color", &json!("rgba(0,255,0,1)"));
     map.style_mut().add_layer(layer, None).unwrap();
@@ -3208,7 +3208,7 @@ fn immediate_style_replacement_retains_color() {
             "layers": [{"id": "underlay", "type": "background", "paint": {"background-color": "white"}}]
         }"#,
         );
-        let mut layer = Layer::new(&StyleRegistry::with_builtins(), "background", "background", "").unwrap();
+        let mut layer = Layer::new(Registry::with_builtins().style(), "background", "background", "").unwrap();
         set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
         test.map().style_mut().add_layer(layer, None).unwrap();
 
@@ -3640,7 +3640,7 @@ fn line_layer_depth_distribution() {
 
     test.map().jump_to(&CameraOptions { zoom: Some(0.0), pitch: Some(45.0), ..Default::default() });
 
-    let mut background_layer = Layer::new(&StyleRegistry::with_builtins(), "background", "Background", "").unwrap();
+    let mut background_layer = Layer::new(Registry::with_builtins().style(), "background", "Background", "").unwrap();
     set(&mut background_layer, "background-color", &json!("rgba(255,255,0,1)"));
     test.map().style_mut().add_layer(background_layer, None).unwrap();
 
@@ -3667,7 +3667,7 @@ fn line_layer_depth_distribution() {
         test.map().style_mut().add_source(Box::new(get_source(i))).unwrap();
 
         let mut layer = Layer::new(
-            &StyleRegistry::with_builtins(),
+            Registry::with_builtins().style(),
             "line",
             &format!("LineLayer{i}"),
             &format!("GeoJSONSource_{i}"),
@@ -3753,7 +3753,7 @@ fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous:
     );
     let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
     test.map().style_mut().add_layer(layer, None).unwrap();
 }
@@ -4352,7 +4352,7 @@ fn layer_added_with_global_state_change_shows_new_state() {
     )
     .unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
     test.map().style_mut().add_layer(layer, None).unwrap();
 
@@ -4611,7 +4611,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
     );
     let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
 
     // The layer joins the render tree in the same update as a write to a key its ramp does not read.

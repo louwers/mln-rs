@@ -5,8 +5,10 @@ use std::sync::Arc;
 use mln_actor::RunLoop;
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, FeatureInfo, Map, MapDebugOptions, MapMode, MapOptions, NDCBound};
+use mln_renderer::Registry;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::PropertyValue;
 use mln_style::conversion::Convertible;
 use mln_style::expression::dsl::{eq, get, literal_str};
 use mln_style::filter::Filter;
@@ -14,7 +16,6 @@ use mln_style::layer::Layer;
 use mln_style::projection::Projection;
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_style::style_impl::LayerRefMut;
-use mln_style::{PropertyValue, StyleRegistry};
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
@@ -91,20 +92,23 @@ impl FeatureTrackingTest {
         let source = GeoJSONSource::with_default_options(SOURCE_NAME);
         source.set_geojson(geojson.parse().expect("GeoJSON")).expect("set GeoJSON");
 
-        let mut background_layer = Layer::new(&StyleRegistry::with_builtins(), "background", "background", "").unwrap();
+        let mut background_layer =
+            Layer::new(Registry::with_builtins().style(), "background", "background", "").unwrap();
         set(&mut background_layer, "background-color", &json!("rgba(255,255,255,1)"));
 
-        let mut fill_layer = Layer::new(&StyleRegistry::with_builtins(), "fill", FILL_LAYER_NAME, SOURCE_NAME).unwrap();
+        let mut fill_layer =
+            Layer::new(Registry::with_builtins().style(), "fill", FILL_LAYER_NAME, SOURCE_NAME).unwrap();
         fill_layer.set_visibility(VisibilityType::None);
         set(&mut fill_layer, "fill-color", &json!("rgba(0,0,255,1)"));
 
-        let mut line_layer = Layer::new(&StyleRegistry::with_builtins(), "line", LINE_LAYER_NAME, SOURCE_NAME).unwrap();
+        let mut line_layer =
+            Layer::new(Registry::with_builtins().style(), "line", LINE_LAYER_NAME, SOURCE_NAME).unwrap();
         line_layer.set_visibility(VisibilityType::None);
         set(&mut line_layer, "line-color", &json!("rgba(0,0,0,1)"));
         set(&mut line_layer, "line-width", &json!(2.0));
 
         let mut circle_layer =
-            Layer::new(&StyleRegistry::with_builtins(), "circle", CIRCLE_LAYER_NAME, SOURCE_NAME).unwrap();
+            Layer::new(Registry::with_builtins().style(), "circle", CIRCLE_LAYER_NAME, SOURCE_NAME).unwrap();
         circle_layer.set_visibility(VisibilityType::None);
         set(&mut circle_layer, "circle-color", &json!("rgba(0,0,0,1)"));
         set(&mut circle_layer, "circle-opacity", &json!(0.0));
@@ -113,7 +117,7 @@ impl FeatureTrackingTest {
         set(&mut circle_layer, "circle-stroke-width", &json!(2.0));
 
         let mut symbol_layer =
-            Layer::new(&StyleRegistry::with_builtins(), "symbol", SYMBOL_LAYER_NAME, SOURCE_NAME).unwrap();
+            Layer::new(Registry::with_builtins().style(), "symbol", SYMBOL_LAYER_NAME, SOURCE_NAME).unwrap();
         symbol_layer.set_visibility(VisibilityType::None);
         set(&mut symbol_layer, "icon-allow-overlap", &json!(false));
         set(&mut symbol_layer, "symbol-placement", &json!("point"));
@@ -527,7 +531,7 @@ fn zero_opacity_data_driven() {
 #[test]
 fn ndc_bound_fill_extrusion() {
     let mut test = FeatureTrackingTest::new(CameraOptions { pitch: Some(45.0), ..camera(10.0) });
-    let mut layer = Layer::new(&StyleRegistry::with_builtins(), "fill-extrusion", "extrusion", SOURCE_NAME).unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "fill-extrusion", "extrusion", SOURCE_NAME).unwrap();
     set(&mut layer, "fill-extrusion-color", &json!("rgba(0,0,255,1)"));
     set(&mut layer, "fill-extrusion-height", &json!(1000.0));
     test.map.style_mut().add_layer(layer, None).expect("add layer");
@@ -688,7 +692,7 @@ fn globe_ndc_bound_fill_extrusion() {
     let mut test = globe_test();
     test.show(FILL_LAYER_NAME);
     let mut extrusion_layer =
-        Layer::new(&StyleRegistry::with_builtins(), "fill-extrusion", "extrusion", SOURCE_NAME).unwrap();
+        Layer::new(Registry::with_builtins().style(), "fill-extrusion", "extrusion", SOURCE_NAME).unwrap();
     set(&mut extrusion_layer, "fill-extrusion-height", &json!(500_000.0));
     test.map.style_mut().add_layer(extrusion_layer, None).expect("add layer");
     test.run(None, 0.0);
@@ -708,7 +712,7 @@ fn globe_ndc_bound_fill_extrusion() {
 fn globe_fill_extrusion_above_horizon() {
     let mut test = globe_test();
     let mut extrusion_layer =
-        Layer::new(&StyleRegistry::with_builtins(), "fill-extrusion", "extrusion", SOURCE_NAME).unwrap();
+        Layer::new(Registry::with_builtins().style(), "fill-extrusion", "extrusion", SOURCE_NAME).unwrap();
     set(&mut extrusion_layer, "fill-extrusion-height", &json!(500_000.0));
     set(&mut extrusion_layer, "fill-extrusion-color", &json!("rgba(0,255,0,1)"));
     extrusion_layer.set_filter(&name_filter("5"));
@@ -746,7 +750,7 @@ fn globe_capture_close_up() {
     let large = r#"{"type": "Feature", "id": "large", "properties": {},
         "geometry": {"type": "Polygon", "coordinates": [[[-40, -40], [40, -40], [40, 40], [-40, 40], [-40, -40]]]}}"#;
     source.set_geojson(large.parse().expect("GeoJSON")).expect("set GeoJSON");
-    let mut fill_layer = Layer::new(&StyleRegistry::with_builtins(), "fill", "lowZoomFill", "lowZoom").unwrap();
+    let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "lowZoomFill", "lowZoom").unwrap();
     set(&mut fill_layer, "fill-color", &json!("rgba(0,255,0,1)"));
     {
         let style = test.map.style_mut();

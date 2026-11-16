@@ -10,7 +10,6 @@ use feature::Feature;
 use geo_types::Point;
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler;
-use mln_style::StyleRegistry;
 use mln_style::custom_tile_loader::{CustomTileLoader, TileFunction};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
@@ -22,6 +21,7 @@ use mln_util::error::Error;
 use parking_lot::Mutex;
 
 use super::RasterTileTest;
+use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
@@ -155,7 +155,7 @@ fn invoke_tile_changed() {
     let loader = loader(&test.run_loop, None, None);
     let mut tiles = tiles(&test, &[root()], loader.self_ref());
 
-    let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
+    let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
         Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
 

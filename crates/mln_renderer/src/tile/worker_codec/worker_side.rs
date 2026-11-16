@@ -17,13 +17,10 @@ use crate::tile::job::{Job, JobResult, JobTimes, Reply};
 pub(crate) struct WorkerCodec {
     /// The values the map side defined, by key.
     tables: shared::Tables,
-    /// What the jobs' registrations resolve against.
     registry: Arc<Registry>,
 }
 
 impl WorkerCodec {
-    /// An instance's side, which resolves the jobs' registrations against
-    /// `registry`.
     pub(crate) fn new(registry: Arc<Registry>) -> Self {
         let tables = shared::Tables::new()
             .copies::<SharedSourceStyle>()

@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use mln_actor::RunLoop;
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
+use mln_renderer::Registry;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::StyleRegistry;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
 use mln_style_types::VisibilityType;
@@ -353,7 +353,7 @@ fn fully_hidden_layer_can_reappear() {
     let test = SymbolRenderingTest::new(256, 0.0, SymbolKind::Icon, MapMode::Static);
     let initial = test.render();
 
-    let mut blocker = Layer::new(&StyleRegistry::with_builtins(), "symbol", "blocker", "points").unwrap();
+    let mut blocker = Layer::new(Registry::with_builtins().style(), "symbol", "blocker", "points").unwrap();
     let error = blocker.set_property("icon-image", &Convertible::from(&serde_json::json!("marker")), None);
     assert!(error.is_none(), "{error:?}");
     test.map.borrow_mut().style_mut().add_layer(blocker, None).unwrap();

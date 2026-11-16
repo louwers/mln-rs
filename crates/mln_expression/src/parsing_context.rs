@@ -200,7 +200,6 @@ pub(crate) fn is_special_form(name: &str) -> bool {
 }
 
 impl ParsingContext {
-    /// A context whose names resolve against `functions`.
     #[must_use]
     pub fn new(functions: &Arc<Functions>) -> Self {
         ParsingContext {
@@ -212,8 +211,6 @@ impl ParsingContext {
         }
     }
 
-    /// A context whose names resolve against `functions`, for an expression
-    /// of the type `expected`.
     #[must_use]
     pub fn with_expected(functions: &Arc<Functions>, expected: Type) -> Self {
         ParsingContext { expected: Some(expected), ..ParsingContext::new(functions) }
@@ -241,7 +238,6 @@ impl ParsingContext {
         }
     }
 
-    /// The functions that names resolve against.
     pub(crate) fn functions(&self) -> &Arc<Functions> {
         &self.functions
     }

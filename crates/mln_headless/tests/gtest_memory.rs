@@ -7,9 +7,9 @@ use std::sync::Arc;
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
+use mln_renderer::Registry;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
-use mln_style::StyleRegistry;
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use support::read_bytes;
@@ -224,7 +224,7 @@ fn rendering_stats_count_live_resources() {
         "source-layer": "poi_label", "layout": {"text-field": "x", "text-allow-overlap": true}});
     let mut error = mln_style::conversion::Error::default();
     let labels = mln_style::conversion::layer::convert_layer(
-        &StyleRegistry::with_builtins(),
+        Registry::with_builtins().style(),
         &mln_style::conversion::Convertible::from(&labels),
         &mut error,
     );

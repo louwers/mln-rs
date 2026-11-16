@@ -260,7 +260,6 @@ pub struct Impl {
     pixel_ratio: f32,
     /// The parsed style's sprites.
     sprites: Vec<Sprite>,
-    /// What the style's JSON, layers and filters parse against.
     registry: Arc<StyleRegistry>,
 
     pub(crate) mutated: bool,
@@ -541,7 +540,6 @@ impl Impl {
         true
     }
 
-    /// What the style's JSON, layers and filters parse against.
     pub(crate) fn registry(&self) -> &Arc<StyleRegistry> {
         &self.registry
     }

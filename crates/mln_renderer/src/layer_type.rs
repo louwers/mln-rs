@@ -1,18 +1,11 @@
-//! The render half of the layer types.
+//! The render half of the layer types: each marker type's [`LayerType`]
+//! impl, which says how a tile lays out the type's layers and which render
+//! layer draws them. The registry holds the types as
+//! `&'static dyn ErasedLayerType` ([`entry`]).
 //!
-//! A layer type's render half is its marker type's [`LayerType`] impl, beside
-//! the type's render layer: how a tile lays out the type's layers into its
-//! bucket, and the render layer that draws them, each from the type's own
-//! data. The registry holds the types as `&'static dyn ErasedLayerType`
-//! ([`entry`]), the render half of the same `LayerTypeEntry<T>` value that a
-//! style registry holds as the style half.
-//!
-//! A layer's values for a frame are an [`EvaluatedLayer<T>`], which the render
-//! layer, its tiles' render data and the tile workers share as an
+//! A layer's values for a frame are an [`EvaluatedLayer<T>`], shared as an
 //! `Arc<dyn ErasedEvaluatedLayer>`. An erased value gets back to its type
-//! only through [`EvaluatedLayer::recover`] or [`evaluated`], which check the
-//! value's type. The erased impls here recover a group's layers, a bucket
-//! and the layer it's queried for, so layouts and buckets get typed values.
+//! only through [`EvaluatedLayer::recover`] or [`evaluated`].
 
 use std::any::Any;
 use std::sync::Arc;
@@ -40,9 +33,8 @@ pub(crate) trait LayerType: StyleLayerType {
     /// doesn't lay out.
     type Layout: Layout<Self>;
 
-    /// The bucket the layout makes, which crosses the worker codec.
-    /// [`NoBucket`](crate::bucket::NoBucket) for a type that doesn't lay
-    /// out.
+    /// The bucket the layout makes. [`NoBucket`](crate::bucket::NoBucket)
+    /// for a type that doesn't lay out.
     type Bucket: Bucket + Wire;
 
     /// Whether the layout of `group` can need glyphs or images. A tile
@@ -69,13 +61,10 @@ pub(crate) trait LayerType: StyleLayerType {
         0.0
     }
 
-    /// The render layer that draws the layer `style`.
     fn render_layer(style: Arc<LayerStyle<Self>>) -> RenderLayerPtr;
 }
 
-/// The values of a layer of the type `T` for a frame: its style data, its
-/// paint properties evaluated, the cross-fade of its patterns and the
-/// render passes it draws in.
+/// The values of a layer of the type `T` for a frame.
 pub(crate) struct EvaluatedLayer<T: LayerType> {
     pub(crate) style: Arc<LayerStyle<T>>,
     pub(crate) paint: <T::PaintProperties as PaintSet>::Evaluated,
@@ -93,7 +82,6 @@ impl<T: LayerType> EvaluatedLayer<T> {
         any.downcast().ok()
     }
 
-    /// The values of the layer `style` before its first evaluation.
     pub(crate) fn new(style: Arc<LayerStyle<T>>) -> Self {
         EvaluatedLayer::with_paint(style, Default::default())
     }
@@ -117,13 +105,10 @@ impl<T: LayerType> std::fmt::Debug for EvaluatedLayer<T> {
 
 /// A layer's values for a frame, whichever its type.
 pub(crate) trait ErasedEvaluatedLayer: Any + Send + Sync {
-    /// The layer's type.
     fn entry(&self) -> &'static dyn ErasedLayerType;
 
-    /// The layer's style data.
     fn style(&self) -> &dyn ErasedLayerStyle;
 
-    /// The layer's style data, shared.
     fn shared_style(&self) -> Arc<dyn ErasedLayerStyle>;
 
     /// The `RenderPass` bits the layer draws in.
@@ -141,8 +126,7 @@ pub(crate) trait ErasedEvaluatedLayer: Any + Send + Sync {
     /// read to `refs`.
     fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>);
 
-    /// Writes the values for their type's [`ErasedLayerType::read_evaluated`]:
-    /// the style data by key, then the rest.
+    /// Writes the values for their type's [`ErasedLayerType::read_evaluated`].
     fn write(&self, w: &mut Writer);
 }
 
@@ -213,12 +197,11 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
     /// is another type's.
     fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<RenderLayerPtr>;
 
-    /// Whether the layout of `group`, layers of the type, can need glyphs
-    /// or images ([`LayerType::layout_can_need_dependencies`]).
+    /// [`LayerType::layout_can_need_dependencies`]; false for a layer of
+    /// another type.
     fn layout_can_need_dependencies(&self, group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool;
 
-    /// The layout of `group`, layers of the type ([`LayerType::create_layout`]).
-    /// Fails for a layer of another type.
+    /// [`LayerType::create_layout`]. Fails for a layer of another type.
     fn create_layout(
         &self,
         group: &[Arc<dyn ErasedEvaluatedLayer>],
@@ -226,9 +209,7 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
         source_layer: SourceLayer,
     ) -> Result<Option<Box<dyn ErasedLayout>>, Error>;
 
-    /// How far outside a feature of `bucket` a query for `layer` still hits
-    /// it ([`LayerType::query_radius`]); 0 for a bucket or layer of another
-    /// type.
+    /// [`LayerType::query_radius`]; 0 for a bucket or layer of another type.
     fn query_radius(&self, bucket: &dyn Bucket, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32;
 
     /// Reads the values that [`ErasedEvaluatedLayer::write`] wrote for a
@@ -285,8 +266,7 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
 }
 
 /// `group`'s layers as `T` layers' values; fails if one is another type's.
-/// Inline for small groups, since a tile's layout recovers each of its
-/// groups.
+// Inline for small groups, since a tile's layout recovers each of its groups.
 fn recover_group<T: LayerType>(
     group: &[Arc<dyn ErasedEvaluatedLayer>],
 ) -> Result<SmallVec<[Arc<EvaluatedLayer<T>>; 4]>, Error> {
@@ -302,7 +282,6 @@ fn recover_group<T: LayerType>(
 
 /// A layout, whichever its layer type.
 pub(crate) trait ErasedLayout: Send {
-    /// Whether the bucket needs the glyphs or images the layout recorded.
     fn has_dependencies(&self) -> bool;
 
     /// Makes the bucket ([`Layout::create_bucket`]) and, if it has data,

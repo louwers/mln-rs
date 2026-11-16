@@ -149,7 +149,6 @@ pub(crate) fn group_layers(layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> GroupMap
 
 #[cfg(test)]
 mod tests {
-    use mln_style::StyleRegistry;
     use mln_style::conversion::{Convertible, Error, convert_filter};
     use mln_style::expression::Functions;
     use mln_style::filter::Filter;
@@ -158,6 +157,7 @@ mod tests {
     use mln_style::layers::{Circle, Fill, Raster};
 
     use super::*;
+    use crate::Registry;
     use crate::layer_type::{EvaluatedLayer, LayerType};
 
     /// A filter of its own, which shares no expression with another.
@@ -168,7 +168,7 @@ mod tests {
 
     /// A `T` layer `id` of `source_layer` in "source".
     fn layer<T: LayerType>(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
-        let mut layer = Layer::new(&StyleRegistry::with_builtins(), T::INFO.name, id, "source").unwrap();
+        let mut layer = Layer::new(Registry::with_builtins().style(), T::INFO.name, id, "source").unwrap();
         layer.set_source_layer(source_layer);
         if let Some(filter) = filter {
             layer.set_filter(filter);

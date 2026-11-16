@@ -220,7 +220,6 @@ pub struct OfflineDownload {
     definition: OfflineRegionDefinition,
     network: Arc<dyn FileSource>,
     post: Post,
-    /// What the region's style is read against.
     registry: Arc<StyleRegistry>,
     /// The most requests the download has in flight at once.
     maximum_concurrent_requests: u32,

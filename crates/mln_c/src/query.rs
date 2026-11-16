@@ -280,7 +280,6 @@ pub(crate) unsafe extern "C" fn mln_render_session_query_rendered_features(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        // The filter parses against the functions of the session's map.
         let functions = Arc::clone(render_session::resolve(session)?.map.registry().functions());
         // SAFETY: the caller's contract.
         let (geometry, options) = unsafe { (self::geometry(geometry)?, rendered_options(options, &functions)?) };
@@ -310,7 +309,6 @@ pub(crate) unsafe extern "C" fn mln_render_session_query_source_features(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        // The filter parses against the functions of the session's map.
         let functions = Arc::clone(render_session::resolve(session)?.map.registry().functions());
         // SAFETY: the caller's contract.
         let (source_id, options) = unsafe { (self::source_id(source_id)?, source_options(options, &functions)?) };

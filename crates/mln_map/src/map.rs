@@ -13,8 +13,8 @@ use mln_map_types::{
     MapView, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
-    FeatureInfo, LayerFeaturesMap, RendererEvent, RendererEvents, RenderingStats, SourceLayerID, UpdateParameters,
-    UpdateReader, UpdateSlot,
+    FeatureInfo, LayerFeaturesMap, Registry, RendererEvent, RendererEvents, RenderingStats, SourceLayerID,
+    UpdateParameters, UpdateReader, UpdateSlot,
 };
 use mln_storage::{FileSource, Loader, ResourceOptions};
 use mln_style::observer::{Observer as StyleObserver, SourceObserver};
@@ -191,7 +191,7 @@ impl Map {
         run_loop: &RunLoop,
     ) -> Result<Map, Error> {
         let loader: Arc<dyn FileSource> = Arc::new(Loader::new(resource_options));
-        Self::with_registry(loader, map_options, StyleRegistry::with_builtins(), run_loop)
+        Self::with_registry(loader, map_options, Arc::clone(Registry::with_builtins().style()), run_loop)
     }
 
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
@@ -202,7 +202,7 @@ impl Map {
         map_options: MapOptions,
         run_loop: &RunLoop,
     ) -> Result<Map, Error> {
-        Self::with_registry(file_source, map_options, StyleRegistry::with_builtins(), run_loop)
+        Self::with_registry(file_source, map_options, Arc::clone(Registry::with_builtins().style()), run_loop)
     }
 
     /// A map whose resources come from `file_source` and whose style parses

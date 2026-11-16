@@ -50,8 +50,6 @@ pub(crate) struct CircleLayout {
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl CircleLayout {
-    /// Creates the layout of `group`, layers of one layout, on
-    /// `source_layer`.
     pub(crate) fn new(
         parameters: &BucketParameters,
         group: &[Arc<EvaluatedLayer<Circle>>],

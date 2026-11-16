@@ -4,9 +4,11 @@ use feature::{PropertyMap, Value};
 use geojson::{GeoJson, Geometry};
 use mln_actor::RunLoop;
 use mln_map::{CameraOptions, MapMode};
+use mln_renderer::Registry;
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::Layer;
 use mln_style::conversion::{Convertible, Error, convert_filter};
 use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_style::expression::expression::FeatureState;
@@ -14,7 +16,6 @@ use mln_style::expression::{Functions, Value as ExpressionValue};
 use mln_style::filter::Filter;
 use mln_style::source::Source;
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
-use mln_style::{Layer, StyleRegistry};
 use mln_util::ErrorKind;
 use mln_util::feature::Feature;
 use mln_util::geo::{LatLng, ScreenCoordinate};
@@ -324,7 +325,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
             source.set_geojson(GeoJson::from(Geometry::new_point([1.003, 1.003]))).unwrap();
             style
                 .add_layer(
-                    Layer::new(&StyleRegistry::with_builtins(), "circle", "circle_layer", "source1").unwrap(),
+                    Layer::new(Registry::with_builtins().style(), "circle", "circle_layer", "source1").unwrap(),
                     None,
                 )
                 .unwrap();
@@ -568,7 +569,7 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     source.load_description(&*test.0.file_source, &test.0.run_loop);
 
     let mut cluster_layer =
-        Layer::new(&StyleRegistry::with_builtins(), "symbol", "cluster_layer", "cluster_source").unwrap();
+        Layer::new(Registry::with_builtins().style(), "symbol", "cluster_layer", "cluster_source").unwrap();
     set(&mut cluster_layer, "icon-image", &json!("test-icon"));
     set(&mut cluster_layer, "icon-size", &json!(12.0));
 

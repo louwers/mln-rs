@@ -7,8 +7,8 @@ use geojson::{Feature, Geometry};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions, TileSettings};
+use mln_renderer::Registry;
 use mln_storage::ResourceOptions;
-use mln_style::StyleRegistry;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
@@ -63,7 +63,7 @@ impl TileLODTest {
         handle.set(source.handle()).unwrap();
         map.style_mut().add_source(Box::new(source)).unwrap();
 
-        let mut layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circles", "custom").unwrap();
+        let mut layer = Layer::new(Registry::with_builtins().style(), "circle", "circles", "custom").unwrap();
         let error = layer.set_property("circle-color", &Convertible::from(&serde_json::json!("rgba(0,0,255,0)")), None);
         assert!(error.is_none(), "{error:?}");
         map.style_mut().add_layer(layer, None).unwrap();

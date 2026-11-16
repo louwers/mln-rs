@@ -8,10 +8,9 @@
 //! (`let`, `match`, `case`, `interpolate` and the other forms that parse their
 //! own arguments) isn't a function and can't be registered as one.
 //!
-//! A parsed compound expression keeps the overload it matched. On the worker
-//! codec it crosses as its name and the overload's position, which the
-//! reading side resolves against the [`Functions`] that [`decode_with`]
-//! names.
+//! A compound expression crosses the worker codec as its function's name and
+//! its overload's position, which the reading side resolves against the
+//! [`Functions`] of [`decode_with`].
 
 pub(crate) mod builtin;
 
@@ -79,7 +78,6 @@ pub enum Eval {
 }
 
 impl Eval {
-    /// Whether this evaluator gives values of `result`.
     fn matches(&self, result: &Type) -> bool {
         match self {
             Eval::Number(_) => *result == Type::Number,
@@ -102,7 +100,6 @@ pub struct OverloadSpec {
     pub eval: Eval,
 }
 
-/// One overload of a function.
 #[derive(Debug)]
 pub struct Overload {
     pub(crate) name: Arc<str>,
@@ -116,7 +113,6 @@ pub struct Overload {
 }
 
 impl Overload {
-    /// The function's name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -240,7 +236,6 @@ impl Functions {
         Ok(())
     }
 
-    /// The function named `name`.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&FunctionDef> {
         self.by_name.get(name).map(|&index| &self.defs[index])

@@ -4,7 +4,6 @@ use feature::Feature;
 use geo_types::Point;
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map_types::MapMode;
-use mln_style::StyleRegistry;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
@@ -14,6 +13,7 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 
+use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tests::{OneTile, style};
 use crate::tile::loading::DataOrigin;
@@ -107,7 +107,7 @@ fn point_data() -> Arc<dyn GeoJSONData> {
 }
 
 fn circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
-    let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
+    let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
     Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))
 }
 
@@ -180,7 +180,7 @@ fn issue_9927() {
 /// A circle layer as its render layer evaluates it, which records what the
 /// worker codec sends to evaluate it again.
 fn evaluated_circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
-    let layer = Layer::new(&StyleRegistry::with_builtins(), "circle", "circle", "source").unwrap();
+    let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
     let render_layer = crate::tests::render_layer(layer.style());
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     Arc::clone(&render_layer.borrow().base().evaluated_properties)

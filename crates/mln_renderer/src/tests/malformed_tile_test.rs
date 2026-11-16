@@ -9,7 +9,6 @@ use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
-use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Fill, FillExtrusion, Line, Symbol};
@@ -26,9 +25,9 @@ use proptest::prelude::*;
 use serde_json::json;
 
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
-use crate::render_source;
 use crate::tile::store::StoreEvent;
 use crate::tile_parameters::TileParameters;
+use crate::{Registry, render_source};
 
 /// What the render source reported for the tile.
 #[derive(Debug, PartialEq)]
@@ -40,7 +39,7 @@ enum Outcome {
 /// A layer of the given style JSON, as the worker gets it.
 fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut error = ConversionError::default();
-    let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(json), &mut error)
+    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let style = layer.style();
     match json["type"].as_str().unwrap() {

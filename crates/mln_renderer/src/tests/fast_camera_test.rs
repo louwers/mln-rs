@@ -17,7 +17,6 @@ use mln_actor::{LocalObject, RunLoop, TaggedScheduler, scheduler};
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
-use mln_style::StyleRegistry;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Fill, Raster};
@@ -30,6 +29,7 @@ use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
 
+use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::{self as render_source, RenderSource};
 use crate::tile::source_tiles::SourceTiles;
@@ -175,11 +175,11 @@ impl Scene {
         vector.load_description(&*file_source, &run_loop);
         raster.load_description(&*file_source, &run_loop);
 
-        let mut fill = Layer::new(&StyleRegistry::with_builtins(), "fill", "water", "vector").unwrap();
+        let mut fill = Layer::new(Registry::with_builtins().style(), "fill", "water", "vector").unwrap();
         fill.set_source_layer("water");
         let fill_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
             vec![Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(fill.style()).unwrap()))];
-        let raster_layer = Layer::new(&StyleRegistry::with_builtins(), "raster", "raster", "raster").unwrap();
+        let raster_layer = Layer::new(Registry::with_builtins().style(), "raster", "raster", "raster").unwrap();
         let raster_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
             vec![Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(raster_layer.style()).unwrap()))];
 

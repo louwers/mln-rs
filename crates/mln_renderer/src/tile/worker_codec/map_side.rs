@@ -18,7 +18,6 @@ pub(crate) struct MapCodec {
     /// The keys of what the instance has of this side's: source styles,
     /// layers, their properties and expressions, and sets of images.
     tables: shared::Tables,
-    /// What the jobs name and the replies resolve against.
     registry: Arc<Registry>,
 }
 

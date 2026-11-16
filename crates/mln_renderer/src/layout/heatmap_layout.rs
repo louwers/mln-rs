@@ -37,8 +37,6 @@ pub(crate) struct HeatmapLayout {
 }
 
 impl HeatmapLayout {
-    /// Creates the layout of `group`, layers of one layout, on
-    /// `source_layer`.
     pub(crate) fn new(
         parameters: &BucketParameters,
         group: &[Arc<EvaluatedLayer<Heatmap>>],

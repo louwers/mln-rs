@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_actor::actor::{Actor, PoolActorRef};
-use mln_style::StyleRegistry;
 use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, TileFunction};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
@@ -17,6 +16,7 @@ use mln_util::geo::{LatLng, LatLngBounds};
 use parking_lot::Mutex;
 
 use super::RasterTileTest;
+use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
@@ -225,7 +225,7 @@ fn set_mlt_tile_data() {
     let root = OverscaledTileID::from_zxy(0, 0, 0);
     let mut tiles = tiles(&test, &[root], loader.self_ref());
 
-    let mut layer = Layer::new(&StyleRegistry::with_builtins(), "fill", "water", "source").unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "water", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
         Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(layer.style()).unwrap()));
