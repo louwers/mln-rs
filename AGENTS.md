@@ -17,10 +17,10 @@ correctness, not the C++ or GL JS code.
 
 ## The C API
 
-mln-rs owns the MapLibre Native C API: `crates/mln_c` holds its headers and
-implements them. maplibre-native-ffi builds that crate and generates its
-language bindings from the headers, so a feature's C API ships in its mln-rs PR.
-Read `crates/mln_c/README.md` before you design, change or review the C API.
+`crates/mln_c` holds the MapLibre Native C API's headers and implements them.
+maplibre-native-ffi builds that crate and generates its language bindings from
+the headers. Read `crates/mln_c/README.md` before you design, change or review
+the C API.
 
 ## Dev tool commands
 

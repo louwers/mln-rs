@@ -1,7 +1,7 @@
 # mln-rs-c
 
-The MapLibre Native C API. mln-rs owns it: the headers in `include/` define it,
-and this crate implements it as the C library `libmaplibre_native_c`.
+The MapLibre Native C API: the headers in `include/` define it, and this crate
+implements it as the C library `libmaplibre_native_c`.
 
 [maplibre-native-ffi](https://github.com/maplibre/maplibre-native-ffi) builds
 this crate from a pinned mln-rs commit, packages the library for each platform,
@@ -9,10 +9,6 @@ and generates bindings for other languages from the headers. Its copy of the
 headers must match the ones here, so it takes theirs from the commit it pins.
 
 ## Changing the API
-
-Change the API here, in one PR: the headers, the implementation, and its tests.
-Don't hold back an API change because maplibre-native-ffi hasn't made it. It
-picks the change up when it moves its pin.
 
 - After editing a header, run `mise run generate:c-abi`. `src/lib.rs` explains
   what it generates and how to implement a function.
