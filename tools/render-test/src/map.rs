@@ -343,11 +343,11 @@ impl TestRunnerImpl for Impl {
     }
 
     fn add_source(&mut self, id: &str, json: &str) -> Result<(), MapError> {
-        style_ops::add_source(self.map.style_mut(), id, json)
+        style_ops::add_source(&mut self.map, id, json)
     }
 
     fn remove_source(&mut self, id: &str) -> Result<bool, MapError> {
-        Ok(style_ops::remove_source(self.map.style_mut(), id))
+        Ok(style_ops::remove_source(&mut self.map, id))
     }
 
     fn add_image(&mut self, name: &str, image_path: &str, pixel_ratio: f32, sdf: bool) -> Result<(), MapError> {

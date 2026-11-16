@@ -173,17 +173,25 @@ pub(crate) fn style_of<T: crate::layer_type::StyleLayerType>(
     crate::layer_type::LayerStyle::recover_ref(&**layer.style()).unwrap()
 }
 
-impl crate::style::Impl {
-    /// Parses `json` into the style, as a map's loader does; a document that
-    /// doesn't parse leaves the style as it was.
+impl crate::Style {
+    /// Replaces the style with the one `json` describes, as a map's loader
+    /// does, keeping its observer; a document that doesn't parse leaves the
+    /// style as it was.
     pub(crate) fn load_json(&mut self, json: &str) {
-        let _ = self.parse(json, None);
+        self.impl_.load_json(json);
     }
 }
 
 impl crate::Style {
-    /// Parses `json` into the style, as [`Impl::load_json`](crate::style::Impl) does.
-    pub(crate) fn load_json(&mut self, json: &str) {
-        let _ = self.parse_json(json, None);
+    /// Records the source that `json` describes, as the map does when it
+    /// adds one.
+    pub(crate) fn add_source_json(&mut self, id: &str, json: &str) {
+        let value: serde_json::Value = serde_json::from_str(json).expect("JSON");
+        let mut error = mln_conversion::Error::default();
+        let functions = Arc::clone(self.registry().functions());
+        let source =
+            crate::conversion::convert_source(&mln_conversion::Convertible::from(&value), &mut error, id, &functions)
+                .expect("a source");
+        self.set_source_impl(id, Some(source.base_impl()));
     }
 }

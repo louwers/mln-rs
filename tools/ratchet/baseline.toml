@@ -124,7 +124,6 @@
 "crates/mln_style/src/sources/geojson_source.rs" = 9
 "crates/mln_style/src/sources/image_source.rs" = 10
 "crates/mln_style/src/sources/tile_source.rs" = 2
-"crates/mln_style/src/style_impl.rs" = 3
 "crates/mln_text/src/browser_glyph_rasterizer.rs" = 1
 "crates/mln_util/src/host_bytes.rs" = 3
 "crates/mln_util/src/logging.rs" = 2

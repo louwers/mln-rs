@@ -13,7 +13,6 @@ use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
 
 use crate::conversion::Convertible;
 use crate::conversion::tileset::convert_tileset;
-use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
@@ -209,15 +208,6 @@ impl Source for TileSource {
             Box::new(move |res: Response| on_description_response(&weak, &res)),
         );
         *self.inner.req.borrow_mut() = Some(req);
-    }
-
-    fn supports_layer_type(&self, info: LayerTypeInfo) -> bool {
-        let kind = match self.get_type() {
-            SourceType::Vector => SourceKind::Geometry,
-            SourceType::Raster => SourceKind::Raster,
-            _ => SourceKind::RasterDem,
-        };
-        info.source == kind
     }
 
     fn create_mutable(&self) -> Box<dyn source_impl::Impl> {

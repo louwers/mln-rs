@@ -220,7 +220,7 @@ fn a_source_that_reloads_its_description_changes_the_generation() {
     assert!(map.style_loaded());
     let generation = map.generation();
 
-    let source = map.style().get_source("points").expect("the source");
+    let source = map.source("points").expect("the source");
     source.downcast_ref::<GeoJSONSource>().expect("a GeoJSON source").set_url("http://points");
     map.process_events();
     assert!(!map.style_loaded());

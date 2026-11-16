@@ -3,14 +3,14 @@
 // is the `Source` trait.
 //
 // Deviation (structural): C++ sources call their `SourceObserver*` (the
-// owning `Style::Impl`) from setters and from asynchronous request
-// callbacks, which hold a `WeakPtr` to the source. A Rust callback cannot
-// point into the style's collection, so a source keeps its mutable state
+// owning style) from setters and from asynchronous request callbacks,
+// which hold a `WeakPtr` to the source. A Rust callback cannot point into
+// the map's sources, so a source keeps its mutable state
 // behind interior mutability in an `Rc` (`SourceBase` fields are cells; the
 // concrete sources are handles to an `Rc`'d inner state), the callbacks hold
-// a `Weak` to it, and every source method takes `&self`. The style's
-// observer (see style_impl.rs) then reads the changed `baseImpl` through the
-// source, as C++ `sources.update(source)` does.
+// a `Weak` to it, and every source method takes `&self`. The map's observer
+// (mln_map's style_sources.rs) then reads the changed `baseImpl` through the
+// source and records it in the style.
 
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell};
@@ -22,9 +22,30 @@ use mln_storage::FileSource;
 use mln_style_types::SourceType;
 use mln_util::logging::{Event, Log};
 
-use crate::layer_type::LayerTypeInfo;
-use crate::observer::SourceObserver;
+use crate::layer_type::SourceKind;
 pub use crate::source_impl::{Impl, downcast_arc};
+
+/// Hears about changes to a source that the source makes itself, from its
+/// setters and from the answers to its requests. Methods take `&self`: a
+/// source holds an `Rc<dyn SourceObserver>`.
+pub trait SourceObserver {
+    fn on_source_loaded(&self, _source: &dyn Source) {}
+    fn on_source_changed(&self, _source: &dyn Source) {}
+    fn on_source_error(&self, _source: &dyn Source, _error: mln_util::Error) {}
+    fn on_source_description_changed(&self, _source: &dyn Source) {}
+}
+
+/// The kind of layer that a source of type `type_` feeds.
+#[must_use]
+pub fn layer_kind(type_: SourceType) -> SourceKind {
+    match type_ {
+        SourceType::Vector | SourceType::GeoJSON | SourceType::CustomVector | SourceType::CustomMVTVector => {
+            SourceKind::Geometry
+        }
+        SourceType::Raster | SourceType::Image => SourceKind::Raster,
+        SourceType::RasterDEM => SourceKind::RasterDem,
+    }
+}
 
 /// The data members of `Source`.
 pub struct SourceBase {
@@ -58,11 +79,6 @@ impl SourceBase {
         self.impl_ref().clone()
     }
 
-    /// Whether the impl's id is `id`, read without copying the impl.
-    pub(crate) fn has_id(&self, id: &str) -> bool {
-        self.impl_ref().id == id
-    }
-
     pub(crate) fn set_base_impl(&self, impl_: Arc<dyn Impl>) {
         *self.base_impl.borrow_mut() = impl_;
     }
@@ -93,8 +109,6 @@ pub trait Source: Any {
     /// Loads the source's description through `file_source`, if it has
     /// one to load. Its responses and background work answer on `run_loop`.
     fn load_description(&self, file_source: &dyn FileSource, run_loop: &mln_actor::RunLoop);
-
-    fn supports_layer_type(&self, type_info: LayerTypeInfo) -> bool;
 
     /// A copy of the current impl.
     fn create_mutable(&self) -> Box<dyn Impl>;

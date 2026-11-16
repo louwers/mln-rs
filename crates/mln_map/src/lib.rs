@@ -12,6 +12,7 @@ mod map_snapshot;
 mod map_projection;
 mod rendering_stats_view;
 mod style_loader;
+mod style_sources;
 pub mod transform;
 
 pub use map::Map;

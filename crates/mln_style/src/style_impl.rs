@@ -1,131 +1,50 @@
 // Deviations (structural; see also layer.rs):
-// - The layers, light, sky and projection are values behind `Arc`s, which
-//   the style replaces when they change. `update_layer` edits a copy of a
-//   layer and keeps it if the layer changed.
-// - The observer is an `Rc<dyn Observer>`, shared with the sources'
-//   observer (`StyleSourceObserver`).
-//
-// - Sources notify from setters and from asynchronous request callbacks
-//   (see source.rs), so the observer handed to them is a
-//   `StyleSourceObserver` sharing the style's observer and the file source.
-//   `sources.update(source)` happens when the impls are read
-//   (`get_source_impls`), which picks up every source whose impl changed.
+// - The layers, sources, light, sky and projection are values behind
+//   `Arc`s, which the style replaces when they change. `update_layer` edits
+//   a copy of a layer and keeps it if the layer changed.
+// - The observer is an `Rc<dyn Observer>`.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use feature::Value;
-use mln_actor::RunLoop;
-use mln_storage::FileSource;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 
-use crate::collection::{CollectionWithPersistentOrder, ImmutableVector};
 use crate::expression::GlobalStateMap;
 use crate::image;
 use crate::layer::Layer;
 use crate::layer_list::LayerList;
 use crate::light::Light;
 use crate::map::camera::CameraOptions;
-use crate::observer::{NullObserver, Observer, SourceObserver};
+use crate::observer::{NullObserver, Observer};
 use crate::parser::Parser;
 use crate::projection::Projection;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
-use crate::source::{self, Source};
+use crate::source::{self, Source, layer_kind};
+use crate::source_list::SourceList;
 use crate::sprite::Sprite;
 use crate::transition_options::TransitionOptions;
 
 pub(crate) type ImageImpls = Vec<Arc<image::Impl>>;
 
-/// The style's observer, shared with its sources' observer.
-type ObserverSlot = Rc<RefCell<Option<Rc<dyn Observer>>>>;
-
-fn slot_observer(slot: &ObserverSlot) -> Rc<dyn Observer> {
-    match &*slot.borrow() {
-        Some(observer) => Rc::clone(observer),
-        None => Rc::new(NullObserver),
-    }
-}
-
-/// The `SourceObserver` half of `Style::Impl`.
-struct StyleSourceObserver {
-    observer: std::rc::Weak<RefCell<Option<Rc<dyn Observer>>>>,
-    file_source: Option<Arc<dyn FileSource>>,
-    run_loop: RunLoop,
-}
-
-impl StyleSourceObserver {
-    fn observer(&self) -> Option<Rc<dyn Observer>> {
-        self.observer.upgrade().map(|slot| slot_observer(&slot))
-    }
-}
-
-impl SourceObserver for StyleSourceObserver {
-    fn on_source_loaded(&self, source: &dyn Source) {
-        // sources.update(source): see get_source_impls.
-        if let Some(observer) = self.observer() {
-            observer.on_source_loaded(source);
-            observer.on_update();
-        }
-    }
-
-    fn on_source_changed(&self, source: &dyn Source) {
-        // sources.update(source): see get_source_impls.
-        if let Some(observer) = self.observer() {
-            observer.on_source_changed(source);
-            observer.on_update();
-        }
-    }
-
-    fn on_source_error(&self, source: &dyn Source, error: Error) {
-        if let Some(observer) = self.observer() {
-            observer.on_source_error(source, error);
-        }
-    }
-
-    fn on_source_description_changed(&self, source: &dyn Source) {
-        // sources.update(source): see get_source_impls.
-        if let Some(observer) = self.observer() {
-            observer.on_source_description_changed(source);
-        }
-        if !source.loaded()
-            && let Some(file_source) = &self.file_source
-        {
-            source.load_description(&**file_source, &self.run_loop);
-        }
-    }
-}
-
-/// The collection's source impls, and the source impls that refresh them
-/// with the changes made through the sources.
-type SourceImplsCache = (ImmutableVector<dyn source::Impl>, ImmutableVector<dyn source::Impl>);
-
 pub struct Impl {
-    file_source: Option<Arc<dyn FileSource>>,
-
     json: String,
 
     glyph_url: String,
     /// The document's font faces, followed by the fallback faces given to
     /// the parse.
     font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
-    sources: CollectionWithPersistentOrder<dyn Source>,
-    /// The source impls with the changes made through the sources since the
-    /// collection's last update (see `get_source_impls`), keyed by the
-    /// collection's impls they refresh.
-    source_impls_cache: RefCell<Option<SourceImplsCache>>,
-    source_observer: Rc<dyn SourceObserver>,
-    /// The loop that the sources' requests answer on.
-    run_loop: RunLoop,
+    /// The records of the sources whose handles the map holds.
+    sources: Arc<SourceList>,
     layers: Arc<LayerList>,
     transition_options: TransitionOptions,
     light: Arc<Light>,
     sky: Option<Arc<Sky>>,
     projection: Arc<Projection>,
     images: Arc<ImageImpls>,
-    observer: ObserverSlot,
+    observer: Option<Rc<dyn Observer>>,
 
     // Global state for the "global-state" expression. The map itself is
     // immutable and replaced wholesale on change so that it can be safely
@@ -136,6 +55,8 @@ pub struct Impl {
     // Defaults
     name: String,
     default_camera: CameraOptions,
+    /// The document's sprites.
+    sprites: Vec<Sprite>,
 
     registry: Arc<StyleRegistry>,
 
@@ -154,47 +75,26 @@ impl std::fmt::Debug for Impl {
 }
 
 impl Impl {
-    /// A style without a file source, on `run_loop`, that parses against
-    /// `registry`.
+    /// An empty style that parses against `registry`.
     #[must_use]
-    pub(crate) fn new(registry: Arc<StyleRegistry>, run_loop: &RunLoop) -> Self {
-        Self::with_file_source(registry, None, run_loop)
-    }
-
-    /// A style that parses against `registry` and whose sources load their
-    /// descriptions from `file_source`, answering on `run_loop`.
-    #[must_use]
-    pub(crate) fn with_file_source(
-        registry: Arc<StyleRegistry>,
-        file_source: Option<Arc<dyn FileSource>>,
-        run_loop: &RunLoop,
-    ) -> Self {
-        let observer: ObserverSlot = Rc::new(RefCell::new(None));
-        let source_observer: Rc<dyn SourceObserver> = Rc::new(StyleSourceObserver {
-            observer: Rc::downgrade(&observer),
-            file_source: file_source.clone(),
-            run_loop: run_loop.clone(),
-        });
+    pub(crate) fn new(registry: Arc<StyleRegistry>) -> Self {
         Impl {
-            file_source,
             json: String::new(),
             glyph_url: String::new(),
             font_faces: None,
-            sources: CollectionWithPersistentOrder::default(),
-            source_impls_cache: RefCell::new(None),
-            source_observer,
-            run_loop: run_loop.clone(),
+            sources: Arc::default(),
             layers: Arc::default(),
             transition_options: TransitionOptions::default(),
             light: Arc::default(),
             sky: None,
             projection: Arc::default(),
             images: Arc::new(Vec::new()),
-            observer,
+            observer: None,
             global_state: Arc::new(GlobalStateMap::new()),
             global_state_defaults: GlobalStateMap::new(),
             name: String::new(),
             default_camera: CameraOptions::default(),
+            sprites: Vec::new(),
             registry,
             mutated: false,
             loaded: false,
@@ -202,7 +102,10 @@ impl Impl {
     }
 
     fn observer(&self) -> Rc<dyn Observer> {
-        slot_observer(&self.observer)
+        match &self.observer {
+            Some(observer) => Rc::clone(observer),
+            None => Rc::new(NullObserver),
+        }
     }
 
     /// Marks the style not loaded while a URL load fetches its document.
@@ -210,77 +113,91 @@ impl Impl {
         self.loaded = false;
     }
 
-    /// Replaces the style with the one `json` describes, with
-    /// `fallback_font_faces` after the document's font faces. Returns the
-    /// document's sprites, or why `json` isn't a style, which leaves the
-    /// style as it was. The style's images go: its sprites bring them again.
-    pub(crate) fn parse(
-        &mut self,
+    /// The style that `json` describes, parsed against `registry`, with
+    /// `fallback_font_faces` after the document's font faces, and the
+    /// document's sources, whose records it holds. Fails with why `json`
+    /// isn't a style.
+    pub(crate) fn from_json(
+        registry: &Arc<StyleRegistry>,
         json: &str,
         fallback_font_faces: Option<&Arc<mln_text::glyph::FontFaces>>,
-    ) -> Result<Vec<Sprite>, Error> {
-        let mut parser = Parser::new(&self.registry);
+    ) -> Result<(Self, Vec<Box<dyn Source>>), Error> {
+        let mut parser = Parser::new(registry);
         parser.parse(json)?;
 
-        self.mutated = false;
-        self.loaded = false;
-        self.json = json.to_owned();
+        let mut style = Impl::new(Arc::clone(registry));
+        style.json = json.to_owned();
+        style.transition_options = parser.transition;
+        style.global_state_defaults = parser.global_state_defaults.clone();
+        style.global_state = Arc::new(style.global_state_defaults.clone());
 
-        self.sources.clear();
-        self.layers = Arc::default();
-        self.images = Arc::new(Vec::new());
-
-        self.transition_options = parser.transition;
-
-        self.global_state_defaults = parser.global_state_defaults.clone();
-        self.global_state = Arc::new(self.global_state_defaults.clone());
-
+        let mut sources: Vec<Box<dyn Source>> = Vec::new();
+        let mut records = SourceList::default();
         for source in std::mem::take(&mut parser.sources) {
             // A parsed style cannot contain duplicate source ids (they are
             // object keys).
-            if let Err(error) = self.add_source_unnotified(source) {
-                Log::error(Event::ParseStyle, error.to_string());
+            if records.get(&source.get_id()).is_some() {
+                Log::error(Event::ParseStyle, format!("Source {} already exists", source.get_id()));
+                continue;
             }
+            records.set(source.base_impl());
+            sources.push(source);
         }
+        style.sources = Arc::new(records);
 
         // The parser drops duplicate layer ids, so the layers go in at once
         // without `add_layer`'s lookup. A layer incompatible with its source
         // is logged and skipped.
-        let global_state = Arc::clone(&self.global_state);
-        let sources = &self.sources;
+        let global_state = Arc::clone(&style.global_state);
         let mut layers = LayerList::default();
         layers.extend(std::mem::take(&mut parser.layers).into_iter().filter_map(|mut layer| {
-            if let Err(error) = check_layer_source(sources, &layer) {
+            if let Err(error) = check_layer_source(&style.sources, &layer) {
                 Log::error(Event::ParseStyle, error.to_string());
                 return None;
             }
             layer.reevaluate_visibility(&global_state);
             Some(layer)
         }));
-        self.layers = Arc::new(layers);
+        style.layers = Arc::new(layers);
 
-        self.name = parser.name.clone();
-        self.default_camera.center = Some(parser.lat_lng);
-        self.default_camera.center_altitude = Some(parser.center_altitude);
-        self.default_camera.zoom = Some(parser.zoom);
-        self.default_camera.bearing = Some(parser.bearing);
-        self.default_camera.pitch = Some(parser.pitch);
-        self.default_camera.roll = Some(parser.roll);
+        style.name = parser.name.clone();
+        style.default_camera.center = Some(parser.lat_lng);
+        style.default_camera.center_altitude = Some(parser.center_altitude);
+        style.default_camera.zoom = Some(parser.zoom);
+        style.default_camera.bearing = Some(parser.bearing);
+        style.default_camera.pitch = Some(parser.pitch);
+        style.default_camera.roll = Some(parser.roll);
 
-        self.light = Arc::new(std::mem::take(&mut parser.light));
-        self.sky = parser.sky.take().map(Arc::new);
-        self.projection = Arc::new(std::mem::take(&mut parser.projection));
+        style.light = Arc::new(std::mem::take(&mut parser.light));
+        style.sky = parser.sky.take().map(Arc::new);
+        style.projection = Arc::new(std::mem::take(&mut parser.projection));
 
-        self.glyph_url = std::mem::take(&mut parser.glyph_url);
-        self.font_faces = parser.font_faces.take();
+        style.sprites = std::mem::take(&mut parser.sprites);
+        style.glyph_url = std::mem::take(&mut parser.glyph_url);
+        style.font_faces = parser.font_faces.take();
         if let Some(fallback) = fallback_font_faces.filter(|faces| !faces.is_empty()) {
             // The style's own faces come first, so they win where both cover a font.
-            let mut merged = self.font_faces.as_deref().cloned().unwrap_or_default();
+            let mut merged = style.font_faces.as_deref().cloned().unwrap_or_default();
             merged.extend(fallback.iter().cloned());
-            self.font_faces = Some(Arc::new(merged));
+            style.font_faces = Some(Arc::new(merged));
         }
-        self.loaded = true;
-        Ok(std::mem::take(&mut parser.sprites))
+        style.loaded = true;
+        Ok((style, sources))
+    }
+
+    /// Replaces the style with the one `json` describes, keeping its
+    /// observer; a document that doesn't parse leaves the style as it was.
+    #[cfg(test)]
+    pub(crate) fn load_json(&mut self, json: &str) {
+        if let Ok((mut style, _sources)) = Self::from_json(&Arc::clone(&self.registry), json, None) {
+            style.observer = self.observer.take();
+            *self = style;
+        }
+    }
+
+    /// The document's sprites.
+    pub(crate) fn get_sprites(&self) -> &[Sprite] {
+        &self.sprites
     }
 
     pub(crate) fn registry(&self) -> &Arc<StyleRegistry> {
@@ -292,7 +209,7 @@ impl Impl {
     }
 
     pub fn set_observer(&mut self, observer: Option<Rc<dyn Observer>>) {
-        *self.observer.borrow_mut() = observer;
+        self.observer = observer;
     }
 
     pub(crate) fn set_transition_options(&mut self, options: &TransitionOptions) {
@@ -306,6 +223,7 @@ impl Impl {
         self.observer().on_update();
     }
 
+    #[must_use]
     pub fn get_transition_options(&self) -> TransitionOptions {
         self.transition_options
     }
@@ -377,62 +295,41 @@ impl Impl {
         (*self.global_state).clone()
     }
 
+    #[must_use]
     pub fn get_global_state_shared(&self) -> Arc<GlobalStateMap> {
         Arc::clone(&self.global_state)
     }
 
     // Sources
 
-    pub(crate) fn get_sources(&self) -> Vec<&dyn Source> {
-        self.sources.get_wrappers()
+    /// The records of the sources, in the order they were added.
+    pub(crate) fn get_sources(&self) -> &Arc<SourceList> {
+        &self.sources
     }
 
-    pub(crate) fn get_source(&self, id: &str) -> Option<&dyn Source> {
-        self.sources.get(id)
-    }
-
-    /// See [`Style::add_source`](crate::Style::add_source).
-    pub(crate) fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
-        self.add_source_unnotified(source)?;
-        self.observer().on_update();
-        Ok(())
-    }
-
-    fn add_source_unnotified(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
-        if self.sources.get(&source.get_id()).is_some() {
-            return Err(Error::already_exists(format!("Source {} already exists", source.get_id())));
-        }
-
-        source.set_observer(Some(Rc::clone(&self.source_observer)));
-        let item = self.sources.add(source);
-        if let Some(file_source) = &self.file_source {
-            item.load_description(&**file_source, &self.run_loop);
-        }
-        Ok(())
-    }
-
-    pub(crate) fn remove_source(&mut self, id: &str) -> Option<Box<dyn Source>> {
-        // Check if source is in use
-        for layer in self.layers.iter() {
-            if layer.get_source_id() == id {
-                Log::warning(Event::General, format!("Source '{id}' is in use, cannot remove"));
-                return None;
+    /// Records `source` as the source with its id, replacing the record of
+    /// that source in place or adding it last, or removes the record of the
+    /// source `id` for `None`. Returns whether the records changed.
+    pub(crate) fn set_source_impl(&mut self, id: &str, source: Option<Arc<dyn source::Impl>>) -> bool {
+        if let Some(source) = source {
+            if self.sources.get(id).is_some_and(|current| Arc::ptr_eq(current, &source)) {
+                return false;
             }
+            Arc::make_mut(&mut self.sources).set(source);
+            true
+        } else {
+            if self.sources.get(id).is_none() {
+                return false;
+            }
+            Arc::make_mut(&mut self.sources).remove(id);
+            true
         }
-
-        let source = self.sources.remove(id);
-
-        if let Some(source) = &source {
-            source.set_observer(None);
-            self.observer().on_update();
-        }
-
-        source
     }
 
     // Layers
 
     /// The layers, in drawing order.
+    #[must_use]
     pub fn get_layer_list(&self) -> &Arc<LayerList> {
         &self.layers
     }
@@ -500,6 +397,7 @@ impl Impl {
         self.on_light_changed();
     }
 
+    #[must_use]
     pub fn get_light(&self) -> &Arc<Light> {
         &self.light
     }
@@ -528,6 +426,7 @@ impl Impl {
         self.observer().on_update();
     }
 
+    #[must_use]
     pub fn get_sky(&self) -> Option<&Arc<Sky>> {
         self.sky.as_ref()
     }
@@ -539,6 +438,7 @@ impl Impl {
         self.on_projection_changed();
     }
 
+    #[must_use]
     pub fn get_projection(&self) -> &Arc<Projection> {
         &self.projection
     }
@@ -600,52 +500,20 @@ impl Impl {
     }
 
     /// symbols: `getFontFaces()`.
+    #[must_use]
     pub fn get_font_faces(&self) -> Option<Arc<mln_text::glyph::FontFaces>> {
         self.font_faces.clone()
     }
 
+    #[must_use]
     pub fn get_glyph_url(&self) -> &str {
         &self.glyph_url
     }
 
+    #[must_use]
     pub fn get_image_impls(&self) -> Arc<ImageImpls> {
         Arc::clone(&self.images)
     }
-
-    /// The impls of the sources. A source whose impl changed since the
-    /// collection last stored it gets its current impl (one new vector per
-    /// change, as C++ makes one per update in its `SourceObserver`
-    /// callbacks).
-    pub fn get_source_impls(&self) -> ImmutableVector<dyn source::Impl> {
-        let impls = self.sources.get_impls();
-        if self.sources.are_current(&impls) {
-            return impls;
-        }
-        let mut cache = self.source_impls_cache.borrow_mut();
-        if let Some((base, refreshed)) = &*cache
-            && Arc::ptr_eq(base, &impls)
-            && self.sources.are_current(refreshed)
-        {
-            return Arc::clone(refreshed);
-        }
-        let refreshed: ImmutableVector<dyn source::Impl> = Arc::new(self.sources.current_impls());
-        *cache = Some((impls, Arc::clone(&refreshed)));
-        refreshed
-    }
-
-    /// Logs the sources and their state.
-    pub fn dump_debug_logs(&self) {
-        for source in self.sources.iter() {
-            source.dump_debug_logs();
-        }
-    }
-
-    /// Whether every source has loaded its description.
-    pub fn sources_loaded(&self) -> bool {
-        self.sources.iter().all(Source::loaded)
-    }
-
-    // The SourceObserver implementation is StyleSourceObserver.
 
     // LightObserver implementation.
 
@@ -664,13 +532,12 @@ impl Impl {
     }
 }
 
-/// Fails when `layer`'s source is in `sources` and doesn't support the
-/// layer's type.
-fn check_layer_source(sources: &CollectionWithPersistentOrder<dyn Source>, layer: &Layer) -> Result<(), Error> {
-    // TODO: verify source
+/// Fails when `layer`'s source is in `sources` and doesn't feed layers of
+/// the layer's type.
+fn check_layer_source(sources: &SourceList, layer: &Layer) -> Result<(), Error> {
     let impl_ = layer.style();
     if let Some(source) = sources.get(&impl_.base().source)
-        && !source.supports_layer_type(impl_.info())
+        && layer_kind(source.type_) != impl_.info().source
     {
         let message = format!("Layer '{}' is not compatible with source '{}'", impl_.base().id, impl_.base().source);
         return Err(Error::invalid_argument(message));

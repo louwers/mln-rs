@@ -22,6 +22,7 @@ feature.workspace = true
 geo-types.workspace = true
 geojson.workspace = true
 geometry.workspace = true
+indexmap.workspace = true
 mln_actor.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
@@ -34,6 +35,7 @@ mln_text.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 mln_storage = { workspace = true, features = ["stub-file-source"] }

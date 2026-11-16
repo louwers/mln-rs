@@ -79,6 +79,18 @@ fn sources_list_in_style_order() {
 }
 
 #[test]
+fn sources_list_in_the_order_they_were_added_not_by_id() {
+    let (_runtime, map) = styled_map();
+    let style =
+        format!(r#"{{"version":8,"sources":{{"c":{EMPTY_GEOJSON_SOURCE},"b":{EMPTY_GEOJSON_SOURCE}}},"layers":[]}}"#);
+    wait(map.set_style_json(style));
+    wait(map.add_style_source_json("a", EMPTY_GEOJSON_SOURCE));
+    let sources = wait(map.style_sources());
+    let listed: Vec<_> = sources.iter().map(|source| source.id.as_str()).collect();
+    assert_eq!(listed, ["c", "b", "a"]);
+}
+
+#[test]
 fn a_geojson_source_reports_the_options_its_data_needs() {
     let (_runtime, map) = styled_map();
     let clustered = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]},"minzoom":3,"maxzoom":12,"buffer":64,"tolerance":0.5,"cluster":true,"clusterRadius":40,"clusterMaxZoom":10,"clusterMinPoints":3,"clusterProperties":{"total":["+",["get","weight"]]}}"#;

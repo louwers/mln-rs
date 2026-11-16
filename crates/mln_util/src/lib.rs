@@ -34,7 +34,6 @@ pub mod identity;
 pub mod image;
 pub mod intersection_tests;
 pub mod logging;
-pub mod longest_common_subsequence;
 pub mod mat3;
 pub mod mat4;
 pub mod math;

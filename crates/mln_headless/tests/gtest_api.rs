@@ -86,7 +86,7 @@ fn grid() {
 
     let source = CustomGeometrySource::new("custom", options, run_loop.pool()).unwrap();
     handle.set(source.handle()).unwrap();
-    map.style_mut().add_source(Box::new(source)).unwrap();
+    map.add_source(Box::new(source)).unwrap();
 
     let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
     fill_layer.set_source_layer("landcover");
@@ -127,7 +127,7 @@ fn recycle_map_update_images() {
         set(&mut layer, "icon-image", &json!(marker_name));
 
         map.load_style_json(&read_file("test/fixtures/api/empty.json"));
-        map.style_mut().add_source(Box::new(source)).unwrap();
+        map.add_source(Box::new(source)).unwrap();
         map.style_mut().add_layer(layer, None).unwrap();
         map.style_mut().add_image(style_image(marker_name, decode_image(marker_path), 1.0));
     };

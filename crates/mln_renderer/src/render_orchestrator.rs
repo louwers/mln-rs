@@ -10,14 +10,13 @@ use mln_actor::{ActorRef, Mailbox, RunLoop, TaggedScheduler};
 use mln_gfx::ShaderRegistry;
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_map_types::{MapMode, TransformState};
-use mln_style::collection::ImmutableVector;
 use mln_style::diff::{LayerChange, LayerChanges};
 use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
-    GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image,
-    layer, source,
+    GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, SourceList, TransitionOptions,
+    TransitionParameters, image, layer, source,
 };
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
@@ -44,7 +43,7 @@ use crate::render_source::{self, RenderSource, SourcePrepareParameters};
 use crate::render_tree::{DebugType, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::{EventSink, RendererEvent, RendererEvents};
 use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
-use crate::style_diff::{diff_images, diff_sources};
+use crate::style_diff::{SourceDifference, diff_images, diff_sources, sources_by_id};
 use crate::text::cross_tile_symbol_index::AddLayerResult;
 use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver};
 use crate::text::placement::Placement;
@@ -182,7 +181,10 @@ pub(crate) struct RenderOrchestrator {
     pattern_atlas: Rc<RefCell<PatternAtlas>>,
 
     image_impls: Arc<Vec<Arc<image::Impl>>>,
-    source_impls: ImmutableVector<dyn source::Impl>,
+    source_impls: Arc<SourceList>,
+    /// The sources of `source_impls` in id order, the order of the
+    /// per-source pass.
+    sources_by_id: Vec<Arc<dyn source::Impl>>,
     layers: Arc<LayerList>,
 
     render_sources: HashMap<String, Box<dyn RenderSource>>,
@@ -297,7 +299,8 @@ impl RenderOrchestrator {
             line_atlas: Rc::new(RefCell::new(LineAtlas::new())),
             pattern_atlas: Rc::new(RefCell::new(PatternAtlas::new())),
             image_impls: Arc::new(Vec::new()),
-            source_impls: Arc::new(Vec::new()),
+            source_impls: Arc::default(),
+            sources_by_id: Vec::new(),
             layers: Arc::default(),
             render_sources: HashMap::default(),
             render_layers: HashMap::default(),
@@ -643,7 +646,14 @@ impl RenderOrchestrator {
         // drops after the diff.
         let _previous_sources = (!Arc::ptr_eq(&self.source_impls, &update_parameters.sources))
             .then(|| DropOnWorkers::new(Arc::clone(&self.source_impls), self.thread_pool.clone()));
-        let source_diff = diff_sources(&self.source_impls, &update_parameters.sources);
+        let source_diff = if Arc::ptr_eq(&self.source_impls, &update_parameters.sources) {
+            SourceDifference::default()
+        } else {
+            let sources = sources_by_id(&update_parameters.sources);
+            let diff = diff_sources(&self.sources_by_id, &sources);
+            self.sources_by_id = sources;
+            diff
+        };
         self.source_impls = Arc::clone(&update_parameters.sources);
 
         // Remove render layers for removed sources.
@@ -713,9 +723,9 @@ impl RenderOrchestrator {
         // and handles the layers without a source (background) while it
         // iterates over the first source. Annotations are not ported yet, so
         // with no style sources the loop runs once without a source.
-        let source_count = std::cmp::max(self.source_impls.len(), 1);
+        let source_count = std::cmp::max(self.sources_by_id.len(), 1);
         for source_index in 0..source_count {
-            let source_impl = self.source_impls.get(source_index).cloned();
+            let source_impl = self.sources_by_id.get(source_index).cloned();
             let mut source_needs_rendering = false;
             let mut source_needs_relayout = false;
             // C++ has a render source for every source type; the port skips
@@ -1043,7 +1053,8 @@ impl RenderOrchestrator {
 
     pub(crate) fn clear_data(&mut self) {
         if !self.source_impls.is_empty() {
-            self.source_impls = Arc::new(Vec::new());
+            self.source_impls = Arc::default();
+            self.sources_by_id.clear();
         }
         if !self.layers.is_empty() {
             self.layers = Arc::default();

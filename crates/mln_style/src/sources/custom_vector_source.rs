@@ -14,7 +14,6 @@ use mln_util::geo::LatLngBounds;
 use mln_util::range::Range;
 
 use crate::custom_tile_loader::{CustomTileLoader, TileFunction};
-use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
@@ -225,10 +224,6 @@ impl Source for CustomVectorSource {
         self.inner.base.set_base_impl(new_impl);
         self.inner.base.set_loaded(true);
         self.inner.base.observer().on_source_loaded(self);
-    }
-
-    fn supports_layer_type(&self, info: LayerTypeInfo) -> bool {
-        info.source == SourceKind::Geometry
     }
 
     fn create_mutable(&self) -> Box<dyn source_impl::Impl> {

@@ -13,7 +13,7 @@ use mln_actor::{RunLoop, TaggedScheduler};
 use mln_sprite::load_sprite;
 use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style::sprite::Sprite;
-use mln_style::{Style, StyleLoadError, image};
+use mln_style::{Parsed, Style, StyleLoadError, StyleRegistry, image};
 use mln_text::glyph::FontFaces;
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
@@ -41,8 +41,8 @@ pub(crate) enum SpritePart {
 pub(crate) enum LoadEvent {
     /// A load began.
     Loading,
-    /// A style document parsed into the style.
-    Parsed,
+    /// A style document parsed, which replaces the style and its sources.
+    Parsed(Parsed),
     /// The style and its sprite requests are in place.
     Loaded,
     /// The style document failed to load or parse.
@@ -64,7 +64,7 @@ struct SpriteLoad {
     json: Option<Data>,
     image: Option<Data>,
     /// Held to keep the requests running; dropping them cancels them.
-    _requests: Vec<Request>,
+    requests: Vec<Request>,
     /// Whether the sprite loaded or failed for good. A style without a
     /// sprite that has no file source never loads.
     loaded: bool,
@@ -137,14 +137,15 @@ impl StyleLoader {
         self.replies.set_waker(waker);
     }
 
-    /// Loads the style document `json` into `style`, and cancels a URL load.
-    pub(crate) fn load_json(&mut self, style: &mut Style, json: &str) -> Vec<LoadEvent> {
+    /// Loads the style document `json`, parsed against `registry`, and
+    /// cancels a URL load.
+    pub(crate) fn load_json(&mut self, registry: &Arc<StyleRegistry>, json: &str) -> Vec<LoadEvent> {
         self.last_error = None;
         let mut events = vec![LoadEvent::Loading];
         self.request = None;
         self.style_load = self.next_load();
         self.url = None;
-        self.parse(style, json, &mut events);
+        self.parse(registry, json, &mut events);
         events
     }
 
@@ -174,7 +175,7 @@ impl StyleLoader {
     }
 
     /// Handles a reply from the inbox.
-    pub(crate) fn on_reply(&mut self, style: &mut Style, reply: Reply) -> Vec<LoadEvent> {
+    pub(crate) fn on_reply(&mut self, style: &Style, reply: Reply) -> Vec<LoadEvent> {
         let mut events = Vec::new();
         match reply {
             Reply::Style { load, response } => self.on_style_response(style, load, &response, &mut events),
@@ -196,7 +197,7 @@ impl StyleLoader {
         events
     }
 
-    fn on_style_response(&mut self, style: &mut Style, load: u64, res: &Response, events: &mut Vec<LoadEvent>) {
+    fn on_style_response(&mut self, style: &Style, load: u64, res: &Response, events: &mut Vec<LoadEvent>) {
         if load != self.style_load {
             return;
         }
@@ -229,14 +230,14 @@ impl StyleLoader {
         } else if !empty && let Some(data) = &res.data {
             self.delivered = true;
             let json = String::from_utf8_lossy(data);
-            self.parse(style, &json, events);
+            self.parse(style.registry(), &json, events);
         }
     }
 
-    /// Parses `json` into `style` and requests its sprites.
-    fn parse(&mut self, style: &mut Style, json: &str, events: &mut Vec<LoadEvent>) {
-        let sprites = match style.parse_json(json, self.fallback_font_faces.as_ref()) {
-            Ok(sprites) => sprites,
+    /// Parses `json` against `registry` and requests its sprites.
+    fn parse(&mut self, registry: &Arc<StyleRegistry>, json: &str, events: &mut Vec<LoadEvent>) {
+        let parsed = match Style::from_json(registry, json, self.fallback_font_faces.as_ref()) {
+            Ok(parsed) => parsed,
             Err(error) => {
                 let message = format!("Failed to parse style: {error}");
                 Log::error(Event::ParseStyle, &message);
@@ -246,7 +247,7 @@ impl StyleLoader {
             }
         };
         self.sprites.clear();
-        self.sprite_list = sprites;
+        self.sprite_list = parsed.style.get_sprites().to_vec();
         let mut sprite_events = Vec::new();
         if self.file_source.is_none() {
             self.sprites.push(SpriteLoad::new(None, 0));
@@ -268,7 +269,7 @@ impl StyleLoader {
         }
         // The map publishes the parsed style once it knows where its sprites
         // stand.
-        events.push(LoadEvent::Parsed);
+        events.push(LoadEvent::Parsed(parsed));
         events.extend(sprite_events);
         events.push(LoadEvent::Loaded);
     }
@@ -295,7 +296,7 @@ impl StyleLoader {
             request(SpritePart::Image, Resource::sprite_image(&sprite.sprite_url, self.pixel_ratio)),
         ];
         let mut entry = SpriteLoad::new(Some(sprite), load);
-        entry._requests = requests;
+        entry.requests = requests;
         match self.sprites.iter_mut().find(|other| other.id() == entry.id()) {
             // The earlier load's requests are cancelled as they drop.
             Some(other) => *other = entry,
@@ -414,7 +415,7 @@ const DEFAULT_SPRITE: &str = "default";
 
 impl SpriteLoad {
     fn new(sprite: Option<Sprite>, load: u64) -> Self {
-        SpriteLoad { sprite, load, json: None, image: None, _requests: Vec::new(), loaded: false }
+        SpriteLoad { sprite, load, json: None, image: None, requests: Vec::new(), loaded: false }
     }
 
     fn id(&self) -> &str {

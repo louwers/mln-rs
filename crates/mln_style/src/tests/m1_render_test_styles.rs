@@ -35,28 +35,9 @@ fn render_tests_dir() -> PathBuf {
 fn load(test: &str) -> Impl {
     let path = render_tests_dir().join(test).join("style.json");
     let json = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    // C++ style tests use a StubFileSource; sprite requests fail here
-    // (background-opacity/color has a sprite), which C++ also counts as
-    // loaded.
-    let run_loop = mln_actor::RunLoop::new();
-    let file_source = mln_storage::stub_file_source::StubFileSource::new(
-        &run_loop,
-        mln_storage::stub_file_source::ResponseType::Synchronous,
-    );
-    let failed = |_: &mln_storage::Resource| {
-        let mut response = mln_storage::Response::new();
-        response.error = Some(Box::new(mln_storage::response::ResourceError::new(
-            mln_storage::response::Reason::Other,
-            "no sprites in this test",
-        )));
-        Some(response)
-    };
-    file_source.set_response(mln_storage::Kind::SpriteJSON, failed);
-    file_source.set_response(mln_storage::Kind::SpriteImage, failed);
-    let mut style = Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), &run_loop);
+    let mut style = Impl::new(StyleRegistry::with_builtins());
     style.load_json(&json);
     assert!(style.loaded, "{test} did not load");
-    assert!(style.sources_loaded(), "{test}: sources not loaded");
     style
 }
 
@@ -241,7 +222,7 @@ fn background_opacity_overlay() {
     let log = FixtureLog::new();
     let style = load("background-opacity/overlay");
     assert_eq!(2, style.get_layer_list().len());
-    assert_eq!(1, style.get_source_impls().len());
+    assert_eq!(1, style.get_sources().len());
     assert_eq!(
         0,
         log.count(EventSeverity::Warning, Event::ParseStyle, "Unsupported layer type! Null factory for type: raster")

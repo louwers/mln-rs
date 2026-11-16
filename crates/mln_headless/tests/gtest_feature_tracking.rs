@@ -141,9 +141,9 @@ impl FeatureTrackingTest {
         .expect("style::Image");
 
         map.load_style_json(&read_file(&format!("{FIXTURE_BASE}api/empty.json")));
+        map.add_source(Box::new(source)).expect("add source");
         {
             let style = map.style_mut();
-            style.add_source(Box::new(source)).expect("add source");
             style.add_layer(background_layer, None).expect("add layer");
             style.add_layer(fill_layer, None).expect("add layer");
             style.add_layer(line_layer, None).expect("add layer");
@@ -750,11 +750,8 @@ fn globe_capture_close_up() {
     source.set_geojson(large.parse().expect("GeoJSON")).expect("set GeoJSON");
     let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "lowZoomFill", "lowZoom").unwrap();
     set(&mut fill_layer, "fill-color", &json!("rgba(0,255,0,1)"));
-    {
-        let style = test.map.style_mut();
-        style.add_source(Box::new(source)).expect("add source");
-        style.add_layer(fill_layer, None).expect("add layer");
-    }
+    test.map.add_source(Box::new(source)).expect("add source");
+    test.map.style_mut().add_layer(fill_layer, None).expect("add layer");
     test.map.jump_to(&CameraOptions { pitch: Some(60.0), ..camera(11.0) });
     let image = test.run(None, 0.0).image;
     test.expect_captured_as_drawn("large", "lowZoomFill", &image);

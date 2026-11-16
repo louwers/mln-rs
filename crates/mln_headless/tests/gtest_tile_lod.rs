@@ -61,7 +61,7 @@ impl TileLODTest {
         };
         let source = CustomGeometrySource::new("custom", options, run_loop.pool()).unwrap();
         handle.set(source.handle()).unwrap();
-        map.style_mut().add_source(Box::new(source)).unwrap();
+        map.add_source(Box::new(source)).unwrap();
 
         let mut layer = Layer::new(Registry::with_builtins().style(), "circle", "circles", "custom").unwrap();
         let error = layer.set_property("circle-color", &Convertible::from(&serde_json::json!("rgba(0,0,255,0)")), None);

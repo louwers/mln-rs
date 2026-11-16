@@ -19,8 +19,6 @@ use mln_gfx::{ConsumerSync, Handoff, RendererBackend, SyncKind};
 use mln_map::{MapView, RenderMode};
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
-use mln_style::collection::ImmutableVector;
-use mln_style::source_impl;
 use mln_style::sources::{GeoJSONData, geojson_source_impl};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
@@ -440,7 +438,7 @@ pub(crate) struct Worker {
     /// Whether the target holds a frame since it attached or resized.
     has_frame: bool,
     /// The sources of the last render.
-    sources: Option<ImmutableVector<dyn source_impl::Impl>>,
+    sources: Option<Arc<mln_style::SourceList>>,
     torn_down: bool,
     /// Whether the map refused to bind the session, which then never gets
     /// an update to render.
@@ -1650,11 +1648,10 @@ impl Worker {
         const ZOOM_BITS: u32 = 0x1F;
 
         self.renderer()?;
-        let source = self
-            .sources
-            .as_ref()
-            .and_then(|sources| sources.iter().find(|source| source.base().id == source_id))
-            .ok_or_else(|| Error::not_found(format!("the session's last render has no source named {source_id}")))?;
+        let source =
+            self.sources.as_ref().and_then(|sources| sources.get(source_id)).ok_or_else(|| {
+                Error::not_found(format!("the session's last render has no source named {source_id}"))
+            })?;
         let geojson = source
             .downcast_ref::<geojson_source_impl::Impl>()
             .ok_or_else(|| Error::invalid_argument(format!("source {source_id} is not a GeoJSON source")))?;

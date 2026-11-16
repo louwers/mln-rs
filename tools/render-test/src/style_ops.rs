@@ -1,4 +1,5 @@
 use mln_conversion::Convertible;
+use mln_map::Map;
 use mln_map_types::CameraOptions;
 use mln_style::Style;
 
@@ -82,21 +83,21 @@ pub(crate) fn remove_layer(style: &mut Style, layer_name: &str) -> bool {
 }
 
 /// Parses a source named `source_name` from `json` and adds it to the
-/// style. A duplicate id is a [`MapError::Exception`], as C++ throws an
-/// exception the runner doesn't catch.
-pub(crate) fn add_source(style: &mut Style, source_name: &str, json: &str) -> Result<(), MapError> {
+/// map's style. A duplicate id is a [`MapError::Exception`], as C++ throws
+/// an exception the runner doesn't catch.
+pub(crate) fn add_source(map: &mut Map, source_name: &str, json: &str) -> Result<(), MapError> {
     let value: serde_json::Value = match serde_json::from_str(json) {
         Ok(value) => value,
         Err(e) => return Err(MapError::Conversion(e.to_string())),
     };
     let mut error = mln_conversion::Error::default();
-    let functions = style.registry().functions();
+    let functions = map.style().registry().functions();
     let Some(source) =
         mln_style::conversion::convert_source(&Convertible::from(&value), &mut error, source_name, functions)
     else {
         return Err(MapError::Conversion(error.message));
     };
-    style.add_source(source).map_err(|e| MapError::Exception(e.to_string()))
+    map.add_source(source).map_err(|e| MapError::Exception(e.to_string()))
 }
 
 /// Parses a light from `json` and sets it on the style (for the conformance
@@ -117,8 +118,8 @@ pub(crate) fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
 }
 
 /// Removes the source `source_name`, and returns whether there was one.
-pub(crate) fn remove_source(style: &mut Style, source_name: &str) -> bool {
-    style.remove_source(source_name).is_some()
+pub(crate) fn remove_source(map: &mut Map, source_name: &str) -> bool {
+    map.remove_source(source_name).is_some()
 }
 
 #[cfg(test)]
@@ -138,13 +139,12 @@ mod tests {
     }
 
     fn load_json(style: &mut Style, json: &str) {
-        style.parse_json(json, None).expect("a style");
+        *style = Style::from_json(style.registry(), json, None).expect("a style").style;
     }
 
     #[test]
     fn transition_test_style() {
-        let run_loop = mln_actor::RunLoop::new();
-        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()), &run_loop);
+        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()));
         load_json(&mut style, &style_json("background-color/transition"));
         assert!(style.get_layer("background").is_some());
         assert_eq!(
@@ -159,16 +159,14 @@ mod tests {
 
     #[test]
     fn default_camera_of_a_test_style() {
-        let run_loop = mln_actor::RunLoop::new();
-        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()), &run_loop);
+        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()));
         load_json(&mut style, &style_json("background-color/colorSpace-hcl"));
         assert_eq!(default_camera(&style).zoom, Some(5.0));
     }
 
     #[test]
     fn layers() {
-        let run_loop = mln_actor::RunLoop::new();
-        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()), &run_loop);
+        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()));
         load_json(&mut style, &style_json("background-visibility/none"));
         assert_eq!(set_layer_zoom_range(&mut style, "background", 1.0, 2.0), Ok(()));
         assert_eq!(set_layer_zoom_range(&mut style, "nope", 1.0, 2.0), Err(MapError::LayerNotFound));

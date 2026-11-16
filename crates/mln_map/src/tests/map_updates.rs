@@ -286,11 +286,11 @@ fn each_reader_wakes_until_it_drops() {
 
 /// Whether `update`'s only source updates synchronously.
 fn publishes_synchronous(update: &Update) -> bool {
-    update.parameters.sources[0].is_update_synchronous()
+    update.parameters.sources.iter().next().expect("a source").is_update_synchronous()
 }
 
 fn set_override_synchronous_update(map: &mut Map, value: bool) {
-    let source = map.style_mut().get_source("points").expect("the source");
+    let source = map.source("points").expect("the source");
     source.downcast_ref::<GeoJSONSource>().expect("a GeoJSON source").set_override_synchronous_update(value);
     map.process_events();
 }

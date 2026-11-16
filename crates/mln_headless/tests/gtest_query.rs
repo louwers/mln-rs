@@ -318,11 +318,11 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
         let test = QueryTest::new();
         {
             let mut map = test.map();
-            let style = map.style_mut();
             // Keep the point away from tile boundaries so source queries return one copy.
-            let source = style.get_source("source1").expect("source1");
+            let source = map.source("source1").expect("source1");
             let source = source.downcast_ref::<GeoJSONSource>().expect("GeoJSONSource");
             source.set_geojson(GeoJson::from(Geometry::new_point([1.003, 1.003]))).unwrap();
+            let style = map.style_mut();
             style
                 .add_layer(
                     Layer::new(Registry::with_builtins().style(), "circle", "circle_layer", "source1").unwrap(),
@@ -574,7 +574,7 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     set(&mut cluster_layer, "icon-size", &json!(12.0));
 
     test.map().jump_to(&CameraOptions { center: Some(coordinate), zoom: Some(0.0), ..Default::default() });
-    test.map().style_mut().add_source(Box::new(source)).unwrap();
+    test.map().add_source(Box::new(source)).unwrap();
     test.map().style_mut().add_layer(cluster_layer, None).unwrap();
     test.0.run_loop.run_once();
     test.render();

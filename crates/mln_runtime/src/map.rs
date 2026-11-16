@@ -961,14 +961,14 @@ impl Map {
     }
 
     /// Adds a source to the style from its JSON. See
-    /// `Style::add_source_json` for the errors.
+    /// `mln_map::Map::add_source_json` for the errors.
     pub fn add_style_source_json(
         &self,
         source_id: impl Into<String>,
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (source_id, json) = (source_id.into(), json.into());
-        self.command(move |map| map.style_mut().add_source_json(&source_id, &json))
+        self.command(move |map| map.add_source_json(&source_id, &json))
     }
 
     /// Removes a source from the style. Completes with
@@ -981,18 +981,18 @@ impl Map {
         let source_id = source_id.into();
         self.send(
             move |entry, _| {
-                let style = entry.core.style_mut();
-                if !style.is_loaded() {
+                let map = &mut entry.core;
+                if !map.style().is_loaded() {
                     return Err(style_not_loaded());
                 }
-                if style.get_source(&source_id).is_none() {
+                if map.source(&source_id).is_none() {
                     return Err(Error::not_found(format!("source \"{source_id}\" does not exist")));
                 }
-                if let Some(layer) = style.get_layers().into_iter().find(|layer| layer.get_source_id() == source_id) {
+                if let Some(layer) = map.style().get_layers().find(|layer| layer.get_source_id() == source_id) {
                     let message = format!("source \"{source_id}\" is used by layer \"{}\"", layer.get_id());
                     return Err(Error::invalid_state(message));
                 }
-                style.remove_source(&source_id);
+                map.remove_source(&source_id);
                 entry.core.remove_source_feature_state(&source_id);
                 Ok(())
             },

@@ -12,7 +12,6 @@ use mln_util::LatLng;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 
-use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
@@ -206,10 +205,6 @@ impl Source for ImageSource {
             Box::new(move |res: Response| on_image_response(&weak, &res)),
         );
         *self.inner.req.borrow_mut() = Some(req);
-    }
-
-    fn supports_layer_type(&self, info: LayerTypeInfo) -> bool {
-        info.source == SourceKind::Raster
     }
 
     fn create_mutable(&self) -> Box<dyn source_impl::Impl> {

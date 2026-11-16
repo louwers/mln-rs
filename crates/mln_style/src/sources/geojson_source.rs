@@ -18,7 +18,6 @@ use super::geojson_source_impl::{self, Impl};
 use crate::conversion::Error;
 use crate::conversion::geojson::convert_json_geojson;
 use crate::expression::Expr;
-use crate::layer_type::{LayerTypeInfo, SourceKind};
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl;
 
@@ -364,10 +363,6 @@ impl Source for GeoJSONSource {
             Box::new(move |res: Response| on_description_response(&weak, &res, &callback_loop)),
         );
         *self.inner.req.borrow_mut() = Some(req);
-    }
-
-    fn supports_layer_type(&self, info: LayerTypeInfo) -> bool {
-        info.source == SourceKind::Geometry
     }
 
     fn create_mutable(&self) -> Box<dyn source_impl::Impl> {

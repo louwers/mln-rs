@@ -11,7 +11,7 @@ use mln_conversion::{Convertible, value_to_json};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 
-use crate::conversion::{Converter, convert_layer, convert_light, convert_projection, convert_sky, convert_source};
+use crate::conversion::{Converter, convert_layer, convert_light, convert_projection, convert_sky};
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
 use crate::layer::Layer;
@@ -19,32 +19,12 @@ use crate::layer_type::SourceKind;
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::property_table::{Properties, defined_properties};
+use crate::source::layer_kind;
 use crate::style::Style;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 
 impl Style {
-    /// Adds the [source](https://maplibre.org/maplibre-style-spec/sources/)
-    /// that `json` describes, with the ID `id`.
-    ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
-    /// style isn't loaded, with `AlreadyExists` if the style has a source
-    /// named `id`, and with `InvalidArgument` if `json` isn't a valid source.
-    pub fn add_source_json(&mut self, id: &str, json: &str) -> Result<(), Error> {
-        self.require_loaded()?;
-        if self.get_source(id).is_some() {
-            return Err(Error::already_exists(format!("source {} already exists", quote(id))));
-        }
-        let context = format!("style source {}", quote(id));
-        let value = parse(json, &context)?;
-        let mut error = mln_conversion::Error::default();
-        let functions = Arc::clone(self.registry().functions());
-        let Some(source) = convert_source(&Convertible::from(&value), &mut error, id, &functions) else {
-            return Err(conversion_error(&context, &error));
-        };
-        self.add_source(source)
-    }
-
     /// Adds the [layer](https://maplibre.org/maplibre-style-spec/layers/)
     /// that `json` describes, below the layer named `before_layer_id`, or
     /// above every layer when it is `None`.
@@ -83,7 +63,7 @@ impl Style {
                     quote(source_id)
                 )));
             };
-            if !source.supports_layer_type(type_info) {
+            if layer_kind(source.type_) != type_info.source {
                 return Err(Error::invalid_argument(format!(
                     "source {} does not support {} layer {}",
                     quote(source_id),

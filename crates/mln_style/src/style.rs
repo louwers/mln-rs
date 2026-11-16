@@ -11,7 +11,8 @@ use crate::map::camera::CameraOptions;
 use crate::projection::Projection;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
-use crate::source::Source;
+use crate::source::{self, Source};
+use crate::source_list::SourceList;
 use crate::sprite::Sprite;
 pub(crate) use crate::style_impl::Impl;
 use crate::transition_options::TransitionOptions;
@@ -36,6 +37,13 @@ impl StyleLoadError {
     }
 }
 
+/// A parsed style document: the style, and the sources it names, whose
+/// records the style holds.
+pub struct Parsed {
+    pub style: Style,
+    pub sources: Vec<Box<dyn Source>>,
+}
+
 #[derive(Debug)]
 pub struct Style {
     // Private implementation
@@ -43,22 +51,24 @@ pub struct Style {
 }
 
 impl Style {
-    /// A style without a file source, on `run_loop`, whose JSON, layers and
-    /// filters parse against `registry` (see `Impl::new`).
+    /// An empty style whose JSON, layers and filters parse against
+    /// `registry`.
     #[must_use]
-    pub fn new(registry: Arc<StyleRegistry>, run_loop: &mln_actor::RunLoop) -> Self {
-        Style { impl_: Box::new(Impl::new(registry, run_loop)) }
+    pub fn new(registry: Arc<StyleRegistry>) -> Self {
+        Style { impl_: Box::new(Impl::new(registry)) }
     }
 
-    /// A style that parses against `registry` and whose sources load from
-    /// `file_source`, on `run_loop` (see `Impl::with_file_source`).
-    #[must_use]
-    pub fn with_file_source(
-        registry: Arc<StyleRegistry>,
-        file_source: Option<Arc<dyn mln_storage::FileSource>>,
-        run_loop: &mln_actor::RunLoop,
-    ) -> Self {
-        Style { impl_: Box::new(Impl::with_file_source(registry, file_source, run_loop)) }
+    /// The style that the style document `json` describes, parsed against
+    /// `registry`, with `fallback_font_faces` after the document's font
+    /// faces, and the document's sources. Fails with why `json` isn't a
+    /// style.
+    pub fn from_json(
+        registry: &Arc<StyleRegistry>,
+        json: &str,
+        fallback_font_faces: Option<&Arc<mln_text::glyph::FontFaces>>,
+    ) -> Result<Parsed, Error> {
+        let (style, sources) = Impl::from_json(registry, json, fallback_font_faces)?;
+        Ok(Parsed { style: Style { impl_: Box::new(style) }, sources })
     }
 
     #[must_use]
@@ -66,20 +76,14 @@ impl Style {
         self.impl_.registry()
     }
 
-    /// Replaces the style with the one the style document `json`
-    /// describes, with `fallback_font_faces` after the document's font
-    /// faces. Returns the document's sprites, for the caller to load, or
-    /// why `json` isn't a style, which leaves the style as it was.
-    pub fn parse_json(
-        &mut self,
-        json: &str,
-        fallback_font_faces: Option<&Arc<mln_text::glyph::FontFaces>>,
-    ) -> Result<Vec<Sprite>, Error> {
-        self.impl_.parse(json, fallback_font_faces)
+    /// The document's sprites.
+    #[must_use]
+    pub fn get_sprites(&self) -> &[Sprite] {
+        self.impl_.get_sprites()
     }
 
-    /// Marks the style not loaded until the next [`parse_json`](Self::parse_json),
-    /// while a URL load fetches its document.
+    /// Marks the style not loaded while a URL load fetches the document
+    /// that replaces it.
     pub fn begin_url_load(&mut self) {
         self.impl_.begin_url_load();
     }
@@ -197,26 +201,34 @@ impl Style {
     }
 
     // Sources
+
+    /// The records of the style's sources, in the order they were added.
     #[must_use]
-    pub fn get_sources(&self) -> Vec<&dyn Source> {
+    pub fn get_sources(&self) -> &Arc<SourceList> {
         self.impl_.get_sources()
     }
 
+    /// The record of the source `id`.
     #[must_use]
-    pub fn get_source(&self, id: &str) -> Option<&dyn Source> {
-        self.impl_.get_source(id)
+    pub fn get_source(&self, id: &str) -> Option<&Arc<dyn source::Impl>> {
+        self.impl_.get_sources().get(id)
     }
 
-    /// Fails with [`ErrorKind::AlreadyExists`](mln_util::ErrorKind) if the
-    /// style has a source with the same ID.
-    pub fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
-        self.impl_.mutated = true;
-        self.impl_.add_source(source)
+    /// Records `source` as the source with its id, replacing that source's
+    /// record in place or adding it last, or removes the record of the
+    /// source `id` for `None`. The map, which holds the sources' handles,
+    /// keeps the records current. Counts as an edit when the records change.
+    pub fn set_source_impl(&mut self, id: &str, source: Option<Arc<dyn source::Impl>>) {
+        if self.impl_.set_source_impl(id, source) {
+            self.impl_.mutated = true;
+        }
     }
 
-    pub fn remove_source(&mut self, source_id: &str) -> Option<Box<dyn Source>> {
-        self.impl_.mutated = true;
-        self.impl_.remove_source(source_id)
+    /// As [`set_source_impl`](Self::set_source_impl), for a change that a
+    /// source made itself, which doesn't count as an edit. Returns whether
+    /// the records changed.
+    pub fn refresh_source_impl(&mut self, id: &str, source: Arc<dyn source::Impl>) -> bool {
+        self.impl_.set_source_impl(id, Some(source))
     }
 
     // Layers

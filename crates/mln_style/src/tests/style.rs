@@ -7,33 +7,27 @@ use feature::Value;
 use mln_conversion::Convertible;
 use mln_style_types::{ProjectionDefinition, VisibilityType};
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, EventSeverity};
 use mln_util::size::Size;
 use mln_util::tileset::PartialTileset;
 use mln_util::{Color, LatLng};
 
-use super::util::{FixtureLog, new_layer, parse_json, read_file};
+use super::util::{FixtureLog, new_layer, parse_json};
 use crate::expression::Functions;
 use crate::layer_type::LayerStyle;
 use crate::layers::Line;
-use crate::observer::{Observer, SourceObserver};
+use crate::observer::Observer;
 use crate::projection::Projection;
 use crate::property_value::PropertyValue;
 use crate::sky::Sky;
-use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
+use crate::source::Source as _;
 use crate::sources::tile_source::TileSource;
 use crate::style::{Impl, Style};
 use crate::transition_options::TransitionOptions;
 use crate::{StyleRegistry, image};
 
-/// A style impl over a stub file source, with pixel ratio 1.
+/// An empty style impl.
 fn stub_style() -> Impl {
-    let run_loop = mln_actor::RunLoop::new();
-    let file_source = mln_storage::stub_file_source::StubFileSource::new(
-        &run_loop,
-        mln_storage::stub_file_source::ResponseType::Asynchronous,
-    );
-    Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), &run_loop)
+    Impl::new(StyleRegistry::with_builtins())
 }
 
 // gtest: Style.Properties
@@ -210,33 +204,10 @@ struct CountingObserver {
     updates: Cell<usize>,
 }
 
-impl SourceObserver for CountingObserver {}
 impl Observer for CountingObserver {
     fn on_update(&self) {
         self.updates.set(self.updates.get() + 1);
     }
-}
-
-// gtest: Style.SourceCollectionPublishesUpdates
-#[test]
-fn source_collection_publishes_updates() {
-    // The C++ observer takes the style's sources inside onUpdate; this counts the calls and reads
-    // the sources after each (see transition_options_publish_updates).
-    let mut style = stub_style();
-    style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    style.add_layer(new_layer("line", "line", "late"), None).unwrap();
-    let observer = Rc::new(CountingObserver::default());
-    style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
-
-    style.add_source(Box::new(GeoJSONSource::new("late", GeoJSONOptions::default_options()))).unwrap();
-    assert_eq!(1, observer.updates.get());
-    assert_eq!(1, style.get_source_impls().len());
-
-    style.remove_layer("line");
-    let updates = observer.updates.get();
-    assert!(style.remove_source("late").is_some());
-    assert_eq!(updates + 1, observer.updates.get());
-    assert!(style.get_source_impls().is_empty());
 }
 
 // gtest: Style.ImageRemovalPublishesUpdates
@@ -641,59 +612,33 @@ fn vector_source(id: &str) -> TileSource {
     TileSource::vector(id, Some("mptiler://tiles/contours".to_owned()), PartialTileset::default())
 }
 
-// gtest: Style.DuplicateSource
 #[test]
-fn duplicate_source() {
-    let mut style = stub_style();
+fn source_records_keep_the_order_they_were_added_in() {
+    let mut style = Style::new(StyleRegistry::with_builtins());
+    for id in ["c", "b", "a"] {
+        style.set_source_impl(id, Some(vector_source(id).base_impl()));
+    }
+    let ids = |style: &Style| style.get_sources().iter().map(|source| source.id.clone()).collect::<Vec<_>>();
+    assert_eq!(["c", "b", "a"], *ids(&style));
+    assert!(style.is_mutated());
 
-    style.load_json(&read_file("test/fixtures/resources/style-unused-sources.json"));
+    // A new record of a source replaces the old one in place.
+    let before = Arc::clone(style.get_sources());
+    let record = vector_source("b").base_impl();
+    assert!(style.refresh_source_impl("b", Arc::clone(&record)));
+    assert_eq!(["c", "b", "a"], *ids(&style));
+    assert!(Arc::ptr_eq(&record, style.get_source("b").unwrap()));
+    assert!(!Arc::ptr_eq(&before, style.get_sources()));
+    // The same record changes nothing.
+    let after = Arc::clone(style.get_sources());
+    assert!(!style.refresh_source_impl("b", record));
+    assert!(Arc::ptr_eq(&after, style.get_sources()));
 
-    style.add_source(Box::new(vector_source("sourceId"))).unwrap();
-
-    // C++ throws std::runtime_error.
-    assert!(
-        style.add_source(Box::new(vector_source("sourceId"))).is_err(),
-        "Should not have been allowed to add a duplicate source id"
-    );
+    style.set_source_impl("b", None);
+    assert_eq!(["c", "a"], *ids(&style));
+    assert_eq!(["c", "b", "a"], *ids_of(&before));
 }
 
-// gtest: Style.RemoveSourceInUse
-#[test]
-fn remove_source_in_use() {
-    let log = FixtureLog::new();
-
-    let mut style = stub_style();
-
-    style.load_json(&read_file("test/fixtures/resources/style-unused-sources.json"));
-    style.add_source(Box::new(vector_source("sourceId"))).unwrap();
-    style.add_layer(new_layer("line", "layerId", "sourceId"), None).unwrap();
-
-    // Should not remove the source
-    let removed = style.remove_source("sourceId");
-    assert!(removed.is_none());
-    assert!(style.get_source("sourceId").is_some());
-
-    assert_eq!(1, log.count(EventSeverity::Warning, Event::General, "Source 'sourceId' is in use, cannot remove"));
-}
-
-// gtest: Style.SourceImplsOrder
-#[test]
-fn source_impls_order() {
-    let mut style = stub_style();
-
-    style.add_source(Box::new(vector_source("c"))).unwrap();
-    style.add_source(Box::new(vector_source("b"))).unwrap();
-    style.add_source(Box::new(vector_source("a"))).unwrap();
-
-    let sources = style.get_sources();
-    assert_eq!(3, sources.len());
-    assert_eq!("c", sources[0].get_id());
-    assert_eq!("b", sources[1].get_id());
-    assert_eq!("a", sources[2].get_id());
-
-    let source_impls = style.get_source_impls();
-    assert_eq!(3, source_impls.len());
-    assert_eq!("a", source_impls[0].id);
-    assert_eq!("b", source_impls[1].id);
-    assert_eq!("c", source_impls[2].id);
+fn ids_of(sources: &crate::SourceList) -> Vec<String> {
+    sources.iter().map(|source| source.id.clone()).collect()
 }

@@ -15,8 +15,7 @@ use mln_storage::{FileSource, Kind, RequestOrder, Resource, Responder, Response}
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Hillshade, Line, Raster};
-use mln_style::observer::SourceObserver;
-use mln_style::source::{self, Source};
+use mln_style::source::{self, Source, SourceObserver};
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
 use mln_style::sources::custom_vector_source::{
     CustomVectorSource, Options as CustomVectorSourceOptions, TileDataFormat,

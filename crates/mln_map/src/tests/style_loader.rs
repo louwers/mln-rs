@@ -138,7 +138,8 @@ fn load_json_cancels_pending_load_url() {
     let run_loop = RunLoop::new();
     let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
     file_source.set_response(Kind::Style, |_| Some(style_response(r#"{"version": 8, "name": "Streets"}"#)));
-    let mut map = Map::with_file_source(Arc::clone(&file_source) as _, MapOptions::default(), &run_loop).expect("map");
+    let mut map = Map::with_file_source(Arc::<StubFileSource>::clone(&file_source), MapOptions::default(), &run_loop)
+        .expect("map");
 
     // Start loading a URL (this will be pending)
     map.load_style_url("http://some-url");
@@ -242,13 +243,13 @@ fn load_sprite(
     }
 }
 
-fn loading_success(sprite_path: String, expected_images: usize, pixel_ratio: f32) {
+fn loading_success(sprite_path: &str, expected_images: usize, pixel_ratio: f32) {
     let run_loop = RunLoop::new();
     let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
-    file_source.set_response(Kind::SpriteImage, successful_response(".png", sprite_path.clone(), pixel_ratio));
-    file_source.set_response(Kind::SpriteJSON, successful_response(".json", sprite_path.clone(), pixel_ratio));
+    file_source.set_response(Kind::SpriteImage, successful_response(".png", sprite_path.to_owned(), pixel_ratio));
+    file_source.set_response(Kind::SpriteJSON, successful_response(".json", sprite_path.to_owned(), pixel_ratio));
 
-    let (map, event) = load_sprite(file_source, &sprite_path, pixel_ratio, &run_loop);
+    let (map, event) = load_sprite(file_source, sprite_path, pixel_ratio, &run_loop);
     assert!(matches!(event, MapEvent::SpriteLoaded(Some(_))), "{event:?}");
     assert_eq!(expected_images, map.style().impl_.get_image_impls().len());
     assert!(map.style_loaded());
@@ -257,19 +258,19 @@ fn loading_success(sprite_path: String, expected_images: usize, pixel_ratio: f32
 // gtest: SpriteLoaderParametrized.LoadingSuccess
 #[test]
 fn loading_success_sprite_1x() {
-    loading_success(default_sprite_path(), 418, 1.0);
+    loading_success(&default_sprite_path(), 418, 1.0);
 }
 
 // gtest: SpriteLoaderParametrized.LoadingSuccess
 #[test]
 fn loading_success_versatiles_1x() {
-    loading_success(testdata("test/fixtures/resources/versatiles-sprite/sprite"), 112, 1.0);
+    loading_success(&testdata("test/fixtures/resources/versatiles-sprite/sprite"), 112, 1.0);
 }
 
 // gtest: SpriteLoaderParametrized.LoadingSuccess
 #[test]
 fn loading_success_versatiles_2x() {
-    loading_success(testdata("test/fixtures/resources/versatiles-sprite/sprite"), 112, 2.0);
+    loading_success(&testdata("test/fixtures/resources/versatiles-sprite/sprite"), 112, 2.0);
 }
 
 /// The message of the sprite error that loading the default sprite with
