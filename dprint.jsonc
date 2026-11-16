@@ -10,6 +10,22 @@
     "proseWrap": "always",
     "sortPackageJson": false,
   },
+  // The C API's headers, in the style maplibre-native-ffi formatted them with.
+  "clangFormat": {
+    "BasedOnStyle": "Google",
+    "ColumnLimit": 80,
+    "IndentWidth": 2,
+    "ContinuationIndentWidth": 2,
+    "UseCRLF": false,
+    "UseTab": "Never",
+    "AlignAfterOpenBracket": "BlockIndent",
+    "IncludeBlocks": "Regroup",
+    "IncludeCategories": [
+      { "Regex": "^<[a-zA-Z0-9_]+>$", "Priority": -100 },
+      { "Regex": "^<.*>$", "Priority": -50 },
+      { "Regex": ".*", "Priority": 1 },
+    ],
+  },
   // Rust: the nightly rustfmt that mise.toml's MLN_NIGHTLY names, with its
   // unstable import options; rustfmt.toml has the rest. Bump the two together.
   "exec": {
@@ -39,6 +55,7 @@
     "tools/style-codegen/v8.json",
   ],
   "plugins": [
+    "npm:@dprint/clang-format@0.2.1",
     "npm:@dprint/oxc@0.50.0",
     "npm:@dprint/exec@0.9.0/plugin.json@d4f708dc00798b51013ca4e7c26a86656bfb31e7255cdcde28a487f86813e34d",
   ],
