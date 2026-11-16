@@ -833,8 +833,8 @@ impl Map {
     /// Fails with [`ErrorKind::AlreadyExists`](mln_util::ErrorKind) if the
     /// style has a source with its id.
     pub fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
-        let source = self.sources.add(source)?;
-        let (id, source) = (source.get_id(), Some(source.base_impl()));
+        let (id, record) = self.sources.add(source)?;
+        let source = Some(record);
         // The new handle's record goes in as the edit itself.
         self.edit_synced_style(|style| style.apply(Edit::SetSourceImpl { id, source }))
     }

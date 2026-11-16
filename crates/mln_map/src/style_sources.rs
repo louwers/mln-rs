@@ -6,14 +6,12 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use indexmap::IndexMap;
 use mln_actor::RunLoop;
 use mln_storage::FileSource;
-use mln_style::source::{Source, SourceObserver};
+use mln_style::source::{self, Source, SourceObserver};
 use mln_style::{Edit, Style};
 use mln_util::error::Error;
 use mln_util::event_queue::EventQueue;
-use mln_util::hash::RandomState;
 
 /// What a source reported about itself.
 pub(crate) enum SourceEvent {
@@ -60,7 +58,7 @@ impl SourceObserver for SourceEvents {
 
 /// The handles of the style's sources, in the order they were added.
 pub(crate) struct StyleSources {
-    sources: IndexMap<Arc<str>, Box<dyn Source>, RandomState>,
+    sources: Vec<(Arc<str>, Box<dyn Source>)>,
     observer: Rc<SourceEvents>,
 }
 
@@ -73,26 +71,27 @@ impl StyleSources {
         events: EventQueue<SourceEvent>,
     ) -> Self {
         StyleSources {
-            sources: IndexMap::default(),
+            sources: Vec::new(),
             observer: Rc::new(SourceEvents { events, file_source, run_loop: run_loop.clone() }),
         }
     }
 
     pub(crate) fn get(&self, id: &str) -> Option<&dyn Source> {
-        self.sources.get(id).map(AsRef::as_ref)
+        self.sources.iter().find(|(key, _)| **key == *id).map(|(_, source)| source.as_ref())
     }
 
     /// The sources, in the order they were added.
     pub(crate) fn iter(&self) -> impl Iterator<Item = &dyn Source> {
-        self.sources.values().map(AsRef::as_ref)
+        self.sources.iter().map(|(_, source)| source.as_ref())
     }
 
-    /// Adds `source` last and starts loading its description. Fails with
+    /// Adds `source` last and starts loading its description, and returns
+    /// its id and record. Fails with
     /// [`ErrorKind::AlreadyExists`](mln_util::ErrorKind) if a source has its
     /// id.
-    pub(crate) fn add(&mut self, source: Box<dyn Source>) -> Result<&dyn Source, Error> {
+    pub(crate) fn add(&mut self, source: Box<dyn Source>) -> Result<(String, Arc<dyn source::Impl>), Error> {
         let id = source.get_id();
-        if self.sources.contains_key(id.as_str()) {
+        if self.get(&id).is_some() {
             return Err(Error::already_exists(format!("Source {id} already exists")));
         }
         let observer: Rc<dyn SourceObserver> = Rc::<SourceEvents>::clone(&self.observer);
@@ -100,13 +99,15 @@ impl StyleSources {
         if let Some(file_source) = &self.observer.file_source {
             source.load_description(&**file_source, &self.observer.run_loop);
         }
-        let (index, _) = self.sources.insert_full(Arc::from(id.as_str()), source);
-        Ok(self.sources[index].as_ref())
+        let record = source.base_impl();
+        self.sources.push((Arc::from(id.as_str()), source));
+        Ok((id, record))
     }
 
     /// Removes the source `id`, which stops reporting.
     pub(crate) fn remove(&mut self, id: &str) -> Option<Box<dyn Source>> {
-        let source = self.sources.shift_remove(id)?;
+        let index = self.sources.iter().position(|(key, _)| **key == *id)?;
+        let (_, source) = self.sources.remove(index);
         source.set_observer(None);
         Some(source)
     }
@@ -145,12 +146,12 @@ impl StyleSources {
 
     /// Whether every source loaded its description.
     pub(crate) fn all_loaded(&self) -> bool {
-        self.sources.values().all(|source| source.loaded())
+        self.sources.iter().all(|(_, source)| source.loaded())
     }
 
     /// Logs the sources and their state.
     pub(crate) fn dump_debug_logs(&self) {
-        for source in self.sources.values() {
+        for (_, source) in &self.sources {
             source.dump_debug_logs();
         }
     }
