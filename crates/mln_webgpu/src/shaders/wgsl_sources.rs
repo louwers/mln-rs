@@ -2741,6 +2741,50 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
+/// Port-only: a layer's texture, the size of the frame, composited onto it
+/// texel for texel.
+pub(crate) const LAYER_COMPOSITE_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "LayerCompositeShader",
+    name: r"LayerCompositeShader",
+    vertex: Some(
+        r"
+struct VertexInput {
+    @location(0) position: vec2<i32>,
+};
+
+@vertex
+fn main(in: VertexInput) -> @builtin(position) vec4<f32> {
+    let pos = vec2<f32>(in.position);
+    return vec4<f32>(pos * 2.0 - 1.0, 0.0, 1.0);
+}
+",
+    ),
+    fragment: Some(
+        r"
+struct LayerCompositeUBO {
+    opacity: f32,
+    pad1: f32,
+    pad2: f32,
+    pad3: f32,
+};
+
+@group(0) @binding(5) var<uniform> props: LayerCompositeUBO;
+@group(1) @binding(1) var image_texture: texture_2d<f32>;
+
+@fragment
+fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let color = textureLoad(image_texture, vec2<i32>(position.xy), 0);
+#ifdef OVERDRAW_INSPECTOR
+    return color;
+#else
+    return color * props.opacity;
+#endif
+}
+",
+    ),
+    prelude: None,
+};
+
 pub(crate) const HILLSHADE_PREPARE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "HillshadePrepareShader",
     name: r"HillshadePrepareShader",
@@ -6054,6 +6098,7 @@ pub(crate) const ALL: &[&WgslShaderSource] = &[
     &HEATMAP_TEXTURE_SHADER,
     &HILLSHADE_PREPARE_SHADER,
     &HILLSHADE_SHADER,
+    &LAYER_COMPOSITE_SHADER,
     &LINE_GRADIENT_SDF_SHADER,
     &LINE_GRADIENT_SHADER,
     &LINE_PATTERN_SHADER,

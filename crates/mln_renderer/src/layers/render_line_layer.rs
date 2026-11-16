@@ -37,7 +37,7 @@ use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
-use crate::layer_group::LayerGroup;
+use crate::layer_group::{LayerGroup, composite_opacity};
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
@@ -408,7 +408,8 @@ impl RenderLayer for RenderLineLayer {
         );
         let evaluated = &properties.evaluated;
 
-        self.base.passes = if evaluated.line_opacity.constant_or(&1.0) > 0.0
+        self.base.passes = if *evaluated.line_layer_opacity.uniform() > 0.0
+            && evaluated.line_opacity.constant_or(&1.0) > 0.0
             && evaluated.line_color.constant_or(&Color::black()).a > 0.0
             && evaluated.line_width.constant_or(&1.0) > 0.0
         {
@@ -545,6 +546,9 @@ impl RenderLayer for RenderLineLayer {
 
         {
             let mut tile_layer_group = layer_group.borrow_mut();
+            let layer_opacity =
+                *get_evaluated::<LineLayerProperties>(&self.base.evaluated_properties).line_layer_opacity.uniform();
+            tile_layer_group.composite_opacity = composite_opacity(layer_opacity);
             let base = &self.base;
             let passes = self.base.passes;
             // If the render pass has changed or the tile has dropped out of

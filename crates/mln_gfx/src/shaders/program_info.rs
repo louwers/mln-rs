@@ -27,7 +27,8 @@ use crate::shaders::shader_defines::{
     ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_COLOR_RAMP_TEXTURE,
     ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE,
     ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE,
-    ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE,
+    ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE,
+    ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE,
     ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE,
     ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
     ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
@@ -93,6 +94,7 @@ pub const PROGRAMS: &[BuiltIn] = &[
     BuiltIn::GlobeDepthShader,
     BuiltIn::SkyShader,
     BuiltIn::AtmosphereShader,
+    BuiltIn::LayerCompositeShader,
 ];
 
 /// What `program` reads, `None` for a program no backend has.
@@ -556,6 +558,13 @@ pub fn program_info(program: BuiltIn) -> Option<&'static ProgramInfo> {
             attributes: &[(ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, Short2)],
             instance_attributes: &[],
             textures: &[],
+        }),
+        BuiltIn::LayerCompositeShader => Some(&ProgramInfo {
+            name: "LayerCompositeShader",
+            program: BuiltIn::LayerCompositeShader,
+            attributes: &[(ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, Short2)],
+            instance_attributes: &[],
+            textures: &[ID_LAYER_COMPOSITE_IMAGE_TEXTURE],
         }),
         _ => None,
     }

@@ -17,6 +17,7 @@ mod globe_depth_pass;
 mod globe_tile_mesh;
 mod group_by_layout;
 mod image_store;
+mod layer_composite;
 mod layer_group;
 mod layer_tweaker;
 pub mod layermanager;

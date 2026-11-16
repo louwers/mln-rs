@@ -48,4 +48,6 @@ pub enum BuiltIn {
     SymbolTextAndIconShader,
     WideVectorShader,
     GlobeDepthShader,
+    /// Port-only: a layer drawn into a texture, composited onto the frame.
+    LayerCompositeShader,
 }

@@ -351,6 +351,15 @@ shader_source!(
     &[tex(0, ID_HEATMAP_IMAGE_TEXTURE), tex(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)]
 );
 
+const LAYER_COMPOSITE_ATTRIBUTES: &[AttributeInfo] =
+    &[attr(0, Short2, LAYER_COMPOSITE_UBO_COUNT, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE)];
+shader_source!(
+    LAYER_COMPOSITE_SHADER,
+    "LayerCompositeShader",
+    LAYER_COMPOSITE_ATTRIBUTES,
+    &[tex(0, ID_LAYER_COMPOSITE_IMAGE_TEXTURE)]
+);
+
 const HILLSHADE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
@@ -550,6 +559,7 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::SkyShader => Some(&SKY_SHADER),
         BuiltIn::AtmosphereShader => Some(&ATMOSPHERE_SHADER),
         BuiltIn::GlobeDepthShader => Some(&GLOBE_DEPTH_SHADER),
+        BuiltIn::LayerCompositeShader => Some(&LAYER_COMPOSITE_SHADER),
         _ => None,
     }
 }

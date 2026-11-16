@@ -3555,6 +3555,48 @@ void main() {
 ",
 };
 
+pub(crate) const LAYER_COMPOSITE_SHADER_PRELUDE: &str = r"#define idLayerCompositeUBO    layerUBOStartId";
+
+/// Port-only: a layer's texture, the size of the frame, composited onto it
+/// texel for texel.
+pub(crate) const LAYER_COMPOSITE_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "LayerCompositeShader",
+    name: "LayerCompositeShader",
+    prelude: LAYER_COMPOSITE_SHADER_PRELUDE,
+    vertex: r"
+
+layout(location = 0) in ivec2 in_position;
+
+void main() {
+    gl_Position = vec4(vec2(in_position) * 2.0 - 1.0, 0.0, 1.0);
+}
+",
+    fragment: r"
+
+layout(location = 0) out vec4 out_color;
+
+layout(set = LAYER_SET_INDEX, binding = idLayerCompositeUBO) uniform LayerCompositeUBO {
+    float opacity;
+    float pad1;
+    float pad2;
+    float pad3;
+} props;
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
+
+void main() {
+    const vec4 color = texelFetch(sampler2D(image_texture, image_sampler), ivec2(gl_FragCoord.xy), 0);
+
+#if defined(OVERDRAW_INSPECTOR)
+    out_color = color;
+#else
+    out_color = color * props.opacity;
+#endif
+}
+",
+};
+
 pub(crate) const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
@@ -6754,4 +6796,5 @@ pub(crate) const ALL: &[&GlslShaderSource] = &[
     &SYMBOL_ICON_SHADER,
     &SYMBOL_SDF_SHADER,
     &SYMBOL_TEXT_AND_ICON_SHADER,
+    &LAYER_COMPOSITE_SHADER,
 ];

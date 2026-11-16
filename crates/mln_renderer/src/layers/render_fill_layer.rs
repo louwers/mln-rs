@@ -31,7 +31,7 @@ use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
-use crate::layer_group::LayerGroup;
+use crate::layer_group::{LayerGroup, composite_opacity};
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
@@ -263,9 +263,11 @@ impl RenderLayer for RenderFillLayer {
             evaluated.fill_outline_color = evaluated.fill_color.clone();
         }
 
-        self.base.passes = RenderPass::Translucent;
+        self.base.passes =
+            if *evaluated.fill_layer_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
 
-        if self.unevaluated.fill_pattern.is_undefined()
+        if self.base.passes != RenderPass::None
+            && self.unevaluated.fill_pattern.is_undefined()
             && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
             && evaluated.fill_opacity.constant_or(&0.0) >= 1.0
         {
@@ -393,6 +395,9 @@ impl RenderLayer for RenderFillLayer {
 
         {
             let mut tile_layer_group = layer_group.borrow_mut();
+            let layer_opacity =
+                *get_evaluated::<FillLayerProperties>(&self.base.evaluated_properties).fill_layer_opacity.uniform();
+            tile_layer_group.composite_opacity = composite_opacity(layer_opacity);
             let base = &self.base;
             // If the render pass has changed or the tile has dropped out of
             // the cover set, remove it.

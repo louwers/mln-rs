@@ -10,6 +10,7 @@ pub mod heatmap_layer_ubo;
 pub mod heatmap_texture_layer_ubo;
 pub mod hillshade_layer_ubo;
 pub mod hillshade_prepare_layer_ubo;
+pub mod layer_composite_ubo;
 pub mod layer_ubo;
 pub mod line_layer_ubo;
 pub mod program_info;

@@ -64,6 +64,7 @@ const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::SymbolTextAndIconShader,
     BuiltIn::WideVectorShader,
     BuiltIn::GlobeDepthShader,
+    BuiltIn::LayerCompositeShader,
 ];
 
 fn sources() -> impl Iterator<Item = &'static ShaderSource> {
@@ -256,6 +257,7 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
         "HeatmapTextureShader" => {
             (&[("idHeatmapTexturePropsUBO", ID_HEATMAP_TEXTURE_PROPS_UBO)], "heatmapTextureUBOCount")
         }
+        "LayerCompositeShader" => (&[("idLayerCompositeUBO", ID_LAYER_COMPOSITE_UBO)], "layerCompositeUBOCount"),
         "HillshadeShader" => (
             &[
                 ("idHillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),
@@ -337,6 +339,7 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("HeatmapDrawableUBO", size_of::<heatmap_layer_ubo::HeatmapDrawableUBO>()),
     ("HeatmapEvaluatedPropsUBO", size_of::<heatmap_layer_ubo::HeatmapEvaluatedPropsUBO>()),
     ("HeatmapTexturePropsUBO", size_of::<heatmap_texture_layer_ubo::HeatmapTexturePropsUBO>()),
+    ("LayerCompositeUBO", size_of::<layer_composite_ubo::LayerCompositeUBO>()),
     ("HillshadeDrawableUBO", size_of::<hillshade_layer_ubo::HillshadeDrawableUBO>()),
     ("HillshadeTilePropsUBO", size_of::<hillshade_layer_ubo::HillshadeTilePropsUBO>()),
     ("HillshadeEvaluatedPropsUBO", size_of::<hillshade_layer_ubo::HillshadeEvaluatedPropsUBO>()),

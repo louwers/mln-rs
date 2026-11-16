@@ -58,6 +58,14 @@ fn sort_key(drawable: &Drawable) -> SortKey {
     (drawable.draw_priority, drawable.unique_id)
 }
 
+/// The opacity a layer group with the layer opacity `layer_opacity` is
+/// composited with: `None` for an opaque layer, which draws straight onto the
+/// frame.
+#[must_use]
+pub(crate) fn composite_opacity(layer_opacity: f32) -> Option<f32> {
+    (layer_opacity < 1.0).then_some(layer_opacity)
+}
+
 /// A layer-like group of drawables, not a group of layers.
 pub struct LayerGroup {
     pub(crate) id: SimpleIdentity,
@@ -73,6 +81,10 @@ pub struct LayerGroup {
     tiles: HashMap<TileKey, Vec<SortKey>>,
     /// The buffers the group binds for its drawables.
     uniform_buffers: UniformBufferArray,
+    /// The opacity that a tile group's translucent drawables are composited
+    /// onto the frame with, as one surface, after they draw into a texture
+    /// of their own; `None` where they draw straight onto the frame.
+    pub(crate) composite_opacity: Option<f32>,
 }
 
 pub(crate) type LayerGroupPtr = Rc<RefCell<LayerGroup>>;
@@ -89,6 +101,7 @@ impl LayerGroup {
             drawables: BTreeMap::new(),
             tiles: HashMap::default(),
             uniform_buffers: UniformBufferArray::new(),
+            composite_opacity: None,
         }))
     }
 
@@ -238,7 +251,12 @@ impl LayerGroup {
             custom.render(gpu, parameters);
         } else if !self.drawables.is_empty() {
             if matches!(self.kind, LayerGroupKind::Tile) {
-                self.render_tiles(gpu, parameters);
+                if self.composite_opacity.is_some() && parameters.pass == RenderPass::Translucent {
+                    let id = self.id;
+                    parameters.draw_composited(gpu, id, |gpu, parameters| self.render_tiles(gpu, parameters));
+                } else {
+                    self.render_tiles(gpu, parameters);
+                }
             } else {
                 self.render_plain(gpu, parameters);
             }

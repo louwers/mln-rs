@@ -33,6 +33,7 @@ use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPr
 use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::hillshade_layer_ubo::{HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
 use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
+use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::line_layer_ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
@@ -68,6 +69,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO,
     ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_PREPARE_DRAWABLE_UBO,
     ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TILE_PROPS_UBO,
+    ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_UBO,
     ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE,
     ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE,
     ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
@@ -344,6 +346,18 @@ shader_source!(
     &[element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),],
     &[attr("a_pos", ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE),],
     &[]
+);
+
+// Layer composite
+shader_source!(
+    LAYER_COMPOSITE_SHADER,
+    "LayerCompositeShader",
+    &[
+        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        block::<LayerCompositeUBO>("LayerCompositeUBO", ID_LAYER_COMPOSITE_UBO),
+    ],
+    &[attr("a_pos", ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE)],
+    &[tex("u_image", ID_LAYER_COMPOSITE_IMAGE_TEXTURE)]
 );
 
 // Fill
@@ -951,6 +965,7 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::SymbolIconShader => Some(&SYMBOL_ICON_SHADER),
         BuiltIn::SymbolSDFShader => Some(&SYMBOL_SDF_SHADER),
         BuiltIn::SymbolTextAndIconShader => Some(&SYMBOL_TEXT_AND_ICON_SHADER),
+        BuiltIn::LayerCompositeShader => Some(&LAYER_COMPOSITE_SHADER),
         _ => None,
     }
 }
@@ -995,4 +1010,5 @@ pub(crate) const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::SymbolIconShader,
     BuiltIn::SymbolSDFShader,
     BuiltIn::SymbolTextAndIconShader,
+    BuiltIn::LayerCompositeShader,
 ];

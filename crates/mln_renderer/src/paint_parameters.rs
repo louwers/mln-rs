@@ -8,6 +8,7 @@ use mln_gfx::types::{DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
+use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
 use mln_util::range::Range;
@@ -16,6 +17,7 @@ use mln_vec_map::VecMap;
 
 use crate::clip_masks::ClipMasks;
 use crate::gfx::context::Context;
+use crate::layer_composite::LayerComposite;
 use crate::line_atlas::LineAtlas;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
@@ -115,6 +117,8 @@ pub struct PaintParameters<'a> {
 
     /// The masks of the tiles that the frame's layer groups can clip to.
     pub(crate) clip_masks: ClipMasks,
+    /// The texture that the frame's layers with a layer opacity draw into.
+    pub(crate) layer_composite: LayerComposite,
     /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
@@ -167,6 +171,7 @@ impl<'a> PaintParameters<'a> {
             renderable_size,
             pixels_to_gl_units,
             clip_masks: ClipMasks::default(),
+            layer_composite: LayerComposite::default(),
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             // The renderer sets these before use.
@@ -211,6 +216,51 @@ impl<'a> PaintParameters<'a> {
         if let Err(error) = restarted {
             Log::error(Event::Render, format!("Restarting the {} pass failed: {error}", pass.label));
         }
+    }
+
+    /// Runs `draw` into the layer composite's texture, rather than into the
+    /// pass begun on `gpu`, the context's, and then composites the texture
+    /// onto that pass as the layer group `group` asks. Runs `draw` into the
+    /// pass begun where the frame doesn't composite `group`.
+    ///
+    /// `draw` starts with the texture's stencil clear, and the pass begun
+    /// keeps its stencil as it was.
+    pub(crate) fn draw_composited(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        group: SimpleIdentity,
+        draw: impl FnOnce(&mut dyn Gpu, &mut Self),
+    ) {
+        let Some(frame) = self.open_pass.get().filter(|_| self.layer_composite.composites(group)) else {
+            draw(gpu, self);
+            return;
+        };
+        let Some(composite) = self.layer_composite.pass() else {
+            return draw(gpu, self);
+        };
+        let drawn = self.end_pass(gpu).and_then(|()| self.begin_pass(gpu, composite));
+        if let Err(error) = &drawn {
+            Log::error(Event::Render, format!("Beginning the layer composite's pass failed: {error}"));
+        } else {
+            let tile_clipping_mask_ids = std::mem::take(&mut self.tile_clipping_mask_ids);
+            let next_stencil_id = std::mem::replace(&mut self.next_stencil_id, 1);
+            draw(gpu, self);
+            self.tile_clipping_mask_ids = tile_clipping_mask_ids;
+            self.next_stencil_id = next_stencil_id;
+            if let Err(error) = self.end_pass(gpu) {
+                Log::error(Event::Render, format!("Ending the layer composite's pass failed: {error}"));
+            }
+        }
+        if let Err(error) = self.begin_pass(gpu, frame.loading(LoadOp::Load)) {
+            Log::error(Event::Render, format!("Resuming the {} pass failed: {error}", frame.label));
+            return;
+        }
+        if drawn.is_err() {
+            return;
+        }
+        let mut layer_composite = std::mem::take(&mut self.layer_composite);
+        layer_composite.draw(gpu, self, group);
+        self.layer_composite = layer_composite;
     }
 
     /// Runs `f` with `gpu`'s, the context's, commands inside the pass

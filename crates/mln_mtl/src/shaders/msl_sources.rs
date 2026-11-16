@@ -3968,6 +3968,58 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
+/// Port-only: a layer's texture, the size of the frame, composited onto it
+/// texel for texel.
+pub(crate) const LAYER_COMPOSITE_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r#"
+
+enum {
+    idLayerCompositeUBO = drawableReservedUBOCount,
+    layerCompositeUBOCount
+};
+
+struct alignas(16) LayerCompositeUBO {
+    /*  0 */ float opacity;
+    /*  4 */ float pad1;
+    /*  8 */ float pad2;
+    /* 12 */ float pad3;
+    /* 16 */
+};
+static_assert(sizeof(LayerCompositeUBO) == 16, "wrong size");
+
+"#,
+    source: r"
+
+struct VertexStage {
+    short2 pos [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]]) {
+    return {
+        .position = float4(float2(vertx.pos) * 2.0 - 1.0, 0.0, 1.0),
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            device const LayerCompositeUBO& props [[buffer(idLayerCompositeUBO)]],
+                            texture2d<float, access::sample> image [[texture(0)]]) {
+    const float4 color = image.read(uint2(in.position.xy));
+
+#if defined(OVERDRAW_INSPECTOR)
+    return half4(color);
+#else
+    return half4(color * props.opacity);
+#endif
+}
+",
+};
+
 pub(crate) const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",

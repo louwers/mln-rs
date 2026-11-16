@@ -23,6 +23,7 @@ use mln_util::time::Instant;
 use crate::clip_masks::ClipMasks;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::{Context, Stats};
+use crate::layer_composite::LayerComposite;
 use crate::layer_tweaker::to_projection_ubo;
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_orchestrator::RenderOrchestrator;
@@ -74,6 +75,8 @@ pub struct Renderer {
     static_data: Option<RenderStaticData>,
     /// Kept across frames; dropped in `drop` inside the hold.
     clip_masks: ClipMasks,
+    /// The texture that layers with a layer opacity draw into, between frames.
+    layer_composite: LayerComposite,
     render_state: RenderState,
     frame_count: u64,
     /// Where the last frame drew the map.
@@ -133,6 +136,7 @@ impl Renderer {
             pixel_ratio,
             static_data: None,
             clip_masks: ClipMasks::default(),
+            layer_composite: LayerComposite::default(),
             render_state: RenderState::Never,
             frame_count: 0,
             frame_projection: None,
@@ -153,6 +157,7 @@ impl Renderer {
         self.pixel_ratio = pixel_ratio;
         self.static_data = None;
         self.clip_masks = ClipMasks::default();
+        self.layer_composite = LayerComposite::default();
         self.orchestrator.release_shaders();
     }
 
@@ -553,6 +558,20 @@ impl Renderer {
         );
         parameters.clip_masks = std::mem::take(&mut self.clip_masks);
 
+        // The layer groups drawn as a whole, each into the layer composite's
+        // texture and then onto the frame.
+        let mut composited = Vec::new();
+        orchestrator.visit_layer_groups(|layer_group| {
+            if let Some(opacity) = layer_group.composite_opacity
+                && layer_group.enabled
+                && !layer_group.empty()
+            {
+                composited.push((layer_group.id, opacity));
+            }
+        });
+        self.layer_composite.update(context, &static_data.shaders, image.size, &composited);
+        parameters.layer_composite = std::mem::take(&mut self.layer_composite);
+
         let layers_uploaded = Instant::now();
         let atlas_size = parameters.pattern_atlas.borrow().get_pixel_size();
         let world_size = parameters.renderable_size;
@@ -741,6 +760,7 @@ impl Renderer {
 
         context.destroy_released();
         self.clip_masks = std::mem::take(&mut parameters.clip_masks);
+        self.layer_composite = std::mem::take(&mut parameters.layer_composite);
 
         let rendering_time = context.rendering_stats().rendering_time;
         context.rendering_stats().encoding_time = render_tree.get_elapsed_time() - rendering_time;
@@ -790,6 +810,7 @@ impl Drop for Renderer {
             ManuallyDrop::drop(&mut self.orchestrator);
         }
         self.clip_masks = ClipMasks::default();
+        self.layer_composite = LayerComposite::default();
         self.static_data = None;
         self.context.destroy_released();
     }

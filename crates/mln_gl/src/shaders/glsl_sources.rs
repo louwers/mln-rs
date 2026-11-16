@@ -2624,6 +2624,36 @@ void main() {
 ",
 };
 
+/// Port-only: a layer's texture, the size of the frame, composited onto it
+/// texel for texel.
+pub(crate) const LAYER_COMPOSITE_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: r"layout (location = 0) in vec2 a_pos;
+
+void main() {
+    gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0);
+}
+",
+    fragment: r"uniform sampler2D u_image;
+
+layout (std140) uniform LayerCompositeUBO {
+    highp float u_opacity;
+    lowp float props_pad1;
+    lowp float props_pad2;
+    lowp float props_pad3;
+};
+
+void main() {
+    vec4 color = texelFetch(u_image, ivec2(gl_FragCoord.xy), 0);
+
+#ifdef OVERDRAW_INSPECTOR
+    fragColor = color;
+#else
+    fragColor = color * u_opacity;
+#endif
+}
+",
+};
+
 pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r#"layout (location = 0) in vec2 a_pos;
 out vec2 v_extrude;
