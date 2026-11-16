@@ -43,6 +43,7 @@ mod apple {
         ),
         ("frames_on_the_gpu_are_iosurface_backed_pixel_buffers", frames_on_the_gpu_are_iosurface_backed_pixel_buffers),
         ("a_paused_video_sends_the_frame_it_seeks_to", a_paused_video_sends_the_frame_it_seeks_to),
+        ("a_refused_gpu_frame_comes_again_in_memory", a_refused_gpu_frame_comes_again_in_memory),
         ("the_video_loops", the_video_loops),
         ("a_file_that_isnt_a_video_fails", a_file_that_isnt_a_video_fails),
         ("the_first_url_that_plays_plays", the_first_url_that_plays_plays),
@@ -245,6 +246,21 @@ mod apple {
         let seen = generation(&slot);
         std::thread::sleep(Duration::from_millis(300));
         assert_eq!(seen, generation(&slot), "frames while paused");
+    }
+
+    /// A paused video whose renderer refuses its GPU frame sends that frame
+    /// again in memory, as no other comes.
+    fn a_refused_gpu_frame_comes_again_in_memory() {
+        let (mut player, slot) = open(&["https://example.com/quarters.mp4"], false);
+        frame_after(&slot, 0, |_| true);
+        player.pause();
+        player.seek(1.5);
+        let paused = frame_after(&slot, 0, |frame| frame.time.is_some_and(|time| (time - 1.5).abs() < 0.15));
+        assert!(matches!(paused.frame.pixels, FramePixels::Gpu(_)), "{:?}", paused.frame.pixels);
+        slot.refuse_gpu_frames();
+        let again = frame_after(&slot, paused.generation, |_| true);
+        assert_eq!(paused.frame.time, again.frame.time);
+        assert_frame(&again.frame, SECOND);
     }
 
     fn the_video_loops() {

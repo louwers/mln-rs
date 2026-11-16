@@ -52,8 +52,11 @@ impl VideoTexture {
             Ok(()) => self.seen.set(newest.generation),
             Err(GpuError::Unsupported(what)) if matches!(newest.frame.pixels, FramePixels::Gpu(_)) => {
                 // The player sends frames in memory from now on; the texture
-                // keeps the frame it has until one comes.
-                Log::info(Event::Render, format!("Video frames go through memory: {what} isn't supported"));
+                // keeps the frame it has until one comes, and each render
+                // till then tries the GPU frame again.
+                if !self.frames.gpu_frames_refused() {
+                    Log::info(Event::Render, format!("Video frames go through memory: {what} isn't supported"));
+                }
                 self.frames.refuse_gpu_frames();
             }
             Err(error) => {

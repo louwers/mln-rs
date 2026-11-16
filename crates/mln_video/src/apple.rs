@@ -221,6 +221,7 @@ impl Drop for AvFoundationPlayer {
 fn poll_frames(shared: &Arc<Shared>) {
     let started = Instant::now();
     let mut last_time: Option<f64> = None;
+    let mut last_gpu: Option<(Retained<CVPixelBuffer>, Option<f64>)> = None;
     let mut poll = DEFAULT_POLL;
     while !shared.closed() {
         if !shared.opened.load(Ordering::Relaxed) && started.elapsed() > MAIN_QUEUE_TIMEOUT {
@@ -239,45 +240,44 @@ fn poll_frames(shared: &Arc<Shared>) {
             });
         }
         autoreleasepool(|_| {
-            let Some(frame) = new_frame(shared) else {
+            // A renderer that refused the last frame sent on the GPU gets
+            // it again in memory, as a paused video sends no other.
+            let refused = shared.frames.gpu_frames_refused();
+            let resent = if refused { last_gpu.take() } else { None };
+            let Some((buffer, time)) = new_buffer(shared).or(resent) else {
                 return;
             };
-            if let (Some(time), Some(last)) = (frame.time, last_time)
+            if let (Some(time), Some(last)) = (time, last_time)
                 && time > last
             {
                 poll = Duration::from_secs_f64((time - last) / 2.0).clamp(MIN_POLL, MAX_POLL);
             }
-            last_time = frame.time;
-            if !shared.closed() {
-                shared.frames.push(frame);
+            last_time = time;
+            last_gpu = (!refused).then(|| (Retained::clone(&buffer), time));
+            match frame(buffer, time, !refused) {
+                Ok(frame) if !shared.closed() => shared.frames.push(frame),
+                Ok(_) => {}
+                Err(message) => shared.frames.fail(message),
             }
         });
         std::thread::park_timeout(poll);
     }
 }
 
-/// The output's frame for now, if it's one not sent yet.
-fn new_frame(shared: &Shared) -> Option<VideoFrame> {
-    let (buffer, shown) = {
-        let output = shared.output.lock();
-        let Output(output) = output.as_ref()?;
-        // SAFETY: the output's frame methods, for any thread, with a valid
-        // pointer for the time of the image.
-        unsafe {
-            let now = output.itemTimeForMachAbsoluteTime(mach_absolute_time().cast_signed());
-            if !output.hasNewPixelBufferForItemTime(now) {
-                return None;
-            }
-            let mut shown = now;
-            output.copyPixelBufferForItemTime_itemTimeForDisplay(now, &raw mut shown).map(|buffer| (buffer, shown))
-        }?
-    };
-    match frame(buffer, seconds(shown), !shared.frames.gpu_frames_refused()) {
-        Ok(frame) => Some(frame),
-        Err(message) => {
-            shared.frames.fail(message);
-            None
+/// The output's image for now and its time, if it's one not sent yet.
+fn new_buffer(shared: &Shared) -> Option<(Retained<CVPixelBuffer>, Option<f64>)> {
+    let output = shared.output.lock();
+    let Output(output) = output.as_ref()?;
+    // SAFETY: the output's frame methods, for any thread, with a valid
+    // pointer for the time of the image.
+    unsafe {
+        let now = output.itemTimeForMachAbsoluteTime(mach_absolute_time().cast_signed());
+        if !output.hasNewPixelBufferForItemTime(now) {
+            return None;
         }
+        let mut shown = now;
+        let buffer = output.copyPixelBufferForItemTime_itemTimeForDisplay(now, &raw mut shown)?;
+        Some((buffer, seconds(shown)))
     }
 }
 
