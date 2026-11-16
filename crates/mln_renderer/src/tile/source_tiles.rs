@@ -55,7 +55,7 @@ pub(crate) struct CoverUpdate<'a, 'p> {
     pub(crate) needs_rendering: bool,
     pub(crate) needs_relayout: bool,
     pub(crate) parameters: &'a TileParameters<'p>,
-    pub(crate) source_impl: &'a Source,
+    pub(crate) style_source: &'a Source,
     pub(crate) tile_size: u16,
     pub(crate) zoom_range: Range<u8>,
     pub(crate) bounds: Option<LatLngBounds>,
@@ -453,19 +453,19 @@ impl SourceTiles {
             parameters.transform_state.get_max_zoom(),
         );
 
-        let source_impl = update.source_impl;
+        let style_source = update.style_source;
         let zoom_range = update.zoom_range;
         let tile_size = update.tile_size;
-        let type_ = source_impl.get_type();
+        let type_ = style_source.get_type();
         // Determine the overzooming/underzooming amounts and required tiles.
         let overscaled_zoom: i32 = covering_zoom_level(zoom, type_, tile_size);
         let mut tile_zoom: i32 = overscaled_zoom;
         let mut pan_zoom: i32 = i32::from(zoom_range.max);
 
-        let source_prefetch_zoom_delta = source_impl.common().get_prefetch_zoom_delta();
-        let max_parent_tile_overscale_factor = source_impl.common().get_max_overscale_factor_for_parent_tiles();
-        let minimum_update_interval = source_impl.common().get_minimum_tile_update_interval();
-        let is_volatile = source_impl.common().is_volatile();
+        let source_prefetch_zoom_delta = style_source.common().get_prefetch_zoom_delta();
+        let max_parent_tile_overscale_factor = style_source.common().get_max_overscale_factor_for_parent_tiles();
+        let minimum_update_interval = style_source.common().get_minimum_tile_update_interval();
+        let is_volatile = style_source.common().is_volatile();
 
         let mut ideal_tiles: Vec<OverscaledTileID> = Vec::new();
         let mut pan_tiles: Vec<OverscaledTileID> = Vec::new();

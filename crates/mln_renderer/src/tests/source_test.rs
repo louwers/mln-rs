@@ -127,7 +127,7 @@ impl SourceTest {
     }
 
     /// As `run_with`, with `observer` observing the store.
-    fn run_observed(&self, store: &mut TileStore, observer: &StubRenderSourceObserver) {
+    fn run_observed(&self, store: &mut TileStore, observer: &StubStoreObserver) {
         self.run_with(store, |_, event| observer.dispatch(event));
     }
 }
@@ -143,12 +143,12 @@ type OnTileError = Box<dyn Fn(&str, &OverscaledTileID, Error)>;
 
 /// Hears what a tile store reports of its sources' tiles.
 #[derive(Default)]
-struct StubRenderSourceObserver {
+struct StubStoreObserver {
     tile_changed: RefCell<Option<OnTileChanged>>,
     tile_error: RefCell<Option<OnTileError>>,
 }
 
-impl StubRenderSourceObserver {
+impl StubStoreObserver {
     /// Calls the callback for `event`.
     fn dispatch(&self, event: StoreEvent) {
         match event {
@@ -235,7 +235,7 @@ fn run_tile_case(
     test: &SourceTest,
     kind: Tiled,
     file_source: Arc<StubFileSource>,
-    observer: &StubRenderSourceObserver,
+    observer: &StubStoreObserver,
 ) -> SourceType {
     let layers = kind.layers();
     let source = crate::tests::ready(kind.source(None, tiles_tileset()));
@@ -265,7 +265,7 @@ fn tile_empty(kind: Tiled) {
         Some(response)
     });
 
-    let observer = Rc::new(StubRenderSourceObserver::default());
+    let observer = Rc::new(StubStoreObserver::default());
     let changed = Rc::new(RefCell::new(false));
     {
         let changed = Rc::clone(&changed);
@@ -290,7 +290,7 @@ fn tile_fail(kind: Tiled) {
         Some(response)
     });
 
-    let observer = Rc::new(StubRenderSourceObserver::default());
+    let observer = Rc::new(StubStoreObserver::default());
     let failed = Rc::new(RefCell::new(false));
     {
         let failed = Rc::clone(&failed);
@@ -319,7 +319,7 @@ fn tile_corrupt(kind: Tiled) {
         Some(response)
     });
 
-    let observer = Rc::new(StubRenderSourceObserver::default());
+    let observer = Rc::new(StubStoreObserver::default());
     let failed = Rc::new(RefCell::new(false));
     {
         let failed = Rc::clone(&failed);
@@ -356,7 +356,7 @@ fn tile_cancel(kind: Tiled) {
         });
     }
 
-    let observer = Rc::new(StubRenderSourceObserver::default());
+    let observer = Rc::new(StubStoreObserver::default());
     *observer.tile_changed.borrow_mut() = Some(Box::new(|| panic!("Should never be called")));
     *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
 
@@ -653,7 +653,7 @@ fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (Source, Bo
 #[test]
 fn custom_geometry_source_set_tile_data() {
     let test = SourceTest::new();
-    let observer = Rc::new(StubRenderSourceObserver::default());
+    let observer = Rc::new(StubStoreObserver::default());
     {
         let end = test.end_handle();
         *observer.tile_changed.borrow_mut() = Some(Box::new(end));
@@ -676,7 +676,7 @@ fn custom_geometry_source_set_tile_data() {
 #[test]
 fn custom_geometry_source_set_tile_error() {
     let test = SourceTest::new();
-    let observer = Rc::new(StubRenderSourceObserver::default());
+    let observer = Rc::new(StubStoreObserver::default());
     {
         let end = test.end_handle();
         *observer.tile_error.borrow_mut() = Some(Box::new(move |source_id, tile_id, error| {
@@ -703,7 +703,7 @@ fn custom_geometry_source_set_tile_error() {
 #[test]
 fn custom_vector_source_set_tile_data() {
     let test = SourceTest::new();
-    let observer = Rc::new(StubRenderSourceObserver::default());
+    let observer = Rc::new(StubStoreObserver::default());
     {
         let end = test.end_handle();
         *observer.tile_changed.borrow_mut() = Some(Box::new(end));

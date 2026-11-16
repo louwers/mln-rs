@@ -323,7 +323,7 @@ static void a_geojson_source_reports_its_full_cluster_min_points(void) {
 }
 #endif
 
-static void assert_same_source(
+static void assert_source_matches(
   const source_copy* expected, const source_copy* actual
 ) {
   const mln_style_source_info* want = &expected->info;
@@ -388,7 +388,7 @@ static void sources_list_in_style_order_with_their_info(void) {
 
   const source_copy got = read_source(map, "third");
   TEST_ASSERT_TRUE(got.found);
-  assert_same_source(&got, third);
+  assert_source_matches(&got, third);
 
   mln_test_destroy_map(map);
   mln_test_destroy_runtime(runtime);

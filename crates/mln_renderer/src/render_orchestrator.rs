@@ -719,16 +719,16 @@ impl RenderOrchestrator {
         // with no style sources the loop runs once without a source.
         let source_count = std::cmp::max(self.sources_by_id.len(), 1);
         for source_index in 0..source_count {
-            let source_impl = self.sources_by_id.get(source_index).cloned();
+            let style_source = self.sources_by_id.get(source_index).cloned();
             let mut source_needs_rendering = false;
             let mut source_needs_relayout = false;
             // C++ has a render source for every source type; the port skips
             // the layers of a source type without one.
             let has_render_source =
-                source_impl.as_ref().is_some_and(|source_impl| self.render_sources.contains_key(source_impl.id()));
+                style_source.as_ref().is_some_and(|style_source| self.render_sources.contains_key(style_source.id()));
             // The id of the source whose layers this pass takes, if it has a
             // render source.
-            let render_source_id = source_impl.as_ref().filter(|_| has_render_source).map(Source::id);
+            let render_source_id = style_source.as_ref().filter(|_| has_render_source).map(Source::id);
 
             for (index, layer_ptr) in self.ordered_layers.iter().enumerate() {
                 let layer = layer_ptr.borrow();
@@ -739,7 +739,7 @@ impl RenderOrchestrator {
                 if layer_info.source != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
                     // source check goes before anything else is read.
-                    if let Some(source_impl) = &source_impl
+                    if let Some(style_source) = &style_source
                         && render_source_id == Some(style.base().source.as_str())
                     {
                         let layer_is_visible = style.base().visibility != mln_style_types::VisibilityType::None;
@@ -776,7 +776,7 @@ impl RenderOrchestrator {
                             self.filtered_layers_for_source.push(Arc::clone(&layer.base().evaluated_properties));
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
-                                let source_id = source_impl.id().to_owned();
+                                let source_id = style_source.id().to_owned();
                                 layer_render_items
                                     .entry(index as u32)
                                     .or_insert_with(|| LayerRenderItem::new(Rc::clone(layer_ptr), Some(source_id)));
@@ -813,15 +813,15 @@ impl RenderOrchestrator {
                     update_list[index] = true;
                 }
             }
-            if let Some(source_impl) = &source_impl {
-                tile_parameters.is_update_synchronous = source_impl.is_update_synchronous();
+            if let Some(style_source) = &style_source {
+                tile_parameters.is_update_synchronous = style_source.is_update_synchronous();
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
                 // C++ `renderSources.at(sourceImpl->id)`; a source type
                 // without a render source has none.
-                if let Some(source) = self.render_sources.get_mut(source_impl.id()) {
+                if let Some(source) = self.render_sources.get_mut(style_source.id()) {
                     source.update(
                         &mut self.tile_store,
-                        source_impl.clone(),
+                        style_source.clone(),
                         &filtered_layers,
                         source_needs_rendering,
                         source_needs_relayout,

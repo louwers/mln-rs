@@ -381,7 +381,9 @@ impl<D: Clone + Send + 'static> CustomProvider<D> {
         loop {
             let call = {
                 let mut state = self.state.lock();
-                if let Some(call) = state.queue.pop_front() { call } else {
+                if let Some(call) = state.queue.pop_front() {
+                    call
+                } else {
                     state.draining = false;
                     return;
                 }

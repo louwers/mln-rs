@@ -481,7 +481,7 @@ impl RenderSource for RenderTileSource {
             needs_rendering,
             needs_relayout,
             parameters,
-            source_impl: &self.base.base_impl,
+            style_source: &self.base.base_impl,
             tile_size: cover.tile_size,
             zoom_range: cover.zoom_range,
             bounds: cover.bounds,

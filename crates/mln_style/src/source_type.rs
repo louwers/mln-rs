@@ -44,8 +44,8 @@ pub struct SourceTypeInfo {
     pub layer_kind: SourceKind,
     /// Whether style JSON can create a source of the type.
     pub from_json: bool,
-    /// The type as [`SourceType`] names it, which the tile cover and the
-    /// offline tile count still read.
+    /// The type as [`SourceType`] names it, which the tile cover, the tile
+    /// pyramid and the offline tile count read.
     pub type_: SourceType,
 }
 
