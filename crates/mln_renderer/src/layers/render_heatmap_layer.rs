@@ -33,9 +33,11 @@ use mln_util::size::Size;
 use super::heatmap_layer_tweaker::HeatmapLayerTweaker;
 use super::heatmap_texture_layer_tweaker::HeatmapTextureLayerTweaker;
 use super::render_line_layer::apply_color_ramp;
-use super::{DrawableBinders, DrawableRenderTile, drawable_has_layer_tweaker, shared_vertices};
+use super::{
+    DrawableBinders, DrawableRenderTile, drawable_has_layer_tweaker, refresh_if_bucket_updated, shared_vertices,
+};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_indexes};
-use crate::buckets::heatmap_bucket::{HeatmapBucket, HeatmapLayoutVertex};
+use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable::Drawable;
 use crate::drawable_builder::DrawableBuilder;
@@ -53,6 +55,39 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_target::{RenderTarget, RenderTargetPtr};
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
+
+/// Reads the data-driven attributes of `b` into `attrs`, from the paint
+/// vertices `shared`, and records in `pau` those that are uniforms.
+fn read_heatmap_attributes(
+    attrs: &mut VertexAttributeArray,
+    b: &HeatmapBinders,
+    shared: &VertexVectorBasePtr,
+    evaluated: &HeatmapPaintProperties::PossiblyEvaluated,
+    pau: &mut StringIDSetsPair,
+) {
+    let buffer = &b.interleaved_vertex_buffer;
+    let mut id = ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE;
+    read_data_driven_paint_property(
+        attrs,
+        &b.heatmap_weight,
+        buffer,
+        shared,
+        &["a_weight"],
+        evaluated.heatmap_weight.is_constant(),
+        pau,
+        &mut id,
+    );
+    read_data_driven_paint_property(
+        attrs,
+        &b.heatmap_radius,
+        buffer,
+        shared,
+        &["a_radius"],
+        evaluated.heatmap_radius.is_constant(),
+        pau,
+        &mut id,
+    );
+}
 
 const HEATMAP_SHADER_GROUP_NAME: &str = "HeatmapShader";
 const HEATMAP_TEXTURE_SHADER_GROUP_NAME: &str = "HeatmapTextureShader";
@@ -397,10 +432,30 @@ impl RenderLayer for RenderHeatmapLayer {
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
+            let paint = || {
+                paint_vertices(
+                    geometry,
+                    bucket,
+                    &paint_property_binders.interleaved_vertex_buffer,
+                    paint_property_binders.depends_on_feature_state(),
+                )
+            };
             let update_existing = |drawable: &mut Drawable| {
                 // A drawable produced on a previous style/bucket should not
                 // be updated.
-                drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref())
+                let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
+                if current {
+                    refresh_if_bucket_updated(drawable, |attrs| {
+                        read_heatmap_attributes(
+                            attrs,
+                            paint_property_binders,
+                            &paint(),
+                            evaluated,
+                            &mut Default::default(),
+                        );
+                    });
+                }
+                current
             };
             if self.update_tile(&tile_layer_group, render_pass, &tile_id, update_existing) {
                 continue;
@@ -410,35 +465,13 @@ impl RenderLayer for RenderHeatmapLayer {
             properties_as_uniforms.1.clear();
 
             let heatmap_vertex_attrs = VertexAttributeArray::new_ptr();
-            {
-                let buffer = &paint_property_binders.interleaved_vertex_buffer;
-                let shared =
-                    paint_vertices(geometry, bucket, buffer, paint_property_binders.depends_on_feature_state());
-                let mut attrs = heatmap_vertex_attrs.borrow_mut();
-                let mut id = ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE;
-                let b = paint_property_binders;
-                let pau = &mut properties_as_uniforms;
-                read_data_driven_paint_property(
-                    &mut attrs,
-                    &b.heatmap_weight,
-                    buffer,
-                    &shared,
-                    &["a_weight"],
-                    evaluated.heatmap_weight.is_constant(),
-                    pau,
-                    &mut id,
-                );
-                read_data_driven_paint_property(
-                    &mut attrs,
-                    &b.heatmap_radius,
-                    buffer,
-                    &shared,
-                    &["a_radius"],
-                    evaluated.heatmap_radius.is_constant(),
-                    pau,
-                    &mut id,
-                );
-            }
+            read_heatmap_attributes(
+                &mut heatmap_vertex_attrs.borrow_mut(),
+                paint_property_binders,
+                &paint(),
+                evaluated,
+                &mut properties_as_uniforms,
+            );
 
             if heatmap_shader.is_none() {
                 heatmap_shader =

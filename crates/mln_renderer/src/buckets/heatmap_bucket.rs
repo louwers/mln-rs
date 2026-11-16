@@ -30,8 +30,6 @@ crate::paint_property_binders!(
         heatmap_radius => PaintPropertyBinder<f32>,
         heatmap_weight => PaintPropertyBinder<f32>,
     }
-    #[expect(dead_code, reason = "the heatmap bucket doesn't rewrite its vertices on a feature state change")]
-    fn update_vertex_vectors;
 );
 
 /// A heatmap layout vertex, also used for the heatmap texture's quad.
@@ -49,8 +47,8 @@ pub(crate) struct HeatmapBucket {
     pub(crate) vertices: GeometryVec<HeatmapLayoutVertex>,
     pub(crate) triangles: GeometryVec<u16>,
     pub(crate) segments: Vec<SegmentBase>,
-    /// Behind `RwLock`s like the other buckets' binders (the bucket is
-    /// shared; C++ heatmap buckets have no feature-state update).
+    /// Behind `RwLock`s, as the bucket is shared and a feature state
+    /// change rewrites them.
     pub(crate) paint_property_binders: VecMap<String, RwLock<HeatmapBinders>>,
     pub(crate) mode: MapMode,
 }
@@ -172,6 +170,20 @@ impl Bucket for HeatmapBucket {
             );
         }
         Ok(())
+    }
+
+    fn update(
+        &self,
+        states: &crate::bucket::FeatureStates,
+        layer: &mln_tile::TileLayer<'_>,
+        layer_id: &str,
+        image_positions: &ImagePositions,
+    ) {
+        if let Some(binders) = self.paint_property_binders.get(layer_id) {
+            binders.write().update_vertex_vectors(states, layer, image_positions);
+            self.base.uploaded.store(false, Ordering::SeqCst);
+            self.base.version.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     fn upload(&self, _context: &Context) {
