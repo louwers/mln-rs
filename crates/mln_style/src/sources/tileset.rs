@@ -5,10 +5,10 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use mln_actor::scheduler::Respond;
 use mln_storage::{Data, Resource};
 use mln_style_types::SourceType;
 use mln_util::constants;
+use mln_util::pool::Respond;
 use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
 
 use crate::conversion::tileset::{convert_tileset, optional_member};

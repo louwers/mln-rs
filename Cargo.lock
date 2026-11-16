@@ -2996,7 +2996,6 @@ dependencies = [
 name = "mln-rs-sprite"
 version = "0.0.12"
 dependencies = [
- "mln-rs-actor",
  "mln-rs-geometry",
  "mln-rs-image",
  "mln-rs-storage",
@@ -3066,7 +3065,6 @@ version = "0.0.12"
 dependencies = [
  "geo-types",
  "geojson",
- "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-expression",
  "mln-rs-feature",

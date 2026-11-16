@@ -23,6 +23,10 @@ pub type Task = Box<dyn FnOnce() + Send + 'static>;
 /// What a pool calls when work arrives while it had none.
 pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
+/// Where a job hands its result: called at most once, from any thread,
+/// while the job runs or later. Dropping it uncalled drops the result.
+pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
+
 /// Runs background work on worker threads, or, without threads, on the
 /// thread that runs it. Cheap to clone: clones share the pool. Its threads
 /// end once the last clone and the last [`TaskGroup`] of it drop, dropping

@@ -20,12 +20,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use mln_actor::scheduler::Respond;
 use mln_conversion::{Convertible, Error};
 use mln_storage::{Data, Resource};
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
+use mln_util::pool::Respond;
 use mln_util::tileset::{Tileset, VectorEncoding};
 
 use crate::expression::Functions;

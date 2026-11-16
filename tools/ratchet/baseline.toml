@@ -55,7 +55,6 @@
 [borrow]
 "crates/mln_actor/src/local_object.rs" = 3
 "crates/mln_actor/src/run_loop.rs" = 3
-"crates/mln_actor/src/scheduler.rs" = 1
 "crates/mln_actor/src/timer.rs" = 4
 "crates/mln_c/src/render_session.rs" = 3
 "crates/mln_c/src/web.rs" = 5

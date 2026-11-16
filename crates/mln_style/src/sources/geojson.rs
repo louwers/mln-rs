@@ -6,7 +6,6 @@ use std::sync::{Arc, OnceLock};
 
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
-use mln_actor::scheduler::Respond;
 use mln_expression::expression::evaluate_accumulated;
 use mln_storage::{Data, Resource};
 use mln_style_types::SourceType;
@@ -14,7 +13,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
-use mln_util::pool::Pool;
+use mln_util::pool::{Pool, Respond};
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
