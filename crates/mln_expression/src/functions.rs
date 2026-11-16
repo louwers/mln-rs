@@ -18,7 +18,7 @@ pub(crate) mod builtin;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use mln_util::Color;
 use mln_util::hash::HashMap;
@@ -174,15 +174,19 @@ impl Functions {
         Functions::default()
     }
 
-    /// The style specification's functions.
+    /// The style specification's functions. Every call returns the same
+    /// value, built on the first: it never changes, so sharing it is a cache.
     #[must_use]
     pub fn with_builtins() -> Arc<Functions> {
-        let mut functions = Functions::new();
-        // Into no functions, the built-ins register: no two share a name or
-        // a role, and none is an expression form.
-        let registered = register_builtin_functions(&mut functions);
-        debug_assert_eq!(registered, Ok(()));
-        Arc::new(functions)
+        static BUILTINS: LazyLock<Arc<Functions>> = LazyLock::new(|| {
+            let mut functions = Functions::new();
+            // Into no functions, the built-ins register: no two share a name
+            // or a role, and none is an expression form.
+            let registered = register_builtin_functions(&mut functions);
+            debug_assert_eq!(registered, Ok(()));
+            Arc::new(functions)
+        });
+        Arc::clone(&BUILTINS)
     }
 
     /// Adds the function `name` with its overloads, in the order parsing

@@ -8,7 +8,7 @@
 //! [`digest`](Registry::digest) before it decodes a job.
 
 use std::hash::Hasher;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
@@ -63,11 +63,7 @@ impl RegistryBuilder {
     /// The registry of what was added.
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        let style_halves = self.layer_types.values().map(|&layer_type| style_half(layer_type));
-        let style = StyleRegistry::new(Arc::new(self.functions), style_halves);
-        let mut hasher = Fnv::default();
-        style.digest(&mut hasher);
-        Arc::new(Registry { style: Arc::new(style), layer_types: self.layer_types, digest: hasher.finish() })
+        Registry::new(Arc::new(self.functions), self.layer_types)
     }
 }
 
@@ -81,6 +77,11 @@ fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedSt
 /// function has.
 pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     register_builtin_functions(builder.functions_mut())?;
+    register_builtin_layer_types(builder)
+}
+
+/// Adds the style specification's layer types.
+fn register_builtin_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     builder.add_layer_type::<Fill>()?;
     builder.add_layer_type::<Line>()?;
     builder.add_layer_type::<Circle>()?;
@@ -116,14 +117,32 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
-    /// The built-in registrations: what [`register_builtins`] adds.
+    /// The built-in registrations: what [`register_builtins`] adds. Every
+    /// call returns the same value, built on the first: a registry never
+    /// changes, so sharing it is a cache, and an app with registrations of
+    /// its own still builds its registry with a [`RegistryBuilder`].
     #[must_use]
     pub fn with_builtins() -> Arc<Registry> {
-        let mut builder = RegistryBuilder::new();
-        // Into no registrations, the built-ins register.
-        let registered = register_builtins(&mut builder);
-        debug_assert_eq!(registered, Ok(()));
-        builder.build()
+        static BUILTINS: LazyLock<Arc<Registry>> = LazyLock::new(|| {
+            let mut builder = RegistryBuilder::new();
+            // Into no layer types, the built-ins register.
+            let registered = register_builtin_layer_types(&mut builder);
+            debug_assert_eq!(registered, Ok(()));
+            Registry::new(Functions::with_builtins(), builder.layer_types)
+        });
+        Arc::clone(&BUILTINS)
+    }
+
+    /// The registry of `functions` and `layer_types`.
+    fn new(
+        functions: Arc<Functions>,
+        layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
+    ) -> Arc<Registry> {
+        let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
+        let style = StyleRegistry::new(functions, style_halves);
+        let mut hasher = Fnv::default();
+        style.digest(&mut hasher);
+        Arc::new(Registry { style: Arc::new(style), layer_types, digest: hasher.finish() })
     }
 
     /// What a style's JSON, its layers' property values and its filters

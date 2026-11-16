@@ -4,7 +4,7 @@
 //! needs no stack from the caller's thread.
 
 use core::ffi::c_char;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use feature::{Feature, Value as JsonValue, ValueObject};
 use mln_conversion::Convertible;
@@ -111,18 +111,17 @@ unsafe fn read_expected_type(options: *const mln_style_expression_options) -> Re
     fields.get(MLN_STYLE_EXPRESSION_OPTION_EXPECTED_TYPE, options.expected_type).map(expected_type).transpose()
 }
 
-/// What standalone expressions parse against. They belong to no map, so to
-/// no runtime's registrations: the style specification's functions.
-static FUNCTIONS: LazyLock<Arc<Functions>> = LazyLock::new(Functions::with_builtins);
-
 fn parse(json: &str, expected: Option<Type>) -> Result<Expr, Error> {
     let document = parse_json(json, "expression")?;
     // GL JS's createExpression() coerces a result that must be a string
     // rather than asserting it, as a string layer property does.
     let annotation = (expected == Some(Type::String)).then_some(TypeAnnotationOption::Coerce);
+    // Standalone expressions belong to no map, so to no runtime's
+    // registrations.
+    let functions = Functions::with_builtins();
     let mut context = match expected {
-        Some(expected) => ParsingContext::with_expected(&FUNCTIONS, expected),
-        None => ParsingContext::new(&FUNCTIONS),
+        Some(expected) => ParsingContext::with_expected(&functions, expected),
+        None => ParsingContext::new(&functions),
     };
     let Some(parsed) = context.parse_expression(&Convertible::from(&document), annotation) else {
         return Err(Error::invalid_argument(format!("expression: {}", context.get_combined_errors())));

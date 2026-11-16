@@ -3,7 +3,7 @@
 
 use std::cell::Cell;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use mln_conversion::{Convertible, Error};
 use mln_vec_map::VecMap;
@@ -34,10 +34,14 @@ impl StyleRegistry {
         StyleRegistry { functions, layer_types: by_name }
     }
 
-    /// The built-in layer types and expression functions.
+    /// The built-in layer types and expression functions. Every call
+    /// returns the same value, built on the first: it never changes, so
+    /// sharing it is a cache.
     #[must_use]
     pub fn with_builtins() -> Arc<Self> {
-        Arc::new(StyleRegistry::new(Functions::with_builtins(), BUILTIN_STYLE_TYPES))
+        static BUILTINS: LazyLock<Arc<StyleRegistry>> =
+            LazyLock::new(|| Arc::new(StyleRegistry::new(Functions::with_builtins(), BUILTIN_STYLE_TYPES)));
+        Arc::clone(&BUILTINS)
     }
 
     /// The expression functions.
