@@ -335,8 +335,6 @@ pub(crate) struct SymbolLayout {
 }
 
 impl SymbolLayout {
-    pub(crate) const INVALID_OFFSET_VALUE: f32 = f32::MAX;
-
     pub(crate) fn new(
         parameters: &BucketParameters,
         layers: &[Arc<EvaluatedLayer<Symbol>>],
@@ -646,10 +644,14 @@ impl SymbolLayout {
     }
 
     #[must_use]
-    pub(crate) fn evaluate_variable_offset(anchor: SymbolAnchorType, mut offset: [f32; 2]) -> [f32; 2] {
-        if offset[1] == Self::INVALID_OFFSET_VALUE {
-            return evaluate_radial_offset(anchor, offset[0]);
-        }
+    pub(crate) fn evaluate_variable_offset(
+        anchor: SymbolAnchorType,
+        offset: Option<[f32; 2]>,
+        radial_offset: f32,
+    ) -> [f32; 2] {
+        let Some(mut offset) = offset else {
+            return evaluate_radial_offset(anchor, radial_offset);
+        };
         let mut result = [0.0_f32, 0.0_f32];
         offset[0] = offset[0].abs();
         offset[1] = offset[1].abs();
@@ -716,25 +718,23 @@ impl SymbolLayout {
         if variable_text_anchor.is_empty() {
             return None;
         }
-        let variable_text_offset = if self.text_radial_offset.is_undefined() {
+        let (variable_text_offset, radial_offset) = if self.text_radial_offset.is_undefined() {
             let text_offset = self.layout.text_offset.evaluate(
                 &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
             );
-            [text_offset[0] * ONE_EM, text_offset[1] * ONE_EM]
+            (Some([text_offset[0] * ONE_EM, text_offset[1] * ONE_EM]), 0.0)
         } else {
-            [
-                self.layout.text_radial_offset.evaluate(
-                    &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-                ) * ONE_EM,
-                Self::INVALID_OFFSET_VALUE,
-            ]
+            let radial_offset = self.layout.text_radial_offset.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+            );
+            (None, radial_offset * ONE_EM)
         };
 
         let anchor_offset_pairs = variable_text_anchor
             .into_iter()
             .map(|anchor| AnchorOffsetPair {
                 anchor_type: anchor,
-                offset: Self::evaluate_variable_offset(anchor, variable_text_offset),
+                offset: Self::evaluate_variable_offset(anchor, variable_text_offset, radial_offset),
             })
             .collect();
         Some(VariableAnchorOffsetCollection::new(anchor_offset_pairs))
@@ -2023,7 +2023,37 @@ mod tests {
 
     use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
 
-    use super::GlyphTypeTable;
+    use super::{BASELINE_OFFSET, GlyphTypeTable, SymbolAnchorType, SymbolLayout, evaluate_radial_offset};
+
+    #[test]
+    fn variable_offset_distinguishes_cartesian_and_radial_offsets() {
+        for anchor in [
+            SymbolAnchorType::Center,
+            SymbolAnchorType::Top,
+            SymbolAnchorType::Bottom,
+            SymbolAnchorType::Left,
+            SymbolAnchorType::Right,
+            SymbolAnchorType::TopLeft,
+            SymbolAnchorType::TopRight,
+            SymbolAnchorType::BottomLeft,
+            SymbolAnchorType::BottomRight,
+        ] {
+            for radial_offset in [-12.0, 0.0, 12.0] {
+                assert_eq!(
+                    SymbolLayout::evaluate_variable_offset(anchor, None, radial_offset),
+                    evaluate_radial_offset(anchor, radial_offset),
+                );
+            }
+        }
+        assert_eq!(
+            SymbolLayout::evaluate_variable_offset(SymbolAnchorType::TopRight, Some([-12.0, -24.0]), 0.0),
+            [-12.0, 24.0 - BASELINE_OFFSET],
+        );
+        assert_eq!(
+            SymbolLayout::evaluate_variable_offset(SymbolAnchorType::TopLeft, Some([12.0, f32::MAX]), 0.0),
+            [12.0, f32::MAX],
+        );
+    }
 
     /// The faces' rule, read off them for each code unit.
     fn scan(unit: u16, stack: &[String], faces: &FontFaces, previous: GlyphIDType) -> GlyphIDType {
