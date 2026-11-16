@@ -4068,6 +4068,74 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
+/// Port-only: a video frame's planes as the RGBA of a video source's
+/// texture (`BuiltIn::VideoFrameShader`).
+pub(crate) const VIDEO_FRAME_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r#"
+
+enum {
+    idVideoFramePropsUBO = drawableReservedUBOCount,
+    videoFrameUBOCount
+};
+
+struct alignas(16) VideoFramePropsUBO {
+    /*   0 */ float4x4 matrix;
+    /*  64 */ float4 to_r;
+    /*  80 */ float4 to_g;
+    /*  96 */ float4 to_b;
+    /* 112 */
+};
+static_assert(sizeof(VideoFramePropsUBO) == 7 * 16, "wrong size");
+
+"#,
+    source: r"
+
+struct VertexStage {
+    short2 pos [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float2 pos;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const VideoFramePropsUBO& props [[buffer(idVideoFramePropsUBO)]]) {
+    const float2 pos = float2(vertx.pos);
+    return {
+        .position    = props.matrix * float4(pos, 0, 1),
+        .pos         = pos,
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            device const VideoFramePropsUBO& props [[buffer(idVideoFramePropsUBO)]],
+                            texture2d<float, access::sample> plane0 [[texture(0)]],
+                            texture2d<float, access::sample> plane1 [[texture(1)]],
+                            texture2d<float, access::sample> plane2 [[texture(2)]],
+                            sampler plane0_sampler [[sampler(0)]],
+                            sampler plane1_sampler [[sampler(1)]],
+                            sampler plane2_sampler [[sampler(2)]]) {
+    const float4 luma = plane0.sample(plane0_sampler, in.pos);
+    const float4 chroma1 = plane1.sample(plane1_sampler, in.pos);
+    const float4 chroma2 = plane2.sample(plane2_sampler, in.pos);
+#if defined(VIDEO_NV12)
+    const float4 yuv = float4(luma.r, chroma1.r, chroma1.g, 1.0);
+#else
+    const float4 yuv = float4(luma.r, chroma1.r, chroma2.r, 1.0);
+#endif
+#if defined(VIDEO_YUV)
+    const float3 rgb = float3(dot(props.to_r, yuv), dot(props.to_g, yuv), dot(props.to_b, yuv));
+    return half4(half3(saturate(rgb)), 1.0);
+#else
+    return half4(luma);
+#endif
+}
+",
+};
+
 pub(crate) const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",

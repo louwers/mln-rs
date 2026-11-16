@@ -47,6 +47,12 @@ path = "tests/local_glyph_rasterizer_test.rs"
 name = "map_snapshot_test"
 path = "tests/map_snapshot_test.rs"
 
+# Video sources through Map -> HeadlessFrontend, with a player that hands
+# the map one frame.
+[[test]]
+name = "video_test"
+path = "tests/video_test.rs"
+
 # gtests-core: test/renderer/feature_tracking.test.cpp.
 [[test]]
 name = "gtest_feature_tracking"
@@ -121,6 +127,7 @@ mln_style_types.workspace = true
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 mln_text = { package = "mln-rs-text", path = "../mln_text" }
 mln_tile_id.workspace = true
+mln_video.workspace = true
 parking_lot.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true

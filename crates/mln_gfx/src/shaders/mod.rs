@@ -22,3 +22,4 @@ pub mod shader_program;
 pub mod shader_source;
 pub mod sky_ubo;
 pub mod symbol_layer_ubo;
+pub mod video_frame_ubo;

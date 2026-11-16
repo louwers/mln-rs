@@ -168,6 +168,14 @@ pub const ID_HEATMAP_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE: usize = 1;
 pub const ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE: usize = 2;
 
+/// Port-only: the video frame shader's props (`VideoFramePropsUBO`).
+pub const ID_VIDEO_FRAME_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
+/// The frame's planes: luma (or RGBA), then the chroma planes.
+pub const ID_VIDEO_FRAME_PLANE0_TEXTURE: usize = 0;
+pub const ID_VIDEO_FRAME_PLANE1_TEXTURE: usize = 1;
+pub const ID_VIDEO_FRAME_PLANE2_TEXTURE: usize = 2;
+pub const ID_VIDEO_FRAME_POS_VERTEX_ATTRIBUTE: usize = 0;
+
 pub const ID_HILLSHADE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
 pub const ID_HILLSHADE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
 pub(crate) const HILLSHADE_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;

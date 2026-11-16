@@ -1,7 +1,6 @@
 //! The players of a style's video sources: the map opens one for each
 //! video source of its style, and drops it with the source.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_actor::{AsyncTask, RunLoop};
@@ -11,6 +10,7 @@ use mln_style::Style;
 use mln_style::source::Source;
 use mln_style::sources::VideoSource;
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_video::{FrameSink, FrameSlot, OpenRequest, VideoPlayer, VideoPlayers};
 
@@ -88,7 +88,9 @@ impl Videos {
             frames.set_waker(Some(Arc::new(move || sender.send())));
             let sink = FrameSink::new(Arc::clone(&frames));
             let request = OpenRequest { urls, file_source: file_source.cloned(), frames: sink.clone() };
-            let player = if let Some(players) = &self.players { players.open(request).map_err(|error| sink.fail(error)).ok() } else {
+            let player = if let Some(players) = &self.players {
+                players.open(request).map_err(|error| sink.fail(error)).ok()
+            } else {
                 sink.fail("the map has no video players");
                 None
             };

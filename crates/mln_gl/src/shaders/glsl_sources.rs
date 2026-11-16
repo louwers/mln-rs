@@ -2873,6 +2873,61 @@ void main() {
 ",
 };
 
+/// Port-only: a video frame's planes as the RGBA of a video source's
+/// texture (`BuiltIn::VideoFrameShader`).
+pub(crate) const VIDEO_FRAME_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: r"layout (location = 0) in vec2 a_pos;
+out vec2 v_pos;
+
+layout (std140) uniform VideoFramePropsUBO {
+    highp mat4 u_matrix;
+    highp vec4 u_to_r;
+    highp vec4 u_to_g;
+    highp vec4 u_to_b;
+};
+
+void main() {
+    gl_Position = u_matrix * vec4(a_pos, 0, 1);
+    // OpenGL keeps a render target's rows bottom first: the frame's first
+    // row goes to the target's last, where an upload would put it.
+    v_pos = vec2(a_pos.x, 1.0 - a_pos.y);
+}
+",
+    fragment: r"#ifdef GL_ES
+precision highp float;
+#endif
+
+in vec2 v_pos;
+uniform sampler2D u_plane0;
+uniform sampler2D u_plane1;
+uniform sampler2D u_plane2;
+
+layout (std140) uniform VideoFramePropsUBO {
+    highp mat4 u_matrix;
+    highp vec4 u_to_r;
+    highp vec4 u_to_g;
+    highp vec4 u_to_b;
+};
+
+void main() {
+    vec4 luma = texture(u_plane0, v_pos);
+    vec4 chroma1 = texture(u_plane1, v_pos);
+    vec4 chroma2 = texture(u_plane2, v_pos);
+#ifdef VIDEO_NV12
+    vec4 yuv = vec4(luma.r, chroma1.r, chroma1.g, 1.0);
+#else
+    vec4 yuv = vec4(luma.r, chroma1.r, chroma2.r, 1.0);
+#endif
+#ifdef VIDEO_YUV
+    vec3 rgb = vec3(dot(u_to_r, yuv), dot(u_to_g, yuv), dot(u_to_b, yuv));
+    fragColor = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+#else
+    fragColor = luma;
+#endif
+}
+",
+};
+
 pub(crate) const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_texture_pos;

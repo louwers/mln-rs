@@ -300,10 +300,14 @@ impl RenderSource for RenderImageSource {
                 }
                 None
             }
-            None => if let Some(image) = self.image_impl().get_image().filter(|image| image.valid()) { Some(image) } else {
-                self.base.enabled = false;
-                return;
-            },
+            None => {
+                if let Some(image) = self.image_impl().get_image().filter(|image| image.valid()) {
+                    Some(image)
+                } else {
+                    self.base.enabled = false;
+                    return;
+                }
+            }
         };
 
         // Compute the z0 tile coordinates for the given LatLngs

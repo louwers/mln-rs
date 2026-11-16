@@ -83,12 +83,15 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
+    ID_VIDEO_FRAME_PLANE0_TEXTURE, ID_VIDEO_FRAME_PLANE1_TEXTURE, ID_VIDEO_FRAME_PLANE2_TEXTURE,
+    ID_VIDEO_FRAME_POS_VERTEX_ATTRIBUTE, ID_VIDEO_FRAME_PROPS_UBO,
 };
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
+use mln_gfx::shaders::video_frame_ubo::VideoFramePropsUBO;
 
 use super::glsl_sources;
 
@@ -639,6 +642,22 @@ shader_source!(
     &[]
 );
 
+// Video Frame
+shader_source!(
+    VIDEO_FRAME_SHADER,
+    "VideoFrameShader",
+    &[
+        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        block::<VideoFramePropsUBO>("VideoFramePropsUBO", ID_VIDEO_FRAME_PROPS_UBO)
+    ],
+    &[attr("a_pos", ID_VIDEO_FRAME_POS_VERTEX_ATTRIBUTE)],
+    &[
+        tex("u_plane0", ID_VIDEO_FRAME_PLANE0_TEXTURE),
+        tex("u_plane1", ID_VIDEO_FRAME_PLANE1_TEXTURE),
+        tex("u_plane2", ID_VIDEO_FRAME_PLANE2_TEXTURE)
+    ]
+);
+
 // Heatmap Texture
 shader_source!(
     HEATMAP_TEXTURE_SHADER,
@@ -955,6 +974,7 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::FillExtrusionPatternWallShader => Some(&FILL_EXTRUSION_PATTERN_WALL_SHADER),
         BuiltIn::HeatmapShader => Some(&HEATMAP_SHADER),
         BuiltIn::HeatmapTextureShader => Some(&HEATMAP_TEXTURE_SHADER),
+        BuiltIn::VideoFrameShader => Some(&VIDEO_FRAME_SHADER),
         BuiltIn::HillshadePrepareShader => Some(&HILLSHADE_PREPARE_SHADER),
         BuiltIn::HillshadeShader => Some(&HILLSHADE_SHADER),
         BuiltIn::ColorReliefShader => Some(&COLOR_RELIEF_SHADER),
@@ -1013,4 +1033,5 @@ pub(crate) const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::SymbolSDFShader,
     BuiltIn::SymbolTextAndIconShader,
     BuiltIn::LayerCompositeShader,
+    BuiltIn::VideoFrameShader,
 ];

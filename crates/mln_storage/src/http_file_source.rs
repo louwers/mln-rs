@@ -350,6 +350,6 @@ mod range_tests {
     fn a_whole_body_answers_a_range_with_its_bytes() {
         assert_eq!(b"lo Wor".to_vec(), whole_body_range(b"Hello World!".to_vec(), 3, 8));
         assert_eq!(b"d!".to_vec(), whole_body_range(b"Hello World!".to_vec(), 10, 99));
-        assert_eq!(whole_body_range(b"Hello".to_vec(), 9, 12), [] as [u8; 0]);
+        assert_eq!(Vec::<u8>::new(), whole_body_range(b"Hello".to_vec(), 9, 12));
     }
 }

@@ -50,6 +50,7 @@ const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::FillExtrusionPatternInstancedShader,
     BuiltIn::HeatmapShader,
     BuiltIn::HeatmapTextureShader,
+    BuiltIn::VideoFrameShader,
     BuiltIn::HillshadePrepareShader,
     BuiltIn::ColorReliefShader,
     BuiltIn::HillshadeShader,
@@ -258,6 +259,7 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
             (&[("idHeatmapTexturePropsUBO", ID_HEATMAP_TEXTURE_PROPS_UBO)], "heatmapTextureUBOCount")
         }
         "LayerCompositeShader" => (&[("idLayerCompositeUBO", ID_LAYER_COMPOSITE_UBO)], "layerCompositeUBOCount"),
+        "VideoFrameShader" => (&[("idVideoFramePropsUBO", ID_VIDEO_FRAME_PROPS_UBO)], "videoFrameUBOCount"),
         "HillshadeShader" => (
             &[
                 ("idHillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),
@@ -340,6 +342,7 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("HeatmapEvaluatedPropsUBO", size_of::<heatmap_layer_ubo::HeatmapEvaluatedPropsUBO>()),
     ("HeatmapTexturePropsUBO", size_of::<heatmap_texture_layer_ubo::HeatmapTexturePropsUBO>()),
     ("LayerCompositeUBO", size_of::<layer_composite_ubo::LayerCompositeUBO>()),
+    ("VideoFramePropsUBO", size_of::<mln_gfx::shaders::video_frame_ubo::VideoFramePropsUBO>()),
     ("HillshadeDrawableUBO", size_of::<hillshade_layer_ubo::HillshadeDrawableUBO>()),
     ("HillshadeTilePropsUBO", size_of::<hillshade_layer_ubo::HillshadeTilePropsUBO>()),
     ("HillshadeEvaluatedPropsUBO", size_of::<hillshade_layer_ubo::HillshadeEvaluatedPropsUBO>()),

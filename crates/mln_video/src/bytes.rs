@@ -28,11 +28,29 @@ pub struct ByteSource {
     cancelled: AtomicBool,
 }
 
+/// What a source knows of its resource's size.
+#[derive(Clone, Copy, Default)]
+enum Size {
+    /// No response said yet.
+    #[default]
+    Unasked,
+    Known(u64),
+    /// No source knows it.
+    Unknown,
+}
+
+impl Size {
+    fn known(self) -> Option<u64> {
+        match self {
+            Size::Known(size) => Some(size),
+            Size::Unasked | Size::Unknown => None,
+        }
+    }
+}
+
 #[derive(Default)]
 struct State {
-    /// The resource's size: `None` until a response said, then `Some(None)`
-    /// when no source knows it.
-    size: Option<Option<u64>>,
+    size: Size,
     chunks: Vec<(u64, Data)>,
 }
 
@@ -61,19 +79,23 @@ impl ByteSource {
     ///
     /// The resource's first chunk failed to load.
     pub fn size(&self) -> io::Result<Option<u64>> {
-        if let Some(size) = self.state.lock().size {
-            return Ok(size);
+        if !matches!(self.state.lock().size, Size::Unasked) {
+            return Ok(self.state.lock().size.known());
         }
         let chunk = self.chunk(0)?;
-        if let Some(size) = self.state.lock().size {
-            return Ok(size);
+        if !matches!(self.state.lock().size, Size::Unasked) {
+            return Ok(self.state.lock().size.known());
         }
         // A cached first chunk doesn't know the size; the network does, and
         // a short chunk is the whole resource.
         let size = self.fetch(0, LoadingMethod::NetworkOnly).ok().and_then(|(_, size)| size);
         let short = (chunk.len() as u64) < CHUNK_SIZE;
         let size = size.or(short.then_some(chunk.len() as u64));
-        Ok(*self.state.lock().size.get_or_insert(size))
+        let mut state = self.state.lock();
+        if matches!(state.size, Size::Unasked) {
+            state.size = size.map_or(Size::Unknown, Size::Known);
+        }
+        Ok(state.size.known())
     }
 
     /// Reads bytes from `offset` into `buf`, as many as the chunk at
@@ -87,7 +109,7 @@ impl ByteSource {
         if buf.is_empty() {
             return Ok(0);
         }
-        if let Some(Some(size)) = self.state.lock().size
+        if let Some(size) = self.state.lock().size.known()
             && offset >= size
         {
             return Ok(0);
@@ -139,11 +161,11 @@ impl ByteSource {
         }
         let (mut data, size) = self.fetch(index * CHUNK_SIZE, LoadingMethod::All)?;
         let mut state = self.state.lock();
-        if size.is_some() {
-            state.size = Some(size);
+        if let Some(size) = size {
+            state.size = Size::Known(size);
         }
         // A local file pads a range past its end with zeros.
-        if let Some(Some(size)) = state.size {
+        if let Some(size) = state.size.known() {
             let end = size.saturating_sub(index * CHUNK_SIZE);
             if (data.len() as u64) > end {
                 data = Arc::new(data[..end as usize].to_vec());

@@ -2781,6 +2781,7 @@ dependencies = [
  "mln-rs-text",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-video",
  "mln-rs-vulkan",
  "mln-rs-webgpu",
  "naga",

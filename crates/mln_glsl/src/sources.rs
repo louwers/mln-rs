@@ -3647,6 +3647,70 @@ void main() {
 ",
 };
 
+pub(crate) const VIDEO_FRAME_SHADER_PRELUDE: &str = r"#define idVideoFramePropsUBO    layerUBOStartId";
+
+/// Port-only: a video frame's planes as the RGBA of a video source's
+/// texture (`BuiltIn::VideoFrameShader`).
+pub(crate) const VIDEO_FRAME_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "VideoFrameShader",
+    name: "VideoFrameShader",
+    prelude: VIDEO_FRAME_SHADER_PRELUDE,
+    vertex: r"
+
+layout(location = 0) in ivec2 in_position;
+
+layout(set = LAYER_SET_INDEX, binding = idVideoFramePropsUBO) uniform VideoFramePropsUBO {
+    mat4 matrix;
+    vec4 to_r;
+    vec4 to_g;
+    vec4 to_b;
+} props;
+
+layout(location = 0) out vec2 frag_position;
+
+void main() {
+    gl_Position = props.matrix * vec4(in_position, 0.0, 1.0);
+    frag_position = vec2(in_position);
+}
+",
+    fragment: r"
+
+layout(location = 0) in vec2 frag_position;
+layout(location = 0) out vec4 out_color;
+
+layout(set = LAYER_SET_INDEX, binding = idVideoFramePropsUBO) uniform VideoFramePropsUBO {
+    mat4 matrix;
+    vec4 to_r;
+    vec4 to_g;
+    vec4 to_b;
+} props;
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D plane0_texture;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler plane0_sampler;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D plane1_texture;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler plane1_sampler;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 2) uniform texture2D plane2_texture;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 2) uniform sampler plane2_sampler;
+
+void main() {
+    const vec4 luma = texture(sampler2D(plane0_texture, plane0_sampler), frag_position);
+    const vec4 chroma1 = texture(sampler2D(plane1_texture, plane1_sampler), frag_position);
+    const vec4 chroma2 = texture(sampler2D(plane2_texture, plane2_sampler), frag_position);
+#if defined(VIDEO_NV12)
+    const vec4 yuv = vec4(luma.r, chroma1.r, chroma1.g, 1.0);
+#else
+    const vec4 yuv = vec4(luma.r, chroma1.r, chroma2.r, 1.0);
+#endif
+#if defined(VIDEO_YUV)
+    const vec3 rgb = vec3(dot(props.to_r, yuv), dot(props.to_g, yuv), dot(props.to_b, yuv));
+    out_color = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+#else
+    out_color = luma;
+#endif
+}
+",
+};
+
 pub(crate) const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
