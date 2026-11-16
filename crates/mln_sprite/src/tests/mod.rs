@@ -1,7 +1,5 @@
-// Ported gtests: test/sprite/sprite_parser.test.cpp and
-// test/sprite/sprite_loader.test.cpp.
+// Ported gtests: test/sprite/sprite_parser.test.cpp.
 
-mod sprite_loader;
 mod sprite_parser;
 
 use std::path::PathBuf;

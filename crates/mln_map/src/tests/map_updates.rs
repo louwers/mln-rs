@@ -169,7 +169,7 @@ fn a_style_load_clears_the_feature_state_that_it_publishes() {
     map.set_feature_state("points", None, "1", hover(true));
     map.set_feature_state("other", None, "1", hover(true));
 
-    map.style_mut().load_json(
+    map.load_style_json(
         r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
     );
     map.process_events();
@@ -218,7 +218,7 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
         }
     })));
 
-    map.style_mut().load_url("http://style");
+    map.load_style_url("http://style");
     map.process_events();
     run_loop.run_once();
     map.renderer_events().push(RendererEvent::Invalidate);
@@ -301,7 +301,7 @@ fn the_synchronous_update_override_publishes_an_update() {
     let mut map = map(&run_loop);
     map.jump_to(&CameraOptions::default());
     let reader = map.update_reader();
-    map.style_mut().load_json(
+    map.load_style_json(
         r#"{"version":8,"sources":{"points":{"type":"geojson","synchronousUpdate":true,
             "data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
     );

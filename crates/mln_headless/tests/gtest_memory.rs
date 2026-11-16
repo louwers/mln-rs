@@ -81,7 +81,7 @@ fn vector() {
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio, &test.run_loop).expect("a headless frontend");
     let mut map = test.map(&mut frontend, ratio);
     map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
-    map.style_mut().load_url("https://example.com/maps/streets");
+    map.load_style_url("https://example.com/maps/streets");
 
     frontend.render(&mut map).expect("render");
 }
@@ -94,7 +94,7 @@ fn raster() {
 
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio, &test.run_loop).expect("a headless frontend");
     let mut map = test.map(&mut frontend, ratio);
-    map.style_mut().load_url("https://example.com/maps/hybrid");
+    map.load_style_url("https://example.com/maps/hybrid");
 
     frontend.render(&mut map).expect("render");
 }
@@ -137,7 +137,7 @@ fn footprint() {
                 HeadlessFrontend::new(Size::new(256, 256), 2.0, &test.run_loop).expect("a headless frontend");
             let mut map = test.map(&mut frontend, 2.0);
             map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
-            map.style_mut().load_url(style);
+            map.load_style_url(style);
             frontend.render(&mut map).expect("render");
             FrontendAndMap { _map: map, _frontend: frontend }
         }
@@ -216,7 +216,7 @@ fn rendering_stats_count_live_resources() {
     let mut map = test.map(&mut frontend, 1.0);
     map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
 
-    map.style_mut().load_url("https://example.com/maps/streets");
+    map.load_style_url("https://example.com/maps/streets");
     frontend.render(&mut map).expect("render");
     // Labels, so that the map draws from the atlas's textures: the style's
     // own labels read source layers the tile doesn't have.
@@ -240,7 +240,7 @@ fn rendering_stats_count_live_resources() {
     assert!(live(&loaded, "mem_buffers") >= sum("mem"));
 
     // The tiles go with their style.
-    map.style_mut().load_json(EMPTY);
+    map.load_style_json(EMPTY);
     frontend.render(&mut map).expect("render");
     let evicted = live_resources(&frontend);
     assert_eq!(live(&evicted, "num_index_buffers"), 0);
@@ -250,10 +250,10 @@ fn rendering_stats_count_live_resources() {
     }
 
     // Loading the tiles again and dropping them leaves the same resources.
-    map.style_mut().load_url("https://example.com/maps/streets");
+    map.load_style_url("https://example.com/maps/streets");
     frontend.render(&mut map).expect("render");
     assert!(live(&live_resources(&frontend), "num_index_buffers") > 0);
-    map.style_mut().load_json(EMPTY);
+    map.load_style_json(EMPTY);
     frontend.render(&mut map).expect("render");
     assert_eq!(live_resources(&frontend), evicted);
 
@@ -273,7 +273,7 @@ fn rendering_stats_count_one_frame_of_globe_clip_masks() {
     let test = MemoryTest::new();
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &test.run_loop).expect("a headless frontend");
     let mut map = test.map(&mut frontend, 1.0);
-    map.style_mut().load_json(
+    map.load_style_json(
         r#"{"version": 8, "projection": {"type": "vertical-perspective"},
             "sources": {"shape": {"type": "geojson", "data": {"type": "Polygon",
                 "coordinates": [[[-60, -40], [60, -40], [60, 40], [-60, 40], [-60, -40]]]}}},

@@ -34,7 +34,7 @@ impl QueryTest {
         let run_loop = RunLoop::new();
         let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
         let test = QueryTest(MapTest::create(run_loop, file_source, 1.0, MapMode::Static));
-        test.map().style_mut().load_json(&read_file("test/fixtures/api/query_style.json"));
+        test.map().load_style_json(&read_file("test/fixtures/api/query_style.json"));
         test.map().style_mut().add_image(style_image(
             "test-icon",
             decode_image("test/fixtures/sprites/default_marker.png"),
@@ -214,7 +214,7 @@ fn query_rendered_features_line_offset_endpoint() {
     for offset in [22.0f64, -22.0] {
         let test = QueryTest::new();
         // std::to_string(double): "%f".
-        test.map().style_mut().load_json(&format!(
+        test.map().load_style_json(&format!(
             r#"{{"version":8,"sources":{{"source":{{"type":"geojson","data":{{
                 "type":"LineString","coordinates":[[1.0025,1],[1.0035,1]]
             }}}}}},"layers":[{{"id":"layer","type":"line","source":"source","paint":{{
@@ -277,7 +277,7 @@ fn query_rendered_features_composite_paint_zoom() {
             // std::to_string(int).
             let lower_zoom = zoom as i32;
             let upper_zoom = zoom as i32 + 1;
-            test.map().style_mut().load_json(&format!(
+            test.map().load_style_json(&format!(
                 r#"{{"version":8,"sources":{{"source":{{"type":"geojson","data":{{
                     "type":"Feature","properties":{{"small":4,"large":40}},"geometry":{geometry}
                 }}}}}},"layers":[{{"id":"layer","type":"{layer_type}","source":"source","paint":{{{paint}

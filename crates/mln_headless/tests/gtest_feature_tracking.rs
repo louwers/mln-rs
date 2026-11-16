@@ -140,9 +140,9 @@ impl FeatureTrackingTest {
         )
         .expect("style::Image");
 
+        map.load_style_json(&read_file(&format!("{FIXTURE_BASE}api/empty.json")));
         {
             let style = map.style_mut();
-            style.load_json(&read_file(&format!("{FIXTURE_BASE}api/empty.json")));
             style.add_source(Box::new(source)).expect("add source");
             style.add_layer(background_layer, None).expect("add layer");
             style.add_layer(fill_layer, None).expect("add layer");

@@ -100,7 +100,7 @@ impl TestRunnerImpl for Impl {
                 .with_y_skew(metadata.y_skew),
         );
         self.map.set_debug(mln_map::MapDebugOptions(metadata.debug.0));
-        style_ops::load_json(self.map.style_mut(), &metadata.document_json);
+        self.map.load_style_json(&metadata.document_json);
         // C++ parses a style as it loads: the operations after it see it.
         self.map.process_events();
         Ok(())
@@ -196,13 +196,13 @@ impl TestRunnerImpl for Impl {
     }
 
     fn load_style_json(&mut self, json: &str) -> Result<(), MapError> {
-        style_ops::load_json(self.map.style_mut(), json);
+        self.map.load_style_json(json);
         self.map.process_events();
         Ok(())
     }
 
     fn load_style_url(&mut self, url: &str) -> Result<(), MapError> {
-        style_ops::load_url(self.map.style_mut(), url);
+        self.map.load_style_url(url);
         self.map.process_events();
         Ok(())
     }

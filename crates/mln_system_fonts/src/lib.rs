@@ -72,7 +72,7 @@ pub fn fallback_font_faces() -> &'static [SystemFontFace] {
 }
 
 /// The faces of [`fallback_font_faces`] alone, for
-/// `Style::set_fallback_font_face_list`.
+/// `Map::set_fallback_font_face_list`.
 #[must_use]
 pub fn fallback_font_face_list() -> FontFaces {
     fallback_font_faces().iter().map(|face| face.face.clone()).collect()

@@ -53,10 +53,10 @@ fn load(test: &str) -> Impl {
     };
     file_source.set_response(mln_storage::Kind::SpriteJSON, failed);
     file_source.set_response(mln_storage::Kind::SpriteImage, failed);
-    let mut style = Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop);
+    let mut style = Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), &run_loop);
     style.load_json(&json);
     assert!(style.loaded, "{test} did not load");
-    assert!(style.is_loaded(), "{test}: style not fully loaded");
+    assert!(style.sources_loaded(), "{test}: sources not loaded");
     style
 }
 

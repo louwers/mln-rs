@@ -53,7 +53,7 @@ fn grid() {
     )
     .unwrap();
     frontend.attach(&map);
-    map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    map.load_style_json(&read_file("test/fixtures/api/water.json"));
     map.jump_to(&CameraOptions {
         center: Some(LatLng::new(37.8, -122.5).unwrap()),
         zoom: Some(10.0),
@@ -126,7 +126,7 @@ fn recycle_map_update_images() {
         let mut layer = Layer::new(Registry::with_builtins().style(), "symbol", "geometry", "geometry").unwrap();
         set(&mut layer, "icon-image", &json!(marker_name));
 
-        map.style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
+        map.load_style_json(&read_file("test/fixtures/api/empty.json"));
         map.style_mut().add_source(Box::new(source)).unwrap();
         map.style_mut().add_layer(layer, None).unwrap();
         map.style_mut().add_image(style_image(marker_name, decode_image(marker_path), 1.0));

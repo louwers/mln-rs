@@ -119,7 +119,7 @@ fn no_local() {
     // Expectation: without any local fonts set, and without any CJK glyphs
     // provided, the output should just contain basic latin characters.
     let mut test = LocalGlyphRasterizerTest::new(None);
-    test.map.style_mut().load_json(&mixed_json());
+    test.map.load_style_json(&mixed_json());
     test.check_rendering("no_local", 0.001, 0.1);
 }
 
@@ -131,7 +131,7 @@ fn no_local_with_content_insets() {
     // size as with no offset.
     let mut test = LocalGlyphRasterizerTest::new(None);
     let view_size = test.frontend.size();
-    test.map.style_mut().load_json(&mixed_json());
+    test.map.load_style_json(&mixed_json());
     // The style's camera applies before the jump, as C++'s synchronous load
     // applies it.
     test.map.process_events();
@@ -155,7 +155,7 @@ fn no_local_with_content_insets_and_pitch() {
     // size as with no offset.
     let mut test = LocalGlyphRasterizerTest::new(None);
     let view_size = test.frontend.size();
-    test.map.style_mut().load_json(&mixed_json());
+    test.map.load_style_json(&mixed_json());
     // The style's camera applies before the jump, as C++'s synchronous load
     // applies it.
     test.map.process_events();

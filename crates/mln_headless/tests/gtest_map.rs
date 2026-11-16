@@ -688,7 +688,7 @@ fn offline() {
     );
     dbfs.invoke(move |_| handle.stop());
     run_with_timeout(&test.run_loop, 60);
-    test.map().style_mut().load_url(&format!("{prefix}style.json"));
+    test.map().load_style_url(&format!("{prefix}style.json"));
 
     check_image("test/fixtures/map/offline", &test.render().image, 0.0015, 0.1);
     NetworkStatus::set(NetworkStatusType::Online);
@@ -845,7 +845,7 @@ fn set_style_invalid_url() {
     let run_loop = test.run_loop.clone();
     test.observer.did_fail_loading_map_callback.set(move |()| run_loop.stop());
 
-    test.map().style_mut().load_url("https://example.com/bar");
+    test.map().load_style_url("https://example.com/bar");
 
     run_with_timeout(&test.run_loop, 60);
 }
@@ -876,7 +876,7 @@ fn style_fresh() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("https://example.com/maps/test");
+    test.map().load_style_url("https://example.com/maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     // Timestamp::max()
@@ -893,7 +893,7 @@ fn style_expired() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("https://example.com/maps/test");
+    test.map().load_style_url("https://example.com/maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     let mut response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
@@ -931,7 +931,7 @@ fn style_expired_with_render() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("https://example.com/maps/test");
+    test.map().load_style_url("https://example.com/maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
@@ -955,7 +955,7 @@ fn style_expired_with_projection() {
     for in_place in [false, true] {
         let test = MapTest::fake();
 
-        test.map().style_mut().load_url("https://example.com/maps/test");
+        test.map().load_style_url("https://example.com/maps/test");
 
         let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
         test.file_source.respond(Kind::Style, &response);
@@ -983,7 +983,7 @@ fn style_early_mutation() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("https://example.com/maps/test");
+    test.map().load_style_url("https://example.com/maps/test");
     test.map()
         .style_mut()
         .add_layer(Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(), None)
@@ -1055,7 +1055,7 @@ fn style_network_error_retry() {
     let server = HttpServer::new();
     let test = online_file_source_test();
 
-    test.map().style_mut().load_url(&server.url("/style-fail-once-500"));
+    test.map().load_style_url(&server.url("/style-fail-once-500"));
 
     let run_loop = test.run_loop.clone();
     test.observer.did_finish_loading_style_callback.set(move |()| run_loop.stop());
@@ -1069,7 +1069,7 @@ fn style_not_found() {
     let server = HttpServer::new();
     let test = online_file_source_test();
 
-    test.map().style_mut().load_url(&server.url("/style-fail-once-404"));
+    test.map().load_style_url(&server.url("/style-fail-once-404"));
 
     let timer = Rc::new(Timer::new(&test.run_loop));
 
@@ -1087,7 +1087,7 @@ fn style_not_found() {
     run_with_timeout(&test.run_loop, 10);
 
     // Should also not retry if the response has cache headers.
-    test.map().style_mut().load_url(&server.url("/style-fail-once-404-cache"));
+    test.map().load_style_url(&server.url("/style-fail-once-404-cache"));
     run_with_timeout(&test.run_loop, 10);
 }
 
@@ -1288,7 +1288,7 @@ fn continuous_rendering() {
     let map = Rc::new(RefCell::new(map));
     let frontend = Rc::new(RefCell::new(frontend));
     let _events = observer.observe(&map, Some(&frontend));
-    map.borrow_mut().style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    map.borrow_mut().load_style_json(&read_file("test/fixtures/api/water.json"));
 
     run_loop.run();
     assert!(!did_not_stop.get(), "Did not stop rendering");
@@ -1584,7 +1584,7 @@ fn issue12432() {
     let run_loop = test.run_loop.clone();
     test.observer.did_finish_loading_map_callback.set(move |()| {
         if let Some(map) = map.upgrade() {
-            map.borrow_mut().style_mut().load_json(
+            map.borrow_mut().load_style_json(
                 r#"{
           "version": 8,
           "sources": {
@@ -1721,7 +1721,7 @@ fn issue15342() {
         let (Some(map), Some(observer)) = (map.upgrade(), observer.upgrade()) else {
             return;
         };
-        map.borrow_mut().style_mut().load_json(
+        map.borrow_mut().load_style_json(
             r#"{
           "version": 8,
           "sources": {
@@ -2397,7 +2397,7 @@ fn expired_sprite_sheet() {
     );
     dbfs.invoke(move |_| handle.stop());
     run_with_timeout(&run_loop, 60);
-    map.borrow_mut().style_mut().load_url(&format!("{prefix}style.json"));
+    map.borrow_mut().load_style_url(&format!("{prefix}style.json"));
 
     run_with_timeout(&run_loop, 60);
 }
@@ -2489,7 +2489,7 @@ fn keep_render_data() {
     test.file_source.set_response(Kind::SpriteImage, make_response("sprite.png", None));
 
     test.map().jump_to(&CameraOptions { zoom: Some(10.0), ..Default::default() });
-    test.map().style_mut().load_url("https://example.com/maps/streets");
+    test.map().load_style_url("https://example.com/maps/streets");
     let iterations = 3;
     let resources_count = 4; /*tiles*/
 
@@ -2549,7 +2549,7 @@ fn disabled_placed_symbol_data() {
         ..Default::default()
     });
 
-    test.map().style_mut().load_url("https://example.com/maps/streets");
+    test.map().load_style_url("https://example.com/maps/streets");
     let viewport_size = test.frontend().size();
     test.frontend().renderer().collect_placed_symbol_data(true);
     test.render();
@@ -3066,7 +3066,7 @@ fn observe_tile_lifecycle() {
     )
     .unwrap();
     frontend.attach(&map);
-    map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    map.load_style_json(&read_file("test/fixtures/api/water.json"));
     let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
     layer.set_source_layer("landcover");
     set(&mut layer, "fill-color", &json!("rgba(0,255,0,1)"));
@@ -3301,7 +3301,7 @@ fn globe_hand_off_keeps_tiles() {
     )
     .unwrap();
 
-    map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    map.load_style_json(&read_file("test/fixtures/api/water.json"));
     map.style_mut().set_root_property_json("projection", r#"{"type":"globe"}"#).unwrap();
     let center = ll(37.8, -122.5); // the fixture has tile 10/163/395
     map.jump_to(&CameraOptions { center: Some(center), zoom: Some(10.5), ..Default::default() });
@@ -3373,7 +3373,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     };
 
     let mut map = Map::with_file_source(Arc::clone(&file_source), options, &run_loop).unwrap();
-    map.style_mut().load_json(&water_layers_in(["fill", "line"]));
+    map.load_style_json(&water_layers_in(["fill", "line"]));
     map.jump_to(&camera);
     let before = render(&mut map);
     assert!(parses.get() > 0);
@@ -3385,7 +3385,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     assert_ne!(before, moved);
 
     let mut reordered = Map::with_file_source(file_source, options, &run_loop).unwrap();
-    reordered.style_mut().load_json(&water_layers_in(["line", "fill"]));
+    reordered.load_style_json(&water_layers_in(["line", "fill"]));
     reordered.jump_to(&camera);
     assert_eq!(render(&mut reordered), moved);
 }
@@ -3656,7 +3656,7 @@ fn globe_bounded_source_loads_finer_tiles() {
     .unwrap();
 
     // The same tile answers every request, so the cover alone decides what loads.
-    map.style_mut().load_json(
+    map.load_style_json(
         r#"{
         "version": 8,
         "projection": {"type": "globe"},
@@ -4455,7 +4455,7 @@ fn tile_selection_options_publish_updates() {
     )
     .unwrap();
     let updates = map.update_reader();
-    map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
+    map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map.process_events();
     assert!(updates.latest().is_some());
 
@@ -4573,10 +4573,7 @@ fn fallback_font_faces_cover_every_font_stack() {
         Some(response)
     });
 
-    test.map()
-        .style_mut()
-        .set_fallback_font_faces(r#"[{"url": "fallback.ttf", "unicode-range": ["U+1000-109F"]}]"#)
-        .unwrap();
+    test.map().set_fallback_font_faces(r#"[{"url": "fallback.ttf", "unicode-range": ["U+1000-109F"]}]"#).unwrap();
     test.load_json(
         r#"{
         "version": 8,

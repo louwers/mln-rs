@@ -121,7 +121,7 @@ impl SymbolRenderingTest {
         )
         .unwrap();
         frontend.attach(&map);
-        map.style_mut().load_json(&colliding_symbols_style(count, spacing, kind));
+        map.load_style_json(&colliding_symbols_style(count, spacing, kind));
         map.style_mut().add_image(marker(kind == SymbolKind::SdfIcon));
         map.jump_to(&CameraOptions { center: Some(lat_lng(5.0, 5.0)), zoom: Some(4.0), ..Default::default() });
         let map = Rc::new(RefCell::new(map));
@@ -401,7 +401,7 @@ fn shown_icons_take_image_updates_while_a_style_url_loads() {
     };
     assert_eq!(pixel_at_symbol(&frame(1000).image), [255; 4]);
 
-    test.map.borrow_mut().style_mut().load_url("https://example.com/next.json");
+    test.map.borrow_mut().load_style_url("https://example.com/next.json");
     frame(1100);
     let red = PremultipliedImage::from_vec(Size::new(16, 16), [255, 0, 0, 255].repeat(16 * 16));
     let red =

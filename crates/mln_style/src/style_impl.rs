@@ -2,40 +2,23 @@
 // - The layers, light, sky and projection are values behind `Arc`s, which
 //   the style replaces when they change. `update_layer` edits a copy of a
 //   layer and keeps it if the layer changed.
-// - The observer is an `Rc<dyn Observer>` (C++: `Observer*`, default
-//   `&nullObserver`).
-// - C++ `Style::Impl` is the SpriteLoaderObserver of its sprite loader,
-//   whose callbacks arrive later from the RunLoop. The members those
-//   callbacks change (images, sprite loading status, last error, observer)
-//   live in `SpriteShared`, shared with the loader's observer
-//   (`StyleSpriteObserver`) through an `Rc`; its borrow ends before the
-//   style's observer is called, so the observer can read the style.
+// - The observer is an `Rc<dyn Observer>`, shared with the sources'
+//   observer (`StyleSourceObserver`).
 //
-// - C++ `Style::Impl` is the SourceObserver of its sources. Sources notify
-//   from setters and from asynchronous request callbacks (see source.rs), so
-//   the observer handed to them is a `StyleSourceObserver` sharing
-//   `SpriteShared` (the style's observer and last error) and the file
-//   source. `sources.update(source)` happens when the impls are read
+// - Sources notify from setters and from asynchronous request callbacks
+//   (see source.rs), so the observer handed to them is a
+//   `StyleSourceObserver` sharing the style's observer and the file source.
+//   `sources.update(source)` happens when the impls are read
 //   (`get_source_impls`), which picks up every source whose impl changed.
-//
-// - `loadURL` (added by glfw): the response callback can't reach the
-//   `&mut Impl` its owner holds, so it queues the response in
-//   `style_responses` and calls `Observer::on_style_response`; the owner
-//   (the Map) then calls `process_style_responses`, which is the body of the
-//   C++ lambda.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use feature::Value;
-use mln_actor::{RunLoop, TaggedScheduler};
-use mln_sprite::{SpriteLoader, SpriteLoaderObserver};
-use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
+use mln_actor::RunLoop;
+use mln_storage::FileSource;
 use mln_util::error::Error;
-use mln_util::hash::HashMap;
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 
 use crate::collection::{CollectionWithPersistentOrder, ImmutableVector};
@@ -52,113 +35,30 @@ use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source::{self, Source};
 use crate::sprite::Sprite;
-use crate::style::StyleLoadError;
 use crate::transition_options::TransitionOptions;
 
 pub(crate) type ImageImpls = Vec<Arc<image::Impl>>;
 
-/// The members of `Style::Impl` that its `SpriteLoaderObserver` half changes.
-struct SpriteShared {
-    images: Arc<ImageImpls>,
-    sprites_loading_status: HashMap<String, bool>,
-    last_error: Option<Error>,
-    observer: Option<Rc<dyn Observer>>,
-}
+/// The style's observer, shared with its sources' observer.
+type ObserverSlot = Rc<RefCell<Option<Rc<dyn Observer>>>>;
 
-impl SpriteShared {
-    fn observer(&self) -> Rc<dyn Observer> {
-        match &self.observer {
-            Some(observer) => Rc::clone(observer),
-            None => Rc::new(NullObserver),
-        }
-    }
-}
-
-fn shared_observer(shared: &RefCell<SpriteShared>) -> Rc<dyn Observer> {
-    shared.borrow().observer()
-}
-
-fn on_sprite_loaded(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, images: Vec<Arc<image::Impl>>) {
-    {
-        let mut shared = shared.borrow_mut();
-        let mut new_images = (*shared.images).clone();
-
-        let mut remaining = Vec::new();
-        for image in images {
-            let first = new_images.partition_point(|a| a.id < image.id);
-            if first < new_images.len() && image.id == new_images[first].id {
-                new_images[first] = image;
-            } else {
-                remaining.push(image);
-            }
-        }
-
-        new_images.extend(remaining);
-        new_images.sort_by(|a, b| a.id.cmp(&b.id));
-        shared.images = Arc::new(new_images);
-        match sprite {
-            Some(sprite) => shared.sprites_loading_status.insert(sprite.id.clone(), true),
-            None => shared.sprites_loading_status.insert("default".to_owned(), true),
-        };
-    }
-    let observer = shared_observer(shared);
-    observer.on_update(); // For *-pattern properties.
-    observer.on_sprite_loaded(sprite);
-}
-
-fn on_sprite_error(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, error: Error) {
-    shared.borrow_mut().last_error = Some(error.clone());
-    Log::error(Event::Style, format!("Failed to load sprite: {error}"));
-    let observer = shared_observer(shared);
-    observer.on_resource_error(error.clone());
-    match sprite {
-        Some(sprite) => shared.borrow_mut().sprites_loading_status.insert(sprite.id.clone(), true),
-        None => shared.borrow_mut().sprites_loading_status.insert("default".to_owned(), false),
-    };
-    // Unblock rendering tiles (even though sprite request has failed).
-    observer.on_update();
-    observer.on_sprite_error(sprite, error);
-}
-
-fn on_sprite_requested(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>) {
-    shared_observer(shared).on_sprite_requested(sprite);
-}
-
-/// The `SpriteLoaderObserver` half of `Style::Impl`.
-struct StyleSpriteObserver {
-    shared: std::rc::Weak<RefCell<SpriteShared>>,
-}
-
-impl SpriteLoaderObserver for StyleSpriteObserver {
-    fn on_sprite_loaded(&self, sprite: Option<Sprite>, images: Vec<Arc<image::Impl>>) {
-        if let Some(shared) = self.shared.upgrade() {
-            on_sprite_loaded(&shared, sprite.as_ref(), images);
-        }
-    }
-
-    fn on_sprite_error(&self, sprite: Option<Sprite>, error: Error) {
-        if let Some(shared) = self.shared.upgrade() {
-            on_sprite_error(&shared, sprite.as_ref(), error);
-        }
-    }
-
-    fn on_sprite_requested(&self, sprite: &Option<Sprite>) {
-        if let Some(shared) = self.shared.upgrade() {
-            on_sprite_requested(&shared, sprite.as_ref());
-        }
+fn slot_observer(slot: &ObserverSlot) -> Rc<dyn Observer> {
+    match &*slot.borrow() {
+        Some(observer) => Rc::clone(observer),
+        None => Rc::new(NullObserver),
     }
 }
 
 /// The `SourceObserver` half of `Style::Impl`.
 struct StyleSourceObserver {
-    shared: std::rc::Weak<RefCell<SpriteShared>>,
+    observer: std::rc::Weak<RefCell<Option<Rc<dyn Observer>>>>,
     file_source: Option<Arc<dyn FileSource>>,
     run_loop: RunLoop,
 }
 
 impl StyleSourceObserver {
     fn observer(&self) -> Option<Rc<dyn Observer>> {
-        self.shared.upgrade().map(|shared| shared_observer(&shared))
+        self.observer.upgrade().map(|slot| slot_observer(&slot))
     }
 }
 
@@ -180,14 +80,9 @@ impl SourceObserver for StyleSourceObserver {
     }
 
     fn on_source_error(&self, source: &dyn Source, error: Error) {
-        let Some(shared) = self.shared.upgrade() else {
-            return;
-        };
-        shared.borrow_mut().last_error = Some(error.clone());
-        Log::error(Event::Style, format!("Failed to load source {}: {error}", source.get_id()));
-        let observer = shared_observer(&shared);
-        observer.on_source_error(source, error.clone());
-        observer.on_resource_error(error);
+        if let Some(observer) = self.observer() {
+            observer.on_source_error(source, error);
+        }
     }
 
     fn on_source_description_changed(&self, source: &dyn Source) {
@@ -208,40 +103,29 @@ impl SourceObserver for StyleSourceObserver {
 type SourceImplsCache = (ImmutableVector<dyn source::Impl>, ImmutableVector<dyn source::Impl>);
 
 pub struct Impl {
-    // C++ declares fileSource first and destroys members in reverse order,
-    // so the sprite loader (and its requests) goes before the file source;
-    // Rust drops fields in declaration order.
-    sprite_loader: SpriteLoader,
-    style_request: Option<Request>,
-    /// Responses to `style_request` waiting for `process_style_responses`.
-    style_responses: Rc<RefCell<VecDeque<Response>>>,
-    /// Whether a response to `style_request` has brought a style, which a
-    /// later response without content or not modified confirms.
-    style_delivered: bool,
     file_source: Option<Arc<dyn FileSource>>,
 
-    url: String,
     json: String,
 
     glyph_url: String,
-    /// symbols: `std::shared_ptr<FontFaces> fontFaces`.
+    /// The document's font faces, followed by the fallback faces given to
+    /// the parse.
     font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
-    /// symbols: `std::shared_ptr<FontFaces> fallbackFontFaces`.
-    fallback_font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
     sources: CollectionWithPersistentOrder<dyn Source>,
     /// The source impls with the changes made through the sources since the
     /// collection's last update (see `get_source_impls`), keyed by the
     /// collection's impls they refresh.
     source_impls_cache: RefCell<Option<SourceImplsCache>>,
     source_observer: Rc<dyn SourceObserver>,
-    /// The loop that the style's requests and background work answer on.
+    /// The loop that the sources' requests answer on.
     run_loop: RunLoop,
     layers: Arc<LayerList>,
     transition_options: TransitionOptions,
     light: Arc<Light>,
     sky: Option<Arc<Sky>>,
     projection: Arc<Projection>,
-    shared: Rc<RefCell<SpriteShared>>,
+    images: Arc<ImageImpls>,
+    observer: ObserverSlot,
 
     // Global state for the "global-state" expression. The map itself is
     // immutable and replaced wholesale on change so that it can be safely
@@ -253,9 +137,6 @@ pub struct Impl {
     name: String,
     default_camera: CameraOptions,
 
-    pixel_ratio: f32,
-    /// The parsed style's sprites.
-    sprites: Vec<Sprite>,
     registry: Arc<StyleRegistry>,
 
     pub(crate) mutated: bool,
@@ -265,7 +146,7 @@ pub struct Impl {
 impl std::fmt::Debug for Impl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("style::Impl")
-            .field("url", &self.url)
+            .field("name", &self.name)
             .field("layers", &self.layers)
             .field("loaded", &self.loaded)
             .finish_non_exhaustive()
@@ -276,46 +157,29 @@ impl Impl {
     /// A style without a file source, on `run_loop`, that parses against
     /// `registry`.
     #[must_use]
-    pub(crate) fn new(registry: Arc<StyleRegistry>, pixel_ratio: f32, run_loop: &RunLoop) -> Self {
-        Self::with_file_source(registry, None, pixel_ratio, run_loop)
+    pub(crate) fn new(registry: Arc<StyleRegistry>, run_loop: &RunLoop) -> Self {
+        Self::with_file_source(registry, None, run_loop)
     }
 
-    /// A style that parses against `registry` and loads its resources from
-    /// `file_source`. Its responses and background work answer on
-    /// `run_loop`, and its background work runs on the loop's pool, under a
-    /// tag of the style's own.
+    /// A style that parses against `registry` and whose sources load their
+    /// descriptions from `file_source`, answering on `run_loop`.
     #[must_use]
     pub(crate) fn with_file_source(
         registry: Arc<StyleRegistry>,
         file_source: Option<Arc<dyn FileSource>>,
-        pixel_ratio: f32,
         run_loop: &RunLoop,
     ) -> Self {
-        let thread_pool = TaggedScheduler::new(run_loop.pool(), SimpleIdentity::new());
-        let shared = Rc::new(RefCell::new(SpriteShared {
-            images: Arc::new(Vec::new()),
-            sprites_loading_status: HashMap::default(),
-            last_error: None,
-            observer: None,
-        }));
-        let sprite_loader = SpriteLoader::new(pixel_ratio, run_loop.scheduler(), thread_pool);
-        sprite_loader.set_observer(Rc::new(StyleSpriteObserver { shared: Rc::downgrade(&shared) }));
+        let observer: ObserverSlot = Rc::new(RefCell::new(None));
         let source_observer: Rc<dyn SourceObserver> = Rc::new(StyleSourceObserver {
-            shared: Rc::downgrade(&shared),
+            observer: Rc::downgrade(&observer),
             file_source: file_source.clone(),
             run_loop: run_loop.clone(),
         });
         Impl {
-            sprite_loader,
-            style_request: None,
-            style_responses: Rc::new(RefCell::new(VecDeque::new())),
-            style_delivered: false,
             file_source,
-            url: String::new(),
             json: String::new(),
             glyph_url: String::new(),
             font_faces: None,
-            fallback_font_faces: None,
             sources: CollectionWithPersistentOrder::default(),
             source_impls_cache: RefCell::new(None),
             source_observer,
@@ -325,13 +189,12 @@ impl Impl {
             light: Arc::default(),
             sky: None,
             projection: Arc::default(),
-            shared,
+            images: Arc::new(Vec::new()),
+            observer,
             global_state: Arc::new(GlobalStateMap::new()),
             global_state_defaults: GlobalStateMap::new(),
             name: String::new(),
             default_camera: CameraOptions::default(),
-            pixel_ratio,
-            sprites: Vec::new(),
             registry,
             mutated: false,
             loaded: false,
@@ -339,119 +202,25 @@ impl Impl {
     }
 
     fn observer(&self) -> Rc<dyn Observer> {
-        shared_observer(&self.shared)
+        slot_observer(&self.observer)
     }
 
-    /// Cancels any pending style request.
-    pub(crate) fn cancel_pending_request(&mut self) {
-        self.style_request = None;
-        self.style_responses.borrow_mut().clear();
-    }
-
-    pub(crate) fn load_json(&mut self, json: &str) {
-        self.shared.borrow_mut().last_error = None;
-        self.observer().on_style_loading();
-
-        self.cancel_pending_request();
-        self.url.clear();
-        self.parse(json);
-    }
-
-    pub(crate) fn load_url(&mut self, url: &str) {
-        let Some(file_source) = self.file_source.clone() else {
-            self.observer()
-                .on_style_error(StyleLoadError::Load("Unable to find resource provider for style url.".to_owned()));
-            return;
-        };
-
-        self.shared.borrow_mut().last_error = None;
-        self.observer().on_style_loading();
-
+    /// Marks the style not loaded while a URL load fetches its document.
+    pub(crate) fn begin_url_load(&mut self) {
         self.loaded = false;
-        self.url = url.to_owned();
-
-        self.style_responses.borrow_mut().clear();
-        self.style_delivered = false;
-        let responses = Rc::downgrade(&self.style_responses);
-        let shared = Rc::downgrade(&self.shared);
-        self.style_request = Some(file_source.request(
-            &self.run_loop.scheduler(),
-            &Resource::style(url),
-            Box::new(move |res: Response| {
-                let (Some(responses), Some(shared)) = (responses.upgrade(), shared.upgrade()) else {
-                    return;
-                };
-                responses.borrow_mut().push_back(res);
-                shared_observer(&shared).on_style_response();
-            }),
-        ));
     }
 
-    /// Queues a later response to the style request, as a file source that
-    /// revalidates the style answers the same request again.
-    #[cfg(test)]
-    pub(crate) fn push_style_response(&self, response: Response) {
-        self.style_responses.borrow_mut().push_back(response);
-    }
-
-    /// The body of the `loadURL` response lambda, for each response queued
-    /// since the last call (see the file comment). Returns whether a response
-    /// replaced the style.
-    pub fn process_style_responses(&mut self) -> bool {
-        let mut replaced = false;
-        loop {
-            let Some(res) = self.style_responses.borrow_mut().pop_front() else {
-                return replaced;
-            };
-
-            // Don't allow a loaded, mutated style to be overwritten with a new version.
-            if self.mutated && self.loaded {
-                continue;
-            }
-
-            // C++ ignores a response without content or not modified, as one
-            // that confirms the style an earlier response brought. Without
-            // one, the load has no style, so it fails.
-            let empty = res.no_content || res.not_modified;
-            let error = match &res.error {
-                Some(error) => Some(error.message.clone()),
-                None if empty && !self.style_delivered => Some(
-                    if res.no_content {
-                        "the style request returned no content"
-                    } else {
-                        "the style request returned not modified, but no earlier response delivered the style"
-                    }
-                    .to_owned(),
-                ),
-                None => None,
-            };
-            if let Some(error) = error {
-                let message = format!("loading style failed: {error}");
-                Log::error(Event::Setup, &message);
-                let observer = self.observer();
-                observer.on_style_error(StyleLoadError::Load(message));
-                observer.on_resource_error(Error::native(error));
-            } else if !empty && let Some(data) = &res.data {
-                self.style_delivered = true;
-                let json = String::from_utf8_lossy(data).into_owned();
-                replaced |= self.parse(&json);
-            }
-        }
-    }
-
-    /// Replaces the style with the one `json` describes; returns whether it
-    /// parsed.
-    fn parse(&mut self, json: &str) -> bool {
+    /// Replaces the style with the one `json` describes, with
+    /// `fallback_font_faces` after the document's font faces. Returns the
+    /// document's sprites, or why `json` isn't a style, which leaves the
+    /// style as it was. The style's images go: its sprites bring them again.
+    pub(crate) fn parse(
+        &mut self,
+        json: &str,
+        fallback_font_faces: Option<&Arc<mln_text::glyph::FontFaces>>,
+    ) -> Result<Vec<Sprite>, Error> {
         let mut parser = Parser::new(&self.registry);
-
-        if let Err(error) = parser.parse(json) {
-            let message = format!("Failed to parse style: {error}");
-            Log::error(Event::ParseStyle, &message);
-            let observer = self.observer();
-            observer.on_style_error(StyleLoadError::Parse(message));
-            observer.on_resource_error(error);
-            return false;
-        }
+        parser.parse(json)?;
 
         self.mutated = false;
         self.loaded = false;
@@ -459,7 +228,7 @@ impl Impl {
 
         self.sources.clear();
         self.layers = Arc::default();
-        self.shared.borrow_mut().images = Arc::new(Vec::new());
+        self.images = Arc::new(Vec::new());
 
         self.transition_options = parser.transition;
 
@@ -467,16 +236,16 @@ impl Impl {
         self.global_state = Arc::new(self.global_state_defaults.clone());
 
         for source in std::mem::take(&mut parser.sources) {
-            // C++ lets the exception propagate; a parsed style cannot
-            // contain duplicate source ids (they are object keys).
-            if let Err(error) = self.add_source(source) {
+            // A parsed style cannot contain duplicate source ids (they are
+            // object keys).
+            if let Err(error) = self.add_source_unnotified(source) {
                 Log::error(Event::ParseStyle, error.to_string());
             }
         }
 
         // The parser drops duplicate layer ids, so the layers go in at once
         // without `add_layer`'s lookup. A layer incompatible with its source
-        // is logged and skipped (C++ throws).
+        // is logged and skipped.
         let global_state = Arc::clone(&self.global_state);
         let sources = &self.sources;
         let mut layers = LayerList::default();
@@ -488,13 +257,7 @@ impl Impl {
             layer.reevaluate_visibility(&global_state);
             Some(layer)
         }));
-        let count = layers.len();
         self.layers = Arc::new(layers);
-        // An update for each layer, as `add_layer` publishes.
-        let observer = self.observer();
-        for _ in 0..count {
-            observer.on_update();
-        }
 
         self.name = parser.name.clone();
         self.default_camera.center = Some(parser.lat_lng);
@@ -504,38 +267,20 @@ impl Impl {
         self.default_camera.pitch = Some(parser.pitch);
         self.default_camera.roll = Some(parser.roll);
 
-        self.set_light(parser.light.clone());
-        self.set_sky(parser.sky.clone());
-        self.set_projection(parser.projection.clone());
+        self.light = Arc::new(std::mem::take(&mut parser.light));
+        self.sky = parser.sky.take().map(Arc::new);
+        self.projection = Arc::new(std::mem::take(&mut parser.projection));
 
-        self.sprites = parser.sprites.clone();
-        if let Some(file_source) = self.file_source.clone() {
-            if parser.sprites.is_empty() {
-                // We identify no sprite with 'default' as string in the sprite loading status.
-                self.shared.borrow_mut().sprites_loading_status.insert("default".to_owned(), false);
-                self.sprite_loader.load(None, &*file_source);
-            } else {
-                for sprite in &parser.sprites {
-                    self.shared.borrow_mut().sprites_loading_status.insert(sprite.id.clone(), false);
-                    self.sprite_loader.load(Some(sprite.clone()), &*file_source);
-                }
-            }
-        } else {
-            // We identify no sprite with 'default' as string in the sprite loading status.
-            self.shared.borrow_mut().sprites_loading_status.insert("default".to_owned(), false);
-            self.on_sprite_error(None, Error::native("Unable to find resource provider for sprite url."));
-        }
-        self.glyph_url = parser.glyph_url.clone();
-        self.font_faces = parser.font_faces.clone();
-        if let Some(fallback) = self.fallback_font_faces.as_ref().filter(|faces| !faces.is_empty()) {
+        self.glyph_url = std::mem::take(&mut parser.glyph_url);
+        self.font_faces = parser.font_faces.take();
+        if let Some(fallback) = fallback_font_faces.filter(|faces| !faces.is_empty()) {
             // The style's own faces come first, so they win where both cover a font.
             let mut merged = self.font_faces.as_deref().cloned().unwrap_or_default();
             merged.extend(fallback.iter().cloned());
             self.font_faces = Some(Arc::new(merged));
         }
         self.loaded = true;
-        self.observer().on_style_loaded();
-        true
+        Ok(std::mem::take(&mut parser.sprites))
     }
 
     pub(crate) fn registry(&self) -> &Arc<StyleRegistry> {
@@ -546,16 +291,8 @@ impl Impl {
         self.json.clone()
     }
 
-    pub(crate) fn get_url(&self) -> String {
-        self.url.clone()
-    }
-
     pub fn set_observer(&mut self, observer: Option<Rc<dyn Observer>>) {
-        self.shared.borrow_mut().observer = observer;
-    }
-
-    pub fn get_last_error(&self) -> Option<Error> {
-        self.shared.borrow().last_error.clone()
+        *self.observer.borrow_mut() = observer;
     }
 
     pub(crate) fn set_transition_options(&mut self, options: &TransitionOptions) {
@@ -656,6 +393,12 @@ impl Impl {
 
     /// See [`Style::add_source`](crate::Style::add_source).
     pub(crate) fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
+        self.add_source_unnotified(source)?;
+        self.observer().on_update();
+        Ok(())
+    }
+
+    fn add_source_unnotified(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
         if self.sources.get(&source.get_id()).is_some() {
             return Err(Error::already_exists(format!("Source {} already exists", source.get_id())));
         }
@@ -665,7 +408,6 @@ impl Impl {
         if let Some(file_source) = &self.file_source {
             item.load_description(&**file_source, &self.run_loop);
         }
-        self.observer().on_update();
         Ok(())
     }
 
@@ -812,12 +554,12 @@ impl Impl {
     // Images
 
     pub(crate) fn get_image(&self, id: &str) -> Option<Arc<image::Impl>> {
-        self.shared.borrow().images.iter().find(|image| image.id == id).cloned()
+        self.images.iter().find(|image| image.id == id).cloned()
     }
 
     /// Adds an image, replacing the image with the same id.
     pub(crate) fn add_image(&mut self, image: Arc<image::Impl>) {
-        let mut new_images = (*self.shared.borrow().images).clone();
+        let mut new_images = (*self.images).clone();
         let it = new_images.partition_point(|a| a.id < image.id);
         if it < new_images.len() && new_images[it].id == image.id {
             // We permit using addImage to update.
@@ -825,18 +567,35 @@ impl Impl {
         } else {
             new_images.insert(it, image);
         }
-        self.shared.borrow_mut().images = Arc::new(new_images);
+        self.images = Arc::new(new_images);
         self.observer().on_update();
     }
 
+    /// Adds a sprite's images, each replacing the image with its id.
+    pub(crate) fn add_images(&mut self, images: Vec<Arc<image::Impl>>) {
+        let mut new_images = (*self.images).clone();
+        let mut remaining = Vec::new();
+        for image in images {
+            let first = new_images.partition_point(|a| a.id < image.id);
+            if first < new_images.len() && image.id == new_images[first].id {
+                new_images[first] = image;
+            } else {
+                remaining.push(image);
+            }
+        }
+        new_images.extend(remaining);
+        new_images.sort_by(|a, b| a.id.cmp(&b.id));
+        self.images = Arc::new(new_images);
+    }
+
     pub(crate) fn remove_image(&mut self, id: &str) {
-        let mut new_images = (*self.shared.borrow().images).clone();
+        let mut new_images = (*self.images).clone();
         let Some(found) = new_images.iter().position(|image| image.id == id) else {
             Log::warning(Event::General, format!("Image '{id}' is not present in style, cannot remove"));
             return;
         };
         new_images.remove(found);
-        self.shared.borrow_mut().images = Arc::new(new_images);
+        self.images = Arc::new(new_images);
         self.observer().on_update();
     }
 
@@ -845,17 +604,12 @@ impl Impl {
         self.font_faces.clone()
     }
 
-    /// symbols: `setFallbackFontFaces(faces)`.
-    pub(crate) fn set_fallback_font_faces(&mut self, faces: Option<Arc<mln_text::glyph::FontFaces>>) {
-        self.fallback_font_faces = faces;
-    }
-
     pub fn get_glyph_url(&self) -> &str {
         &self.glyph_url
     }
 
     pub fn get_image_impls(&self) -> Arc<ImageImpls> {
-        Arc::clone(&self.shared.borrow().images)
+        Arc::clone(&self.images)
     }
 
     /// The impls of the sources. A source whose impl changed since the
@@ -879,54 +633,16 @@ impl Impl {
         refreshed
     }
 
+    /// Logs the sources and their state.
     pub fn dump_debug_logs(&self) {
-        Log::info(Event::General, format!("styleURL: {}", self.url));
         for source in self.sources.iter() {
             source.dump_debug_logs();
         }
     }
 
-    pub fn are_sprites_loaded(&self) -> bool {
-        let shared = self.shared.borrow();
-        if shared.sprites_loading_status.is_empty() {
-            return false; // If nothing is stored inside, sprites are not yet loaded.
-        }
-        shared.sprites_loading_status.values().all(|loaded| *loaded)
-    }
-
-    pub fn is_loaded(&self) -> bool {
-        if !self.loaded {
-            return false;
-        }
-
-        if !self.are_sprites_loaded() {
-            return false;
-        }
-
+    /// Whether every source has loaded its description.
+    pub fn sources_loaded(&self) -> bool {
         self.sources.iter().all(Source::loaded)
-    }
-
-    /// Sets the pixel ratio that the style loads its sprites for. Where
-    /// that picks the sprites' other resolution, the style loads them
-    /// again, and keeps its images until the new ones arrive.
-    pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
-        self.pixel_ratio = pixel_ratio;
-        if !self.sprite_loader.set_pixel_ratio(pixel_ratio) {
-            return;
-        }
-        let Some(file_source) = self.file_source.clone() else {
-            return;
-        };
-        for sprite in &self.sprites {
-            self.shared.borrow_mut().sprites_loading_status.insert(sprite.id.clone(), false);
-            self.sprite_loader.load(Some(sprite.clone()), &*file_source);
-        }
-    }
-
-    // SpriteLoaderObserver implementation.
-
-    pub(crate) fn on_sprite_error(&mut self, sprite: Option<&Sprite>, error: Error) {
-        on_sprite_error(&self.shared, sprite, error);
     }
 
     // The SourceObserver implementation is StyleSourceObserver.

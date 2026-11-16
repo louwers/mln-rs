@@ -200,7 +200,7 @@ fn generation_grows_with_each_change() {
     assert_changed(&map, true, "enable_rendering_stats_view");
     map.enable_rendering_stats_view(true);
     assert_changed(&map, false, "enable_rendering_stats_view when enabled");
-    map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
+    map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     assert_changed(&map, true, "load_json");
     map.set_free_camera_options(&FreeCameraOptions { position: Some([0.4, 0.4, 0.1]), orientation: None });
     assert_changed(&map, true, "set_free_camera_options");
@@ -213,17 +213,17 @@ fn generation_grows_with_each_change() {
 fn a_source_that_reloads_its_description_changes_the_generation() {
     let run_loop = RunLoop::new();
     let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
-    map.style_mut().load_json(
+    map.load_style_json(
         r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
     );
     map.process_events();
-    assert!(map.style().impl_.is_loaded());
+    assert!(map.style_loaded());
     let generation = map.generation();
 
     let source = map.style().get_source("points").expect("the source");
     source.downcast_ref::<GeoJSONSource>().expect("a GeoJSON source").set_url("http://points");
     map.process_events();
-    assert!(!map.style().impl_.is_loaded());
+    assert!(!map.style_loaded());
     assert!(map.generation() > generation);
 }
 
@@ -347,7 +347,7 @@ fn projection_from_a_view_rejects_views_no_map_shows() {
 fn projection_from_a_globe_view_matches_the_map() {
     let run_loop = RunLoop::new();
     let mut map = map(MapOptions { size: Size::new(400, 300), ..Default::default() }, &run_loop);
-    map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"globe"}}"#);
+    map.load_style_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"globe"}}"#);
     map.process_events();
     // The globe lets the zoom fall below 0 toward a pole, and the center past
     // Mercator's latitudes.

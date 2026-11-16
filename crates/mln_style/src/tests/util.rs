@@ -172,3 +172,18 @@ pub(crate) fn style_of<T: crate::layer_type::StyleLayerType>(
 ) -> &crate::layer_type::LayerStyle<T> {
     crate::layer_type::LayerStyle::recover_ref(&**layer.style()).unwrap()
 }
+
+impl crate::style::Impl {
+    /// Parses `json` into the style, as a map's loader does; a document that
+    /// doesn't parse leaves the style as it was.
+    pub(crate) fn load_json(&mut self, json: &str) {
+        let _ = self.parse(json, None);
+    }
+}
+
+impl crate::Style {
+    /// Parses `json` into the style, as [`Impl::load_json`](crate::style::Impl) does.
+    pub(crate) fn load_json(&mut self, json: &str) {
+        let _ = self.parse_json(json, None);
+    }
+}

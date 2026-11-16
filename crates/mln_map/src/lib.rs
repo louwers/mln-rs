@@ -11,6 +11,7 @@ mod map_snapshot;
 // gtests-core: MapProjection (test/map/map.test.cpp).
 mod map_projection;
 mod rendering_stats_view;
+mod style_loader;
 pub mod transform;
 
 pub use map::Map;

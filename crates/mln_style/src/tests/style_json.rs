@@ -13,7 +13,7 @@ const DOTS: &str = r#"{"id":"dots","type":"circle","source":"points"}"#;
 
 fn loaded_style() -> Style {
     let run_loop = mln_actor::RunLoop::new();
-    let mut style = Style::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
+    let mut style = Style::new(StyleRegistry::with_builtins(), &run_loop);
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     assert!(style.is_loaded());
     style
@@ -46,7 +46,7 @@ fn set_property(style: &mut Style, layer_id: &str, name: &str, json: &str) {
 #[test]
 fn edits_fail_while_the_style_is_not_loaded() {
     let run_loop = mln_actor::RunLoop::new();
-    let mut style = Style::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
+    let mut style = Style::new(StyleRegistry::with_builtins(), &run_loop);
     assert!(!style.is_loaded());
     let not_loaded = "style is not loaded";
     assert_fails(style.add_source_json("points", EMPTY_GEOJSON_SOURCE), ErrorKind::InvalidState, not_loaded);
@@ -318,7 +318,7 @@ fn the_style_light_round_trips_through_json() {
 #[test]
 fn global_state_reads_back_defaults_and_set_properties() {
     let run_loop = mln_actor::RunLoop::new();
-    let mut style = Style::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
+    let mut style = Style::new(StyleRegistry::with_builtins(), &run_loop);
     assert_fails(style.set_global_state_property_json("theme", "true"), ErrorKind::InvalidState, "style is not loaded");
     style.load_json(r#"{"version":8,"sources":{},"layers":[],"state":{"theme":{"default":"light"}}}"#);
     assert_eq!(style.global_state_json(), r#"{"theme":"light"}"#);
@@ -403,7 +403,7 @@ fn the_sky_and_the_projection_change_and_reset() {
 #[test]
 fn a_new_state_resets_every_global_state_property() {
     let run_loop = mln_actor::RunLoop::new();
-    let mut style = Style::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
+    let mut style = Style::new(StyleRegistry::with_builtins(), &run_loop);
     style.load_json(r#"{"version":8,"sources":{},"layers":[],"state":{"theme":{"default":"light"}}}"#);
     assert_eq!(root_property(&style, "state").as_deref(), Some(r#"{"theme":{"default":"light"}}"#));
     style.set_global_state_property_json("theme", r#""dark""#).unwrap();
@@ -428,7 +428,7 @@ fn a_new_state_resets_every_global_state_property() {
 #[test]
 fn other_root_properties_read_as_loaded_and_reject_changes() {
     let run_loop = mln_actor::RunLoop::new();
-    let mut style = Style::new(StyleRegistry::with_builtins(), 1.0, &run_loop);
+    let mut style = Style::new(StyleRegistry::with_builtins(), &run_loop);
     style.load_json(r#"{"version":8,"name":"plain","sources":{},"layers":[],"zoom":3}"#);
     assert_eq!(root_property(&style, "version").as_deref(), Some("8"));
     assert_eq!(root_property(&style, "name").as_deref(), Some(r#""plain""#));

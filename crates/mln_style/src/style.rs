@@ -12,6 +12,7 @@ use crate::projection::Projection;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source::Source;
+use crate::sprite::Sprite;
 pub(crate) use crate::style_impl::Impl;
 use crate::transition_options::TransitionOptions;
 
@@ -45,20 +46,19 @@ impl Style {
     /// A style without a file source, on `run_loop`, whose JSON, layers and
     /// filters parse against `registry` (see `Impl::new`).
     #[must_use]
-    pub fn new(registry: Arc<StyleRegistry>, pixel_ratio: f32, run_loop: &mln_actor::RunLoop) -> Self {
-        Style { impl_: Box::new(Impl::new(registry, pixel_ratio, run_loop)) }
+    pub fn new(registry: Arc<StyleRegistry>, run_loop: &mln_actor::RunLoop) -> Self {
+        Style { impl_: Box::new(Impl::new(registry, run_loop)) }
     }
 
-    /// A style that parses against `registry` and loads its resources from
+    /// A style that parses against `registry` and whose sources load from
     /// `file_source`, on `run_loop` (see `Impl::with_file_source`).
     #[must_use]
     pub fn with_file_source(
         registry: Arc<StyleRegistry>,
         file_source: Option<Arc<dyn mln_storage::FileSource>>,
-        pixel_ratio: f32,
         run_loop: &mln_actor::RunLoop,
     ) -> Self {
-        Style { impl_: Box::new(Impl::with_file_source(registry, file_source, pixel_ratio, run_loop)) }
+        Style { impl_: Box::new(Impl::with_file_source(registry, file_source, run_loop)) }
     }
 
     #[must_use]
@@ -66,12 +66,28 @@ impl Style {
         self.impl_.registry()
     }
 
-    pub fn load_json(&mut self, json: &str) {
-        self.impl_.load_json(json);
+    /// Replaces the style with the one the style document `json`
+    /// describes, with `fallback_font_faces` after the document's font
+    /// faces. Returns the document's sprites, for the caller to load, or
+    /// why `json` isn't a style, which leaves the style as it was.
+    pub fn parse_json(
+        &mut self,
+        json: &str,
+        fallback_font_faces: Option<&Arc<mln_text::glyph::FontFaces>>,
+    ) -> Result<Vec<Sprite>, Error> {
+        self.impl_.parse(json, fallback_font_faces)
     }
 
-    pub fn load_url(&mut self, url: &str) {
-        self.impl_.load_url(url);
+    /// Marks the style not loaded until the next [`parse_json`](Self::parse_json),
+    /// while a URL load fetches its document.
+    pub fn begin_url_load(&mut self) {
+        self.impl_.begin_url_load();
+    }
+
+    /// Whether the style has been edited since its document parsed.
+    #[must_use]
+    pub fn is_mutated(&self) -> bool {
+        self.impl_.mutated
     }
 
     #[must_use]
@@ -79,12 +95,7 @@ impl Style {
         self.impl_.get_json()
     }
 
-    #[must_use]
-    pub fn get_url(&self) -> String {
-        self.impl_.get_url()
-    }
-
-    /// False while a style passed to `load_json/load_url` is still being fetched or parsed.
+    /// Whether a style document parsed, and no URL load began since.
     #[must_use]
     pub fn is_loaded(&self) -> bool {
         self.impl_.loaded
@@ -110,27 +121,6 @@ impl Style {
     pub fn set_transition_options(&mut self, options: &TransitionOptions) {
         self.impl_.mutated = true;
         self.impl_.set_transition_options(options);
-    }
-
-    /// Sets the font faces that every font stack falls back to after the
-    /// style's own, for the styles that load after this call.
-    ///
-    /// `json` is an array of font files, each an object with a `url` and an
-    /// optional `unicode-range`, as in a font face of a style's `font-faces`.
-    /// It fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
-    /// `json` isn't such an array. Without a font-face shaper, the map ignores
-    /// them, as it ignores a style's `font-faces`.
-    pub fn set_fallback_font_faces(&mut self, json: &str) -> Result<(), Error> {
-        let faces = crate::parser::parse_fallback_font_faces(json)?;
-        self.set_fallback_font_face_list(faces);
-        Ok(())
-    }
-
-    /// `set_fallback_font_faces` with faces an app has made, such as
-    /// `FontFace::fallback(url, ranges).with_data(bytes)` for a font file it
-    /// holds in memory.
-    pub fn set_fallback_font_face_list(&mut self, faces: mln_text::glyph::FontFaces) {
-        self.impl_.set_fallback_font_faces(Some(Arc::new(faces)));
     }
 
     // Light
@@ -198,6 +188,12 @@ impl Style {
     pub fn remove_image(&mut self, name: &str) {
         self.impl_.mutated = true;
         self.impl_.remove_image(name);
+    }
+
+    /// Adds a sprite's images, each replacing the image with its id. Unlike
+    /// [`add_image`](Self::add_image), it doesn't count as an edit.
+    pub fn add_sprite_images(&mut self, images: Vec<Arc<image::Impl>>) {
+        self.impl_.add_images(images);
     }
 
     // Sources

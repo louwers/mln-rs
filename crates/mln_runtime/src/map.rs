@@ -39,7 +39,7 @@ pub struct MapOptions {
     /// The events that the map reports.
     pub event_mask: EventMask,
     /// JSON text of the font faces that the map falls back to for glyphs
-    /// that the style's fonts lack, as `Style::set_fallback_font_faces`
+    /// that the style's fonts lack, as `Map::set_fallback_font_faces`
     /// takes it. Without it, the map falls back to the system's fonts
     /// unless `system_fonts` is off.
     pub fallback_font_faces: Option<String>,
@@ -957,7 +957,7 @@ impl Map {
 
     /// The URL of the map's style, or `None` for a style loaded from JSON.
     pub fn style_url(&self) -> Result<Completion<Option<String>>, Error> {
-        self.query(|map| Ok(Some(map.style().get_url()).filter(|url| !url.is_empty())))
+        self.query(|map| Ok(map.style_url().filter(|url| !url.is_empty()).map(str::to_owned)))
     }
 
     /// Adds a source to the style from its JSON. See
@@ -1476,11 +1476,11 @@ pub(crate) fn create(
         Err(error) => return outbox.resolve(resolver, Err(error)),
     };
     if let Some(json) = &options.fallback_font_faces {
-        if let Err(error) = map.style_mut().set_fallback_font_faces(json) {
+        if let Err(error) = map.set_fallback_font_faces(json) {
             return outbox.resolve(resolver, Err(error));
         }
     } else if options.system_fonts {
-        map.style_mut().set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
+        map.set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
     }
     let _ = published.updates.set(map.update_reader());
     let flush_task = async_task(&core.run_loop, &core.queue, move |core, outbox| flush(core, id, outbox));
@@ -1586,10 +1586,9 @@ fn load_style(
             if let Some(previous) = entry.pending_style.replace(PendingStyle { resolver, from_json }) {
                 outbox.resolve(previous.resolver, Err(Error::cancelled("another style load started")));
             }
-            let style = entry.core.style_mut();
             match load {
-                StyleLoad::Url(url) => style.load_url(&url),
-                StyleLoad::Json(json) => style.load_json(&json),
+                StyleLoad::Url(url) => entry.core.load_style_url(&url),
+                StyleLoad::Json(json) => entry.core.load_style_json(&json),
             }
         },
         |_, (), _, _| {},

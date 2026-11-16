@@ -173,7 +173,7 @@ fn resource_offline_usage_unset() {
     .unwrap();
     frontend.attach(&map);
 
-    map.style_mut().load_url("http://127.0.0.1:3000/inline_source.style.json");
+    map.load_style_url("http://127.0.0.1:3000/inline_source.style.json");
     map.jump_to(&CameraOptions { center: Some(LatLng::new(0.0, 0.0).unwrap()), zoom: Some(0.0), ..Default::default() });
     // `didFinishRenderingFrameCallback` stops the loop at the first full
     // frame.

@@ -33,7 +33,7 @@ fn stub_style() -> Impl {
         &run_loop,
         mln_storage::stub_file_source::ResponseType::Asynchronous,
     );
-    Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop)
+    Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), &run_loop)
 }
 
 // gtest: Style.Properties
@@ -332,13 +332,11 @@ fn layer_changes_leave_earlier_snapshots_unchanged() {
     let mut style = stub_style();
     let observer = Rc::new(CountingObserver::default());
     style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
-    style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    let without_layers = observer.updates.replace(0);
     style.load_json(
         r#"{"version":8,"sources":{},"layers":[{"id":"a","type":"background"},{"id":"b","type":"background"}]}"#,
     );
-    // An update for each layer.
-    assert_eq!(without_layers + 2, observer.updates.replace(0));
+    // A parse doesn't notify: the map publishes the parsed style once.
+    assert_eq!(0, observer.updates.get());
     let ids = |layers: &crate::LayerList| layers.iter().map(|layer| layer.get_id().to_owned()).collect::<Vec<_>>();
     let loaded = Arc::clone(style.get_layer_list());
     assert_eq!(["a", "b"], *ids(&loaded));
@@ -678,37 +676,6 @@ fn remove_source_in_use() {
     assert_eq!(1, log.count(EventSeverity::Warning, Event::General, "Source 'sourceId' is in use, cannot remove"));
 }
 
-// gtest: Style.PublicLoadStateDoesNotWaitForResources
-#[test]
-fn public_load_state_does_not_wait_for_resources() {
-    let run_loop = mln_actor::RunLoop::new();
-    let file_source = mln_storage::stub_file_source::StubFileSource::new(
-        &run_loop,
-        mln_storage::stub_file_source::ResponseType::Manual,
-    );
-    let mut style =
-        Style::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop);
-
-    assert!(!style.is_loaded());
-
-    style.load_json(
-        r#"{
-        "version": 8,
-        "sources": {
-            "pending": {
-                "type": "geojson",
-                "data": { "type": "FeatureCollection", "features": [] }
-            }
-        },
-        "layers": []
-    }"#,
-    );
-    assert!(style.is_loaded());
-
-    style.load_url("http://some-url");
-    assert!(!style.is_loaded());
-}
-
 // gtest: Style.SourceImplsOrder
 #[test]
 fn source_impls_order() {
@@ -729,181 +696,4 @@ fn source_impls_order() {
     assert_eq!("a", source_impls[0].id);
     assert_eq!("b", source_impls[1].id);
     assert_eq!("c", source_impls[2].id);
-}
-
-// Style::loadURL (added by glfw).
-
-/// An observer that records `on_style_response` and style errors.
-#[derive(Default)]
-struct ResponseObserver {
-    responses: Cell<usize>,
-    errors: std::cell::RefCell<Vec<crate::StyleLoadError>>,
-}
-
-impl SourceObserver for ResponseObserver {}
-
-impl Observer for ResponseObserver {
-    fn on_style_response(&self) {
-        self.responses.set(self.responses.get() + 1);
-    }
-    fn on_style_error(&self, error: crate::StyleLoadError) {
-        self.errors.borrow_mut().push(error);
-    }
-}
-
-fn stub_with_style_response(
-    responder: impl Fn(&mln_storage::Resource) -> Option<mln_storage::Response> + 'static,
-) -> (Impl, Rc<ResponseObserver>, mln_actor::RunLoop) {
-    let run_loop = mln_actor::RunLoop::new();
-    let file_source = mln_storage::stub_file_source::StubFileSource::new(
-        &run_loop,
-        mln_storage::stub_file_source::ResponseType::Asynchronous,
-    );
-    file_source.set_response(mln_storage::Kind::Style, responder);
-    let mut style = Impl::with_file_source(StyleRegistry::with_builtins(), Some(Arc::new(file_source)), 1.0, &run_loop);
-    let observer = Rc::new(ResponseObserver::default());
-    style.set_observer(Some(Rc::<ResponseObserver>::clone(&observer)));
-    (style, observer, run_loop)
-}
-
-#[test]
-fn load_url_parses_the_response() {
-    let (mut style, observer, run_loop) = stub_with_style_response(|resource| {
-        assert_eq!(resource.url, "http://some-url");
-        let mut response = mln_storage::Response::new();
-        response.data = Some(Arc::new(br#"{"version": 8, "name": "Remote", "sources": {}, "layers": []}"#.to_vec()));
-        Some(response)
-    });
-    style.load_url("http://some-url");
-    assert!(!style.is_loaded());
-    assert_eq!("http://some-url", style.get_url());
-    run_loop.run_once();
-    assert_eq!(1, observer.responses.get());
-    style.process_style_responses();
-    assert_eq!("Remote", style.get_name());
-    assert_eq!("http://some-url", style.get_url());
-}
-
-#[test]
-fn load_url_error() {
-    let (mut style, observer, run_loop) = stub_with_style_response(|_| {
-        let mut response = mln_storage::Response::new();
-        response.error = Some(Box::new(mln_storage::response::ResourceError::new(
-            mln_storage::response::Reason::NotFound,
-            "HTTP status code 404",
-        )));
-        Some(response)
-    });
-    style.load_url("http://some-url");
-    run_loop.run_once();
-    style.process_style_responses();
-    assert_eq!(
-        vec![crate::StyleLoadError::Load("loading style failed: HTTP status code 404".to_owned())],
-        *observer.errors.borrow()
-    );
-    assert!(!style.is_loaded());
-}
-
-#[test]
-fn load_url_answered_without_a_style_fails() {
-    for (no_content, message) in [
-        (true, "the style request returned no content"),
-        (false, "the style request returned not modified, but no earlier response delivered the style"),
-    ] {
-        let (mut style, observer, run_loop) = stub_with_style_response(move |_| {
-            let mut response = mln_storage::Response::new();
-            response.no_content = no_content;
-            response.not_modified = !no_content;
-            Some(response)
-        });
-        style.load_url("http://some-url");
-        run_loop.run_once();
-        style.process_style_responses();
-        assert_eq!(
-            vec![crate::StyleLoadError::Load(format!("loading style failed: {message}"))],
-            *observer.errors.borrow()
-        );
-        assert!(!style.is_loaded());
-    }
-}
-
-#[test]
-fn load_url_ignores_no_content_and_not_modified_after_a_style() {
-    let (mut style, observer, run_loop) = stub_with_style_response(|_| {
-        let mut response = mln_storage::Response::new();
-        response.data = Some(Arc::new(br#"{"version": 8, "name": "Remote", "sources": {}, "layers": []}"#.to_vec()));
-        Some(response)
-    });
-    style.load_url("http://some-url");
-    run_loop.run_once();
-    style.process_style_responses();
-    assert!(style.is_loaded());
-    // A revalidation that confirms the style the first response brought.
-    for (no_content, not_modified) in [(true, false), (false, true)] {
-        let mut response = mln_storage::Response::new();
-        response.no_content = no_content;
-        response.not_modified = not_modified;
-        style.push_style_response(response);
-        style.process_style_responses();
-    }
-    assert!(observer.errors.borrow().is_empty(), "{:?}", observer.errors.borrow());
-    assert!(style.is_loaded());
-    assert_eq!("Remote", style.get_name());
-}
-
-#[test]
-fn load_json_parse_error() {
-    let (mut style, observer, _run_loop) = stub_with_style_response(|_| None);
-    style.load_json("[]");
-    assert_eq!(
-        vec![crate::StyleLoadError::Parse("Failed to parse style: style must be an object".to_owned())],
-        *observer.errors.borrow()
-    );
-    assert!(!style.is_loaded());
-}
-
-// gtest: Style.LoadJSONCancelsPendingLoadURL
-#[test]
-fn load_json_cancels_pending_load_url() {
-    let run_loop = mln_actor::RunLoop::new();
-    let file_source = Arc::new(mln_storage::stub_file_source::StubFileSource::new(
-        &run_loop,
-        mln_storage::stub_file_source::ResponseType::Manual,
-    ));
-    file_source.set_response(mln_storage::Kind::Style, |_| {
-        let mut response = mln_storage::Response::new();
-        response.data = Some(Arc::new(read_file("test/fixtures/resources/style_vector.json").into_bytes()));
-        Some(response)
-    });
-    let mut style = Impl::with_file_source(
-        StyleRegistry::with_builtins(),
-        Some(Arc::<mln_storage::stub_file_source::StubFileSource>::clone(&file_source)),
-        1.0,
-        &run_loop,
-    );
-
-    // Start loading a URL (this will be pending)
-    style.load_url("http://some-url");
-
-    // Before the URL request completes, load JSON directly
-    style.load_json(
-        r#"{
-        "version": 8,
-        "name": "Test Style",
-        "sources": {},
-        "layers": []
-    }"#,
-    );
-
-    // The style should now be loaded with our JSON content
-    assert_eq!("Test Style", style.get_name());
-    assert_eq!("", style.get_url());
-    assert!(style.get_json().contains("Test Style"));
-
-    file_source.respond_to_all();
-    style.process_style_responses();
-
-    // The style should still show our JSON content, not the URL content
-    assert_eq!("Test Style", style.get_name());
-    assert_ne!("Streets", style.get_name());
 }

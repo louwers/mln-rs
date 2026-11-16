@@ -46,7 +46,7 @@ impl TileLODTest {
         map.jump_to(camera_options);
 
         map.set_debug(MapDebugOptions::TILE_BORDERS);
-        map.style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
+        map.load_style_json(&read_file("test/fixtures/api/empty.json"));
 
         let tile_count = Arc::new(AtomicU32::new(0));
         let handle = Arc::new(OnceLock::new());

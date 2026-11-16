@@ -98,7 +98,7 @@ fn session(
         Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() }, run_loop)
             .unwrap();
     frontend.attach(&map);
-    map.style_mut().load_json(STYLE);
+    map.load_style_json(STYLE);
     map.style_mut().add_custom_layer("quad", host, before).expect("the custom layer");
     Some((frontend, map))
 }

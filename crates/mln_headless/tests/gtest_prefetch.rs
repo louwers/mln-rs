@@ -76,8 +76,8 @@ fn prefetch_tiles() {
         {
             let mut map = map.borrow_mut();
             // Force tile reloading.
-            map.style_mut().load_json(&read_file("test/fixtures/map/prefetch/empty.json"));
-            map.style_mut().load_json(&read_file("test/fixtures/map/prefetch/style.json"));
+            map.load_style_json(&read_file("test/fixtures/map/prefetch/empty.json"));
+            map.load_style_json(&read_file("test/fixtures/map/prefetch/style.json"));
             map.jump_to(&CameraOptions {
                 center: Some(LatLng::new(40.726_989, -73.992_857).unwrap()),
                 zoom: Some(f64::from(zoom)),

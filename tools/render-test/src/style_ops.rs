@@ -4,15 +4,6 @@ use mln_style::Style;
 
 use crate::runner::MapError;
 
-/// Loads the style from `json`. Errors reach the map's events, as in C++.
-pub(crate) fn load_json(style: &mut Style, json: &str) {
-    style.load_json(json);
-}
-
-pub(crate) fn load_url(style: &mut Style, url: &str) {
-    style.load_url(url);
-}
-
 #[must_use]
 pub(crate) fn default_camera(style: &Style) -> CameraOptions {
     style.get_default_camera()
@@ -146,10 +137,14 @@ mod tests {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
     }
 
+    fn load_json(style: &mut Style, json: &str) {
+        style.parse_json(json, None).expect("a style");
+    }
+
     #[test]
     fn transition_test_style() {
         let run_loop = mln_actor::RunLoop::new();
-        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()), 1.0, &run_loop);
+        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()), &run_loop);
         load_json(&mut style, &style_json("background-color/transition"));
         assert!(style.get_layer("background").is_some());
         assert_eq!(
@@ -165,7 +160,7 @@ mod tests {
     #[test]
     fn default_camera_of_a_test_style() {
         let run_loop = mln_actor::RunLoop::new();
-        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()), 1.0, &run_loop);
+        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()), &run_loop);
         load_json(&mut style, &style_json("background-color/colorSpace-hcl"));
         assert_eq!(default_camera(&style).zoom, Some(5.0));
     }
@@ -173,7 +168,7 @@ mod tests {
     #[test]
     fn layers() {
         let run_loop = mln_actor::RunLoop::new();
-        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()), 1.0, &run_loop);
+        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()), &run_loop);
         load_json(&mut style, &style_json("background-visibility/none"));
         assert_eq!(set_layer_zoom_range(&mut style, "background", 1.0, 2.0), Ok(()));
         assert_eq!(set_layer_zoom_range(&mut style, "nope", 1.0, 2.0), Err(MapError::LayerNotFound));

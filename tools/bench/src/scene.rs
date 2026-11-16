@@ -306,11 +306,11 @@ impl Scene {
 
     /// Starts loading a style; it loads while the scene renders.
     pub(crate) fn load_url(&mut self, url: &str) {
-        self.map.style_mut().load_url(url);
+        self.map.load_style_url(url);
     }
 
     pub(crate) fn load_json(&mut self, json: &str) {
-        self.map.style_mut().load_json(json);
+        self.map.load_style_json(json);
     }
 
     /// Adds a layer from its JSON below `before`, or above every layer.

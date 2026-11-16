@@ -1,12 +1,9 @@
-// The observer methods take `&self` (C++: non-const virtuals): the style
-// holds an `Rc<dyn Observer>`, and the map's implementation uses interior
-// mutability.
+// The observer methods take `&self`: the style holds an `Rc<dyn Observer>`,
+// and the map's implementation uses interior mutability.
 
 use mln_util::error::Error;
 
 use crate::source::Source;
-use crate::sprite::Sprite;
-use crate::style::StyleLoadError;
 
 pub trait SourceObserver {
     fn on_source_loaded(&self, _source: &dyn Source) {}
@@ -16,27 +13,12 @@ pub trait SourceObserver {
 }
 
 pub trait Observer: SourceObserver {
-    fn on_style_loading(&self) {}
-    fn on_style_loaded(&self) {}
     fn on_update(&self) {}
-    /// The style's projection changed: set, edited, or replaced with the
-    /// style it loaded.
+    /// The style's projection changed: set or edited.
     fn on_projection_changed(&self) {}
-    fn on_style_error(&self, _error: StyleLoadError) {}
-    fn on_resource_error(&self, _error: Error) {}
-
-    fn on_sprite_loaded(&self, _sprite: Option<&Sprite>) {}
-    fn on_sprite_error(&self, _sprite: Option<&Sprite>, _error: Error) {}
-    fn on_sprite_requested(&self, _sprite: Option<&Sprite>) {}
-
-    /// Port-only (glfw): a `loadURL` response arrived. C++'s response
-    /// lambda captures the `Style::Impl` and parses at once; in Rust the
-    /// owner of the style must call `Impl::process_style_responses` (the
-    /// Map does it when this fires).
-    fn on_style_response(&self) {}
 }
 
-/// The default `Observer nullObserver`.
+/// The observer of a style that has none.
 #[derive(Default)]
 pub(crate) struct NullObserver;
 

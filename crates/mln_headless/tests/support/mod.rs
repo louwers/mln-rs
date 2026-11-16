@@ -569,7 +569,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     }
 
     pub(crate) fn load_json(&self, json: &str) {
-        self.map().style_mut().load_json(json);
+        self.map().load_style_json(json);
     }
 }
 
