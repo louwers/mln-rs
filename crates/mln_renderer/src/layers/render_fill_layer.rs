@@ -31,7 +31,8 @@ use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
-use crate::layer_group::{LayerGroup, composite_opacity};
+use crate::layer_composite::Composite;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -430,8 +431,9 @@ impl RenderLayer for RenderFillLayer {
 
         {
             let mut tile_layer_group = layer_group.borrow_mut();
-            let layer_opacity = *evaluated::<Fill>(&self.base.evaluated_properties).paint.fill_layer_opacity.uniform();
-            tile_layer_group.composite_opacity = composite_opacity(layer_opacity);
+            let paint = &evaluated::<Fill>(&self.base.evaluated_properties).paint;
+            tile_layer_group.composite =
+                Composite::of(*paint.fill_layer_opacity.uniform(), *paint.fill_layer_blend.uniform());
             let base = &self.base;
             // If the render pass has changed or the tile has dropped out of
             // the cover set, remove it.

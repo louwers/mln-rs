@@ -135,6 +135,9 @@ fn evaluated_type_of(q: &TypeQuery<'_>) -> EvaluatedType {
     {
         return EvaluatedType::Enum("AlignmentType".into());
     }
+    if name.ends_with("-layer-blend") {
+        return EvaluatedType::Enum("LayerBlendType".into());
+    }
     if name == "text-anchor" || name == "icon-anchor" {
         return EvaluatedType::Enum("SymbolAnchorType".into());
     }

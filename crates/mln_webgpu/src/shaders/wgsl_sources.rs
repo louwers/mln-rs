@@ -2742,7 +2742,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 /// Port-only: a layer's texture, the size of the frame, composited onto it
-/// texel for texel.
+/// texel for texel, with its opacity and, for the blend modes that no blend
+/// function expresses, against a copy of the frame (`backdrop_texture`).
 pub(crate) const LAYER_COMPOSITE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LayerCompositeShader",
     name: r"LayerCompositeShader",
@@ -2763,21 +2764,83 @@ fn main(in: VertexInput) -> @builtin(position) vec4<f32> {
         r"
 struct LayerCompositeUBO {
     opacity: f32,
-    pad1: f32,
+    blend: i32,
     pad2: f32,
     pad3: f32,
 };
 
 @group(0) @binding(5) var<uniform> props: LayerCompositeUBO;
 @group(1) @binding(1) var image_texture: texture_2d<f32>;
+@group(1) @binding(2) var backdrop_texture: texture_2d<f32>;
+
+// The blend modes that no blend function expresses, of the W3C compositing
+// spec, on premultiplied colors.
+fn lum(c: vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.3, 0.59, 0.11));
+}
+
+// Pulls a color back into gamut around its luminosity, which it keeps.
+fn clip_color(color: vec3<f32>) -> vec3<f32> {
+    var c = color;
+    let l = lum(c);
+    let n = min(min(c.r, c.g), c.b);
+    let x = max(max(c.r, c.g), c.b);
+    if (n < 0.0) {
+        c = l + (c - l) * l / (l - n);
+    }
+    if (x > 1.0) {
+        c = l + (c - l) * (1.0 - l) / (x - l);
+    }
+    return c;
+}
+
+fn set_lum(c: vec3<f32>, l: f32) -> vec3<f32> {
+    return clip_color(c + (l - lum(c)));
+}
+
+fn composite(src: vec4<f32>, dst: vec4<f32>, mode: i32) -> vec4<f32> {
+    let inv_dst_a = 1.0 - dst.a;
+    let inv_src_a = 1.0 - src.a;
+    var co: vec3<f32>;
+    if (mode == 1) {
+        co = inv_dst_a * src.rgb + inv_src_a * dst.rgb + src.rgb * dst.rgb;
+    } else if (mode == 2) {
+        let screen = step(vec3<f32>(dst.a), 2.0 * dst.rgb);
+        let multiplied = inv_dst_a * src.rgb + inv_src_a * dst.rgb + 2.0 * dst.rgb * src.rgb;
+        let screened = src.rgb + dst.rgb + dst.a * src.rgb + src.a * dst.rgb - vec3<f32>(src.a * dst.a) - 2.0 * dst.rgb * src.rgb;
+        co = mix(multiplied, screened, screen);
+    } else {
+        var cs = vec3<f32>(0.0);
+        if (src.a > 0.0) {
+            cs = src.rgb / src.a;
+        }
+        var cb = vec3<f32>(0.0);
+        if (dst.a > 0.0) {
+            cb = dst.rgb / dst.a;
+        }
+        var blended: vec3<f32>;
+        if (mode == 3) {
+            blended = set_lum(cs, lum(cb));
+        } else {
+            blended = set_lum(cb, lum(cs));
+        }
+        co = inv_dst_a * src.rgb + inv_src_a * dst.rgb + src.a * dst.a * blended;
+    }
+    return vec4<f32>(co, src.a + dst.a * inv_src_a);
+}
 
 @fragment
 fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    let color = textureLoad(image_texture, vec2<i32>(position.xy), 0);
+    let texel = vec2<i32>(position.xy);
+    let color = textureLoad(image_texture, texel, 0);
 #ifdef OVERDRAW_INSPECTOR
     return color;
 #else
-    return color * props.opacity;
+    let src = color * props.opacity;
+    if (props.blend == 0) {
+        return src;
+    }
+    return composite(src, textureLoad(backdrop_texture, texel, 0), props.blend);
 #endif
 }
 ",

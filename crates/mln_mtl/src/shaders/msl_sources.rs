@@ -3969,7 +3969,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 /// Port-only: a layer's texture, the size of the frame, composited onto it
-/// texel for texel.
+/// texel for texel, with its opacity and, for the blend modes that no blend
+/// function expresses, against a copy of the frame (`backdrop`).
 pub(crate) const LAYER_COMPOSITE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
@@ -3982,7 +3983,7 @@ enum {
 
 struct alignas(16) LayerCompositeUBO {
     /*  0 */ float opacity;
-    /*  4 */ float pad1;
+    /*  4 */ int blend;
     /*  8 */ float pad2;
     /* 12 */ float pad3;
     /* 16 */
@@ -4006,15 +4007,61 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]]) {
     };
 }
 
+// The blend modes that no blend function expresses, of the W3C compositing
+// spec, on premultiplied colors.
+static float lum(float3 c) {
+    return dot(c, float3(0.3, 0.59, 0.11));
+}
+
+// Pulls a color back into gamut around its luminosity, which it keeps.
+static float3 clip_color(float3 c) {
+    const float l = lum(c);
+    const float n = min(min(c.r, c.g), c.b);
+    const float x = max(max(c.r, c.g), c.b);
+    if (n < 0.0) c = l + (c - l) * l / (l - n);
+    if (x > 1.0) c = l + (c - l) * (1.0 - l) / (x - l);
+    return c;
+}
+
+static float3 set_lum(float3 c, float l) {
+    return clip_color(c + (l - lum(c)));
+}
+
+static float4 composite(float4 src, float4 dst, int mode) {
+    const float inv_dst_a = 1.0 - dst.a;
+    const float inv_src_a = 1.0 - src.a;
+    float3 co;
+    if (mode == 1) {
+        co = inv_dst_a * src.rgb + inv_src_a * dst.rgb + src.rgb * dst.rgb;
+    } else if (mode == 2) {
+        const float3 screen = step(float3(dst.a), 2.0 * dst.rgb);
+        const float3 multiplied = inv_dst_a * src.rgb + inv_src_a * dst.rgb + 2.0 * dst.rgb * src.rgb;
+        const float3 screened = src.rgb + dst.rgb + dst.a * src.rgb + src.a * dst.rgb - float3(src.a * dst.a) - 2.0 * dst.rgb * src.rgb;
+        co = mix(multiplied, screened, screen);
+    } else {
+        const float3 cs = src.a > 0.0 ? src.rgb / src.a : float3(0.0);
+        const float3 cb = dst.a > 0.0 ? dst.rgb / dst.a : float3(0.0);
+        const float3 blended = mode == 3 ? set_lum(cs, lum(cb)) : set_lum(cb, lum(cs));
+        co = inv_dst_a * src.rgb + inv_src_a * dst.rgb + src.a * dst.a * blended;
+    }
+    return float4(co, src.a + dst.a * inv_src_a);
+}
+
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const LayerCompositeUBO& props [[buffer(idLayerCompositeUBO)]],
-                            texture2d<float, access::sample> image [[texture(0)]]) {
-    const float4 color = image.read(uint2(in.position.xy));
+                            texture2d<float, access::sample> image [[texture(0)]],
+                            texture2d<float, access::sample> backdrop [[texture(1)]]) {
+    const uint2 texel = uint2(in.position.xy);
+    const float4 color = image.read(texel);
 
 #if defined(OVERDRAW_INSPECTOR)
     return half4(color);
 #else
-    return half4(color * props.opacity);
+    const float4 src = color * props.opacity;
+    if (props.blend == 0) {
+        return half4(src);
+    }
+    return half4(composite(src, backdrop.read(texel), props.blend));
 #endif
 }
 ",

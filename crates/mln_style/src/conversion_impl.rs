@@ -147,6 +147,7 @@ enum_value_factory!(
     mln_style_types::IconTextFitType,
     mln_style_types::LightAnchorType,
     mln_style_types::LineCapType,
+    mln_style_types::LayerBlendType,
     mln_style_types::LineJoinType,
     mln_style_types::RasterResamplingType,
     mln_style_types::ResamplingType,

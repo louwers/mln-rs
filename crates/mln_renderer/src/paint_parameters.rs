@@ -231,14 +231,24 @@ impl<'a> PaintParameters<'a> {
         group: SimpleIdentity,
         draw: impl FnOnce(&mut dyn Gpu, &mut Self),
     ) {
-        let Some(frame) = self.open_pass.get().filter(|_| self.layer_composite.composites(group)) else {
-            draw(gpu, self);
-            return;
-        };
-        let Some(composite) = self.layer_composite.pass() else {
+        let mut layer_composite = std::mem::take(&mut self.layer_composite);
+        let composite = self
+            .open_pass
+            .get()
+            .filter(|_| layer_composite.composites(group))
+            .and_then(|frame| Some((frame, layer_composite.pass()?)));
+        let Some((frame, composite)) = composite else {
+            self.layer_composite = layer_composite;
             return draw(gpu, self);
         };
-        let drawn = self.end_pass(gpu).and_then(|()| self.begin_pass(gpu, composite));
+        let mut drawn = self.end_pass(gpu);
+        if drawn.is_ok()
+            && let Some(backdrop) = layer_composite.backdrop_pass(group)
+        {
+            drawn = self.begin_pass(gpu, backdrop).map(|()| layer_composite.copy_frame(gpu, self));
+            drawn = drawn.and_then(|()| self.end_pass(gpu));
+        }
+        drawn = drawn.and_then(|()| self.begin_pass(gpu, composite));
         if let Err(error) = &drawn {
             Log::error(Event::Render, format!("Beginning the layer composite's pass failed: {error}"));
         } else {
@@ -253,13 +263,25 @@ impl<'a> PaintParameters<'a> {
         }
         if let Err(error) = self.begin_pass(gpu, frame.loading(LoadOp::Load)) {
             Log::error(Event::Render, format!("Resuming the {} pass failed: {error}", frame.label));
+        } else if drawn.is_ok() {
+            layer_composite.draw(gpu, self, group);
+        }
+        self.layer_composite = layer_composite;
+    }
+
+    /// Ends the frame's pass, which drew into the layer composite's frame
+    /// texture, and begins `present`, which the texture is copied into.
+    /// Does nothing where the frame drew into its target.
+    pub(crate) fn present_frame(&mut self, gpu: &mut dyn Gpu, present: OpenPass) {
+        if self.layer_composite.frame_texture().is_none() {
             return;
         }
-        if drawn.is_err() {
+        if let Err(error) = self.end_pass(gpu).and_then(|()| self.begin_pass(gpu, present)) {
+            Log::error(Event::Render, format!("Beginning the frame's copy failed: {error}"));
             return;
         }
         let mut layer_composite = std::mem::take(&mut self.layer_composite);
-        layer_composite.draw(gpu, self, group);
+        layer_composite.copy_frame(gpu, self);
         self.layer_composite = layer_composite;
     }
 

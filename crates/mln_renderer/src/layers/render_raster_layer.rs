@@ -48,6 +48,7 @@ use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
+use crate::layer_composite::Composite;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
@@ -129,6 +130,13 @@ impl RenderRasterLayer {
 
         builder.set_texture(Some(Rc::clone(&texture)), ID_RASTER_IMAGE0_TEXTURE);
         builder.set_texture(Some(texture), ID_RASTER_IMAGE1_TEXTURE);
+    }
+
+    /// How the layer's drawables composite onto the frame: as one surface,
+    /// for a `raster-layer-blend` other than `normal`.
+    fn composite(&self) -> Option<Composite> {
+        let paint = &evaluated::<Raster>(&self.base.evaluated_properties).paint;
+        Composite::of(1.0, *paint.raster_layer_blend.uniform())
     }
 
     /// The sampler of the layer's tile textures for the evaluated
@@ -214,6 +222,7 @@ impl RenderRasterLayer {
             builder.flush();
 
             let mut layer_group = image_layer_group.borrow_mut();
+            layer_group.composite = self.composite();
             for mut drawable in builder.clear_drawables() {
                 drawable.tile_id = Some(OverscaledTileID::new(tile_id.canonical.z, tile_id.wrap, tile_id.canonical));
                 drawable.layer_tweaker = layer_tweaker.clone();
@@ -408,14 +417,7 @@ impl RenderLayer for RenderRasterLayer {
             return;
         };
 
-        // Remove existing drawables that are no longer in the cover set
-        if let Some(layer_group) = self.base.layer_group.clone() {
-            let mut tile_layer_group = layer_group.borrow_mut();
-            let base = &self.base;
-            tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
-        } else {
+        if self.base.layer_group.is_none() {
             // Set up a tile layer group
             let layer_group = LayerGroup::tiles(self.base.layer_index);
             if let Some(tweaker) = &layer_tweaker {
@@ -426,6 +428,15 @@ impl RenderLayer for RenderRasterLayer {
         let Some(layer_group) = self.base.layer_group.clone() else {
             return;
         };
+        {
+            let mut tile_layer_group = layer_group.borrow_mut();
+            tile_layer_group.composite = self.composite();
+            // Remove existing drawables that are no longer in the cover set
+            let base = &self.base;
+            tile_layer_group.remove_drawables_if(|drawable| {
+                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+            });
+        }
 
         if self.static_data_vertices.is_none() {
             self.static_data_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));

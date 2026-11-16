@@ -141,10 +141,11 @@ pub const ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 9;
 pub const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 // --- layer composite (port-only): a layer drawn into a texture, composited
-// onto the frame with its `*-layer-opacity`.
+// onto the frame with its `*-layer-opacity` and `*-layer-blend`.
 pub const ID_LAYER_COMPOSITE_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 pub const LAYER_COMPOSITE_UBO_COUNT: usize = ID_LAYER_COMPOSITE_UBO + 1;
 pub const ID_LAYER_COMPOSITE_IMAGE_TEXTURE: usize = 0;
+pub const ID_LAYER_COMPOSITE_BACKDROP_TEXTURE: usize = 1;
 pub const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 // --- sky (`idSkyPropsUBO` / `idAtmospherePropsUBO = getEnumValue(drawableReservedUBOCount, layerUBOStartId)`)

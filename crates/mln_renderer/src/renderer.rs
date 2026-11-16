@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp};
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, TargetFormats};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
@@ -570,14 +570,21 @@ impl Renderer {
         // texture and then onto the frame.
         let mut composited = Vec::new();
         orchestrator.visit_layer_groups(|layer_group| {
-            if let Some(opacity) = layer_group.composite_opacity
+            if let Some(composite) = layer_group.composite
                 && layer_group.enabled
                 && !layer_group.empty()
             {
-                composited.push((layer_group.id, opacity));
+                composited.push((layer_group.id, composite));
             }
         });
-        self.layer_composite.update(context, &static_data.shaders, image.size, &composited);
+        self.layer_composite.update(
+            context,
+            &static_data.shaders,
+            image.size,
+            image.targets.color,
+            parameters.debug_options.contains(MapDebugOptions::OVERDRAW),
+            &composited,
+        );
         parameters.layer_composite = std::mem::take(&mut self.layer_composite);
 
         let layers_uploaded = Instant::now();
@@ -665,7 +672,10 @@ impl Renderer {
             };
             let pass = OpenPass {
                 label: "main buffer",
-                color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(color) }),
+                color: Some(ColorAttachment {
+                    texture: parameters.layer_composite.frame_texture().unwrap_or(image.color),
+                    load: LoadOp::Clear(color),
+                }),
                 depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
                     texture,
                     depth: LoadOp::Clear(1.0),
@@ -753,6 +763,20 @@ impl Renderer {
             layer_group.borrow_mut().render(&mut *gpu, &mut parameters);
             parameters.current_layer += 1;
         }
+
+        parameters.present_frame(
+            &mut *gpu,
+            OpenPass {
+                label: "main buffer",
+                color: Some(ColorAttachment {
+                    texture: image.color,
+                    load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)),
+                }),
+                depth_stencil: None,
+                size: image.size,
+                targets: TargetFormats { color: image.targets.color, depth_stencil: None },
+            },
+        );
 
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(&mut *gpu).and_then(|()| gpu.flush(false)) {

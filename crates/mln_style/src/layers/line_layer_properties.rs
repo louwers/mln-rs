@@ -27,6 +27,7 @@ crate::properties!(
         line_dasharray: cross_faded_or_data_driven Vec<f32> = Vec::new(),
         line_gap_width: data_driven f32 = 0.0_f32,
         line_gradient: color_ramp Color = Color::default(),
+        line_layer_blend: constant LayerBlendType = LayerBlendType::Normal,
         line_layer_opacity: constant f32 = 1.0_f32,
         line_offset: data_driven f32 = 0.0_f32,
         line_opacity: data_driven f32 = 1.0_f32,
@@ -38,7 +39,7 @@ crate::properties!(
     derived {
         line_floor_width: integer_zoom f32 = 1.0_f32 => line_width,
     }
-    use crate::expression::Image, mln_style_types::TranslateAnchorType, mln_util::Color;
+    use crate::expression::Image, mln_style_types::LayerBlendType, mln_style_types::TranslateAnchorType, mln_util::Color;
 );
 
 /// The properties, by slot.
@@ -49,6 +50,7 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
         PropertyInfo::paint("line-dasharray").data_driven(),
         PropertyInfo::paint("line-gap-width").data_driven(),
         PropertyInfo::paint("line-gradient"),
+        PropertyInfo::paint("line-layer-blend"),
         PropertyInfo::paint("line-layer-opacity"),
         PropertyInfo::paint("line-offset").data_driven(),
         PropertyInfo::paint("line-opacity").data_driven(),
@@ -62,7 +64,7 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
         PropertyInfo::layout("line-round-limit").data_driven(),
         PropertyInfo::layout("line-sort-key").data_driven(),
     ],
-    &[0, 12, 1, 2, 3, 4, 13, 5, 14, 6, 7, 8, 15, 16, 9, 10, 11],
+    &[0, 13, 1, 2, 3, 4, 14, 5, 6, 15, 7, 8, 9, 16, 17, 10, 11, 12],
 );
 
 /// Calls `visitor` with the field of the property in `slot`.
@@ -73,18 +75,19 @@ pub(crate) fn visit<V: PropertyVisitor<LayerStyle<Line>>>(slot: usize, visitor: 
         2 => visitor.paint(|s| &s.paint.line_dasharray, |s| &mut s.paint.line_dasharray),
         3 => visitor.paint(|s| &s.paint.line_gap_width, |s| &mut s.paint.line_gap_width),
         4 => visitor.paint(|s| &s.paint.line_gradient, |s| &mut s.paint.line_gradient),
-        5 => visitor.paint(|s| &s.paint.line_layer_opacity, |s| &mut s.paint.line_layer_opacity),
-        6 => visitor.paint(|s| &s.paint.line_offset, |s| &mut s.paint.line_offset),
-        7 => visitor.paint(|s| &s.paint.line_opacity, |s| &mut s.paint.line_opacity),
-        8 => visitor.paint(|s| &s.paint.line_pattern, |s| &mut s.paint.line_pattern),
-        9 => visitor.paint(|s| &s.paint.line_translate, |s| &mut s.paint.line_translate),
-        10 => visitor.paint(|s| &s.paint.line_translate_anchor, |s| &mut s.paint.line_translate_anchor),
-        11 => visitor.paint(|s| &s.paint.line_width, |s| &mut s.paint.line_width),
-        12 => visitor.layout(|s| &s.layout.line_cap, |s| &mut s.layout.line_cap),
-        13 => visitor.layout(|s| &s.layout.line_join, |s| &mut s.layout.line_join),
-        14 => visitor.layout(|s| &s.layout.line_miter_limit, |s| &mut s.layout.line_miter_limit),
-        15 => visitor.layout(|s| &s.layout.line_round_limit, |s| &mut s.layout.line_round_limit),
-        16 => visitor.layout(|s| &s.layout.line_sort_key, |s| &mut s.layout.line_sort_key),
+        5 => visitor.paint(|s| &s.paint.line_layer_blend, |s| &mut s.paint.line_layer_blend),
+        6 => visitor.paint(|s| &s.paint.line_layer_opacity, |s| &mut s.paint.line_layer_opacity),
+        7 => visitor.paint(|s| &s.paint.line_offset, |s| &mut s.paint.line_offset),
+        8 => visitor.paint(|s| &s.paint.line_opacity, |s| &mut s.paint.line_opacity),
+        9 => visitor.paint(|s| &s.paint.line_pattern, |s| &mut s.paint.line_pattern),
+        10 => visitor.paint(|s| &s.paint.line_translate, |s| &mut s.paint.line_translate),
+        11 => visitor.paint(|s| &s.paint.line_translate_anchor, |s| &mut s.paint.line_translate_anchor),
+        12 => visitor.paint(|s| &s.paint.line_width, |s| &mut s.paint.line_width),
+        13 => visitor.layout(|s| &s.layout.line_cap, |s| &mut s.layout.line_cap),
+        14 => visitor.layout(|s| &s.layout.line_join, |s| &mut s.layout.line_join),
+        15 => visitor.layout(|s| &s.layout.line_miter_limit, |s| &mut s.layout.line_miter_limit),
+        16 => visitor.layout(|s| &s.layout.line_round_limit, |s| &mut s.layout.line_round_limit),
+        17 => visitor.layout(|s| &s.layout.line_sort_key, |s| &mut s.layout.line_sort_key),
         _ => return None,
     })
 }

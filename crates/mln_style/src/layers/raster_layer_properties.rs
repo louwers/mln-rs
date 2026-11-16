@@ -14,12 +14,13 @@ crate::properties!(
         raster_contrast: constant f32 = 0.0_f32,
         raster_fade_duration: constant f32 = 300.0_f32,
         raster_hue_rotate: constant f32 = 0.0_f32,
+        raster_layer_blend: constant LayerBlendType = LayerBlendType::Normal,
         raster_opacity: constant f32 = 1.0_f32,
         raster_resampling: constant RasterResamplingType = RasterResamplingType::Linear,
         raster_saturation: constant f32 = 0.0_f32,
         resampling: constant ResamplingType = ResamplingType::Linear,
     }
-    use mln_style_types::RasterResamplingType, mln_style_types::ResamplingType;
+    use mln_style_types::LayerBlendType, mln_style_types::RasterResamplingType, mln_style_types::ResamplingType;
 );
 
 /// The properties, by slot.
@@ -30,12 +31,13 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
         PropertyInfo::paint("raster-contrast"),
         PropertyInfo::paint("raster-fade-duration"),
         PropertyInfo::paint("raster-hue-rotate"),
+        PropertyInfo::paint("raster-layer-blend"),
         PropertyInfo::paint("raster-opacity"),
         PropertyInfo::paint("raster-resampling"),
         PropertyInfo::paint("raster-saturation"),
         PropertyInfo::paint("resampling"),
     ],
-    &[0, 1, 2, 3, 4, 5, 6, 7, 8],
+    &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
 );
 
 /// Calls `visitor` with the field of the property in `slot`.
@@ -46,10 +48,11 @@ pub(crate) fn visit<V: PropertyVisitor<LayerStyle<Raster>>>(slot: usize, visitor
         2 => visitor.paint(|s| &s.paint.raster_contrast, |s| &mut s.paint.raster_contrast),
         3 => visitor.paint(|s| &s.paint.raster_fade_duration, |s| &mut s.paint.raster_fade_duration),
         4 => visitor.paint(|s| &s.paint.raster_hue_rotate, |s| &mut s.paint.raster_hue_rotate),
-        5 => visitor.paint(|s| &s.paint.raster_opacity, |s| &mut s.paint.raster_opacity),
-        6 => visitor.paint(|s| &s.paint.raster_resampling, |s| &mut s.paint.raster_resampling),
-        7 => visitor.paint(|s| &s.paint.raster_saturation, |s| &mut s.paint.raster_saturation),
-        8 => visitor.paint(|s| &s.paint.resampling, |s| &mut s.paint.resampling),
+        5 => visitor.paint(|s| &s.paint.raster_layer_blend, |s| &mut s.paint.raster_layer_blend),
+        6 => visitor.paint(|s| &s.paint.raster_opacity, |s| &mut s.paint.raster_opacity),
+        7 => visitor.paint(|s| &s.paint.raster_resampling, |s| &mut s.paint.raster_resampling),
+        8 => visitor.paint(|s| &s.paint.raster_saturation, |s| &mut s.paint.raster_saturation),
+        9 => visitor.paint(|s| &s.paint.resampling, |s| &mut s.paint.resampling),
         _ => return None,
     })
 }

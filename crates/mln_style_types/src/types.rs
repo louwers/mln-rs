@@ -56,6 +56,20 @@ pub enum RasterResamplingType {
     Nearest,
 }
 
+/// How a layer composites onto what's drawn beneath it: `*-layer-blend`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
+#[repr(u8)]
+pub enum LayerBlendType {
+    #[default]
+    Normal,
+    Multiply,
+    Color,
+    Luminosity,
+    PlusLighter,
+    Screen,
+    Overlay,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 #[repr(u8)]
 pub enum ResamplingType {
@@ -282,6 +296,16 @@ style_spec_names!(RasterResamplingType {
     Nearest => "nearest",
 });
 
+style_spec_names!(LayerBlendType {
+    Normal => "normal",
+    Multiply => "multiply",
+    Color => "color",
+    Luminosity => "luminosity",
+    PlusLighter => "plus-lighter",
+    Screen => "screen",
+    Overlay => "overlay",
+});
+
 style_spec_names!(ResamplingType {
     Linear => "linear",
     Nearest => "nearest",
@@ -423,6 +447,7 @@ uninterpolated_enums!(
     LineJoinType,
     RasterResamplingType,
     ResamplingType,
+    LayerBlendType,
     HillshadeIlluminationAnchorType,
     HillshadeMethodType,
     TranslateAnchorType,

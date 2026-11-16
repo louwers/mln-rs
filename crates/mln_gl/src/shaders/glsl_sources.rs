@@ -2625,7 +2625,8 @@ void main() {
 };
 
 /// Port-only: a layer's texture, the size of the frame, composited onto it
-/// texel for texel.
+/// texel for texel, with its opacity and, for the blend modes that no blend
+/// function expresses, against a copy of the frame (`u_backdrop`).
 pub(crate) const LAYER_COMPOSITE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"layout (location = 0) in vec2 a_pos;
 
@@ -2634,21 +2635,64 @@ void main() {
 }
 ",
     fragment: r"uniform sampler2D u_image;
+uniform sampler2D u_backdrop;
 
 layout (std140) uniform LayerCompositeUBO {
     highp float u_opacity;
-    lowp float props_pad1;
+    highp int u_blend;
     lowp float props_pad2;
     lowp float props_pad3;
 };
 
+// The blend modes that no blend function expresses, of the W3C compositing
+// spec, on premultiplied colors.
+float lum(vec3 c) {
+    return dot(c, vec3(0.3, 0.59, 0.11));
+}
+
+// Pulls a color back into gamut around its luminosity, which it keeps.
+vec3 clip_color(vec3 c) {
+    float l = lum(c);
+    float n = min(min(c.r, c.g), c.b);
+    float x = max(max(c.r, c.g), c.b);
+    if (n < 0.0) c = l + (c - l) * l / (l - n);
+    if (x > 1.0) c = l + (c - l) * (1.0 - l) / (x - l);
+    return c;
+}
+
+vec3 set_lum(vec3 c, float l) {
+    return clip_color(c + (l - lum(c)));
+}
+
+vec4 composite(vec4 src, vec4 dst, int mode) {
+    float inv_dst_a = 1.0 - dst.a;
+    float inv_src_a = 1.0 - src.a;
+    vec3 co;
+    if (mode == 1) {
+        co = inv_dst_a * src.rgb + inv_src_a * dst.rgb + src.rgb * dst.rgb;
+    } else if (mode == 2) {
+        vec3 screen = step(dst.a, 2.0 * dst.rgb);
+        vec3 multiplied = inv_dst_a * src.rgb + inv_src_a * dst.rgb + 2.0 * dst.rgb * src.rgb;
+        vec3 screened = src.rgb + dst.rgb + dst.a * src.rgb + src.a * dst.rgb - vec3(src.a * dst.a) - 2.0 * dst.rgb * src.rgb;
+        co = mix(multiplied, screened, screen);
+    } else {
+        vec3 cs = src.a > 0.0 ? src.rgb / src.a : vec3(0.0);
+        vec3 cb = dst.a > 0.0 ? dst.rgb / dst.a : vec3(0.0);
+        vec3 blended = mode == 3 ? set_lum(cs, lum(cb)) : set_lum(cb, lum(cs));
+        co = inv_dst_a * src.rgb + inv_src_a * dst.rgb + src.a * dst.a * blended;
+    }
+    return vec4(co, src.a + dst.a * inv_src_a);
+}
+
 void main() {
-    vec4 color = texelFetch(u_image, ivec2(gl_FragCoord.xy), 0);
+    ivec2 texel = ivec2(gl_FragCoord.xy);
+    vec4 color = texelFetch(u_image, texel, 0);
 
 #ifdef OVERDRAW_INSPECTOR
     fragColor = color;
 #else
-    fragColor = color * u_opacity;
+    vec4 src = color * u_opacity;
+    fragColor = u_blend == 0 ? src : composite(src, texelFetch(u_backdrop, texel, 0), u_blend);
 #endif
 }
 ",

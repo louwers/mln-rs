@@ -70,11 +70,6 @@ pub(crate) fn load(text: &str) -> Result<Value, String> {
     // Without terrain, the ground and sea level are the same height.
     remove(&mut spec, &["layout_symbol"], "symbol-height-anchor")?;
 
-    // https://github.com/maplibre/maplibre-native/issues/2963
-    remove(&mut spec, &["paint_fill"], "fill-layer-blend")?;
-    remove(&mut spec, &["paint_line"], "line-layer-blend")?;
-    remove(&mut spec, &["paint_raster"], "raster-layer-blend")?;
-
     // https://github.com/maplibre/maplibre-native/issues/4517
     zoom_only(&mut spec, "layout_symbol", "icon-rotation-alignment", "data-constant")?;
 
