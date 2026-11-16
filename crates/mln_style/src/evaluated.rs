@@ -114,6 +114,21 @@ impl<T: Clone + Default + ValueConverter> Evaluated<T> {
         Self::cross_fade(parameters, value.clone(), value.clone(), value)
     }
 
+    /// As [`Evaluated::cross_faded`], or to an expression for each feature
+    /// when the value reads the feature: `line-dasharray`.
+    pub fn cross_faded_or_per_feature(
+        value: &PropertyValue<T>,
+        parameters: &PropertyEvaluationParameters,
+        default: T,
+    ) -> Self {
+        if let PropertyValue::Expression(expression) = value
+            && !expression.is_feature_constant()
+        {
+            return Self::per_feature(expression, parameters, false, default);
+        }
+        Self::cross_faded(value, parameters, default)
+    }
+
     /// Fades to `mid` from `min` when zooming in, or from `max` when zooming
     /// out.
     fn cross_fade(parameters: &PropertyEvaluationParameters, min: T, mid: T, max: T) -> Self {

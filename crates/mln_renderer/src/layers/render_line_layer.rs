@@ -2,9 +2,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::gpu::TextureFormat;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::{
-    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE,
+    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE,
     ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
@@ -25,6 +26,7 @@ use mln_style_types::LineCapType;
 use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::line_layer_tweaker::{LineDrawableData, LineLayerTweaker, LineType};
@@ -237,6 +239,38 @@ fn read_line_attributes(
         pau,
         &mut id,
     );
+    read_data_driven_paint_property(
+        attrs,
+        &b.line_dasharray,
+        buffer,
+        shared,
+        &["a_dasharray"],
+        evaluated.line_dasharray.is_constant(),
+        pau,
+        &mut id,
+    );
+}
+
+/// A texture of the bucket's dash patterns, for a `line-dasharray` that
+/// differs by feature.
+fn dash_atlas_texture(context: &Context, binders: &LineBinders) -> Option<Texture2DPtr> {
+    let image = binders.line_dasharray.atlas()?.image();
+    if !image.valid() {
+        return None;
+    }
+    let mut texture = context.texture_2d();
+    texture.set_format(TextureFormat::A8Unorm);
+    if let Err(error) = texture.upload_data(context, &image.data, image.size) {
+        Log::error(Event::Render, format!("Uploading the dash patterns failed: {error}"));
+        return None;
+    }
+    texture.set_sampler(SamplerState {
+        filter: TextureFilterType::Linear,
+        wrap_u: TextureWrapType::Repeat,
+        wrap_v: TextureWrapType::Clamp,
+        ..Default::default()
+    });
+    Some(Rc::new(RefCell::new(texture)))
 }
 
 impl LayerType for Line {
@@ -753,7 +787,18 @@ impl RenderLayer for RenderLineLayer {
                 &mut properties_as_uniforms,
             );
 
-            let has_dasharray = !evaluated.line_dasharray.faded().from.is_empty();
+            let has_dasharray =
+                !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
+            // Where the dash array differs by feature, the bucket's patterns;
+            // otherwise the tweaker binds the layer's from the line atlas.
+            let dash_texture = if evaluated.line_dasharray.is_constant() {
+                None
+            } else {
+                match dash_atlas_texture(context, paint_property_binders) {
+                    Some(texture) => Some(texture),
+                    None => continue,
+                }
+            };
             let has_gradient = !self.unevaluated.line_gradient.get_value().is_undefined();
 
             // The ramp texture is shared by every tile of the layer.
@@ -793,6 +838,9 @@ impl RenderLayer for RenderLineLayer {
                 ensure_color_ramp_texture(&mut self.color_ramp_texture_2d, &self.color_ramp);
                 if let Some(texture) = &self.color_ramp_texture_2d {
                     builder.set_texture(Some(Rc::clone(texture)), ID_LINE_IMAGE_TEXTURE);
+                    if let Some(dash_texture) = dash_texture {
+                        builder.set_texture(Some(dash_texture), ID_LINE_DASH_TEXTURE);
+                    }
 
                     set_segments(builder.as_mut(), geometry, bucket);
 
@@ -815,6 +863,9 @@ impl RenderLayer for RenderLineLayer {
 
                 // vertices, attributes and segments
                 add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
+                if let Some(dash_texture) = dash_texture {
+                    builder.set_texture(Some(dash_texture), ID_LINE_IMAGE_TEXTURE);
+                }
                 set_segments(builder.as_mut(), geometry, bucket);
 
                 builder.flush();

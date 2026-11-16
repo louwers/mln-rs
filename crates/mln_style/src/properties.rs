@@ -294,6 +294,9 @@ macro_rules! __property_evaluation {
     (cross_faded_data_driven) => {
         $crate::evaluated::Evaluated::cross_faded_per_feature
     };
+    (cross_faded_or_data_driven) => {
+        $crate::evaluated::Evaluated::cross_faded_or_per_feature
+    };
     ($kind:ident) => {
         $crate::evaluated::Evaluated::plain
     };
@@ -309,6 +312,9 @@ macro_rules! __property_data_driven {
         true
     };
     (cross_faded_data_driven) => {
+        true
+    };
+    (cross_faded_or_data_driven) => {
         true
     };
     ($kind:ident) => {
@@ -333,7 +339,9 @@ pub(crate) use __property_data_driven;
 /// A property's kind is its style-spec property type: `constant`,
 /// `data_driven`, `cross_faded`, `cross_faded_data_driven` or `color_ramp`,
 /// or `integer_zoom` for a data-driven property that evaluates at the integer
-/// zoom below. A `paint` set transitions; a `layout` set doesn't.
+/// zoom below. `cross_faded_data_driven` is the patterns' kind;
+/// `cross_faded_or_data_driven`, `line-dasharray`'s, cross-fades a value that
+/// doesn't read the feature as `cross_faded` does. A `paint` set transitions; a `layout` set doesn't.
 ///
 /// A paint set's `derived { field: kind T = default => source, }` values
 /// aren't style properties: each takes `source`'s value, and transitions with

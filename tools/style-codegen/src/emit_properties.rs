@@ -1,7 +1,7 @@
 use crate::defaults::{default_value, rust_value};
 use crate::emit_table::Visit;
 use crate::spec::{LayerSpec, Property};
-use crate::types::{camelize, evaluated_type, is_color_ramp, is_data_driven, snake};
+use crate::types::{EvaluatedType, camelize, evaluated_type, is_color_ramp, is_data_driven, snake};
 use crate::writer::{Writer, imports_for};
 
 /// The kind and type of a property in `properties!`: `data_driven Color`.
@@ -14,7 +14,10 @@ fn kind_and_type(property: &Property, layout: bool) -> (&'static str, String) {
     } else {
         match property.property_type() {
             Some("data-driven") => "data_driven",
-            Some("cross-faded-data-driven") => "cross_faded_data_driven",
+            Some("cross-faded-data-driven") if evaluated_type(property) == EvaluatedType::Image => {
+                "cross_faded_data_driven"
+            }
+            Some("cross-faded-data-driven") => "cross_faded_or_data_driven",
             Some("cross-faded") => "cross_faded",
             _ => "constant",
         }

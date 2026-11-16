@@ -24,7 +24,7 @@ crate::properties!(
     pub mod LinePaintProperties: paint {
         line_blur: data_driven f32 = 0.0_f32,
         line_color: data_driven Color = Color::black(),
-        line_dasharray: cross_faded Vec<f32> = Vec::new(),
+        line_dasharray: cross_faded_or_data_driven Vec<f32> = Vec::new(),
         line_gap_width: data_driven f32 = 0.0_f32,
         line_gradient: color_ramp Color = Color::default(),
         line_offset: data_driven f32 = 0.0_f32,
@@ -45,7 +45,7 @@ pub(crate) static PROPERTIES: PropertyTable = PropertyTable::new(
     &[
         PropertyInfo::paint("line-blur").data_driven(),
         PropertyInfo::paint("line-color").data_driven(),
-        PropertyInfo::paint("line-dasharray"),
+        PropertyInfo::paint("line-dasharray").data_driven(),
         PropertyInfo::paint("line-gap-width").data_driven(),
         PropertyInfo::paint("line-gradient"),
         PropertyInfo::paint("line-offset").data_driven(),

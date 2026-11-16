@@ -57,6 +57,18 @@ pub(crate) struct LineDrawableData {
     pub(crate) line_pattern_cap: LinePatternCap,
 }
 
+/// Where a dash drawable samples its patterns. With a dash array that
+/// differs by feature, the scales' x is the tile ratio, which the shaders
+/// divide by each pattern's length, and the gamma is divided by it too.
+struct SdfPatterns {
+    patternscale_a: [f32; 2],
+    patternscale_b: [f32; 2],
+    tex_y_a: f32,
+    tex_y_b: f32,
+    atlas_height: f32,
+    sdfgamma: f32,
+}
+
 pub(crate) struct LineLayerTweaker {
     base: LayerTweakerBase,
     evaluated_props_uniform_buffer: Option<UniformBufferPtr>,
@@ -288,25 +300,35 @@ impl LayerTweaker for LineLayerTweaker {
                 }
 
                 Some(line_type @ (LineType::Sdf | LineType::GradientSdf)) => {
-                    let line_pattern_cap = match &drawable.data {
-                        Some(crate::drawable::DrawableData::Line(data)) => Some(data.line_pattern_cap),
-                        _ => None,
-                    };
-                    if let Some(cap) = line_pattern_cap {
+                    // The gradient variant keeps its ramp in the image slot,
+                    // so the dash atlas takes the second.
+                    let dash_texture_id =
+                        if line_type == LineType::GradientSdf { ID_LINE_DASH_TEXTURE } else { ID_LINE_IMAGE_TEXTURE };
+                    let tile_ratio = |scale: f32| 1.0 / tile_id.pixels_to_tile_units(scale, f32::from(int_zoom));
+                    let sdf = if let Some(atlas) = binders.line_dasharray.atlas() {
+                        // The vertices hold the patterns' places in the
+                        // bucket's atlas, the drawable's texture. Both
+                        // samples are of the pattern at this zoom, at the
+                        // cross-fade's two scales, as for a constant pattern
+                        // that doesn't change with the zoom.
+                        let atlas_size = atlas.image().size;
+                        let min_scale = crossfade.from_scale.min(crossfade.to_scale);
+                        Some(SdfPatterns {
+                            patternscale_a: [tile_ratio(crossfade.from_scale), 0.0],
+                            patternscale_b: [tile_ratio(crossfade.to_scale), 0.0],
+                            tex_y_a: 0.0,
+                            tex_y_b: 0.0,
+                            atlas_height: atlas_size.height as f32,
+                            sdfgamma: atlas_size.width as f32 / (min_scale * 256.0 * parameters.pixel_ratio) / 2.0,
+                        })
+                    } else if let Some(crate::drawable::DrawableData::Line(data)) = drawable.data {
                         let mut line_atlas = parameters.line_atlas.borrow_mut();
                         let dash_pattern_texture = line_atlas.get_dash_pattern_texture(
                             evaluated.line_dasharray.faded().from,
                             evaluated.line_dasharray.faded().to,
-                            cap,
+                            data.line_pattern_cap,
                         );
 
-                        // The gradient variant keeps its ramp in the image
-                        // slot, so the dash atlas takes the second.
-                        let dash_texture_id = if line_type == LineType::GradientSdf {
-                            ID_LINE_DASH_TEXTURE
-                        } else {
-                            ID_LINE_IMAGE_TEXTURE
-                        };
                         if drawable.textures[dash_texture_id].as_ref().is_none() {
                             let texture = dash_pattern_texture.get_texture();
                             drawable.enabled = texture.is_some();
@@ -319,19 +341,29 @@ impl LayerTweaker for LineLayerTweaker {
                         let pos_b = dash_pattern_texture.get_to();
                         let width_a = pos_a.width * crossfade.from_scale;
                         let width_b = pos_b.width * crossfade.to_scale;
-
-                        drawable_ubo_vector[i as usize].set(&LineSDFDrawableUBO {
-                            matrix: cast_matrix(&matrix),
-                            patternscale_a: [
-                                1.0 / tile_id.pixels_to_tile_units(width_a, f32::from(int_zoom)),
-                                -pos_a.height / 2.0,
-                            ],
-                            patternscale_b: [
-                                1.0 / tile_id.pixels_to_tile_units(width_b, f32::from(int_zoom)),
-                                -pos_b.height / 2.0,
-                            ],
+                        // std::min(widthA, widthB)
+                        let min_width = if width_b < width_a { width_b } else { width_a };
+                        Some(SdfPatterns {
+                            patternscale_a: [tile_ratio(width_a), -pos_a.height / 2.0],
+                            patternscale_b: [tile_ratio(width_b), -pos_b.height / 2.0],
                             tex_y_a: pos_a.y,
                             tex_y_b: pos_b.y,
+                            atlas_height: 0.0,
+                            sdfgamma: dash_pattern_texture.get_size().width as f32
+                                / (min_width * 256.0 * parameters.pixel_ratio)
+                                / 2.0,
+                        })
+                    } else {
+                        None
+                    };
+
+                    if let Some(sdf) = sdf {
+                        drawable_ubo_vector[i as usize].set(&LineSDFDrawableUBO {
+                            matrix: cast_matrix(&matrix),
+                            patternscale_a: sdf.patternscale_a,
+                            patternscale_b: sdf.patternscale_b,
+                            tex_y_a: sdf.tex_y_a,
+                            tex_y_b: sdf.tex_y_b,
                             ratio: pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom),
 
                             color_t: binders.line_color.interpolation_factor(zoom),
@@ -341,16 +373,12 @@ impl LayerTweaker for LineLayerTweaker {
                             offset_t: binders.line_offset.interpolation_factor(zoom),
                             width_t: binders.line_width.interpolation_factor(zoom),
                             floorwidth_t: binders.line_floor_width.interpolation_factor(zoom),
-                            pad1: 0.0,
+                            atlas_height: sdf.atlas_height,
                             pad2: 0.0,
                         });
 
-                        // std::min(widthA, widthB)
-                        let min_width = if width_b < width_a { width_b } else { width_a };
                         tile_props_ubo_vector[i as usize].set(&LineSDFTilePropsUBO {
-                            sdfgamma: dash_pattern_texture.get_size().width as f32
-                                / (min_width * 256.0 * parameters.pixel_ratio)
-                                / 2.0,
+                            sdfgamma: sdf.sdfgamma,
                             mix: crossfade.t,
                             pad1: 0.0,
                             pad2: 0.0,

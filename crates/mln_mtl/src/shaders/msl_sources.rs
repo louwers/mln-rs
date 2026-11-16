@@ -4440,7 +4440,7 @@ struct alignas(16) LineSDFDrawableUBO {
     /* 108 */ float offset_t;
     /* 112 */ float width_t;
     /* 116 */ float floorwidth_t;
-    /* 120 */ float pad1;
+    /* 120 */ float atlas_height;
     /* 124 */ float pad2;
     /* 128 */
 };
@@ -4531,6 +4531,9 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_floorwidth)
     float2 floorwidth [[attribute(7)]];
 #endif
+#if !defined(HAS_UNIFORM_u_dasharray)
+    float4 dasharray [[attribute(8)]];
+#endif
 };
 
 struct FragmentStage {
@@ -4553,6 +4556,9 @@ struct FragmentStage {
 #endif
 #if !defined(HAS_UNIFORM_u_floorwidth)
     float floorwidth;
+#endif
+#if !defined(HAS_UNIFORM_u_dasharray)
+    float dash_width [[flat]];
 #endif
 };
 
@@ -4641,6 +4647,20 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float extrude_length_without_perspective = length(dist);
     const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
 
+#if defined(HAS_UNIFORM_u_dasharray)
+    const float2 patternscale_a = drawable.patternscale_a;
+    const float2 patternscale_b = drawable.patternscale_b;
+    const float tex_y_a = drawable.tex_y_a;
+    const float tex_y_b = drawable.tex_y_b;
+#else
+    // The feature's pattern in the bucket's atlas: its middle row, its rows
+    // and its length.
+    const float2 patternscale_a = float2(drawable.patternscale_a.x / vertx.dasharray.z, -vertx.dasharray.y / 2.0 / drawable.atlas_height);
+    const float2 patternscale_b = float2(drawable.patternscale_b.x / vertx.dasharray.z, patternscale_a.y);
+    const float tex_y_a = (vertx.dasharray.x + 0.5) / drawable.atlas_height;
+    const float tex_y_b = tex_y_a;
+#endif
+
     return {
         .position     = position,
 #if defined(PROJECTION_GLOBE)
@@ -4648,8 +4668,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
         .width2       = float2(outset, inset),
         .normal       = v_normal,
-        .tex_a        = float2(linesofar * drawable.patternscale_a.x / floorwidth, v_normal.y * drawable.patternscale_a.y + drawable.tex_y_a),
-        .tex_b        = float2(linesofar * drawable.patternscale_b.x / floorwidth, v_normal.y * drawable.patternscale_b.y + drawable.tex_y_b),
+        .tex_a        = float2(linesofar * patternscale_a.x / floorwidth, v_normal.y * patternscale_a.y + tex_y_a),
+        .tex_b        = float2(linesofar * patternscale_b.x / floorwidth, v_normal.y * patternscale_b.y + tex_y_b),
         .gamma_scale  = half(extrude_length_without_perspective / extrude_length_with_perspective),
         .lineprogress = v_lineprogress,
 
@@ -4661,6 +4681,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
 #if !defined(HAS_UNIFORM_u_floorwidth)
         .floorwidth   = floorwidth,
+#endif
+#if !defined(HAS_UNIFORM_u_dasharray)
+        .dash_width   = vertx.dasharray.z,
 #endif
     };
 }
@@ -4718,8 +4741,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float sdfdist_a = dashTexture.sample(dashSampler, in.tex_a).a;
     const float sdfdist_b = dashTexture.sample(dashSampler, in.tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
+#if defined(HAS_UNIFORM_u_dasharray)
+    const float sdfgamma = tileProps.sdfgamma;
+#else
+    const float sdfgamma = tileProps.sdfgamma / in.dash_width;
+#endif
     const float alpha = clamp(min(dist - (in.width2.y - blur2), in.width2.x - dist) / blur2, 0.0, 1.0) *
-                        smoothstep(0.5 - tileProps.sdfgamma / floorwidth, 0.5 + tileProps.sdfgamma / floorwidth, sdfdist);
+                        smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     // The gradient ramp is stored in a texture indexed by the ratio along the entire line.
     const float4 color = gradientTexture.sample(gradientSampler, float2(in.lineprogress, 0.5));
@@ -5610,7 +5638,7 @@ struct alignas(16) LineSDFDrawableUBO {
     /* 108 */ float offset_t;
     /* 112 */ float width_t;
     /* 116 */ float floorwidth_t;
-    /* 120 */ float pad1;
+    /* 120 */ float atlas_height;
     /* 124 */ float pad2;
     /* 128 */
 };
@@ -5704,6 +5732,9 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_floorwidth)
     float2 floorwidth [[attribute(8)]];
 #endif
+#if !defined(HAS_UNIFORM_u_dasharray)
+    float4 dasharray [[attribute(9)]];
+#endif
 };
 
 struct FragmentStage {
@@ -5728,6 +5759,9 @@ struct FragmentStage {
 #endif
 #if !defined(HAS_UNIFORM_u_floorwidth)
     float floorwidth;
+#endif
+#if !defined(HAS_UNIFORM_u_dasharray)
+    float dash_width [[flat]];
 #endif
 };
 
@@ -5815,6 +5849,20 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float extrude_length_without_perspective = length(dist);
     const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
 
+#if defined(HAS_UNIFORM_u_dasharray)
+    const float2 patternscale_a = drawable.patternscale_a;
+    const float2 patternscale_b = drawable.patternscale_b;
+    const float tex_y_a = drawable.tex_y_a;
+    const float tex_y_b = drawable.tex_y_b;
+#else
+    // The feature's pattern in the bucket's atlas: its middle row, its rows
+    // and its length.
+    const float2 patternscale_a = float2(drawable.patternscale_a.x / vertx.dasharray.z, -vertx.dasharray.y / 2.0 / drawable.atlas_height);
+    const float2 patternscale_b = float2(drawable.patternscale_b.x / vertx.dasharray.z, patternscale_a.y);
+    const float tex_y_a = (vertx.dasharray.x + 0.5) / drawable.atlas_height;
+    const float tex_y_b = tex_y_a;
+#endif
+
     return {
         .position     = position,
 #if defined(PROJECTION_GLOBE)
@@ -5823,8 +5871,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .width2       = float2(outset, inset),
         .normal       = v_normal,
         .gamma_scale  = half(extrude_length_without_perspective / extrude_length_with_perspective),
-        .tex_a        = float2(linesofar * drawable.patternscale_a.x / floorwidth, v_normal.y * drawable.patternscale_a.y + drawable.tex_y_a),
-        .tex_b        = float2(linesofar * drawable.patternscale_b.x / floorwidth, v_normal.y * drawable.patternscale_b.y + drawable.tex_y_b),
+        .tex_a        = float2(linesofar * patternscale_a.x / floorwidth, v_normal.y * patternscale_a.y + tex_y_a),
+        .tex_b        = float2(linesofar * patternscale_b.x / floorwidth, v_normal.y * patternscale_b.y + tex_y_b),
 
 #if !defined(HAS_UNIFORM_u_color)
         .color        = unpack_mix_color(vertx.color, drawable.color_t),
@@ -5837,6 +5885,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
 #if !defined(HAS_UNIFORM_u_floorwidth)
         .floorwidth   = floorwidth,
+#endif
+#if !defined(HAS_UNIFORM_u_dasharray)
+        .dash_width   = vertx.dasharray.z,
 #endif
     };
 }
@@ -5900,8 +5951,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float sdfdist_a = image0.sample(image0_sampler, in.tex_a).a;
     const float sdfdist_b = image0.sample(image0_sampler, in.tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
+#if defined(HAS_UNIFORM_u_dasharray)
+    const float sdfgamma = tileProps.sdfgamma;
+#else
+    const float sdfgamma = tileProps.sdfgamma / in.dash_width;
+#endif
     const float alpha = clamp(min(dist - (in.width2.y - blur2), in.width2.x - dist) / blur2, 0.0, 1.0) *
-                        smoothstep(0.5 - tileProps.sdfgamma / floorwidth, 0.5 + tileProps.sdfgamma / floorwidth, sdfdist);
+                        smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     return half4(color * (alpha * opacity));
 }

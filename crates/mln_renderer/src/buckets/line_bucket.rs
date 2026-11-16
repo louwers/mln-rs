@@ -25,7 +25,7 @@ use crate::bucket_geometry::GeometryVec;
 use crate::gfx::context::Context;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
-use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
+use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, DashArrayBinder, PaintPropertyBinder};
 use crate::util::subdivision::subdivide_vertex_line;
 
 crate::paint_property_binders!(
@@ -38,6 +38,7 @@ crate::paint_property_binders!(
         line_opacity => PaintPropertyBinder<f32>,
         line_pattern => CrossFadedPaintPropertyBinder<Image>,
         line_width => PaintPropertyBinder<f32>,
+        line_dasharray => DashArrayBinder,
     }
 );
 
@@ -84,9 +85,11 @@ impl LineBucket {
     ) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
-            paint_property_binders
-                .entry(id.clone())
-                .or_insert_with(|| RwLock::new(LineBinders::new(&properties.paint, zoom)));
+            paint_property_binders.entry(id.clone()).or_insert_with(|| {
+                let mut binders = LineBinders::new(&properties.paint, zoom);
+                binders.line_dasharray.set_line_cap(&layout.line_cap);
+                RwLock::new(binders)
+            });
         }
         LineBucket {
             base: BucketBase::default(),

@@ -209,7 +209,12 @@ impl Context {
 
     /// A texture without a size, made by its first upload or `create`.
     pub(crate) fn create_texture_2d(&self) -> Texture2DPtr {
-        Rc::new(RefCell::new(Texture2D::new(Rc::clone(&self.released))))
+        Rc::new(RefCell::new(self.texture_2d()))
+    }
+
+    /// A texture to set up before it is shared.
+    pub(crate) fn texture_2d(&self) -> Texture2D {
+        Texture2D::new(Rc::clone(&self.released))
     }
 
     /// The sampler of `state`, made through `gpu`, the context's, on first
