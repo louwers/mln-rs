@@ -13,11 +13,9 @@ use mln_style::sources::custom_geometry_source::{self, TileOptions};
 use mln_style::sources::geojson_source::GeoJSONData;
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::{
-    CustomGeometrySource, CustomVectorSource, GeoJSONOptions, GeoJSONSource, TileDataFormat, TileSource,
-    custom_vector_source,
+    CustomGeometrySource, CustomVectorSource, GeoJSONOptions, GeoJSONSource, TileDataFormat, custom_vector_source,
 };
 use mln_style::{Edit, TransitionOptions};
-use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
@@ -376,16 +374,20 @@ fn require_new_source(map: &mln_map::Map, id: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn source_kind(source: &dyn Source) -> SourceKind {
-    match source.get_type() {
-        SourceType::Vector => SourceKind::Vector,
-        SourceType::Raster => SourceKind::Raster,
-        SourceType::RasterDEM => SourceKind::RasterDem,
-        SourceType::GeoJSON => SourceKind::GeoJson,
-        SourceType::Image => SourceKind::Image,
-        SourceType::CustomVector => SourceKind::CustomGeometry,
-        SourceType::CustomMVTVector => SourceKind::CustomVector,
-    }
+/// The runtime's kind of a source of the type `name`, the one place that
+/// maps source types to [`SourceKind`]. `None` for a type the runtime
+/// doesn't name.
+fn source_kind(name: &str) -> Option<SourceKind> {
+    Some(match name {
+        "vector" => SourceKind::Vector,
+        "raster" => SourceKind::Raster,
+        "raster-dem" => SourceKind::RasterDem,
+        "geojson" => SourceKind::GeoJson,
+        "image" => SourceKind::Image,
+        "custom-geometry" => SourceKind::CustomGeometry,
+        "custom-vector" => SourceKind::CustomVector,
+        _ => return None,
+    })
 }
 
 /// The `clusterProperties` of `options` as a JSON object.
@@ -404,44 +406,30 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
     Some(serde_json::Value::Object(members).to_string())
 }
 
-fn source_info(source: &dyn Source) -> SourceInfo {
-    let kind = source_kind(source);
-    let any: &dyn Any = source;
-    let url = if let Some(tiles) = any.downcast_ref::<TileSource>() {
-        tiles.get_url()
-    } else if let Some(geojson) = any.downcast_ref::<GeoJSONSource>() {
-        geojson.get_url()
-    } else {
-        any.downcast_ref::<ImageSource>().and_then(ImageSource::get_url)
-    };
-    let geojson =
-        any.downcast_ref::<GeoJSONSource>().map(|geojson| GeoJsonSourceOptions::from_core(&geojson.get_options()));
-    let mut info = SourceInfo {
-        id: source.get_id(),
+/// What the API reports about `source`, a source handle; `None` for a
+/// source of a type the runtime doesn't name.
+fn source_info(source: &dyn Source) -> Option<SourceInfo> {
+    let record = source.base_impl();
+    let kind = source_kind(record.info().name)?;
+    let summary = record.summary();
+    Some(SourceInfo {
+        id: record.id().to_owned(),
         kind,
-        is_volatile: source.is_volatile(),
-        attribution: source.get_attribution().filter(|attribution| !attribution.is_empty()),
-        url,
-        tiles: None,
-        tile_size: None,
-        vector_encoding: None,
-        geojson,
-    };
-    if let Some(tile_source) = any.downcast_ref::<TileSource>() {
-        info.tile_size = Some(tile_source.get_tile_size());
-        info.vector_encoding = (kind == SourceKind::Vector).then(|| tile_source.get_vector_encoding());
-        if let Some(tileset) = tile_source.inline_tileset() {
-            info.tiles = Some(SourceTiles {
-                urls: tileset.tiles,
-                zoom_range: tileset.zoom_range,
-                scheme: tileset.scheme,
-                bounds: tileset.bounds,
-                vector_encoding: tileset.vector_encoding,
-                raster_encoding: tileset.raster_encoding,
-            });
-        }
-    }
-    info
+        is_volatile: record.common().is_volatile(),
+        attribution: record.get_attribution().filter(|attribution| !attribution.is_empty()),
+        url: summary.url,
+        tiles: summary.inline_tileset.map(|tileset| SourceTiles {
+            urls: tileset.tiles,
+            zoom_range: tileset.zoom_range,
+            scheme: tileset.scheme,
+            bounds: tileset.bounds,
+            vector_encoding: tileset.vector_encoding,
+            raster_encoding: tileset.raster_encoding,
+        }),
+        tile_size: summary.tile_size,
+        vector_encoding: summary.vector_encoding,
+        geojson: summary.geojson.map(|options| GeoJsonSourceOptions::from_core(&options)),
+    })
 }
 
 fn layer_info(layer: &mln_style::Layer) -> LayerInfo {
@@ -521,12 +509,12 @@ impl Map {
     /// A source of the style, or `None` when the style has no such source.
     pub fn style_source(&self, source_id: impl Into<String>) -> Result<Completion<Option<SourceInfo>>, Error> {
         let source_id = source_id.into();
-        self.query(move |map| Ok(map.source(&source_id).map(source_info)))
+        self.query(move |map| Ok(map.source(&source_id).and_then(source_info)))
     }
 
     /// The style's sources, in style order.
     pub fn style_sources(&self) -> Result<Completion<Vec<SourceInfo>>, Error> {
-        self.query(|map| Ok(map.sources().map(source_info).collect()))
+        self.query(|map| Ok(map.sources().filter_map(source_info).collect()))
     }
 
     /// Sets whether a source keeps its tiles out of the persistent cache.

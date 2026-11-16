@@ -23,8 +23,7 @@ use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
 use mln_style::StyleRegistry;
 use mln_style::parser::Parser;
-use mln_style::sources::image_source::ImageSource;
-use mln_style::sources::{GeoJSONSource, TileSource};
+use mln_style::source_type::OfflineResources;
 use mln_style_types::SourceType;
 use mln_text::glyph::{
     GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, GlyphID, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
@@ -196,7 +195,7 @@ enum Then {
     /// The style, which lists the sources, glyphs and sprites.
     Style,
     /// A source's TileJSON, which lists its tiles.
-    Source { url: String, type_: SourceType, tile_source: Box<TileSource> },
+    Source { url: String, source: mln_style::Source, tile_size: u16 },
 }
 
 impl Then {
@@ -333,58 +332,35 @@ impl OfflineDownload {
         result.required_resource_count_is_precise = true;
 
         for source in &parser.sources {
-            let type_ = source.get_type();
-
-            let mut handle_tiled_source = |tile_source: &TileSource| {
-                let tileset = match tile_source.get_url() {
-                    // A source without tile URLs has no tiles to download.
-                    None => tile_source.inline_tileset(),
-                    Some(url) => {
-                        result.required_resource_count += 1;
-                        let source_response = db.get(&Resource::source(&url));
-                        let tileset = source_response
-                            .and_then(|response| response.data)
-                            .and_then(|data| tile_source.tileset_with_tilejson(&data).ok());
-                        // As a download does, count no tiles for a TileJSON that
-                        // is missing, can't be read, or has no tile URLs, and
-                        // leave the count imprecise.
-                        if tileset.as_ref().is_none_or(|tileset| tileset.tiles.is_empty()) {
-                            result.required_resource_count_is_precise = false;
-                        }
-                        tileset
+            let record = source.base_impl();
+            let type_ = record.get_type();
+            let (tileset, tile_size) = match record.data().offline() {
+                OfflineResources::None => continue,
+                OfflineResources::Source { .. } | OfflineResources::Image { .. } => {
+                    result.required_resource_count += 1;
+                    continue;
+                }
+                // A source without tile URLs has no tiles to download.
+                OfflineResources::Tiles { tileset, tile_size } => (Some(tileset), tile_size),
+                OfflineResources::TileJson { url, tile_size } => {
+                    result.required_resource_count += 1;
+                    let source_response = db.get(&Resource::source(&url));
+                    let tileset = source_response
+                        .and_then(|response| response.data)
+                        .and_then(|data| record.data().offline_tileset(&data).ok());
+                    // As a download does, count no tiles for a TileJSON that
+                    // is missing, can't be read, or has no tile URLs, and
+                    // leave the count imprecise.
+                    if tileset.as_ref().is_none_or(|tileset| tileset.tiles.is_empty()) {
+                        result.required_resource_count_is_precise = false;
                     }
-                };
-                if let Some(tileset) = tileset.filter(|tileset| !tileset.tiles.is_empty()) {
-                    let count = tile_count(&self.definition, type_, tile_source.get_tile_size(), tileset.zoom_range);
-                    result.required_tile_count += count;
-                    result.required_resource_count += count;
+                    (tileset, tile_size)
                 }
             };
-
-            match type_ {
-                SourceType::Vector | SourceType::Raster | SourceType::RasterDEM => {
-                    if let Some(tile_source) = source.downcast_ref::<TileSource>() {
-                        handle_tiled_source(tile_source);
-                    }
-                }
-
-                SourceType::GeoJSON => {
-                    if let Some(geojson_source) = source.downcast_ref::<GeoJSONSource>()
-                        && geojson_source.get_url().is_some()
-                    {
-                        result.required_resource_count += 1;
-                    }
-                }
-
-                SourceType::Image => {
-                    if let Some(image_source) = source.downcast_ref::<ImageSource>()
-                        && image_source.get_url().is_some()
-                    {
-                        result.required_resource_count += 1;
-                    }
-                }
-
-                SourceType::CustomVector | SourceType::CustomMVTVector => {}
+            if let Some(tileset) = tileset.filter(|tileset| !tileset.tiles.is_empty()) {
+                let count = tile_count(&self.definition, type_, tile_size, tileset.zoom_range);
+                result.required_tile_count += count;
+                result.required_resource_count += count;
             }
         }
 
@@ -421,15 +397,15 @@ impl OfflineDownload {
         match then {
             Then::Nothing => Ok(()),
             Then::Style => self.on_style_response(response),
-            Then::Source { url, type_, tile_source } => {
+            Then::Source { url, source, tile_size } => {
                 let Some(data) = &response.data else {
                     return Err("the TileJSON has no content".to_owned());
                 };
-                let tileset = tile_source.tileset_with_tilejson(data)?;
+                let tileset = source.data().offline_tileset(data)?;
                 if tileset.tiles.is_empty() {
                     return Err("the TileJSON has no tile URLs".to_owned());
                 }
-                self.queue_tiles(*type_, tile_source.get_tile_size(), &tileset);
+                self.queue_tiles(source.get_type(), *tile_size, &tileset);
                 if self.required_source_urls.remove(url) && self.required_source_urls.is_empty() {
                     self.status.required_resource_count_is_precise = true;
                 }
@@ -448,48 +424,28 @@ impl OfflineDownload {
         self.status.required_resource_count_is_precise = true;
 
         for source in &parser.sources {
-            let type_ = source.get_type();
-            match type_ {
-                SourceType::Vector | SourceType::Raster | SourceType::RasterDEM => {
-                    let Some(tile_source) = source.downcast_ref::<TileSource>() else { continue };
-                    match tile_source.get_url() {
-                        None => {
-                            if let Some(tileset) = tile_source.inline_tileset() {
-                                self.queue_tiles(type_, tile_source.get_tile_size(), &tileset);
-                            }
-                        }
-                        Some(url) => {
-                            self.status.required_resource_count_is_precise = false;
-                            self.status.required_resource_count += 1;
-                            self.required_source_urls.insert(url.clone());
+            let record = source.base_impl();
+            match record.data().offline() {
+                OfflineResources::None => {}
+                OfflineResources::Tiles { tileset, tile_size } => {
+                    self.queue_tiles(record.get_type(), tile_size, &tileset);
+                }
+                OfflineResources::TileJson { url, tile_size } => {
+                    self.status.required_resource_count_is_precise = false;
+                    self.status.required_resource_count += 1;
+                    self.required_source_urls.insert(url.clone());
 
-                            let mut source_resource = Resource::source(&url);
-                            source_resource.set_priority(Priority::Low);
-                            source_resource.set_usage(Usage::Offline);
-                            let then = Then::Source { url, type_, tile_source: Box::new(tile_source.clone()) };
-                            self.ensure_resource(source_resource, then);
-                        }
+                    let mut source_resource = Resource::source(&url);
+                    source_resource.set_priority(Priority::Low);
+                    source_resource.set_usage(Usage::Offline);
+                    self.ensure_resource(source_resource, Then::Source { url, source: record, tile_size });
+                }
+                OfflineResources::Source { url } => self.queue_resource(Resource::source(&url)),
+                OfflineResources::Image { url } => {
+                    if !url.is_empty() {
+                        self.queue_resource(Resource::image(&url));
                     }
                 }
-
-                SourceType::GeoJSON => {
-                    if let Some(geojson_source) = source.downcast_ref::<GeoJSONSource>()
-                        && let Some(url) = geojson_source.get_url()
-                    {
-                        self.queue_resource(Resource::source(&url));
-                    }
-                }
-
-                SourceType::Image => {
-                    if let Some(image_source) = source.downcast_ref::<ImageSource>()
-                        && let Some(image_url) = image_source.get_url()
-                        && !image_url.is_empty()
-                    {
-                        self.queue_resource(Resource::image(&image_url));
-                    }
-                }
-
-                SourceType::CustomVector | SourceType::CustomMVTVector => {}
             }
         }
 

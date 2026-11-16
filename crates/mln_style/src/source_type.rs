@@ -66,12 +66,12 @@ pub enum OfflineResources {
     /// The tiles of a tileset that's known without a fetch, of tiles
     /// `tile_size` pixels wide.
     Tiles { tileset: Tileset, tile_size: u16 },
-    /// The TileJSON at `url`, then the tiles of the tileset that
-    /// [`ErasedSource::offline_tileset`] makes of it.
-    TileJson { url: String },
+    /// The TileJSON at `url`, then the tiles, `tile_size` pixels wide, of
+    /// the tileset that [`ErasedSource::offline_tileset`] makes of it.
+    TileJson { url: String, tile_size: u16 },
     /// The source's data at `url`: GeoJSON.
     Source { url: String },
-    /// The source's image at `url`.
+    /// The source's image at `url`, which is nothing to fetch if empty.
     Image { url: String },
 }
 

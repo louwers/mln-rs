@@ -148,7 +148,7 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
     fn offline(source: &SourceData<Self>) -> OfflineResources {
         let options = &source.options;
         match &options.url {
-            Some(url) => OfflineResources::TileJson { url: url.clone() },
+            Some(url) => OfflineResources::TileJson { url: url.clone(), tile_size: options.tile_size },
             None => match options.inline_tileset() {
                 Some(tileset) => OfflineResources::Tiles { tileset, tile_size: options.tile_size },
                 None => OfflineResources::None,

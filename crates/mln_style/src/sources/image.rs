@@ -46,8 +46,8 @@ impl StyleSourceType for ImageSourceType {
 
     fn offline(source: &SourceData<Self>) -> OfflineResources {
         match &source.options.url {
-            Some(url) if !url.is_empty() => OfflineResources::Image { url: url.clone() },
-            _ => OfflineResources::None,
+            Some(url) => OfflineResources::Image { url: url.clone() },
+            None => OfflineResources::None,
         }
     }
 }
