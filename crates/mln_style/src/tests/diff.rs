@@ -68,23 +68,25 @@ fn compare() {
     assert!(!changes.order_changed);
 }
 
-// Order change shows up as add and remove
+// An order change only changes the order: C++ and GL JS's diff show it as an
+// addition and a removal.
 // gtest: StyleDiff.Order
 #[test]
 fn order() {
     let (l1, l2) = (new_layer("background", "id-1", "src-1"), new_layer("background", "id-2", "src-2"));
     let changes = LayerChanges::between(&list(&[&l1, &l2]), &list(&[&l2, &l1]));
-    let replaced: Vec<_> = changes.iter().filter(|(_, change)| *change == LayerChange::Replaced).collect();
-    assert_eq!(1, replaced.len());
-    assert_eq!(2, changes.iter().count() + 1);
+    assert!(changes.is_empty());
     assert!(changes.order_changed);
 }
 
 #[test]
-fn a_layer_moved_past_others_is_the_one_replaced() {
-    let layers: Vec<Layer> = ["a", "b", "c", "d"].map(|id| new_layer("background", id, "")).into();
-    let [a, b, c, d] = [&layers[0], &layers[1], &layers[2], &layers[3]];
-    assert_eq!(changes(&[a, b, c, d], &[b, c, d, a]), [("a".to_owned(), LayerChange::Replaced)]);
+fn a_moved_layer_that_changed_keeps_its_class() {
+    let (a, b) = (new_layer("line", "a", "s"), new_layer("line", "b", "s"));
+    let wider = changed(a.clone(), "line-width", r#"["get", "width"]"#);
+    let changes = LayerChanges::between(&list(&[&a, &b]), &list(&[&b, &wider]));
+    assert_eq!(Some(LayerChange::Relaid), changes.get("a"));
+    assert_eq!(None, changes.get("b"));
+    assert!(changes.order_changed);
 }
 
 #[test]

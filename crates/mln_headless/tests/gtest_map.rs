@@ -3327,6 +3327,69 @@ fn globe_hand_off_keeps_tiles() {
     );
 }
 
+/// A style of the water tiles: a background, then the water as a fill and as
+/// a wide line, in `order`.
+fn water_layers_in(order: [&str; 2]) -> String {
+    let layer = |id: &str| match id {
+        "fill" => json!({"id": "fill", "type": "fill", "source": "mapbox", "source-layer": "water",
+            "paint": {"fill-color": "blue"}}),
+        _ => json!({"id": "line", "type": "line", "source": "mapbox", "source-layer": "water",
+            "paint": {"line-color": "red", "line-width": 12}}),
+    };
+    json!({
+        "version": 8,
+        "sources": {"mapbox": {"type": "vector", "tiles": ["asset://streets/{z}-{x}-{y}.vector.pbf"]}},
+        "layers": [{"id": "background", "type": "background", "paint": {"background-color": "white"}},
+            layer(order[0]), layer(order[1])],
+    })
+    .to_string()
+}
+
+#[test]
+fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
+    let run_loop = RunLoop::new();
+    let parses = Rc::new(Cell::new(0));
+    let observer = Rc::new(StubMapObserver::default());
+    {
+        let parses = Rc::clone(&parses);
+        observer.on_tile_action_callback.set(move |(op, _, _)| {
+            if op == TileOperation::StartParse {
+                parses.set(parses.get() + 1);
+            }
+        });
+    }
+    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop).expect("a headless frontend");
+    let asset_path = cpp_root().join("test/fixtures/api/assets");
+    let file_source: Arc<dyn FileSource> = Arc::new(Loader::new(&ResourceOptions {
+        asset_path: asset_path.to_str().expect("asset path").to_owned(),
+        ..ResourceOptions::default()
+    }));
+    let options = MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() };
+    let camera = CameraOptions { center: Some(ll(37.8, -122.5)), zoom: Some(10.0), ..Default::default() };
+    let mut render = |map: &mut Map| {
+        let result = frontend.render(map).unwrap_or_else(|e| panic!("render: {e}"));
+        map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
+        result.image
+    };
+
+    let mut map = Map::with_file_source(Arc::clone(&file_source), options, &run_loop).unwrap();
+    map.style_mut().load_json(&water_layers_in(["fill", "line"]));
+    map.jump_to(&camera);
+    let before = render(&mut map);
+    assert!(parses.get() > 0);
+
+    parses.set(0);
+    map.style_mut().move_layer("line", Some("fill")).unwrap();
+    let moved = render(&mut map);
+    assert_eq!(0, parses.get(), "moving a layer laid its tiles out again");
+    assert_ne!(before, moved);
+
+    let mut reordered = Map::with_file_source(file_source, options, &run_loop).unwrap();
+    reordered.style_mut().load_json(&water_layers_in(["line", "fill"]));
+    reordered.jump_to(&camera);
+    assert_eq!(render(&mut reordered), moved);
+}
+
 // gtest: Map.GlobeKeepsItsTilesAcrossTheAntimeridian
 #[test]
 fn globe_keeps_its_tiles_across_the_antimeridian() {
