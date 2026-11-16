@@ -6,6 +6,9 @@ doc-valid-idents = [
   "FastPFOR",
   "FreeType",
   "GeoJSON",
+  "GLib",
+  "GObject",
+  "GStreamer",
   "HarfBuzz",
   "HarfRust",
   "IOSurface",
@@ -20,6 +23,7 @@ doc-valid-idents = [
   "SwiftShader",
   "TileJSON",
   "TinySDF",
+  "WebM",
   "ZigZag",
 ]
 

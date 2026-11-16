@@ -21,5 +21,9 @@ mln_storage.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true
 
+# GStreamer, loaded at run time.
+[target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))'.dependencies]
+libloading.workspace = true
+
 [lints]
 workspace = true

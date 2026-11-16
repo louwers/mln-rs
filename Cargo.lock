@@ -3246,6 +3246,7 @@ dependencies = [
 name = "mln-rs-video"
 version = "0.0.12"
 dependencies = [
+ "libloading",
  "mln-rs-gfx",
  "mln-rs-storage",
  "mln-rs-util",

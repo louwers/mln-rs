@@ -10,6 +10,8 @@
 //! bring its own.
 
 mod bytes;
+#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))]
+mod gstreamer;
 mod player;
 mod slot;
 
@@ -22,9 +24,14 @@ pub use mln_gfx::video::{
 pub use player::{NoPlayers, OpenRequest, VideoPlayer, VideoPlayers};
 pub use slot::{FrameSink, FrameSlot, Newest};
 
-/// The players of the platform the library runs on. A platform without one
-/// fails to open each video, saying so.
+/// The players of the platform the library runs on: GStreamer's on Linux and
+/// the BSDs, which fail to open each video, saying so, where GStreamer 1.x
+/// isn't installed. A platform without players fails to open each video
+/// too.
 #[must_use]
 pub fn platform_players() -> Arc<dyn VideoPlayers> {
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm")))]
+    return Arc::new(gstreamer::GstreamerPlayers);
+    #[cfg(not(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_family = "wasm"))))]
     Arc::new(NoPlayers)
 }
