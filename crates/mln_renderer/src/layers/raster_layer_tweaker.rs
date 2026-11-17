@@ -109,7 +109,7 @@ impl LayerTweaker for RasterLayerTweaker {
                 TranslateAnchorType::Viewport,
                 false,
                 false,
-                drawable,
+                drawable.origin,
                 !parameters.state.is_changing(),
             );
 

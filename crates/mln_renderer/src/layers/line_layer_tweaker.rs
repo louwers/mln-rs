@@ -144,7 +144,7 @@ impl LayerTweaker for LineLayerTweaker {
         layer_group.visit_drawables(|drawable| {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
-            let shader = drawable.shader().cloned();
+            let shader = drawable.objects.shader().cloned();
             let Some(tile_id) = drawable.tile_id else {
                 return;
             };
@@ -176,7 +176,7 @@ impl LayerTweaker for LineLayerTweaker {
                 *anchor.uniform(),
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
-                drawable,
+                drawable.origin,
                 false,
             );
             let matrix = projection.fallback_matrix;
@@ -215,7 +215,7 @@ impl LayerTweaker for LineLayerTweaker {
 
                 Some(LineType::Pattern) => {
                     let mut texture_size = Size::new(0, 0);
-                    if let Some(texture) = drawable.textures[ID_LINE_IMAGE_TEXTURE].as_ref() {
+                    if let Some(texture) = drawable.objects.textures[ID_LINE_IMAGE_TEXTURE].as_ref() {
                         texture_size = texture.borrow().size();
                     }
                     drawable_ubo_vector[i as usize].set(&LinePatternDrawableUBO {
@@ -278,11 +278,11 @@ impl LayerTweaker for LineLayerTweaker {
                             data.line_pattern_cap,
                         );
 
-                        if drawable.textures[dash_texture_id].as_ref().is_none() {
+                        if drawable.objects.textures[dash_texture_id].as_ref().is_none() {
                             let texture = dash_pattern_texture.get_texture();
                             drawable.enabled = texture.is_some();
                             if let Some(texture) = texture {
-                                drawable.set_texture(Some(texture), dash_texture_id);
+                                drawable.objects.set_texture(Some(texture), dash_texture_id);
                             }
                         }
 

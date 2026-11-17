@@ -10,6 +10,7 @@ mod bucket_geometry;
 mod bucket_parameters;
 mod buckets;
 mod clip_masks;
+mod draw;
 mod draw_cache;
 mod drawable;
 mod drawable_builder;

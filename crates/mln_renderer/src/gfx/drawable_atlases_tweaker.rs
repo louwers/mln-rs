@@ -4,12 +4,12 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style_types::AlignmentType;
 
-use crate::drawable::Drawable;
+use crate::draw::DrawObjects;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_render_data::TileAtlasTextures;
 
-/// Gives a symbol drawable the textures of its tile's glyph and icon
-/// atlases, which change after the drawable is made.
+/// Gives a draw the textures of its tile's glyph and icon atlases, which
+/// change after the draw is made.
 pub(crate) struct DrawableAtlasesTweaker {
     atlases: Option<Rc<TileAtlasTextures>>,
     icon_texture_id: Option<usize>,
@@ -47,8 +47,8 @@ impl DrawableAtlasesTweaker {
         }
     }
 
-    fn setup_textures(&self, drawable: &mut Drawable, linear_filter_for_icons: bool) {
-        let Some(shader) = drawable.shader().cloned() else {
+    fn setup_textures(&self, objects: &mut DrawObjects, linear_filter_for_icons: bool) {
+        let Some(shader) = objects.shader().cloned() else {
             return;
         };
         let (Some(glyph_texture_id), Some(atlases)) = (self.glyph_texture_id, &self.atlases) else {
@@ -76,23 +76,23 @@ impl DrawableAtlasesTweaker {
             && shader.samples(icon_texture_id)
         {
             debug_assert_ne!(glyph_texture_id, icon_texture_id);
-            drawable.set_texture(glyph, glyph_texture_id);
-            drawable.set_texture(icon, icon_texture_id);
+            objects.set_texture(glyph, glyph_texture_id);
+            objects.set_texture(icon, icon_texture_id);
         } else {
-            drawable.set_texture(if self.is_text { glyph } else { icon }, glyph_texture_id);
+            objects.set_texture(if self.is_text { glyph } else { icon }, glyph_texture_id);
         }
     }
 }
 
 impl DrawableAtlasesTweaker {
-    /// Gives a drawable added to a layer group the atlases' textures.
-    pub(crate) fn init(&self, drawable: &mut Drawable) {
-        self.setup_textures(drawable, true);
+    /// Gives a draw the atlases' textures when it is made.
+    pub(crate) fn init(&self, objects: &mut DrawObjects) {
+        self.setup_textures(objects, true);
     }
 
-    /// Gives the drawable the atlases' textures before it draws, filtered
-    /// as the frame's view asks.
-    pub(crate) fn execute(&self, drawable: &mut Drawable, parameters: &PaintParameters<'_>) {
+    /// Gives the draw the atlases' textures before it draws, filtered as the
+    /// frame's view asks.
+    pub(crate) fn execute(&self, objects: &mut DrawObjects, parameters: &PaintParameters<'_>) {
         let state = parameters.state;
         let transformed = self.rotation_alignment == AlignmentType::Map || state.get_pitch() != 0.0;
         let linear_filter_for_icons = if self.is_text {
@@ -100,6 +100,6 @@ impl DrawableAtlasesTweaker {
         } else {
             self.sdf_icons || state.is_changing() || self.icon_scaled || transformed
         };
-        self.setup_textures(drawable, linear_filter_for_icons);
+        self.setup_textures(objects, linear_filter_for_icons);
     }
 }

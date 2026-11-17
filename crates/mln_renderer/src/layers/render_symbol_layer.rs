@@ -46,7 +46,7 @@ use crate::bucket_geometry::{BucketGeometry, bucket_vertices, paint_vertices, re
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
 };
-use crate::draw_cache::{BucketChanges, LayerDraws};
+use crate::draw_cache::{BucketChanges, DrawGroup, LayerDraws};
 use crate::drawable_builder::DrawableBuilder;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
@@ -431,7 +431,7 @@ fn update_tile_drawable(
         return;
     }
 
-    if let Some(attrs) = drawable.vertex_attributes.clone() {
+    if let Some(attrs) = drawable.objects.vertex_attributes.clone() {
         let key = Rc::as_ptr(&attrs).cast::<()>();
         if !refreshed_attributes.contains(&key) {
             refreshed_attributes.push(key);
@@ -461,14 +461,14 @@ fn update_tile_drawable(
     }
 
     if refresh.sort && !buffer.triangles.is_empty() {
-        let segments: Vec<crate::drawable::UniqueDrawSegment> = match draw_data.segment {
+        let segments: Vec<crate::draw::UniqueDrawSegment> = match draw_data.segment {
             Some(i) => buffer.segments.get(i).map(|s| vec![s]).unwrap_or_default(),
             None => buffer.segments.iter().collect(),
         }
         .into_iter()
-        .map(|segment| Box::new(crate::drawable::DrawSegment::new(DrawMode::Triangles(), segment.copy())))
+        .map(|segment| Box::new(crate::draw::DrawSegment::new(DrawMode::Triangles(), segment.copy())))
         .collect();
-        drawable.set_index_data(Some(released_indexes(&buffer.triangles)), segments);
+        drawable.objects.set_index_data(Some(released_indexes(&buffer.triangles)), segments);
     }
 }
 
@@ -841,9 +841,10 @@ impl RenderLayer for RenderSymbolLayer {
         }
     }
 
-    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<&'a mut LayerGroup>) {
+    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<DrawGroup<'a>>) {
         if self.base.is_renderable {
-            groups.extend([&mut draws.group, &mut self.collision_tile_layer_group].into_iter().flatten());
+            let layer_groups = [&mut draws.group, &mut self.collision_tile_layer_group].into_iter().flatten();
+            groups.extend(layer_groups.map(DrawGroup::Drawables));
         }
     }
 

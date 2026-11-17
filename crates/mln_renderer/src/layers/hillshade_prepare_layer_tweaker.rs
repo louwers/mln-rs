@@ -76,7 +76,7 @@ impl LayerTweaker for HillshadePrepareLayerTweaker {
                 maxzoom: f32::from(drawable_data.maxzoom),
             };
 
-            let drawable_uniforms = drawable.mutable_uniform_buffers();
+            let drawable_uniforms = drawable.objects.mutable_uniform_buffers();
             drawable_uniforms.create_or_update_pod(
                 ID_HILLSHADE_PREPARE_DRAWABLE_UBO,
                 &drawable_ubo,

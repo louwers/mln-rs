@@ -537,12 +537,14 @@ impl RenderLayer for RenderColorReliefLayer {
                     }
 
                     // Update textures
-                    drawable.set_texture(Some(Rc::clone(&dem_texture)), ID_COLOR_RELIEF_IMAGE_TEXTURE);
-                    drawable.set_texture(
+                    drawable.objects.set_texture(Some(Rc::clone(&dem_texture)), ID_COLOR_RELIEF_IMAGE_TEXTURE);
+                    drawable.objects.set_texture(
                         Some(Rc::clone(&elevation_stops_texture)),
                         ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
                     );
-                    drawable.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
+                    drawable
+                        .objects
+                        .set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
 
                     true
                 };

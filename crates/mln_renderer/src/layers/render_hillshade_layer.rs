@@ -149,7 +149,12 @@ impl TypedLayer for RenderHillshadeLayer {
 }
 
 impl RenderLayer for RenderHillshadeLayer {
-    fn layer_changed(&mut self, _parameters: &TransitionParameters, _new_layer: &Arc<dyn ErasedLayerStyle>) {
+    fn layer_changed(
+        &mut self,
+        _parameters: &TransitionParameters,
+        _new_layer: &Arc<dyn ErasedLayerStyle>,
+        _draws: &mut LayerDraws,
+    ) {
         // RenderLayer::layerChanged
         self.base.layer_tweaker = None;
         self.prepare_layer_tweaker = None;
@@ -445,7 +450,7 @@ impl RenderLayer for RenderHillshadeLayer {
                         _ => None,
                     };
                     if built_from != Some(geometry_time) {
-                        drawable.update_vertex_attributes(
+                        drawable.objects.update_vertex_attributes(
                             Some(hillshade_vertex_attributes(&vertices)),
                             vertex_count,
                             DrawMode::Triangles(),
@@ -454,7 +459,7 @@ impl RenderLayer for RenderHillshadeLayer {
                         );
                         drawable.data = Some(crate::drawable::DrawableData::HillshadeGeometryTime(geometry_time));
                     }
-                    drawable.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
+                    drawable.objects.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
 
                     true
                 };

@@ -18,9 +18,8 @@ use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_util::Color;
 
 use crate::bucket::BucketPtr;
-use crate::draw_cache::LayerDraws;
+use crate::draw_cache::{DrawGroup, LayerDraws};
 use crate::gfx::context::Context;
-use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::layers::LayerTiles;
@@ -314,11 +313,11 @@ pub(crate) trait RenderLayer: LayerParts {
         }
     }
 
-    /// Adds the layer's groups that draw, its own and those of `draws`, to
-    /// `groups`, in drawing order.
-    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<&'a mut LayerGroup>) {
+    /// Adds what the frame draws of the layer, its own groups and what
+    /// `draws` keeps, to `groups`, in drawing order.
+    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<DrawGroup<'a>>) {
         if self.base().is_renderable
-            && let Some(group) = &mut draws.group
+            && let Some(group) = DrawGroup::of(draws)
         {
             groups.push(group);
         }
@@ -341,8 +340,13 @@ pub(crate) trait RenderLayer: LayerParts {
     fn lose_context(&mut self) {}
 
     /// Called when the style layer is replaced (same ID and type), and the
-    /// render layer is reused.
-    fn layer_changed(&mut self, _parameters: &TransitionParameters, _new_layer: &Arc<dyn ErasedLayerStyle>) {
+    /// render layer is reused, with what the renderer keeps of its drawing.
+    fn layer_changed(
+        &mut self,
+        _parameters: &TransitionParameters,
+        _new_layer: &Arc<dyn ErasedLayerStyle>,
+        _draws: &mut LayerDraws,
+    ) {
         // When a layer changes, the bucket won't be replaced until the new
         // source(s) load. If we remove the drawables here, they will just be
         // re-created based on the current data.

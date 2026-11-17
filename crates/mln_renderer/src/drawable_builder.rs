@@ -17,7 +17,8 @@ use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::logging::{Event, Log};
 
-use crate::drawable::{DrawPriority, DrawSegment, Drawable, Textures, UniqueDrawSegment, UniqueDrawable};
+use crate::draw::{DrawSegment, Textures, UniqueDrawSegment};
+use crate::drawable::{DrawPriority, Drawable, UniqueDrawable};
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::render_pass::RenderPass;
@@ -178,16 +179,16 @@ impl DrawableBuilder {
             drawable.enable_depth = self.enable_depth;
             drawable.depth_type = self.depth_type;
             drawable.is_3d = self.is_3d;
-            drawable.set_color_mode(&self.color_mode);
-            drawable.set_cull_face_mode(self.cull_face_mode);
-            drawable.set_shader(self.shader.clone());
-            drawable.textures = self.textures.clone();
+            drawable.objects.set_color_mode(&self.color_mode);
+            drawable.objects.set_cull_face_mode(self.cull_face_mode);
+            drawable.objects.set_shader(self.shader.clone());
+            drawable.objects.textures = self.textures.clone();
             drawable.atlases = self.atlases.clone();
             drawable.origin = self.origin;
             let vertex_attrs = self.vertex_attrs.clone().unwrap_or_else(VertexAttributeArray::new_ptr);
-            drawable.set_vertex_attributes(Some(vertex_attrs));
+            drawable.objects.set_vertex_attributes(Some(vertex_attrs));
             if let Some(attrs) = &self.instance_attrs {
-                drawable.instance_attributes = Some(Rc::clone(attrs));
+                drawable.objects.instance_attributes = Some(Rc::clone(attrs));
             }
             self.init(&mut drawable);
             self.origin = None;
@@ -200,16 +201,16 @@ impl DrawableBuilder {
 
     /// Gives `drawable` the builder's geometry.
     fn init(&mut self, drawable: &mut Drawable) {
-        drawable.set_vertex_attr_id(self.vertex_attr_id);
+        drawable.objects.set_vertex_attr_id(self.vertex_attr_id);
 
         if self.raw_vertices_count != 0 && self.raw_vertices.is_empty() {
             // The vertex data is in the vertex attributes (fills).
-            if drawable.vertex_attributes.is_some() && !self.segments.is_empty() {
+            if drawable.objects.vertex_attributes.is_some() && !self.segments.is_empty() {
                 // The draw mode of the first segment; set_index_data below
                 // sets the segments.
                 let draw_mode = *self.segments[0].mode();
-                let attrs = drawable.vertex_attributes.clone();
-                drawable.update_vertex_attributes(
+                let attrs = drawable.objects.vertex_attributes.clone();
+                drawable.objects.update_vertex_attributes(
                     attrs,
                     self.raw_vertices_count,
                     draw_mode,
@@ -219,12 +220,12 @@ impl DrawableBuilder {
             }
         } else if self.raw_vertices_count != 0 {
             let raw = std::mem::take(&mut self.raw_vertices);
-            drawable.set_vertices(raw, self.raw_vertices_count, self.raw_vertices_type);
+            drawable.objects.set_vertices(raw, self.raw_vertices_count, self.raw_vertices_type);
         } else if !self.vertices.empty() {
             let vertices = self.vertices.data();
             if !vertices.is_empty() {
                 let raw: Vec<u8> = bytemuck::cast_slice(&vertices).to_vec();
-                drawable.set_vertices(raw, vertices.len(), AttributeDataType::Short2);
+                drawable.objects.set_vertices(raw, vertices.len(), AttributeDataType::Short2);
             }
         }
 
@@ -234,9 +235,9 @@ impl DrawableBuilder {
         }
         if let Some(indexes) = self.shared_indexes.clone().filter(|i| i.borrow().elements() != 0) {
             let segments = std::mem::take(&mut self.segments);
-            drawable.set_index_data(Some(indexes), segments);
+            drawable.objects.set_index_data(Some(indexes), segments);
         } else {
-            Log::warning(Event::Render, format!("drawable {} has no indexes", drawable.name));
+            Log::warning(Event::Render, format!("drawable {} has no indexes", drawable.objects.name));
         }
 
         // The next drawable doesn't get this one's textures.

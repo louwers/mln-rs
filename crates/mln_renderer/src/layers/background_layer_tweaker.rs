@@ -132,7 +132,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
                 TranslateAnchorType::Viewport,
                 false,
                 false,
-                drawable,
+                drawable.origin,
                 false,
             );
             let matrix = projection.fallback_matrix;
@@ -146,7 +146,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
                         wrap_v: TextureWrapType::Clamp,
                         ..Default::default()
                     });
-                    drawable.set_texture(Some(std::rc::Rc::clone(tex)), ID_BACKGROUND_IMAGE_TEXTURE);
+                    drawable.objects.set_texture(Some(std::rc::Rc::clone(tex)), ID_BACKGROUND_IMAGE_TEXTURE);
                 }
 
                 let int_zoom = state.get_integer_zoom();

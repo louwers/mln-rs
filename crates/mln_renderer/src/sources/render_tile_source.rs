@@ -183,9 +183,10 @@ impl RenderItem for TileSourceRenderItem {
         let remove_stale = |tile_layer_group: &mut LayerGroup| {
             tile_layer_group.remove_drawables_if(|drawable| {
                 let same_shader = drawable
+                    .objects
                     .shader()
                     .is_some_and(|shader| std::ptr::addr_eq(Rc::as_ptr(shader), Rc::as_ptr(&polyline_shader)));
-                drawable.name == drawable_name
+                drawable.objects.name == drawable_name
                     && (!drawable.tile_id.is_some_and(|id| new_tiles.contains(&id)) || !same_shader)
             });
         };
@@ -211,13 +212,13 @@ impl RenderItem for TileSourceRenderItem {
                     let shows_text = |drawable: &mut Drawable| matches!(&drawable.data, Some(crate::drawable::DrawableData::DebugText(text)) if *text == debug_bucket.text);
                     let mut current = false;
                     tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
-                        current |= drawable.name == drawable_name && shows_text(drawable);
+                        current |= drawable.objects.name == drawable_name && shows_text(drawable);
                     });
                     if current {
                         continue;
                     }
                     tile_layer_group.remove_drawables_if(|drawable| {
-                        drawable.name == drawable_name && drawable.tile_id == Some(tile_id)
+                        drawable.objects.name == drawable_name && drawable.tile_id == Some(tile_id)
                     });
                     if tile.get_needs_rendering() && !debug_bucket.strokes.is_empty() {
                         add_polyline_drawable(
@@ -261,7 +262,7 @@ impl RenderItem for TileSourceRenderItem {
                 }
                 let mut drawn = false;
                 tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
-                    drawn |= drawable.name == drawable_name;
+                    drawn |= drawable.objects.name == drawable_name;
                 });
                 if !drawn {
                     let border = if globe {
@@ -350,7 +351,7 @@ impl LayerTweaker for PolylineLayerTweaker {
                 TranslateAnchorType::Viewport,
                 false,
                 false,
-                drawable,
+                drawable.origin,
                 false,
             );
             let matrix = projection.fallback_matrix;

@@ -70,7 +70,7 @@ impl LayerTweaker for CollisionLayerTweaker {
                 data.translate_anchor,
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
-                drawable,
+                drawable.origin,
                 false,
             );
             let matrix = projection.fallback_matrix;
@@ -90,7 +90,7 @@ impl LayerTweaker for CollisionLayerTweaker {
                 overscale_factor: overscaled_tile_id.overscale_factor() as f32,
                 pad1: 0.0,
             };
-            let drawable_uniforms = drawable.mutable_uniform_buffers();
+            let drawable_uniforms = drawable.objects.mutable_uniform_buffers();
             drawable_uniforms.create_or_update_pod(ID_COLLISION_DRAWABLE_UBO, &drawable_ubo, context);
             drawable_uniforms.create_or_update_pod(ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
             drawable_uniforms.create_or_update_pod(ID_COLLISION_PROJECTION_UBO, &projection_ubo, context);

@@ -5,7 +5,6 @@ pub(crate) mod circle_layer_tweaker;
 pub(crate) mod collision_layer_tweaker;
 pub(crate) mod color_relief_layer_tweaker; // dem-heatmap
 pub(crate) mod fill_extrusion_layer_tweaker;
-pub(crate) mod fill_layer_tweaker;
 pub(crate) mod heatmap_layer_tweaker; // dem-heatmap
 pub(crate) mod heatmap_texture_layer_tweaker; // dem-heatmap
 pub(crate) mod hillshade_layer_tweaker; // dem-heatmap
@@ -34,6 +33,7 @@ use mln_style::layers::{Background, BackgroundPaintProperties};
 use mln_tile_id::OverscaledTileID;
 use mln_util::hash::HashMap;
 
+use crate::draw::DrawObjects;
 use crate::draw_cache::BucketChanges;
 use crate::drawable::Drawable;
 use crate::layer_type::{ErasedEvaluatedLayer, LayerType, evaluated};
@@ -86,19 +86,19 @@ impl<'a> LayerTiles<'a> {
     }
 }
 
-/// Copies the bucket's data-driven attributes into the drawable again where
+/// Copies the bucket's data-driven attributes into a draw again where
 /// `changes` says their values changed: `refresh(attrs)` reads them into its
 /// instance attributes where it has them, else into its vertex attributes,
 /// which then upload again.
 pub(crate) fn refresh_paint_attributes(
-    drawable: &mut Drawable,
+    objects: &mut DrawObjects,
     changes: BucketChanges,
     refresh: impl FnOnce(&mut mln_gfx::vertex_attribute::VertexAttributeArray),
 ) {
     if !changes.paint {
         return;
     }
-    if let Some(attrs) = drawable.instance_attributes.as_ref().or(drawable.vertex_attributes.as_ref()) {
+    if let Some(attrs) = objects.instance_attributes.as_ref().or(objects.vertex_attributes.as_ref()) {
         refresh(&mut attrs.borrow_mut());
     }
 }

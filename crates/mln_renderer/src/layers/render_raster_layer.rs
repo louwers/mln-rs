@@ -42,7 +42,7 @@ use super::raster_layer_tweaker::RasterLayerTweaker;
 use super::{LayerTiles, shared_vertices, update_tile};
 use crate::bucket::NoBucket;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
-use crate::draw_cache::LayerDraws;
+use crate::draw_cache::{DrawGroup, LayerDraws};
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
@@ -301,9 +301,10 @@ impl RenderLayer for RenderRasterLayer {
         }
     }
 
-    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<&'a mut LayerGroup>) {
+    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<DrawGroup<'a>>) {
         if self.base.is_renderable {
-            groups.extend([&mut draws.group, &mut self.image_layer_group].into_iter().flatten());
+            let layer_groups = [&mut draws.group, &mut self.image_layer_group].into_iter().flatten();
+            groups.extend(layer_groups.map(DrawGroup::Drawables));
         }
     }
 

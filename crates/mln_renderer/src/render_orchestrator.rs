@@ -28,7 +28,7 @@ use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::Registry;
-use crate::draw_cache::{ChangedBuckets, LayerDraws};
+use crate::draw_cache::{ChangedBuckets, DrawGroup, LayerDraws};
 use crate::gfx::context::Context;
 use crate::image_store::ImageStore;
 use crate::layer_group::LayerGroup;
@@ -703,7 +703,7 @@ impl RenderOrchestrator {
             if let (Some(&index), Some(layer)) = (self.layer_indexes.get(&**id), layers.get(id)) {
                 let new_layer = layer.style();
                 let render_layer = &mut self.layers[index];
-                render_layer.layer_changed(&clock.transition, new_layer);
+                render_layer.layer_changed(&clock.transition, new_layer, &mut self.draws[index]);
                 render_layer.restyle(&clock.transition, new_layer);
             }
         }
@@ -1176,8 +1176,8 @@ impl RenderOrchestrator {
         Some(self.tile_store.source_mut(key)?.0)
     }
 
-    /// The groups of the layers that draw, in drawing order.
-    pub(crate) fn layer_groups(&mut self) -> Vec<&mut LayerGroup> {
+    /// What the frame draws of the layers that draw, in drawing order.
+    pub(crate) fn layer_groups(&mut self) -> Vec<DrawGroup<'_>> {
         let mut groups = Vec::new();
         for (layer, draws) in self.layers.iter_mut().zip(&mut self.draws) {
             layer.layer_groups(draws, &mut groups);

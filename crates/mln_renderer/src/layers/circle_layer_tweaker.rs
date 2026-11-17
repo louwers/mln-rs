@@ -116,7 +116,7 @@ impl LayerTweaker for CircleLayerTweaker {
                 *anchor.uniform(),
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
-                drawable,
+                drawable.origin,
                 false,
             );
             let matrix = projection.fallback_matrix;

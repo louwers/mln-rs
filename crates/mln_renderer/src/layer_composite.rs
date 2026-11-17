@@ -42,7 +42,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::drawable::clamped_scissor;
+use crate::draw::clamped_scissor;
 use crate::gfx::attachment::Attachment;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;

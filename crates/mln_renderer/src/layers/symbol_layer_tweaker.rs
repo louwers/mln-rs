@@ -40,7 +40,7 @@ impl SymbolLayerTweaker {
 }
 
 fn get_tex_size(drawable: &Drawable, tex_id: usize) -> [f32; 2] {
-    match drawable.textures[tex_id].as_ref() {
+    match drawable.objects.textures[tex_id].as_ref() {
         Some(tex) => {
             let size = tex.borrow().size();
             [size.width as f32, size.height as f32]
@@ -153,7 +153,7 @@ impl LayerTweaker for SymbolLayerTweaker {
                     *anchor.uniform(),
                     NEAR_CLIPPED,
                     IN_VIEWPORT_PIXEL_UNITS,
-                    drawable,
+                    drawable.origin,
                     false,
                 )
             };

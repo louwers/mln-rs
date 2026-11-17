@@ -21,7 +21,7 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::drawable::clamped_scissor;
+use crate::draw::clamped_scissor;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
 use crate::gfx::uniform_buffer::UniformBufferPtr;

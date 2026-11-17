@@ -405,7 +405,7 @@ impl RenderLayer for RenderCircleLayer {
                     // A drawable produced on a previous style/bucket should not be updated.
                     let current = drawable.tweaker == tweaker;
                     if current {
-                        refresh_paint_attributes(drawable, changes, |attrs| {
+                        refresh_paint_attributes(&mut drawable.objects, changes, |attrs| {
                             read_circle_attributes(
                                 attrs,
                                 paint_property_binders,

@@ -100,7 +100,7 @@ impl LayerTweaker for HeatmapLayerTweaker {
                 TranslateAnchorType::Viewport,
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
-                drawable,
+                drawable.origin,
                 false,
             );
             let matrix = projection.fallback_matrix;

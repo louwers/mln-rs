@@ -171,7 +171,12 @@ impl TypedLayer for RenderHeatmapLayer {
 }
 
 impl RenderLayer for RenderHeatmapLayer {
-    fn layer_changed(&mut self, _parameters: &TransitionParameters, _new_layer: &Arc<dyn ErasedLayerStyle>) {
+    fn layer_changed(
+        &mut self,
+        _parameters: &TransitionParameters,
+        _new_layer: &Arc<dyn ErasedLayerStyle>,
+        _draws: &mut LayerDraws,
+    ) {
         // RenderLayer::layerChanged
         self.base.layer_tweaker = None;
         self.texture_tweaker = None;
@@ -376,7 +381,7 @@ impl RenderHeatmapLayer {
                 // be updated.
                 let current = drawable.tweaker == tweaker;
                 if current {
-                    refresh_paint_attributes(drawable, changes, |attrs| {
+                    refresh_paint_attributes(&mut drawable.objects, changes, |attrs| {
                         read_heatmap_attributes(
                             attrs,
                             paint_property_binders,

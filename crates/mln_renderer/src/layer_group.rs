@@ -134,7 +134,7 @@ impl LayerGroup {
 
     fn insert(&mut self, key: Option<TileKey>, mut drawable: UniqueDrawable) {
         if let Some(atlases) = drawable.atlases.clone() {
-            atlases.init(&mut drawable);
+            atlases.init(&mut drawable.objects);
         }
         let sort = sort_key(&drawable);
         if let Some(key) = key {
@@ -244,7 +244,7 @@ impl LayerGroup {
         }
         for (_, drawable) in self.drawables.values_mut() {
             if drawable.enabled {
-                drawable.upload(context);
+                drawable.objects.upload(context);
                 context.destroy_released();
             }
         }
@@ -372,7 +372,7 @@ impl LayerGroup {
 /// draws it.
 fn draw(drawable: &mut Drawable, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>, layer: &UniformBufferArray) {
     if let Some(atlases) = drawable.atlases.clone() {
-        atlases.execute(drawable, parameters);
+        atlases.execute(&mut drawable.objects, parameters);
     }
     drawable.draw(gpu, parameters, Some(layer));
 }

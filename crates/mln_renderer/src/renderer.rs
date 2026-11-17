@@ -24,6 +24,7 @@ use mln_util::time::Instant;
 
 use crate::Registry;
 use crate::clip_masks::ClipMasks;
+use crate::draw_cache::DrawGroup;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::{Context, Stats};
 use crate::layer_composite::LayerComposite;
@@ -535,7 +536,7 @@ impl Renderer {
         orchestrator.tweak(&parameters);
 
         // Give the layers a chance to upload
-        for layer_group in orchestrator.layer_groups() {
+        for mut layer_group in orchestrator.layer_groups() {
             layer_group.upload(context);
         }
         if let Some(globe_depth) = orchestrator.globe_depth_layer_group() {
@@ -565,7 +566,7 @@ impl Renderer {
         let mut clip_tiles = Vec::new();
         let mut last: Option<Rc<Vec<UnwrappedTileID>>> = None;
         for layer_group in orchestrator.layer_groups() {
-            if let Some(tiles) = &layer_group.stencil_tiles
+            if let Some(tiles) = layer_group.stencil_tiles()
                 && last.as_ref().is_none_or(|last| last != tiles)
             {
                 clip_tiles.extend(tiles.iter().copied());
@@ -590,15 +591,7 @@ impl Renderer {
 
         // The layer groups drawn as a whole, each into the layer composite's
         // texture and then onto the frame.
-        let mut composited = Vec::new();
-        for layer_group in orchestrator.layer_groups() {
-            if let Some(composite) = layer_group.composite
-                && layer_group.enabled
-                && !layer_group.empty()
-            {
-                composited.push((layer_group.id, composite));
-            }
-        }
+        let composited: Vec<_> = orchestrator.layer_groups().iter().filter_map(DrawGroup::composite).collect();
         self.layer_composite.update(
             context,
             &static_data.shaders,
@@ -667,7 +660,7 @@ impl Renderer {
             parameters.depth_range_size = 1.0 - ((num_layer_groups + 2) * num_sublayers) as f32 * depth_epsilon;
             parameters.current_layer = (num_layer_groups as u32).wrapping_sub(1);
             let mut gpu = context.gpu();
-            for layer_group in orchestrator.layer_groups() {
+            for mut layer_group in orchestrator.layer_groups() {
                 layer_group.render(&mut *gpu, &mut parameters);
                 if parameters.current_layer > 0 {
                     parameters.current_layer -= 1;
@@ -727,7 +720,7 @@ impl Renderer {
             // are painted bottom to top.
             if render_tree_parameters.transform_params.state.is_globe_rendering() {
                 parameters.current_layer = (num_layer_groups as u32).wrapping_sub(1);
-                for layer_group in orchestrator.layer_groups() {
+                for mut layer_group in orchestrator.layer_groups() {
                     layer_group.render(&mut *gpu, &mut parameters);
                     if parameters.current_layer > 0 {
                         parameters.current_layer -= 1;
@@ -735,7 +728,7 @@ impl Renderer {
                 }
             } else {
                 parameters.current_layer = 0;
-                for layer_group in orchestrator.layer_groups().into_iter().rev() {
+                for mut layer_group in orchestrator.layer_groups().into_iter().rev() {
                     layer_group.render(&mut *gpu, &mut parameters);
                     parameters.current_layer += 1;
                 }
@@ -755,7 +748,7 @@ impl Renderer {
 
             // draw layer groups, translucent pass
             parameters.current_layer = (num_layer_groups as u32).wrapping_sub(1);
-            for layer_group in orchestrator.layer_groups() {
+            for mut layer_group in orchestrator.layer_groups() {
                 layer_group.render(&mut *gpu, &mut parameters);
                 if parameters.current_layer > 0 {
                     parameters.current_layer -= 1;

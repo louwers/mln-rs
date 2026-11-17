@@ -143,7 +143,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
                 *anchor.uniform(),
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,
-                drawable,
+                drawable.origin,
                 false,
             );
             if zero_to_one {
@@ -166,7 +166,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
             let mut texture_size = Size::new(0, 0);
-            if let Some(tex) = drawable.textures[ID_FILL_EXTRUSION_IMAGE_TEXTURE].as_ref() {
+            if let Some(tex) = drawable.objects.textures[ID_FILL_EXTRUSION_IMAGE_TEXTURE].as_ref() {
                 texture_size = tex.borrow().size();
             }
 

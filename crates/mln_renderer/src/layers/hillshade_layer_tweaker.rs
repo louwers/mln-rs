@@ -208,7 +208,7 @@ impl LayerTweaker for HillshadeLayerTweaker {
                 TranslateAnchorType::Viewport,
                 false,
                 false,
-                drawable,
+                drawable.origin,
                 true,
             );
             let matrix = projection.fallback_matrix;

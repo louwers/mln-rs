@@ -15,7 +15,6 @@ use mln_util::constants::{EXTENT, M2PI};
 use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::{Mat4, matrix};
 
-use crate::drawable::Drawable;
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use crate::layer_group::LayerGroup;
@@ -91,7 +90,7 @@ pub(crate) trait LayerTweaker {
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "the tile, the paint parameters and the translation, clipping and alignment options of its matrix"
+    reason = "the tile, the paint parameters and the translation, origin, clipping and alignment options of its matrix"
 )]
 pub(crate) fn get_tile_matrix(
     tile_id: &UnwrappedTileID,
@@ -100,7 +99,7 @@ pub(crate) fn get_tile_matrix(
     anchor: TranslateAnchorType,
     near_clipped: bool,
     in_viewport_pixel_units: bool,
-    drawable: &Drawable,
+    origin: Option<Point<f64>>,
     aligned: bool,
 ) -> Mat4 {
     get_tile_matrix_for(
@@ -109,18 +108,18 @@ pub(crate) fn get_tile_matrix(
         parameters.transform_params,
         translation,
         anchor,
-        drawable.origin,
+        origin,
         near_clipped,
         in_viewport_pixel_units,
         aligned,
     )
 }
 
-/// The projection data for this tile: the tile matrix plus the per-tile
-/// projection fields.
+/// The projection data for this tile, of geometry at `origin` in it: the
+/// tile matrix plus the per-tile projection fields.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the tile, the paint parameters and the translation, clipping and alignment options of its projection"
+    reason = "the tile, the paint parameters and the translation, origin, clipping and alignment options of its projection"
 )]
 pub(crate) fn get_projection_data(
     tile_id: &UnwrappedTileID,
@@ -129,7 +128,7 @@ pub(crate) fn get_projection_data(
     anchor: TranslateAnchorType,
     near_clipped: bool,
     in_viewport_pixel_units: bool,
-    drawable: &Drawable,
+    origin: Option<Point<f64>>,
     aligned: bool,
 ) -> ProjectionData {
     let mut data = parameters.state.get_projection_data_for_matrix(
@@ -141,7 +140,7 @@ pub(crate) fn get_projection_data(
             anchor,
             near_clipped,
             in_viewport_pixel_units,
-            drawable,
+            origin,
             aligned,
         ),
     );
