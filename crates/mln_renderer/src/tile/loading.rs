@@ -338,6 +338,35 @@ impl TilesetLoad {
     pub(crate) fn is_idle(&self) -> bool {
         matches!(self.fetch, Fetch::Idle | Fetch::Failed)
     }
+
+    /// What the requests know of the data they brought.
+    pub(crate) fn answered(&self) -> TilesetAnswered {
+        TilesetAnswered { resource: self.resource.clone(), modified: self.modified, expires: self.expires }
+    }
+
+    /// Takes `answered`, of a load of the same resource, as a cache's
+    /// answer. Returns false for another resource's, which it leaves.
+    pub(crate) fn take_answered(&mut self, answered: TilesetAnswered) -> bool {
+        let TilesetAnswered { resource, modified, expires } = answered;
+        if resource.url != self.resource.url {
+            return false;
+        }
+        self.resource.prior_modified = resource.prior_modified;
+        self.resource.prior_expires = resource.prior_expires;
+        self.resource.prior_etag = resource.prior_etag;
+        self.resource.prior_data = resource.prior_data;
+        (self.modified, self.expires) = (modified, expires);
+        self.cache_answered = true;
+        true
+    }
+}
+
+/// What a tileset tile's requests know of the data they brought: the
+/// validators its resource carries, and the data's freshness.
+pub(crate) struct TilesetAnswered {
+    resource: Resource,
+    modified: Option<Timestamp>,
+    expires: Option<Timestamp>,
 }
 
 /// Asks GeoJSON `data` for `tile`'s features, as load `load`, cut on `pool`

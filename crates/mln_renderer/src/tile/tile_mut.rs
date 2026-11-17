@@ -9,10 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_storage::response::Reason;
-use mln_storage::{Data, Request, Response};
+use mln_storage::{Request, Response};
 use mln_style::custom_tile_loader::SubscriberKey;
 use mln_style::sources::geojson::GeoJSONData;
-use mln_util::chrono::Timestamp;
 use mln_util::error::Error;
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
@@ -26,7 +25,7 @@ use crate::render_orchestrator::drop_on_workers;
 use crate::tile::contents::{Contents, GeometryContents, release};
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle};
-use crate::tile::loading::{self, CustomLoad, CustomLoader, DataOrigin, Fetch, Method, OriginLoad};
+use crate::tile::loading::{self, CustomLoad, CustomLoader, DataOrigin, Fetch, Method, OriginLoad, TilesetAnswered};
 use crate::tile::pipeline::{
     DecodeWork, DependencyWait, InFlight, Layout, LayoutData, LayoutWork, Pipeline, Resume, Running, Waiting,
     outdated_by,
@@ -91,34 +90,32 @@ impl<'a> TileMut<'a> {
         }
     }
 
-    /// Starts a new tile from `copy`, another world copy of it: the tile
-    /// shows the copy's contents at once. A tileset tile takes the copy's
-    /// data as a cache's answer and lays it out for the layers the copy left
-    /// out; another tile, or one whose copy has no data to lay out, loads
-    /// its own.
+    /// Starts a new tile from `copy`, of the tile in another world copy: it
+    /// shows the copy's contents at once. With the copy's load, it takes
+    /// that as a cache's answer, and lays out the data for contents of its
+    /// own; otherwise it loads as any new tile.
     pub(crate) fn start_as_copy(&mut self, copy: WorldCopy) {
-        let WorldCopy { shown, data, freshness } = copy;
+        let WorldCopy { shown, load } = copy;
         self.tile.shown = Some(shown);
         self.installed = true;
-        let lays_out = matches!(self.tile.pipeline, Pipeline::Layout(_));
-        let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
+        self.store.changed();
+        let taken = match (load, &mut self.tile.load.origin) {
+            (Some((answered, data)), OriginLoad::Tileset(tileset)) => tileset.take_answered(answered).then_some(data),
+            _ => None,
+        };
+        let Some(data) = taken else {
             self.start_load();
             return;
         };
-        if lays_out && data.is_none() {
-            self.start_load();
-            return;
-        }
-        let resource = &mut tileset.resource;
-        resource.prior_modified = freshness.prior_modified;
-        resource.prior_expires = freshness.prior_expires;
-        resource.prior_etag = freshness.prior_etag;
-        resource.prior_data = freshness.prior_data;
-        (tileset.modified, tileset.expires) = (freshness.modified, freshness.expires);
-        tileset.cache_answered = true;
         self.tile.settled = true;
-        if let Some(data) = data {
-            self.change_layout(|layout| layout.data = Some(data));
+        match data {
+            Some(data) => self.change_layout(|layout| layout.data = Some(data)),
+            // A raster or raster-dem tile shows all it will: its parse
+            // starts and ends at once.
+            None => {
+                self.action(TileOperation::StartParse);
+                self.action(TileOperation::EndParse);
+            }
         }
     }
 
@@ -537,7 +534,9 @@ impl<'a> TileMut<'a> {
                     style: Arc::clone(style),
                     available_images: Arc::clone(&images),
                     data: input,
-                    params: LayoutParams { first_load: shown.is_none(), ..layout.params },
+                    // A world copy's contents have none of the layers that
+                    // a first load fades in.
+                    params: LayoutParams { first_load: shown.is_none_or(|shown| shown.world_copy), ..layout.params },
                     resolved: Arc::clone(&answer.resolved),
                 });
                 let id = JobId { tile, generation: layout.generation };
@@ -729,23 +728,13 @@ impl<'a> TileMut<'a> {
     }
 }
 
-/// What a new tile of another world copy starts with: what a loaded tile
-/// shows, and what a tileset tile was loaded from.
+/// What a new tile starts with from the tile in another world copy: what
+/// that tile shows and, for a tileset tile whose contents are of its latest
+/// data, its load: what its requests know, and the data a geometry tile lays
+/// out.
 pub(crate) struct WorldCopy {
     shown: Shown,
-    data: Option<LayoutData>,
-    freshness: Freshness,
-}
-
-/// What a tileset tile's requests know of the data it has.
-#[derive(Default)]
-struct Freshness {
-    prior_modified: Option<Timestamp>,
-    prior_expires: Option<Timestamp>,
-    prior_etag: Option<String>,
-    prior_data: Option<Data>,
-    modified: Option<Timestamp>,
-    expires: Option<Timestamp>,
+    load: Option<(TilesetAnswered, Option<LayoutData>)>,
 }
 
 impl WorldCopy {
@@ -770,25 +759,26 @@ impl WorldCopy {
             }
             Contents::Empty => Contents::Empty,
         };
-        let freshness = match &tile.load.origin {
-            OriginLoad::Tileset(tileset) => Freshness {
-                prior_modified: tileset.resource.prior_modified,
-                prior_expires: tileset.resource.prior_expires,
-                prior_etag: tileset.resource.prior_etag.clone(),
-                prior_data: tileset.resource.prior_data.clone(),
-                modified: tileset.modified,
-                expires: tileset.expires,
-            },
-            OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => Freshness::default(),
+        let load = match (&tile.load.origin, &tile.pipeline) {
+            // The copy lays the latest data out itself.
+            (OriginLoad::Tileset(tileset), Pipeline::Layout(layout)) => {
+                layout.data.clone().map(|data| (tileset.answered(), Some(data)))
+            }
+            // An image still to decode is newer than the one shown.
+            (OriginLoad::Tileset(tileset), Pipeline::Decode(_)) => {
+                (!tile.is_pending()).then(|| (tileset.answered(), None))
+            }
+            (OriginLoad::GeoJson { .. } | OriginLoad::Custom(_), _) => None,
         };
+        let world_copy = matches!(contents, Contents::Geometry(_));
         Some(WorldCopy {
             shown: Shown {
                 contents: Rc::new(contents),
                 feature_state_version: shown.feature_state_version,
                 answer_outdated: shown.answer_outdated,
+                world_copy,
             },
-            data: tile.pipeline.layout().and_then(|layout| layout.data.clone()),
-            freshness,
+            load,
         })
     }
 }

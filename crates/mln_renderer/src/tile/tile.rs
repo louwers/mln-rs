@@ -114,11 +114,14 @@ pub(crate) struct Shown {
     /// The layout's answer resolved glyphs or images that changed since: no
     /// first try starts with it.
     pub(crate) answer_outdated: bool,
+    /// The contents are those of the tile in another world copy, without
+    /// the layers that are placed, which the tile has yet to lay out.
+    pub(crate) world_copy: bool,
 }
 
 impl Shown {
     pub(crate) fn new(contents: Contents, feature_state_version: u64) -> Self {
-        Shown { contents: Rc::new(contents), feature_state_version, answer_outdated: false }
+        Shown { contents: Rc::new(contents), feature_state_version, answer_outdated: false, world_copy: false }
     }
 }
 
