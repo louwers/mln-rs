@@ -509,6 +509,9 @@ impl BorrowedRing {
 /// its canvas does.
 pub struct Surface {
     pub(crate) kind: SurfaceKind,
+    /// Whether presenting waits for the display: see
+    /// [`without_frame_rate_cap`](Self::without_frame_rate_cap).
+    pub(crate) cap_frame_rate: bool,
 }
 
 /// What a host draws over each frame that a surface session presents, after
@@ -582,13 +585,27 @@ impl CanvasFormat {
 }
 
 impl Surface {
+    fn of(kind: SurfaceKind) -> Surface {
+        Surface { kind, cap_frame_rate: true }
+    }
+
+    /// The surface, presenting frames as they finish instead of one per
+    /// refresh of the display, where the backend and the surface can: a
+    /// benchmark's way to measure frame times. Metal on macOS, Vulkan,
+    /// WebGPU outside the browser and OpenGL on a window take it; the
+    /// others keep the display's pace.
+    #[must_use]
+    pub fn without_frame_rate_cap(self) -> Surface {
+        Surface { cap_frame_rate: false, ..self }
+    }
+
     /// A window, which the session makes its surface on. The window must
     /// outlive the session's use of it: until a
     /// [`set_surface`](crate::RenderSession::set_surface) or
     /// [`release_target`](crate::RenderSession::release_target) replaces it,
     /// or the session detaches or is abandoned.
     pub fn window(window: impl Window + 'static) -> Surface {
-        Surface { kind: SurfaceKind::Window(Arc::new(window)) }
+        Surface::of(SurfaceKind::Window(Arc::new(window)))
     }
 
     /// In the browser, a canvas that the session presents to with its
@@ -613,7 +630,7 @@ impl Surface {
         {
             return Err(Error::invalid_argument("a web canvas is an OffscreenCanvas or an HTMLCanvasElement"));
         }
-        Ok(Surface { kind: SurfaceKind::WebCanvas { canvas, format } })
+        Ok(Surface::of(SurfaceKind::WebCanvas { canvas, format }))
     }
 
     /// A `CAMetalLayer`, which a session on Metal presents to. It must
@@ -621,14 +638,14 @@ impl Surface {
     #[cfg(all(feature = "metal", target_vendor = "apple"))]
     #[must_use]
     pub fn metal_layer(layer: mln_mtl::Layer) -> Surface {
-        Surface { kind: SurfaceKind::MetalLayer(layer) }
+        Surface::of(SurfaceKind::MetalLayer(layer))
     }
 
     /// A surface that the host made with the instance of the WebGPU
     /// [`Device`] that the session renders on.
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
     pub fn wgpu(surface: wgpu::Surface<'static>) -> Surface {
-        Surface { kind: SurfaceKind::Wgpu(surface) }
+        Surface::of(SurfaceKind::Wgpu(surface))
     }
 
     /// The host's `VkSurfaceKHR`, which a session on the Vulkan device
@@ -636,7 +653,7 @@ impl Surface {
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     #[must_use]
     pub fn vulkan(surface: mln_vulkan::HostSurface) -> Surface {
-        Surface { kind: SurfaceKind::Vulkan(surface) }
+        Surface::of(SurfaceKind::Vulkan(surface))
     }
 
     /// The host's `EGLSurface`, which a session on the OpenGL device that
@@ -644,7 +661,7 @@ impl Surface {
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
     #[must_use]
     pub fn gl(surface: mln_gl::HostSurface) -> Surface {
-        Surface { kind: SurfaceKind::Gl(surface) }
+        Surface::of(SurfaceKind::Gl(surface))
     }
 
     /// A composition swap chain that a session on D3D12 makes and presents
@@ -663,8 +680,7 @@ impl Surface {
     #[cfg(all(feature = "d3d12", windows))]
     #[must_use]
     pub fn d3d12_composition(composition: mln_d3d12::Composition) -> Surface {
-        let kind = SurfaceKind::D3d12Composition { composition, thread: std::thread::current().id() };
-        Surface { kind }
+        Surface::of(SurfaceKind::D3d12Composition { composition, thread: std::thread::current().id() })
     }
 
     /// The backend of the device whose instance or share group a host's
@@ -683,12 +699,13 @@ impl Surface {
     /// The surface again, if it is a window, or a surface that a new
     /// backend presents to.
     pub(crate) fn clone_window(&self) -> Option<Surface> {
-        match &self.kind {
-            SurfaceKind::Window(window) => Some(Surface { kind: SurfaceKind::Window(Arc::clone(window)) }),
+        let kind = match &self.kind {
+            SurfaceKind::Window(window) => SurfaceKind::Window(Arc::clone(window)),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-            SurfaceKind::Gl(surface) => Some(Surface { kind: SurfaceKind::Gl(*surface) }),
-            _ => None,
-        }
+            SurfaceKind::Gl(surface) => SurfaceKind::Gl(*surface),
+            _ => return None,
+        };
+        Some(Surface { kind, cap_frame_rate: self.cap_frame_rate })
     }
 
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
@@ -805,10 +822,10 @@ impl SentSurface {
         }
         #[cfg(target_family = "wasm")]
         match self {
-            SentSurface::Window(window) => Ok(Surface { kind: SurfaceKind::Window(window) }),
+            SentSurface::Window(window) => Ok(Surface::of(SurfaceKind::Window(window))),
             SentSurface::WebCanvas { canvas, format } => {
                 let canvas = canvas.take().ok_or_else(|| Error::invalid_state("the surface's canvas is gone"))?;
-                Ok(Surface { kind: SurfaceKind::WebCanvas { canvas, format } })
+                Ok(Surface::of(SurfaceKind::WebCanvas { canvas, format }))
             }
         }
     }

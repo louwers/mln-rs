@@ -129,9 +129,9 @@ impl StyleInfo {
 pub(crate) fn run(launch: Launch) {
     let Launch { args, settings, ui, pixel_ratio, size, frame_interval, start, inbox, proxy, .. } = launch;
     #[cfg(not(target_os = "macos"))]
-    let surfaces = WindowSurfaces { window: launch.window };
+    let surfaces = WindowSurfaces { window: launch.window, cap_frame_rate: args.benchmark.is_none() };
     #[cfg(target_os = "macos")]
-    let surfaces = WindowSurfaces { proxy: proxy.clone() };
+    let surfaces = WindowSurfaces { proxy: proxy.clone(), cap_frame_rate: args.benchmark.is_none() };
 
     let benchmark = match args.benchmark.map(|path| Benchmark::new(path, args.laps.unwrap_or(10))).transpose() {
         Ok(benchmark) => benchmark,
