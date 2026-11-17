@@ -86,6 +86,8 @@ pub(crate) struct Bench {
     measuring: bool,
     /// `None` once a part ran where the counters couldn't be read.
     instructions: Option<u64>,
+    /// What the last part retired, where the counters could be read.
+    last_instructions: Option<u64>,
     allocations: u64,
     allocated: u64,
     peak_heap: i64,
@@ -136,6 +138,7 @@ impl Bench {
         let baseline = self.baseline.unwrap_or_default();
 
         self.instructions = self.instructions.zip(instructions).map(|(total, part)| total + part);
+        self.last_instructions = instructions;
         self.allocations += end.allocations - heap.allocations;
         self.allocated += end.allocated - heap.allocated;
         self.peak_heap = meter::peak() - baseline;
@@ -144,6 +147,13 @@ impl Bench {
         self.cpu += cpu;
         self.measuring = false;
         result
+    }
+
+    /// The instructions the last measured part retired, where the system
+    /// counts them: for a scenario that reports its largest part, such as
+    /// its costliest frame, as well as the total.
+    pub(crate) fn last_instructions(&self) -> Option<u64> {
+        self.last_instructions
     }
 
     /// Declares a count of the scenario's own, such as frames drawn.

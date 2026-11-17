@@ -37,15 +37,21 @@ unless `MLN_RENDER_BACKEND` names another backend (`metal`, `vulkan`, `d3d12`,
 
 ## Scenarios
 
-| scenario                    | question                                                                                                | one unit                                                                              |
-| --------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `micro/expression/evaluate` | What does evaluating a style's kinds of expressions over features cost?                                 | 12 expressions over 50,000 features                                                   |
-| `macro/load/street`         | What does showing a city's streets from nothing take, until the first complete frame?                   | a load: the map, renderer and workers start; the style, tiles, glyphs and sprite load |
-| `macro/load/globe`          | What does showing the whole world on the globe from nothing take, until the first complete frame?       | a load                                                                                |
-| `macro/load/cjk`            | What does showing a city labelled in Japanese script from nothing take, until the first complete frame? | a load                                                                                |
-| `macro/frame/street`        | What does a frame of a city's streets cost while the camera pans, turns and tilts over loaded tiles?    | a frame: the update, symbol placement, draw calls and the GPU finishing it            |
-| `macro/frame/globe`         | What does a frame of the globe cost while it turns and tilts over loaded tiles?                         | a frame                                                                               |
-| `macro/tile-server/street`  | What does a tile server's renderer spend on each new tile of a city, from zoom 7 to 14?                 | a tile: laid out, placed, drawn and read back by a reused renderer                    |
+| scenario                     | question                                                                                                | one unit                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `micro/expression/evaluate`  | What does evaluating a style's kinds of expressions over features cost?                                 | 12 expressions over 50,000 features                                                   |
+| `macro/load/street`          | What does showing a city's streets from nothing take, until the first complete frame?                   | a load: the map, renderer and workers start; the style, tiles, glyphs and sprite load |
+| `macro/load/globe`           | What does showing the whole world on the globe from nothing take, until the first complete frame?       | a load                                                                                |
+| `macro/load/cjk`             | What does showing a city labelled in Japanese script from nothing take, until the first complete frame? | a load                                                                                |
+| `macro/frame/street`         | What does a frame of a city's streets cost while the camera pans, turns and tilts over loaded tiles?    | a frame: the update, symbol placement, draw calls and the GPU finishing it            |
+| `macro/frame/globe`          | What does a frame of the globe cost while it turns and tilts over loaded tiles?                         | a frame                                                                               |
+| `macro/navigate/street`      | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?         | a frame, with the layout of what arrived for it                                       |
+| `macro/update/geojson`       | What does replacing a GeoJSON source's data cost, until the map shows the new data?                     | an update of 2,000 points: parsed, indexed, tiled, laid out and shown                 |
+| `macro/update/layers`        | What does adding a batch of layers to a city's map, then removing them, cost until the map shows each?  | a batch of 20 layers added or removed, and the tiles laid out again                   |
+| `macro/update/paint`         | What does setting a layer's paint property cost, until the map shows the new value?                     | an edit, and the frames of its transition                                             |
+| `macro/update/feature-state` | What does a frame cost that moves a hover state from one feature to another?                            | a frame that moves the hover state                                                    |
+| `macro/update/images`        | What does adding the images that visible symbols use cost, until the map shows them?                    | 24 images added, and the tiles that use them laid out again                           |
+| `macro/tile-server/street`   | What does a tile server's renderer spend on each new tile of a city, from zoom 7 to 14?                 | a tile: laid out, placed, drawn and read back by a reused renderer                    |
 
 `mise run bench:list` prints the questions, and each scenario's doc comment says
 what it runs.
@@ -55,9 +61,15 @@ or Tokyo tiles) at 1024 x 768 and end at its first frame with nothing missing;
 making the GPU device is left out. The frame scenarios load the start of their
 path, then measure 120 frames along a camera path that keeps the same tiles in
 view: the renderer loads a tile again when it comes back into view, which a
-frame over loaded tiles mustn't do. The tile server renders thirteen new
-512-pixel tiles of zooms 7 to 14 as still images in tile mode, with one map and
-renderer that have the style loaded.
+frame over loaded tiles mustn't do. The navigate scenario flies 240 frames from
+zoom 11 into the streets at zoom 15.5 and back out to zoom 12, and each request
+it makes is answered 6 frames later, as over a network, so its frames show tiles
+missing and arriving. The update scenarios each edit a settled street map at
+zoom 15 and run until it shows the edit, complete and with nothing left to
+animate; the hover scenario moves a feature's state at each of 120 frames
+instead. The tile server renders thirteen new 512-pixel tiles of zooms 7 to 14
+as still images in tile mode, with one map and renderer that have the style
+loaded.
 
 ## Fixtures
 
@@ -129,8 +141,9 @@ is left out):
 | `wall`, `cpu`   | time  | wall-clock time, and the CPU time of every thread of the process        |
 
 A scenario adds its own, such as `frames`, `frames_incomplete` (frames drawn
-with tiles missing), `gpu_buffers` (the bytes of the GPU's vertex and index
-buffers after the last frame), `gpu_objects` (the textures and buffers the
+with tiles missing), `tile_requests`, `instructions_largest_frame` (the
+costliest single frame's), `gpu_buffers` (the bytes of the GPU's vertex and
+index buffers after the last frame), `gpu_objects` (the textures and buffers the
 renderer made), or frame-time percentiles (`frame_p50`, `frame_p90`,
 `frame_p99`). A scenario that repeats a unit of work, such as a frame or a tile,
 also reports `instructions`, `allocations` and `allocated` per unit
@@ -243,6 +256,12 @@ the scenario drives it, so that it does the same work on every run:
   for, and a map loads in the same steps on every run.
 - `support::map::Frontend` holds the GPU device and target, made apart from the
   map, so that a scenario can leave them out of what it measures.
+- A GeoJSON source that `HeadlessMap::add_geojson_source` adds cuts its tiles on
+  those workers too, rather than on threads of its own.
+- `support::latency::Latency` holds a file source's answers back for a number of
+  frames: a scenario that calls its `tick` before each frame, then waits for the
+  workers, sees each answer arrive the same number of frames after its request
+  on every run.
 
 On macOS, the system caches the GPU code it compiles for each binary, so the
 first process of a newly built binary to draw with a shader does 1% to 2% more

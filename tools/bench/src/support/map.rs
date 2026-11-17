@@ -14,6 +14,7 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_runtime::Device;
 use mln_storage::FileSource;
+use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
 use mln_util::geo::LatLng;
 use mln_util::size::Size;
 
@@ -277,6 +278,28 @@ impl HeadlessMap {
         }
     }
 
+    /// Adds a GeoJSON source `id`, with the default options, holding the
+    /// GeoJSON text `json`, as [`set_geojson`](Self::set_geojson) does.
+    pub(crate) fn add_geojson_source(&mut self, id: &str, json: &str) {
+        self.map.add_source(geojson_source(id, GeoJSONOptions::default_options())).expect("a new source");
+        self.set_geojson(id, json);
+    }
+
+    /// Replaces the data of the GeoJSON source `id` with the GeoJSON text
+    /// `json`, as an application's update does: parses it, indexes it for
+    /// tiling and gives it to the source. The source's tiles are cut on the
+    /// map's workers, where a GeoJSON source otherwise cuts them on threads
+    /// of its own, so that [`wait_for_workers`](Self::wait_for_workers)
+    /// waits for them too.
+    pub(crate) fn set_geojson(&mut self, id: &str, json: &str) {
+        let geojson: geojson::GeoJson = serde_json::from_str(json).expect("GeoJSON");
+        let data = create_geojson_data(geojson, self.frontend.workers(), &GeoJSONOptions::default_options())
+            .expect("GeoJSON that tiles");
+        self.map
+            .edit_style(|style| style.apply(GeoJsonSourceType::set_data(id, Some(data))))
+            .expect("a GeoJSON source");
+    }
+
     /// The vertex and index buffers the GPU held after the last frame.
     pub(crate) fn gpu_buffer_bytes(&self) -> u64 {
         let stats = self.frontend.frontend.rendering_stats();
@@ -289,9 +312,14 @@ impl HeadlessMap {
         stats.num_created_textures as u64 + stats.total_buffer_objs as u64
     }
 
+    /// The last frame, read back from the GPU.
+    pub(crate) fn image(&self) -> mln_util::image::PremultipliedImage {
+        self.frontend.frontend.read_still_image()
+    }
+
     /// Writes the last frame as a PNG to `path`.
     pub(crate) fn save_image(&self, path: &Path) {
-        save_png(&self.frontend.frontend.read_still_image(), path);
+        save_png(&self.image(), path);
     }
 
     /// Handles the map's events, counting its frames.

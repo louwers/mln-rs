@@ -3,7 +3,9 @@
 
 pub(crate) mod frame;
 pub(crate) mod load;
+pub(crate) mod navigate;
 pub(crate) mod tile_server;
+pub(crate) mod update;
 
 use mln_map::CameraOptions;
 use mln_util::geo::LatLng;
