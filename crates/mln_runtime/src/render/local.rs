@@ -485,18 +485,16 @@ impl Backend {
                 let target = webgpu_surface(backend, kind)?;
                 let options = mln_webgpu::SurfaceOptions { format, ..mln_webgpu::SurfaceOptions::default() };
                 let target = mln_webgpu::SurfaceTarget::new(Rc::clone(backend), target, size, options)?;
-                target.set_overlay(overlay_of(overlay, |overlay| match overlay {
-                    SurfaceOverlay::WebGpu(overlay) => Ok(overlay),
-                    other => Err(other),
+                target.set_overlay(overlay_of(overlay, |overlay| {
+                    if let SurfaceOverlay::WebGpu(overlay) = overlay { Ok(overlay) } else { Err(overlay) }
                 })?);
                 Ok(Box::new(target))
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             (Backend::Metal(backend), SurfaceKind::MetalLayer(layer)) => {
                 let target = mln_mtl::SurfaceTarget::new(backend, layer, size, true);
-                target.set_overlay(overlay_of(overlay, |overlay| match overlay {
-                    SurfaceOverlay::Metal(overlay) => Ok(overlay),
-                    other => Err(other),
+                target.set_overlay(overlay_of(overlay, |overlay| {
+                    if let SurfaceOverlay::Metal(overlay) = overlay { Ok(overlay) } else { Err(overlay) }
                 })?);
                 Ok(Box::new(target))
             }
