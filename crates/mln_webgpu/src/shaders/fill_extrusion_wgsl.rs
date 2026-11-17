@@ -63,9 +63,11 @@ struct GlobalIndexUBO {
 // The color of a surface facing `normal`, at `t` (0 at the base, 1 at the
 // top) of a wall.
 fn lit_color(in_color: vec4<f32>, normal: vec3<f32>, t: f32, baseValue: f32, heightValue: f32) -> vec4<f32> {
-    let color = in_color + min(vec4<f32>(0.03, 0.03, 0.03, 1.0), vec4<f32>(1.0));
+    // The surface's own luminance, before the ambient light that keeps it
+    // from going black.
+    let luminance = dot(in_color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let color = in_color + vec4<f32>(0.03, 0.03, 0.03, 1.0);
 
-    let luminance = dot(color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
     let directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
     let minDirectional = 1.0 - props.light_intensity;
     let maxDirectional = max(1.0 - luminance + props.light_intensity, 1.0);

@@ -1550,9 +1550,9 @@ fn main(in: VertexInput) -> VertexOutput {
 #else
     var color = props.color;
 #endif
-    color = color + min(vec4<f32>(0.03, 0.03, 0.03, 1.0), vec4<f32>(1.0));
-
     let luminance = dot(color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    color = color + vec4<f32>(0.03, 0.03, 0.03, 1.0);
+
     let directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
     let minDirectional = 1.0 - props.light_intensity;
     let maxDirectional = max(1.0 - luminance + props.light_intensity, 1.0);
