@@ -503,6 +503,9 @@ impl RenderLayer for RenderFillExtrusionLayer {
             };
             let binders = &*binders_lock.read();
 
+            // The draws keep the paint values they were built with, so
+            // feature state doesn't reach an extrusion: the tile's changes go
+            // unread.
             if draws.cache_mut::<ExtrusionTile>(&tile_id).is_none() {
                 let built = builder.build(tile, bucket, binders, &self.values.evaluated.paint);
                 draws.set_cache(&tile_id, built);

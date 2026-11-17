@@ -190,9 +190,8 @@ pub(crate) struct RenderOrchestrator {
     globe_depth_pass: GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
 
-    /// Last, so that it drops after the fields above: the render layers,
-    /// their draws and placement hold render tiles, whose layouts free
-    /// their data on the thread pool (`drop_on_workers`).
+    /// Last, so that it drops after the fields above: the render sources'
+    /// tiles free their data on the thread pool (`drop_on_workers`).
     _wait_for_thread_pool: WaitOnDrop,
 }
 

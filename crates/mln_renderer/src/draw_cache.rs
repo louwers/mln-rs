@@ -7,8 +7,9 @@
 //! the frame's prepare reports it. A layer keeps the GPU objects of its
 //! draws in caches of state of its own type ([`DrawCache`]): one in each
 //! tile's entry, and one of the layer's draws that no tile holds. Its update
-//! returns the frame's draws as values ([`FrameDraw`]), which the frame's
-//! encode issues ([`DrawGroup`]).
+//! leaves the frame's draws, as values ([`FrameDraw`]), in
+//! [`LayerDraws::frame`] and their uniforms in the layer's buffers, and the
+//! frame's encode issues them ([`DrawGroup`]).
 
 use std::any::Any;
 use std::ops::BitOrAssign;

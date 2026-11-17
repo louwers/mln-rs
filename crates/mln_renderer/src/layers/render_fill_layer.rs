@@ -706,12 +706,23 @@ impl RenderLayer for RenderFillLayer {
             let changes = draws.take_changes(&tile_id);
             if let Some(cached) = draws.cache_mut::<FillTile>(&tile_id) {
                 let geometry = tile.get_bucket_geometry();
-                for draw in [&mut cached.fill, &mut cached.outline].into_iter().flatten() {
-                    refresh_paint_attributes(&mut draw.objects, changes, |attrs| {
-                        let buffer = &binders.interleaved_vertex_buffer;
-                        let paint = paint_vertices(geometry, bucket, buffer, binders.depends_on_feature_state());
-                        read_fill_attributes(attrs, binders, &paint, evaluated, &mut Default::default());
-                    });
+                let refresh = |attrs: &mut VertexAttributeArray| {
+                    let buffer = &binders.interleaved_vertex_buffer;
+                    let paint = paint_vertices(geometry, bucket, buffer, binders.depends_on_feature_state());
+                    read_fill_attributes(attrs, binders, &paint, evaluated, &mut Default::default());
+                };
+                if let Some(fill) = &mut cached.fill {
+                    refresh_paint_attributes(&mut fill.objects, changes, refresh);
+                }
+                if let Some(outline) = &mut cached.outline {
+                    match &cached.fill {
+                        // A line outline reads the fill's attributes, and so
+                        // binds the buffers the fill uploads.
+                        Some(fill) if changes.paint && outline.objects.instance_attributes.is_none() => {
+                            outline.objects.vertex_attributes = copy_shared_attributes(&fill.objects.vertex_attributes);
+                        }
+                        _ => refresh_paint_attributes(&mut outline.objects, changes, refresh),
+                    }
                 }
             } else if let Some(built) = builder.build(tile, bucket, binders, evaluated) {
                 draws.set_cache(&tile_id, built);

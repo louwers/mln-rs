@@ -349,8 +349,6 @@ pub(crate) struct Buffer {
     pub(crate) segments: Vec<SegmentBase>,
     pub(crate) placed_symbols: Vec<PlacedSymbol>,
     pub(crate) pools: PlacedSymbolPools,
-    /// Bumped by `updateModified` (the draws re-read changed vectors).
-    pub(crate) modified: u64,
 }
 
 /// The geometry of a buffer's placed symbols, which they hold ranges of.
@@ -378,10 +376,6 @@ impl PlacedSymbolPools {
 }
 
 impl Buffer {
-    pub(crate) fn update_modified(&mut self) {
-        self.modified += 1;
-    }
-
     /// The positions `layer_id` draws: its own when it has them, the
     /// leader's otherwise.
     pub(crate) fn dynamic_attribute_data_for(&self, layer_id: &str) -> &Vec<SymbolDynamicLayoutVertex> {
@@ -715,17 +709,11 @@ impl SymbolBucket {
         }
     }
 
-    /// The end of `upload`/`updateVertices` bookkeeping: `uploaded = false`
-    /// and the buffers' `updateModified`.
+    /// Marks the bucket for upload when placement changed its opacities or
+    /// its dynamic vertices.
     pub(crate) fn mark_vertices_updated(&self, update_opacities: bool, dynamic_updated: bool) {
-        let mut state = self.state();
         if update_opacities || dynamic_updated {
             self.base.uploaded.store(false, Ordering::SeqCst);
-        }
-        if !self.base.uploaded.load(Ordering::SeqCst) {
-            state.text.update_modified();
-            state.icon.update_modified();
-            state.sdf_icon.update_modified();
         }
     }
 
