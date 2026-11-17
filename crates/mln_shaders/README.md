@@ -104,6 +104,9 @@ its own convention:
   on WebGPU; sample and load textures through their globals, not function
   parameters, for the crate to tell.
 - naga's GLSL has no `f16` and writes `highp`; use `f32`.
+- An alpha-only texture (`A8Unorm`: the glyph atlas, line dash patterns) reads
+  its value from alpha on every backend but WebGPU, which has no alpha-only
+  format and reads it from red: use `@if(webgpu)`.
 - Metal's line shaders evaluate GPU expressions (`Caps::line_expressions`),
   whose expression mask means the opposite of the other backends'. A WESL line
   program needs Metal's caps to match it.
