@@ -33,8 +33,7 @@ use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{Shown, Tile, TileInput, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_workers::{InlineWorkers, Lane, ReplyBody};
 
-/// A tile, its source and the store, borrowed for a transition. Dropping it
-/// reports the tile's `StartParse` if it became pending.
+/// A tile, its source and the store, borrowed for a transition.
 pub(crate) struct TileMut<'a> {
     source: &'a mut SourceInfo,
     tile: &'a mut Tile,
@@ -45,15 +44,9 @@ pub(crate) struct TileMut<'a> {
     pub(super) installed: bool,
 }
 
-impl Drop for TileMut<'_> {
-    fn drop(&mut self) {
-        self.report();
-    }
-}
-
 impl<'a> TileMut<'a> {
-    /// Runs `f` on `tile`, and returns its result and whether the tile
-    /// showed new contents.
+    /// Runs `f` on `tile`, then reports `StartParse` if `f` left it pending.
+    /// Returns `f`'s result and whether the tile showed new contents.
     pub(super) fn with<R>(
         source: &'a mut SourceInfo,
         tile: &'a mut Tile,
@@ -62,7 +55,9 @@ impl<'a> TileMut<'a> {
     ) -> (R, bool) {
         let reported = tile.is_pending();
         let mut tile = TileMut { source, tile, store, reported, installed: false };
-        (f(&mut tile), tile.installed)
+        let result = f(&mut tile);
+        tile.report();
+        (result, tile.installed)
     }
 
     pub(crate) fn tile(&self) -> &Tile {

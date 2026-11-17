@@ -153,9 +153,10 @@ impl Pipeline {
         }
     }
 
-    /// Whether work is under way or to start. A layout with its style counts
-    /// as started from the tile's first load on, as C++'s does from
-    /// `setLayers`, until the tile has `settled` without data.
+    /// Whether work is under way or to start. An outdated layout with its
+    /// style is pending while it has data to lay out, and while it waits for
+    /// data until the tile settles without any, so that a tile isn't complete
+    /// before its load answers.
     pub(crate) fn is_pending(&self, settled: bool) -> bool {
         match self {
             Pipeline::Layout(layout) => match &layout.work {

@@ -642,13 +642,12 @@ impl SourceTiles {
             self.cache_set_size(0, ctx);
         }
 
-        // Port-only: a tile that leaves the view while it loads goes on
-        // loading in the cache while it is next to the view's tiles (C++
-        // releases it). A view that turns back and forth needs the tiles at
-        // its corners for moments too short to load them each time. A tile
-        // that the view has left further behind, such as one of a zoom level
-        // that a fast zoom passed, stops loading as in C++: it would hold up
-        // the requests and the tile workers that the view's own tiles need.
+        // A tile that leaves the view while it loads goes on loading in the
+        // cache while it is next to the view's tiles: a view that turns back
+        // and forth needs the tiles at its corners for moments too short to
+        // load them each time. A tile the view has left further behind, such
+        // as one of a zoom level that a fast zoom passed, stops loading, since
+        // it would hold up the requests and workers the view's tiles need.
         let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles));
         self.cache_release_loading(ctx, |id| wanted.is_near(id));
 
