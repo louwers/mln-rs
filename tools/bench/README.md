@@ -20,11 +20,11 @@ benchmark
 the camera path of a `macro/frame` scenario in a window, over the same fixtures,
 and prints the times between the frames the window presents. It shows what a
 user sees of a frame, the backend's surface and the display's compositor
-included, which a headless frame leaves out. It gives no verdicts, and nothing
-runs it but a person at a machine with a display: run it on both sides of a
-change by hand, and compare the summaries. `--laps <n>` sets how long it runs
-(10 laps of 120 frames; 0 draws until the window closes, for a profiler). The
-fixtures and the paths come from `workload/`, a crate both programs share.
+included, which a headless frame leaves out. Nothing runs it but a person at a
+machine with a display: run it on both sides of a change by hand, and compare
+the summaries. `--laps <n>` sets how long it runs (10 laps of 120 frames; 0
+draws until the window closes, for a profiler). The fixtures and the paths come
+from `workload/`, a crate both programs share.
 
 ## Running
 
@@ -175,9 +175,9 @@ out as the base URL is.
 
 A scenario opens it with `support::fixtures::Fixtures::open(bench)`, which
 records the manifest's hash in the run's environment, so runs on different
-fixtures get no verdicts against each other. A scenario fails, naming the
-command, when the snapshot isn't installed. Data an application would supply,
-such as features to add, is generated in code from a fixed seed instead.
+fixtures aren't compared. A scenario fails, naming the command, when the
+snapshot isn't installed. Data an application would supply, such as features to
+add, is generated in code from a fixed seed instead.
 
 ### A new snapshot
 
@@ -215,15 +215,14 @@ the GPU's vertex and index buffers), `gpu_objects` (the textures and buffers the
 renderer made) or `background_work` (the times a frame started work off the
 frame, such as laying out a tile). A scenario that repeats a unit of work, such
 as a frame or a tile, also reports `instructions`, `allocations` and `allocated`
-per unit, such as `instructions_per_frame`, as context.
+per unit, such as `instructions_per_frame`.
 
 A user feels the costliest frames, not the average one: the frame that crosses
 the antimeridian, or the one where a tile arrives. So a scenario whose measured
 parts are each one unit of a user's experience (a frame, a tile, an edit) also
 reports how the units spread, with no need to know which are costly:
-`instructions`, `allocations` and `allocated` of the median unit, the 90th
-percentile and the costliest, such as `allocations_per_frame_max`, which are
-counts and get verdicts, and the same of `wall`, as context.
+`instructions`, `allocations`, `allocated` and `wall` of the median unit, the
+90th percentile and the costliest, such as `allocations_per_frame_max`.
 
 How closely a count repeats depends on what it counts. Allocations and bytes
 repeat exactly in most scenarios. Instructions move by a few hundredths of a
@@ -246,11 +245,11 @@ checkout ends up in a binary, so the same source builds the same binary on both
 sides. Each run reports its harness id, a hash of the harness's files and the
 compiler, and the comparison refuses runs whose ids differ.
 
-When this checkout's harness doesn't build against the ref, the comparison stops
-with no verdicts. It never runs the ref's own harness instead. This happens when
-a change adds a scenario or entry point that needs library code the ref lacks,
-or changes the internals an entry point calls. Commit what the harness needs
-first, then compare the change you want to measure with that commit
+When this checkout's harness doesn't build against the ref, the comparison
+stops. It never runs the ref's own harness instead. This happens when a change
+adds a scenario or entry point that needs library code the ref lacks, or changes
+the internals an entry point calls. Commit what the harness needs first, then
+compare the change you want to measure with that commit
 (`mise run bench:compare HEAD~1`).
 
 ### Counts
@@ -262,29 +261,27 @@ later ones none. The ref is also built a second time with the harness's
 `layout-probe` feature, which adds code that never runs and so moves the rest,
 and each scenario runs once on that build.
 
-A count's noise (its spread in the report) is the larger range of either side's
-runs; for instructions, also the most that the layout probe of any ref compared
-so far moved them, since one build of moved code shows too little of how far
-they move. A count gets a verdict when this checkout's median moves from the
-ref's by more than twice its noise, however small the change: a count that
-repeats exactly gets one for any change, and the report shows how large it is.
-Whether a change that size matters is the reader's call, or a CI workflow's
-policy (`verdicts.py --min-change`). A scenario whose counts get a verdict runs
-twice more on this checkout, and the verdicts come from all three runs. Per-unit
-means get no verdicts of their own.
+A count's noise is the larger range of either side's runs; for instructions,
+also the most that the layout probe of any ref compared so far moved them, since
+one build of moved code shows too little of how far they move. The report shows
+every count's change and noise, and marks a change over twice the noise, however
+small: a count that repeats exactly is marked for any change. Whether a change
+matters is the reader's call. A scenario with a marked count runs twice more on
+this checkout, and its counts come from all three runs, so that a change that
+doesn't repeat isn't marked.
 
 ### Times
 
-Without `--rounds`, times show what one run of each side took, as context.
-`--rounds <n>` runs each side n times, interleaved ABBA so that changes in the
-machine's load hit both alike. Each scenario's `wall` time then gets a verdict
-when a two-sided Mann-Whitney U test, Holm-adjusted over every scenario
-compared, gives p < 0.05; its other times are context. The fewest rounds that
-can give a verdict grow with the scenarios compared: 4 for one scenario, 7 for
-all of them. Compare times only within one configuration.
+Without `--rounds`, times show what one run of each side took, with no noise to
+hold them against. `--rounds <n>` runs each side n times, interleaved ABBA so
+that changes in the machine's load hit both alike. Each scenario's `wall` time
+is then marked when a two-sided Mann-Whitney U test, Holm-adjusted over every
+scenario compared, gives p < 0.05; its other times move with it. The fewest
+rounds that can mark a time grow with the scenarios compared: 4 for one
+scenario, 7 for all of them. Compare times only within one configuration.
 
 Rounds need a quiet machine, and several sessions often measure on one. Every
-`mln-bench` that measures holds one lock of the user's: runs that judge only
+`mln-bench` that measures holds one lock of the user's: runs that take only
 counts share it and overlap freely, and rounds take it alone, waiting for the
 measurements under way. The lock doesn't cover other sessions' builds and tests,
 so rounds don't start while the machine's load average is over `--max-load` (a
@@ -295,37 +292,26 @@ them.
 
 Each run records its environment: the OS, the CPU, how it counted instructions,
 the GPU it drew on and its backend, whether that GPU is a CPU rasterizer, and
-the fixtures it read. A scenario whose sides ran in different environments gets
-no verdicts.
-
-### In CI
-
-GitHub's runners have no GPU, so CI's two workflows compare on lavapipe, with
-one run per side: only counts get verdicts there, and the runners count no
-instructions. Both act only on changes of 1% or more
-(`verdicts.py --min-change`), and list smaller verdicts apart. `bench`, run by
-hand on a branch, compares it with a base and fails on a worse verdict.
-`bench-nightly` compares main with main a day earlier and keeps the issue
-"Nightly benchmarks: main got worse": a night with a worse verdict opens it or
-comments on it, and a night without one closes it. Both report through
-`verdicts.py`, which reads `compare --json`.
+the fixtures it read. A scenario whose sides ran in different environments isn't
+compared.
 
 ## Reading a report
 
 ```text
 micro/expression/evaluate/liberty (counts: 3 base runs, 3 of this checkout)
-  metric                         base     this  change  spread    verdict
-  instructions                 1.01 G   1.03 G   +2.2%   0.01%      WORSE
-  allocations                   687 k    699 k   +1.8%   0.00%      WORSE
-  wall                        39.4 ms  40.6 ms   +3.0%          (context)
-  instructions_per_evaluation    1271     1299   +2.2%          (context)
+  metric                         base     this  change  noise  moved
+  instructions                 1.01 G   1.03 G   +2.2%  0.31%   more
+  allocations                   687 k    699 k   +1.8%  0.00%   more
+  retained_heap                23 KiB   23 KiB  +0.00%  0.00%
+  wall                        39.4 ms  40.6 ms   +3.0%
+  instructions_per_evaluation    1271     1299   +2.2%  0.31%   more
 ```
 
 `base` is the ref's median, `this` this checkout's, `change` the difference as a
-share of the base. `spread` is a count's noise as a share of the base, or with
-rounds the tested time's adjusted p-value. `WORSE` and `better` are verdicts; a
-blank is no verdict, and `(context)` marks a metric that gets none. The last
-line counts the verdicts; comparing a commit with itself gives none.
+share of the base. `noise` is a count's noise as a share of the base, or with
+rounds the tested time's adjusted p-value. `moved` marks a change beyond the
+noise, `more` or `less` of the metric; lower is better for every metric. The
+last line counts the marked changes; comparing a commit with itself gives none.
 
 ## Adding a scenario
 

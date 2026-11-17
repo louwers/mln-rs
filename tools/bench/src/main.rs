@@ -37,10 +37,11 @@ run and compare run each scenario in a process of its own (mln-bench exec).
 --images writes the last image each scenario drew to <dir>, as PNG files
 named after the scenarios.
 compare builds this checkout's harness against <ref> and compares the two
-(tools/bench/README.md). A count gets a verdict when it moves by over twice
-its noise: how far it moves between runs, and for instructions between
-builds of the same code laid out differently. --rounds runs each side n
-times, and gives the wall time a verdict when a rank test finds it changed.
+(tools/bench/README.md): each metric's change, and its noise, how far it
+moves between runs, and for instructions between builds of the same code
+laid out differently; a change over twice its noise is marked. --rounds
+runs each side n times, and marks the wall time when a rank test finds it
+changed.
 Rounds run alone among the machine's benchmark runs,
 and not at all while its load average is over --max-load (a quarter of its
 cores by default).

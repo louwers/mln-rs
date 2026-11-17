@@ -1,6 +1,6 @@
 //! What a run's numbers depend on besides the code: the machine, the GPU a
-//! scenario drew on, and the fixtures it read. `mln-bench compare` gives
-//! verdicts only between runs whose environments are equal.
+//! scenario drew on, and the fixtures it read. `mln-bench compare` holds
+//! changes against their noise only between runs whose environments are equal.
 
 #![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "sysctl is FFI"))]
 

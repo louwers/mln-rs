@@ -13,21 +13,22 @@
 //!
 //! Counts: each side runs once per scenario, and the ref's runs are kept
 //! under `<target>/bench-compare/samples`, by commit, to measure how much a
-//! count moves from run to run (its spread) without running the ref again
+//! count moves from run to run (its noise) without running the ref again
 //! next time; the ref runs again only until it has [`SPREAD_RUNS`] of them.
-//! A scenario whose counts get a verdict runs again on this checkout, until
-//! it has [`CONFIRM_RUNS`], and its verdicts come from those runs. The
+//! A scenario whose counts move beyond their noise runs again on this
+//! checkout, until it has [`CONFIRM_RUNS`], and its counts come from those
+//! runs. The
 //! instructions a scenario retires also move with where the compiler and
 //! linker put its code, which any edit to the binary can change, by up to a
 //! few percent in some scenarios: each ref is built a second time with the
 //! harness's `layout-probe` feature, which only moves code, and the most
 //! that any stored probe has moved a scenario's instructions counts as
-//! their noise too. A count gets a verdict when it moves by over
-//! [`SPREAD_FACTOR`] times its noise, however small that is: a count that
-//! repeats exactly gets one for any change, which the report shows with its
-//! size, for the reader to weigh.
-//! Times: context only, unless `--rounds` asks for interleaved rounds, which
-//! a rank test then judges. Rounds run alone among the machine's benchmark
+//! their noise too. The report shows every metric's change and its noise,
+//! and marks a count that moved by over [`NOISE_FACTOR`] times its noise,
+//! however little: one that repeats exactly is marked for any change. The
+//! reader weighs what matters.
+//! Times: one run per side has no noise to hold them against, unless
+//! `--rounds` asks for interleaved rounds, which a rank test compares. Rounds run alone among the machine's benchmark
 //! runs ([`host::measuring`]), and not while its load is over
 //! `--max-load`.
 
@@ -47,18 +48,18 @@ use crate::scenario::{MetricKind, Scenario, Unit};
 use crate::stats::{holm, mann_whitney, median, range};
 use crate::{host, scenarios};
 
-/// The base's runs a count's spread needs at least.
+/// The base's runs a count's noise needs at least.
 const SPREAD_RUNS: usize = 3;
 /// The base's runs kept for each scenario, the latest.
 const KEPT_RUNS: usize = 8;
-/// This checkout's runs of a scenario whose counts got a verdict from one.
+/// This checkout's runs of a scenario whose counts moved beyond their noise
+/// in one.
 const CONFIRM_RUNS: usize = 3;
-/// How many times its noise a count must move by.
-const SPREAD_FACTOR: f64 = 2.0;
-/// A time's verdict needs its Holm-adjusted p-value below this.
+/// How many times its noise a count must move by to be marked.
+const NOISE_FACTOR: f64 = 2.0;
+/// A time is marked when its Holm-adjusted p-value is below this.
 const ALPHA: f64 = 0.05;
-/// The time that gets a verdict with rounds; a scenario's other times are
-/// context, since they move with it.
+/// The time that rounds test; a scenario's other times move with it.
 const TESTED_TIME: &str = "wall";
 
 pub(crate) struct Options {
@@ -70,11 +71,13 @@ pub(crate) struct Options {
     pub(crate) max_load: f64,
 }
 
+/// Which way a metric moved, when it moved beyond its noise. Lower is
+/// better for every metric.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Verdict {
-    Better,
-    Worse,
+pub(crate) enum Moved {
+    More,
+    Less,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -90,19 +93,21 @@ pub(crate) struct MetricComparison {
     /// A count's noise, as a fraction of the base: the larger range of
     /// either side's runs, or for instructions the most a stored layout
     /// probe moved them, if that is larger.
-    pub(crate) spread: Option<f64>,
+    pub(crate) noise: Option<f64>,
     /// The tested time's p-value with rounds, Holm-adjusted over every
     /// scenario of the comparison.
     pub(crate) p: Option<f64>,
-    pub(crate) verdict: Option<Verdict>,
+    /// Which way the metric moved, if beyond its noise.
+    pub(crate) moved: Option<Moved>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ScenarioComparison {
     pub(crate) scenario: String,
     pub(crate) environment: Environment,
-    /// Why the scenario gets no verdicts, if it doesn't.
-    pub(crate) no_verdicts: Option<String>,
+    /// Why the scenario's changes aren't held against their noise, if they
+    /// aren't.
+    pub(crate) not_comparable: Option<String>,
     /// The base's runs its counts used, and the candidate's.
     pub(crate) base_runs: usize,
     pub(crate) candidate_runs: usize,
@@ -130,8 +135,9 @@ pub(crate) struct Load {
 }
 
 impl Comparison {
-    pub(crate) fn verdicts(&self) -> usize {
-        self.scenarios.iter().flat_map(|scenario| &scenario.metrics).filter(|metric| metric.verdict.is_some()).count()
+    /// How many metrics moved beyond their noise.
+    pub(crate) fn moved(&self) -> usize {
+        self.scenarios.iter().flat_map(|scenario| &scenario.metrics).filter(|metric| metric.moved.is_some()).count()
     }
 }
 
@@ -146,7 +152,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         let needed = min_rounds(scenarios.len());
         if rounds < needed {
             return Err(format!(
-                "--rounds {rounds} can't give a time a verdict among {} scenarios: that takes at least {needed} \
+                "--rounds {rounds} can't tell a time's change from noise among {} scenarios: that takes at least {needed} \
                  rounds, or fewer scenarios (--filter)",
                 scenarios.len()
             ));
@@ -176,7 +182,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     let base = build(&root, &tree.join("Cargo.toml"), Some(&base_target), None).map_err(|error| {
         format!(
             "{error}\n\nThis checkout's harness, with its libraries' bench modules, doesn't build against {} ({}), \
-             so there are no verdicts. A scenario or entry point that needs library code the base lacks can't be \
+             so there's nothing to compare. A scenario or entry point that needs library code the base lacks can't be \
              compared with it: commit that code with the scenario, then compare later changes with that commit \
              (tools/bench/README.md).",
             options.base,
@@ -231,7 +237,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         let harness = &harness;
         if let Some(run) = base_runs.iter().chain(&candidate_runs).find(|run| &run.harness != harness) {
             return Err(format!(
-                "{}: the sides ran different harness builds ({} and {harness}), so there are no verdicts",
+                "{}: the sides ran different harness builds ({} and {harness}), so they can't be compared",
                 scenario.name, run.harness
             ));
         }
@@ -241,7 +247,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         let mut base_counts = kept.clone();
         base_counts.extend(base_runs.iter().cloned());
         while base_counts.len() < SPREAD_RUNS {
-            eprintln!("mln-bench: {}: another base run, for the spread", scenario.name);
+            eprintln!("mln-bench: {}: another base run, for the noise", scenario.name);
             base_counts.push(run_in_process(&base, scenario.name, None)?);
         }
         let fresh = base_counts.len() - kept.len();
@@ -252,9 +258,9 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         let layout = layout_noise(&work.join("samples"), scenario.name, environment);
         let base = Base { runs: &base_runs, counts: &base_counts, layout: &layout };
         let mut comparison = compare_scenario(scenario, &base, &candidate_runs, options.rounds);
-        if options.rounds.is_none() && comparison.has_count_verdict() {
+        if options.rounds.is_none() && comparison.has_count_moved() {
             while candidate_runs.len() < CONFIRM_RUNS {
-                eprintln!("mln-bench: {}: this checkout again, to confirm its verdicts", scenario.name);
+                eprintln!("mln-bench: {}: this checkout again, to confirm its changes", scenario.name);
                 let run = run_in_process(&candidate, scenario.name, None)?;
                 if &run.harness != harness {
                     return Err(format!("{}: this checkout's harness changed while it ran", scenario.name));
@@ -278,7 +284,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     })
 }
 
-/// The fewest rounds with which a time can get a verdict when `tests`
+/// The fewest rounds with which a time can move beyond its noise when `tests`
 /// scenarios each test one: Holm's adjustment multiplies the smallest
 /// p-value by `tests`, and with n rounds per side the smallest p-value of a
 /// two-sided Mann-Whitney U test is 2 / C(2n, n), when the sides don't
@@ -293,12 +299,12 @@ fn min_rounds(tests: usize) -> usize {
 }
 
 /// Gives the tested time of each scenario of `comparisons` its p-value
-/// Holm-adjusted over all of them, so that the chance of any false verdict
-/// in the comparison stays under [`ALPHA`], and its verdict.
+/// Holm-adjusted over all of them, so that the chance of marking any time
+/// that didn't change stays under [`ALPHA`], and marks it if it moved.
 fn judge_times(comparisons: &mut [ScenarioComparison]) {
     let mut tested: Vec<&mut MetricComparison> = comparisons
         .iter_mut()
-        .filter(|scenario| scenario.no_verdicts.is_none())
+        .filter(|scenario| scenario.not_comparable.is_none())
         .flat_map(|scenario| scenario.metrics.iter_mut())
         .filter(|metric| metric.kind == MetricKind::Time && metric.p.is_some())
         .collect();
@@ -309,7 +315,7 @@ fn judge_times(comparisons: &mut [ScenarioComparison]) {
             && p < ALPHA
             && change != 0.0
         {
-            metric.verdict = Some(if c > b { Verdict::Worse } else { Verdict::Better });
+            metric.moved = Some(if c > b { Moved::More } else { Moved::Less });
         }
     }
 }
@@ -396,9 +402,9 @@ fn compare_scenario(
 ) -> ScenarioComparison {
     let (base_runs, base_counts) = (base_side.runs, base_side.counts);
     let environment = candidate_runs[0].environment.clone();
-    let mut no_verdicts = None;
+    let mut not_comparable = None;
     if let Some(run) = base_runs.iter().chain(candidate_runs).find(|run| run.environment != environment) {
-        no_verdicts = Some(format!(
+        not_comparable = Some(format!(
             "the sides ran in different environments ({})",
             environment.differences(&run.environment).join("; ")
         ));
@@ -429,9 +435,9 @@ fn compare_scenario(
             base: base_median,
             candidate: candidate_median,
             change,
-            spread: None,
+            noise: None,
             p: None,
-            verdict: None,
+            moved: None,
         };
         if let (Some(b), Some(c)) = (base_median, candidate_median)
             && kind == MetricKind::Count
@@ -440,9 +446,9 @@ fn compare_scenario(
             if let Some(moved) = base_side.layout.get(name) {
                 spread = spread.max(moved * b.abs());
             }
-            comparison.spread = Some(relative(spread, b));
-            if (c - b).abs() > SPREAD_FACTOR * spread {
-                comparison.verdict = Some(if c > b { Verdict::Worse } else { Verdict::Better });
+            comparison.noise = Some(relative(spread, b));
+            if (c - b).abs() > NOISE_FACTOR * spread {
+                comparison.moved = Some(if c > b { Moved::More } else { Moved::Less });
             }
         }
         if rounds.is_some() && kind == MetricKind::Time && name == TESTED_TIME {
@@ -450,15 +456,15 @@ fn compare_scenario(
         }
         metrics.push(comparison);
     }
-    if no_verdicts.is_some() {
+    if not_comparable.is_some() {
         for metric in &mut metrics {
-            metric.verdict = None;
+            metric.moved = None;
         }
     }
     ScenarioComparison {
         scenario: scenario.name.to_owned(),
         environment,
-        no_verdicts,
+        not_comparable,
         base_runs: base_counts.len(),
         candidate_runs: candidate_runs.len(),
         metrics,
@@ -466,8 +472,8 @@ fn compare_scenario(
 }
 
 impl ScenarioComparison {
-    fn has_count_verdict(&self) -> bool {
-        self.metrics.iter().any(|metric| metric.kind == MetricKind::Count && metric.verdict.is_some())
+    fn has_count_moved(&self) -> bool {
+        self.metrics.iter().any(|metric| metric.kind == MetricKind::Count && metric.moved.is_some())
     }
 }
 
@@ -495,20 +501,19 @@ pub(crate) fn text(comparison: &Comparison) -> String {
     let _ = writeln!(out, "harness {} on both sides", comparison.harness);
     let _ = writeln!(
         out,
-        "counts: a verdict needs a change over {SPREAD_FACTOR}x the count's noise (spread): the larger range of \
-         either side's runs, and for instructions the most a build laid out differently moved them; per-unit \
-         means are context"
+        "noise: a count's larger range over either side's runs, and for instructions the most a build laid out \
+         differently moved them; a change over {NOISE_FACTOR}x its noise is marked more or less"
     );
     match comparison.rounds {
         Some(rounds) => {
             let _ = writeln!(
                 out,
-                "times: {rounds} interleaved rounds; {TESTED_TIME} gets a verdict when its Mann-Whitney p, \
-                 Holm-adjusted over the scenarios, is under {ALPHA}; other times are context"
+                "times: {rounds} interleaved rounds; {TESTED_TIME} is marked when its Mann-Whitney p, Holm-adjusted \
+                 over the scenarios, is under {ALPHA}"
             );
         }
         None => {
-            let _ = writeln!(out, "times: context only, from one run per side (--rounds <n> tests them)");
+            let _ = writeln!(out, "times: one run per side, so no noise to hold them against (--rounds <n>)");
         }
     }
     if let Some(load) = comparison.load {
@@ -533,26 +538,21 @@ pub(crate) fn text(comparison: &Comparison) -> String {
             "\n{} (counts: {} base runs, {} of this checkout)",
             scenario.scenario, scenario.base_runs, scenario.candidate_runs
         );
-        if let Some(reason) = &scenario.no_verdicts {
-            let _ = writeln!(out, "  no verdicts: {reason}");
+        if let Some(reason) = &scenario.not_comparable {
+            let _ = writeln!(out, "  not comparable: {reason}");
         }
-        let mut rows = vec![["metric", "base", "this", "change", "spread", "verdict"].map(str::to_owned).to_vec()];
+        let mut rows = vec![["metric", "base", "this", "change", "noise", "moved"].map(str::to_owned).to_vec()];
         for metric in &scenario.metrics {
             let value =
                 |value: Option<f64>| value.map_or_else(|| "-".to_owned(), |value| format_value(metric.unit, value));
-            let spread = match (metric.spread, metric.p) {
-                (Some(spread), _) => percent(spread, false),
+            let noise = match (metric.noise, metric.p) {
+                (Some(noise), _) => percent(noise, false),
                 (None, Some(p)) => format!("p={p:.3}"),
                 (None, None) => String::new(),
             };
-            let verdict = match metric.verdict {
-                Some(Verdict::Better) => "better",
-                Some(Verdict::Worse) => "WORSE",
-                None if metric.kind == MetricKind::PerUnit
-                    || (metric.kind == MetricKind::Time && metric.p.is_none()) =>
-                {
-                    "(context)"
-                }
+            let moved = match metric.moved {
+                Some(Moved::More) => "more",
+                Some(Moved::Less) => "less",
                 None => "",
             };
             rows.push(vec![
@@ -560,14 +560,14 @@ pub(crate) fn text(comparison: &Comparison) -> String {
                 value(metric.base),
                 value(metric.candidate),
                 metric.change.map_or_else(String::new, |change| percent(change, true)),
-                spread,
-                verdict.to_owned(),
+                noise,
+                moved.to_owned(),
             ]);
         }
         out.push_str(&table(&rows));
     }
-    let verdicts = comparison.verdicts();
-    let _ = writeln!(out, "\n{verdicts} verdict{}", if verdicts == 1 { "" } else { "s" });
+    let moved = comparison.moved();
+    let _ = writeln!(out, "\n{moved} change{} beyond noise", if moved == 1 { "" } else { "s" });
     out
 }
 
@@ -794,7 +794,7 @@ mod tests {
             metrics: vec![
                 count("instructions", MetricKind::Count, instructions),
                 count("allocations", MetricKind::Count, allocations),
-                count("allocations_per_tile", MetricKind::PerUnit, allocations / 10.0),
+                count("allocations_per_tile", MetricKind::Count, allocations / 10.0),
                 Metric { name: "wall".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
                 Metric { name: "cpu".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
             ],
@@ -803,8 +803,8 @@ mod tests {
 
     const SCENARIO: Scenario = Scenario { name: "micro/test/case", kind: Kind::Micro, question: "?", run: |_| {} };
 
-    fn verdict(comparison: &ScenarioComparison, name: &str) -> Option<Verdict> {
-        comparison.metrics.iter().find(|metric| metric.name == name).unwrap().verdict
+    fn moved(comparison: &ScenarioComparison, name: &str) -> Option<Moved> {
+        comparison.metrics.iter().find(|metric| metric.name == name).unwrap().moved
     }
 
     fn base<'a>(runs: &'a [Run], layout: &'a BTreeMap<String, f64>) -> Base<'a> {
@@ -812,47 +812,47 @@ mod tests {
     }
 
     #[test]
-    fn a_count_needs_twice_its_spread() {
+    fn a_count_moves_beyond_twice_its_noise() {
         let none = BTreeMap::new();
         let runs = [run(1000.0, 1.0), run(1001.0, 1.0), run(1002.0, 1.0)];
-        // +0.5% of the median, 1001: over twice the spread of 2.
+        // +0.5% of the median, 1001: over twice the noise of 2.
         let comparison = compare_scenario(&SCENARIO, &base(&runs, &none), &[run(1006.0, 5.0)], None);
-        assert_eq!(verdict(&comparison, "instructions"), Some(Verdict::Worse));
-        // Times are context without rounds.
-        assert_eq!(verdict(&comparison, "wall"), None);
+        assert_eq!(moved(&comparison, "instructions"), Some(Moved::More));
+        // Times have no noise to hold against without rounds.
+        assert_eq!(moved(&comparison, "wall"), None);
         // +0.2%: within it.
         let comparison = compare_scenario(&SCENARIO, &base(&runs, &none), &[run(1003.0, 1.0)], None);
-        assert_eq!(verdict(&comparison, "instructions"), None);
-        // A spread of 30 hides a change of 50.
+        assert_eq!(moved(&comparison, "instructions"), None);
+        // A noise of 30 hides a change of 50.
         let noisy = [run(1000.0, 1.0), run(1015.0, 1.0), run(1030.0, 1.0)];
         let comparison = compare_scenario(&SCENARIO, &base(&noisy, &none), &[run(1065.0, 1.0)], None);
-        assert_eq!(verdict(&comparison, "instructions"), None);
+        assert_eq!(moved(&comparison, "instructions"), None);
         let comparison = compare_scenario(&SCENARIO, &base(&noisy, &none), &[run(900.0, 1.0)], None);
-        assert_eq!(verdict(&comparison, "instructions"), Some(Verdict::Better));
+        assert_eq!(moved(&comparison, "instructions"), Some(Moved::Less));
     }
 
     #[test]
-    fn instructions_take_the_layout_noise_as_spread() {
+    fn instructions_take_the_layout_noise_as_noise() {
         let runs = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
         // +2%, where moving the code has moved the count by 3%.
         let candidate = [run(1020.0, 1.0)];
         let layout = BTreeMap::from([("instructions".to_owned(), 0.03)]);
         let comparison = compare_scenario(&SCENARIO, &base(&runs, &layout), &candidate, None);
-        assert_eq!(verdict(&comparison, "instructions"), None);
+        assert_eq!(moved(&comparison, "instructions"), None);
         let comparison = compare_scenario(&SCENARIO, &base(&runs, &BTreeMap::new()), &candidate, None);
-        assert_eq!(verdict(&comparison, "instructions"), Some(Verdict::Worse));
+        assert_eq!(moved(&comparison, "instructions"), Some(Moved::More));
     }
 
     #[test]
-    fn a_count_that_repeats_gets_a_verdict_for_any_change() {
+    fn a_count_that_repeats_moves_beyond_its_noise_with_any_change() {
         let runs = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
-        // One allocation more: a verdict; per-unit counts are context.
+        // One allocation more, and its mean per tile with it.
         let comparison =
             compare_scenario(&SCENARIO, &base(&runs, &BTreeMap::new()), &[run_with(1000.0, 1001.0, 1.0)], None);
-        assert_eq!(verdict(&comparison, "allocations"), Some(Verdict::Worse));
-        assert_eq!(verdict(&comparison, "instructions"), None);
-        assert_eq!(verdict(&comparison, "allocations_per_tile"), None);
-        assert!(comparison.has_count_verdict());
+        assert_eq!(moved(&comparison, "allocations"), Some(Moved::More));
+        assert_eq!(moved(&comparison, "instructions"), None);
+        assert_eq!(moved(&comparison, "allocations_per_tile"), Some(Moved::More));
+        assert!(comparison.has_count_moved());
     }
 
     #[test]
@@ -872,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn a_time_needs_rounds_and_a_significant_change() {
+    fn a_time_needs_rounds_and_a_significant_change_to_move() {
         let base: Vec<Run> = (0..6).map(|i| run(1000.0, 10.0 + f64::from(i) * 0.01)).collect();
         let slower: Vec<Run> = (0..6).map(|i| run(1000.0, 11.0 + f64::from(i) * 0.01)).collect();
         let same: Vec<Run> = (0..6).map(|i| run(1000.0, 10.005 + f64::from(i) * 0.01)).collect();
@@ -883,10 +883,10 @@ mod tests {
             compare_scenario(&SCENARIO, &all(&base), &same, Some(6)),
         ];
         judge_times(&mut comparisons);
-        assert_eq!(verdict(&comparisons[0], "wall"), Some(Verdict::Worse));
+        assert_eq!(moved(&comparisons[0], "wall"), Some(Moved::More));
         // Only wall is tested.
-        assert_eq!(verdict(&comparisons[0], "cpu"), None);
-        assert_eq!(verdict(&comparisons[1], "wall"), None);
+        assert_eq!(moved(&comparisons[0], "cpu"), None);
+        assert_eq!(moved(&comparisons[1], "wall"), None);
     }
 
     #[test]
@@ -898,15 +898,15 @@ mod tests {
     }
 
     #[test]
-    fn different_environments_get_no_verdicts() {
+    fn different_environments_are_not_compared() {
         let none = BTreeMap::new();
         let base_of = |runs| base(runs, &none);
         let base = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
         let mut other = run(2000.0, 1.0);
         other.environment.cpu = "another".to_owned();
         let comparison = compare_scenario(&SCENARIO, &base_of(&base), &[other], None);
-        assert!(comparison.no_verdicts.is_some());
-        assert_eq!(verdict(&comparison, "instructions"), None);
+        assert!(comparison.not_comparable.is_some());
+        assert_eq!(moved(&comparison, "instructions"), None);
     }
 
     #[test]

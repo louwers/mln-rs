@@ -50,10 +50,10 @@ the change reaches:
   with your OS and backend's manifest and a regex over the tests' paths, e.g.
   `cargo run -p mln-rs-render-test -- --manifestPath manifests/macos-wgpu.json --filter "/render-tests/line-dasharray/" --jobs 0 --output <dir>`.
 - `mise run test`, the whole suite, before a pull request.
-- Performance: `mise run bench:compare <ref> -- --filter <scenario>`, judged on
-  its counts from one run per side; the whole set (no filter) for a broad
-  change. Run time rounds (`--rounds <n>`) only when a pull request claims a
-  change in time.
+- Performance: `mise run bench:compare <ref> -- --filter <scenario>`, read from
+  its counts, one run per side, against their noise; the whole set (no filter)
+  for a broad change. Run time rounds (`--rounds <n>`) only when a pull request
+  claims a change in time.
 
 A benchmark scenario answers a lasting question about a stage or an operation
 (tools/bench/README.md); don't add one to prove one pull request's claim. An

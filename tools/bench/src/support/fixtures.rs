@@ -27,7 +27,7 @@ impl Deref for Fixtures {
 impl Fixtures {
     /// The snapshot this harness's manifest names, which `bench`'s
     /// environment then records, so that runs on other fixtures get no
-    /// verdicts against this one. Panics, failing the scenario, when the
+    /// comparison with this one. Panics, failing the scenario, when the
     /// snapshot isn't installed.
     pub(crate) fn open(bench: &mut Bench) -> Fixtures {
         let snapshot = Snapshot::find().unwrap_or_else(|error| panic!("{error}"));

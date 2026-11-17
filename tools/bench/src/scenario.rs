@@ -37,15 +37,12 @@ pub(crate) struct Scenario {
 }
 
 /// Whether a metric counts work, which repeats across runs, or times it,
-/// which doesn't; or divides a count by the units of work a scenario did,
-/// which a comparison shows as context only, since its total gets the
-/// verdict.
+/// which doesn't.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MetricKind {
     Count,
     Time,
-    PerUnit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,7 +182,7 @@ impl Bench {
     /// Declares that the measured parts did `n` units of the scenario's
     /// work, such as frames or tiles, called `unit`: the run reports
     /// `instructions`, `allocations` and `allocated` per unit too, as
-    /// `<metric>_per_<unit>`, for context.
+    /// `<metric>_per_<unit>`.
     pub(crate) fn per(&mut self, unit: &str, n: u64) {
         assert!(self.per.is_none(), "per() twice");
         assert!(n > 0, "{unit}: no units");
@@ -198,8 +195,7 @@ impl Bench {
     /// and times spread too, as `<metric>_per_<unit>_p50`, `_p90` and `_max`
     /// (nearest rank). The costliest units, such as a frame that crosses the
     /// antimeridian or the one where a tile arrives, show there however few
-    /// they are among the rest. Counts of the spread get verdicts, as totals
-    /// do; times are context.
+    /// they are among the rest.
     pub(crate) fn per_part(&mut self, unit: &str) {
         let parts = self.parts.len() as u64;
         assert!(parts >= 2, "{unit}: per_part needs two measured parts or more");
@@ -238,7 +234,7 @@ impl Bench {
                 .filter(|metric| ["instructions", "allocations", "allocated"].contains(&metric.name.as_str()))
                 .map(|metric| Metric {
                     name: format!("{}_per_{unit}", metric.name),
-                    kind: MetricKind::PerUnit,
+                    kind: MetricKind::Count,
                     unit: metric.unit,
                     value: metric.value / n,
                 })
