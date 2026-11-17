@@ -2,7 +2,6 @@
 // half-float render target; a second, non-tile layer group draws that
 // texture through the color ramp onto the map.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -25,7 +24,6 @@ use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
-use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -33,27 +31,25 @@ use mln_util::size::Size;
 use super::heatmap_layer_tweaker::HeatmapLayerTweaker;
 use super::heatmap_texture_layer_tweaker::HeatmapTextureLayerTweaker;
 use super::render_line_layer::apply_color_ramp;
-use super::{
-    DrawableBinders, DrawableRenderTile, drawable_has_layer_tweaker, refresh_if_bucket_updated, shared_vertices,
-};
+use super::{DrawableBinders, DrawableRenderTile, refresh_if_bucket_updated, shared_vertices, update_tile};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable::Drawable;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
-use crate::layer_group::{LayerGroup, LayerGroupPtr};
-use crate::layer_tweaker::LayerTweakerPtr;
+use crate::gfx::texture2d::Texture2DPtr;
+use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
+use crate::render_layer::{RenderLayer, RenderLayerBase, set_style};
 use crate::render_pass::RenderPass;
+use crate::render_source::RenderTiles;
 use crate::render_static_data::RenderStaticData;
-use crate::render_target::{RenderTarget, RenderTargetPtr};
-use crate::render_tree::RenderTree;
+use crate::render_target::RenderTarget;
 use crate::update_parameters::UpdateParameters;
 
 fn read_heatmap_attributes(
@@ -90,23 +86,6 @@ fn read_heatmap_attributes(
 const HEATMAP_SHADER_GROUP_NAME: &str = "HeatmapShader";
 const HEATMAP_TEXTURE_SHADER_GROUP_NAME: &str = "HeatmapTextureShader";
 
-pub(crate) fn activate_render_target(
-    render_target: Option<&RenderTargetPtr>,
-    activate: bool,
-    changes: &mut UniqueChangeRequestVec,
-) {
-    if let Some(render_target) = render_target {
-        if activate {
-            // The RenderTree has determined this render target should be
-            // included in the renderable set for a frame
-            changes.push(ChangeRequest::AddRenderTarget(Rc::clone(render_target)));
-        } else {
-            // The RenderTree is informing us we should not render anything
-            changes.push(ChangeRequest::RemoveRenderTarget(Rc::clone(render_target)));
-        }
-    }
-}
-
 impl LayerType for Heatmap {
     type Layout = HeatmapLayout;
     type Bucket = HeatmapBucket;
@@ -119,8 +98,8 @@ impl LayerType for Heatmap {
         HeatmapLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
     }
 
-    fn render_layer(style: Arc<LayerStyle<Heatmap>>) -> RenderLayerPtr {
-        Rc::new(RefCell::new(RenderHeatmapLayer::new(style)))
+    fn render_layer(style: Arc<LayerStyle<Heatmap>>) -> Box<dyn RenderLayer> {
+        Box::new(RenderHeatmapLayer::new(style))
     }
 }
 
@@ -137,14 +116,16 @@ pub(crate) struct RenderHeatmapLayer {
 
     heatmap_shader_group: Option<ShaderGroupPtr>,
     heatmap_texture_shader: Option<ShaderProgramPtr>,
-    render_target: Option<RenderTargetPtr>,
+    /// The texture the tiles draw their heat into, which the layer's group
+    /// colors onto the frame.
+    render_target: Option<RenderTarget>,
 
     shared_texture_vertices: Option<VertexVectorBasePtr>,
 
     /// This is the layer tweaker for applying the off-screen texture to the
     /// framebuffer. The inherited layer tweaker is for applying tiles to the
     /// off-screen texture.
-    texture_tweaker: Option<LayerTweakerPtr>,
+    texture_tweaker: Option<Box<dyn LayerTweaker>>,
 }
 
 impl RenderHeatmapLayer {
@@ -180,51 +161,6 @@ impl RenderHeatmapLayer {
         apply_color_ramp(&color_value, &mut image, self.color_ramp_global_state.as_deref());
         self.color_ramp = Rc::new(image);
     }
-
-    /// The tile layer group of the render target (`renderTarget->getLayerGroup(0)`).
-    fn render_target_layer_group(&self) -> Option<LayerGroupPtr> {
-        self.render_target.as_ref().and_then(|target| target.borrow().get_layer_group(0).cloned())
-    }
-
-    /// Removes the tile's drawables, which live in the render target's layer
-    /// group.
-    fn remove_tile(&mut self, render_pass: RenderPass, tile_id: &OverscaledTileID) {
-        let Some(layer_group) = self.render_target_layer_group() else {
-            return;
-        };
-        let mut tile_layer_group = layer_group.borrow_mut();
-        tile_layer_group.remove_drawables(render_pass, tile_id);
-    }
-
-    fn update_tile(
-        &mut self,
-        layer_group: &LayerGroupPtr,
-        render_pass: RenderPass,
-        tile_id: &OverscaledTileID,
-        mut update: impl FnMut(&mut Drawable) -> bool,
-    ) -> bool {
-        let mut any_updated = false;
-        let mut un_updated_drawables = false;
-        {
-            let mut tile_layer_group = layer_group.borrow_mut();
-            tile_layer_group.visit_drawables_for(render_pass, tile_id, |drawable| {
-                if update(drawable) {
-                    any_updated = true;
-                } else {
-                    un_updated_drawables = true;
-                }
-            });
-        }
-
-        // If any are updated, the caller shouldn't add new ones. If none are
-        // updated and some were skipped, remove those. This is to handle the
-        // case that the style layer changes but the bucket is not re-created.
-        if !any_updated && un_updated_drawables {
-            self.remove_tile(render_pass, tile_id);
-        }
-
-        any_updated
-    }
 }
 
 impl RenderLayer for RenderHeatmapLayer {
@@ -247,12 +183,7 @@ impl RenderLayer for RenderHeatmapLayer {
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        _changes: &mut UniqueChangeRequestVec,
-    ) {
+    fn layer_changed(&mut self, _parameters: &TransitionParameters, _new_layer: &Arc<dyn ErasedLayerStyle>) {
         // RenderLayer::layerChanged
         self.base.layer_tweaker = None;
         self.texture_tweaker = None;
@@ -294,11 +225,11 @@ impl RenderLayer for RenderHeatmapLayer {
         properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
-        if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
+            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
-        if let Some(texture_tweaker) = &self.texture_tweaker {
-            texture_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(texture_tweaker) = &mut self.texture_tweaker {
+            texture_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -310,24 +241,50 @@ impl RenderLayer for RenderHeatmapLayer {
         false
     }
 
-    fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
-        crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
-
-        activate_render_target(self.render_target.as_ref(), will_render, changes);
-    }
-
     fn remove_all_drawables(&mut self) {
         // RenderLayer::removeAllDrawables
-        if let Some(group) = &self.base.layer_group {
-            group.borrow_mut().clear_drawables();
+        if let Some(group) = &mut self.base.layer_group {
+            group.clear_drawables();
         }
-        if let Some(layer_group) = self.render_target_layer_group() {
-            layer_group.borrow_mut().clear_drawables();
+        if let Some(render_target) = &mut self.render_target {
+            render_target.layer_group.clear_drawables();
         }
     }
 
-    fn tile_layer_groups(&self) -> Vec<LayerGroupPtr> {
-        self.base.layer_group.iter().cloned().chain(self.render_target_layer_group()).collect()
+    /// The texture tweaker sets up the layer's group, which colors the heat
+    /// onto the frame; the layer's tweaker sets up the render target's.
+    fn tweak(&mut self, parameters: &PaintParameters<'_>) {
+        if self.base.is_renderable
+            && let (Some(tweaker), Some(group)) = (&mut self.texture_tweaker, &mut self.base.layer_group)
+        {
+            tweaker.execute(group, parameters);
+        }
+    }
+
+    fn upload_render_targets(&mut self, context: &Context) {
+        if self.base.is_renderable
+            && let Some(render_target) = &mut self.render_target
+        {
+            render_target.upload(context);
+        }
+    }
+
+    fn render_targets(&mut self, parameters: &mut PaintParameters<'_>) {
+        if self.base.is_renderable
+            && let Some(render_target) = &mut self.render_target
+        {
+            let tweaker = &mut self.base.layer_tweaker;
+            render_target.render(parameters, |group, parameters| {
+                if let Some(tweaker) = tweaker {
+                    tweaker.execute(group, parameters);
+                }
+            });
+        }
+    }
+
+    fn tile_layer_groups<'a>(&'a mut self, groups: &mut Vec<&'a mut LayerGroup>) {
+        groups.extend(self.base.layer_group.as_mut());
+        groups.extend(self.render_target.as_mut().map(|render_target| &mut render_target.layer_group));
     }
 
     fn update(
@@ -337,8 +294,6 @@ impl RenderLayer for RenderHeatmapLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        changes: &mut UniqueChangeRequestVec,
     ) {
         self.update_projection_variant(state);
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
@@ -349,53 +304,58 @@ impl RenderLayer for RenderHeatmapLayer {
         let viewport_size = state.get_size();
         let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
 
-        // Set up a render target
-        if self.render_target.is_none() {
-            let render_target = RenderTarget::create(context, size, TextureChannelDataType::HalfFloat);
-            self.render_target = Some(Rc::clone(&render_target));
-            activate_render_target(self.render_target.as_ref(), self.base.is_renderable, changes);
-
-            // Set up tile layer group
-            let tile_layer_group = LayerGroup::tiles(0);
-            render_target.borrow_mut().add_layer_group(tile_layer_group, /*replace=*/ true);
+        // Set up a render target, with its tile layer group
+        let mut render_target = self.render_target.take().unwrap_or_else(|| {
             self.texture_tweaker = None;
+            RenderTarget::new(context, size, TextureChannelDataType::HalfFloat, LayerGroup::tiles())
+        });
+        render_target.set_size(context, size);
+        let drawn = self.draw_tiles(shaders, &render_tiles, &mut render_target.layer_group);
+        let render_target_texture = render_target.get_texture();
+        self.render_target = Some(render_target);
+        if drawn {
+            self.draw_texture(shaders, context, render_target_texture);
         }
+    }
+}
 
-        self.render_target.as_ref().expect("render target").borrow_mut().set_size(context, size);
-
-        let Some(tile_layer_group) = self.render_target_layer_group() else {
-            return;
-        };
-
+impl RenderHeatmapLayer {
+    /// Updates the drawables of the tiles, which draw into the render target
+    /// through `tile_layer_group`. Returns false if the layer draws nothing.
+    fn draw_tiles(
+        &mut self,
+        shaders: &ShaderRegistry,
+        render_tiles: &RenderTiles,
+        tile_layer_group: &mut LayerGroup,
+    ) -> bool {
         if self.heatmap_shader_group.is_none() {
             self.heatmap_shader_group = shaders.shader_group(HEATMAP_SHADER_GROUP_NAME);
         }
         let Some(heatmap_shader_group) = self.heatmap_shader_group.clone() else {
-            self.remove_all_drawables();
-            return;
+            tile_layer_group.clear_drawables();
+            if let Some(group) = &mut self.base.layer_group {
+                group.clear_drawables();
+            }
+            return false;
         };
 
         if self.base.layer_tweaker.is_none() {
-            let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(HeatmapLayerTweaker::new(
+            self.base.layer_tweaker = Some(Box::new(HeatmapLayerTweaker::new(
                 self.get_id().to_owned(),
                 Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
-            // tileLayerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&tile_layer_group), Rc::downgrade(&tweaker)));
         }
-        let layer_tweaker = self.base.layer_tweaker.clone();
+        let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
 
         let render_pass = RenderPass::Translucent;
 
         if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
-            return;
+            return false;
         }
 
         {
-            let mut tile_group = tile_layer_group.borrow_mut();
             let base = &self.base;
-            tile_group.remove_drawables_if(|drawable| {
+            tile_layer_group.remove_drawables_if(|drawable| {
                 drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
         }
@@ -411,7 +371,7 @@ impl RenderLayer for RenderHeatmapLayer {
 
             let style = Arc::clone(&self.base.style);
             let Some(render_data) = super::render_data_for_pass(tile, &*style, render_pass) else {
-                self.remove_tile(render_pass, &tile_id);
+                tile_layer_group.remove_drawables(render_pass, &tile_id);
                 continue;
             };
 
@@ -430,7 +390,7 @@ impl RenderLayer for RenderHeatmapLayer {
             if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // This tile was previously set up from a different bucket,
                 // drop and re-create any drawables for it.
-                self.remove_tile(render_pass, &tile_id);
+                tile_layer_group.remove_drawables(render_pass, &tile_id);
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
@@ -445,7 +405,7 @@ impl RenderLayer for RenderHeatmapLayer {
             let update_existing = |drawable: &mut Drawable| {
                 // A drawable produced on a previous style/bucket should not
                 // be updated.
-                let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
+                let current = drawable.tweaker == tweaker;
                 if current {
                     refresh_if_bucket_updated(drawable, |attrs| {
                         read_heatmap_attributes(
@@ -459,7 +419,7 @@ impl RenderLayer for RenderHeatmapLayer {
                 }
                 current
             };
-            if self.update_tile(&tile_layer_group, render_pass, &tile_id, update_existing) {
+            if update_tile(tile_layer_group, render_pass, &tile_id, update_existing) {
                 continue;
             }
 
@@ -511,46 +471,46 @@ impl RenderLayer for RenderHeatmapLayer {
 
             heatmap_builder.flush();
 
-            let mut tile_group = tile_layer_group.borrow_mut();
             for mut drawable in heatmap_builder.clear_drawables() {
                 drawable.tile_id = Some(tile_id);
-                drawable.layer_tweaker = layer_tweaker.clone();
+                drawable.tweaker = tweaker;
                 drawable.binders = Some(DrawableBinders::new(&render_data.bucket, self.get_id()));
                 drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
-                tile_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
             }
         }
+        true
+    }
+
+    /// Rebuilds the drawable of the layer's group, which colors the heat of
+    /// `render_target_texture` onto the frame.
+    fn draw_texture(&mut self, shaders: &ShaderRegistry, context: &Context, render_target_texture: Texture2DPtr) {
+        let render_pass = RenderPass::Translucent;
 
         // Set up texture layer group
-        if self.base.layer_group.is_none() {
-            let layer_group = LayerGroup::plain(self.base.layer_index);
-            if let Some(texture_tweaker) = &self.texture_tweaker {
-                changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(texture_tweaker)));
-            }
-            self.set_layer_group(Some(layer_group), changes);
-        }
-        let layer_group = self.base.layer_group.clone().expect("layer group");
+        let layer_group = self.base.layer_group.get_or_insert_with(LayerGroup::plain);
         if self.texture_tweaker.is_none() {
-            let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(HeatmapTextureLayerTweaker::new(
-                self.get_id().to_owned(),
+            self.texture_tweaker = Some(Box::new(HeatmapTextureLayerTweaker::new(
+                self.base.style.base().id.clone(),
                 Arc::clone(&self.base.evaluated_properties),
             )));
-            self.texture_tweaker = Some(Rc::clone(&tweaker));
-            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
-        let texture_tweaker = self.texture_tweaker.clone();
+        let texture_tweaker = self.texture_tweaker.as_ref().map(|tweaker| tweaker.base().key);
 
         if self.heatmap_texture_shader.is_none() {
             self.heatmap_texture_shader =
                 shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
         }
         let Some(heatmap_texture_shader) = self.heatmap_texture_shader.clone() else {
-            self.remove_all_drawables();
+            layer_group.clear_drawables();
+            if let Some(render_target) = &mut self.render_target {
+                render_target.layer_group.clear_drawables();
+            }
             return;
         };
 
         // TODO: Don't rebuild drawables every time
-        layer_group.borrow_mut().clear_drawables();
+        layer_group.clear_drawables();
 
         if self.shared_texture_vertices.is_none() {
             self.shared_texture_vertices = Some(shared_vertices(&RenderStaticData::heatmap_texture_vertices()));
@@ -588,7 +548,6 @@ impl RenderLayer for RenderHeatmapLayer {
             &self.segments,
         );
 
-        let render_target_texture = self.render_target.as_ref().expect("render target").borrow().get_texture();
         heatmap_texture_builder.set_texture(Some(render_target_texture), ID_HEATMAP_IMAGE_TEXTURE);
 
         let texture = context.create_texture_2d();
@@ -606,10 +565,9 @@ impl RenderLayer for RenderHeatmapLayer {
 
         heatmap_texture_builder.flush();
 
-        let mut texture_layer_group = layer_group.borrow_mut();
         for mut drawable in heatmap_texture_builder.clear_drawables() {
-            drawable.layer_tweaker = texture_tweaker.clone();
-            texture_layer_group.add_drawable(drawable);
+            drawable.tweaker = texture_tweaker;
+            layer_group.add_drawable(drawable);
         }
     }
 }

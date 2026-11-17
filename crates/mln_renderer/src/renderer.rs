@@ -522,7 +522,6 @@ impl Renderer {
             render_tree,
         );
 
-        orchestrator.process_changes();
         let layers_updated = Instant::now();
 
         // - LAYER GROUP UPLOAD ----------------------------------------------
@@ -533,40 +532,30 @@ impl Renderer {
 
         // Tweakers run before the layer groups upload, so they can set up
         // uniforms.
-        parameters.current_layer = 0;
-        for layer_group in orchestrator.layer_groups() {
-            orchestrator.run_tweakers(&layer_group, &parameters);
-            parameters.current_layer += 1;
-        }
-        parameters.current_layer = 0;
-        // layers: debug
-        for layer_group in orchestrator.debug_layer_groups() {
-            orchestrator.run_tweakers(&layer_group, &parameters);
-            parameters.current_layer += 1;
-        }
+        orchestrator.tweak(&parameters);
 
         // Give the layers a chance to upload
-        orchestrator.visit_layer_groups(|layer_group| layer_group.upload(context));
-        if let Some(globe_depth) = orchestrator.get_globe_depth_layer_group() {
-            globe_depth.borrow_mut().upload(context);
+        for layer_group in orchestrator.layer_groups() {
+            layer_group.upload(context);
         }
-        if let Some(sky) = orchestrator.get_sky_layer_group() {
-            sky.borrow_mut().upload(context);
+        if let Some(globe_depth) = orchestrator.globe_depth_layer_group() {
+            globe_depth.upload(context);
         }
-        if let Some(atmosphere) = orchestrator.get_atmosphere_layer_group() {
-            atmosphere.borrow_mut().upload(context);
+        if let Some(sky) = orchestrator.sky_layer_group() {
+            sky.upload(context);
+        }
+        if let Some(atmosphere) = orchestrator.atmosphere_layer_group() {
+            atmosphere.upload(context);
         }
 
         // Give the render targets a chance to upload
         // dem-heatmap
-        for render_target in orchestrator.render_targets() {
-            render_target.borrow().upload(context);
-        }
+        orchestrator.visit_render_layers(|layer| layer.upload_render_targets(context));
 
         // Upload the Debug layer group
         // layers: debug
         for layer_group in orchestrator.debug_layer_groups() {
-            layer_group.borrow_mut().upload(context);
+            layer_group.upload(context);
         }
 
         // The masks of the tiles the layer groups clip to and, when any
@@ -575,14 +564,14 @@ impl Renderer {
         // once.
         let mut clip_tiles = Vec::new();
         let mut last: Option<Rc<Vec<UnwrappedTileID>>> = None;
-        orchestrator.visit_layer_groups(|layer_group| {
+        for layer_group in orchestrator.layer_groups() {
             if let Some(tiles) = &layer_group.stencil_tiles
                 && last.as_ref().is_none_or(|last| last != tiles)
             {
                 clip_tiles.extend(tiles.iter().copied());
                 last = Some(Rc::clone(tiles));
             }
-        });
+        }
         if last.is_some() {
             clip_tiles.extend(parameters.stencil_clear_tile());
         }
@@ -602,14 +591,14 @@ impl Renderer {
         // The layer groups drawn as a whole, each into the layer composite's
         // texture and then onto the frame.
         let mut composited = Vec::new();
-        orchestrator.visit_layer_groups(|layer_group| {
+        for layer_group in orchestrator.layer_groups() {
             if let Some(composite) = layer_group.composite
                 && layer_group.enabled
                 && !layer_group.empty()
             {
                 composited.push((layer_group.id, composite));
             }
-        });
+        }
         self.layer_composite.update(
             context,
             &static_data.shaders,
@@ -642,6 +631,7 @@ impl Renderer {
 
         let num_sublayers = PaintParameters::NUM_SUBLAYERS as usize;
         let depth_epsilon = PaintParameters::DEPTH_EPSILON;
+        let num_layer_groups = orchestrator.num_layer_groups();
 
         // - CUSTOM LAYER PRERENDER ------------------------------------------
         // Custom layers record their own work before the first pass, with the
@@ -650,7 +640,7 @@ impl Renderer {
         // groups' count sets.
         let frame_projection = frame_projection::compute(
             &render_tree_parameters.transform_params,
-            1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon,
+            1.0 - ((num_layer_groups + 2) * num_sublayers) as f32 * depth_epsilon,
             context.caps().clip_depth,
         );
         parameters.custom_layer_frame = Some(CustomLayerFrame {
@@ -659,8 +649,8 @@ impl Renderer {
             width: renderable_size.width,
             height: renderable_size.height,
         });
-        for item in render_tree.get_layer_render_item_map().values() {
-            item.layer.borrow_mut().prerender(&parameters);
+        for &index in render_tree.get_layer_render_item_map().keys() {
+            orchestrator.layer_mut(index as usize).prerender(&parameters);
         }
 
         // - 3D PASS -------------------------------------------------------
@@ -674,23 +664,20 @@ impl Renderer {
             // drawable3DPass: draw layer groups, 3D pass
             debug_assert_eq!(parameters.pass, RenderPass::Pass3D);
             // `depthModeFor3D` uses this, and the 3D pass runs before the opaque pass sets it
-            parameters.depth_range_size =
-                1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
-            parameters.current_layer = (orchestrator.num_layer_groups() as u32).wrapping_sub(1);
+            parameters.depth_range_size = 1.0 - ((num_layer_groups + 2) * num_sublayers) as f32 * depth_epsilon;
+            parameters.current_layer = (num_layer_groups as u32).wrapping_sub(1);
             let mut gpu = context.gpu();
-            orchestrator.visit_layer_groups(|layer_group| {
+            for layer_group in orchestrator.layer_groups() {
                 layer_group.render(&mut *gpu, &mut parameters);
                 if parameters.current_layer > 0 {
                     parameters.current_layer -= 1;
                 }
-            });
+            }
         }
 
         // drawableTargetsPass: draw render targets
         // dem-heatmap
-        for render_target in orchestrator.render_targets() {
-            render_target.borrow_mut().render(orchestrator, &mut parameters);
-        }
+        orchestrator.visit_render_layers(|layer| layer.render_targets(&mut parameters));
 
         let mut gpu = context.gpu();
         // commonClearPass
@@ -723,69 +710,65 @@ impl Renderer {
         }
 
         // drawableSkyPass
-        if let Some(sky) = orchestrator.get_sky_layer_group() {
+        if let Some(sky) = orchestrator.sky_layer_group() {
             parameters.pass = RenderPass::Translucent;
-            parameters.depth_range_size =
-                1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
-            parameters.current_layer = orchestrator.num_layer_groups() as u32 + 1;
-            sky.borrow_mut().render(&mut *gpu, &mut parameters);
+            parameters.depth_range_size = 1.0 - ((num_layer_groups + 2) * num_sublayers) as f32 * depth_epsilon;
+            parameters.current_layer = num_layer_groups as u32 + 1;
+            sky.render(&mut *gpu, &mut parameters);
         }
 
         // drawableOpaquePass
         {
             parameters.pass = RenderPass::Opaque;
-            parameters.depth_range_size =
-                1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
+            parameters.depth_range_size = 1.0 - ((num_layer_groups + 2) * num_sublayers) as f32 * depth_epsilon;
 
             // draw layer groups, opaque pass: front to back with the depth
             // buffer, except on the globe, where 2D layers carry no depth and
             // are painted bottom to top.
             if render_tree_parameters.transform_params.state.is_globe_rendering() {
-                parameters.current_layer = (orchestrator.num_layer_groups() as u32).wrapping_sub(1);
-                orchestrator.visit_layer_groups(|layer_group| {
+                parameters.current_layer = (num_layer_groups as u32).wrapping_sub(1);
+                for layer_group in orchestrator.layer_groups() {
                     layer_group.render(&mut *gpu, &mut parameters);
                     if parameters.current_layer > 0 {
                         parameters.current_layer -= 1;
                     }
-                });
+                }
             } else {
                 parameters.current_layer = 0;
-                orchestrator.visit_layer_groups_reversed(|layer_group| {
+                for layer_group in orchestrator.layer_groups().into_iter().rev() {
                     layer_group.render(&mut *gpu, &mut parameters);
                     parameters.current_layer += 1;
-                });
+                }
             }
         }
 
         // drawableTranslucentPass
         {
             parameters.pass = RenderPass::Translucent;
-            parameters.depth_range_size =
-                1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
+            parameters.depth_range_size = 1.0 - ((num_layer_groups + 2) * num_sublayers) as f32 * depth_epsilon;
 
             // The planet goes into the depth buffer first, so 3D geometry
             // behind the horizon stays hidden.
-            if let Some(globe_depth) = orchestrator.get_globe_depth_layer_group() {
-                globe_depth.borrow_mut().render(&mut *gpu, &mut parameters);
+            if let Some(globe_depth) = orchestrator.globe_depth_layer_group() {
+                globe_depth.render(&mut *gpu, &mut parameters);
             }
 
             // draw layer groups, translucent pass
-            parameters.current_layer = (orchestrator.num_layer_groups() as u32).wrapping_sub(1);
-            orchestrator.visit_layer_groups(|layer_group| {
+            parameters.current_layer = (num_layer_groups as u32).wrapping_sub(1);
+            for layer_group in orchestrator.layer_groups() {
                 layer_group.render(&mut *gpu, &mut parameters);
                 if parameters.current_layer > 0 {
                     parameters.current_layer -= 1;
                 }
-            });
+            }
         }
 
         // drawableAtmospherePass
-        if let Some(atmosphere) = orchestrator.get_atmosphere_layer_group() {
+        if let Some(atmosphere) = orchestrator.atmosphere_layer_group() {
             parameters.pass = RenderPass::Translucent;
-            parameters.depth_range_size =
-                1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
-            parameters.current_layer = orchestrator.num_layer_groups() as u32 + 1;
-            atmosphere.borrow_mut().render(&mut *gpu, &mut parameters);
+            parameters.depth_range_size = 1.0 - ((num_layer_groups + 2) * num_sublayers) as f32 * depth_epsilon;
+            parameters.current_layer = num_layer_groups as u32 + 1;
+            atmosphere.render(&mut *gpu, &mut parameters);
         }
 
         // drawableDebugOverlays
@@ -793,7 +776,7 @@ impl Renderer {
         parameters.current_layer = 0;
         // layers: debug
         for layer_group in orchestrator.debug_layer_groups() {
-            layer_group.borrow_mut().render(&mut *gpu, &mut parameters);
+            layer_group.render(&mut *gpu, &mut parameters);
             parameters.current_layer += 1;
         }
 

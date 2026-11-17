@@ -29,9 +29,9 @@ fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut error = ConversionError::default();
     let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    let render_layer = crate::tests::render_layer(layer.style());
-    render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
-    Arc::clone(&render_layer.borrow().base().evaluated_properties)
+    let mut render_layer = crate::tests::render_layer(layer.style());
+    render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
+    Arc::clone(&render_layer.base().evaluated_properties)
 }
 
 /// Two squares.

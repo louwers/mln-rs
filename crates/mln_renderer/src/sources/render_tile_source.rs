@@ -39,7 +39,7 @@ use crate::drawable::Drawable;
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
-use crate::layer_group::{LayerGroup, LayerGroupPtr};
+use crate::layer_group::LayerGroup;
 // layers: debug
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layer_type::ErasedEvaluatedLayer;
@@ -49,7 +49,7 @@ use crate::query::FeatureExtensionValue;
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
-use crate::render_tree::{DebugLayerGroupMap, DebugType, RenderItem};
+use crate::render_tree::{DebugLayerGroupMap, DebugType, RenderItem, debug_layer_group};
 use crate::source_type::{OriginUpdate, TileOrigin};
 use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
@@ -176,15 +176,6 @@ impl RenderItem for TileSourceRenderItem {
             };
 
         // add or get the layer group for a debug type
-        let add_or_get_layer_group_for_type =
-            |debug_layer_groups: &mut DebugLayerGroupMap, type_: DebugType| -> Option<LayerGroupPtr> {
-                if let Some(layer_group) = debug_layer_groups.get(&type_) {
-                    return Some(Rc::clone(layer_group));
-                }
-                let layer_group = LayerGroup::tiles(type_ as i32);
-                debug_layer_groups.insert(type_, Rc::clone(&layer_group));
-                Some(layer_group)
-            };
 
         // build a set of tiles to cover
         let new_tiles: HashSet<OverscaledTileID> =
@@ -210,11 +201,8 @@ impl RenderItem for TileSourceRenderItem {
                 ..Default::default()
             };
             for type_ in [DebugType::TextOutline, DebugType::Text] {
-                let Some(layer_group) = add_or_get_layer_group_for_type(debug_layer_groups, type_) else {
-                    continue;
-                };
-                let mut tile_layer_group = layer_group.borrow_mut();
-                remove_stale(&mut tile_layer_group);
+                let tile_layer_group = debug_layer_group(debug_layer_groups, type_);
+                remove_stale(tile_layer_group);
 
                 // add new drawables and replace those whose text changed
                 for tile in self.render_tiles.iter() {
@@ -235,7 +223,7 @@ impl RenderItem for TileSourceRenderItem {
                     });
                     if tile.get_needs_rendering() && !debug_bucket.strokes.is_empty() {
                         add_polyline_drawable(
-                            &mut tile_layer_group,
+                            tile_layer_group,
                             tile_id,
                             &debug_bucket.strokes,
                             &text_options,
@@ -252,11 +240,8 @@ impl RenderItem for TileSourceRenderItem {
 
         // Tile Borders
         if parameters.debug_options.contains(MapDebugOptions::TILE_BORDERS) {
-            let Some(layer_group) = add_or_get_layer_group_for_type(debug_layer_groups, DebugType::Border) else {
-                return;
-            };
-            let mut tile_layer_group = layer_group.borrow_mut();
-            remove_stale(&mut tile_layer_group);
+            let tile_layer_group = debug_layer_group(debug_layer_groups, DebugType::Border);
+            remove_stale(tile_layer_group);
 
             // add new drawables
             let extent = EXTENT as i16;
@@ -291,7 +276,7 @@ impl RenderItem for TileSourceRenderItem {
                         &tile_border
                     };
                     add_polyline_drawable(
-                        &mut tile_layer_group,
+                        tile_layer_group,
                         tile_id,
                         std::slice::from_ref(border),
                         &border_options,
@@ -331,6 +316,10 @@ impl PolylineLayerTweaker {
 }
 
 impl LayerTweaker for PolylineLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }

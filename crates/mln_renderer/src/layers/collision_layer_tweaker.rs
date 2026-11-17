@@ -6,7 +6,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::symbol_layer_ubo::{CollisionDrawableUBO, CollisionTilePropsUBO};
 use mln_style_types::TranslateAnchorType;
 
-use super::{cast_matrix, check_tweak_drawable_ptr};
+use super::cast_matrix;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layer_type::ErasedEvaluatedLayer;
@@ -29,6 +29,10 @@ impl CollisionLayerTweaker {
 }
 
 impl LayerTweaker for CollisionLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -41,7 +45,7 @@ impl LayerTweaker for CollisionLayerTweaker {
         let context = parameters.context;
         self.base.properties_updated = false;
 
-        let self_ptr: *const Self = self;
+        let key = self.base.key;
         layer_group.visit_drawables(|drawable| {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
@@ -52,7 +56,7 @@ impl LayerTweaker for CollisionLayerTweaker {
                 return;
             };
             let data = *data;
-            if !check_tweak_drawable_ptr(drawable, self_ptr) {
+            if !drawable.tweaked_by(key) {
                 return;
             }
             let tile_id = overscaled_tile_id.to_unwrapped();

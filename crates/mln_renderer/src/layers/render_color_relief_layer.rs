@@ -45,23 +45,20 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::color_relief_layer_tweaker::{ColorReliefDrawableData, ColorReliefLayerTweaker};
-use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
+use super::{shared_vertices, update_tile};
 use crate::bucket::NoBucket;
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
@@ -70,8 +67,8 @@ impl LayerType for ColorRelief {
     type Layout = NoLayout;
     type Bucket = NoBucket;
 
-    fn render_layer(style: Arc<LayerStyle<ColorRelief>>) -> RenderLayerPtr {
-        Rc::new(RefCell::new(RenderColorReliefLayer::new(style)))
+    fn render_layer(style: Arc<LayerStyle<ColorRelief>>) -> Box<dyn RenderLayer> {
+        Box::new(RenderColorReliefLayer::new(style))
     }
 }
 
@@ -320,8 +317,8 @@ impl RenderLayer for RenderColorReliefLayer {
         properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
-        if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
+            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -358,8 +355,6 @@ impl RenderLayer for RenderColorReliefLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        changes: &mut UniqueChangeRequestVec,
     ) {
         if self.update_projection_variant(state) {
             self.color_relief_shader = None;
@@ -372,259 +367,259 @@ impl RenderLayer for RenderColorReliefLayer {
             return;
         };
 
-        // Set up layer group
-        if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index)), changes);
-        }
-        let layer_group = self.base.layer_group.clone().expect("layer group");
-
-        if self.base.layer_tweaker.is_none() {
-            let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(ColorReliefLayerTweaker::new(
-                self.get_id().to_owned(),
-                Arc::clone(&self.base.evaluated_properties),
-            )));
-            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
-            // layerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
-        }
-        let layer_tweaker = self.base.layer_tweaker.clone();
-
-        if self.color_relief_shader.is_none() {
-            self.color_relief_shader = shaders.shader(COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
-        }
-        let Some(color_relief_shader) = self.color_relief_shader.clone() else {
-            Log::error(Event::Render, "ColorRelief shader failed to load");
-            self.remove_all_drawables();
-            return;
-        };
-
-        let render_pass = RenderPass::Translucent;
-        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
-            return;
-        }
-
-        {
-            let mut tile_layer_group = layer_group.borrow_mut();
-            let base = &self.base;
-            tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
-        }
-
-        if self.static_data_shared_vertices.is_none() {
-            self.static_data_shared_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
-        }
-        let static_data_shared_vertices = self.static_data_shared_vertices.clone().expect("static vertices");
-        let static_data_indices: IndexVectorBasePtr =
-            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
-        let static_data_segments = RenderStaticData::raster_segments();
-
-        // Update color ramp textures if changed
-        if self.color_ramp_changed {
-            let ramp_changed_texture = context.create_texture_2d();
-            {
-                let mut t = ramp_changed_texture.borrow_mut();
-                // Use RGBA32F instead of R32F for llvmpipe compatibility
-                t.set_format(TextureFormat::Rgba32Float);
-                let data = bytemuck::cast_slice(&self.elevation_stops_data);
-                if let Err(error) = t.upload_data(context, data, Size::new(self.color_ramp_size, 1)) {
-                    Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
-                }
-                t.set_sampler(SamplerState {
-                    filter: TextureFilterType::Nearest,
-                    wrap_u: TextureWrapType::Clamp,
-                    wrap_v: TextureWrapType::Clamp,
-                    ..Default::default()
-                });
+        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        'draw: {
+            if self.base.layer_tweaker.is_none() {
+                self.base.layer_tweaker = Some(Box::new(ColorReliefLayerTweaker::new(
+                    self.get_id().to_owned(),
+                    Arc::clone(&self.base.evaluated_properties),
+                )));
             }
-            self.elevation_stops_texture = Some(ramp_changed_texture);
+            let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
 
-            let color_stops_texture =
-                Rc::clone(self.color_stops_texture.get_or_insert_with(|| context.create_texture_2d()));
+            if self.color_relief_shader.is_none() {
+                self.color_relief_shader = shaders.shader(COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
+            }
+            let Some(color_relief_shader) = self.color_relief_shader.clone() else {
+                Log::error(Event::Render, "ColorRelief shader failed to load");
+                layer_group.clear_drawables();
+                break 'draw;
+            };
+
+            let render_pass = RenderPass::Translucent;
+            if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
+                break 'draw;
+            }
+
             {
-                let mut t = color_stops_texture.borrow_mut();
-                t.set_image(Some(Rc::new(self.color_stops.clone())));
-                t.set_sampler(SamplerState {
-                    filter: TextureFilterType::Linear,
-                    wrap_u: TextureWrapType::Clamp,
-                    wrap_v: TextureWrapType::Clamp,
-                    ..Default::default()
+                let tile_layer_group = &mut layer_group;
+                let base = &self.base;
+                tile_layer_group.remove_drawables_if(|drawable| {
+                    drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
                 });
             }
 
-            self.color_ramp_changed = false;
-        }
-
-        // Skip rendering if color ramp textures aren't ready
-        let (Some(elevation_stops_texture), Some(color_stops_texture)) =
-            (self.elevation_stops_texture.clone(), self.color_stops_texture.clone())
-        else {
-            return;
-        };
-
-        // Drop the DEM textures of buckets that are no longer rendered.
-        let live_buckets: HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
-        self.dem_textures.retain(|id, _| live_buckets.contains(id));
-
-        let evaluated = &evaluated::<ColorRelief>(&self.base.evaluated_properties).paint;
-        let dem_sampler = SamplerState {
-            filter: match *evaluated.resampling.uniform() {
-                ResamplingType::Linear => TextureFilterType::Linear,
-                ResamplingType::Nearest => TextureFilterType::Nearest,
-            },
-            wrap_u: TextureWrapType::Clamp,
-            wrap_v: TextureWrapType::Clamp,
-            ..Default::default()
-        };
-
-        for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
-
-            let style = Arc::clone(&self.base.style);
-            let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
-            let Some(bucket_ptr) = bucket_ptr else {
-                self.remove_tile(render_pass, &tile_id);
-                continue;
-            };
-            let Some(bucket) = (*bucket_ptr).downcast_ref::<HillshadeBucket>() else {
-                self.remove_tile(render_pass, &tile_id);
-                continue;
-            };
-            let bucket_id = bucket.base.bucket_id;
-
-            let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
-            if prev_bucket_id.is_some_and(|prev| prev != bucket_id) {
-                self.remove_tile(render_pass, &tile_id);
+            if self.static_data_shared_vertices.is_none() {
+                self.static_data_shared_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
             }
-            self.set_render_tile_bucket_id(&tile_id, bucket_id);
+            let static_data_shared_vertices = self.static_data_shared_vertices.clone().expect("static vertices");
+            let static_data_indices: IndexVectorBasePtr =
+                Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
+            let static_data_segments = RenderStaticData::raster_segments();
 
-            // Set up tile drawable
-            let (vertices, vertex_count, indices, segments, geometry_time): (
-                VertexVectorBasePtr,
-                usize,
-                IndexVectorBasePtr,
-                Vec<SegmentBase>,
-                Instant,
-            ) = {
-                let geometry = bucket.geometry();
-                if self.base.projection_variant == ProjectionVariant::Globe {
-                    let globe_mesh =
-                        self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
-                    let vertices: VertexVectorBasePtr =
-                        Rc::<mln_gfx::vertex_vector::VertexVector<HillshadeLayoutVertex>>::clone(&globe_mesh.vertices);
-                    (
-                        vertices,
-                        globe_mesh.vertices.elements(),
-                        Rc::clone(&globe_mesh.indices),
-                        globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
-                        geometry.last_modified,
-                    )
-                } else if !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty()
+            // Update color ramp textures if changed
+            if self.color_ramp_changed {
+                let ramp_changed_texture = context.create_texture_2d();
                 {
-                    (
-                        shared_vertices(&geometry.vertices),
-                        geometry.vertices.len(),
-                        Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone()))),
-                        geometry.segments.iter().map(SegmentBase::copy).collect(),
-                        geometry.last_modified,
-                    )
-                } else {
-                    (
-                        Rc::clone(&static_data_shared_vertices),
-                        4,
-                        Rc::clone(&static_data_indices),
-                        static_data_segments.iter().map(SegmentBase::copy).collect(),
-                        geometry.last_modified,
-                    )
+                    let mut t = ramp_changed_texture.borrow_mut();
+                    // Use RGBA32F instead of R32F for llvmpipe compatibility
+                    t.set_format(TextureFormat::Rgba32Float);
+                    let data = bytemuck::cast_slice(&self.elevation_stops_data);
+                    if let Err(error) = t.upload_data(context, data, Size::new(self.color_ramp_size, 1)) {
+                        Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
+                    }
+                    t.set_sampler(SamplerState {
+                        filter: TextureFilterType::Nearest,
+                        wrap_u: TextureWrapType::Clamp,
+                        wrap_v: TextureWrapType::Clamp,
+                        ..Default::default()
+                    });
                 }
-            };
+                self.elevation_stops_texture = Some(ramp_changed_texture);
 
-            // The DEM texture and tile properties
-            let (dem_image, tile_props_ubo) = {
-                let dem_data = bucket.get_dem_data();
-                if !dem_data.get_image().valid() {
-                    Log::warning(Event::Render, "ColorRelief: DEM image not valid for tile");
-                    continue; // Skip this tile if DEM data is not ready
-                }
-                let unpack_vector = dem_data.get_unpack_vector();
-                (
-                    dem_data.get_image().clone(),
-                    ColorReliefTilePropsUBO {
-                        unpack: unpack_vector,
-                        // Use stride (dim + 2) for dimension, as the
-                        // texture includes a 1-pixel border
-                        dimension: [dem_data.stride as f32, dem_data.stride as f32],
-                        color_ramp_size: self.color_ramp_size as i32,
-                        pad_tile0: 0.0,
-                    },
-                )
-            };
-            let generation = bucket.render_target_generation();
-            let dem_texture = match self.dem_textures.get(&bucket_id) {
-                Some((texture, made_at)) if *made_at == generation => Rc::clone(texture),
-                _ => {
-                    let texture = context.create_texture_2d();
-                    texture.borrow_mut().set_image(Some(Rc::new(dem_image)));
-                    self.dem_textures.insert(bucket_id, (Rc::clone(&texture), generation));
-                    texture
-                }
-            };
-            dem_texture.borrow_mut().set_sampler(dem_sampler);
-
-            let update_existing = |drawable: &mut crate::drawable::Drawable| {
-                if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
-                    return false;
-                }
-                // The masked geometry changed: rebuild (see the file comment).
-                if drawable.create_time < geometry_time {
-                    return false;
+                let color_stops_texture =
+                    Rc::clone(self.color_stops_texture.get_or_insert_with(|| context.create_texture_2d()));
+                {
+                    let mut t = color_stops_texture.borrow_mut();
+                    t.set_image(Some(Rc::new(self.color_stops.clone())));
+                    t.set_sampler(SamplerState {
+                        filter: TextureFilterType::Linear,
+                        wrap_u: TextureWrapType::Clamp,
+                        wrap_v: TextureWrapType::Clamp,
+                        ..Default::default()
+                    });
                 }
 
-                // Update textures
-                drawable.set_texture(Some(Rc::clone(&dem_texture)), ID_COLOR_RELIEF_IMAGE_TEXTURE);
-                drawable
-                    .set_texture(Some(Rc::clone(&elevation_stops_texture)), ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE);
-                drawable.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
-
-                true
-            };
-
-            if self.update_tile(render_pass, &tile_id, update_existing) {
-                continue;
+                self.color_ramp_changed = false;
             }
 
-            let mut builder = DrawableBuilder::boxed();
-            builder.set_shader(Some(Rc::clone(&color_relief_shader)));
-            builder.set_enable_depth(false);
-            builder.set_color_mode(&ColorMode::alpha_blended());
-            builder.set_cull_face_mode(CullFaceMode::disabled());
-            builder.set_render_pass(render_pass);
-            builder.set_vertex_attributes(Some(color_relief_vertex_attributes(&vertices)));
-            builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-            builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(&indices)), &segments);
+            // Skip rendering if color ramp textures aren't ready
+            let (Some(elevation_stops_texture), Some(color_stops_texture)) =
+                (self.elevation_stops_texture.clone(), self.color_stops_texture.clone())
+            else {
+                break 'draw;
+            };
 
-            builder.set_texture(Some(dem_texture), ID_COLOR_RELIEF_IMAGE_TEXTURE);
+            // Drop the DEM textures of buckets that are no longer rendered.
+            let live_buckets: HashSet<SimpleIdentity> =
+                render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
+            self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
-            // Bind color ramp textures
-            builder.set_texture(Some(Rc::clone(&elevation_stops_texture)), ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE);
-            builder.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
+            let evaluated = &evaluated::<ColorRelief>(&self.base.evaluated_properties).paint;
+            let dem_sampler = SamplerState {
+                filter: match *evaluated.resampling.uniform() {
+                    ResamplingType::Linear => TextureFilterType::Linear,
+                    ResamplingType::Nearest => TextureFilterType::Nearest,
+                },
+                wrap_u: TextureWrapType::Clamp,
+                wrap_v: TextureWrapType::Clamp,
+                ..Default::default()
+            };
 
-            builder.flush();
+            for tile in render_tiles.iter() {
+                let tile_id = *tile.get_overscaled_tile_id();
 
-            let mut tile_layer_group = layer_group.borrow_mut();
-            for mut drawable in builder.clear_drawables() {
-                drawable.tile_id = Some(tile_id);
-                drawable.layer_tweaker = layer_tweaker.clone();
+                let style = Arc::clone(&self.base.style);
+                let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
+                let Some(bucket_ptr) = bucket_ptr else {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    continue;
+                };
+                let Some(bucket) = (*bucket_ptr).downcast_ref::<HillshadeBucket>() else {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    continue;
+                };
+                let bucket_id = bucket.base.bucket_id;
 
-                // Store tile props in drawable data for use by the tweaker
-                // (for consolidated backends)
-                drawable.data = Some(crate::drawable::DrawableData::ColorRelief(ColorReliefDrawableData {
-                    tile_props: tile_props_ubo,
-                }));
+                let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+                if prev_bucket_id.is_some_and(|prev| prev != bucket_id) {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                }
+                self.set_render_tile_bucket_id(&tile_id, bucket_id);
 
-                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                // Set up tile drawable
+                let (vertices, vertex_count, indices, segments, geometry_time): (
+                    VertexVectorBasePtr,
+                    usize,
+                    IndexVectorBasePtr,
+                    Vec<SegmentBase>,
+                    Instant,
+                ) = {
+                    let geometry = bucket.geometry();
+                    if self.base.projection_variant == ProjectionVariant::Globe {
+                        let globe_mesh =
+                            self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
+                        let vertices: VertexVectorBasePtr = Rc::<
+                            mln_gfx::vertex_vector::VertexVector<HillshadeLayoutVertex>,
+                        >::clone(&globe_mesh.vertices);
+                        (
+                            vertices,
+                            globe_mesh.vertices.elements(),
+                            Rc::clone(&globe_mesh.indices),
+                            globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
+                            geometry.last_modified,
+                        )
+                    } else if !geometry.vertices.is_empty()
+                        && !geometry.indices.is_empty()
+                        && !geometry.segments.is_empty()
+                    {
+                        (
+                            shared_vertices(&geometry.vertices),
+                            geometry.vertices.len(),
+                            Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone()))),
+                            geometry.segments.iter().map(SegmentBase::copy).collect(),
+                            geometry.last_modified,
+                        )
+                    } else {
+                        (
+                            Rc::clone(&static_data_shared_vertices),
+                            4,
+                            Rc::clone(&static_data_indices),
+                            static_data_segments.iter().map(SegmentBase::copy).collect(),
+                            geometry.last_modified,
+                        )
+                    }
+                };
+
+                // The DEM texture and tile properties
+                let (dem_image, tile_props_ubo) = {
+                    let dem_data = bucket.get_dem_data();
+                    if !dem_data.get_image().valid() {
+                        Log::warning(Event::Render, "ColorRelief: DEM image not valid for tile");
+                        continue; // Skip this tile if DEM data is not ready
+                    }
+                    let unpack_vector = dem_data.get_unpack_vector();
+                    (
+                        dem_data.get_image().clone(),
+                        ColorReliefTilePropsUBO {
+                            unpack: unpack_vector,
+                            // Use stride (dim + 2) for dimension, as the
+                            // texture includes a 1-pixel border
+                            dimension: [dem_data.stride as f32, dem_data.stride as f32],
+                            color_ramp_size: self.color_ramp_size as i32,
+                            pad_tile0: 0.0,
+                        },
+                    )
+                };
+                let generation = bucket.render_target_generation();
+                let dem_texture = match self.dem_textures.get(&bucket_id) {
+                    Some((texture, made_at)) if *made_at == generation => Rc::clone(texture),
+                    _ => {
+                        let texture = context.create_texture_2d();
+                        texture.borrow_mut().set_image(Some(Rc::new(dem_image)));
+                        self.dem_textures.insert(bucket_id, (Rc::clone(&texture), generation));
+                        texture
+                    }
+                };
+                dem_texture.borrow_mut().set_sampler(dem_sampler);
+
+                let update_existing = |drawable: &mut crate::drawable::Drawable| {
+                    if drawable.tweaker != tweaker {
+                        return false;
+                    }
+                    // The masked geometry changed: rebuild (see the file comment).
+                    if drawable.create_time < geometry_time {
+                        return false;
+                    }
+
+                    // Update textures
+                    drawable.set_texture(Some(Rc::clone(&dem_texture)), ID_COLOR_RELIEF_IMAGE_TEXTURE);
+                    drawable.set_texture(
+                        Some(Rc::clone(&elevation_stops_texture)),
+                        ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
+                    );
+                    drawable.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
+
+                    true
+                };
+
+                if update_tile(&mut layer_group, render_pass, &tile_id, update_existing) {
+                    continue;
+                }
+
+                let mut builder = DrawableBuilder::boxed();
+                builder.set_shader(Some(Rc::clone(&color_relief_shader)));
+                builder.set_enable_depth(false);
+                builder.set_color_mode(&ColorMode::alpha_blended());
+                builder.set_cull_face_mode(CullFaceMode::disabled());
+                builder.set_render_pass(render_pass);
+                builder.set_vertex_attributes(Some(color_relief_vertex_attributes(&vertices)));
+                builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
+                builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(&indices)), &segments);
+
+                builder.set_texture(Some(dem_texture), ID_COLOR_RELIEF_IMAGE_TEXTURE);
+
+                // Bind color ramp textures
+                builder.set_texture(Some(Rc::clone(&elevation_stops_texture)), ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE);
+                builder.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
+
+                builder.flush();
+
+                let tile_layer_group = &mut layer_group;
+                for mut drawable in builder.clear_drawables() {
+                    drawable.tile_id = Some(tile_id);
+                    drawable.tweaker = tweaker;
+
+                    // Store tile props in drawable data for use by the tweaker
+                    // (for consolidated backends)
+                    drawable.data = Some(crate::drawable::DrawableData::ColorRelief(ColorReliefDrawableData {
+                        tile_props: tile_props_ubo,
+                    }));
+
+                    tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                }
             }
         }
+        self.base.layer_group = Some(layer_group);
     }
 }

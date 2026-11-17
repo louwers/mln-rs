@@ -53,9 +53,9 @@ fn convert(json: &str) -> Layer {
 /// A layer from its style JSON, evaluated at `z` by its render layer, as
 /// the `RenderOrchestrator` evaluates it.
 fn layer(json: &str, z: f32) -> Arc<dyn ErasedEvaluatedLayer> {
-    let render_layer = crate::tests::render_layer(convert(json).style());
-    render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(z));
-    Arc::clone(&render_layer.borrow().base().evaluated_properties)
+    let mut render_layer = crate::tests::render_layer(convert(json).style());
+    render_layer.evaluate(&PropertyEvaluationParameters::new(z));
+    Arc::clone(&render_layer.base().evaluated_properties)
 }
 
 fn layers(jsons: &[&str]) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
@@ -361,10 +361,10 @@ fn format_section_overrides_cross() {
             "text-field": ["format", ["to-string", ["get", "admin_level"]], {"text-color": "red"}]},
         "paint": {"text-color": "blue"}}"#,
     );
-    let render_layer = crate::tests::render_layer(layer.style());
-    render_layer.borrow_mut().transition(&TransitionParameters::new(None, TransitionOptions::default()));
-    render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
-    let layers = vec![Arc::clone(&render_layer.borrow().base().evaluated_properties)];
+    let mut render_layer = crate::tests::render_layer(layer.style());
+    render_layer.transition(&TransitionParameters::new(None, TransitionOptions::default()));
+    render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
+    let layers = vec![Arc::clone(&render_layer.base().evaluated_properties)];
     cross(&layers, &tile_data());
 }
 
@@ -482,8 +482,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     use mln_util::time::Instant;
 
     let constant = FILL.replace(r#"["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]"#, r#""red""#);
-    let render_layer = crate::tests::render_layer(convert(FILL).style());
-    let mut render_layer = render_layer.borrow_mut();
+    let mut render_layer = crate::tests::render_layer(convert(FILL).style());
     let start = Instant::now();
     let at = |now| PropertyEvaluationParameters::with_zoom_history(ZoomHistory::default(), Some(now), Duration::ZERO);
     render_layer.transition(&TransitionParameters::new(Some(start), TransitionOptions::default()));
@@ -545,9 +544,9 @@ fn styles_and_layers_are_defined_once() {
 
     // Evaluated again (another zoom), the line layer's properties travel
     // again, but not the layer or its expressions, and the fill layer by key.
-    let line = crate::tests::render_layer(&layers[1].shared_style());
-    line.borrow_mut().evaluate(&PropertyEvaluationParameters::new(1.0));
-    let again = style(&[Arc::clone(&layers[0]), Arc::clone(&line.borrow().base().evaluated_properties)]);
+    let mut line = crate::tests::render_layer(&layers[1].shared_style());
+    line.evaluate(&PropertyEvaluationParameters::new(1.0));
+    let again = style(&[Arc::clone(&layers[0]), Arc::clone(&line.base().evaluated_properties)]);
     drop(line);
     let third = map.encode_run(&job(&again, data_input(&data), Resolved::default())).unwrap();
     assert!(third.len() < first.len() / 2 && third.len() > second.len());

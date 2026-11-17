@@ -6,7 +6,6 @@ pub mod bucket;
 mod bucket_geometry;
 mod bucket_parameters;
 mod buckets;
-mod change_request;
 mod clip_masks;
 mod drawable;
 mod drawable_builder;

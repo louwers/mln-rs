@@ -6,7 +6,7 @@ use mln_gfx::shaders::shader_defines::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUAT
 use mln_style::layers::Circle;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 
-use super::{cast_matrix, check_tweak_drawable_ptr, slot_bucket};
+use super::{cast_matrix, slot_bucket};
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
@@ -35,6 +35,10 @@ impl CircleLayerTweaker {
 /// The constant value of paint property `$p`, or its default if it isn't
 /// constant.
 impl LayerTweaker for CircleLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -80,7 +84,7 @@ impl LayerTweaker for CircleLayerTweaker {
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
 
         let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
-        let self_ptr: *const Self = self;
+        let key = self.base.key;
         layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = false;
@@ -88,7 +92,7 @@ impl LayerTweaker for CircleLayerTweaker {
             let Some(tile_id) = drawable.tile_id else {
                 return;
             };
-            if !check_tweak_drawable_ptr(drawable, self_ptr) {
+            if !drawable.tweaked_by(key) {
                 return;
             }
             let tile_id = tile_id.to_unwrapped();

@@ -36,6 +36,10 @@ fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
 }
 
 impl LayerTweaker for BackgroundLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -105,8 +109,8 @@ impl LayerTweaker for BackgroundLayerTweaker {
         let mut drawable_ubo_vector = vec![BackgroundDrawableUnionUBO::default(); layer_group.drawable_count()];
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
 
-        let self_ptr: *const Self = self;
-        let check = |d: &crate::drawable::Drawable| super::check_tweak_drawable_ptr(d, self_ptr);
+        let key = self.base.key;
+        let check = |d: &crate::drawable::Drawable| d.tweaked_by(key);
         layer_group.visit_drawables(|drawable| {
             debug_assert!(drawable.tile_id.is_some());
             let Some(tile_id) = drawable.tile_id else {

@@ -18,7 +18,7 @@ use mln_style::layers::{Line, LinePaintProperties};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
+use super::{DrawableRenderTile, cast_matrix, slot_bucket};
 use crate::buckets::line_bucket::LineBucket;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
@@ -97,6 +97,10 @@ fn cast_tlbr(a: [u16; 4]) -> [f32; 4] {
 }
 
 impl LayerTweaker for LineLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -182,7 +186,7 @@ impl LayerTweaker for LineLayerTweaker {
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![LineTilePropsUnionUBO::default(); count];
 
-        let self_ptr: *const Self = self;
+        let key = self.base.key;
         layer_group.visit_drawables(|drawable| {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
@@ -190,7 +194,7 @@ impl LayerTweaker for LineLayerTweaker {
             let Some(tile_id) = drawable.tile_id else {
                 return;
             };
-            if shader.is_none() || !check_tweak_drawable_ptr(drawable, self_ptr) {
+            if shader.is_none() || !drawable.tweaked_by(key) {
                 return;
             }
 

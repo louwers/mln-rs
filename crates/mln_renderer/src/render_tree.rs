@@ -8,9 +8,9 @@ use mln_util::Color;
 use mln_vec_map::VecMap;
 
 use crate::gfx::context::Context; // layers: debug
-use crate::layer_group::LayerGroupPtr;
+use crate::layer_group::LayerGroup;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
-use crate::render_layer::RenderLayerPtr;
+use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties};
 
 /// The kinds of debug drawables (layers: debug).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -20,31 +20,43 @@ pub(crate) enum DebugType {
     Border,
 }
 
-/// The debug layer groups, by debug type (layers: debug).
-pub(crate) type DebugLayerGroupMap = VecMap<DebugType, LayerGroupPtr>;
+/// A debug overlay's layer group, with the tweaker that sets its uniforms
+/// (layers: debug).
+pub(crate) struct DebugLayer {
+    pub(crate) group: LayerGroup,
+    pub(crate) tweaker: PolylineLayerTweaker,
+}
+
+impl DebugLayer {
+    pub(crate) fn new(type_: DebugType) -> Self {
+        DebugLayer { group: LayerGroup::tiles(), tweaker: PolylineLayerTweaker::new(debug_line_properties(type_)) }
+    }
+}
+
+/// The debug overlays, by debug type (layers: debug).
+pub(crate) type DebugLayerGroupMap = VecMap<DebugType, DebugLayer>;
+
+/// The layer group of the debug overlay `type_` in `debug_layer_groups`,
+/// made if it isn't there (layers: debug).
+pub(crate) fn debug_layer_group(debug_layer_groups: &mut DebugLayerGroupMap, type_: DebugType) -> &mut LayerGroup {
+    &mut debug_layer_groups.entry(type_).or_insert_with(|| DebugLayer::new(type_)).group
+}
 
 /// The render item of a source. The layer render items are the concrete
 /// `LayerRenderItem`.
 pub(crate) trait RenderItem {
     fn upload(&self, context: &Context);
     /// Updates the item's debug drawables; a no-op for the items that have
-    /// none (`LayerRenderItem`, the image source). The orchestrator gives
-    /// each debug layer group its tweaker (layers: debug).
+    /// none (the image source) (layers: debug).
     fn update_debug_drawables(&self, _debug_layer_groups: &mut DebugLayerGroupMap, _parameters: &PaintParameters<'_>) {}
 }
 
+/// A layer the frame draws, by its index in the orchestrator's layers.
 #[derive(Clone)]
 pub(crate) struct LayerRenderItem {
-    pub(crate) layer: RenderLayerPtr,
     /// The id of the orchestrator's render source, `None` for layers without
     /// a source.
     pub(crate) source: Option<String>,
-}
-
-impl LayerRenderItem {
-    pub(crate) fn new(layer: RenderLayerPtr, source: Option<String>) -> Self {
-        LayerRenderItem { layer, source }
-    }
 }
 
 pub(crate) struct RenderTreeParameters {

@@ -25,7 +25,7 @@ use smallvec::SmallVec;
 use crate::bucket::{Bucket, BucketPtr};
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
-use crate::render_layer::{LayerRenderData, RenderLayerPtr};
+use crate::render_layer::{LayerRenderData, RenderLayer};
 
 /// A layer type that the renderer draws.
 pub(crate) trait LayerType: StyleLayerType {
@@ -62,7 +62,7 @@ pub(crate) trait LayerType: StyleLayerType {
         0.0
     }
 
-    fn render_layer(style: Arc<LayerStyle<Self>>) -> RenderLayerPtr;
+    fn render_layer(style: Arc<LayerStyle<Self>>) -> Box<dyn RenderLayer>;
 }
 
 /// The values of a layer of the type `T` for a frame.
@@ -196,7 +196,7 @@ pub(crate) fn evaluated<T: LayerType>(layer: &Arc<dyn ErasedEvaluatedLayer>) -> 
 pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
     /// The render layer that draws the layer `style`, or `None` if `style`
     /// is another type's.
-    fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<RenderLayerPtr>;
+    fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<Box<dyn RenderLayer>>;
 
     /// [`LayerType::layout_can_need_dependencies`]; false for a layer of
     /// another type.
@@ -222,7 +222,7 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
 }
 
 impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
-    fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<RenderLayerPtr> {
+    fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<Box<dyn RenderLayer>> {
         LayerStyle::<T>::recover(style).map(T::render_layer)
     }
 

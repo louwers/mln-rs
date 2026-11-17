@@ -2,7 +2,7 @@
 // are in, and turns what the store reports into the renderer's events.
 
 use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,27 +22,24 @@ use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::Registry;
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::context::Context;
 use crate::image_store::ImageStore;
-use crate::layer_group::{LayerGroup, LayerGroupPtr};
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::render_layer::{LayerPrepareParameters, RenderLayerPtr};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer};
 use crate::render_source::{self, RenderSource, SourcePrepareParameters};
-use crate::render_tree::{DebugType, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
+use crate::render_tree::{LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::RendererEvent;
-use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::Placement;
 use crate::tile::inbox::Waker;
@@ -92,7 +89,7 @@ fn ptr_eq_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
 /// The render layer of the layer `style`, from its type in `registry`. A
 /// type that the registry lacks breaks the contract that a map and its
 /// renderer register alike; the layer isn't drawn.
-fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -> Option<RenderLayerPtr> {
+fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -> Option<Box<dyn RenderLayer>> {
     let name = style.info().name;
     let render_layer = registry.layer_type(name).and_then(|layer_type| layer_type.create_render_layer(style));
     debug_assert!(render_layer.is_some(), "the renderer's registry has no layer type '{name}'");
@@ -154,7 +151,12 @@ pub(crate) struct RenderOrchestrator {
     sources_by_id: Vec<Source>,
 
     render_sources: HashMap<String, Box<dyn RenderSource>>,
-    render_layers: HashMap<String, RenderLayerPtr>,
+    /// The render layers, in the style's order: a layer's index is its
+    /// place in the drawing order. A layer whose type has no render layer
+    /// has none.
+    layers: Vec<Box<dyn RenderLayer>>,
+    /// The index in `layers` of each render layer, by layer id.
+    layer_indexes: HashMap<String, usize>,
     // conformance: renderLight.
     render_light: crate::render_light::RenderLight,
     render_sky: Option<crate::render_sky::RenderSky>,
@@ -168,8 +170,6 @@ pub(crate) struct RenderOrchestrator {
     longitude: f32,
     tile_cache_enabled: bool,
 
-    /// Vector with reference wrappers to the layers in style order.
-    ordered_layers: Vec<RenderLayerPtr>,
     /// Whether the next update makes the render layers again, for new
     /// shaders.
     remake_render_layers: bool,
@@ -179,24 +179,8 @@ pub(crate) struct RenderOrchestrator {
 
     global_state: Option<Arc<GlobalStateMap>>,
 
-    /// Ordered by layer index, and by insertion order within an index.
-    layer_groups_by_layer_index: VecMap<i32, Vec<LayerGroupPtr>>,
-
-    /// The `layerTweakers` (weak pointers) each C++ `LayerGroupBase` holds,
-    /// keyed by the layer group's id (see `change_request.rs`).
-    layer_group_tweakers: HashMap<SimpleIdentity, Vec<Weak<RefCell<dyn LayerTweaker>>>>,
-
-    /// The debug layer groups (layers: debug).
+    /// The debug overlays (layers: debug).
     debug_layer_groups: crate::render_tree::DebugLayerGroupMap,
-    /// The tweaker of each debug layer group, with the group it was made
-    /// for. The render items that fill the groups last one frame, so the
-    /// orchestrator owns the tweakers (layers: debug).
-    debug_layer_tweakers: VecMap<DebugType, (LayerGroupPtr, Rc<RefCell<PolylineLayerTweaker>>)>,
-
-    // dem-heatmap: `std::vector<RenderTargetPtr> renderTargets`.
-    render_targets: Vec<crate::render_target::RenderTargetPtr>,
-
-    pending_changes: UniqueChangeRequestVec,
 
     globe_depth_pass: crate::globe_depth_pass::GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
@@ -249,7 +233,8 @@ impl RenderOrchestrator {
             style: None,
             sources_by_id: Vec::new(),
             render_sources: HashMap::default(),
-            render_layers: HashMap::default(),
+            layers: Vec::new(),
+            layer_indexes: HashMap::default(),
             // conformance: renderLight(makeMutable<Light::Impl>())
             render_light: crate::render_light::RenderLight::new(Arc::default()),
             render_sky: None,
@@ -257,20 +242,14 @@ impl RenderOrchestrator {
             placed_symbol_data_collected: false,
             longitude: 0.0,
             tile_cache_enabled: true,
-            ordered_layers: Vec::new(),
             remake_render_layers: false,
             filtered_layers_for_source: Vec::new(),
             _wait_for_thread_pool: WaitOnDrop(thread_pool.clone()),
             thread_pool,
             global_state: None,
-            layer_groups_by_layer_index: VecMap::new(),
-            layer_group_tweakers: HashMap::default(),
             globe_depth_pass: crate::globe_depth_pass::GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
-            debug_layer_groups: VecMap::new(),   // layers: debug
-            debug_layer_tweakers: VecMap::new(), // layers: debug
-            render_targets: Vec::new(),          // dem-heatmap
-            pending_changes: Vec::new(),
+            debug_layer_groups: VecMap::new(), // layers: debug
         }
     }
 
@@ -341,8 +320,7 @@ impl RenderOrchestrator {
 
         self.apply_image_diff(&image_diff, update_parameters.sprite_loaded);
 
-        let mut changes: UniqueChangeRequestVec = Vec::new();
-        let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock, &mut changes);
+        let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock);
         let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, &mut clock);
         self.apply_source_diff(&source_diff, update_parameters);
 
@@ -393,16 +371,14 @@ impl RenderOrchestrator {
 
         // Update all layers with their new renderability status, if it
         // changed.
-        for (i, will_render) in update_list.iter().enumerate() {
-            let mut layer = self.ordered_layers[i].borrow_mut();
+        for (layer, will_render) in self.layers.iter_mut().zip(update_list) {
             if wrap_delta != 0 {
                 layer.handle_wrap_jump(wrap_delta);
             }
-            if layer.is_layer_renderable() != *will_render {
-                layer.mark_layer_renderable(*will_render, &mut changes);
+            if layer.is_layer_renderable() != will_render {
+                layer.mark_layer_renderable(will_render);
             }
         }
-        self.add_changes(&mut changes);
 
         parameters.loaded = update_parameters.style_loaded && !answered && self.is_loaded();
         if !clock.continuous && !parameters.loaded {
@@ -438,11 +414,12 @@ impl RenderOrchestrator {
             }
         }
 
-        let mut layers_need_placement: Vec<RenderLayerPtr> = Vec::new();
-        let mut layers_following_placement: Vec<RenderLayerPtr> = Vec::new();
+        let mut layers_need_placement: Vec<usize> = Vec::new();
+        let mut layers_following_placement: Vec<usize> = Vec::new();
         let mut opaque_pass_cut_off_estimation = layer_render_items.len();
-        for render_item in layer_render_items.values() {
-            let mut render_layer = render_item.layer.borrow_mut();
+        for (&index, render_item) in &layer_render_items {
+            let index = index as usize;
+            let render_layer = &mut self.layers[index];
             let source = render_item.source.as_ref().and_then(|id| self.render_sources.get(id)).map(AsRef::as_ref);
             render_layer.prepare(&mut LayerPrepareParameters {
                 source,
@@ -451,10 +428,10 @@ impl RenderOrchestrator {
                 line_atlas: &self.line_atlas,
             });
             if render_layer.needs_placement() {
-                layers_need_placement.push(Rc::clone(&render_item.layer));
+                layers_need_placement.push(index);
             }
             if !render_layer.get_follower_data().is_empty() {
-                layers_following_placement.push(Rc::clone(&render_item.layer));
+                layers_following_placement.push(index);
             }
             if parameters.opaque_pass_cut_off == 0 {
                 opaque_pass_cut_off_estimation -= 1;
@@ -487,15 +464,15 @@ impl RenderOrchestrator {
         // The symbol buckets of the layers that need placement, then the
         // positions of the layers that draw buckets other layers place.
         let placement = self.placement_controller.get_placement();
-        for layer in layers_need_placement.iter().rev() {
+        for &index in layers_need_placement.iter().rev() {
             placement.update_layer_buckets(
-                &*layer.borrow(),
+                &*self.layers[index],
                 &parameters.transform_params.state,
                 update_symbol_opacities,
             );
         }
-        for layer in &layers_following_placement {
-            placement.update_follower_buckets(&*layer.borrow(), &parameters.transform_params.state);
+        for &index in &layers_following_placement {
+            placement.update_follower_buckets(&*self.layers[index], &parameters.transform_params.state);
         }
 
         RenderTree::new(parameters, layer_render_items, source_render_items, start_time, symbols_start)
@@ -651,77 +628,57 @@ impl RenderOrchestrator {
     /// Makes, removes and restyles the render layers for the layers that
     /// changed, and puts them in the style's order. Returns whether it made
     /// every render layer again, for new shaders.
-    fn apply_layer_changes(
-        &mut self,
-        layer_changes: &LayerChanges,
-        layers: &LayerList,
-        clock: &FrameClock,
-        changes: &mut UniqueChangeRequestVec,
-    ) -> bool {
+    fn apply_layer_changes(&mut self, layer_changes: &LayerChanges, layers: &LayerList, clock: &FrameClock) -> bool {
         // Make each render layer again from its layer, without the relayout
         // that adding the layer would take.
         let render_layers_remade = std::mem::take(&mut self.remake_render_layers);
         if render_layers_remade {
-            for render_layer in self.render_layers.values_mut() {
-                let impl_ = Arc::clone(&render_layer.borrow().base().style);
-                let Some(new_layer) = create_render_layer(&self.registry, &impl_) else {
+            for render_layer in &mut self.layers {
+                let style = Arc::clone(&render_layer.base().style);
+                let Some(mut new_layer) = create_render_layer(&self.registry, &style) else {
                     continue;
                 };
-                render_layer.borrow_mut().layer_removed(changes);
-                new_layer.borrow_mut().transition(&clock.added_layer_transition);
+                new_layer.transition(&clock.added_layer_transition);
                 *render_layer = new_layer;
             }
         }
-        let layers_added_or_removed = render_layers_remade || layer_changes.order_changed;
 
-        // Remove render layers for removed layers.
-        for (id, _) in layer_changes.iter().filter(|(_, change)| change.removes()) {
-            if let Some(layer) = self.render_layers.remove(&**id) {
-                layer.borrow_mut().layer_removed(changes);
-            }
-        }
+        if layer_changes.order_changed {
+            let mut by_id: HashMap<String, Box<dyn RenderLayer>> =
+                self.layers.drain(..).map(|layer| (layer.get_id().to_owned(), layer)).collect();
 
-        // Create render layers for newly added layers.
-        for (id, _) in layer_changes.iter().filter(|(_, change)| change.adds()) {
-            let Some(layer) = layers.get(id) else { continue };
-            if let Some(render_layer) = create_render_layer(&self.registry, layer.style()) {
-                render_layer.borrow_mut().transition(&clock.added_layer_transition);
-                // `emplace` keeps an existing entry.
-                self.render_layers.entry(id.to_string()).or_insert(render_layer);
+            // Remove render layers for removed layers.
+            for (id, _) in layer_changes.iter().filter(|(_, change)| change.removes()) {
+                by_id.remove(&**id);
             }
+
+            // Create render layers for newly added layers.
+            for (id, _) in layer_changes.iter().filter(|(_, change)| change.adds()) {
+                let Some(layer) = layers.get(id) else { continue };
+                if let Some(mut render_layer) = create_render_layer(&self.registry, layer.style()) {
+                    render_layer.transition(&clock.added_layer_transition);
+                    // `emplace` keeps an existing entry.
+                    by_id.entry(id.to_string()).or_insert(render_layer);
+                }
+            }
+
+            // A layer type without a render layer is skipped.
+            self.layers = layers.iter().filter_map(|layer| by_id.remove(layer.get_id())).collect();
+            self.layer_indexes =
+                self.layers.iter().enumerate().map(|(index, layer)| (layer.get_id().to_owned(), index)).collect();
         }
 
         // Update render layers for changed layers.
         for (id, _) in layer_changes.iter().filter(|(_, change)| change.restyles()) {
-            if let (Some(render_layer), Some(layer)) = (self.render_layers.get(&**id), layers.get(id)) {
+            if let (Some(&index), Some(layer)) = (self.layer_indexes.get(&**id), layers.get(id)) {
                 let new_layer = layer.style();
-
-                let mut render_layer = render_layer.borrow_mut();
-                render_layer.layer_changed(&clock.transition, new_layer, changes);
+                let render_layer = &mut self.layers[index];
+                render_layer.layer_changed(&clock.transition, new_layer);
                 render_layer.restyle(&clock.transition, new_layer);
             }
         }
 
-        if layers_added_or_removed {
-            self.ordered_layers.clear();
-            self.ordered_layers.reserve(layers.len());
-            let mut layer_index: i32 = 0;
-            for style_layer in layers.iter() {
-                // A layer type without a render layer is skipped.
-                let Some(layer) = self.render_layers.get(style_layer.get_id()) else {
-                    continue;
-                };
-                self.ordered_layers.push(Rc::clone(layer));
-
-                // We're mutating the list of ordered layers and must notify
-                // them of their new assigned indices
-                layer.borrow_mut().layer_index_changed(layer_index, changes);
-                layer_index += 1;
-            }
-        }
-        debug_assert_eq!(self.ordered_layers.len(), self.render_layers.len());
-
-        if layers_added_or_removed || !layer_changes.is_empty() {
+        if render_layers_remade || layer_changes.order_changed || !layer_changes.is_empty() {
             self.tile_store.glyphs().evict(&layer::font_stacks(layers.iter().map(Layer::style)));
         }
         render_layers_remade
@@ -739,8 +696,7 @@ impl RenderOrchestrator {
         clock: &mut FrameClock,
     ) -> VecSet<String> {
         let mut constants_mask_changed: VecSet<String> = VecSet::new();
-        for layer in &self.ordered_layers {
-            let mut layer = layer.borrow_mut();
+        for layer in &mut self.layers {
             let id = layer.get_id().to_owned();
             let layer_added_or_changed =
                 render_layers_remade || layer_changes.get(&id).is_some_and(|change| change != LayerChange::Removed);
@@ -856,7 +812,7 @@ impl RenderOrchestrator {
         }
 
         // Track which layers are flagged for rendering
-        let mut update_list: Vec<bool> = vec![false; self.ordered_layers.len()];
+        let mut update_list: Vec<bool> = vec![false; self.layers.len()];
 
         // Update all sources and initialize renderItems.
         //
@@ -878,8 +834,7 @@ impl RenderOrchestrator {
             // render source.
             let render_source_id = style_source.as_ref().filter(|_| has_render_source).map(Source::id);
 
-            for (index, layer_ptr) in self.ordered_layers.iter().enumerate() {
-                let layer = layer_ptr.borrow();
+            for (index, layer) in self.layers.iter().enumerate() {
                 let style = &layer.base().style;
                 let layer_info = style.info();
                 parameters.has_3d |= layer_info.pass_3d;
@@ -927,7 +882,7 @@ impl RenderOrchestrator {
                                 let source_id = style_source.id().to_owned();
                                 layer_render_items
                                     .entry(index as u32)
-                                    .or_insert_with(|| LayerRenderItem::new(Rc::clone(layer_ptr), Some(source_id)));
+                                    .or_insert_with(|| LayerRenderItem { source: Some(source_id) });
                                 update_list[index] = true;
                             }
                         }
@@ -955,9 +910,7 @@ impl RenderOrchestrator {
                             // and it shall not be added to render items.
                         }
                     }
-                    layer_render_items
-                        .entry(index as u32)
-                        .or_insert_with(|| LayerRenderItem::new(Rc::clone(layer_ptr), None));
+                    layer_render_items.entry(index as u32).or_insert_with(|| LayerRenderItem { source: None });
                     update_list[index] = true;
                 }
             }
@@ -990,9 +943,11 @@ impl RenderOrchestrator {
     fn place_symbols(
         &mut self,
         update_parameters: &Arc<UpdateParameters>,
-        layers_need_placement: &[RenderLayerPtr],
+        layers_need_placement: &[usize],
         parameters: &mut RenderTreeParameters,
     ) -> bool {
+        let layers_need_placement: Vec<&dyn RenderLayer> =
+            layers_need_placement.iter().map(|&index| &*self.layers[index]).collect();
         let continuous = update_parameters.mode == MapMode::Continuous;
         let mut symbol_buckets_changed = false;
         let mut symbol_buckets_added = false;
@@ -1000,8 +955,7 @@ impl RenderOrchestrator {
         let longitude =
             update_parameters.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         for layer in layers_need_placement.iter().rev() {
-            let layer = layer.borrow();
-            let result = self.cross_tile_symbol_index.add_layer(&*layer, longitude, &update_parameters.transform_state);
+            let result = self.cross_tile_symbol_index.add_layer(*layer, longitude, &update_parameters.transform_state);
             if continuous {
                 used_symbol_layers.insert(layer.get_id().to_owned());
                 symbol_buckets_added |= result.buckets_added;
@@ -1043,7 +997,7 @@ impl RenderOrchestrator {
             if parameters.placement_changed {
                 let prev = self.placement_controller.take_placement();
                 let mut placement = Placement::create(Arc::clone(update_parameters), Some(prev));
-                placement.place_layers(layers_need_placement);
+                placement.place_layers(&layers_need_placement);
                 self.placement_controller.set_placement(placement);
                 self.cross_tile_symbol_index.prune_unused_layers(&used_symbol_layers);
                 self.tile_store.update_fading_tiles();
@@ -1059,7 +1013,7 @@ impl RenderOrchestrator {
             if parameters.placement_changed {
                 let mut placement = Placement::create(Arc::clone(update_parameters), None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
-                placement.place_layers(layers_need_placement);
+                placement.place_layers(&layers_need_placement);
                 self.placement_controller.set_placement(placement);
             }
             self.cross_tile_symbol_index.reset();
@@ -1079,10 +1033,8 @@ impl RenderOrchestrator {
             return true;
         }
 
-        for layer in self.render_layers.values() {
-            if layer.borrow().has_transition() {
-                return true;
-            }
+        if self.layers.iter().any(|layer| layer.has_transition()) {
+            return true;
         }
 
         if self.placement_controller.has_transitions(time_point) {
@@ -1115,20 +1067,11 @@ impl RenderOrchestrator {
         self.style = None;
         self.sources_by_id.clear();
 
-        let mut changes: UniqueChangeRequestVec = Vec::new();
-        for layer in self.render_layers.values() {
-            layer.borrow_mut().layer_removed(&mut changes);
-        }
-        self.add_changes(&mut changes);
-
         self.debug_layer_groups.clear(); // layers: debug
-        self.debug_layer_tweakers.clear(); // layers: debug
         self.render_sources.clear();
         self.tile_store.clear();
-        self.render_layers.clear();
-        // C++ keeps orderedLayers here and rebuilds it on the next
-        // createRenderTree (the layer diff then reports additions).
-        self.ordered_layers.clear();
+        self.layers.clear();
+        self.layer_indexes.clear();
 
         self.cross_tile_symbol_index.reset();
         if !self.line_atlas.borrow().is_empty() {
@@ -1150,7 +1093,6 @@ impl RenderOrchestrator {
     pub(crate) fn release_shaders(&mut self) {
         self.remake_render_layers = true;
         self.debug_layer_groups.clear(); // layers: debug
-        self.debug_layer_tweakers.clear(); // layers: debug
         self.sky_pass = crate::sky_pass::SkyPass::default();
         self.globe_depth_pass = crate::globe_depth_pass::GlobeDepthPass::default();
     }
@@ -1203,75 +1145,18 @@ impl RenderOrchestrator {
         Some(self.tile_store.source_mut(key)?.0)
     }
 
-    fn add_changes(&mut self, changes: &mut UniqueChangeRequestVec) {
-        self.pending_changes.append(changes);
-    }
-
-    pub(crate) fn update_layer_index(&mut self, layer_group: &LayerGroupPtr, new_index: i32) {
-        let current = layer_group.borrow().layer_index;
-        if current == new_index {
-            return;
+    /// The groups of the layers that draw, in drawing order.
+    pub(crate) fn layer_groups(&mut self) -> Vec<&mut LayerGroup> {
+        let mut groups = Vec::new();
+        for layer in &mut self.layers {
+            layer.layer_groups(&mut groups);
         }
-        if let Some(groups) = self.layer_groups_by_layer_index.get_mut(&current)
-            && let Some(pos) = groups.iter().position(|g| Rc::ptr_eq(g, layer_group))
-        {
-            groups.remove(pos);
-            if groups.is_empty() {
-                self.layer_groups_by_layer_index.remove(&current);
-            }
-            layer_group.borrow_mut().layer_index = new_index;
-            self.layer_groups_by_layer_index.entry(new_index).or_default().push(Rc::clone(layer_group));
-            return;
-        }
-        // We're not tracking the layer, indicating that it's currently
-        // disabled, so update it directly.
-        layer_group.borrow_mut().layer_index = new_index;
+        groups
     }
 
-    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupPtr) -> bool {
-        let index = layer_group.borrow().layer_index;
-        let groups = self.layer_groups_by_layer_index.entry(index).or_default();
-        if groups.iter().any(|g| Rc::ptr_eq(g, &layer_group)) {
-            false // not added
-        } else {
-            groups.push(layer_group);
-            true // added
-        }
-    }
-
-    pub(crate) fn remove_layer_group(&mut self, layer_group: &LayerGroupPtr) -> bool {
-        let index = layer_group.borrow().layer_index;
-        if let Some(groups) = self.layer_groups_by_layer_index.get_mut(&index)
-            && let Some(pos) = groups.iter().position(|g| Rc::ptr_eq(g, layer_group))
-        {
-            groups.remove(pos);
-            if groups.is_empty() {
-                self.layer_groups_by_layer_index.remove(&index);
-            }
-            return true;
-        }
-        false
-    }
-
-    pub(crate) fn num_layer_groups(&self) -> usize {
-        self.layer_groups_by_layer_index.values().map(Vec::len).sum()
-    }
-
-    /// The layer groups in multimap order (ascending layer index).
-    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupPtr> {
-        self.layer_groups_by_layer_index.values().flatten().cloned().collect()
-    }
-
-    pub(crate) fn visit_layer_groups(&self, mut f: impl FnMut(&mut LayerGroup)) {
-        for group in self.layer_groups() {
-            f(&mut group.borrow_mut());
-        }
-    }
-
-    pub(crate) fn visit_layer_groups_reversed(&self, mut f: impl FnMut(&mut LayerGroup)) {
-        for group in self.layer_groups().into_iter().rev() {
-            f(&mut group.borrow_mut());
-        }
+    /// The number of the layers' groups that draw.
+    pub(crate) fn num_layer_groups(&mut self) -> usize {
+        self.layer_groups().len()
     }
 
     /// Updates the debug layer groups (layers: debug).
@@ -1279,58 +1164,35 @@ impl RenderOrchestrator {
         for item in render_tree.get_source_render_items() {
             item.update_debug_drawables(&mut self.debug_layer_groups, parameters);
         }
-
-        // `layerGroup->addLayerTweaker(tweaker)`, once per group.
-        let groups = &self.debug_layer_groups;
-        let group_tweakers = &mut self.layer_group_tweakers;
-        self.debug_layer_tweakers.retain(|type_, (group, _)| {
-            let live = groups.get(type_).is_some_and(|g| Rc::ptr_eq(g, group));
-            if !live {
-                group_tweakers.remove(&group.borrow().id);
-            }
-            live
-        });
-        for (type_, group) in &self.debug_layer_groups {
-            if self.debug_layer_tweakers.contains_key(type_) {
-                continue;
-            }
-            let tweaker = Rc::new(RefCell::new(PolylineLayerTweaker::new(debug_line_properties(*type_))));
-            let weak = Rc::downgrade(&tweaker);
-            self.layer_group_tweakers.entry(group.borrow().id).or_default().push(weak);
-            self.debug_layer_tweakers.insert(*type_, (Rc::clone(group), tweaker));
-        }
     }
 
     /// The debug layer groups, in `DebugType` order (`visitDebugLayerGroups`)
     /// (layers: debug).
-    pub(crate) fn debug_layer_groups(&self) -> Vec<LayerGroupPtr> {
-        self.debug_layer_groups.values().cloned().collect()
+    pub(crate) fn debug_layer_groups(&mut self) -> impl Iterator<Item = &mut LayerGroup> {
+        self.debug_layer_groups.values_mut().map(|debug| &mut debug.group)
     }
 
-    /// Runs the live tweakers of the layer group and drops the expired ones.
-    pub(crate) fn run_tweakers(&mut self, layer_group: &LayerGroupPtr, parameters: &PaintParameters<'_>) {
-        let id = layer_group.borrow().id;
-        let Some(tweakers) = self.layer_group_tweakers.get_mut(&id) else {
-            return;
-        };
-        let mut i = 0;
-        while i < tweakers.len() {
-            if let Some(tweaker) = tweakers[i].upgrade() {
-                tweaker.borrow_mut().execute(&mut layer_group.borrow_mut(), parameters);
-                i += 1;
-            } else {
-                tweakers.remove(i);
-            }
+    /// Runs the tweakers of the layers' groups that draw, and of the debug
+    /// layer groups, before the groups upload.
+    pub(crate) fn tweak(&mut self, parameters: &PaintParameters<'_>) {
+        for layer in &mut self.layers {
+            layer.tweak(parameters);
+        }
+        // layers: debug
+        for debug in self.debug_layer_groups.values_mut() {
+            debug.tweaker.execute(&mut debug.group, parameters);
         }
     }
 
     /// Visits every render layer, in no order.
-    pub(crate) fn visit_render_layers(&self, mut f: impl FnMut(&mut dyn crate::render_layer::RenderLayer)) {
-        for layer in self.render_layers.values() {
-            f(&mut *layer.borrow_mut());
+    pub(crate) fn visit_render_layers(&mut self, mut f: impl FnMut(&mut dyn RenderLayer)) {
+        for layer in &mut self.layers {
+            f(&mut **layer);
         }
     }
 
+    /// Updates the drawables of the layers the frame draws, and the sky and
+    /// globe depth passes.
     pub(crate) fn update_layers(
         &mut self,
         shaders: &ShaderRegistry,
@@ -1340,27 +1202,14 @@ impl RenderOrchestrator {
         paint_parameters: &PaintParameters<'_>,
         render_tree: &RenderTree,
     ) {
-        let items = render_tree.get_layer_render_item_map();
-
-        let mut changes: UniqueChangeRequestVec = Vec::with_capacity(items.len() * 3);
-
         let mut has_3d = false;
-        for item in items.values() {
-            let mut render_layer = item.layer.borrow_mut();
+        for &index in render_tree.get_layer_render_item_map().keys() {
+            let render_layer = &mut self.layers[index as usize];
             // C++ catches exceptions from update() and reports them through
             // onRenderError; the Rust layers don't throw.
-            render_layer.update(
-                shaders,
-                context,
-                state,
-                update_parameters,
-                paint_parameters,
-                render_tree,
-                &mut changes,
-            );
+            render_layer.update(shaders, context, state, update_parameters, paint_parameters);
             has_3d = has_3d || render_layer.needs_globe_depth();
         }
-        self.add_changes(&mut changes);
 
         let tree_parameters = render_tree.get_parameters();
         self.sky_pass.update(
@@ -1381,70 +1230,21 @@ impl RenderOrchestrator {
         );
     }
 
-    pub(crate) fn get_sky_layer_group(&self) -> Option<LayerGroupPtr> {
-        self.sky_pass.get_sky_layer_group().cloned()
+    /// The render layer at `index` in the drawing order.
+    pub(crate) fn layer_mut(&mut self, index: usize) -> &mut dyn RenderLayer {
+        &mut *self.layers[index]
     }
 
-    pub(crate) fn get_atmosphere_layer_group(&self) -> Option<LayerGroupPtr> {
-        self.sky_pass.get_atmosphere_layer_group().cloned()
+    pub(crate) fn sky_layer_group(&mut self) -> Option<&mut LayerGroup> {
+        self.sky_pass.sky_layer_group()
     }
 
-    pub(crate) fn get_globe_depth_layer_group(&self) -> Option<LayerGroupPtr> {
-        self.globe_depth_pass.get_layer_group().cloned()
+    pub(crate) fn atmosphere_layer_group(&mut self) -> Option<&mut LayerGroup> {
+        self.sky_pass.atmosphere_layer_group()
     }
 
-    pub(crate) fn process_changes(&mut self) {
-        let local_changes = std::mem::take(&mut self.pending_changes);
-        for change in local_changes {
-            match change {
-                ChangeRequest::AddLayerGroup(layer_group) => {
-                    self.add_layer_group(layer_group);
-                }
-                ChangeRequest::RemoveLayerGroup(layer_group) => {
-                    self.remove_layer_group(&layer_group);
-                }
-                ChangeRequest::UpdateLayerGroupIndex(layer_group, new_index) => {
-                    self.update_layer_index(&layer_group, new_index);
-                }
-                ChangeRequest::AddLayerTweaker(layer_group, tweaker) => {
-                    let id = layer_group.borrow().id;
-                    self.layer_group_tweakers.entry(id).or_default().push(tweaker);
-                }
-                // dem-heatmap
-                ChangeRequest::AddRenderTarget(render_target) => {
-                    self.add_render_target(render_target);
-                }
-                ChangeRequest::RemoveRenderTarget(render_target) => {
-                    self.remove_render_target(&render_target);
-                }
-            }
-        }
-    }
-
-    // dem-heatmap: render targets.
-    pub(crate) fn add_render_target(&mut self, render_target: crate::render_target::RenderTargetPtr) -> bool {
-        if self.render_targets.iter().any(|t| Rc::ptr_eq(t, &render_target)) {
-            false
-        } else {
-            self.render_targets.push(render_target);
-            true
-        }
-    }
-
-    pub(crate) fn remove_render_target(&mut self, render_target: &crate::render_target::RenderTargetPtr) -> bool {
-        match self.render_targets.iter().position(|t| Rc::ptr_eq(t, render_target)) {
-            Some(pos) => {
-                self.render_targets.remove(pos);
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// The render targets, for `visitRenderTargets` (cloned, so that the
-    /// visitor may use the orchestrator).
-    pub(crate) fn render_targets(&self) -> Vec<crate::render_target::RenderTargetPtr> {
-        self.render_targets.clone()
+    pub(crate) fn globe_depth_layer_group(&mut self) -> Option<&mut LayerGroup> {
+        self.globe_depth_pass.layer_group()
     }
 
     // query
@@ -1457,15 +1257,17 @@ impl RenderOrchestrator {
     ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         // A query answers from the layouts that arrived since the update.
         self.receive_tiles();
-        let render_layers: Vec<&RenderLayerPtr> = match &options.layer_ids {
-            Some(layer_ids) => layer_ids.iter().filter_map(|id| self.render_layers.get(id)).collect(),
-            None => self.render_layers.values().collect(),
+        let render_layers: Vec<&dyn RenderLayer> = match &options.layer_ids {
+            Some(layer_ids) => layer_ids
+                .iter()
+                .filter_map(|id| self.layer_indexes.get(id))
+                .map(|&index| &*self.layers[index])
+                .collect(),
+            None => self.layers.iter().map(AsRef::as_ref).collect(),
         };
-        let borrowed: Vec<std::cell::Ref<'_, dyn crate::render_layer::RenderLayer>> =
-            render_layers.iter().map(|layer| layer.borrow()).collect();
         let mut layers = crate::geometry::feature_index::QueryLayers::default();
-        for layer in &borrowed {
-            layers.entry(layer.get_id().to_owned()).or_insert(&**layer);
+        for layer in render_layers {
+            layers.entry(layer.get_id().to_owned()).or_insert(layer);
         }
 
         self.query_rendered_features_in(geometry, options, &layers)

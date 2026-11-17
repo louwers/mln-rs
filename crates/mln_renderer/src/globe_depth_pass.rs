@@ -18,7 +18,7 @@ use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
-use crate::layer_group::{LayerGroup, LayerGroupPtr};
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::to_projection_ubo;
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
@@ -31,7 +31,7 @@ const GLOBE_DEPTH_SHADER_NAME: &str = "GlobeDepthShader";
 /// layers are by their clip Z.
 #[derive(Default)]
 pub(crate) struct GlobeDepthPass {
-    layer_group: Option<LayerGroupPtr>,
+    layer_group: Option<LayerGroup>,
     shader: Option<ShaderProgramPtr>,
     projection_uniform_buffer: Option<UniformBufferPtr>,
     meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
@@ -49,8 +49,8 @@ impl GlobeDepthPass {
         needed: bool,
     ) {
         if !state.is_globe_rendering() || !needed {
-            if let Some(layer_group) = &self.layer_group {
-                layer_group.borrow_mut().clear_drawables();
+            if let Some(layer_group) = &mut self.layer_group {
+                layer_group.clear_drawables();
             }
             if !state.is_globe_rendering() {
                 self.meshes.clear();
@@ -64,12 +64,7 @@ impl GlobeDepthPass {
         if self.shader.is_none() {
             return;
         }
-        if self.layer_group.is_none() {
-            self.layer_group = Some(LayerGroup::tiles(0));
-        }
-        let Some(layer_group) = self.layer_group.clone() else {
-            return;
-        };
+        let tile_layer_group = self.layer_group.get_or_insert_with(LayerGroup::tiles);
 
         let zoom = state.get_integer_zoom();
         let tile_cover = tile_cover(
@@ -87,8 +82,6 @@ impl GlobeDepthPass {
             Range::new(0u8, zoom),
             None,
         );
-
-        let mut tile_layer_group = layer_group.borrow_mut();
 
         let covered: BTreeSet<OverscaledTileID> = tile_cover.iter().copied().collect();
         tile_layer_group
@@ -149,7 +142,7 @@ impl GlobeDepthPass {
     }
 
     #[must_use]
-    pub(crate) fn get_layer_group(&self) -> Option<&LayerGroupPtr> {
-        self.layer_group.as_ref()
+    pub(crate) fn layer_group(&mut self) -> Option<&mut LayerGroup> {
+        self.layer_group.as_mut()
     }
 }

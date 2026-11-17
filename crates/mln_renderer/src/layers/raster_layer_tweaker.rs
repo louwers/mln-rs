@@ -6,7 +6,7 @@ use mln_gfx::shaders::shader_defines::{ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUAT
 use mln_style::layers::Raster;
 use mln_style_types::TranslateAnchorType;
 
-use super::{cast_matrix, check_tweak_drawable_ptr};
+use super::cast_matrix;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -46,6 +46,10 @@ fn contrast_factor(contrast: f32) -> f32 {
 }
 
 impl LayerTweaker for RasterLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -87,12 +91,12 @@ impl LayerTweaker for RasterLayerTweaker {
         let mut drawable_ubo_vector = vec![RasterDrawableUBO::default(); layer_group.drawable_count()];
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
 
-        let self_ptr: *const Self = self;
+        let key = self.base.key;
         layer_group.visit_drawables(|drawable| {
             let Some(tile_id) = drawable.tile_id else {
                 return;
             };
-            if !check_tweak_drawable_ptr(drawable, self_ptr) {
+            if !drawable.tweaked_by(key) {
                 return;
             }
 

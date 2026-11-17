@@ -14,7 +14,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::render_fill_layer::FillVariant;
-use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
+use super::{DrawableRenderTile, cast_matrix, slot_bucket};
 use crate::bucket::Bucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
@@ -46,6 +46,10 @@ fn cast_tlbr(a: [u16; 4]) -> [f32; 4] {
 }
 
 impl LayerTweaker for FillLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -93,7 +97,7 @@ impl LayerTweaker for FillLayerTweaker {
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![FillTilePropsUnionUBO::default(); count];
 
-        let self_ptr: *const Self = self;
+        let key = self.base.key;
         let id = self.base.id.clone();
         layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
@@ -101,7 +105,7 @@ impl LayerTweaker for FillLayerTweaker {
             let Some(tile_id) = drawable.tile_id else {
                 return;
             };
-            if !check_tweak_drawable_ptr(drawable, self_ptr) {
+            if !drawable.tweaked_by(key) {
                 return;
             }
 

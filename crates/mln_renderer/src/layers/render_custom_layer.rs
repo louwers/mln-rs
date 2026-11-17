@@ -25,15 +25,13 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
-use crate::change_request::UniqueChangeRequestVec;
 use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupKind};
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
 use crate::render_pass::RenderPass;
-use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 /// What the render layer and its drawable share: the host, while the
@@ -83,8 +81,8 @@ impl LayerType for Custom {
     type Layout = NoLayout;
     type Bucket = NoBucket;
 
-    fn render_layer(style: Arc<LayerStyle<Custom>>) -> RenderLayerPtr {
-        Rc::new(RefCell::new(RenderCustomLayer::new(style)))
+    fn render_layer(style: Arc<LayerStyle<Custom>>) -> Box<dyn RenderLayer> {
+        Box::new(RenderCustomLayer::new(style))
     }
 }
 
@@ -169,12 +167,10 @@ impl RenderLayer for RenderCustomLayer {
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        changes: &mut UniqueChangeRequestVec,
     ) {
         if self.base.layer_group.is_none() {
             let kind = LayerGroupKind::Custom(CustomLayerDraw { shared: Rc::clone(&self.shared) });
-            self.set_layer_group(Some(LayerGroup::new(self.base.layer_index, kind)), changes);
+            self.base.layer_group = Some(LayerGroup::new(kind));
         }
     }
 

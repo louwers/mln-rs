@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -63,7 +62,6 @@ fn sort_key(drawable: &Drawable) -> SortKey {
 pub(crate) struct LayerGroup {
     pub(crate) id: SimpleIdentity,
     pub(crate) enabled: bool,
-    pub(crate) layer_index: i32,
     kind: LayerGroupKind,
     /// Of a tile group whose layer clips to tiles, the tiles whose masks the
     /// stencil buffer holds when its 2D drawables draw.
@@ -80,34 +78,31 @@ pub(crate) struct LayerGroup {
     pub(crate) composite: Option<Composite>,
 }
 
-pub(crate) type LayerGroupPtr = Rc<RefCell<LayerGroup>>;
-
 impl LayerGroup {
     #[must_use]
-    pub(crate) fn new(layer_index: i32, kind: LayerGroupKind) -> LayerGroupPtr {
-        Rc::new(RefCell::new(LayerGroup {
+    pub(crate) fn new(kind: LayerGroupKind) -> LayerGroup {
+        LayerGroup {
             id: SimpleIdentity::new(),
             enabled: true,
-            layer_index,
             kind,
             stencil_tiles: None,
             drawables: BTreeMap::new(),
             tiles: HashMap::default(),
             uniform_buffers: UniformBufferArray::new(),
             composite: None,
-        }))
+        }
     }
 
-    /// A shared group of tiles' drawables.
+    /// A group of tiles' drawables.
     #[must_use]
-    pub(crate) fn tiles(layer_index: i32) -> LayerGroupPtr {
-        Self::new(layer_index, LayerGroupKind::Tile)
+    pub(crate) fn tiles() -> LayerGroup {
+        Self::new(LayerGroupKind::Tile)
     }
 
-    /// A shared group of drawables not tied to tiles.
+    /// A group of drawables not tied to tiles.
     #[must_use]
-    pub(crate) fn plain(layer_index: i32) -> LayerGroupPtr {
-        Self::new(layer_index, LayerGroupKind::Plain)
+    pub(crate) fn plain() -> LayerGroup {
+        Self::new(LayerGroupKind::Plain)
     }
 
     /// The number of drawables, counting a custom layer's host as one.
@@ -394,8 +389,7 @@ mod tests {
     /// each pass are found under the tile's new id, and clip to it.
     #[test]
     fn shift_wraps_moves_the_tiles_drawables() {
-        let group = LayerGroup::tiles(0);
-        let mut group = group.borrow_mut();
+        let mut group = LayerGroup::tiles();
         let tile = OverscaledTileID::with_zxy(1, 0, 1, 1, 0);
         let other = OverscaledTileID::with_zxy(1, 1, 1, 0, 0);
         for (pass, id) in [(RenderPass::Opaque, tile), (RenderPass::Translucent, tile), (RenderPass::Opaque, other)] {

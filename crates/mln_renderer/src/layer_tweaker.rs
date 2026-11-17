@@ -1,10 +1,7 @@
 // C++ `LayerTweaker` is an abstract class with data members: the data is
-// `LayerTweakerBase`, the virtual `execute` is the `LayerTweaker` trait.
-// Tweakers are shared (`std::shared_ptr`) by the render layer and, weakly, by
-// its layer group: `Rc<RefCell<dyn LayerTweaker>>`.
+// `LayerTweakerBase`, the virtual `execute` is the `LayerTweaker` trait. The
+// render layer owns its tweakers and runs them on its layer groups.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -15,6 +12,7 @@ use mln_map_types::{ProjectionData, TransformState};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, M2PI};
+use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::{Mat4, matrix};
 
 use crate::drawable::Drawable;
@@ -26,11 +24,12 @@ use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
 
-pub(crate) type LayerTweakerPtr = Rc<RefCell<dyn LayerTweaker>>;
-
 /// The data members of `LayerTweaker`.
 pub(crate) struct LayerTweakerBase {
     pub(crate) id: String,
+    /// Tells this tweaker from the layer's earlier ones: a drawable keeps
+    /// the key of the tweaker it was built for, which sets its uniforms.
+    pub(crate) key: SimpleIdentity,
     /// The evaluated values of the layer the tweaker sets the uniforms of,
     /// if it is a style layer.
     pub(crate) evaluated_properties: Option<Arc<dyn ErasedEvaluatedLayer>>,
@@ -42,6 +41,7 @@ impl LayerTweakerBase {
     pub(crate) fn new(id: String, properties: Option<Arc<dyn ErasedEvaluatedLayer>>) -> Self {
         LayerTweakerBase {
             id,
+            key: SimpleIdentity::new(),
             evaluated_properties: properties,
             properties_updated: true,
             projection_uniform_buffer: None,
@@ -75,6 +75,7 @@ pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, contex
 
 /// Base class for layer tweakers, which manipulate layer group per frame.
 pub(crate) trait LayerTweaker {
+    fn base(&self) -> &LayerTweakerBase;
     fn base_mut(&mut self) -> &mut LayerTweakerBase;
 
     fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>);

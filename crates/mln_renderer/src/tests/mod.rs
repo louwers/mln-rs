@@ -337,7 +337,7 @@ pub(crate) fn style(
 /// Port-only: the render layer of the layer `style`, of a built-in type.
 pub(crate) fn render_layer(
     style: &std::sync::Arc<dyn mln_style::layer_type::ErasedLayerStyle>,
-) -> crate::render_layer::RenderLayerPtr {
+) -> Box<dyn crate::render_layer::RenderLayer> {
     let registry = crate::Registry::with_builtins();
     let layer_type = registry.layer_type(style.info().name).expect("a built-in layer type");
     layer_type.create_render_layer(style).expect("a layer of its type")

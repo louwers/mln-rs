@@ -11,7 +11,7 @@ use mln_style_types::{AlignmentType, IconTextFitType};
 use mln_util::mat4::{Mat4, matrix};
 
 use super::render_symbol_layer::{SymbolType, get_screen_matrix};
-use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
+use super::{DrawableRenderTile, cast_matrix, slot_bucket};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::drawable::Drawable;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
@@ -51,6 +51,10 @@ fn get_tex_size(drawable: &Drawable, tex_id: usize) -> [f32; 2] {
 }
 
 impl LayerTweaker for SymbolLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -107,7 +111,7 @@ impl LayerTweaker for SymbolLayerTweaker {
 
         let pitched_scale = state.get_projection().circle_radius_correction(state) as f32;
 
-        let self_ptr: *const Self = self;
+        let key = self.base.key;
         let id = self.base.id.clone();
         layer_group.visit_drawables(|drawable| {
             if !drawable.enabled {
@@ -120,7 +124,7 @@ impl LayerTweaker for SymbolLayerTweaker {
                 return;
             };
             let symbol_data = *symbol_data;
-            if !check_tweak_drawable_ptr(drawable, self_ptr) {
+            if !drawable.tweaked_by(key) {
                 return;
             }
             let tile_id = tile_id.to_unwrapped();

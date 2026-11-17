@@ -31,7 +31,6 @@ use crate::gfx::owned::Owned;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload;
-use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layers::collision_layer_tweaker::CollisionDrawableData;
 use crate::layers::color_relief_layer_tweaker::ColorReliefDrawableData;
 use crate::layers::hillshade_prepare_layer_tweaker::HillshadePrepareDrawableData;
@@ -140,8 +139,9 @@ pub(crate) struct Drawable {
     pub(crate) textures: Textures,
     /// Sets the symbol atlases' textures on the drawable before it draws.
     pub(crate) atlases: Option<Rc<DrawableAtlasesTweaker>>,
-    /// The tweaker of the drawable's layer, which writes its buffers.
-    pub(crate) layer_tweaker: Option<LayerTweakerPtr>,
+    /// The key of the layer tweaker the drawable was built for, which writes
+    /// its buffers (`LayerTweakerBase::key`).
+    pub(crate) tweaker: Option<SimpleIdentity>,
     pub(crate) type_: usize,
     pub(crate) origin: Option<Point<f64>>,
     /// The index of the drawable's entries in the storage buffers of its
@@ -187,6 +187,13 @@ pub(crate) struct Drawable {
 }
 
 impl Drawable {
+    /// Whether the tweaker of key `key` sets the drawable's uniforms: the
+    /// drawable was built for it, or for no tweaker.
+    #[must_use]
+    pub(crate) fn tweaked_by(&self, key: SimpleIdentity) -> bool {
+        self.tweaker.is_none_or(|tweaker| tweaker == key)
+    }
+
     #[must_use]
     pub(crate) fn new(name: String) -> Self {
         Drawable {
@@ -209,7 +216,7 @@ impl Drawable {
             attribute_update_time: None,
             textures: Default::default(),
             atlases: None,
-            layer_tweaker: None,
+            tweaker: None,
             type_: 0,
             origin: None,
             ubo_index: 0,

@@ -30,27 +30,22 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::line_layer_tweaker::{LineDrawableData, LineLayerTweaker, LineType};
-use super::{
-    DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_layer_tweaker, refresh_if_bucket_updated,
-};
+use super::{DrawableBinders, DrawableRenderTile, refresh_if_bucket_updated, update_tile};
 use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_composite::Composite;
 use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
 use crate::render_pass::RenderPass;
-use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 /// The ends of a bucket's dashes. A dash pattern is shared by the whole
@@ -232,8 +227,8 @@ impl LayerType for Line {
         bucket.query_radius(layer)
     }
 
-    fn render_layer(style: Arc<LayerStyle<Line>>) -> RenderLayerPtr {
-        Rc::new(RefCell::new(RenderLineLayer::new(style)))
+    fn render_layer(style: Arc<LayerStyle<Line>>) -> Box<dyn RenderLayer> {
+        Box::new(RenderLineLayer::new(style))
     }
 }
 
@@ -292,8 +287,8 @@ impl RenderLineLayer {
             self.color_ramp_texture_2d = None;
 
             // delete all gradient drawables
-            if let Some(layer_group) = &self.base.layer_group {
-                layer_group.borrow_mut().clear_drawables();
+            if let Some(layer_group) = &mut self.base.layer_group {
+                layer_group.clear_drawables();
             }
         }
     }
@@ -425,8 +420,8 @@ impl RenderLayer for RenderLineLayer {
         properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
-        if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
+            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -520,8 +515,6 @@ impl RenderLayer for RenderLineLayer {
         state: &TransformState,
         _parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        changes: &mut UniqueChangeRequestVec,
     ) {
         self.update_projection_variant(state);
 
@@ -530,360 +523,360 @@ impl RenderLayer for RenderLineLayer {
             return;
         };
 
-        // Set up a layer group
-        if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index)), changes);
-        }
-        let layer_group = self.base.layer_group.clone().expect("layer group");
-
-        if self.base.layer_tweaker.is_none() {
-            let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(LineLayerTweaker::new(
-                self.get_id().to_owned(),
-                Arc::clone(&self.base.evaluated_properties),
-            )));
-            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
-            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
-        }
-
-        let render_pass =
-            RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
-
+        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
         {
-            let mut tile_layer_group = layer_group.borrow_mut();
-            let paint = &evaluated::<Line>(&self.base.evaluated_properties).paint;
-            tile_layer_group.composite =
-                Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
-            let base = &self.base;
-            let passes = self.base.passes;
-            // If the render pass has changed or the tile has dropped out of
-            // the cover set, remove it.
-            tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.render_pass != passes
-                    || drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
+            if self.base.layer_tweaker.is_none() {
+                self.base.layer_tweaker = Some(Box::new(LineLayerTweaker::new(
+                    self.get_id().to_owned(),
+                    Arc::clone(&self.base.evaluated_properties),
+                )));
+            }
 
-            tile_layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
-        }
+            let render_pass =
+                RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
 
-        let create_line_builder = |shader: ShaderProgramPtr| -> UniqueDrawableBuilder {
-            let mut builder = DrawableBuilder::boxed();
-            builder.set_shader(Some(shader));
-            builder.set_render_pass(render_pass);
-            builder.set_sub_layer_index(0);
-            builder.set_depth_type(DepthMaskType::ReadOnly);
-            builder.set_color_mode(&if render_pass == RenderPass::Translucent {
-                ColorMode::alpha_blended()
-            } else {
-                ColorMode::unblended()
-            });
-            builder.set_cull_face_mode(CullFaceMode::disabled());
-            builder.set_enable_stencil(true);
-            builder
-        };
-
-        let add_attributes = |builder: &mut DrawableBuilder,
-                              geometry: Option<&BucketGeometry>,
-                              bucket: &LineBucket,
-                              vertex_attrs: VertexAttributeArrayPtr| {
-            let vertex_count = bucket.vertices.len();
-            builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short4);
-
-            let shared = bucket_vertices(geometry, bucket, &bucket.vertices);
-            if let Some(attr) =
-                vertex_attrs.borrow_mut().set(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
             {
-                attr.set_shared_raw_data(
-                    Some(Rc::clone(&shared)),
-                    0, // offsetof(LineLayoutVertex, a1)
-                    /*vertexOffset=*/ 0,
-                    size_of::<LineLayoutVertex>() as u32,
-                    AttributeDataType::Short2,
-                );
+                let tile_layer_group = &mut layer_group;
+                let paint = &evaluated::<Line>(&self.base.evaluated_properties).paint;
+                tile_layer_group.composite =
+                    Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
+                let base = &self.base;
+                let passes = self.base.passes;
+                // If the render pass has changed or the tile has dropped out of
+                // the cover set, remove it.
+                tile_layer_group.remove_drawables_if(|drawable| {
+                    drawable.render_pass != passes
+                        || drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                });
+
+                tile_layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
             }
 
-            if let Some(attr) =
-                vertex_attrs.borrow_mut().set(ID_LINE_DATA_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
-            {
-                attr.set_shared_raw_data(
-                    Some(shared),
-                    4, // offsetof(LineLayoutVertex, a2)
-                    /*vertexOffset=*/ 0,
-                    size_of::<LineLayoutVertex>() as u32,
-                    AttributeDataType::UByte4,
-                );
-            }
-
-            builder.set_vertex_attributes(Some(vertex_attrs));
-        };
-
-        let set_segments = |builder: &mut DrawableBuilder, geometry: Option<&BucketGeometry>, bucket: &LineBucket| {
-            builder.set_segments_shared(
-                DrawMode::Triangles(),
-                Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
-                &bucket.segments,
-            );
-        };
-
-        let layer_tweaker = self.base.layer_tweaker.clone();
-        let layer_id = self.get_id().to_owned();
-        let mut properties_as_uniforms: StringIDSetsPair = Default::default();
-        for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
-
-            let style = Arc::clone(&self.base.style);
-            let Some(render_data) = super::render_data_for_pass(tile, &*style, render_pass) else {
-                self.remove_tile(render_pass, &tile_id);
-                continue;
+            let create_line_builder = |shader: ShaderProgramPtr| -> UniqueDrawableBuilder {
+                let mut builder = DrawableBuilder::boxed();
+                builder.set_shader(Some(shader));
+                builder.set_render_pass(render_pass);
+                builder.set_sub_layer_index(0);
+                builder.set_depth_type(DepthMaskType::ReadOnly);
+                builder.set_color_mode(&if render_pass == RenderPass::Translucent {
+                    ColorMode::alpha_blended()
+                } else {
+                    ColorMode::unblended()
+                });
+                builder.set_cull_face_mode(CullFaceMode::disabled());
+                builder.set_enable_stencil(true);
+                builder
             };
 
-            let Some(bucket) = (*render_data.bucket).downcast_ref::<LineBucket>() else {
-                continue;
-            };
-            if bucket.triangles.is_empty() {
-                self.remove_tile(render_pass, &tile_id);
-                continue;
-            }
+            let add_attributes = |builder: &mut DrawableBuilder,
+                                  geometry: Option<&BucketGeometry>,
+                                  bucket: &LineBucket,
+                                  vertex_attrs: VertexAttributeArrayPtr| {
+                let vertex_count = bucket.vertices.len();
+                builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short4);
 
-            let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
-                continue;
-            };
-            let binders_guard = binders_lock.read();
-            let paint_property_binders = &*binders_guard;
-            let geometry = tile.get_bucket_geometry();
-            let paint = || {
-                paint_vertices(
-                    geometry,
-                    bucket,
-                    &paint_property_binders.interleaved_vertex_buffer,
-                    paint_property_binders.depends_on_feature_state(),
-                )
-            };
-            let evaluated = &evaluated::<Line>(&render_data.layer).paint;
-
-            let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
-            if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
-                // This tile was previously set up from a different bucket,
-                // drop and re-create any drawables for it.
-                self.remove_tile(render_pass, &tile_id);
-            }
-            self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
-
-            let update_existing = |drawable: &mut crate::drawable::Drawable| {
-                // A drawable produced on a previous style/bucket should not be updated.
-                let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
-                if current {
-                    refresh_if_bucket_updated(drawable, |attrs| {
-                        read_line_attributes(
-                            attrs,
-                            paint_property_binders,
-                            &paint(),
-                            evaluated,
-                            &mut Default::default(),
-                        );
-                    });
+                let shared = bucket_vertices(geometry, bucket, &bucket.vertices);
+                if let Some(attr) = vertex_attrs.borrow_mut().set(
+                    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
+                    -1,
+                    AttributeDataType::Invalid,
+                    0,
+                ) {
+                    attr.set_shared_raw_data(
+                        Some(Rc::clone(&shared)),
+                        0, // offsetof(LineLayoutVertex, a1)
+                        /*vertexOffset=*/ 0,
+                        size_of::<LineLayoutVertex>() as u32,
+                        AttributeDataType::Short2,
+                    );
                 }
-                current
-            };
-            if self.update_tile(render_pass, &tile_id, update_existing) {
-                continue;
-            }
 
-            let cap_type = dash_pattern_cap(bucket);
-            let add_drawable = |mut drawable: crate::drawable::UniqueDrawable, type_: LineType| {
-                drawable.tile_id = Some(tile_id);
-                drawable.type_ = type_ as usize;
-                drawable.layer_tweaker = layer_tweaker.clone();
-                drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
-                drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &layer_id));
-
-                drawable.data =
-                    Some(crate::drawable::DrawableData::Line(LineDrawableData { line_pattern_cap: cap_type }));
-
-                let mut tile_layer_group = layer_group.borrow_mut();
-                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
-            };
-
-            properties_as_uniforms.0.clear();
-            properties_as_uniforms.1.clear();
-
-            let vertex_attrs = VertexAttributeArray::new_ptr();
-            read_line_attributes(
-                &mut vertex_attrs.borrow_mut(),
-                paint_property_binders,
-                &paint(),
-                evaluated,
-                &mut properties_as_uniforms,
-            );
-
-            let has_dasharray =
-                !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
-            // A constant dash array's texture comes from the line atlas, in
-            // the tweaker.
-            let dash_texture = if evaluated.line_dasharray.is_constant() {
-                None
-            } else {
-                match dash_atlas_texture(context, paint_property_binders) {
-                    Some(texture) => Some(texture),
-                    None => continue,
+                if let Some(attr) =
+                    vertex_attrs.borrow_mut().set(ID_LINE_DATA_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
+                {
+                    attr.set_shared_raw_data(
+                        Some(shared),
+                        4, // offsetof(LineLayoutVertex, a2)
+                        /*vertexOffset=*/ 0,
+                        size_of::<LineLayoutVertex>() as u32,
+                        AttributeDataType::UByte4,
+                    );
                 }
-            };
-            let has_gradient = !self.unevaluated.line_gradient.get_value().is_undefined();
 
-            // The ramp texture is shared by every tile of the layer.
-            let ensure_color_ramp_texture =
-                |texture_2d: &mut Option<Texture2DPtr>, color_ramp: &Rc<PremultipliedImage>| {
-                    if texture_2d.is_none() && color_ramp.valid() {
-                        let texture = context.create_texture_2d();
-                        {
-                            let mut t = texture.borrow_mut();
-                            t.set_image(Some(Rc::clone(color_ramp)));
-                            t.set_sampler(SamplerState {
-                                filter: TextureFilterType::Linear,
-                                wrap_u: TextureWrapType::Clamp,
-                                wrap_v: TextureWrapType::Clamp,
-                                ..Default::default()
-                            });
+                builder.set_vertex_attributes(Some(vertex_attrs));
+            };
+
+            let set_segments =
+                |builder: &mut DrawableBuilder, geometry: Option<&BucketGeometry>, bucket: &LineBucket| {
+                    builder.set_segments_shared(
+                        DrawMode::Triangles(),
+                        Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
+                        &bucket.segments,
+                    );
+                };
+
+            let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
+            let layer_id = self.get_id().to_owned();
+            let mut properties_as_uniforms: StringIDSetsPair = Default::default();
+            for tile in render_tiles.iter() {
+                let tile_id = *tile.get_overscaled_tile_id();
+
+                let style = Arc::clone(&self.base.style);
+                let Some(render_data) = super::render_data_for_pass(tile, &*style, render_pass) else {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    continue;
+                };
+
+                let Some(bucket) = (*render_data.bucket).downcast_ref::<LineBucket>() else {
+                    continue;
+                };
+                if bucket.triangles.is_empty() {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    continue;
+                }
+
+                let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
+                    continue;
+                };
+                let binders_guard = binders_lock.read();
+                let paint_property_binders = &*binders_guard;
+                let geometry = tile.get_bucket_geometry();
+                let paint = || {
+                    paint_vertices(
+                        geometry,
+                        bucket,
+                        &paint_property_binders.interleaved_vertex_buffer,
+                        paint_property_binders.depends_on_feature_state(),
+                    )
+                };
+                let evaluated = &evaluated::<Line>(&render_data.layer).paint;
+
+                let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+                if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
+                    // This tile was previously set up from a different bucket,
+                    // drop and re-create any drawables for it.
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                }
+                self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
+
+                let update_existing = |drawable: &mut crate::drawable::Drawable| {
+                    // A drawable produced on a previous style/bucket should not be updated.
+                    let current = drawable.tweaker == tweaker;
+                    if current {
+                        refresh_if_bucket_updated(drawable, |attrs| {
+                            read_line_attributes(
+                                attrs,
+                                paint_property_binders,
+                                &paint(),
+                                evaluated,
+                                &mut Default::default(),
+                            );
+                        });
+                    }
+                    current
+                };
+                if update_tile(&mut layer_group, render_pass, &tile_id, update_existing) {
+                    continue;
+                }
+
+                let cap_type = dash_pattern_cap(bucket);
+                let mut add_drawable = |mut drawable: crate::drawable::UniqueDrawable, type_: LineType| {
+                    drawable.tile_id = Some(tile_id);
+                    drawable.type_ = type_ as usize;
+                    drawable.tweaker = tweaker;
+                    drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
+                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &layer_id));
+
+                    drawable.data =
+                        Some(crate::drawable::DrawableData::Line(LineDrawableData { line_pattern_cap: cap_type }));
+
+                    let tile_layer_group = &mut layer_group;
+                    tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                };
+
+                properties_as_uniforms.0.clear();
+                properties_as_uniforms.1.clear();
+
+                let vertex_attrs = VertexAttributeArray::new_ptr();
+                read_line_attributes(
+                    &mut vertex_attrs.borrow_mut(),
+                    paint_property_binders,
+                    &paint(),
+                    evaluated,
+                    &mut properties_as_uniforms,
+                );
+
+                let has_dasharray =
+                    !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
+                // A constant dash array's texture comes from the line atlas, in
+                // the tweaker.
+                let dash_texture = if evaluated.line_dasharray.is_constant() {
+                    None
+                } else {
+                    match dash_atlas_texture(context, paint_property_binders) {
+                        Some(texture) => Some(texture),
+                        None => continue,
+                    }
+                };
+                let has_gradient = !self.unevaluated.line_gradient.get_value().is_undefined();
+
+                // The ramp texture is shared by every tile of the layer.
+                let ensure_color_ramp_texture =
+                    |texture_2d: &mut Option<Texture2DPtr>, color_ramp: &Rc<PremultipliedImage>| {
+                        if texture_2d.is_none() && color_ramp.valid() {
+                            let texture = context.create_texture_2d();
+                            {
+                                let mut t = texture.borrow_mut();
+                                t.set_image(Some(Rc::clone(color_ramp)));
+                                t.set_sampler(SamplerState {
+                                    filter: TextureFilterType::Linear,
+                                    wrap_u: TextureWrapType::Clamp,
+                                    wrap_v: TextureWrapType::Clamp,
+                                    ..Default::default()
+                                });
+                            }
+                            *texture_2d = Some(texture);
                         }
-                        *texture_2d = Some(texture);
+                    };
+
+                if has_dasharray && has_gradient {
+                    // dash array over a gradient
+                    if self.line_gradient_sdf_shader_group.is_none() {
+                        self.line_gradient_sdf_shader_group = shaders.shader_group("LineGradientSDFShader");
                     }
-                };
+                    let Some(group) = self.line_gradient_sdf_shader_group.clone() else {
+                        continue;
+                    };
+                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
 
-            if has_dasharray && has_gradient {
-                // dash array over a gradient
-                if self.line_gradient_sdf_shader_group.is_none() {
-                    self.line_gradient_sdf_shader_group = shaders.shader_group("LineGradientSDFShader");
-                }
-                let Some(group) = self.line_gradient_sdf_shader_group.clone() else {
-                    continue;
-                };
-                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
+                    let mut builder = create_line_builder(shader);
 
-                let mut builder = create_line_builder(shader);
+                    // vertices and attributes
+                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
 
-                // vertices and attributes
-                add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
+                    ensure_color_ramp_texture(&mut self.color_ramp_texture_2d, &self.color_ramp);
+                    if let Some(texture) = &self.color_ramp_texture_2d {
+                        builder.set_texture(Some(Rc::clone(texture)), ID_LINE_IMAGE_TEXTURE);
+                        if let Some(dash_texture) = dash_texture {
+                            builder.set_texture(Some(dash_texture), ID_LINE_DASH_TEXTURE);
+                        }
 
-                ensure_color_ramp_texture(&mut self.color_ramp_texture_2d, &self.color_ramp);
-                if let Some(texture) = &self.color_ramp_texture_2d {
-                    builder.set_texture(Some(Rc::clone(texture)), ID_LINE_IMAGE_TEXTURE);
+                        set_segments(builder.as_mut(), geometry, bucket);
+
+                        builder.flush();
+                        for drawable in builder.clear_drawables() {
+                            add_drawable(drawable, LineType::GradientSdf);
+                        }
+                    }
+                } else if has_dasharray {
+                    // dash array line (SDF)
+                    if self.line_sdf_shader_group.is_none() {
+                        self.line_sdf_shader_group = shaders.shader_group("LineSDFShader");
+                    }
+                    let Some(group) = self.line_sdf_shader_group.clone() else {
+                        continue;
+                    };
+                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
+
+                    let mut builder = create_line_builder(shader);
+
+                    // vertices, attributes and segments
+                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
                     if let Some(dash_texture) = dash_texture {
-                        builder.set_texture(Some(dash_texture), ID_LINE_DASH_TEXTURE);
+                        builder.set_texture(Some(dash_texture), ID_LINE_IMAGE_TEXTURE);
                     }
-
                     set_segments(builder.as_mut(), geometry, bucket);
 
                     builder.flush();
                     for drawable in builder.clear_drawables() {
-                        add_drawable(drawable, LineType::GradientSdf);
+                        add_drawable(drawable, LineType::Sdf);
                     }
-                }
-            } else if has_dasharray {
-                // dash array line (SDF)
-                if self.line_sdf_shader_group.is_none() {
-                    self.line_sdf_shader_group = shaders.shader_group("LineSDFShader");
-                }
-                let Some(group) = self.line_sdf_shader_group.clone() else {
-                    continue;
-                };
-                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
+                } else if !self.unevaluated.line_pattern.is_undefined() {
+                    // pattern line (conformance)
+                    if self.line_pattern_shader_group.is_none() {
+                        self.line_pattern_shader_group = shaders.shader_group("LinePatternShader");
+                    }
+                    let Some(group) = self.line_pattern_shader_group.clone() else {
+                        continue;
+                    };
+                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
 
-                let mut builder = create_line_builder(shader);
+                    let mut builder = create_line_builder(shader);
 
-                // vertices, attributes and segments
-                add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
-                if let Some(dash_texture) = dash_texture {
-                    builder.set_texture(Some(dash_texture), ID_LINE_IMAGE_TEXTURE);
-                }
-                set_segments(builder.as_mut(), geometry, bucket);
+                    // vertices and attributes
+                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
 
-                builder.flush();
-                for drawable in builder.clear_drawables() {
-                    add_drawable(drawable, LineType::Sdf);
-                }
-            } else if !self.unevaluated.line_pattern.is_undefined() {
-                // pattern line (conformance)
-                if self.line_pattern_shader_group.is_none() {
-                    self.line_pattern_shader_group = shaders.shader_group("LinePatternShader");
-                }
-                let Some(group) = self.line_pattern_shader_group.clone() else {
-                    continue;
-                };
-                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
+                    // texture
+                    if let Some(atlases) = tile.get_atlas_textures().filter(|a| a.icon().is_some()) {
+                        let icon_tweaker = Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
+                            Some(Rc::clone(atlases)),
+                            None,
+                            Some(ID_LINE_IMAGE_TEXTURE),
+                            /*is_text*/ false,
+                            /*sdf_icons*/ true, // to force linear filter
+                            /*rotation_alignment*/ mln_style_types::AlignmentType::Auto,
+                            /*icon_scaled*/ false,
+                            /*text_size_is_zoom_constant*/ false,
+                        ));
 
-                let mut builder = create_line_builder(shader);
+                        builder.set_atlases(Some(icon_tweaker));
 
-                // vertices and attributes
-                add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
+                        set_segments(builder.as_mut(), geometry, bucket);
 
-                // texture
-                if let Some(atlases) = tile.get_atlas_textures().filter(|a| a.icon().is_some()) {
-                    let icon_tweaker = Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
-                        Some(Rc::clone(atlases)),
-                        None,
-                        Some(ID_LINE_IMAGE_TEXTURE),
-                        /*is_text*/ false,
-                        /*sdf_icons*/ true, // to force linear filter
-                        /*rotation_alignment*/ mln_style_types::AlignmentType::Auto,
-                        /*icon_scaled*/ false,
-                        /*text_size_is_zoom_constant*/ false,
-                    ));
+                        builder.flush();
+                        for drawable in builder.clear_drawables() {
+                            add_drawable(drawable, LineType::Pattern);
+                        }
+                    }
+                } else if has_gradient {
+                    // gradient line
+                    if self.line_gradient_shader_group.is_none() {
+                        self.line_gradient_shader_group = shaders.shader_group("LineGradientShader");
+                    }
+                    let Some(group) = self.line_gradient_shader_group.clone() else {
+                        continue;
+                    };
+                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
 
-                    builder.set_atlases(Some(icon_tweaker));
+                    let mut builder = create_line_builder(shader);
 
+                    // vertices and attributes
+                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
+
+                    ensure_color_ramp_texture(&mut self.color_ramp_texture_2d, &self.color_ramp);
+                    if let Some(texture) = &self.color_ramp_texture_2d {
+                        builder.set_texture(Some(Rc::clone(texture)), ID_LINE_IMAGE_TEXTURE);
+
+                        set_segments(builder.as_mut(), geometry, bucket);
+
+                        builder.flush();
+                        for drawable in builder.clear_drawables() {
+                            add_drawable(drawable, LineType::Gradient);
+                        }
+                    }
+                } else {
+                    // simple line
+                    if self.line_shader_group.is_none() {
+                        self.line_shader_group = shaders.shader_group("LineShader");
+                    }
+                    let Some(group) = self.line_shader_group.clone() else {
+                        continue;
+                    };
+                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
+
+                    let mut builder = create_line_builder(shader);
+
+                    // vertices, attributes and segments
+                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
                     set_segments(builder.as_mut(), geometry, bucket);
 
                     builder.flush();
                     for drawable in builder.clear_drawables() {
-                        add_drawable(drawable, LineType::Pattern);
+                        add_drawable(drawable, LineType::Simple);
                     }
-                }
-            } else if has_gradient {
-                // gradient line
-                if self.line_gradient_shader_group.is_none() {
-                    self.line_gradient_shader_group = shaders.shader_group("LineGradientShader");
-                }
-                let Some(group) = self.line_gradient_shader_group.clone() else {
-                    continue;
-                };
-                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
-
-                let mut builder = create_line_builder(shader);
-
-                // vertices and attributes
-                add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
-
-                ensure_color_ramp_texture(&mut self.color_ramp_texture_2d, &self.color_ramp);
-                if let Some(texture) = &self.color_ramp_texture_2d {
-                    builder.set_texture(Some(Rc::clone(texture)), ID_LINE_IMAGE_TEXTURE);
-
-                    set_segments(builder.as_mut(), geometry, bucket);
-
-                    builder.flush();
-                    for drawable in builder.clear_drawables() {
-                        add_drawable(drawable, LineType::Gradient);
-                    }
-                }
-            } else {
-                // simple line
-                if self.line_shader_group.is_none() {
-                    self.line_shader_group = shaders.shader_group("LineShader");
-                }
-                let Some(group) = self.line_shader_group.clone() else {
-                    continue;
-                };
-                let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
-
-                let mut builder = create_line_builder(shader);
-
-                // vertices, attributes and segments
-                add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
-                set_segments(builder.as_mut(), geometry, bucket);
-
-                builder.flush();
-                for drawable in builder.clear_drawables() {
-                    add_drawable(drawable, LineType::Simple);
                 }
             }
         }
+        self.base.layer_group = Some(layer_group);
     }
 }

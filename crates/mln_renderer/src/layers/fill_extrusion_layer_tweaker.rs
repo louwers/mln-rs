@@ -13,7 +13,7 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
-use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
+use super::{DrawableRenderTile, cast_matrix, slot_bucket};
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
@@ -45,6 +45,10 @@ fn cast_tlbr(tlbr: [u16; 4]) -> [f32; 4] {
 }
 
 impl LayerTweaker for FillExtrusionLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -108,14 +112,14 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         // whose runs from 0 (`frame_projection`). The globe projects in its
         // shaders.
         let zero_to_one = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !state.is_globe_rendering();
-        let self_ptr: *const Self = self;
+        let key = self.base.key;
         layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = true;
             let Some(tile_id) = drawable.tile_id else {
                 return;
             };
-            if !check_tweak_drawable_ptr(drawable, self_ptr) {
+            if !drawable.tweaked_by(key) {
                 return;
             }
 

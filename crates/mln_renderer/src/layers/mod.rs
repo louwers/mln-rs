@@ -35,7 +35,6 @@ use mln_style::layers::{Background, BackgroundPaintProperties};
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::drawable::Drawable;
-use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
 use crate::render_tile::RenderTile;
 
@@ -119,29 +118,11 @@ impl DrawableRenderTile {
     }
 }
 
-pub(crate) fn drawable_has_layer_tweaker(drawable: &Drawable, layer_tweaker: Option<&LayerTweakerPtr>) -> bool {
-    match (&drawable.layer_tweaker, layer_tweaker) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 /// A shared gfx vertex vector holding a copy of `vertices`, for data that
 /// stays in the bucket or the layer (see `bucket_geometry::released_vertices`;
 /// a bucket's geometry comes from `bucket_geometry::bucket_vertices`).
 pub(crate) fn shared_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorBasePtr {
     crate::bucket_geometry::released_vertices(vertices)
-}
-
-/// Whether the drawable references the tweaker at `self_ptr`, or no tweaker
-/// at all. It takes a pointer because the running `execute` already borrows
-/// the tweaker's `RefCell` mutably.
-pub(crate) fn check_tweak_drawable_ptr<T: ?Sized>(drawable: &Drawable, self_ptr: *const T) -> bool {
-    match &drawable.layer_tweaker {
-        None => true,
-        Some(tweaker) => std::ptr::addr_eq(tweaker.as_ptr(), self_ptr),
-    }
 }
 
 /// The tile's render data for `pass`. A free function, so that the result
@@ -160,53 +141,31 @@ pub(crate) fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
     std::array::from_fn(|i| m[i] as f32)
 }
 
-/// The `RenderLayer` members that manage a tile's drawables
-/// (`updateTile`, `removeTile`), for every render layer.
-pub(crate) trait TileDrawables: crate::render_layer::RenderLayer {
-    /// Removes all drawables for the tile from the layer group.
-    fn remove_tile(&mut self, render_pass: crate::render_pass::RenderPass, tile_id: &mln_tile_id::OverscaledTileID) {
-        let Some(layer_group) = self.base().layer_group.clone() else {
-            return;
-        };
-        let mut tile_group = layer_group.borrow_mut();
-        tile_group.remove_drawables(render_pass, tile_id);
+/// Updates the drawables of a tile in `pass` of `layer_group`. `update`
+/// returns true if it updated the drawable, false if it skipped it because
+/// it's for a previous style. Returns true if drawables were updated.
+pub(crate) fn update_tile(
+    layer_group: &mut crate::layer_group::LayerGroup,
+    render_pass: crate::render_pass::RenderPass,
+    tile_id: &mln_tile_id::OverscaledTileID,
+    mut update: impl FnMut(&mut Drawable) -> bool,
+) -> bool {
+    let mut any_updated = false;
+    let mut un_updated_drawables = false;
+    layer_group.visit_drawables_for(render_pass, tile_id, |drawable| {
+        if update(drawable) {
+            any_updated = true;
+        } else {
+            un_updated_drawables = true;
+        }
+    });
+
+    // If any are updated, the caller shouldn't add new ones. If none are
+    // updated and some were skipped, remove those. This is to handle the
+    // case that the style layer changes but the bucket is not re-created.
+    if !any_updated && un_updated_drawables {
+        layer_group.remove_drawables(render_pass, tile_id);
     }
 
-    /// Updates the drawables for a tile. `update` returns true if it updated
-    /// the drawable, false if it skipped it because it's for a previous
-    /// style. Returns true if drawables were updated.
-    fn update_tile(
-        &mut self,
-        render_pass: crate::render_pass::RenderPass,
-        tile_id: &mln_tile_id::OverscaledTileID,
-        mut update: impl FnMut(&mut Drawable) -> bool,
-    ) -> bool {
-        let Some(layer_group) = self.base().layer_group.clone() else {
-            return false;
-        };
-
-        let mut any_updated = false;
-        let mut un_updated_drawables = false;
-        {
-            let mut tile_group = layer_group.borrow_mut();
-            tile_group.visit_drawables_for(render_pass, tile_id, |drawable| {
-                if update(drawable) {
-                    any_updated = true;
-                } else {
-                    un_updated_drawables = true;
-                }
-            });
-        }
-
-        // If any are updated, the caller shouldn't add new ones. If none are
-        // updated and some were skipped, remove those. This is to handle the
-        // case that the style layer changes but the bucket is not re-created.
-        if !any_updated && un_updated_drawables {
-            self.remove_tile(render_pass, tile_id);
-        }
-
-        any_updated
-    }
+    any_updated
 }
-
-impl<T: crate::render_layer::RenderLayer + ?Sized> TileDrawables for T {}

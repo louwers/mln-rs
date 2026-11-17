@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -15,20 +13,17 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::{background_crossfade, background_layer_properties};
 use crate::bucket::NoBucket;
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::layers::background_layer_tweaker::BackgroundLayerTweaker;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
 
@@ -48,8 +43,8 @@ impl LayerType for Background {
     type Layout = NoLayout;
     type Bucket = NoBucket;
 
-    fn render_layer(style: Arc<LayerStyle<Background>>) -> RenderLayerPtr {
-        Rc::new(RefCell::new(RenderBackgroundLayer::new(style)))
+    fn render_layer(style: Arc<LayerStyle<Background>>) -> Box<dyn RenderLayer> {
+        Box::new(RenderBackgroundLayer::new(style))
     }
 }
 
@@ -120,8 +115,8 @@ impl RenderLayer for RenderBackgroundLayer {
 
         self.base.evaluated_properties = Arc::new(properties);
 
-        if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
+            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -160,8 +155,6 @@ impl RenderLayer for RenderBackgroundLayer {
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        changes: &mut UniqueChangeRequestVec,
     ) {
         let zoom = state.get_integer_zoom();
         let zoom_range = Range::new(0u8, zoom);
@@ -201,112 +194,108 @@ impl RenderLayer for RenderBackgroundLayer {
             return;
         }
 
-        if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index)), changes);
-        }
-        let layer_group = self.base.layer_group.clone().expect("layer group");
-
-        if self.base.layer_tweaker.is_none() {
-            // Background drawables have no source buckets to replace them
-            // after a style change. Rebuild them so the new tweaker populates
-            // the group's uniform buffers for every drawable.
-            self.remove_all_drawables();
-            let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(BackgroundLayerTweaker::new(
-                self.get_id().to_owned(),
-                Arc::clone(&self.base.evaluated_properties),
-            )));
-            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
-            // layerGroup->addLayerTweaker(layerTweaker): the orchestrator
-            // keeps the layer groups' tweaker lists (see layer_group.rs).
-            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
-        }
-
-        if self.update_projection_variant(state) {
-            self.plain_shader = None;
-            self.pattern_shader = None;
-        }
-
-        if !has_pattern && self.plain_shader.is_none() {
-            self.plain_shader = shaders.shader(BACKGROUND_PLAIN_SHADER_NAME, self.base.projection_variant);
-        }
-        if has_pattern && self.pattern_shader.is_none() {
-            self.pattern_shader = shaders.shader(BACKGROUND_PATTERN_SHADER_NAME, self.base.projection_variant);
-        }
-
-        let layer_tweaker = self.base.layer_tweaker.clone().expect("layer tweaker");
-
-        let cur_shader = if has_pattern { self.pattern_shader.clone() } else { self.plain_shader.clone() };
-        if cur_shader.is_none() {
-            self.remove_all_drawables();
-            return;
-        }
-
-        let tile_vertices = RenderStaticData::tile_vertices();
-        let vertex_count = tile_vertices.len();
-        // sizeof(a1): short2
-        let vert_size = size_of::<[i16; 2]>();
-        let mut raw_vertices: Vec<u8> = vec![0; vertex_count * vert_size];
-        for (i, vertex) in tile_vertices.iter().enumerate() {
-            raw_vertices[i * vert_size..(i + 1) * vert_size].copy_from_slice(bytemuck::bytes_of(vertex));
-        }
-
-        let indexes = RenderStaticData::quad_triangle_indices();
-        let segs = RenderStaticData::tile_triangle_segments();
-
-        let mut builder: Option<crate::drawable_builder::UniqueDrawableBuilder> = None;
-
-        let mut tile_layer_group = layer_group.borrow_mut();
-
-        // Remove drawables for tiles that are no longer in the cover set.
-        // (Note that `RenderTiles` is empty, and this layer does not use it)
-        tile_layer_group.remove_drawables_if(|drawable| match drawable.tile_id {
-            Some(tile_id) => !tile_cover.contains(&tile_id),
-            None => false,
-        });
-
-        // For each tile in the cover set, add a tile drawable if one doesn't
-        // already exist.
-        for tile_id in &tile_cover {
-            // If we already have drawables for this tile, skip. If a drawable
-            // needs to be updated, that's handled in the layer tweaker.
-            if tile_layer_group.drawable_count_for(draw_passes, tile_id) > 0 {
-                continue;
+        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        'draw: {
+            if self.base.layer_tweaker.is_none() {
+                // Background drawables have no source buckets to replace them
+                // after a style change. Rebuild them so the new tweaker populates
+                // the group's uniform buffers for every drawable.
+                layer_group.clear_drawables();
+                self.base.layer_tweaker = Some(Box::new(BackgroundLayerTweaker::new(
+                    self.get_id().to_owned(),
+                    Arc::clone(&self.base.evaluated_properties),
+                )));
             }
 
-            // We actually need to build things, so set up a builder if we
-            // haven't already
-            let builder = builder.get_or_insert_with(|| {
-                let mut b = DrawableBuilder::boxed();
-                b.set_render_pass(draw_passes);
-                b.set_shader(cur_shader.clone());
-                b.set_depth_type(DepthMaskType::ReadWrite);
-                b.set_color_mode(&if draw_passes == RenderPass::Translucent {
-                    ColorMode::alpha_blended()
-                } else {
-                    ColorMode::unblended()
-                });
-                b
+            if self.update_projection_variant(state) {
+                self.plain_shader = None;
+                self.pattern_shader = None;
+            }
+
+            if !has_pattern && self.plain_shader.is_none() {
+                self.plain_shader = shaders.shader(BACKGROUND_PLAIN_SHADER_NAME, self.base.projection_variant);
+            }
+            if has_pattern && self.pattern_shader.is_none() {
+                self.pattern_shader = shaders.shader(BACKGROUND_PATTERN_SHADER_NAME, self.base.projection_variant);
+            }
+
+            let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
+
+            let cur_shader = if has_pattern { self.pattern_shader.clone() } else { self.plain_shader.clone() };
+            if cur_shader.is_none() {
+                layer_group.clear_drawables();
+                break 'draw;
+            }
+
+            let tile_vertices = RenderStaticData::tile_vertices();
+            let vertex_count = tile_vertices.len();
+            // sizeof(a1): short2
+            let vert_size = size_of::<[i16; 2]>();
+            let mut raw_vertices: Vec<u8> = vec![0; vertex_count * vert_size];
+            for (i, vertex) in tile_vertices.iter().enumerate() {
+                raw_vertices[i * vert_size..(i + 1) * vert_size].copy_from_slice(bytemuck::bytes_of(vertex));
+            }
+
+            let indexes = RenderStaticData::quad_triangle_indices();
+            let segs = RenderStaticData::tile_triangle_segments();
+
+            let mut builder: Option<crate::drawable_builder::UniqueDrawableBuilder> = None;
+
+            let tile_layer_group = &mut layer_group;
+
+            // Remove drawables for tiles that are no longer in the cover set.
+            // (Note that `RenderTiles` is empty, and this layer does not use it)
+            tile_layer_group.remove_drawables_if(|drawable| match drawable.tile_id {
+                Some(tile_id) => !tile_cover.contains(&tile_id),
+                None => false,
             });
 
-            builder.set_vertex_attr_id(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE);
-            if self.base.projection_variant == ProjectionVariant::Globe {
-                // The background is not depth tested, so it needs no tile
-                // border.
-                let mesh = raw_globe_tile_mesh(&tile_id.canonical, false, SubdivisionGranularitySetting::globe().tile);
-                builder.set_raw_vertices(mesh.vertices, mesh.vertex_count, AttributeDataType::Short2);
-                builder.set_segments(DrawMode::Triangles(), mesh.indices, &mesh.segments);
-            } else {
-                let vertices_copy = raw_vertices.clone();
-                builder.set_raw_vertices(vertices_copy, vertex_count, AttributeDataType::Short2);
-                builder.set_segments(DrawMode::Triangles(), indexes.clone(), &segs);
-            }
-            builder.flush();
+            // For each tile in the cover set, add a tile drawable if one doesn't
+            // already exist.
+            for tile_id in &tile_cover {
+                // If we already have drawables for this tile, skip. If a drawable
+                // needs to be updated, that's handled in the layer tweaker.
+                if tile_layer_group.drawable_count_for(draw_passes, tile_id) > 0 {
+                    continue;
+                }
 
-            for mut drawable in builder.clear_drawables() {
-                drawable.tile_id = Some(*tile_id);
-                drawable.layer_tweaker = Some(Rc::clone(&layer_tweaker));
-                tile_layer_group.add_tile_drawable(draw_passes, tile_id, drawable);
+                // We actually need to build things, so set up a builder if we
+                // haven't already
+                let builder = builder.get_or_insert_with(|| {
+                    let mut b = DrawableBuilder::boxed();
+                    b.set_render_pass(draw_passes);
+                    b.set_shader(cur_shader.clone());
+                    b.set_depth_type(DepthMaskType::ReadWrite);
+                    b.set_color_mode(&if draw_passes == RenderPass::Translucent {
+                        ColorMode::alpha_blended()
+                    } else {
+                        ColorMode::unblended()
+                    });
+                    b
+                });
+
+                builder.set_vertex_attr_id(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE);
+                if self.base.projection_variant == ProjectionVariant::Globe {
+                    // The background is not depth tested, so it needs no tile
+                    // border.
+                    let mesh =
+                        raw_globe_tile_mesh(&tile_id.canonical, false, SubdivisionGranularitySetting::globe().tile);
+                    builder.set_raw_vertices(mesh.vertices, mesh.vertex_count, AttributeDataType::Short2);
+                    builder.set_segments(DrawMode::Triangles(), mesh.indices, &mesh.segments);
+                } else {
+                    let vertices_copy = raw_vertices.clone();
+                    builder.set_raw_vertices(vertices_copy, vertex_count, AttributeDataType::Short2);
+                    builder.set_segments(DrawMode::Triangles(), indexes.clone(), &segs);
+                }
+                builder.flush();
+
+                for mut drawable in builder.clear_drawables() {
+                    drawable.tile_id = Some(*tile_id);
+                    drawable.tweaker = tweaker;
+                    tile_layer_group.add_tile_drawable(draw_passes, tile_id, drawable);
+                }
             }
         }
+        self.base.layer_group = Some(layer_group);
     }
 }

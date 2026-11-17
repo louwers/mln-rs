@@ -40,27 +40,21 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 
 use super::raster_layer_tweaker::RasterLayerTweaker;
-use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
+use super::{shared_vertices, update_tile};
 use crate::bucket::NoBucket;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
-use crate::layer_group::{LayerGroup, LayerGroupPtr};
-use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_group::LayerGroup;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, activate_layer_group, change_layer_index,
-    set_style,
-};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tree::RenderTree;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::update_parameters::UpdateParameters;
 
@@ -68,8 +62,8 @@ impl LayerType for Raster {
     type Layout = NoLayout;
     type Bucket = NoBucket;
 
-    fn render_layer(style: Arc<LayerStyle<Raster>>) -> RenderLayerPtr {
-        Rc::new(RefCell::new(RenderRasterLayer::new(style)))
+    fn render_layer(style: Arc<LayerStyle<Raster>>) -> Box<dyn RenderLayer> {
+        Box::new(RenderRasterLayer::new(style))
     }
 }
 
@@ -90,7 +84,9 @@ pub(crate) struct RenderRasterLayer {
     textures: HashMap<SimpleIdentity, Texture2DPtr>,
 
     image_data: Option<Rc<ImageSourceRenderData>>,
-    image_layer_group: Option<LayerGroupPtr>,
+    /// The group of an image source's drawables, which the layer's tweaker
+    /// sets up too.
+    image_layer_group: Option<LayerGroup>,
 }
 
 impl RenderRasterLayer {
@@ -164,10 +160,9 @@ impl RenderRasterLayer {
         context: &Context,
         raster_shader: Option<&ShaderProgramPtr>,
         image_data: &ImageSourceRenderData,
-        changes: &mut UniqueChangeRequestVec,
     ) {
-        if let Some(group) = &self.image_layer_group {
-            group.borrow_mut().clear_drawables();
+        if let Some(group) = &mut self.image_layer_group {
+            group.clear_drawables();
         }
 
         // C++ dereferences the bucket unconditionally; it is missing until
@@ -180,17 +175,9 @@ impl RenderRasterLayer {
             return;
         }
 
-        let layer_tweaker = self.base.layer_tweaker.clone();
-        if self.image_layer_group.is_none() {
-            // Set up a layer group
-            let group = LayerGroup::plain(self.base.layer_index);
-            if let Some(tweaker) = &layer_tweaker {
-                changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&group), Rc::downgrade(tweaker)));
-            }
-            self.image_layer_group = Some(group);
-            activate_layer_group(self.image_layer_group.as_ref(), self.base.is_renderable, changes);
-        }
-        let image_layer_group = self.image_layer_group.clone().expect("image layer group");
+        let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
+        // Set up a layer group
+        let mut layer_group = self.image_layer_group.take().unwrap_or_else(LayerGroup::plain);
 
         // Create a drawable for each tile the image is drawn in
         // TODO: Share textures
@@ -221,14 +208,14 @@ impl RenderRasterLayer {
             // finish
             builder.flush();
 
-            let mut layer_group = image_layer_group.borrow_mut();
             layer_group.composite = self.composite();
             for mut drawable in builder.clear_drawables() {
                 drawable.tile_id = Some(OverscaledTileID::new(tile_id.canonical.z, tile_id.wrap, tile_id.canonical));
-                drawable.layer_tweaker = layer_tweaker.clone();
+                drawable.tweaker = tweaker;
                 layer_group.add_drawable(drawable);
             }
         }
+        self.image_layer_group = Some(layer_group);
     }
 }
 
@@ -292,8 +279,8 @@ impl RenderLayer for RenderRasterLayer {
         properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
-        if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
+            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -322,39 +309,32 @@ impl RenderLayer for RenderRasterLayer {
         self.update_render_tile_ids();
     }
 
-    fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
-        crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
-        if self.image_layer_group.is_some() {
-            activate_layer_group(self.image_layer_group.as_ref(), will_render, changes);
-        }
-    }
-
     fn release_render_data(&mut self) {
         crate::render_layer::release_render_data_base(self);
-        if let Some(layer_group) = &self.image_layer_group {
-            layer_group.borrow_mut().clear_drawables();
+        if let Some(layer_group) = &mut self.image_layer_group {
+            layer_group.clear_drawables();
         }
         self.textures.clear();
         self.image_data = None;
     }
 
-    fn layer_removed(&mut self, changes: &mut UniqueChangeRequestVec) {
-        // RenderLayer::layerRemoved
-        self.remove_all_drawables();
-        let group = self.base.layer_group.clone();
-        activate_layer_group(group.as_ref(), false, changes);
-        if self.image_layer_group.is_some() {
-            activate_layer_group(self.image_layer_group.as_ref(), false, changes);
+    /// The layer's tweaker sets up both its tile group and its image group.
+    fn tweak(&mut self, parameters: &PaintParameters<'_>) {
+        if !self.base.is_renderable {
+            return;
+        }
+        let Some(tweaker) = &mut self.base.layer_tweaker else {
+            return;
+        };
+        for group in [&mut self.base.layer_group, &mut self.image_layer_group].into_iter().flatten() {
+            tweaker.execute(group, parameters);
         }
     }
 
-    fn layer_index_changed(&mut self, new_layer_index: i32, changes: &mut UniqueChangeRequestVec) {
-        // RenderLayer::layerIndexChanged
-        self.base.layer_index = new_layer_index;
-        let group = self.base.layer_group.clone();
-        change_layer_index(group.as_ref(), new_layer_index, changes);
-
-        change_layer_index(self.image_layer_group.as_ref(), new_layer_index, changes);
+    fn layer_groups<'a>(&'a mut self, groups: &mut Vec<&'a mut LayerGroup>) {
+        if self.base.is_renderable {
+            groups.extend([&mut self.base.layer_group, &mut self.image_layer_group].into_iter().flatten());
+        }
     }
 
     fn update(
@@ -364,8 +344,6 @@ impl RenderLayer for RenderRasterLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        changes: &mut UniqueChangeRequestVec,
     ) {
         if self.update_projection_variant(state) {
             self.raster_shader = None;
@@ -376,11 +354,11 @@ impl RenderLayer for RenderRasterLayer {
         let render_tiles = self.base.render_tiles.clone().filter(|t| !t.is_empty());
         let image_data = self.image_data.clone();
         if render_tiles.is_none() && image_data.is_none() {
-            if let Some(layer_group) = &self.base.layer_group {
-                layer_group.borrow_mut().clear_drawables();
+            if let Some(layer_group) = &mut self.base.layer_group {
+                layer_group.clear_drawables();
             }
-            if let Some(layer_group) = &self.image_layer_group {
-                layer_group.borrow_mut().clear_drawables();
+            if let Some(layer_group) = &mut self.image_layer_group {
+                layer_group.clear_drawables();
             }
             self.textures.clear();
             return;
@@ -397,217 +375,205 @@ impl RenderLayer for RenderRasterLayer {
         let raster_shader = self.raster_shader.clone();
 
         if self.base.layer_tweaker.is_none() {
-            let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(RasterLayerTweaker::new(
+            self.base.layer_tweaker = Some(Box::new(RasterLayerTweaker::new(
                 self.get_id().to_owned(),
                 Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
-            for group in [&self.base.layer_group, &self.image_layer_group].into_iter().flatten() {
-                // layerGroup->addLayerTweaker(layerTweaker)
-                changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(group), Rc::downgrade(&tweaker)));
-            }
         }
-        let layer_tweaker = self.base.layer_tweaker.clone();
+        let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
 
         if let Some(image_data) = image_data {
-            self.update_image(context, raster_shader.as_ref(), &image_data, changes);
+            self.update_image(context, raster_shader.as_ref(), &image_data);
             return;
         }
         let Some(render_tiles) = render_tiles else {
             return;
         };
 
-        if self.base.layer_group.is_none() {
-            // Set up a tile layer group
-            let layer_group = LayerGroup::tiles(self.base.layer_index);
-            if let Some(tweaker) = &layer_tweaker {
-                changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(tweaker)));
-            }
-            self.set_layer_group(Some(layer_group), changes);
-        }
-        let Some(layer_group) = self.base.layer_group.clone() else {
-            return;
-        };
+        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
         {
-            let mut tile_layer_group = layer_group.borrow_mut();
-            tile_layer_group.composite = self.composite();
-            // Remove existing drawables that are no longer in the cover set
-            let base = &self.base;
-            tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
-        }
-
-        if self.static_data_vertices.is_none() {
-            self.static_data_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
-        }
-        if self.static_data_indices.is_none() {
-            self.static_data_indices =
-                Some(Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices()))));
-        }
-        if self.static_data_segments.is_none() {
-            self.static_data_segments = Some(Rc::new(RenderStaticData::raster_segments()));
-        }
-        let static_vertices = self.static_data_vertices.clone().expect("static vertices");
-        let static_indices = self.static_data_indices.clone().expect("static indices");
-        let static_segments = self.static_data_segments.clone().expect("static segments");
-        let mut static_attrs: Option<VertexAttributeArrayPtr> = None;
-
-        // Drop the textures of buckets that are no longer rendered.
-        let live_buckets: mln_util::hash::HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
-        self.textures.retain(|id, _| live_buckets.contains(id));
-        // Existing drawables keep their textures, so a changed filter is
-        // applied to the textures themselves.
-        let sampler = self.sampler_state();
-        for texture in self.textures.values() {
-            texture.borrow_mut().set_sampler(sampler);
-        }
-
-        for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
-
-            let style = Arc::clone(&self.base.style);
-            let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
-            let Some(bucket_ptr) = bucket_ptr else {
-                self.remove_tile(render_pass, &tile_id);
-                continue;
-            };
-            let Some(bucket) = (*bucket_ptr).downcast_ref::<RasterBucket>() else {
-                self.remove_tile(render_pass, &tile_id);
-                continue;
-            };
-
-            let mut cleared = false;
-            let (geometry_nonempty, geometry_modified) = {
-                let geometry = bucket.geometry();
-                (
-                    !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty(),
-                    geometry.last_modified,
-                )
-            };
-
-            if self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id) {
-                // Bucket ID changed, we need to rebuild the drawables
-                self.remove_tile(render_pass, &tile_id);
-                cleared = true;
-            } else if geometry_nonempty {
-                // If the bucket data has changed, rebuild the drawables.
-                // Find the earliest time on existing drawables
-                let mut tile_update_time: Option<Instant> = None;
-                {
-                    let mut tile_layer_group = layer_group.borrow_mut();
-                    tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
-                        let create_time = drawable.create_time;
-                        if tile_update_time.is_none_or(|t| create_time < t) {
-                            tile_update_time = Some(create_time);
-                        }
-                    });
-                }
-
-                if tile_update_time.is_some_and(|t| t < geometry_modified) {
-                    self.remove_tile(render_pass, &tile_id);
-                    cleared = true;
-                }
-            }
-
-            if !cleared {
-                // Update existing drawables
-                let mut geometry_changed = false;
-                let update_existing = |drawable: &mut crate::drawable::Drawable| {
-                    // Only current drawables are updated, ones produced for
-                    // a previous style retain the attribute values for that
-                    // style.
-                    if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
-                        return false;
-                    }
-                    // buildVertexData(none, &drawable, bucket): the bucket
-                    // may later add, remove, or change masking. In that
-                    // case, the tile's shared data and segments are not
-                    // updated, and it needs to be re-created.
-                    if !geometry_changed && drawable.create_time < geometry_modified {
-                        // Masking changed, need to rebuild this tile
-                        geometry_changed = true;
-                    }
-                    true
-                };
-                // If we update existing drawables, don't build new ones. But
-                // if the geometry has changed, we need to drop and re-build
-                // them anyway.
-                if self.update_tile(render_pass, &tile_id, update_existing) && !geometry_changed {
-                    continue;
-                } else if geometry_changed {
-                    self.remove_tile(render_pass, &tile_id);
-                }
-            }
-
-            // Otherwise, create new ones.
-            let mut builder = DrawableBuilder::boxed();
-            builder.set_shader(raster_shader.clone());
-            builder.set_render_pass(render_pass);
-            builder.set_sub_layer_index(0);
-            builder.set_depth_type(DepthMaskType::ReadOnly);
-            builder.set_color_mode(&ColorMode::alpha_blended());
-            builder.set_cull_face_mode(CullFaceMode::disabled());
-
-            self.set_textures(context, builder.as_mut(), bucket);
-
-            // buildVertexData(builder, nullptr, bucket, tileID): the bucket
-            // only fills in geometry for masked tiles, otherwise the standard
-            // tile extent geometry is used; on the globe, the pole-capped
-            // grid of what the mask keeps.
             {
-                let geometry = bucket.geometry();
-                let globe = self.base.projection_variant == ProjectionVariant::Globe;
-                let shared = !globe
-                    && !geometry.vertices.is_empty()
-                    && !geometry.indices.is_empty()
-                    && !geometry.segments.is_empty();
-                if globe {
-                    let globe_mesh =
-                        self.globe_meshes.get(&tile_id.canonical, &geometry.mask, RasterBucket::layout_vertex);
-                    let vertices: VertexVectorBasePtr =
-                        Rc::<mln_gfx::vertex_vector::VertexVector<RasterLayoutVertex>>::clone(&globe_mesh.vertices);
-                    let attrs = raster_vertex_attributes(&vertices);
-                    builder.set_vertex_attributes(Some(attrs));
-                    builder.set_raw_vertices(Vec::new(), globe_mesh.vertices.elements(), AttributeDataType::Short2);
-                    builder.set_segments_shared(
-                        DrawMode::Triangles(),
-                        Some(Rc::clone(&globe_mesh.indices)),
-                        &globe_mesh.segments,
-                    );
-                } else if shared {
-                    let vertices = shared_vertices(&geometry.vertices);
-                    let attrs = raster_vertex_attributes(&vertices);
-                    builder.set_vertex_attributes(Some(attrs));
-                    builder.set_raw_vertices(Vec::new(), geometry.vertices.len(), AttributeDataType::Short2);
-                    builder.set_segments_shared(
-                        DrawMode::Triangles(),
-                        Some(Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone())))),
-                        &geometry.segments,
-                    );
-                } else {
-                    let attrs =
-                        Rc::clone(static_attrs.get_or_insert_with(|| raster_vertex_attributes(&static_vertices)));
-                    builder.set_vertex_attributes(Some(attrs));
-                    builder.set_raw_vertices(Vec::new(), 4, AttributeDataType::Short2);
-                    builder.set_segments_shared(
-                        DrawMode::Triangles(),
-                        Some(Rc::clone(&static_indices)),
-                        &static_segments,
-                    );
-                }
+                let tile_layer_group = &mut layer_group;
+                tile_layer_group.composite = self.composite();
+                // Remove existing drawables that are no longer in the cover set
+                let base = &self.base;
+                tile_layer_group.remove_drawables_if(|drawable| {
+                    drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                });
             }
 
-            // finish
-            builder.flush();
-            let drawables = builder.clear_drawables();
-            let mut tile_layer_group = layer_group.borrow_mut();
-            for mut drawable in drawables {
-                drawable.tile_id = Some(tile_id);
-                drawable.layer_tweaker = layer_tweaker.clone();
-                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+            if self.static_data_vertices.is_none() {
+                self.static_data_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
+            }
+            if self.static_data_indices.is_none() {
+                self.static_data_indices =
+                    Some(Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices()))));
+            }
+            if self.static_data_segments.is_none() {
+                self.static_data_segments = Some(Rc::new(RenderStaticData::raster_segments()));
+            }
+            let static_vertices = self.static_data_vertices.clone().expect("static vertices");
+            let static_indices = self.static_data_indices.clone().expect("static indices");
+            let static_segments = self.static_data_segments.clone().expect("static segments");
+            let mut static_attrs: Option<VertexAttributeArrayPtr> = None;
+
+            // Drop the textures of buckets that are no longer rendered.
+            let live_buckets: mln_util::hash::HashSet<SimpleIdentity> =
+                render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
+            self.textures.retain(|id, _| live_buckets.contains(id));
+            // Existing drawables keep their textures, so a changed filter is
+            // applied to the textures themselves.
+            let sampler = self.sampler_state();
+            for texture in self.textures.values() {
+                texture.borrow_mut().set_sampler(sampler);
+            }
+
+            for tile in render_tiles.iter() {
+                let tile_id = *tile.get_overscaled_tile_id();
+
+                let style = Arc::clone(&self.base.style);
+                let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
+                let Some(bucket_ptr) = bucket_ptr else {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    continue;
+                };
+                let Some(bucket) = (*bucket_ptr).downcast_ref::<RasterBucket>() else {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    continue;
+                };
+
+                let mut cleared = false;
+                let (geometry_nonempty, geometry_modified) = {
+                    let geometry = bucket.geometry();
+                    (
+                        !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty(),
+                        geometry.last_modified,
+                    )
+                };
+
+                if self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id) {
+                    // Bucket ID changed, we need to rebuild the drawables
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    cleared = true;
+                } else if geometry_nonempty {
+                    // If the bucket data has changed, rebuild the drawables.
+                    // Find the earliest time on existing drawables
+                    let mut tile_update_time: Option<Instant> = None;
+                    {
+                        let tile_layer_group = &mut layer_group;
+                        tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
+                            let create_time = drawable.create_time;
+                            if tile_update_time.is_none_or(|t| create_time < t) {
+                                tile_update_time = Some(create_time);
+                            }
+                        });
+                    }
+
+                    if tile_update_time.is_some_and(|t| t < geometry_modified) {
+                        layer_group.remove_drawables(render_pass, &tile_id);
+                        cleared = true;
+                    }
+                }
+
+                if !cleared {
+                    // Update existing drawables
+                    let mut geometry_changed = false;
+                    let update_existing = |drawable: &mut crate::drawable::Drawable| {
+                        // Only current drawables are updated, ones produced for
+                        // a previous style retain the attribute values for that
+                        // style.
+                        if drawable.tweaker != tweaker {
+                            return false;
+                        }
+                        // buildVertexData(none, &drawable, bucket): the bucket
+                        // may later add, remove, or change masking. In that
+                        // case, the tile's shared data and segments are not
+                        // updated, and it needs to be re-created.
+                        if !geometry_changed && drawable.create_time < geometry_modified {
+                            // Masking changed, need to rebuild this tile
+                            geometry_changed = true;
+                        }
+                        true
+                    };
+                    // If we update existing drawables, don't build new ones. But
+                    // if the geometry has changed, we need to drop and re-build
+                    // them anyway.
+                    if update_tile(&mut layer_group, render_pass, &tile_id, update_existing) && !geometry_changed {
+                        continue;
+                    } else if geometry_changed {
+                        layer_group.remove_drawables(render_pass, &tile_id);
+                    }
+                }
+
+                // Otherwise, create new ones.
+                let mut builder = DrawableBuilder::boxed();
+                builder.set_shader(raster_shader.clone());
+                builder.set_render_pass(render_pass);
+                builder.set_sub_layer_index(0);
+                builder.set_depth_type(DepthMaskType::ReadOnly);
+                builder.set_color_mode(&ColorMode::alpha_blended());
+                builder.set_cull_face_mode(CullFaceMode::disabled());
+
+                self.set_textures(context, builder.as_mut(), bucket);
+
+                // buildVertexData(builder, nullptr, bucket, tileID): the bucket
+                // only fills in geometry for masked tiles, otherwise the standard
+                // tile extent geometry is used; on the globe, the pole-capped
+                // grid of what the mask keeps.
+                {
+                    let geometry = bucket.geometry();
+                    let globe = self.base.projection_variant == ProjectionVariant::Globe;
+                    let shared = !globe
+                        && !geometry.vertices.is_empty()
+                        && !geometry.indices.is_empty()
+                        && !geometry.segments.is_empty();
+                    if globe {
+                        let globe_mesh =
+                            self.globe_meshes.get(&tile_id.canonical, &geometry.mask, RasterBucket::layout_vertex);
+                        let vertices: VertexVectorBasePtr =
+                            Rc::<mln_gfx::vertex_vector::VertexVector<RasterLayoutVertex>>::clone(&globe_mesh.vertices);
+                        let attrs = raster_vertex_attributes(&vertices);
+                        builder.set_vertex_attributes(Some(attrs));
+                        builder.set_raw_vertices(Vec::new(), globe_mesh.vertices.elements(), AttributeDataType::Short2);
+                        builder.set_segments_shared(
+                            DrawMode::Triangles(),
+                            Some(Rc::clone(&globe_mesh.indices)),
+                            &globe_mesh.segments,
+                        );
+                    } else if shared {
+                        let vertices = shared_vertices(&geometry.vertices);
+                        let attrs = raster_vertex_attributes(&vertices);
+                        builder.set_vertex_attributes(Some(attrs));
+                        builder.set_raw_vertices(Vec::new(), geometry.vertices.len(), AttributeDataType::Short2);
+                        builder.set_segments_shared(
+                            DrawMode::Triangles(),
+                            Some(Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone())))),
+                            &geometry.segments,
+                        );
+                    } else {
+                        let attrs =
+                            Rc::clone(static_attrs.get_or_insert_with(|| raster_vertex_attributes(&static_vertices)));
+                        builder.set_vertex_attributes(Some(attrs));
+                        builder.set_raw_vertices(Vec::new(), 4, AttributeDataType::Short2);
+                        builder.set_segments_shared(
+                            DrawMode::Triangles(),
+                            Some(Rc::clone(&static_indices)),
+                            &static_segments,
+                        );
+                    }
+                }
+
+                // finish
+                builder.flush();
+                let drawables = builder.clear_drawables();
+                let tile_layer_group = &mut layer_group;
+                for mut drawable in drawables {
+                    drawable.tile_id = Some(tile_id);
+                    drawable.tweaker = tweaker;
+                    tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                }
             }
         }
+        self.base.layer_group = Some(layer_group);
     }
 }

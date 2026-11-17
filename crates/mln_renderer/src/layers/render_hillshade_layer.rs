@@ -40,25 +40,22 @@ use mln_util::size::Size;
 
 use super::hillshade_layer_tweaker::HillshadeLayerTweaker;
 use super::hillshade_prepare_layer_tweaker::{HillshadePrepareDrawableData, HillshadePrepareLayerTweaker};
-use super::render_heatmap_layer::activate_render_target;
-use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
+use super::{shared_vertices, update_tile};
 use crate::bucket::NoBucket;
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable::Drawable;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_target::{RenderTarget, RenderTargetPtr};
-use crate::render_tree::RenderTree;
+use crate::render_target::RenderTarget;
 use crate::update_parameters::UpdateParameters;
 
 const HILLSHADE_PREPARE_SHADER_GROUP_NAME: &str = "HillshadePrepareShader";
@@ -68,8 +65,8 @@ impl LayerType for Hillshade {
     type Layout = NoLayout;
     type Bucket = NoBucket;
 
-    fn render_layer(style: Arc<LayerStyle<Hillshade>>) -> RenderLayerPtr {
-        Rc::new(RefCell::new(RenderHillshadeLayer::new(style)))
+    fn render_layer(style: Arc<LayerStyle<Hillshade>>) -> Box<dyn RenderLayer> {
+        Box::new(RenderHillshadeLayer::new(style))
     }
 }
 
@@ -82,16 +79,17 @@ pub(crate) struct RenderHillshadeLayer {
 
     hillshade_prepare_shader: Option<ShaderProgramPtr>,
     hillshade_shader: Option<ShaderProgramPtr>,
-    activated_render_targets: Vec<RenderTargetPtr>,
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
-    prepare_layer_tweaker: Option<LayerTweakerPtr>,
+    /// Sets up the render targets' drawables, which prepare the slopes of
+    /// the DEM that the layer's drawables shade.
+    prepare_layer_tweaker: Option<Box<dyn LayerTweaker>>,
 
     /// Each bucket's render target, with the bucket's prepare generation, by
-    /// bucket id.
-    bucket_render_targets: HashMap<SimpleIdentity, (RenderTargetPtr, u64)>,
+    /// bucket id. They draw while the layer is renderable.
+    bucket_render_targets: HashMap<SimpleIdentity, (RenderTarget, u64)>,
 }
 
 impl RenderHillshadeLayer {
@@ -107,24 +105,11 @@ impl RenderHillshadeLayer {
             maxzoom: constants::TERRAIN_RGB_MAXZOOM,
             hillshade_prepare_shader: None,
             hillshade_shader: None,
-            activated_render_targets: Vec::new(),
             static_data_shared_vertices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             prepare_layer_tweaker: None,
             bucket_render_targets: HashMap::default(),
         }
-    }
-
-    fn add_render_target(&mut self, render_target: &RenderTargetPtr, changes: &mut UniqueChangeRequestVec) {
-        activate_render_target(Some(render_target), true, changes);
-        self.activated_render_targets.push(Rc::clone(render_target));
-    }
-
-    fn remove_render_targets(&mut self, changes: &mut UniqueChangeRequestVec) {
-        for render_target in &self.activated_render_targets {
-            activate_render_target(Some(render_target), false, changes);
-        }
-        self.activated_render_targets.clear();
     }
 }
 
@@ -177,12 +162,7 @@ impl RenderLayer for RenderHillshadeLayer {
         self.base.style_dependencies = self.unevaluated.get_dependencies();
     }
 
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        _changes: &mut UniqueChangeRequestVec,
-    ) {
+    fn layer_changed(&mut self, _parameters: &TransitionParameters, _new_layer: &Arc<dyn ErasedLayerStyle>) {
         // RenderLayer::layerChanged
         self.base.layer_tweaker = None;
         self.prepare_layer_tweaker = None;
@@ -202,11 +182,11 @@ impl RenderLayer for RenderHillshadeLayer {
         };
         properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
-        if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
+            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
-        if let Some(prepare_layer_tweaker) = &self.prepare_layer_tweaker {
-            prepare_layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(prepare_layer_tweaker) = &mut self.prepare_layer_tweaker {
+            prepare_layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -233,24 +213,31 @@ impl RenderLayer for RenderHillshadeLayer {
         self.update_render_tile_ids();
     }
 
-    fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
-        crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
-
-        self.remove_render_targets(changes);
-    }
-
     fn release_render_data(&mut self) {
         crate::render_layer::release_render_data_base(self);
         self.bucket_render_targets.clear();
     }
 
-    fn layer_removed(&mut self, changes: &mut UniqueChangeRequestVec) {
-        // RenderLayer::layerRemoved
-        self.remove_all_drawables();
-        let group = self.base.layer_group.clone();
-        crate::render_layer::activate_layer_group(group.as_ref(), false, changes);
+    fn upload_render_targets(&mut self, context: &Context) {
+        if self.base.is_renderable {
+            for (render_target, _) in self.bucket_render_targets.values_mut() {
+                render_target.upload(context);
+            }
+        }
+    }
 
-        self.remove_render_targets(changes);
+    fn render_targets(&mut self, parameters: &mut PaintParameters<'_>) {
+        if !self.base.is_renderable {
+            return;
+        }
+        for (render_target, _) in self.bucket_render_targets.values_mut() {
+            let tweaker = &mut self.prepare_layer_tweaker;
+            render_target.render(parameters, |group, parameters| {
+                if let Some(tweaker) = tweaker {
+                    tweaker.execute(group, parameters);
+                }
+            });
+        }
     }
 
     fn update(
@@ -260,8 +247,6 @@ impl RenderLayer for RenderHillshadeLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        changes: &mut UniqueChangeRequestVec,
     ) {
         if self.update_projection_variant(state) {
             self.hillshade_shader = None;
@@ -274,276 +259,266 @@ impl RenderLayer for RenderHillshadeLayer {
             return;
         };
 
-        // Set up a layer group
-        if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index)), changes);
-        }
-        let layer_group = self.base.layer_group.clone().expect("layer group");
-
-        if self.base.layer_tweaker.is_none() {
-            let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(HillshadeLayerTweaker::new(
-                self.get_id().to_owned(),
-                Arc::clone(&self.base.evaluated_properties),
-            )));
-            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
-            // layerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
-        }
-        let layer_tweaker = self.base.layer_tweaker.clone();
-
-        if self.hillshade_prepare_shader.is_none() {
-            self.hillshade_prepare_shader =
-                shaders.shader(HILLSHADE_PREPARE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
-        }
-
-        if self.hillshade_shader.is_none() {
-            self.hillshade_shader = shaders.shader(HILLSHADE_SHADER_GROUP_NAME, self.base.projection_variant);
-        }
-
-        let (Some(hillshade_prepare_shader), Some(hillshade_shader)) =
-            (self.hillshade_prepare_shader.clone(), self.hillshade_shader.clone())
-        else {
-            self.remove_all_drawables();
-            return;
-        };
-
-        let render_pass = RenderPass::Translucent;
-        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
-            return;
-        }
-
-        {
-            let mut tile_layer_group = layer_group.borrow_mut();
-            let base = &self.base;
-            tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
-        }
-
-        if self.static_data_shared_vertices.is_none() {
-            self.static_data_shared_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
-        }
-        let static_data_shared_vertices = self.static_data_shared_vertices.clone().expect("static vertices");
-        let static_data_indices: IndexVectorBasePtr =
-            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
-        let static_data_segments = RenderStaticData::raster_segments();
-
-        let mut hillshade_prepare_vertex_attrs: Option<VertexAttributeArrayPtr> = None;
-
-        // `resampling` filters the prepared texture the tile drawable
-        // samples; the prepare pass reads the DEM with Nearest regardless.
-        let evaluated = &evaluated::<Hillshade>(&self.base.evaluated_properties).paint;
-        let resampling_filter = match *evaluated.resampling.uniform() {
-            ResamplingType::Linear => TextureFilterType::Linear,
-            ResamplingType::Nearest => TextureFilterType::Nearest,
-        };
-
-        // Drop the render targets of buckets that are no longer rendered
-        // (C++ releases them with the bucket).
-        let live_buckets: HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
-        self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
-
-        for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
-
-            let style = Arc::clone(&self.base.style);
-            let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
-            let Some(bucket_ptr) = bucket_ptr else {
-                self.remove_tile(render_pass, &tile_id);
-                continue;
-            };
-            let Some(bucket) = (*bucket_ptr).downcast_ref::<HillshadeBucket>() else {
-                self.remove_tile(render_pass, &tile_id);
-                continue;
-            };
-            let bucket_id = bucket.base.bucket_id;
-
-            let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
-            if prev_bucket_id.is_some_and(|prev| prev != bucket_id) {
-                // This tile was previously set up from a different bucket,
-                // drop and re-create any drawables for it.
-                self.remove_tile(render_pass, &tile_id);
+        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        'draw: {
+            if self.base.layer_tweaker.is_none() {
+                self.base.layer_tweaker = Some(Box::new(HillshadeLayerTweaker::new(
+                    self.get_id().to_owned(),
+                    Arc::clone(&self.base.evaluated_properties),
+                )));
             }
-            self.set_render_tile_bucket_id(&tile_id, bucket_id);
+            let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
 
-            let generation = bucket.render_target_generation();
-            let render_target_prepared =
-                self.bucket_render_targets.get(&bucket_id).is_some_and(|(_, prepared)| *prepared == generation);
-            if !render_target_prepared {
-                // Set up tile render target
-                let (tilesize, stride, encoding, dem_image) = {
-                    let dem = bucket.get_dem_data();
-                    (dem.dim as u16, dem.stride, dem.encoding, dem.get_image().clone())
-                };
-                let render_target = RenderTarget::create(
-                    context,
-                    Size::new(u32::from(tilesize), u32::from(tilesize)),
-                    TextureChannelDataType::UnsignedByte,
-                );
-                self.bucket_render_targets.insert(bucket_id, (Rc::clone(&render_target), generation));
-                self.add_render_target(&render_target, changes);
-
-                let single_tile_layer_group = LayerGroup::tiles(0);
-                render_target.borrow_mut().add_layer_group(Rc::clone(&single_tile_layer_group), /*replace=*/ true);
-
-                if self.prepare_layer_tweaker.is_none() {
-                    self.prepare_layer_tweaker = Some(Rc::new(RefCell::new(HillshadePrepareLayerTweaker::new(
-                        self.get_id().to_owned(),
-                        Arc::clone(&self.base.evaluated_properties),
-                    ))));
-                }
-                let prepare_layer_tweaker = self.prepare_layer_tweaker.clone().expect("prepare tweaker");
-                // singleTileLayerGroup->addLayerTweaker(prepareLayerTweaker)
-                changes.push(ChangeRequest::AddLayerTweaker(
-                    Rc::clone(&single_tile_layer_group),
-                    Rc::downgrade(&prepare_layer_tweaker),
-                ));
-
-                let mut hillshade_prepare_builder = DrawableBuilder::boxed();
-                hillshade_prepare_builder.set_shader(Some(Rc::clone(&hillshade_prepare_shader)));
-                hillshade_prepare_builder.set_depth_type(DepthMaskType::ReadOnly);
-                hillshade_prepare_builder.set_color_mode(&ColorMode::unblended());
-                hillshade_prepare_builder.set_cull_face_mode(CullFaceMode::disabled());
-                hillshade_prepare_builder.set_render_pass(render_pass);
-                let attrs = Rc::clone(
-                    hillshade_prepare_vertex_attrs
-                        .get_or_insert_with(|| hillshade_vertex_attributes(&static_data_shared_vertices)),
-                );
-                hillshade_prepare_builder.set_vertex_attributes(Some(attrs));
-                hillshade_prepare_builder.set_raw_vertices(Vec::new(), 4, AttributeDataType::Short2);
-                hillshade_prepare_builder.set_segments_shared(
-                    DrawMode::Triangles(),
-                    Some(Rc::clone(&static_data_indices)),
-                    &static_data_segments,
-                );
-
-                let texture = context.create_texture_2d();
-                {
-                    let mut t = texture.borrow_mut();
-                    t.set_image(Some(Rc::new(dem_image)));
-                    // Use Nearest filtering to match GL JS behavior - the
-                    // Sobel kernel samples exact pixel values
-                    t.set_sampler(SamplerState {
-                        filter: TextureFilterType::Nearest,
-                        wrap_u: TextureWrapType::Clamp,
-                        wrap_v: TextureWrapType::Clamp,
-                        ..Default::default()
-                    });
-                }
-                hillshade_prepare_builder.set_texture(Some(texture), ID_HILLSHADE_IMAGE_TEXTURE);
-
-                hillshade_prepare_builder.flush();
-
-                let mut tile_group = single_tile_layer_group.borrow_mut();
-                for mut drawable in hillshade_prepare_builder.clear_drawables() {
-                    drawable.tile_id = Some(tile_id);
-                    drawable.layer_tweaker = Some(Rc::clone(&prepare_layer_tweaker));
-                    drawable.data =
-                        Some(crate::drawable::DrawableData::HillshadePrepare(HillshadePrepareDrawableData {
-                            stride,
-                            encoding,
-                            maxzoom: self.maxzoom,
-                        }));
-                    tile_group.add_tile_drawable(render_pass, &tile_id, drawable);
-                }
+            if self.hillshade_prepare_shader.is_none() {
+                self.hillshade_prepare_shader =
+                    shaders.shader(HILLSHADE_PREPARE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
             }
-            let render_target_texture =
-                self.bucket_render_targets.get(&bucket_id).expect("render target").0.borrow().get_texture();
-            render_target_texture.borrow_mut().set_sampler(SamplerState {
-                filter: resampling_filter,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
 
-            // Set up tile drawable
-            let (vertices, vertex_count, indices, segments, geometry_time) = {
-                let geometry = bucket.geometry();
-                if self.base.projection_variant == ProjectionVariant::Globe {
-                    let globe_mesh =
-                        self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
-                    let vertices: VertexVectorBasePtr =
-                        Rc::<mln_gfx::vertex_vector::VertexVector<HillshadeLayoutVertex>>::clone(&globe_mesh.vertices);
-                    (
-                        vertices,
-                        globe_mesh.vertices.elements(),
-                        Rc::clone(&globe_mesh.indices),
-                        globe_mesh.segments.iter().map(SegmentBase::copy).collect::<Vec<SegmentBase>>(),
-                        geometry.last_modified,
-                    )
-                } else if !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty()
-                {
-                    let indices: IndexVectorBasePtr =
-                        Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone())));
-                    (
-                        shared_vertices(&geometry.vertices),
-                        geometry.vertices.len(),
-                        indices,
-                        geometry.segments.iter().map(SegmentBase::copy).collect::<Vec<SegmentBase>>(),
-                        geometry.last_modified,
-                    )
-                } else {
-                    (
-                        Rc::clone(&static_data_shared_vertices),
-                        4,
-                        Rc::clone(&static_data_indices),
-                        static_data_segments.iter().map(SegmentBase::copy).collect::<Vec<SegmentBase>>(),
-                        geometry.last_modified,
-                    )
-                }
+            if self.hillshade_shader.is_none() {
+                self.hillshade_shader = shaders.shader(HILLSHADE_SHADER_GROUP_NAME, self.base.projection_variant);
+            }
+
+            let (Some(hillshade_prepare_shader), Some(hillshade_shader)) =
+                (self.hillshade_prepare_shader.clone(), self.hillshade_shader.clone())
+            else {
+                layer_group.clear_drawables();
+                break 'draw;
             };
 
-            let update_existing = |drawable: &mut Drawable| {
-                // Only current drawables are updated, ones produced for a
-                // previous style retain the attribute values for that style.
-                if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
-                    return false;
-                }
+            let render_pass = RenderPass::Translucent;
+            if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
+                break 'draw;
+            }
 
-                let built_from = match &drawable.data {
-                    Some(crate::drawable::DrawableData::HillshadeGeometryTime(time)) => Some(*time),
-                    _ => None,
+            {
+                let tile_layer_group = &mut layer_group;
+                let base = &self.base;
+                tile_layer_group.remove_drawables_if(|drawable| {
+                    drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                });
+            }
+
+            if self.static_data_shared_vertices.is_none() {
+                self.static_data_shared_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
+            }
+            let static_data_shared_vertices = self.static_data_shared_vertices.clone().expect("static vertices");
+            let static_data_indices: IndexVectorBasePtr =
+                Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
+            let static_data_segments = RenderStaticData::raster_segments();
+
+            let mut hillshade_prepare_vertex_attrs: Option<VertexAttributeArrayPtr> = None;
+
+            // `resampling` filters the prepared texture the tile drawable
+            // samples; the prepare pass reads the DEM with Nearest regardless.
+            let evaluated = &evaluated::<Hillshade>(&self.base.evaluated_properties).paint;
+            let resampling_filter = match *evaluated.resampling.uniform() {
+                ResamplingType::Linear => TextureFilterType::Linear,
+                ResamplingType::Nearest => TextureFilterType::Nearest,
+            };
+
+            // Drop the render targets of buckets that are no longer rendered
+            // (C++ releases them with the bucket).
+            let live_buckets: HashSet<SimpleIdentity> =
+                render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
+            self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
+
+            for tile in render_tiles.iter() {
+                let tile_id = *tile.get_overscaled_tile_id();
+
+                let style = Arc::clone(&self.base.style);
+                let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
+                let Some(bucket_ptr) = bucket_ptr else {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    continue;
                 };
-                if built_from != Some(geometry_time) {
-                    drawable.update_vertex_attributes(
-                        Some(hillshade_vertex_attributes(&vertices)),
-                        vertex_count,
-                        DrawMode::Triangles(),
-                        Some(Rc::clone(&indices)),
-                        &segments,
+                let Some(bucket) = (*bucket_ptr).downcast_ref::<HillshadeBucket>() else {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    continue;
+                };
+                let bucket_id = bucket.base.bucket_id;
+
+                let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+                if prev_bucket_id.is_some_and(|prev| prev != bucket_id) {
+                    // This tile was previously set up from a different bucket,
+                    // drop and re-create any drawables for it.
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                }
+                self.set_render_tile_bucket_id(&tile_id, bucket_id);
+
+                let generation = bucket.render_target_generation();
+                let render_target_prepared =
+                    self.bucket_render_targets.get(&bucket_id).is_some_and(|(_, prepared)| *prepared == generation);
+                if !render_target_prepared {
+                    // Set up tile render target
+                    let (tilesize, stride, encoding, dem_image) = {
+                        let dem = bucket.get_dem_data();
+                        (dem.dim as u16, dem.stride, dem.encoding, dem.get_image().clone())
+                    };
+                    let mut render_target = RenderTarget::new(
+                        context,
+                        Size::new(u32::from(tilesize), u32::from(tilesize)),
+                        TextureChannelDataType::UnsignedByte,
+                        LayerGroup::tiles(),
                     );
-                    drawable.data = Some(crate::drawable::DrawableData::HillshadeGeometryTime(geometry_time));
+
+                    if self.prepare_layer_tweaker.is_none() {
+                        self.prepare_layer_tweaker = Some(Box::new(HillshadePrepareLayerTweaker::new(
+                            self.get_id().to_owned(),
+                            Arc::clone(&self.base.evaluated_properties),
+                        )));
+                    }
+                    let prepare_layer_tweaker = self.prepare_layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
+
+                    let mut hillshade_prepare_builder = DrawableBuilder::boxed();
+                    hillshade_prepare_builder.set_shader(Some(Rc::clone(&hillshade_prepare_shader)));
+                    hillshade_prepare_builder.set_depth_type(DepthMaskType::ReadOnly);
+                    hillshade_prepare_builder.set_color_mode(&ColorMode::unblended());
+                    hillshade_prepare_builder.set_cull_face_mode(CullFaceMode::disabled());
+                    hillshade_prepare_builder.set_render_pass(render_pass);
+                    let attrs = Rc::clone(
+                        hillshade_prepare_vertex_attrs
+                            .get_or_insert_with(|| hillshade_vertex_attributes(&static_data_shared_vertices)),
+                    );
+                    hillshade_prepare_builder.set_vertex_attributes(Some(attrs));
+                    hillshade_prepare_builder.set_raw_vertices(Vec::new(), 4, AttributeDataType::Short2);
+                    hillshade_prepare_builder.set_segments_shared(
+                        DrawMode::Triangles(),
+                        Some(Rc::clone(&static_data_indices)),
+                        &static_data_segments,
+                    );
+
+                    let texture = context.create_texture_2d();
+                    {
+                        let mut t = texture.borrow_mut();
+                        t.set_image(Some(Rc::new(dem_image)));
+                        // Use Nearest filtering to match GL JS behavior - the
+                        // Sobel kernel samples exact pixel values
+                        t.set_sampler(SamplerState {
+                            filter: TextureFilterType::Nearest,
+                            wrap_u: TextureWrapType::Clamp,
+                            wrap_v: TextureWrapType::Clamp,
+                            ..Default::default()
+                        });
+                    }
+                    hillshade_prepare_builder.set_texture(Some(texture), ID_HILLSHADE_IMAGE_TEXTURE);
+
+                    hillshade_prepare_builder.flush();
+
+                    let tile_group = &mut render_target.layer_group;
+                    for mut drawable in hillshade_prepare_builder.clear_drawables() {
+                        drawable.tile_id = Some(tile_id);
+                        drawable.tweaker = prepare_layer_tweaker;
+                        drawable.data =
+                            Some(crate::drawable::DrawableData::HillshadePrepare(HillshadePrepareDrawableData {
+                                stride,
+                                encoding,
+                                maxzoom: self.maxzoom,
+                            }));
+                        tile_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                    }
+                    self.bucket_render_targets.insert(bucket_id, (render_target, generation));
                 }
-                drawable.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
+                let render_target_texture =
+                    self.bucket_render_targets.get(&bucket_id).expect("render target").0.get_texture();
+                render_target_texture.borrow_mut().set_sampler(SamplerState {
+                    filter: resampling_filter,
+                    wrap_u: TextureWrapType::Clamp,
+                    wrap_v: TextureWrapType::Clamp,
+                    ..Default::default()
+                });
 
-                true
-            };
-            if self.update_tile(render_pass, &tile_id, update_existing) {
-                continue;
-            }
+                // Set up tile drawable
+                let (vertices, vertex_count, indices, segments, geometry_time) = {
+                    let geometry = bucket.geometry();
+                    if self.base.projection_variant == ProjectionVariant::Globe {
+                        let globe_mesh =
+                            self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
+                        let vertices: VertexVectorBasePtr = Rc::<
+                            mln_gfx::vertex_vector::VertexVector<HillshadeLayoutVertex>,
+                        >::clone(&globe_mesh.vertices);
+                        (
+                            vertices,
+                            globe_mesh.vertices.elements(),
+                            Rc::clone(&globe_mesh.indices),
+                            globe_mesh.segments.iter().map(SegmentBase::copy).collect::<Vec<SegmentBase>>(),
+                            geometry.last_modified,
+                        )
+                    } else if !geometry.vertices.is_empty()
+                        && !geometry.indices.is_empty()
+                        && !geometry.segments.is_empty()
+                    {
+                        let indices: IndexVectorBasePtr =
+                            Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone())));
+                        (
+                            shared_vertices(&geometry.vertices),
+                            geometry.vertices.len(),
+                            indices,
+                            geometry.segments.iter().map(SegmentBase::copy).collect::<Vec<SegmentBase>>(),
+                            geometry.last_modified,
+                        )
+                    } else {
+                        (
+                            Rc::clone(&static_data_shared_vertices),
+                            4,
+                            Rc::clone(&static_data_indices),
+                            static_data_segments.iter().map(SegmentBase::copy).collect::<Vec<SegmentBase>>(),
+                            geometry.last_modified,
+                        )
+                    }
+                };
 
-            let mut hillshade_builder = DrawableBuilder::boxed();
-            hillshade_builder.set_shader(Some(Rc::clone(&hillshade_shader)));
-            hillshade_builder.set_enable_depth(false);
-            hillshade_builder.set_color_mode(&ColorMode::alpha_blended());
-            hillshade_builder.set_cull_face_mode(CullFaceMode::disabled());
-            hillshade_builder.set_render_pass(render_pass);
-            hillshade_builder.set_vertex_attributes(Some(hillshade_vertex_attributes(&vertices)));
-            hillshade_builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-            hillshade_builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(&indices)), &segments);
-            hillshade_builder.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
+                let update_existing = |drawable: &mut Drawable| {
+                    // Only current drawables are updated, ones produced for a
+                    // previous style retain the attribute values for that style.
+                    if drawable.tweaker != tweaker {
+                        return false;
+                    }
 
-            hillshade_builder.flush();
+                    let built_from = match &drawable.data {
+                        Some(crate::drawable::DrawableData::HillshadeGeometryTime(time)) => Some(*time),
+                        _ => None,
+                    };
+                    if built_from != Some(geometry_time) {
+                        drawable.update_vertex_attributes(
+                            Some(hillshade_vertex_attributes(&vertices)),
+                            vertex_count,
+                            DrawMode::Triangles(),
+                            Some(Rc::clone(&indices)),
+                            &segments,
+                        );
+                        drawable.data = Some(crate::drawable::DrawableData::HillshadeGeometryTime(geometry_time));
+                    }
+                    drawable.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
 
-            let mut tile_layer_group = layer_group.borrow_mut();
-            for mut drawable in hillshade_builder.clear_drawables() {
-                drawable.tile_id = Some(tile_id);
-                drawable.layer_tweaker = layer_tweaker.clone();
-                drawable.data = Some(crate::drawable::DrawableData::HillshadeGeometryTime(geometry_time));
+                    true
+                };
+                if update_tile(&mut layer_group, render_pass, &tile_id, update_existing) {
+                    continue;
+                }
 
-                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                let mut hillshade_builder = DrawableBuilder::boxed();
+                hillshade_builder.set_shader(Some(Rc::clone(&hillshade_shader)));
+                hillshade_builder.set_enable_depth(false);
+                hillshade_builder.set_color_mode(&ColorMode::alpha_blended());
+                hillshade_builder.set_cull_face_mode(CullFaceMode::disabled());
+                hillshade_builder.set_render_pass(render_pass);
+                hillshade_builder.set_vertex_attributes(Some(hillshade_vertex_attributes(&vertices)));
+                hillshade_builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
+                hillshade_builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(&indices)), &segments);
+                hillshade_builder.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
+
+                hillshade_builder.flush();
+
+                let tile_layer_group = &mut layer_group;
+                for mut drawable in hillshade_builder.clear_drawables() {
+                    drawable.tile_id = Some(tile_id);
+                    drawable.tweaker = tweaker;
+                    drawable.data = Some(crate::drawable::DrawableData::HillshadeGeometryTime(geometry_time));
+
+                    tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                }
             }
         }
+        self.base.layer_group = Some(layer_group);
     }
 }

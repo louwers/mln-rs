@@ -56,7 +56,7 @@ use crate::layout::symbol_projection::{
     LabelPlaneProjector, add_dynamic_attributes, evaluate_size_for_feature, get_tile_skew_vectors, hide_glyphs,
     reproject_line_labels,
 };
-use crate::render_layer::{BucketPlacementData, RenderLayer, RenderLayerPtr, SymbolTranslate};
+use crate::render_layer::{BucketPlacementData, RenderLayer, SymbolTranslate};
 use crate::render_tile::RenderTile;
 use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
 use crate::text::collision_index::{
@@ -924,14 +924,14 @@ impl Placement {
         self.commit_time
     }
 
-    pub(crate) fn place_layers(&mut self, layers: &[RenderLayerPtr]) {
+    pub(crate) fn place_layers(&mut self, layers: &[&dyn RenderLayer]) {
         if matches!(self.kind, PlacementKind::Tile(_)) {
             self.tile_place_layers(layers);
             return;
         }
         for layer in layers.iter().rev() {
             let mut seen_cross_tile_ids = BTreeSet::new();
-            self.place_layer(&*layer.borrow(), &mut seen_cross_tile_ids);
+            self.place_layer(*layer, &mut seen_cross_tile_ids);
         }
         self.commit();
     }
@@ -2425,7 +2425,7 @@ impl Placement {
         }
     }
 
-    fn tile_place_layers(&mut self, layers: &[RenderLayerPtr]) {
+    fn tile_place_layers(&mut self, layers: &[&dyn RenderLayer]) {
         {
             let tile = self.tile_state();
             tile.placed_symbols_data.clear();
@@ -2437,7 +2437,7 @@ impl Placement {
         }
         let mut seen_cross_tile_ids = std::mem::take(&mut self.tile_state().seen_cross_tile_ids);
         for layer in layers.iter().rev() {
-            self.place_layer(&*layer.borrow(), &mut seen_cross_tile_ids);
+            self.place_layer(*layer, &mut seen_cross_tile_ids);
         }
 
         let intersections = std::mem::take(&mut self.tile_state().intersections);
@@ -2483,7 +2483,7 @@ impl Placement {
         // Place the rest labels.
         self.tile_state().populate_intersections = false;
         for layer in layers.iter().rev() {
-            self.place_layer(&*layer.borrow(), &mut seen_cross_tile_ids);
+            self.place_layer(*layer, &mut seen_cross_tile_ids);
         }
         self.tile_state().seen_cross_tile_ids = seen_cross_tile_ids;
         self.commit();

@@ -1,8 +1,7 @@
 // C++ `RenderLayer` is an abstract class with data members; the data is
 // `RenderLayerBase` and the virtual interface is the `RenderLayer` trait.
-// Render layers are shared between the orchestrator, its ordered list and
-// the render tree's items (C++: `unique_ptr` + `reference_wrapper`s), so
-// they are `Rc<RefCell<dyn RenderLayer>>`.
+// The orchestrator owns the render layers, in the style's order, and each
+// render layer owns the layer groups it draws, with their tweakers.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -21,10 +20,9 @@ use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 
 use crate::bucket::BucketPtr;
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::context::Context;
-use crate::layer_group::LayerGroupPtr;
-use crate::layer_tweaker::LayerTweakerPtr;
+use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
@@ -32,10 +30,7 @@ use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, RenderTiles};
 use crate::render_tile::RenderTile;
-use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
-
-pub(crate) type RenderLayerPtr = Rc<RefCell<dyn RenderLayer>>;
 
 #[derive(Clone)]
 pub(crate) struct LayerRenderData {
@@ -98,10 +93,13 @@ pub(crate) struct RenderLayerBase {
     pub(crate) style: Arc<dyn ErasedLayerStyle>,
 
     pub(crate) passes: RenderPass,
-    pub(crate) layer_group: Option<LayerGroupPtr>,
-    pub(crate) layer_tweaker: Option<LayerTweakerPtr>,
-    pub(crate) layer_index: i32,
+    /// The group of the layer's drawables, which draws while the layer is
+    /// renderable.
+    pub(crate) layer_group: Option<LayerGroup>,
+    /// Sets the uniforms of the group's drawables each frame.
+    pub(crate) layer_tweaker: Option<Box<dyn LayerTweaker>>,
     pub(crate) style_dependencies: Dependency,
+    /// Whether the frame draws the layer.
     pub(crate) is_renderable: bool,
 
     /// Stores current set of tiles to be rendered for this layer.
@@ -129,7 +127,6 @@ impl RenderLayerBase {
             passes: RenderPass::None,
             layer_group: None,
             layer_tweaker: None,
-            layer_index: 0,
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             render_tiles: None,
@@ -184,10 +181,6 @@ pub(crate) trait RenderLayer {
     }
 
     /// Update a layer with its render data (drawables).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the shaders, context, camera, update and paint parameters, render tree and change list that a layer's drawables depend on"
-    )]
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
@@ -195,10 +188,37 @@ pub(crate) trait RenderLayer {
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        _changes: &mut UniqueChangeRequestVec,
     ) {
     }
+
+    /// Runs the layer's tweakers on its layer groups that draw, before they
+    /// upload.
+    fn tweak(&mut self, parameters: &PaintParameters<'_>) {
+        let base = self.base_mut();
+        if base.is_renderable
+            && let (Some(tweaker), Some(group)) = (&mut base.layer_tweaker, &mut base.layer_group)
+        {
+            tweaker.execute(group, parameters);
+        }
+    }
+
+    /// Adds the layer's groups that draw to `groups`, in drawing order.
+    fn layer_groups<'a>(&'a mut self, groups: &mut Vec<&'a mut LayerGroup>) {
+        let base = self.base_mut();
+        if base.is_renderable
+            && let Some(group) = &mut base.layer_group
+        {
+            groups.push(group);
+        }
+    }
+
+    /// Uploads the drawables of the layer's render targets, which draw
+    /// before the frame's passes.
+    fn upload_render_targets(&mut self, _context: &Context) {}
+
+    /// Draws the layer's render targets, ahead of the frame's passes, which
+    /// sample them.
+    fn render_targets(&mut self, _parameters: &mut PaintParameters<'_>) {}
 
     /// Runs a custom layer's prerender, after the layer groups upload and
     /// before the frame's first pass, which draws into `target`.
@@ -210,12 +230,7 @@ pub(crate) trait RenderLayer {
 
     /// Called when the style layer is replaced (same ID and type), and the
     /// render layer is reused.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        _changes: &mut UniqueChangeRequestVec,
-    ) {
+    fn layer_changed(&mut self, _parameters: &TransitionParameters, _new_layer: &Arc<dyn ErasedLayerStyle>) {
         // When a layer changes, the bucket won't be replaced until the new
         // source(s) load. If we remove the drawables here, they will just be
         // re-created based on the current data.
@@ -227,26 +242,9 @@ pub(crate) trait RenderLayer {
         self.base_mut().layer_tweaker = None;
     }
 
-    /// Called when the style layer is removed.
-    fn layer_removed(&mut self, changes: &mut UniqueChangeRequestVec) {
-        self.remove_all_drawables();
-        let group = self.base().layer_group.clone();
-        activate_layer_group(group.as_ref(), false, changes);
-    }
-
-    /// Called when the layer index changes.
-    fn layer_index_changed(&mut self, new_layer_index: i32, changes: &mut UniqueChangeRequestVec) {
-        self.base_mut().layer_index = new_layer_index;
-
-        // Submit a change request to update the layer index of our tile layer
-        // group
-        let group = self.base().layer_group.clone();
-        change_layer_index(group.as_ref(), new_layer_index, changes);
-    }
-
     /// Called when the layer is included or excluded from rendering.
-    fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
-        mark_layer_renderable_base(self, will_render, changes);
+    fn mark_layer_renderable(&mut self, will_render: bool) {
+        mark_layer_renderable_base(self, will_render);
     }
 
     /// Drops what the last `prepare` and `update` built: the drawables, and
@@ -259,8 +257,8 @@ pub(crate) trait RenderLayer {
 
     /// Remove all drawables for the tile from the layer group.
     fn remove_all_drawables(&mut self) {
-        if let Some(group) = &self.base().layer_group {
-            group.borrow_mut().clear_drawables();
+        if let Some(group) = &mut self.base_mut().layer_group {
+            group.clear_drawables();
         }
     }
 
@@ -272,9 +270,10 @@ pub(crate) trait RenderLayer {
         handle_wrap_jump_base(self, wrap_delta);
     }
 
-    /// The groups that hold the drawables of the layer's tiles.
-    fn tile_layer_groups(&self) -> Vec<LayerGroupPtr> {
-        self.base().layer_group.iter().cloned().collect()
+    /// Adds the groups that hold the drawables of the layer's tiles to
+    /// `groups`.
+    fn tile_layer_groups<'a>(&'a mut self, groups: &mut Vec<&'a mut LayerGroup>) {
+        groups.extend(self.base_mut().layer_group.as_mut());
     }
 
     // Non-virtual members of the C++ class.
@@ -413,19 +412,6 @@ pub(crate) trait RenderLayer {
     ) -> bool {
         false
     }
-
-    fn set_layer_group(&mut self, layer_group: Option<LayerGroupPtr>, changes: &mut UniqueChangeRequestVec) {
-        // Remove the active layer group, if any, before replacing it.
-        let old = self.base().layer_group.clone();
-        activate_layer_group(old.as_ref(), false, changes);
-
-        self.base_mut().layer_group = layer_group;
-
-        // Add the new layer group, if we're currently renderable.
-        let group = self.base().layer_group.clone();
-        let renderable = self.base().is_renderable;
-        activate_layer_group(group.as_ref(), renderable, changes);
-    }
 }
 
 /// Makes `style` the style of the render layer whose members are `base` and
@@ -442,19 +428,10 @@ pub(crate) fn set_style<T: StyleLayerType>(
 }
 
 /// The default `RenderLayer::mark_layer_renderable`, callable from
-/// overrides: sets the renderable flag, (un-)registers the layer group, and
-/// releases the render data of a layer that stops rendering.
-pub(crate) fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
-    layer: &mut L,
-    will_render: bool,
-    changes: &mut UniqueChangeRequestVec,
-) {
+/// overrides: sets the renderable flag, and releases the render data of a
+/// layer that stops rendering.
+pub(crate) fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(layer: &mut L, will_render: bool) {
     layer.base_mut().is_renderable = will_render;
-
-    // This layer is either being freshly included in the renderable set or
-    // excluded
-    let group = layer.base().layer_group.clone();
-    activate_layer_group(group.as_ref(), will_render, changes);
 
     if !will_render {
         layer.release_render_data();
@@ -468,8 +445,10 @@ pub(crate) fn handle_wrap_jump_base<L: RenderLayer + ?Sized>(layer: &mut L, wrap
         .into_iter()
         .map(|(id, bucket)| (id.unwrap_to(id.wrap.wrapping_add(wrap_delta)), bucket))
         .collect();
-    for group in layer.tile_layer_groups() {
-        group.borrow_mut().shift_wraps(wrap_delta);
+    let mut groups = Vec::new();
+    layer.tile_layer_groups(&mut groups);
+    for group in groups {
+        group.shift_wraps(wrap_delta);
     }
 }
 
@@ -509,30 +488,4 @@ pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &
 /// The bucket id of the render tile `tile_id`, or `None` if there is none.
 fn get_render_tile_bucket_id(base: &RenderLayerBase, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
     base.render_tile_ids.get(tile_id).copied().flatten()
-}
-
-/// (Un-)Register the layer group with the orchestrator.
-pub(crate) fn activate_layer_group(
-    layer_group: Option<&LayerGroupPtr>,
-    activate: bool,
-    changes: &mut UniqueChangeRequestVec,
-) {
-    if let Some(layer_group) = layer_group {
-        if activate {
-            // The RenderTree has determined this layer should be included in
-            // the renderable set for a frame
-            changes.push(ChangeRequest::AddLayerGroup(Rc::clone(layer_group)));
-        } else {
-            // The RenderTree is informing us we should not render anything
-            changes.push(ChangeRequest::RemoveLayerGroup(Rc::clone(layer_group)));
-        }
-    }
-}
-
-pub(crate) fn change_layer_index(group: Option<&LayerGroupPtr>, new_index: i32, changes: &mut UniqueChangeRequestVec) {
-    if let Some(group) = group
-        && group.borrow().layer_index != new_index
-    {
-        changes.push(ChangeRequest::UpdateLayerGroupIndex(Rc::clone(group), new_index));
-    }
 }

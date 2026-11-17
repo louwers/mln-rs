@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -19,25 +17,20 @@ use mln_util::Color;
 use mln_util::error::Error;
 
 use super::circle_layer_tweaker::CircleLayerTweaker;
-use super::{
-    DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_layer_tweaker, refresh_if_bucket_updated,
-};
+use super::{DrawableBinders, DrawableRenderTile, refresh_if_bucket_updated, update_tile};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
+use crate::render_layer::{RenderLayer, RenderLayerBase, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
-use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 const CIRCLE_SHADER_GROUP_NAME: &str = "CircleShader";
@@ -161,8 +154,8 @@ impl LayerType for Circle {
         bucket.query_radius(layer)
     }
 
-    fn render_layer(style: Arc<LayerStyle<Circle>>) -> RenderLayerPtr {
-        Rc::new(RefCell::new(RenderCircleLayer::new(style)))
+    fn render_layer(style: Arc<LayerStyle<Circle>>) -> Box<dyn RenderLayer> {
+        Box::new(RenderCircleLayer::new(style))
     }
 }
 
@@ -226,8 +219,8 @@ impl RenderLayer for RenderCircleLayer {
         properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
-        if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
+            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -357,8 +350,6 @@ impl RenderLayer for RenderCircleLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        changes: &mut UniqueChangeRequestVec,
     ) {
         self.update_projection_variant(state);
 
@@ -367,161 +358,159 @@ impl RenderLayer for RenderCircleLayer {
             return;
         };
 
-        // Set up a layer group
-        if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index)), changes);
-        }
-        let layer_group = self.base.layer_group.clone().expect("layer group");
-
-        if self.base.layer_tweaker.is_none() {
-            let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(CircleLayerTweaker::new(
-                self.get_id().to_owned(),
-                Arc::clone(&self.base.evaluated_properties),
-            )));
-            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
-            // layerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
-        }
-
-        if self.circle_shader_group.is_none() {
-            self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
-        }
-        let Some(circle_shader_group) = self.circle_shader_group.clone() else {
-            self.remove_all_drawables();
-            return;
-        };
-
-        let render_pass = RenderPass::Translucent;
-
-        if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
-            return;
-        }
-
-        {
-            let mut tile_layer_group = layer_group.borrow_mut();
-            let base = &self.base;
-            tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
-        }
-
-        let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = &evaluated::<Circle>(&evaluated_properties).paint;
-        let layer_tweaker = self.base.layer_tweaker.clone();
-        let mut properties_as_uniforms: StringIDSetsPair = Default::default();
-
-        for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
-
-            let style = Arc::clone(&self.base.style);
-            let render_data = super::render_data_for_pass(tile, &*style, render_pass);
-            let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.remove_tile(render_pass, &tile_id);
-                continue;
-            };
-
-            let Some(bucket) = (*render_data.bucket).downcast_ref::<CircleBucket>() else {
-                continue;
-            };
-            let vertex_count = bucket.vertices.len();
-            let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
-                continue;
-            };
-            let binders_guard = binders_lock.read();
-            let paint_property_binders = &*binders_guard;
-            let geometry = tile.get_bucket_geometry();
-            let paint = || {
-                paint_vertices(
-                    geometry,
-                    bucket,
-                    &paint_property_binders.interleaved_vertex_buffer,
-                    paint_property_binders.depends_on_feature_state(),
-                )
-            };
-
-            let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
-            if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
-                // This tile was previously set up from a different bucket,
-                // drop and re-create any drawables for it.
-                self.remove_tile(render_pass, &tile_id);
-            }
-            self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
-
-            // If there are already drawables for this tile, update their UBOs
-            // and move on to the next tile.
-            let update_existing = |drawable: &mut crate::drawable::Drawable| {
-                // A drawable produced on a previous style/bucket should not be updated.
-                let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
-                if current {
-                    refresh_if_bucket_updated(drawable, |attrs| {
-                        read_circle_attributes(
-                            attrs,
-                            paint_property_binders,
-                            &paint(),
-                            evaluated,
-                            &mut Default::default(),
-                        );
-                    });
-                }
-                current
-            };
-            if self.update_tile(render_pass, &tile_id, update_existing) {
-                continue;
+        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        'draw: {
+            if self.base.layer_tweaker.is_none() {
+                self.base.layer_tweaker = Some(Box::new(CircleLayerTweaker::new(
+                    self.get_id().to_owned(),
+                    Arc::clone(&self.base.evaluated_properties),
+                )));
             }
 
-            properties_as_uniforms.0.clear();
-            properties_as_uniforms.1.clear();
+            if self.circle_shader_group.is_none() {
+                self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
+            }
+            let Some(circle_shader_group) = self.circle_shader_group.clone() else {
+                layer_group.clear_drawables();
+                break 'draw;
+            };
 
-            let circle_vertex_attrs = VertexAttributeArray::new_ptr();
-            read_circle_attributes(
-                &mut circle_vertex_attrs.borrow_mut(),
-                paint_property_binders,
-                &paint(),
-                evaluated,
-                &mut properties_as_uniforms,
-            );
+            let render_pass = RenderPass::Translucent;
 
-            let circle_shader = circle_shader_group.shader(&properties_as_uniforms, self.base.projection_variant);
+            if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
+                break 'draw;
+            }
 
-            if let Some(attr) =
-                circle_vertex_attrs.borrow_mut().set(ID_CIRCLE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
             {
-                attr.set_shared_raw_data(
-                    Some(bucket_vertices(geometry, bucket, &bucket.vertices)),
-                    0, // offsetof(CircleLayoutVertex, a1)
-                    0,
-                    size_of::<CircleLayoutVertex>() as u32,
-                    AttributeDataType::Short2,
-                );
+                let tile_layer_group = &mut layer_group;
+                let base = &self.base;
+                tile_layer_group.remove_drawables_if(|drawable| {
+                    drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                });
             }
 
-            let mut circle_builder = DrawableBuilder::boxed();
-            circle_builder.set_shader(Some(circle_shader));
-            circle_builder.set_depth_type(DepthMaskType::ReadOnly);
-            circle_builder.set_color_mode(&ColorMode::alpha_blended());
-            circle_builder.set_cull_face_mode(CullFaceMode::disabled());
+            let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
+            let evaluated = &evaluated::<Circle>(&evaluated_properties).paint;
+            let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
+            let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 
-            circle_builder.set_render_pass(render_pass);
-            circle_builder.set_vertex_attributes(Some(circle_vertex_attrs));
+            for tile in render_tiles.iter() {
+                let tile_id = *tile.get_overscaled_tile_id();
 
-            circle_builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-            circle_builder.set_segments_shared(
-                DrawMode::Triangles(),
-                Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
-                &bucket.segments,
-            );
+                let style = Arc::clone(&self.base.style);
+                let render_data = super::render_data_for_pass(tile, &*style, render_pass);
+                let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                    continue;
+                };
 
-            circle_builder.flush();
+                let Some(bucket) = (*render_data.bucket).downcast_ref::<CircleBucket>() else {
+                    continue;
+                };
+                let vertex_count = bucket.vertices.len();
+                let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
+                    continue;
+                };
+                let binders_guard = binders_lock.read();
+                let paint_property_binders = &*binders_guard;
+                let geometry = tile.get_bucket_geometry();
+                let paint = || {
+                    paint_vertices(
+                        geometry,
+                        bucket,
+                        &paint_property_binders.interleaved_vertex_buffer,
+                        paint_property_binders.depends_on_feature_state(),
+                    )
+                };
 
-            let mut tile_layer_group = layer_group.borrow_mut();
-            for mut drawable in circle_builder.clear_drawables() {
-                drawable.tile_id = Some(tile_id);
-                drawable.layer_tweaker = layer_tweaker.clone();
-                drawable.binders = Some(DrawableBinders::new(&render_data.bucket, self.get_id()));
-                drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
+                let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+                if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
+                    // This tile was previously set up from a different bucket,
+                    // drop and re-create any drawables for it.
+                    layer_group.remove_drawables(render_pass, &tile_id);
+                }
+                self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
-                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                // If there are already drawables for this tile, update their UBOs
+                // and move on to the next tile.
+                let update_existing = |drawable: &mut crate::drawable::Drawable| {
+                    // A drawable produced on a previous style/bucket should not be updated.
+                    let current = drawable.tweaker == tweaker;
+                    if current {
+                        refresh_if_bucket_updated(drawable, |attrs| {
+                            read_circle_attributes(
+                                attrs,
+                                paint_property_binders,
+                                &paint(),
+                                evaluated,
+                                &mut Default::default(),
+                            );
+                        });
+                    }
+                    current
+                };
+                if update_tile(&mut layer_group, render_pass, &tile_id, update_existing) {
+                    continue;
+                }
+
+                properties_as_uniforms.0.clear();
+                properties_as_uniforms.1.clear();
+
+                let circle_vertex_attrs = VertexAttributeArray::new_ptr();
+                read_circle_attributes(
+                    &mut circle_vertex_attrs.borrow_mut(),
+                    paint_property_binders,
+                    &paint(),
+                    evaluated,
+                    &mut properties_as_uniforms,
+                );
+
+                let circle_shader = circle_shader_group.shader(&properties_as_uniforms, self.base.projection_variant);
+
+                if let Some(attr) = circle_vertex_attrs.borrow_mut().set(
+                    ID_CIRCLE_POS_VERTEX_ATTRIBUTE,
+                    -1,
+                    AttributeDataType::Invalid,
+                    0,
+                ) {
+                    attr.set_shared_raw_data(
+                        Some(bucket_vertices(geometry, bucket, &bucket.vertices)),
+                        0, // offsetof(CircleLayoutVertex, a1)
+                        0,
+                        size_of::<CircleLayoutVertex>() as u32,
+                        AttributeDataType::Short2,
+                    );
+                }
+
+                let mut circle_builder = DrawableBuilder::boxed();
+                circle_builder.set_shader(Some(circle_shader));
+                circle_builder.set_depth_type(DepthMaskType::ReadOnly);
+                circle_builder.set_color_mode(&ColorMode::alpha_blended());
+                circle_builder.set_cull_face_mode(CullFaceMode::disabled());
+
+                circle_builder.set_render_pass(render_pass);
+                circle_builder.set_vertex_attributes(Some(circle_vertex_attrs));
+
+                circle_builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
+                circle_builder.set_segments_shared(
+                    DrawMode::Triangles(),
+                    Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
+                    &bucket.segments,
+                );
+
+                circle_builder.flush();
+
+                let tile_layer_group = &mut layer_group;
+                for mut drawable in circle_builder.clear_drawables() {
+                    drawable.tile_id = Some(tile_id);
+                    drawable.tweaker = tweaker;
+                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, self.get_id()));
+                    drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
+
+                    tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
+                }
             }
         }
+        self.base.layer_group = Some(layer_group);
     }
 }

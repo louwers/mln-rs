@@ -38,27 +38,24 @@ use mln_style_types::AlignmentType;
 use mln_util::error::Error;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
-use super::{DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_layer_tweaker, shared_vertices};
+use super::{DrawableBinders, DrawableRenderTile, shared_vertices, update_tile};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
     FillExtrusionStaticVertex, FillExtrusionWallVertex,
 };
-use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
+use crate::render_layer::{RenderLayer, RenderLayerBase, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 fn read_paint_properties(
@@ -246,8 +243,8 @@ impl LayerType for FillExtrusion {
         (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 
-    fn render_layer(style: Arc<LayerStyle<FillExtrusion>>) -> RenderLayerPtr {
-        Rc::new(RefCell::new(RenderFillExtrusionLayer::new(style)))
+    fn render_layer(style: Arc<LayerStyle<FillExtrusion>>) -> Box<dyn RenderLayer> {
+        Box::new(RenderFillExtrusionLayer::new(style))
     }
 }
 
@@ -331,8 +328,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
         properties.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 
-        if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
+        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
+            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -382,8 +379,6 @@ impl RenderLayer for RenderFillExtrusionLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
-        changes: &mut UniqueChangeRequestVec,
     ) {
         self.update_projection_variant(state);
 
@@ -395,306 +390,307 @@ impl RenderLayer for RenderFillExtrusionLayer {
             }
         };
 
-        // Set up a layer group
-        if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index)), changes);
-        }
-        let layer_group = self.base.layer_group.clone().expect("layer group");
-
-        if self.base.layer_tweaker.is_none() {
-            let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(FillExtrusionLayerTweaker::new(
-                self.get_id().to_owned(),
-                Arc::clone(&self.base.evaluated_properties),
-            )));
-            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
-            // layerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
-        }
-        let layer_tweaker = self.base.layer_tweaker.clone();
-
-        if self.fill_extrusion_group.is_none() {
-            self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
-        }
-        if self.fill_extrusion_pattern_group.is_none() {
-            self.fill_extrusion_pattern_group = shaders.shader_group("FillExtrusionPatternShader");
-        }
-        // A device that rasterizes on the CPU draws each wall as a quad of
-        // its own.
-        let instanced_walls = !context.caps().cpu_rasterizer;
-        if self.fill_extrusion_wall_group.is_none() {
-            let name = if instanced_walls { "FillExtrusionInstancedShader" } else { "FillExtrusionWallShader" };
-            self.fill_extrusion_wall_group = shaders.shader_group(name);
-        }
-        if self.fill_extrusion_pattern_wall_group.is_none() {
-            let name =
-                if instanced_walls { "FillExtrusionPatternInstancedShader" } else { "FillExtrusionPatternWallShader" };
-            self.fill_extrusion_pattern_wall_group = shaders.shader_group(name);
-        }
-
-        let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = &evaluated::<FillExtrusion>(&evaluated_properties).paint;
-
-        let draw_pass = RenderPass::Translucent;
-
-        {
-            let mut tile_layer_group = layer_group.borrow_mut();
-            let base = &self.base;
-            tile_layer_group.remove_drawables_if(|drawable| {
-                // If the render pass has changed or the tile has dropped out
-                // of the cover set, remove it.
-                let tile_id = drawable.tile_id;
-                !drawable.has_render_pass(draw_pass)
-                    || tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
-        }
-
-        let has_pattern = !self.unevaluated.fill_extrusion_pattern.is_undefined();
-        let opaque = *evaluated.fill_extrusion_opacity.uniform() >= 1.0;
-
-        let mut depth_builder: Option<UniqueDrawableBuilder> = None;
-        let mut color_builder: Option<UniqueDrawableBuilder> = None;
-        let mut wall_depth_builder: Option<UniqueDrawableBuilder> = None;
-        let mut wall_color_builder: Option<UniqueDrawableBuilder> = None;
-
-        let (shader_group, wall_shader_group) = if has_pattern {
-            (self.fill_extrusion_pattern_group.clone(), self.fill_extrusion_pattern_wall_group.clone())
-        } else {
-            (self.fill_extrusion_group.clone(), self.fill_extrusion_wall_group.clone())
-        };
-        let (Some(shader_group), Some(wall_shader_group)) = (shader_group, wall_shader_group) else {
-            self.remove_all_drawables();
-            return;
-        };
-
-        {
-            let mut tile_layer_group = layer_group.borrow_mut();
-            tile_layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
-        }
-
-        let static_vertices = Rc::clone(
-            self.static_data_vertices
-                .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_extrusion_vertices())),
-        );
-        let static_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
-            Rc::new(RefCell::new(if instanced_walls {
-                IndexVectorBase::new(RenderStaticData::fill_extrusion_triangle_indices())
-            } else {
-                IndexVectorBase::new_released(RenderStaticData::fill_extrusion_wall_indices())
-            }))
-        }));
-        let instance_vertex_count = static_vertices.get_raw_count();
-
-        let mut properties_as_uniforms: StringIDSetsPair = Default::default();
-        let mut wall_properties_as_uniforms: StringIDSetsPair = Default::default();
-        let layer_id = self.get_id().to_owned();
-        for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
-
-            let style = Arc::clone(&self.base.style);
-            let render_data = super::render_data_for_pass(tile, &*style, draw_pass);
-            let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.remove_tile(draw_pass, &tile_id);
-                continue;
-            };
-
-            let Some(bucket) = (*render_data.bucket).downcast_ref::<FillExtrusionBucket>() else {
-                continue;
-            };
-
-            let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
-            if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
-                // This tile was previously set up from a different bucket,
-                // drop and re-create any drawables for it.
-                self.remove_tile(draw_pass, &tile_id);
+        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        'draw: {
+            if self.base.layer_tweaker.is_none() {
+                self.base.layer_tweaker = Some(Box::new(FillExtrusionLayerTweaker::new(
+                    self.get_id().to_owned(),
+                    Arc::clone(&self.base.evaluated_properties),
+                )));
             }
-            self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
+            let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
 
-            for builder in [&mut depth_builder, &mut color_builder, &mut wall_depth_builder, &mut wall_color_builder]
-                .into_iter()
-                .flatten()
+            if self.fill_extrusion_group.is_none() {
+                self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
+            }
+            if self.fill_extrusion_pattern_group.is_none() {
+                self.fill_extrusion_pattern_group = shaders.shader_group("FillExtrusionPatternShader");
+            }
+            // A device that rasterizes on the CPU draws each wall as a quad of
+            // its own.
+            let instanced_walls = !context.caps().cpu_rasterizer;
+            if self.fill_extrusion_wall_group.is_none() {
+                let name = if instanced_walls { "FillExtrusionInstancedShader" } else { "FillExtrusionWallShader" };
+                self.fill_extrusion_wall_group = shaders.shader_group(name);
+            }
+            if self.fill_extrusion_pattern_wall_group.is_none() {
+                let name = if instanced_walls {
+                    "FillExtrusionPatternInstancedShader"
+                } else {
+                    "FillExtrusionPatternWallShader"
+                };
+                self.fill_extrusion_pattern_wall_group = shaders.shader_group(name);
+            }
+
+            let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
+            let evaluated = &evaluated::<FillExtrusion>(&evaluated_properties).paint;
+
+            let draw_pass = RenderPass::Translucent;
+
             {
-                builder.set_atlases(None);
+                let tile_layer_group = &mut layer_group;
+                let base = &self.base;
+                tile_layer_group.remove_drawables_if(|drawable| {
+                    // If the render pass has changed or the tile has dropped out
+                    // of the cover set, remove it.
+                    let tile_id = drawable.tile_id;
+                    !drawable.has_render_pass(draw_pass)
+                        || tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                });
             }
 
-            let vertex_count = bucket.vertices.len();
-            let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
-                continue;
-            };
-            let binders_guard = binders_lock.read();
-            let binders = &*binders_guard;
-            let geometry = tile.get_bucket_geometry();
+            let has_pattern = !self.unevaluated.fill_extrusion_pattern.is_undefined();
+            let opaque = *evaluated.fill_extrusion_opacity.uniform() >= 1.0;
 
-            // If we already have drawables for this tile, update them.
-            let update_existing = |drawable: &mut crate::drawable::Drawable| {
-                // A drawable produced on a previous style/bucket should not
-                // be updated.
-                drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref())
+            let mut depth_builder: Option<UniqueDrawableBuilder> = None;
+            let mut color_builder: Option<UniqueDrawableBuilder> = None;
+            let mut wall_depth_builder: Option<UniqueDrawableBuilder> = None;
+            let mut wall_color_builder: Option<UniqueDrawableBuilder> = None;
+
+            let (shader_group, wall_shader_group) = if has_pattern {
+                (self.fill_extrusion_pattern_group.clone(), self.fill_extrusion_pattern_wall_group.clone())
+            } else {
+                (self.fill_extrusion_group.clone(), self.fill_extrusion_wall_group.clone())
             };
-            if self.update_tile(draw_pass, &tile_id, update_existing) {
-                continue;
+            let (Some(shader_group), Some(wall_shader_group)) = (shader_group, wall_shader_group) else {
+                layer_group.clear_drawables();
+                break 'draw;
+            };
+
+            {
+                let tile_layer_group = &mut layer_group;
+                tile_layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
             }
 
-            // A wall from each vertex to the next, but from the last, which
-            // ends a ring.
-            let walls = vertex_count.saturating_sub(1);
-            let buffer = &binders.interleaved_vertex_buffer;
-            let depends_on_feature_state = binders.depends_on_feature_state();
-            // The walls' own quads are made of the bucket's vertices and paint
-            // values before those move to the vectors the roofs draw.
-            let quads = (!instanced_walls).then(|| {
-                let vertices = derived_vertices(geometry, bucket, &bucket.vertices, wall_quad_vertices);
-                let paint_of = |paint: &[u8]| wall_quad_paint(paint, buffer.stride, walls);
-                let paint = if depends_on_feature_state {
-                    paint_of(&buffer.shared_vertex_vector.data())
-                } else {
-                    derived_vertices(geometry, bucket, &buffer.shared_vertex_vector, paint_of)
-                };
-                (vertices, paint)
-            });
-
-            // The roofs read the paint values per vertex, the instanced walls
-            // per instance, from the same buffer.
-            let paint = paint_vertices(geometry, bucket, buffer, depends_on_feature_state);
-            let vertices = bucket_vertices(geometry, bucket, &bucket.vertices);
-            let vertex_attrs = VertexAttributeArray::new_ptr();
-            read_paint_properties(
-                &mut vertex_attrs.borrow_mut(),
-                binders,
-                evaluated,
-                &paint,
-                &mut properties_as_uniforms,
+            let static_vertices = Rc::clone(
+                self.static_data_vertices
+                    .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_extrusion_vertices())),
             );
-            let wall_attrs = VertexAttributeArray::new_ptr();
-            let (wall_instance_attrs, wall_vertex_count, wall_segments) =
-                if let Some((quad_vertices, quad_paint)) = &quads {
-                    let mut attrs = wall_attrs.borrow_mut();
-                    read_paint_properties(&mut attrs, binders, evaluated, &paint, &mut wall_properties_as_uniforms);
-                    read_quad_paint(&mut attrs, &paint, quad_paint);
-                    read_wall_quads(&mut attrs, quad_vertices);
-                    (None, 4 * walls, RenderStaticData::fill_extrusion_wall_segments(walls))
+            let static_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
+                Rc::new(RefCell::new(if instanced_walls {
+                    IndexVectorBase::new(RenderStaticData::fill_extrusion_triangle_indices())
                 } else {
-                    let instance_attrs = VertexAttributeArray::new_ptr();
-                    let mut attrs = instance_attrs.borrow_mut();
-                    read_paint_properties(&mut attrs, binders, evaluated, &paint, &mut wall_properties_as_uniforms);
-                    read_wall_instances(&mut wall_attrs.borrow_mut(), &mut attrs, &static_vertices, &vertices);
-                    drop(attrs);
-                    let segments = vec![RenderStaticData::fill_extrusion_segment(walls)];
-                    (Some(instance_attrs), instance_vertex_count, segments)
+                    IndexVectorBase::new_released(RenderStaticData::fill_extrusion_wall_indices())
+                }))
+            }));
+            let instance_vertex_count = static_vertices.get_raw_count();
+
+            let mut properties_as_uniforms: StringIDSetsPair = Default::default();
+            let mut wall_properties_as_uniforms: StringIDSetsPair = Default::default();
+            let layer_id = self.get_id().to_owned();
+            for tile in render_tiles.iter() {
+                let tile_id = *tile.get_overscaled_tile_id();
+
+                let style = Arc::clone(&self.base.style);
+                let render_data = super::render_data_for_pass(tile, &*style, draw_pass);
+                let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
+                    layer_group.remove_drawables(draw_pass, &tile_id);
+                    continue;
                 };
 
-            let variant = self.base.projection_variant;
-            let shader = shader_group.shader(&properties_as_uniforms, variant);
-            let wall_shader = wall_shader_group.shader(&wall_properties_as_uniforms, variant);
+                let Some(bucket) = (*render_data.bucket).downcast_ref::<FillExtrusionBucket>() else {
+                    continue;
+                };
 
-            // The non-pattern path in `render()` only uses two-pass
-            // rendering if there's translucency. The pattern path always
-            // uses two passes.
-            let do_depth_pass = !opaque || has_pattern;
+                let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+                if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
+                    // This tile was previously set up from a different bucket,
+                    // drop and re-create any drawables for it.
+                    layer_group.remove_drawables(draw_pass, &tile_id);
+                }
+                self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
-            if do_depth_pass && depth_builder.is_none() {
-                depth_builder = Some(create_builder(&shader, false));
-            }
-            if color_builder.is_none() {
-                color_builder = Some(create_builder(&shader, true));
-            }
-            if do_depth_pass && wall_depth_builder.is_none() {
-                wall_depth_builder = Some(create_builder(&wall_shader, false));
-            }
-            if wall_color_builder.is_none() {
-                wall_color_builder = Some(create_builder(&wall_shader, true));
-            }
-
-            if has_pattern && let Some(atlases) = tile.get_atlas_textures() {
-                let atlases = Rc::new(DrawableAtlasesTweaker::new(
-                    Some(Rc::clone(atlases)),
-                    None,
-                    Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
-                    /*is_text=*/ false,
-                    false,
-                    AlignmentType::Auto,
-                    false,
-                    false,
-                ));
                 for builder in
                     [&mut depth_builder, &mut color_builder, &mut wall_depth_builder, &mut wall_color_builder]
                         .into_iter()
                         .flatten()
                 {
-                    builder.set_atlases(Some(Rc::clone(&atlases)));
+                    builder.set_atlases(None);
                 }
-            }
 
-            let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
-            {
-                let mut attrs = vertex_attrs.borrow_mut();
-                if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
+                let vertex_count = bucket.vertices.len();
+                let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
+                    continue;
+                };
+                let binders_guard = binders_lock.read();
+                let binders = &*binders_guard;
+                let geometry = tile.get_bucket_geometry();
+
+                // If we already have drawables for this tile, update them.
+                let update_existing = |drawable: &mut crate::drawable::Drawable| {
+                    // A drawable produced on a previous style/bucket should not
+                    // be updated.
+                    drawable.tweaker == tweaker
+                };
+                if update_tile(&mut layer_group, draw_pass, &tile_id, update_existing) {
+                    continue;
+                }
+
+                // A wall from each vertex to the next, but from the last, which
+                // ends a ring.
+                let walls = vertex_count.saturating_sub(1);
+                let buffer = &binders.interleaved_vertex_buffer;
+                let depends_on_feature_state = binders.depends_on_feature_state();
+                // The walls' own quads are made of the bucket's vertices and paint
+                // values before those move to the vectors the roofs draw.
+                let quads = (!instanced_walls).then(|| {
+                    let vertices = derived_vertices(geometry, bucket, &bucket.vertices, wall_quad_vertices);
+                    let paint_of = |paint: &[u8]| wall_quad_paint(paint, buffer.stride, walls);
+                    let paint = if depends_on_feature_state {
+                        paint_of(&buffer.shared_vertex_vector.data())
+                    } else {
+                        derived_vertices(geometry, bucket, &buffer.shared_vertex_vector, paint_of)
+                    };
+                    (vertices, paint)
+                });
+
+                // The roofs read the paint values per vertex, the instanced walls
+                // per instance, from the same buffer.
+                let paint = paint_vertices(geometry, bucket, buffer, depends_on_feature_state);
+                let vertices = bucket_vertices(geometry, bucket, &bucket.vertices);
+                let vertex_attrs = VertexAttributeArray::new_ptr();
+                read_paint_properties(
+                    &mut vertex_attrs.borrow_mut(),
+                    binders,
+                    evaluated,
+                    &paint,
+                    &mut properties_as_uniforms,
+                );
+                let wall_attrs = VertexAttributeArray::new_ptr();
+                let (wall_instance_attrs, wall_vertex_count, wall_segments) =
+                    if let Some((quad_vertices, quad_paint)) = &quads {
+                        let mut attrs = wall_attrs.borrow_mut();
+                        read_paint_properties(&mut attrs, binders, evaluated, &paint, &mut wall_properties_as_uniforms);
+                        read_quad_paint(&mut attrs, &paint, quad_paint);
+                        read_wall_quads(&mut attrs, quad_vertices);
+                        (None, 4 * walls, RenderStaticData::fill_extrusion_wall_segments(walls))
+                    } else {
+                        let instance_attrs = VertexAttributeArray::new_ptr();
+                        let mut attrs = instance_attrs.borrow_mut();
+                        read_paint_properties(&mut attrs, binders, evaluated, &paint, &mut wall_properties_as_uniforms);
+                        read_wall_instances(&mut wall_attrs.borrow_mut(), &mut attrs, &static_vertices, &vertices);
+                        drop(attrs);
+                        let segments = vec![RenderStaticData::fill_extrusion_segment(walls)];
+                        (Some(instance_attrs), instance_vertex_count, segments)
+                    };
+
+                let variant = self.base.projection_variant;
+                let shader = shader_group.shader(&properties_as_uniforms, variant);
+                let wall_shader = wall_shader_group.shader(&wall_properties_as_uniforms, variant);
+
+                // The non-pattern path in `render()` only uses two-pass
+                // rendering if there's translucency. The pattern path always
+                // uses two passes.
+                let do_depth_pass = !opaque || has_pattern;
+
+                if do_depth_pass && depth_builder.is_none() {
+                    depth_builder = Some(create_builder(&shader, false));
+                }
+                if color_builder.is_none() {
+                    color_builder = Some(create_builder(&shader, true));
+                }
+                if do_depth_pass && wall_depth_builder.is_none() {
+                    wall_depth_builder = Some(create_builder(&wall_shader, false));
+                }
+                if wall_color_builder.is_none() {
+                    wall_color_builder = Some(create_builder(&wall_shader, true));
+                }
+
+                if has_pattern && let Some(atlases) = tile.get_atlas_textures() {
+                    let atlases = Rc::new(DrawableAtlasesTweaker::new(
+                        Some(Rc::clone(atlases)),
+                        None,
+                        Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
+                        /*is_text=*/ false,
+                        false,
+                        AlignmentType::Auto,
+                        false,
+                        false,
+                    ));
+                    for builder in
+                        [&mut depth_builder, &mut color_builder, &mut wall_depth_builder, &mut wall_color_builder]
+                            .into_iter()
+                            .flatten()
+                    {
+                        builder.set_atlases(Some(Rc::clone(&atlases)));
+                    }
+                }
+
+                let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
                 {
-                    // offsetof(FillExtrusionLayoutVertex, a1)
-                    attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 0, 0, stride, AttributeDataType::Short2);
+                    let mut attrs = vertex_attrs.borrow_mut();
+                    if let Some(attr) =
+                        attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
+                    {
+                        // offsetof(FillExtrusionLayoutVertex, a1)
+                        attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 0, 0, stride, AttributeDataType::Short2);
+                    }
+                    if let Some(attr) =
+                        attrs.set(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
+                    {
+                        // offsetof(FillExtrusionLayoutVertex, a2)
+                        attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 4, 0, stride, AttributeDataType::UShort2);
+                    }
                 }
-                if let Some(attr) =
-                    attrs.set(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
-                {
-                    // offsetof(FillExtrusionLayoutVertex, a2)
-                    attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 4, 0, stride, AttributeDataType::UShort2);
+
+                if do_depth_pass && let Some(builder) = &mut depth_builder {
+                    builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
+                    builder.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
                 }
-            }
 
-            if do_depth_pass && let Some(builder) = &mut depth_builder {
-                builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-                builder.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
-            }
-
-            if let Some(builder) = &mut color_builder {
-                builder.set_enable_stencil(do_depth_pass);
-                builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-                builder.set_vertex_attributes(Some(vertex_attrs));
-            }
-
-            if do_depth_pass && let Some(builder) = &mut wall_depth_builder {
-                builder.set_raw_vertices(Vec::new(), wall_vertex_count, AttributeDataType::Short2);
-                builder.set_vertex_attributes(Some(Rc::clone(&wall_attrs)));
-                builder.set_instance_attributes(wall_instance_attrs.clone());
-            }
-
-            if let Some(builder) = &mut wall_color_builder {
-                builder.set_enable_stencil(do_depth_pass);
-                builder.set_raw_vertices(Vec::new(), wall_vertex_count, AttributeDataType::Short2);
-                builder.set_vertex_attributes(Some(wall_attrs));
-                builder.set_instance_attributes(wall_instance_attrs);
-            }
-
-            let triangles = bucket_indexes(geometry, bucket, &bucket.triangles);
-            let finish = |builder: &mut DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
-                builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(indexes)), segments);
-
-                builder.flush();
-
-                let mut tile_layer_group = layer_group.borrow_mut();
-                for mut drawable in builder.clear_drawables() {
-                    drawable.tile_id = Some(tile_id);
-                    drawable.type_ = usize::from(has_pattern);
-                    drawable.layer_tweaker = layer_tweaker.clone();
-                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &layer_id));
-                    drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
-
-                    tile_layer_group.add_tile_drawable(draw_pass, &tile_id, drawable);
+                if let Some(builder) = &mut color_builder {
+                    builder.set_enable_stencil(do_depth_pass);
+                    builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
+                    builder.set_vertex_attributes(Some(vertex_attrs));
                 }
-            };
-            let (depth, wall_depth) =
-                if do_depth_pass { (depth_builder.as_mut(), wall_depth_builder.as_mut()) } else { (None, None) };
-            if !bucket.triangles.is_empty() {
-                for builder in [depth, color_builder.as_mut()].into_iter().flatten() {
-                    finish(builder.as_mut(), &triangles, &bucket.triangle_segments);
+
+                if do_depth_pass && let Some(builder) = &mut wall_depth_builder {
+                    builder.set_raw_vertices(Vec::new(), wall_vertex_count, AttributeDataType::Short2);
+                    builder.set_vertex_attributes(Some(Rc::clone(&wall_attrs)));
+                    builder.set_instance_attributes(wall_instance_attrs.clone());
                 }
-            }
-            // A tile with one vertex has no wall.
-            if walls > 0 {
-                for builder in [wall_depth, wall_color_builder.as_mut()].into_iter().flatten() {
-                    finish(builder.as_mut(), &static_indices, &wall_segments);
+
+                if let Some(builder) = &mut wall_color_builder {
+                    builder.set_enable_stencil(do_depth_pass);
+                    builder.set_raw_vertices(Vec::new(), wall_vertex_count, AttributeDataType::Short2);
+                    builder.set_vertex_attributes(Some(wall_attrs));
+                    builder.set_instance_attributes(wall_instance_attrs);
+                }
+
+                let triangles = bucket_indexes(geometry, bucket, &bucket.triangles);
+                let mut finish =
+                    |builder: &mut DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
+                        builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(indexes)), segments);
+
+                        builder.flush();
+
+                        let tile_layer_group = &mut layer_group;
+                        for mut drawable in builder.clear_drawables() {
+                            drawable.tile_id = Some(tile_id);
+                            drawable.type_ = usize::from(has_pattern);
+                            drawable.tweaker = tweaker;
+                            drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &layer_id));
+                            drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
+
+                            tile_layer_group.add_tile_drawable(draw_pass, &tile_id, drawable);
+                        }
+                    };
+                let (depth, wall_depth) =
+                    if do_depth_pass { (depth_builder.as_mut(), wall_depth_builder.as_mut()) } else { (None, None) };
+                if !bucket.triangles.is_empty() {
+                    for builder in [depth, color_builder.as_mut()].into_iter().flatten() {
+                        finish(builder.as_mut(), &triangles, &bucket.triangle_segments);
+                    }
+                }
+                // A tile with one vertex has no wall.
+                if walls > 0 {
+                    for builder in [wall_depth, wall_color_builder.as_mut()].into_iter().flatten() {
+                        finish(builder.as_mut(), &static_indices, &wall_segments);
+                    }
                 }
             }
         }
+        self.base.layer_group = Some(layer_group);
     }
 }
 

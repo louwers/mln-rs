@@ -15,7 +15,7 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::geo::LatLng;
 
-use super::{cast_matrix, check_tweak_drawable_ptr};
+use super::cast_matrix;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -140,6 +140,10 @@ impl HillshadeLayerTweaker {
 }
 
 impl LayerTweaker for HillshadeLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -185,12 +189,12 @@ impl LayerTweaker for HillshadeLayerTweaker {
         let method = method_to_int(*evaluated.hillshade_method.uniform());
         let num_lights = illumination.num_sources() as i32;
 
-        let self_ptr: *const Self = self;
+        let key = self.base.key;
         layer_group.visit_drawables(|drawable| {
             let Some(tile_id) = drawable.tile_id else {
                 return;
             };
-            if !check_tweak_drawable_ptr(drawable, self_ptr) {
+            if !drawable.tweaked_by(key) {
                 return;
             }
 

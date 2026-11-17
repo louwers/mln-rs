@@ -164,9 +164,9 @@ fn issue_9927() {
 /// worker codec sends to evaluate it again.
 fn evaluated_circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
     let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
-    let render_layer = crate::tests::render_layer(layer.style());
-    render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
-    Arc::clone(&render_layer.borrow().base().evaluated_properties)
+    let mut render_layer = crate::tests::render_layer(layer.style());
+    render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
+    Arc::clone(&render_layer.base().evaluated_properties)
 }
 
 // Port-only: tiles whose workers are in worker instances on other threads

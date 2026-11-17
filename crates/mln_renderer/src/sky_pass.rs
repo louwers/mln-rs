@@ -18,7 +18,7 @@ use mln_util::vectors::Vec4;
 
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
-use crate::layer_group::{LayerGroup, LayerGroupPtr};
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::bind_no_projection;
 use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
@@ -32,10 +32,10 @@ fn make_fullscreen_layer_group(
     vertex_attribute: usize,
     is_3d: bool,
     depth_mask: DepthMaskType,
-) -> Option<LayerGroupPtr> {
+) -> Option<LayerGroup> {
     let shader = shader?;
 
-    let layer_group = LayerGroup::plain(0);
+    let mut layer_group = LayerGroup::plain();
 
     let mut builder = DrawableBuilder::boxed();
     builder.set_shader(Some(std::rc::Rc::clone(shader)));
@@ -50,11 +50,8 @@ fn make_fullscreen_layer_group(
     builder.add_quad(-1, -1, 1, 1);
     builder.flush();
 
-    {
-        let mut group = layer_group.borrow_mut();
-        for drawable in builder.clear_drawables() {
-            group.add_drawable(drawable);
-        }
+    for drawable in builder.clear_drawables() {
+        layer_group.add_drawable(drawable);
     }
     Some(layer_group)
 }
@@ -101,8 +98,8 @@ fn color_components(color: &Color) -> [f32; 4] {
 /// after them, against the globe depth prepass, so the planet correctly occludes it.
 #[derive(Default)]
 pub(crate) struct SkyPass {
-    sky_layer_group: Option<LayerGroupPtr>,
-    atmosphere_layer_group: Option<LayerGroupPtr>,
+    sky_layer_group: Option<LayerGroup>,
+    atmosphere_layer_group: Option<LayerGroup>,
     sky_shader: Option<ShaderProgramPtr>,
     atmosphere_shader: Option<ShaderProgramPtr>,
 }
@@ -123,11 +120,11 @@ impl SkyPass {
         light: &EvaluatedLight,
     ) {
         let Some(evaluated) = evaluated.filter(|_| !viewport_size.is_empty()) else {
-            if let Some(sky_layer_group) = &self.sky_layer_group {
-                sky_layer_group.borrow_mut().clear_drawables();
+            if let Some(sky_layer_group) = &mut self.sky_layer_group {
+                sky_layer_group.clear_drawables();
             }
-            if let Some(atmosphere_layer_group) = &self.atmosphere_layer_group {
-                atmosphere_layer_group.borrow_mut().clear_drawables();
+            if let Some(atmosphere_layer_group) = &mut self.atmosphere_layer_group {
+                atmosphere_layer_group.clear_drawables();
             }
             return;
         };
@@ -137,7 +134,7 @@ impl SkyPass {
             if self.sky_shader.is_none() {
                 self.sky_shader = shaders.shader(SKY_SHADER_NAME, ProjectionVariant::Mercator);
             }
-            if self.sky_layer_group.as_ref().is_none_or(|group| group.borrow().empty()) {
+            if self.sky_layer_group.as_ref().is_none_or(LayerGroup::empty) {
                 self.sky_layer_group = make_fullscreen_layer_group(
                     self.sky_shader.as_ref(),
                     ID_SKY_POS_VERTEX_ATTRIBUTE,
@@ -146,7 +143,7 @@ impl SkyPass {
                 );
             }
 
-            if let Some(sky_layer_group) = &self.sky_layer_group {
+            if let Some(sky_layer_group) = &mut self.sky_layer_group {
                 let horizon_distance = state.get_mercator_horizon() * f64::from(pixel_ratio);
                 let roll = state.get_roll();
                 let normal = [(-roll.sin()) as f32, roll.cos() as f32];
@@ -164,18 +161,18 @@ impl SkyPass {
                     sky_horizon_blend: *evaluated.sky_horizon_blend.uniform() * viewport_size.height as f32 * 0.5,
                     sky_blend: projection_transition as f32,
                 };
-                let mut group = sky_layer_group.borrow_mut();
+                let group = sky_layer_group;
                 group.mutable_uniform_buffers().create_or_update_pod(ID_SKY_PROPS_UBO, &props, context);
                 bind_no_projection(group.mutable_uniform_buffers(), context);
             }
-        } else if let Some(sky_layer_group) = &self.sky_layer_group {
-            sky_layer_group.borrow_mut().clear_drawables();
+        } else if let Some(sky_layer_group) = &mut self.sky_layer_group {
+            sky_layer_group.clear_drawables();
         }
 
         let atmosphere_blend = *evaluated.sky_atmosphere_blend.uniform() * projection_transition as f32;
         if !state.is_globe_rendering() || atmosphere_blend <= 0.0 {
-            if let Some(atmosphere_layer_group) = &self.atmosphere_layer_group {
-                atmosphere_layer_group.borrow_mut().clear_drawables();
+            if let Some(atmosphere_layer_group) = &mut self.atmosphere_layer_group {
+                atmosphere_layer_group.clear_drawables();
             }
             return;
         }
@@ -183,7 +180,7 @@ impl SkyPass {
         if self.atmosphere_shader.is_none() {
             self.atmosphere_shader = shaders.shader(ATMOSPHERE_SHADER_NAME, ProjectionVariant::Globe);
         }
-        if self.atmosphere_layer_group.as_ref().is_none_or(|group| group.borrow().empty()) {
+        if self.atmosphere_layer_group.as_ref().is_none_or(LayerGroup::empty) {
             self.atmosphere_layer_group = make_fullscreen_layer_group(
                 self.atmosphere_shader.as_ref(),
                 ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE,
@@ -191,7 +188,7 @@ impl SkyPass {
                 DepthMaskType::ReadOnly,
             );
         }
-        let Some(atmosphere_layer_group) = &self.atmosphere_layer_group else {
+        let Some(atmosphere_layer_group) = &mut self.atmosphere_layer_group else {
             return;
         };
 
@@ -201,24 +198,24 @@ impl SkyPass {
             camera_position: [camera[0] as f32, camera[1] as f32, camera[2] as f32, 0.0],
             sun_position: sun_position(light, state, atmosphere_blend),
         };
-        let mut group = atmosphere_layer_group.borrow_mut();
+        let group = atmosphere_layer_group;
         group.mutable_uniform_buffers().create_or_update_pod(ID_ATMOSPHERE_PROPS_UBO, &props, context);
         bind_no_projection(group.mutable_uniform_buffers(), context);
     }
 
     #[must_use]
-    pub(crate) fn get_sky_layer_group(&self) -> Option<&LayerGroupPtr> {
-        self.sky_layer_group.as_ref()
+    pub(crate) fn sky_layer_group(&mut self) -> Option<&mut LayerGroup> {
+        self.sky_layer_group.as_mut()
     }
 
     #[must_use]
-    pub(crate) fn get_atmosphere_layer_group(&self) -> Option<&LayerGroupPtr> {
-        self.atmosphere_layer_group.as_ref()
+    pub(crate) fn atmosphere_layer_group(&mut self) -> Option<&mut LayerGroup> {
+        self.atmosphere_layer_group.as_mut()
     }
 
     #[must_use]
     pub(crate) fn has_atmosphere(&self) -> bool {
-        self.atmosphere_layer_group.as_ref().is_some_and(|group| !group.borrow().empty())
+        self.atmosphere_layer_group.as_ref().is_some_and(|group| !group.empty())
     }
 }
 

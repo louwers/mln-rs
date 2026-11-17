@@ -31,6 +31,10 @@ impl HillshadePrepareLayerTweaker {
 }
 
 impl LayerTweaker for HillshadePrepareLayerTweaker {
+    fn base(&self) -> &LayerTweakerBase {
+        &self.base
+    }
+
     fn base_mut(&mut self) -> &mut LayerTweakerBase {
         &mut self.base
     }
@@ -43,7 +47,7 @@ impl LayerTweaker for HillshadePrepareLayerTweaker {
         self.base.properties_updated = false;
         crate::layer_tweaker::bind_no_projection(layer_group.mutable_uniform_buffers(), parameters.context);
 
-        let self_ptr: *const Self = self;
+        let key = self.base.key;
         layer_group.visit_drawables(|drawable| {
             let Some(tile_id) = drawable.tile_id else {
                 return;
@@ -52,7 +56,7 @@ impl LayerTweaker for HillshadePrepareLayerTweaker {
                 return;
             };
             let drawable_data = *drawable_data;
-            if !super::check_tweak_drawable_ptr(drawable, self_ptr) {
+            if !drawable.tweaked_by(key) {
                 return;
             }
             let tile_id = tile_id.to_unwrapped();

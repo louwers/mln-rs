@@ -1,7 +1,3 @@
-// The tweakers of the contained layer groups are kept by the orchestrator
-// (see change_request.rs), so `render` runs them through it.
-
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, GpuError, LoadOp, TargetFormats};
@@ -11,43 +7,32 @@ use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType
 use mln_util::Color;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_vec_map::VecMap;
 
 use crate::gfx::attachment::Attachment;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
-use crate::layer_group::LayerGroupPtr;
+use crate::layer_group::LayerGroup;
 use crate::paint_parameters::{OpenPass, PaintParameters};
-use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 
-pub(crate) type RenderTargetPtr = Rc<RefCell<RenderTarget>>;
-
-/// A texture that layer groups draw into ahead of the frame, which other
+/// A texture that a layer group draws into ahead of the frame, which other
 /// drawables sample, with the depth texture the backend draws it with
-/// (`Context::render_target_depth`).
+/// (`Context::render_target_depth`). The layer that owns it draws it.
 pub(crate) struct RenderTarget {
     texture: Texture2DPtr,
     /// Made with the first pass, of the texture's size.
     depth: Option<Attachment>,
     /// The channel type the texture was asked for.
     type_: TextureChannelDataType,
-    layer_groups_by_layer_index: VecMap<i32, LayerGroupPtr>,
+    /// The drawables that draw into the texture.
+    pub(crate) layer_group: LayerGroup,
 }
 
 impl RenderTarget {
-    pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
-        RenderTarget {
-            texture: texture(context, size, type_),
-            depth: None,
-            type_,
-            layer_groups_by_layer_index: VecMap::new(),
-        }
-    }
-
-    /// Creates a shared render target of `size` with channel type `type_`.
-    pub(crate) fn create(context: &Context, size: Size, type_: TextureChannelDataType) -> RenderTargetPtr {
-        Rc::new(RefCell::new(RenderTarget::new(context, size, type_)))
+    /// A render target of `size` with channel type `type_`, whose drawables
+    /// are those of `layer_group`.
+    pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType, layer_group: LayerGroup) -> Self {
+        RenderTarget { texture: texture(context, size, type_), depth: None, type_, layer_group }
     }
 
     /// Get the render target texture
@@ -66,61 +51,24 @@ impl RenderTarget {
         }
     }
 
-    /// Add a layer group to the render target; `replace`: replace if
-    /// exists. Returns whether added.
-    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupPtr, replace: bool) -> bool {
-        let index = layer_group.borrow().layer_index;
-        match self.layer_groups_by_layer_index.entry(index) {
-            mln_vec_map::Entry::Vacant(entry) => {
-                // added
-                entry.insert(layer_group);
-                true
-            }
-            mln_vec_map::Entry::Occupied(mut entry) => {
-                // not added
-                if replace {
-                    entry.insert(layer_group);
-                    true
-                } else {
-                    false
-                }
-            }
-        }
+    /// Uploads the drawables.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        self.layer_group.upload(context);
     }
 
-    /// Get a specific layer group by index, if existent.
-    #[must_use]
-    pub(crate) fn get_layer_group(&self, layer_index: i32) -> Option<&LayerGroupPtr> {
-        self.layer_groups_by_layer_index.get(&layer_index)
-    }
-
-    /// The contained layer groups, in layer index order.
-    #[must_use]
-    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupPtr> {
-        self.layer_groups_by_layer_index.values().cloned().collect()
-    }
-
-    /// Upload the layer groups
-    pub(crate) fn upload(&self, context: &Context) {
-        for layer_group in self.layer_groups_by_layer_index.values() {
-            layer_group.borrow_mut().upload(context);
-        }
-    }
-
-    /// Render the layer groups. `renderTree` is only passed on to
-    /// `runTweakers` in C++; the orchestrator runs them here.
-    pub(crate) fn render(&mut self, orchestrator: &mut RenderOrchestrator, parameters: &mut PaintParameters<'_>) {
-        let layer_groups = self.layer_groups();
-        let num_layer_groups = layer_groups.len();
+    /// Draws the drawables into the texture, after `tweak` sets up their
+    /// uniforms.
+    pub(crate) fn render(
+        &mut self,
+        parameters: &mut PaintParameters<'_>,
+        tweak: impl FnOnce(&mut LayerGroup, &PaintParameters<'_>),
+    ) {
         let num_sublayers = PaintParameters::NUM_SUBLAYERS as usize;
         let depth_epsilon = PaintParameters::DEPTH_EPSILON;
 
         // Run layer tweakers to update any dynamic elements
         parameters.current_layer = 0;
-        for layer_group in &layer_groups {
-            orchestrator.run_tweakers(layer_group, parameters);
-            parameters.current_layer += 1;
-        }
+        tweak(&mut self.layer_group, parameters);
 
         let pass = match self.pass(parameters.context) {
             Ok(pass) => pass,
@@ -139,26 +87,14 @@ impl RenderTarget {
         let prev_scissor_rect = parameters.scissor_rect;
         parameters.scissor_rect = ScissorRect { x: 0, y: 0, width: pass.size.width, height: pass.size.height };
 
-        // draw layer groups, opaque pass
-        parameters.pass = RenderPass::Opaque;
-        parameters.depth_range_size = 1.0 - ((num_layer_groups + 2) * num_sublayers) as f32 * depth_epsilon;
-
-        parameters.current_layer = 0;
-        for layer_group in layer_groups.iter().rev() {
-            layer_group.borrow_mut().render(&mut *gpu, parameters);
-            parameters.current_layer += 1;
-        }
-
-        // draw layer groups, translucent pass
-        parameters.pass = RenderPass::Translucent;
-        parameters.depth_range_size = 1.0 - ((num_layer_groups + 2) * num_sublayers) as f32 * depth_epsilon;
-
-        parameters.current_layer = (num_layer_groups as u32).wrapping_sub(1);
-        for layer_group in &layer_groups {
-            layer_group.borrow_mut().render(&mut *gpu, parameters);
-            if parameters.current_layer > 0 {
-                parameters.current_layer -= 1;
-            }
+        // The one layer group draws in the opaque pass, then the translucent
+        // one.
+        let depth_range_size = 1.0 - (3 * num_sublayers) as f32 * depth_epsilon;
+        for pass in [RenderPass::Opaque, RenderPass::Translucent] {
+            parameters.pass = pass;
+            parameters.depth_range_size = depth_range_size;
+            parameters.current_layer = 0;
+            self.layer_group.render(&mut *gpu, parameters);
         }
 
         if let Err(error) = parameters.end_pass(&mut *gpu) {
