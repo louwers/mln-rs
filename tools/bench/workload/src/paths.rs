@@ -36,17 +36,27 @@ pub enum Path {
     /// moves the tiles in view to other world copies. It ends where it
     /// starts.
     Antimeridian,
+    /// The earthquakes of a month over the world's tiles, around Japan: the
+    /// camera circles central Japan as it zooms from 5 to 8 and back out, so
+    /// the heatmap fades into a circle for each earthquake and back. It ends
+    /// where it starts.
+    Earthquakes,
+    /// San Francisco's hills, tinted by elevation and hillshaded, at zoom 13:
+    /// the camera circles Twin Peaks, turning a quarter turn and back, tilted
+    /// between 30 and 45 degrees. It ends where it starts.
+    Terrain,
 }
 
 impl Path {
-    /// The path named `name`: `street`, `globe` or `antimeridian`.
+    /// Every path.
+    pub const ALL: [Path; 5] = [Path::Street, Path::Globe, Path::Antimeridian, Path::Earthquakes, Path::Terrain];
+
+    /// The path named `name`, such as `street`.
     pub fn parse(name: &str) -> Result<Path, String> {
-        match name {
-            "street" => Ok(Path::Street),
-            "globe" => Ok(Path::Globe),
-            "antimeridian" => Ok(Path::Antimeridian),
-            _ => Err(format!("no camera path {name:?}: street, globe or antimeridian")),
-        }
+        Path::ALL.into_iter().find(|path| path.name() == name).ok_or_else(|| {
+            let names: Vec<&str> = Path::ALL.iter().map(|path| path.name()).collect();
+            format!("no camera path {name:?}: {}", names.join(", "))
+        })
     }
 
     #[must_use]
@@ -55,6 +65,8 @@ impl Path {
             Path::Street => "street",
             Path::Globe => "globe",
             Path::Antimeridian => "antimeridian",
+            Path::Earthquakes => "earthquakes",
+            Path::Terrain => "terrain",
         }
     }
 
@@ -65,6 +77,8 @@ impl Path {
             Path::Street => snapshot.style(Tiles::Street),
             Path::Globe => snapshot.globe_style(),
             Path::Antimeridian => snapshot.style(Tiles::World),
+            Path::Earthquakes => snapshot.earthquakes_style(),
+            Path::Terrain => snapshot.terrain_style(),
         }
     }
 
@@ -75,7 +89,7 @@ impl Path {
                 let (x, y) = tile_at(12, snapshot.area_center(Tiles::Street));
                 tile_center(12, x, y)
             }
-            Path::Globe | Path::Antimeridian => LatLng::default(),
+            Path::Globe | Path::Antimeridian | Path::Earthquakes | Path::Terrain => LatLng::default(),
         };
         move |frame| {
             let t = frame as f64 / FRAMES as f64;
@@ -103,6 +117,27 @@ impl Path {
                         zoom: Some(1.5),
                         bearing: Some(30.0 * t),
                         pitch: Some(30.0 * wave),
+                        ..Default::default()
+                    }
+                }
+                Path::Earthquakes => {
+                    let turn = std::f64::consts::TAU * t;
+                    CameraOptions {
+                        center: Some(LatLng::new(36.5 + 2.0 * turn.sin(), 138.0 + 3.0 * turn.cos()).expect("a center")),
+                        zoom: Some(5.0 + 3.0 * (std::f64::consts::PI * t).sin()),
+                        ..Default::default()
+                    }
+                }
+                Path::Terrain => {
+                    let turn = std::f64::consts::TAU * t;
+                    let wave = (std::f64::consts::PI * t).sin();
+                    CameraOptions {
+                        center: Some(
+                            LatLng::new(37.752 + 0.006 * turn.sin(), -122.447 + 0.008 * turn.cos()).expect("a center"),
+                        ),
+                        zoom: Some(13.0),
+                        bearing: Some(90.0 * wave),
+                        pitch: Some(30.0 + 15.0 * wave),
                         ..Default::default()
                     }
                 }
@@ -152,7 +187,7 @@ mod tests {
 
     #[test]
     fn paths_name_themselves() {
-        for path in [Path::Street, Path::Globe, Path::Antimeridian] {
+        for path in Path::ALL {
             assert_eq!(Path::parse(path.name()), Ok(path));
         }
         assert!(Path::parse("moon").is_err());

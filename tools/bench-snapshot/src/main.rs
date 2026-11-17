@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::fetch::{Download, Found, encode_segment};
-use crate::tiles::{CJK, Encoding, STREET, TileSet, WORLD};
+use crate::tiles::{CJK, Encoding, STREET, TERRAIN, TileSet, WORLD};
 
 /// The OpenFreeMap planet build the tiles come from. The TileJSON at
 /// `https://tiles.openfreemap.org/planet` names the build it serves now by a
@@ -31,6 +31,11 @@ const PLANET: &str = "https://tiles.openfreemap.org/planet/20261115_080022_pt";
 const STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
 /// OpenFreeMap's glyph server, which the style names.
 const GLYPHS: &str = "https://tiles.openfreemap.org/fonts";
+/// Mapterhorn's terrain tiles, which it builds from the best open elevation
+/// data of each area: USGS 3DEP around San Francisco, and Copernicus GLO-30 at
+/// low zooms. Mapterhorn serves only its latest build, so the snapshot holds
+/// the tiles as they were when it was built.
+const TERRAIN_TILES: &str = "https://tiles.mapterhorn.com";
 /// Where the snapshots are published, each under its id.
 const BASE_URL: &str = "https://mlc-data.sargunv.dev/benchmark-fixtures/";
 
@@ -45,6 +50,15 @@ struct Copied {
 const GEOJSON: Copied = Copied {
     path: "geojson/ne_10m_admin_0_countries.geojson",
     url: "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/f1890d9f152c896d250a77557a5751a93d494776/geojson/ne_10m_admin_0_countries.geojson",
+};
+
+/// The earthquakes of October 2026, as the USGS's event service lists them,
+/// oldest first: the data visualization scenarios' points. The service may
+/// revise an event later, so the snapshot holds the list as it was when it
+/// was built.
+const EARTHQUAKES: Copied = Copied {
+    path: "geojson/earthquakes-2026-10.geojson",
+    url: "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2026-10-01&endtime=2026-11-01&orderby=time-asc",
 };
 
 /// Font files, for the text scenarios that shape and rasterize glyphs from a
@@ -195,7 +209,7 @@ fn build(id: &str) -> Result<(), String> {
     for suffix in [".json", ".png", "@2x.json", "@2x.png"] {
         copies.push((format!("{sprite_path}{suffix}"), Download::new(&downloads, format!("{sprite_url}{suffix}"))));
     }
-    for copied in FONTS.iter().chain([&GEOJSON, &STYLE_LICENSE]) {
+    for copied in FONTS.iter().chain([&GEOJSON, &EARTHQUAKES, &STYLE_LICENSE]) {
         copies.push((copied.path.to_owned(), Download::new(&downloads, copied.url.to_owned())));
     }
     fetch_all(&copies.iter().map(|(_, download)| download).collect::<Vec<_>>())?;
@@ -227,6 +241,21 @@ fn build(id: &str) -> Result<(), String> {
     write_archive(out, path, &STREET, Encoding::Mlt, &mlt, &tilejson)?;
     tile_sets.insert("street-mlt".to_owned(), tile_set_entry(&STREET, path, Encoding::Mlt, &mlt));
 
+    // The terrain.
+    let terrain = fetch_terrain(&downloads)?;
+    let path = format!("tiles/{}.pmtiles", TERRAIN.name);
+    let file = out.join(&path);
+    create_parent(&file)?;
+    let metadata = json!({
+        "name": TERRAIN.name,
+        "description": TERRAIN.description,
+        "attribution": "<a href='https://mapterhorn.com/attribution'>© Mapterhorn</a>",
+        "encoding": "terrarium",
+    });
+    tiles::write_archive(&file, &TERRAIN, Encoding::Webp, &terrain, &metadata)?;
+    tiles::check_archive(&file, &terrain)?;
+    tile_sets.insert(TERRAIN.name.to_owned(), tile_set_entry(&TERRAIN, &path, Encoding::Webp, &terrain));
+
     // The style.
     let style_changes = style::localize(&mut liberty, &sprite_path)?;
     let style_file = out.join("styles/liberty.json");
@@ -241,9 +270,10 @@ fn build(id: &str) -> Result<(), String> {
         "base_url": format!("{BASE_URL}{id}/"),
         "description": "The benchmarks' map data: OpenFreeMap's OpenMapTiles vector tiles of central San \
             Francisco (street, and street-mlt as MLT), of the whole world to zoom 4 (world) and of central \
-            Tokyo (cjk), each a PMTiles archive; OpenFreeMap's Liberty style pointed at them, with its sprite \
-            and the glyph ranges the tiles' labels need; Noto Sans font files; and Natural Earth's countries \
-            as GeoJSON. tools/bench-snapshot built it.",
+            Tokyo (cjk), and Mapterhorn's terrain tiles of central San Francisco (terrain), each a PMTiles \
+            archive; OpenFreeMap's Liberty style pointed at them, with its sprite and the glyph ranges the \
+            tiles' labels need; Noto Sans font files; and as GeoJSON, Natural Earth's countries and the USGS's \
+            earthquakes of October 2026. tools/bench-snapshot built it.",
         "attribution": "OpenFreeMap © OpenMapTiles Data from OpenStreetMap",
         "sources": sources(&sprite_url),
         "style_changes": style_changes,
@@ -296,6 +326,35 @@ fn read_json(path: &Path) -> Result<Value, String> {
 fn create_parent(path: &Path) -> Result<(), String> {
     let parent = path.parent().expect("a file's directory");
     std::fs::create_dir_all(parent).map_err(|error| format!("{}: {error}", parent.display()))
+}
+
+/// The terrain tiles over [`TERRAIN`]'s area. A tile Mapterhorn lacks, as
+/// over the sea, is left out; each zoom must have some.
+fn fetch_terrain(downloads: &Path) -> Result<BTreeMap<TileId, Vec<u8>>, String> {
+    let coords = TERRAIN.tiles();
+    let fetches: Vec<Download> = coords
+        .iter()
+        .map(|coord| Download::new(downloads, format!("{TERRAIN_TILES}/{}/{}/{}.webp", coord.z(), coord.x(), coord.y())))
+        .collect();
+    eprintln!("mln-bench-snapshot: {} tiles for {}", coords.len(), TERRAIN.name);
+    let found = fetch::fetch(&fetches.iter().collect::<Vec<_>>())?;
+    let mut tiles = BTreeMap::new();
+    for ((coord, download), found) in coords.iter().zip(&fetches).zip(found) {
+        if found == Found::Missing {
+            continue;
+        }
+        let data = std::fs::read(&download.path).map_err(|error| format!("{}: {error}", download.path.display()))?;
+        if !data.starts_with(b"RIFF") {
+            return Err(format!("{} isn't a WebP image", download.url));
+        }
+        tiles.insert(TileId::from(*coord), data);
+    }
+    for z in 0..=TERRAIN.max_zoom {
+        if !tiles.keys().any(|&id| TileCoord::from(id).z() == z) {
+            return Err(format!("{} has no tile at zoom {z}", TERRAIN.name));
+        }
+    }
+    Ok(tiles)
 }
 
 /// The tiles of `set`, uncompressed, by id. The planet has every tile, so a
@@ -417,6 +476,7 @@ fn tile_set_entry(set: &TileSet, path: &str, encoding: Encoding, tiles: &BTreeMa
         "encoding": match encoding {
             Encoding::Mvt => "mvt",
             Encoding::Mlt => "mlt",
+            Encoding::Webp => "terrarium-webp",
         },
         "description": set.description,
         "area": set.area,
@@ -495,6 +555,22 @@ fn sources(sprite_url: &str) -> Value {
             "files": [GEOJSON.path],
             "origin": "Natural Earth v5.1.2, Admin 0 – Countries at 1:10m (nvkelso/natural-earth-vector)",
             "license": "Public domain (https://www.naturalearthdata.com/about/terms-of-use/).",
+        },
+        {
+            "files": ["tiles/terrain.pmtiles"],
+            "origin": format!("Mapterhorn's terrain tiles, {TERRAIN_TILES}, as served when the snapshot was built"),
+            "license": "Around San Francisco, USGS 3DEP elevation models, public domain (U.S. Government Work); \
+                at low zooms, Copernicus GLO-30 under the Copernicus full, free and open license: © DLR e.V. \
+                2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the \
+                European Union and ESA, all rights reserved. Mapterhorn lists its sources at \
+                https://mapterhorn.com/attribution.",
+            "attribution": "© Mapterhorn",
+        },
+        {
+            "files": [EARTHQUAKES.path],
+            "origin": format!("The USGS's earthquake catalog, {}, as served when the snapshot was built", EARTHQUAKES.url),
+            "license": "Public domain (U.S. Government Work, https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits).",
+            "attribution": "U.S. Geological Survey",
         },
     ])
 }

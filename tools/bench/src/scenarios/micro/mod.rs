@@ -49,6 +49,7 @@ pub(crate) fn tile_data(tiles: Tiles, bytes: &Arc<Vec<u8>>) -> TileData {
     match tiles {
         Tiles::StreetMlt => TileData::Mlt(MltTile::new(Arc::clone(bytes), false)),
         Tiles::Street | Tiles::World | Tiles::Cjk => TileData::Mvt(MvtTile::new(Arc::clone(bytes))),
+        Tiles::Terrain => panic!("the terrain tiles are images, not vector tiles"),
     }
 }
 

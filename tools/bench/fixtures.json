@@ -1,7 +1,7 @@
 {
-  "snapshot": "2026-11-17",
-  "base_url": "https://mlc-data.sargunv.dev/benchmark-fixtures/2026-11-17/",
-  "description": "The benchmarks' map data: OpenFreeMap's OpenMapTiles vector tiles of central San Francisco (street, and street-mlt as MLT), of the whole world to zoom 4 (world) and of central Tokyo (cjk), each a PMTiles archive; OpenFreeMap's Liberty style pointed at them, with its sprite and the glyph ranges the tiles' labels need; Noto Sans font files; and Natural Earth's countries as GeoJSON. tools/bench-snapshot built it.",
+  "snapshot": "2026-11-17b",
+  "base_url": "https://mlc-data.sargunv.dev/benchmark-fixtures/2026-11-17b/",
+  "description": "The benchmarks' map data: OpenFreeMap's OpenMapTiles vector tiles of central San Francisco (street, and street-mlt as MLT), of the whole world to zoom 4 (world) and of central Tokyo (cjk), and Mapterhorn's terrain tiles of central San Francisco (terrain), each a PMTiles archive; OpenFreeMap's Liberty style pointed at them, with its sprite and the glyph ranges the tiles' labels need; Noto Sans font files; and as GeoJSON, Natural Earth's countries and the USGS's earthquakes of October 2026. tools/bench-snapshot built it.",
   "attribution": "OpenFreeMap © OpenMapTiles Data from OpenStreetMap",
   "sources": [
     {
@@ -50,6 +50,22 @@
       ],
       "origin": "Natural Earth v5.1.2, Admin 0 – Countries at 1:10m (nvkelso/natural-earth-vector)",
       "license": "Public domain (https://www.naturalearthdata.com/about/terms-of-use/)."
+    },
+    {
+      "files": [
+        "tiles/terrain.pmtiles"
+      ],
+      "origin": "Mapterhorn's terrain tiles, https://tiles.mapterhorn.com, as served when the snapshot was built",
+      "license": "Around San Francisco, USGS 3DEP elevation models, public domain (U.S. Government Work); at low zooms, Copernicus GLO-30 under the Copernicus full, free and open license: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA, all rights reserved. Mapterhorn lists its sources at https://mapterhorn.com/attribution.",
+      "attribution": "© Mapterhorn"
+    },
+    {
+      "files": [
+        "geojson/earthquakes-2026-10.geojson"
+      ],
+      "origin": "The USGS's earthquake catalog, https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2026-10-01&endtime=2026-11-01&orderby=time-asc, as served when the snapshot was built",
+      "license": "Public domain (U.S. Government Work, https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits).",
+      "attribution": "U.S. Geological Survey"
     }
   ],
   "style_changes": [
@@ -143,6 +159,28 @@
         14
       ],
       "tiles": 250
+    },
+    "terrain": {
+      "archive": "tiles/terrain.pmtiles",
+      "encoding": "terrarium-webp",
+      "description": "Mapterhorn's terrain tiles of central San Francisco, Terrarium-encoded WebP of 512 pixels, zooms 0 to 12",
+      "area": [
+        -122.515,
+        37.705,
+        -122.355,
+        37.815
+      ],
+      "bounds": [
+        -122.607421875,
+        37.57941251343839,
+        -122.255859375,
+        37.92686760148134
+      ],
+      "zooms": [
+        0,
+        12
+      ],
+      "tiles": 120
     }
   },
   "files": [
@@ -165,6 +203,11 @@
       "path": "fonts/NotoSansJP-Regular.otf",
       "size": 4533028,
       "sha256": "dff723ba59d57d136764a04b9b2d03205544f7cd785a711442d6d2d085ac5073"
+    },
+    {
+      "path": "geojson/earthquakes-2026-10.geojson",
+      "size": 8114378,
+      "sha256": "338ec2f3a19d57bcced8ab441441123a2f0cb3cb7015a1e640155094fe40d72f"
     },
     {
       "path": "geojson/ne_10m_admin_0_countries.geojson",
@@ -2690,6 +2733,11 @@
       "path": "tiles/street.pmtiles",
       "size": 20865019,
       "sha256": "45794f80443aeb9c89fae90ad2068ad29984825c75456e2e715a0854342f9140"
+    },
+    {
+      "path": "tiles/terrain.pmtiles",
+      "size": 10027700,
+      "sha256": "8627cd6d8742e5fbd3dd85fd9d469108989f0be50dc589b009cad40eba449636"
     },
     {
       "path": "tiles/world.pmtiles",

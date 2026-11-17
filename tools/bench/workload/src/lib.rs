@@ -12,4 +12,4 @@ pub mod manifest;
 pub mod paths;
 mod snapshot;
 
-pub use snapshot::{Snapshot, Tiles};
+pub use snapshot::{EARTHQUAKES, Snapshot, Tiles};
