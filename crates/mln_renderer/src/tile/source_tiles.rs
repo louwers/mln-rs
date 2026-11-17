@@ -31,7 +31,7 @@ use crate::algorithm::update_tile_masks::update_tile_masks;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
 use crate::tile::contents::Contents;
-use crate::tile::dem::{self, DEMTileNeighbors};
+use crate::tile::dem;
 use crate::tile::job::{JobId, SourceStyle};
 use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{FadeState, Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
@@ -271,16 +271,12 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         if !found && parameters.transform_state.is_globe_rendering() {
             found = self.source.cache_pop_any_wrap(id, self.ctx);
         }
-        let SourceTiles { info, tiles, .. } = &mut *self.source;
+        // A tile cached before the pixel ratio changed lays out again as
+        // it is retained.
         if found {
-            // A tile cached before the pixel ratio changed.
-            let tile = &mut tiles.get_mut(id)?.tile;
-            if tile.pixel_ratio != parameters.pixel_ratio {
-                tile.pixel_ratio = parameters.pixel_ratio;
-                info.set_style(tile, self.ctx, self.style);
-            }
             return Some(*id);
         }
+        let info = &mut self.source.info;
         let params = LayoutParams {
             mode: parameters.mode,
             pixel_ratio: parameters.pixel_ratio,
@@ -291,7 +287,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         };
         let mut tile = info.new_tile(*id, params)?;
         info.start_load(&mut tile, self.ctx);
-        info.set_style(&mut tile, self.ctx, self.style);
+        info.set_style(&mut tile, self.ctx, self.style, parameters.pixel_ratio, parameters.subdivision_granularity);
         self.source.insert(tile);
         Some(*id)
     }
@@ -322,11 +318,10 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         // A new pixel ratio lays the tile out again, without the relayout
         // that drops the cached tiles.
         let parameters = self.update.parameters;
-        let pixel_ratio_changed = tile.kind == TileKind::Geometry && tile.pixel_ratio != parameters.pixel_ratio;
-        tile.pixel_ratio = parameters.pixel_ratio;
+        let pixel_ratio_changed =
+            tile.pipeline.layout().is_some_and(|layout| layout.params().pixel_ratio != parameters.pixel_ratio);
         if self.needs_relayout || pixel_ratio_changed {
-            tile.granularity = parameters.subdivision_granularity;
-            info.set_style(tile, self.ctx, self.style);
+            info.set_style(tile, self.ctx, self.style, parameters.pixel_ratio, parameters.subdivision_granularity);
         }
     }
 
@@ -464,25 +459,17 @@ impl SourceTiles {
         }
     }
 
-    /// Backfills the borders of DEM tile `id` and of its loaded neighbours
-    /// from each other.
-    fn backfill_dem(&mut self, id: &OverscaledTileID) {
-        let Some(mut slot) = self.tiles.remove(id) else {
+    /// Backfills the borders of DEM tile `id` and of its renderable
+    /// neighbours from each other.
+    fn backfill_dem(&self, id: &OverscaledTileID) {
+        let Some(tile) = self.tile(id).filter(|tile| tile.is_renderable()) else {
             return;
         };
-        let tile = &mut slot.tile;
-        if tile.is_renderable() && tile.dem_neighbors != DEMTileNeighbors::COMPLETE {
-            // Only the neighbours not backfilled before.
-            for mask in dem::masks() {
-                if tile.dem_neighbors.has(mask) {
-                    continue;
-                }
-                if let Some(border) = self.tiles.get_mut(&dem::neighbor(&tile.id, mask)) {
-                    dem::backfill_pair(tile, &mut border.tile, mask);
-                }
+        for (offset, neighbor) in dem::neighbors(id) {
+            if let Some(border) = self.tile(&neighbor) {
+                dem::backfill_pair(tile, border, offset);
             }
         }
-        self.tiles.insert(*id, slot);
     }
 
     /// Updates the source's cover for the view in `update`'s parameters:
@@ -786,9 +773,7 @@ impl SourceTiles {
                 self.rendered.iter().map(|(id, entry)| (*id, entry.needs_rendering)).collect();
             let masks = update_tile_masks(&renderables);
             for (entry, mask) in self.rendered.values().zip(masks) {
-                if let (Some(mask), Some(contents)) =
-                    (mask, self.tile(&entry.key).and_then(|tile| tile.contents.as_deref()))
-                {
+                if let (Some(mask), Some(contents)) = (mask, self.tile(&entry.key).and_then(Tile::contents)) {
                     contents.set_mask(mask);
                 }
             }
@@ -810,7 +795,7 @@ impl SourceTiles {
             }
         }
         if !expression_layers.is_empty() {
-            let contents = self.cover().filter_map(|tile| tile.contents.as_deref());
+            let contents = self.cover().filter_map(Tile::contents);
             for contents in contents {
                 for layer in &expression_layers {
                     if let Some(bucket) = contents.get_bucket(*layer) {
@@ -973,7 +958,7 @@ impl SourceTiles {
         let keys: BTreeSet<OverscaledTileID> = self.rendered.values().map(|entry| entry.key).collect();
         let SourceTiles { info, tiles, .. } = self;
         info.feature_state.coalesce_changes(
-            tiles.values_mut().filter(|slot| keys.contains(&slot.tile.id)).map(|slot| &mut slot.tile),
+            tiles.values_mut().filter(|slot| keys.contains(&slot.tile.id)).filter_map(|slot| slot.tile.shown.as_mut()),
         );
     }
 
@@ -1133,7 +1118,7 @@ impl SourceTiles {
             let Some(tile) = self.tile(key) else {
                 continue;
             };
-            let Some(contents) = tile.contents.as_deref().and_then(Contents::geometry) else {
+            let Some(contents) = tile.contents().and_then(Contents::geometry) else {
                 continue;
             };
 
@@ -1239,7 +1224,7 @@ impl SourceTiles {
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         let mut result = Vec::new();
         for tile in self.cover() {
-            if let Some(contents) = tile.contents.as_deref().and_then(Contents::geometry) {
+            if let Some(contents) = tile.contents().and_then(Contents::geometry) {
                 contents.query_source_features(&tile.id, self.info.single_layer, &mut result, options, global_state)?;
             }
         }
@@ -1365,7 +1350,7 @@ impl SourceTiles {
 
     pub(crate) fn dump_debug_logs(&self) {
         for tile in self.cover() {
-            tile.dump_debug_logs();
+            tile.dump_debug_logs(self.info.kind);
         }
     }
 
@@ -1432,6 +1417,7 @@ mod tests {
     use crate::layout::tile_layout::LayoutParams;
     use crate::tile::job::SourceKey;
     use crate::tile::loading::{Load, OriginLoad};
+    use crate::tile::pipeline::Pipeline;
     use crate::tile::store::SourceInfo;
     use crate::tile::tile::{FadeState, Tile, TileKind, TileNecessity};
 
@@ -1451,7 +1437,7 @@ mod tests {
             capture_rendered_features: false,
         };
         let load = Load { necessity: TileNecessity::Optional, origin: OriginLoad::GeoJson { load: None } };
-        source.insert(Tile::new(key, TileKind::Geometry, 1, load, params));
+        source.insert(Tile::new(key, load, Pipeline::new(TileKind::Geometry, 1, params)));
         let ideal = key.to_unwrapped();
         let held = UnwrappedTileID::with_wrap(1, key.canonical);
         source.rendered.insert(ideal, Rendered::ideal(key));

@@ -9,7 +9,6 @@ use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::geometry::dem_data::DEMData;
 use crate::tests::OneTile;
 use crate::tile::contents::Contents;
-use crate::tile::dem::DEMTileNeighbors;
 use crate::tile::job::JobResult;
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::InlineWorkers;
@@ -22,7 +21,7 @@ fn tiles(test: &RasterTileTest) -> OneTile {
 
 /// The bucket of the DEM tile `id` shows.
 fn dem(tiles: &OneTile, id: &OverscaledTileID) -> Option<std::sync::Arc<HillshadeBucket>> {
-    match tiles.tile_at(id).contents.as_deref() {
+    match tiles.tile_at(id).contents() {
         Some(Contents::Dem(bucket)) => Some(std::sync::Arc::clone(bucket)),
         _ => None,
     }
@@ -137,9 +136,6 @@ fn decode_and_backfill_through_the_codec() {
         assert_eq!((dem.dim, dem.stride, dem.encoding), (16, 18, RasterEncoding::Mapbox));
     }
 
-    let neighbors = tiles.tile_at(&ids[0]).dem_neighbors;
-    assert_eq!(neighbors & DEMTileNeighbors::RIGHT, DEMTileNeighbors::RIGHT);
-    assert_eq!(tiles.tile_at(&ids[1]).dem_neighbors & DEMTileNeighbors::LEFT, DEMTileNeighbors::LEFT);
     let (left, right) = (dem(&tiles, &ids[0]).unwrap(), dem(&tiles, &ids[1]).unwrap());
     for y in 0..16 {
         assert_eq!(left.get_dem_data().get(16, y), right.get_dem_data().get(0, y));

@@ -188,7 +188,8 @@ impl OneTile {
             necessity: crate::tile::tile::TileNecessity::Optional,
             origin: crate::tile::loading::OriginLoad::GeoJson { load: None },
         };
-        let tile = crate::tile::tile::Tile::new(id, source.info.kind, generation, load, params);
+        let pipeline = crate::tile::pipeline::Pipeline::new(source.info.kind, generation, params);
+        let tile = crate::tile::tile::Tile::new(id, load, pipeline);
         source.insert(tile);
     }
 
@@ -198,7 +199,12 @@ impl OneTile {
 
     /// The layout parameters of the tile.
     pub(crate) fn tile_params(&self) -> crate::layout::tile_layout::LayoutParams {
-        self.tile().params
+        *self.layout().params()
+    }
+
+    /// The layout of the tile, a geometry tile.
+    pub(crate) fn layout(&self) -> &crate::tile::pipeline::Layout {
+        self.tile().pipeline.layout().expect("a geometry tile")
     }
 
     pub(crate) fn tile_at(&self, id: &mln_tile_id::OverscaledTileID) -> &crate::tile::tile::Tile {
@@ -233,20 +239,33 @@ impl OneTile {
     }
 
     pub(crate) fn set_style(&mut self, style: &std::sync::Arc<crate::tile::job::SourceStyle>) {
-        self.with(|info, tile, ctx| info.set_style(tile, ctx, style));
+        let id = self.id;
+        self.set_style_at(&id, style);
+    }
+
+    /// Lays tile `id` out with `style`, for the source's parameters.
+    pub(crate) fn set_style_at(
+        &mut self,
+        id: &mln_tile_id::OverscaledTileID,
+        style: &std::sync::Arc<crate::tile::job::SourceStyle>,
+    ) {
+        let params = self.params();
+        self.with_at(id, |info, tile, ctx| {
+            info.set_style(tile, ctx, style, params.pixel_ratio, params.subdivision_granularity);
+        });
     }
 
     /// Gives a geometry tile `data`, as a load of its own.
     pub(crate) fn set_data(&mut self, data: Option<mln_tile::TileData>) {
         self.with(|info, tile, ctx| {
-            info.set_data(tile, ctx, crate::tile::tile::TileInput::Geometry { data, missing: false }, false);
+            info.set_data(tile, ctx, crate::tile::tile::TileInput::Geometry { data, missing: false });
         });
     }
 
     /// Gives raster tile `id` the image `data`, as a load of its own.
     pub(crate) fn set_image(&mut self, id: &mln_tile_id::OverscaledTileID, data: Option<mln_storage::Data>) {
         self.with_at(id, |info, tile, ctx| {
-            info.set_data(tile, ctx, crate::tile::tile::TileInput::Image(data), false);
+            info.set_data(tile, ctx, crate::tile::tile::TileInput::Image { data, missing: false });
         });
     }
 
@@ -254,15 +273,15 @@ impl OneTile {
     /// tile there.
     pub(crate) fn set_missing(&mut self, id: &mln_tile_id::OverscaledTileID) {
         self.with_at(id, |info, tile, ctx| {
-            let input = match tile.kind {
+            let input = match info.kind {
                 crate::tile::tile::TileKind::Geometry => {
                     crate::tile::tile::TileInput::Geometry { data: None, missing: true }
                 }
                 crate::tile::tile::TileKind::Raster | crate::tile::tile::TileKind::Dem(_) => {
-                    crate::tile::tile::TileInput::Image(None)
+                    crate::tile::tile::TileInput::Image { data: None, missing: true }
                 }
             };
-            info.set_data(tile, ctx, input, true);
+            info.set_data(tile, ctx, input);
         });
     }
 
@@ -285,7 +304,7 @@ impl OneTile {
 
     /// Whether the tile shows a layout.
     pub(crate) fn shows_layout(&self) -> bool {
-        self.tile().contents.as_deref().and_then(crate::tile::contents::Contents::geometry).is_some()
+        self.tile().contents().and_then(crate::tile::contents::Contents::geometry).is_some()
     }
 
     /// Lets go of the tile, as its source does when it leaves the cache.

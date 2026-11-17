@@ -198,7 +198,7 @@ fn update_through_the_codec() {
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
     let mut tiles = test.tiles(point_data(), &ids, workers, false);
     for id in &ids {
-        tiles.with_at(id, |info, tile, ctx| info.set_style(tile, ctx, &style(std::slice::from_ref(&layer_properties))));
+        tiles.set_style_at(id, &style(std::slice::from_ref(&layer_properties)));
     }
     test.settle(&mut tiles, &ids);
     for id in &ids {

@@ -19,16 +19,17 @@ use parking_lot::Mutex;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
+use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
-use crate::tests::tile::png;
+use crate::tests::tile::{dem_png, png};
 use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
-use crate::tile::dem::DEMTileNeighbors;
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, Job, Run, TileKey};
 use crate::tile::loading::{DataOrigin, OriginLoad, VectorTileEncoding};
-use crate::tile::tile::{TileKind, TileNecessity, WorkState};
+use crate::tile::pipeline::LayoutWork;
+use crate::tile::tile::{TileKind, TileNecessity};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
 
 /// A file source whose requests wait until the test answers them.
@@ -192,8 +193,8 @@ fn a_not_modified_reload_keeps_the_data() {
     manual.run();
     tile.update();
     assert!(tile.tile().is_complete());
-    let key = tile.tile().data.as_ref().expect("data").key;
-    let shown = std::rc::Rc::clone(tile.tile().contents.as_ref().expect("contents"));
+    let key = tile.layout().data().expect("data").key;
+    let shown = std::rc::Rc::clone(&tile.tile().shown.as_ref().expect("contents").contents);
 
     // Required again, the tile revalidates its data.
     tile.set_necessity(&id, TileNecessity::Optional);
@@ -206,9 +207,9 @@ fn a_not_modified_reload_keeps_the_data() {
     file_source.respond(response);
     tile.update();
     assert!(requesting_network(&tile, false));
-    assert_eq!(tile.tile().data.as_ref().expect("data").key, key, "the same data");
+    assert_eq!(tile.layout().data().expect("data").key, key, "the same data");
     assert_eq!(manual.submitted(), 1, "nothing to lay out again");
-    assert!(std::rc::Rc::ptr_eq(tile.tile().contents.as_ref().expect("contents"), &shown));
+    assert!(std::rc::Rc::ptr_eq(&tile.tile().shown.as_ref().expect("contents").contents, &shown));
     assert!(tile.tile().is_complete());
 }
 
@@ -242,7 +243,7 @@ fn eviction_and_revival_while_a_job_is_in_flight() {
     manual.reply(InlineWorkers::run(new));
     tile.update();
     assert!(tile.shows_layout());
-    let Some(Contents::Geometry(contents)) = tile.tile().contents.as_deref() else {
+    let Some(Contents::Geometry(contents)) = tile.tile().contents() else {
         panic!("a layout");
     };
     let Some(TileData::Features(shown)) = contents.result.feature_index.get_data() else {
@@ -265,11 +266,11 @@ fn a_tile_leaving_the_cover_while_waiting_then_edited_then_revived() {
     manual.run();
     // No sprite yet: the tile waits for its image.
     tile.update();
-    assert!(matches!(tile.tile().work, WorkState::Waiting(_)));
+    assert!(matches!(tile.layout().work(), LayoutWork::Waiting(_)));
 
     let edited = style(&[icons(&json!("late"), 2.0)]);
     tile.set_style(&edited);
-    assert!(matches!(tile.tile().work, WorkState::Outdated), "the wait is gone");
+    assert!(matches!(tile.layout().work(), LayoutWork::Outdated), "the wait is gone");
     tile.store.images_mut().add_image(super::tile_jobs_test::image("late"));
     tile.store.images_mut().set_loaded(true);
     tile.update();
@@ -319,17 +320,18 @@ fn queries_and_feature_state_read_the_shown_contents() {
     source.info.feature_state.update_state(None, "1", &state);
     source.coalesce_feature_state();
     let version = source.info.feature_state.version();
+    let shown_version = |tile: &OneTile| tile.tile().shown.as_ref().expect("contents").feature_state_version;
     // Not rendered, so the coalesce left it.
-    assert_eq!(tile.tile().feature_state_version, 0);
+    assert_eq!(shown_version(&tile), 0);
     tile.with(|info, tile, _| {
-        info.feature_state.coalesce_changes(std::iter::once(tile));
+        info.feature_state.coalesce_changes(tile.shown.as_mut());
     });
-    assert_eq!(tile.tile().feature_state_version, version);
+    assert_eq!(shown_version(&tile), version);
 
     manual.run();
     tile.update();
     assert_eq!(query(&tile), [feature::Identifier::Uint(2)]);
-    assert_eq!(tile.tile().feature_state_version, version, "the new layout got the state as it installed");
+    assert_eq!(shown_version(&tile), version, "the new layout got the state as it installed");
 }
 
 /// Data that a GeoJSON source or a custom source sends a tile that went
@@ -357,14 +359,14 @@ fn source_data_racing_eviction() {
     };
     inbox.send(event(old_load, &[1]));
     tile.update();
-    assert!(tile.tile().data.is_none(), "the old tile's data goes nowhere");
+    assert!(tile.layout().data().is_none(), "the old tile's data goes nowhere");
     inbox.send(TileEvent::Data { tile: TileKey { source: key, id }, load: old_load, data: SourceData::Stale });
     inbox.send(event(new_load, &[2]));
     // One update starts the layout, whose reply the next takes in.
     tile.update();
     tile.update();
     assert!(tile.shows_layout());
-    let Some(data) = tile.tile().data.as_ref().and_then(|loaded| loaded.data().cloned()) else {
+    let Some(data) = tile.layout().data().and_then(|loaded| loaded.data.clone()) else {
         panic!("data");
     };
     let TileData::Features(features) = data else {
@@ -420,7 +422,7 @@ fn style_replaced_mid_load() {
     tile.store.inbox().send(TileEvent::Response { tile: TileKey { source: old_key, id }, load: 1, response: water() });
     tile.update();
     assert!(tile.store.source(old_key).is_none());
-    assert!(tile.tile().contents.is_none() && tile.tile().data.is_none() && requesting_network(&tile, false));
+    assert!(tile.tile().contents().is_none() && tile.layout().data().is_none() && requesting_network(&tile, false));
     assert_eq!(manual.submitted(), 1, "nothing for the new tile yet");
 
     tile.set_necessity(&id, TileNecessity::Required);
@@ -446,22 +448,11 @@ fn dem_backfill_as_dems_arrive() {
     tiles.update();
     tiles.update();
     assert!(tiles.tile_at(&right).is_renderable());
-    assert_eq!(tiles.tile_at(&right).dem_neighbors & DEMTileNeighbors::LEFT, DEMTileNeighbors::EMPTY);
 
     tiles.set_image(&left, Some(png(16, 16)));
     tiles.update();
     tiles.update();
-    assert_eq!(tiles.tile_at(&left).dem_neighbors & DEMTileNeighbors::RIGHT, DEMTileNeighbors::RIGHT);
-    assert_eq!(tiles.tile_at(&right).dem_neighbors & DEMTileNeighbors::LEFT, DEMTileNeighbors::LEFT);
-    let dem = |id: &OverscaledTileID| match tiles.tile_at(id).contents.as_deref() {
-        Some(Contents::Dem(bucket)) => Arc::clone(bucket),
-        _ => panic!("a DEM"),
-    };
-    let (left_dem, right_dem) = (dem(&left), dem(&right));
-    for y in 0..16 {
-        assert_eq!(left_dem.get_dem_data().get(16, y), right_dem.get_dem_data().get(0, y));
-        assert_eq!(right_dem.get_dem_data().get(-1, y), left_dem.get_dem_data().get(15, y));
-    }
+    assert_borders_match(&tiles, &left, &right);
 
     // The world's one tile at zoom 0 is in the first and the last row.
     let store = tile_store(&test.run_loop, &test.pool, Box::new(InlineWorkers));
@@ -471,6 +462,53 @@ fn dem_backfill_as_dems_arrive() {
     root_tile.update();
     root_tile.update();
     assert!(root_tile.tile().is_renderable());
+}
+
+/// The DEMs of tiles `left` and `right`, neighbours in a row.
+fn dems(tiles: &OneTile, left: &OverscaledTileID, right: &OverscaledTileID) -> [Arc<HillshadeBucket>; 2] {
+    [left, right].map(|id| match tiles.tile_at(id).contents() {
+        Some(Contents::Dem(bucket)) => Arc::clone(bucket),
+        _ => panic!("a DEM"),
+    })
+}
+
+/// Asserts that each of the DEMs of `left` and `right` has the other's edge
+/// as its border.
+fn assert_borders_match(tiles: &OneTile, left: &OverscaledTileID, right: &OverscaledTileID) {
+    let [left_dem, right_dem] = dems(tiles, left, right);
+    let (left_dem, right_dem) = (left_dem.get_dem_data(), right_dem.get_dem_data());
+    for y in 0..16 {
+        assert_eq!(left_dem.get(16, y), right_dem.get(0, y), "row {y} of the left tile's border");
+        assert_eq!(right_dem.get(-1, y), left_dem.get(15, y), "row {y} of the right tile's border");
+    }
+}
+
+/// A DEM that reloads with other heights refills its border from its
+/// neighbours, and theirs from it, as at its first load.
+#[test]
+fn a_reloaded_dem_refills_both_borders() {
+    let test = Test::new();
+    let store = tile_store(&test.run_loop, &test.pool, Box::new(InlineWorkers));
+    let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
+    let mut tiles = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), right, MapMode::Static);
+    tiles.add(left);
+    for id in [left, right] {
+        tiles.set_image(&id, Some(dem_png(1)));
+        tiles.update();
+        tiles.update();
+    }
+    assert_borders_match(&tiles, &left, &right);
+    let edge = |tiles: &OneTile| -> Vec<i32> {
+        let [_, right_dem] = dems(tiles, &left, &right);
+        (0..16).map(|y| right_dem.get_dem_data().get(0, y)).collect()
+    };
+    let before = edge(&tiles);
+
+    tiles.set_image(&right, Some(dem_png(2)));
+    tiles.update();
+    tiles.update();
+    assert_ne!(edge(&tiles), before, "the reload has other heights");
+    assert_borders_match(&tiles, &left, &right);
 }
 
 /// Data that arrives in the inbox starts its tile's job in the update that
@@ -521,7 +559,7 @@ fn a_relayout_keeps_only_the_bins_it_uses() {
     }
     tile.update();
     let icons = |tile: &OneTile| -> (Vec<String>, usize) {
-        let Some(Contents::Geometry(contents)) = tile.tile().contents.as_deref() else {
+        let Some(Contents::Geometry(contents)) = tile.tile().contents() else {
             panic!("a layout");
         };
         let mut ids: Vec<String> = contents.answer.resolved.icons.keys().cloned().collect();

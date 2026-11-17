@@ -1,10 +1,9 @@
 //! A tile: plain data the tile store owns and changes through `&mut`. Its
-//! data, its work and its contents are separate fields, since a tile shows
-//! its last contents while newer data or work is pending.
+//! load, its pipeline and what it shows are separate fields, since a tile
+//! shows its last contents while newer data or work is pending.
 
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_map_types::MapMode;
@@ -12,17 +11,11 @@ use mln_storage::Data;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::logging::{Event, Log};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecSet;
 
-use crate::image_store::ImageWait;
-use crate::layout::tile_layout::{Dependencies, LayoutParams};
-use crate::text::glyph_store::GlyphWait;
-use crate::tile::contents::{Answer, Contents};
-use crate::tile::dem::DEMTileNeighbors;
-use crate::tile::job::{DataKey, JobId, SourceStyle};
+use crate::layout::tile_layout::Dependencies;
+use crate::tile::contents::Contents;
 use crate::tile::loading::Load;
-use crate::tile::tile_workers::Lane;
+use crate::tile::pipeline::{Layout, Pipeline};
 
 /// Tiles can have two states: optional or required.
 /// - optional means that only low-cost actions should be taken to obtain
@@ -114,112 +107,43 @@ pub(crate) enum TileKind {
     Dem(mln_util::tileset::RasterEncoding),
 }
 
-/// What a job reads: the data of one load. The store keeps a geometry
-/// tile's until the tile drops, and a raster tile's until its decode
-/// replies, so a job whose lane is lost can always run again.
+/// What a load delivers: the data of a geometry tile, or the image of a
+/// raster or raster-dem tile. `missing`: the tileset has no tile here, so a
+/// tile of another zoom level draws in its place.
 pub(crate) enum TileInput {
     /// `data` is `None` for a tile without any (204, no tile in an archive).
-    /// `missing`: the tileset has no tile here, so a tile of another zoom
-    /// level draws in its place.
     Geometry { data: Option<TileData>, missing: bool },
-    /// The image to decode, until its decode replies.
-    Image(Option<Data>),
+    /// `data` is `None` for a tile without an image, which shows nothing.
+    Image { data: Option<Data>, missing: bool },
 }
 
-/// The data of one load: what the tile's jobs read, apart from the load
-/// that brought it, so a reload keeps laying out and showing it.
-pub(crate) struct Loaded {
-    pub(crate) key: DataKey,
-    pub(crate) input: TileInput,
+/// What a tile shows, and what is known of it.
+pub(crate) struct Shown {
+    /// `Rc` while frames draw it too.
+    pub(crate) contents: Rc<Contents>,
+    /// The [`SourceFeatureState`](crate::source_state::SourceFeatureState)
+    /// version the contents' buckets hold; 0 for buckets that have none.
+    pub(crate) feature_state_version: u64,
+    /// The layout's answer resolved glyphs or images that changed since: no
+    /// first try starts with it.
+    pub(crate) answer_outdated: bool,
 }
 
-impl Loaded {
-    /// The geometry data, if the load has any.
-    pub(crate) fn data(&self) -> Option<&TileData> {
-        match &self.input {
-            TileInput::Geometry { data, .. } => data.as_ref(),
-            TileInput::Image(_) => None,
-        }
-    }
-
-    fn missing(&self) -> bool {
-        matches!(self.input, TileInput::Geometry { missing: true, .. })
+impl Shown {
+    /// `contents`, as installed: up to date.
+    pub(crate) fn new(contents: Contents, feature_state_version: u64) -> Self {
+        Shown { contents: Rc::new(contents), feature_state_version, answer_outdated: false }
     }
 }
 
-/// A job in flight, of the tile's current generation or (when stale) an
-/// earlier one.
-pub(crate) struct Running {
-    pub(crate) id: JobId,
-    pub(crate) lane: Lane,
-    /// The job is a resume, whose `answer` resolves `known`.
-    pub(crate) known: Option<Dependencies>,
-    pub(crate) answer: Answer,
-    /// The images that exist, as the job got them.
-    pub(crate) images: Arc<VecSet<String>>,
-    pub(crate) superseded: Arc<AtomicBool>,
-}
-
-/// A wait for the stores to resolve a job's dependencies.
-#[derive(Default)]
-pub(crate) struct DependencyWait {
-    pub(crate) glyphs: GlyphWait,
-    pub(crate) images: ImageWait,
-    /// The stores' revisions at the last try, which only another revision
-    /// can change the outcome of.
-    pub(crate) revisions: Option<(u64, u64)>,
-}
-
-/// A job that answered `NeedsDeps`: the tile waits for the stores.
-pub(crate) struct Waiting {
-    pub(crate) lane: Lane,
-    pub(crate) needs: Dependencies,
-    pub(crate) wait: DependencyWait,
-    /// The images the job got, which its resume discovers with again.
-    pub(crate) images: Arc<VecSet<String>>,
-}
-
-/// The next job, ready but waiting for a lane with room: a resume with its
-/// answer, or a job sent again with its data.
-pub(crate) struct Next {
-    /// The lane of the job before, for a resume.
-    pub(crate) lane: Option<Lane>,
-    pub(crate) known: Option<Dependencies>,
-    pub(crate) answer: Answer,
-    /// The images the job before got, which a resume discovers with again;
-    /// `None` for a first try, which gets the images as they are.
-    pub(crate) images: Option<Arc<VecSet<String>>>,
-}
-
-/// Where a tile's work stands.
-pub(crate) enum WorkState {
-    /// Nothing to do for this generation: the tile shows its contents,
-    /// failed, or waits for the data or style it lacks.
-    Current,
-    /// The generation has no job yet.
-    Outdated,
-    Running(Running),
-    Waiting(Waiting),
-    Ready(Next),
-}
-
-impl WorkState {
-    /// The dependencies the work names, apart from what the tile shows.
-    pub(crate) fn dependencies(&self) -> Option<&Dependencies> {
-        match self {
-            WorkState::Running(Running { known, .. }) | WorkState::Ready(Next { known, .. }) => known.as_ref(),
-            WorkState::Waiting(Waiting { needs, .. }) => Some(needs),
-            WorkState::Current | WorkState::Outdated => None,
-        }
+impl crate::source_state::FeatureStateTarget for Shown {
+    fn feature_state_version(&mut self) -> &mut u64 {
+        &mut self.feature_state_version
     }
 
-    /// The lane the work holds a place on, or whose worker keeps its state.
-    pub(crate) fn lane(&self) -> Option<Lane> {
-        match self {
-            WorkState::Running(Running { lane, .. })
-            | WorkState::Waiting(Waiting { lane, .. })
-            | WorkState::Ready(Next { lane: Some(lane), .. }) => Some(*lane),
-            WorkState::Current | WorkState::Outdated | WorkState::Ready(_) => None,
+    fn set_feature_state(&self, states: &crate::bucket::LayerFeatureStates) {
+        if let Some(contents) = self.contents.geometry() {
+            contents.set_feature_state(states);
         }
     }
 }
@@ -266,95 +190,38 @@ impl FadeState {
 /// A tile of a source.
 pub(crate) struct Tile {
     pub(crate) id: OverscaledTileID,
-    pub(crate) kind: TileKind,
-    /// The generation of the tile's inputs, from its source's counter.
-    pub(crate) generation: u64,
-    /// The data the tile lays out or decodes, from its last load.
-    pub(crate) data: Option<Loaded>,
-    pub(crate) work: WorkState,
-    /// What the tile draws; `Rc` while frames draw it too.
-    pub(crate) contents: Option<Rc<Contents>>,
+    /// Where the tile's data comes from, and how much it is needed.
+    pub(crate) load: Load,
+    /// How the tile's data becomes its contents.
+    pub(crate) pipeline: Pipeline,
+    /// What the tile draws.
+    pub(crate) shown: Option<Shown>,
     /// The tile has had a response, a layout or an error since it last
     /// started loading: it has exhausted what it can do for now.
     pub(crate) loaded: bool,
-    /// Where the tile's data comes from, and how much it is needed.
-    pub(crate) load: Load,
-
-    // Layout inputs, for a geometry tile.
-    /// The source's style, from the tile's last `set_style`.
-    pub(crate) style: Option<Arc<SourceStyle>>,
-    /// The parameters of the next job; `first_load` is set as it starts.
-    pub(crate) params: LayoutParams,
-    /// The pixel ratio and granularity the next `set_style` lays out for.
-    pub(crate) pixel_ratio: f32,
-    pub(crate) granularity: SubdivisionGranularitySetting,
-    /// The lane that last got the data lost it: the next job carries it.
-    pub(crate) full: bool,
-    /// The shown layout's answer resolved glyphs or images that changed
-    /// since: the next first try starts without it.
-    pub(crate) answer_outdated: bool,
-
-    /// The [`SourceFeatureState`](crate::source_state::SourceFeatureState)
-    /// version the contents' buckets hold; 0 for buckets that have none.
-    pub(crate) feature_state_version: u64,
-    /// raster-dem: the neighbours whose borders the DEM has (a bit each).
-    pub(crate) dem_neighbors: DEMTileNeighbors,
 }
 
 impl Tile {
-    pub(crate) fn new(id: OverscaledTileID, kind: TileKind, generation: u64, load: Load, params: LayoutParams) -> Self {
-        Tile {
-            id,
-            kind,
-            generation,
-            data: None,
-            work: WorkState::Outdated,
-            contents: None,
-            loaded: false,
-            load,
-            style: None,
-            pixel_ratio: params.pixel_ratio,
-            granularity: params.subdivision_granularity,
-            params,
-            full: false,
-            answer_outdated: false,
-            feature_state_version: 0,
-            dem_neighbors: DEMTileNeighbors::of(&id),
-        }
+    pub(crate) fn new(id: OverscaledTileID, load: Load, pipeline: Pipeline) -> Self {
+        Tile { id, load, pipeline, shown: None, loaded: false }
     }
 
-    /// Takes a new generation: a job in flight becomes stale, and any other
-    /// work outdated.
-    pub(crate) fn bump(&mut self, generation: u64) {
-        self.generation = generation;
-        match &self.work {
-            WorkState::Running(running) => running.superseded.store(true, Ordering::Relaxed),
-            _ => self.work = WorkState::Outdated,
-        }
+    /// What the tile draws.
+    pub(crate) fn contents(&self) -> Option<&Contents> {
+        self.shown.as_ref().map(|shown| &*shown.contents)
     }
 
     /// Tile data considered "Renderable" can be used for rendering. Data in
     /// partial state is still waiting for network resources but can also be
     /// rendered, although layers will be missing.
     pub(crate) fn is_renderable(&self) -> bool {
-        self.contents.as_ref().is_some_and(|contents| contents.is_renderable())
+        self.contents().is_some_and(Contents::is_renderable)
     }
 
     /// Whether the tile has work under way or to start: a job in flight or
-    /// waiting, or one to run for the data it has. A geometry tile with its
-    /// style counts its layout as started from its first load on, as C++'s
-    /// does from `setLayers`.
+    /// waiting, or one to run for the data it has.
     pub(crate) fn is_pending(&self) -> bool {
-        match &self.work {
-            WorkState::Current => false,
-            WorkState::Outdated => match self.kind {
-                TileKind::Geometry => self.style.is_some() && (self.data.is_some() || !self.loaded),
-                TileKind::Raster | TileKind::Dem(_) => {
-                    matches!(self.data, Some(Loaded { input: TileInput::Image(Some(_)), .. }))
-                }
-            },
-            WorkState::Running(_) | WorkState::Waiting(_) | WorkState::Ready(_) => true,
-        }
+        self.pipeline.is_pending(self.loaded)
     }
 
     /// "Completion" of a tile means that we have attempted to load it, and
@@ -366,16 +233,27 @@ impl Tile {
         self.loaded && !self.is_pending()
     }
 
-    /// Whether the data the tile lays out with is missing from the tileset.
-    pub(crate) fn data_missing(&self) -> bool {
-        self.data.as_ref().is_some_and(Loaded::missing)
+    /// Whether the tile has a job it can submit, or dependencies to resolve.
+    pub(crate) fn has_work(&self) -> bool {
+        self.pipeline.has_work()
     }
 
     /// Whether the tile's render entries are held after they're no longer
     /// ideal, so that its symbols fade out: a geometry tile of a continuous
     /// map.
     pub(crate) fn fades_out(&self) -> bool {
-        self.kind == TileKind::Geometry && self.params.mode == MapMode::Continuous
+        self.pipeline.layout().is_some_and(|layout| layout.params().mode == MapMode::Continuous)
+    }
+
+    /// Calls `f` with the dependencies of the layout the tile shows and of
+    /// the one it lays out.
+    pub(crate) fn dependencies(&self, mut f: impl FnMut(&Dependencies)) {
+        if let Some(contents) = self.contents().and_then(Contents::geometry) {
+            f(&contents.deps);
+        }
+        if let Some(deps) = self.pipeline.layout().and_then(Layout::dependencies) {
+            f(deps);
+        }
     }
 
     /// Notifies the tile of a visible layer's updated properties. Returns
@@ -384,11 +262,14 @@ impl Tile {
         &mut self,
         layer_properties: &Arc<dyn crate::layer_type::ErasedEvaluatedLayer>,
     ) -> bool {
-        self.contents.as_mut().is_some_and(|contents| Contents::layer_properties_updated(contents, layer_properties))
+        self.shown
+            .as_mut()
+            .is_some_and(|shown| Contents::layer_properties_updated(&mut shown.contents, layer_properties))
     }
 
-    pub(crate) fn dump_debug_logs(&self) {
-        let kind = match self.kind {
+    /// Logs the tile's state, as a tile of `kind`.
+    pub(crate) fn dump_debug_logs(&self, kind: TileKind) {
+        let kind = match kind {
             TileKind::Geometry => "Geometry",
             TileKind::Raster => "Raster",
             TileKind::Dem(_) => "RasterDEM",
@@ -399,17 +280,5 @@ impl Tile {
         Log::info(Event::General, format!("Tile::renderable: {}", yes(self.is_renderable())));
         Log::info(Event::General, format!("Tile::complete: {}", yes(self.is_complete())));
         Log::info(Event::General, format!("Tile::loaded: {}", yes(self.loaded)));
-    }
-}
-
-impl crate::source_state::FeatureStateTarget for Tile {
-    fn feature_state_version(&mut self) -> &mut u64 {
-        &mut self.feature_state_version
-    }
-
-    fn set_feature_state(&self, states: &crate::bucket::LayerFeatureStates) {
-        if let Some(contents) = self.contents.as_deref().and_then(Contents::geometry) {
-            contents.set_feature_state(states);
-        }
     }
 }

@@ -58,6 +58,29 @@ pub(crate) enum DataOrigin {
     Custom { loader: Arc<dyn CustomLoader>, fast_pfor_enabled: bool },
 }
 
+impl DataOrigin {
+    /// What response `res` to a request of a tileset's tile of `kind`
+    /// delivers. A 404 (Not Found), unlike an empty response (204, or no
+    /// tile in an archive), says the tileset has no tile here. A vector tile
+    /// it has no tile of is empty, as in GL JS; a raster tile is missing.
+    /// Every tile without data of a sparse tileset is missing.
+    pub(crate) fn input(&self, kind: TileKind, res: &Response) -> TileInput {
+        let (sparse, encoding) = match self {
+            DataOrigin::Tileset { tileset, encoding, .. } => (tileset.sparse, *encoding),
+            DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => (false, VectorTileEncoding::Mvt),
+        };
+        let not_found = res.tile_not_found || res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
+        let empty = res.no_content || not_found;
+        let not_found_is_empty = kind == TileKind::Geometry;
+        let missing = empty && (sparse || (not_found && !not_found_is_empty));
+        let data = if empty { None } else { res.data.clone() };
+        match kind {
+            TileKind::Geometry => TileInput::Geometry { data: data.map(|data| encoding.decode(data)), missing },
+            TileKind::Raster | TileKind::Dem(_) => TileInput::Image { data, missing },
+        }
+    }
+}
+
 /// A custom source's provider, whatever data it hands its tiles.
 pub(crate) trait CustomLoader {
     /// Asks for tile `id`'s data, for the subscription `key`, whose data and
@@ -632,22 +655,11 @@ impl SourceInfo {
             }
             Taken::Data => self.action(tile, ctx, loaded),
         }
-        let Some(DataOrigin::Tileset { tileset, encoding, .. }) = &self.origin else {
+        let Some(origin) = &self.origin else {
             return;
         };
-        // A 404 (Not Found), unlike an empty response (204, or no tile in an
-        // archive), says the tileset has no tile here. A vector tile it has
-        // no tile of is empty, as in GL JS; a raster tile is missing.
-        let not_found = res.tile_not_found || res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
-        let empty = res.no_content || not_found;
-        let not_found_is_empty = self.kind == TileKind::Geometry;
-        let missing = empty && (tileset.sparse || (not_found && !not_found_is_empty));
-        let data = if empty { None } else { res.data.clone() };
-        let input = match self.kind {
-            TileKind::Geometry => TileInput::Geometry { data: data.map(|data| encoding.decode(data)), missing },
-            TileKind::Raster | TileKind::Dem(_) => TileInput::Image(data),
-        };
-        self.set_data(tile, ctx, input, missing);
+        let input = origin.input(self.kind, res);
+        self.set_data(tile, ctx, input);
     }
 
     /// The tile couldn't load: it keeps what data it had, and is done
@@ -753,7 +765,7 @@ impl SourceInfo {
         );
         let answered = std::mem::replace(&mut *slot.lock(), Answered::Later);
         if let Answered::Now(data) = answered {
-            self.set_data(tile, ctx, TileInput::Geometry { data: Some(data), missing: false }, false);
+            self.set_data(tile, ctx, TileInput::Geometry { data: Some(data), missing: false });
         }
     }
 
@@ -765,7 +777,7 @@ impl SourceInfo {
         }
         match data {
             SourceData::Data(data) => {
-                self.set_data(tile, ctx, TileInput::Geometry { data, missing: false }, false);
+                self.set_data(tile, ctx, TileInput::Geometry { data, missing: false });
             }
             SourceData::Error(error) => self.load_error(tile, ctx, error),
             SourceData::Stale => {

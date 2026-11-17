@@ -143,9 +143,9 @@ impl RenderTile {
         pool: &TaggedScheduler,
         parameters: &SourcePrepareParameters<'_>,
     ) {
-        self.shared_bucket = tile.contents.as_deref().and_then(Contents::shared_bucket);
+        self.shared_bucket = tile.contents().and_then(Contents::shared_bucket);
         self.render_data =
-            tile.contents.as_ref().map(|contents| TileRenderData::new(Rc::clone(contents), pool.clone()));
+            tile.shown.as_ref().map(|shown| TileRenderData::new(Rc::clone(&shown.contents), pool.clone()));
 
         self.needs_rendering = needs_rendering;
         let (modified, expires) = tile.load.freshness();

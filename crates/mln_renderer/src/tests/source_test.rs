@@ -1415,24 +1415,13 @@ fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
     assert_eq!(4, out_of_reach.tiles_at(1).len());
 }
 
-/// Port-only: a 16 by 16 DEM image whose pixels differ from their
-/// neighbours and from those of other `seed`s.
-fn dem_png(seed: u32) -> mln_storage::Data {
-    let mut image = mln_util::image::PremultipliedImage::new(Size::new(16, 16));
-    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-        let i = i as u32;
-        *pixel = [((seed * 37 + i) % 256) as u8, (i * 7 % 256) as u8, ((i * 3 + seed) % 256) as u8, 255];
-    }
-    Arc::new(mln_image::encode_png(&image))
-}
-
 /// Port-only: raster-dem tiles that meet at the antimeridian, in two copies
 /// of the world, backfill each other's borders as neighbours in one copy
 /// do.
 #[test]
 fn raster_dem_borders_across_a_world_wrap() {
+    use crate::tests::tile::dem_png;
     use crate::tile::contents::Contents;
-    use crate::tile::dem::DEMTileNeighbors;
 
     let mut test = SourceTest::new();
     test.transform.jump_to(&CameraOptions {
@@ -1477,7 +1466,7 @@ fn raster_dem_borders_across_a_world_wrap() {
             .find(|tile| tile.id.canonical == CanonicalTileID::new(2, x, 1))
             .unwrap_or_else(|| panic!("no tile 2/{x}/1"))
     };
-    let dem = |tile: &crate::tile::tile::Tile| match tile.contents.as_deref() {
+    let dem = |tile: &crate::tile::tile::Tile| match tile.contents() {
         Some(Contents::Dem(bucket)) => Arc::clone(bucket),
         _ => panic!("a DEM"),
     };
@@ -1485,8 +1474,6 @@ fn raster_dem_borders_across_a_world_wrap() {
     // east of it.
     let (east, west) = (tile(3), tile(0));
     assert_eq!(west.id.wrap, east.id.wrap + 1);
-    assert_eq!(east.dem_neighbors & DEMTileNeighbors::RIGHT, DEMTileNeighbors::RIGHT);
-    assert_eq!(west.dem_neighbors & DEMTileNeighbors::LEFT, DEMTileNeighbors::LEFT);
     let (east, west) = (dem(east), dem(west));
     let (east, west) = (east.get_dem_data(), west.get_dem_data());
     for y in 0..16 {

@@ -7,6 +7,7 @@ use mln_util::size::Size;
 
 use super::{RasterTileTest, png};
 use crate::tests::OneTile;
+use crate::tests::tile_jobs_test::Manual;
 use crate::tile::contents::Contents;
 use crate::tile::job::JobResult;
 use crate::tile::tile::TileKind;
@@ -18,7 +19,7 @@ fn tiles(test: &RasterTileTest) -> OneTile {
 
 /// The size of the image tile `id` shows.
 fn image_size(tiles: &OneTile, id: &OverscaledTileID) -> Option<Size> {
-    match tiles.tile_at(id).contents.as_deref() {
+    match tiles.tile_at(id).contents() {
         Some(Contents::Raster(bucket)) => bucket.image.as_ref().map(|image| image.size),
         _ => None,
     }
@@ -105,12 +106,12 @@ fn missing_and_empty() {
     tiles.set_missing(&id);
     test.settle(&mut tiles, &[id]);
     assert!(!tiles.tile().is_renderable());
-    assert!(tiles.tile().contents.is_none());
+    assert!(tiles.tile().contents().is_none());
 
     tiles.set_image(&id, None);
     test.settle(&mut tiles, &[id]);
     assert!(tiles.tile().is_renderable());
-    assert!(matches!(tiles.tile().contents.as_deref(), Some(Contents::Empty)));
+    assert!(matches!(tiles.tile().contents(), Some(Contents::Empty)));
 }
 
 // Port-only: raster tiles whose jobs run in worker instances on other threads get their images
@@ -137,4 +138,34 @@ fn decode_through_the_codec() {
     assert_eq!(tiles.errors().len(), 1);
     // It keeps the image it had.
     assert!(tiles.tile_at(&ids[0]).is_renderable());
+}
+
+// Port-only: a load without an image while the tile decodes shows nothing at once, and the decode
+// in flight stays the tile's one job: an image that comes before it replies decodes after.
+#[test]
+fn an_empty_load_during_a_decode_keeps_one_decode_in_flight() {
+    let test = RasterTileTest::new();
+    let manual = Manual::default();
+    let mut tiles = test.tiles(TileKind::Raster, OverscaledTileID::from_zxy(0, 0, 0), Box::new(manual.clone()));
+    let id = tiles.id;
+    tiles.set_image(&id, Some(png(16, 16)));
+    tiles.update();
+    assert_eq!(manual.submitted(), 1);
+    let decode = manual.take();
+
+    tiles.set_image(&id, None);
+    assert!(matches!(tiles.tile().contents(), Some(Contents::Empty)));
+    assert!(tiles.tile().is_complete());
+    tiles.set_image(&id, Some(png(8, 8)));
+    tiles.update();
+    assert_eq!(manual.submitted(), 1, "one decode in flight");
+
+    manual.reply(InlineWorkers::run(decode));
+    tiles.update();
+    assert!(matches!(tiles.tile().contents(), Some(Contents::Empty)), "the stale decode isn't shown");
+    assert_eq!(manual.submitted(), 2);
+    manual.run();
+    tiles.update();
+    assert_eq!(image_size(&tiles, &id), Some(Size::new(8, 8)));
+    assert!(tiles.tile().is_complete());
 }

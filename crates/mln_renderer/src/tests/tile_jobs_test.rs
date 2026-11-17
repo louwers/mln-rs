@@ -313,6 +313,71 @@ fn a_tile_sends_its_data_again_after_an_eviction() {
     assert!(test.shows_layout());
 }
 
+/// A first try whose worker lacked the data runs again with the data, and
+/// with the images as they are then: an image added since is there.
+#[test]
+fn a_first_try_sent_again_gets_the_current_images() {
+    let manual = Manual::default();
+    manual.0.borrow_mut().caches_data = true;
+    let mut test = Test::new(Box::new(manual.clone()), &[]);
+    test.load(&[layer(json!({"id": "dots", "type": "circle"}))]);
+    test.update();
+    manual.run();
+    test.update();
+    assert!(test.shows_layout());
+
+    // The relayout's first try names the data its lane got.
+    test.tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    test.update();
+    let first = manual.take();
+    assert!(matches!(&first.job, Job::Layout(job) if matches!(job.data, DataInput::Cached(_))));
+    test.tile.store.images_mut().add_image(image("late"));
+    test.tile.store.images_changed(&HashSet::from_iter(["late".to_owned()]));
+    manual.reply(Reply { id: first.id, result: JobResult::NeedsData });
+    test.update();
+    let again = manual.take();
+    let Job::Layout(job) = &again.job else {
+        panic!("not a layout job");
+    };
+    assert!(matches!(job.data, DataInput::Full { .. }), "with its data");
+    assert!(job.available_images.contains("late"), "with the images as they are");
+    manual.reply(InlineWorkers::run(again));
+    test.update();
+    assert!(test.is_complete());
+}
+
+/// A relayout for a changed image starts without the answer the tile shows,
+/// and so does every first try until a layout shows: one superseded by a
+/// style edit before it replied too.
+#[test]
+fn a_relayout_for_an_image_never_starts_with_the_outdated_answer() {
+    let manual = Manual::default();
+    let mut test = Test::new(Box::new(manual.clone()), &["a"]);
+    test.load(&[icons(&json!("a"), 1.0)]);
+    for _ in 0..2 {
+        test.update();
+        manual.run();
+    }
+    test.update();
+    assert!(test.shows_layout());
+
+    let resolved = |run: &Run| match &run.job {
+        Job::Layout(job) => Arc::clone(&job.resolved),
+        Job::Raster { .. } | Job::Dem { .. } => panic!("not a layout job"),
+    };
+    test.tile.store.images_mut().update_image(image("a"));
+    test.tile.store.images_changed(&HashSet::from_iter(["a".to_owned()]));
+    test.update();
+    let first = manual.take();
+    assert!(resolved(&first).icons.is_empty(), "the relayout starts without the icon's position");
+
+    test.tile.set_style(&style(&[icons(&json!("a"), 2.0)]));
+    manual.reply(InlineWorkers::run(first));
+    test.update();
+    let again = manual.take();
+    assert!(resolved(&again).icons.is_empty(), "so does the first try after it");
+}
+
 /// An image added while a tile's first job runs may change what that job
 /// discovers (`coalesce(image(a), image(b))`): its reply is stale, and the
 /// tile lays out again with the images as they are.
@@ -738,7 +803,7 @@ fn raster_tiles(run_loop: &RunLoop, pool: &TaggedScheduler, workers: Box<dyn Til
 
 /// The size of the image a raster tile shows.
 fn raster_size(tiles: &OneTile, x: u32) -> Option<Size> {
-    let Some(Contents::Raster(bucket)) = tiles.tile_at(&OverscaledTileID::from_zxy(1, x, 0)).contents.as_deref() else {
+    let Some(Contents::Raster(bucket)) = tiles.tile_at(&OverscaledTileID::from_zxy(1, x, 0)).contents() else {
         return None;
     };
     bucket.image.as_ref().map(|image| image.size)
@@ -811,7 +876,7 @@ fn a_worker_lost_during_a_decode() {
     instances.step(0);
     update(&mut tiles);
     assert!(tiles.tile().is_complete() && tiles.tile().is_renderable());
-    let Some(Contents::Dem(bucket)) = tiles.tile().contents.as_deref() else {
+    let Some(Contents::Dem(bucket)) = tiles.tile().contents() else {
         panic!("a DEM");
     };
     assert_eq!(bucket.get_dem_data().dim, 16);

@@ -107,6 +107,18 @@ pub(crate) fn png(width: u32, height: u32) -> mln_storage::Data {
     Arc::new(mln_image::encode_png(&image))
 }
 
+/// Port-only: a 16 by 16 DEM image whose pixels differ from their
+/// neighbours and from those of other `seed`s.
+#[must_use]
+pub(crate) fn dem_png(seed: u32) -> mln_storage::Data {
+    let mut image = mln_util::image::PremultipliedImage::new(mln_util::size::Size::new(16, 16));
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let i = i as u32;
+        *pixel = [((seed * 37 + i) % 256) as u8, (i * 7 % 256) as u8, ((i * 3 + seed) % 256) as u8, 255];
+    }
+    Arc::new(mln_image::encode_png(&image))
+}
+
 impl Drop for RasterTileTest {
     fn drop(&mut self) {
         self.thread_pool.wait_for_empty();

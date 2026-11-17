@@ -35,7 +35,7 @@ use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
 use crate::tile::source_tiles::SourceTiles;
-use crate::tile::store::{SourceInfo, TileStore};
+use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 
 /// The requests in flight at once.
@@ -273,7 +273,7 @@ impl Scene {
             self.thread_pool.wait_for_empty();
             let ran = self.run_loop.run_once();
             crate::tests::update(&mut self.store);
-            let work = self.pyramids().iter().any(|source| source.slots().any(|slot| SourceInfo::has_work(&slot.tile)));
+            let work = self.pyramids().iter().any(|source| source.slots().any(|slot| slot.tile.has_work()));
             if !ran && !work && self.store.is_idle() {
                 break;
             }

@@ -155,7 +155,7 @@ fn invoke_tile_changed() {
         Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
 
     tiles.set_style(&crate::tests::style(std::slice::from_ref(&layer_properties)));
-    assert!(tiles.tile().contents.is_none());
+    assert!(tiles.tile().contents().is_none());
 
     tiles.set_data(Some(mln_tile::TileData::Features(Arc::new(vec![Feature {
         geometry: Some(Point::new(0i16, 0).into()),
@@ -169,7 +169,7 @@ fn invoke_tile_changed() {
     // flickering.
     assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
 
-    let Some(Contents::Geometry(contents)) = tiles.tile().contents.as_deref() else {
+    let Some(Contents::Geometry(contents)) = tiles.tile().contents() else {
         panic!("a layout");
     };
     let mut result = Vec::new();
