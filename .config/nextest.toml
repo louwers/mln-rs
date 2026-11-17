@@ -7,10 +7,10 @@
 slow-timeout = { period = "60s", terminate-after = 10 }
 
 # The tests that depend on the backend: the packages whose tests render with the one that
-# MLN_RENDER_BACKEND names, or make devices of each backend under its validation. `mise run
-# ci:test` runs them on each backend after the first, which runs every test. A test in another
-# package that renders runs on the first backend only. The render suite through the worker codec
-# doesn't depend on the backend.
+# MLN_RENDER_BACKEND names, or make devices of each backend under its validation. CI's backend
+# jobs run them (`mise run ci:test --backend-only`) on each backend other than the one its test
+# jobs run every test on. A test in another package that renders runs on that one only. The
+# render suite through the worker codec doesn't depend on the backend.
 [profile.backend]
 default-filter = """
 (

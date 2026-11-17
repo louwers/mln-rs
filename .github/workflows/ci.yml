@@ -14,14 +14,15 @@ permissions:
   contents: read
 
 jobs:
-  # Which of the macos and web jobs and the packaging a pull request needs,
-  # from what it changes (`mise run ci:plan`). Pushes to main and manual runs
-  # run everything.
+  # Which jobs and steps a pull request needs, from what it changes (`mise run
+  # ci:plan`): the macOS test and backend jobs, web, and the packaging. Pushes
+  # to main and manual runs run everything.
   plan:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
-      macos: ${{ steps.plan.outputs.macos }}
+      test: ${{ steps.plan.outputs.test }}
+      backend: ${{ steps.plan.outputs.backend }}
       web: ${{ steps.plan.outputs.web }}
       package: ${{ steps.plan.outputs.package }}
     steps:
@@ -33,11 +34,24 @@ jobs:
 
       - id: plan
         run: |
+          plan="$RUNNER_TEMP/plan"
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            git diff --name-status HEAD^1 HEAD | bash mise-tasks/ci/plan >> "$GITHUB_OUTPUT"
+            git diff --name-status HEAD^1 HEAD | bash mise-tasks/ci/plan > "$plan"
           else
-            printf 'macos=true\nweb=true\npackage=true\n' >> "$GITHUB_OUTPUT"
+            printf 'macos=true\nweb=true\npackage=true\n' > "$plan"
           fi
+          cat "$plan"
+          grep -E '^(web|package)=' "$plan" >> "$GITHUB_OUTPUT"
+          linux='"os":"linux","runner":"ubuntu-26.04"'
+          macos='"os":"macos","runner":"macos-26"'
+          test="{$linux,\"backend\":\"webgpu\"}"
+          backend="{$linux,\"backend\":\"vulkan\"},{$linux,\"backend\":\"gl\"}"
+          if grep -qx macos=true "$plan"; then
+            test+=",{$macos,\"backend\":\"metal\"}"
+            backend+=",{$macos,\"backend\":\"webgpu\"}"
+          fi
+          echo "test={\"include\":[$test]}" >> "$GITHUB_OUTPUT"
+          echo "backend={\"include\":[$backend]}" >> "$GITHUB_OUTPUT"
 
   # The formatters and linters (`mise run check`, hk.pkl), the API docs as
   # docs.rs builds them, clippy for wasm32 and 32-bit x86 Linux, the minimum
@@ -76,31 +90,25 @@ jobs:
         if: needs.plan.outputs.package == 'true'
         run: mise run ci:package
 
-  # Every test on WebGPU (wgpu on Vulkan), then the tests that depend on the
-  # backend on the Vulkan backend, under Vulkan's validation layer, and on the
-  # OpenGL backend (OpenGL ES 3.0 through EGL), all on Mesa's software
-  # rasterizers (`mise run ci:test`), with their coverage uploaded to Codecov
-  # (codecov.yml). Then maplibre-native-ffi's C ABI suite against
-  # crates/mln_c (`mise run test:c-abi`, tools/c-abi-test) under its Vulkan
-  # and OpenGL presets. The differential tests against the C++ core are in
-  # louwers/mln-rs-difftests.
-  linux:
-    runs-on: ubuntu-26.04
+  # Every test (`mise run ci:test`) on WebGPU on Linux (wgpu on Vulkan, on
+  # lavapipe, Mesa's software rasterizer) and on the Metal backend on macOS,
+  # under Metal's API validation, with their coverage uploaded to Codecov
+  # (codecov.yml). macOS also runs clippy on the code that only it builds. The
+  # differential tests against the C++ core are in louwers/mln-rs-difftests.
+  test:
+    needs: plan
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.test) }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
-      # For the C ABI suite.
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake libvulkan-dev libwayland-client0 libwayland-server0 libwayland-egl1 libegl-dev libgles-dev
-
       - name: Install lavapipe
+        if: runner.os == 'Linux'
         uses: ./.github/actions/lavapipe
-        with:
-          validation-layer: true
-          egl: true
 
       - uses: jdx/mise-action@v5
 
@@ -112,24 +120,21 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Clippy
+        if: runner.os == 'macOS'
+        run: mise run clippy
+
       - name: Test
-        run: mise run ci:test webgpu vulkan gl
-
-      - name: Test the C ABI
         if: ${{ !cancelled() }}
-        run: mise run test:c-abi
+        run: mise run ci:test ${{ matrix.backend }}
 
-      - name: Test the C ABI's OpenGL preset
-        if: ${{ !cancelled() }}
-        run: MLN_C_TEST_BACKEND=opengl mise run test:c-abi
-
-      # Each backend's render suite reports and actual/diff images.
+      # The render suites' reports and actual/diff images.
       - name: Upload the render test results
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: render-tests-linux
-          path: target/llvm-cov-target/tmp/*/render_tests*
+          name: render-tests-${{ matrix.os }}-${{ matrix.backend }}
+          path: target/llvm-cov-target/tmp/render_tests*
           if-no-files-found: ignore
 
       - name: Upload the coverage to Codecov
@@ -139,17 +144,37 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/lcov.info
 
-  # clippy on the code that only macOS builds, then every test on the Metal
-  # backend, under Metal's API validation, and the tests that depend on the
-  # backend on WebGPU (wgpu on Metal) (`mise run ci:test`), with their
-  # coverage uploaded to Codecov.
-  macos:
+  # The tests that depend on the backend (`mise run ci:test --backend-only`,
+  # .config/nextest.toml) on the backends the test jobs don't run, with their
+  # coverage: on Linux the Vulkan backend, under Vulkan's validation layer, and
+  # the OpenGL backend (OpenGL ES 3.0 through EGL, on Mesa's llvmpipe); on
+  # macOS WebGPU (wgpu on Metal). On Linux, then maplibre-native-ffi's C ABI
+  # suite against crates/mln_c (`mise run test:c-abi`, tools/c-abi-test) under
+  # its preset for the backend.
+  backend:
     needs: plan
-    if: needs.plan.outputs.macos == 'true'
-    runs-on: macos-26
+    name: backend (${{ matrix.os }}, ${{ matrix.backend }})
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.backend) }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+
+      # For the C ABI suite.
+      - name: Install system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake libvulkan-dev libwayland-client0 libwayland-server0 libwayland-egl1 libegl-dev libgles-dev
+
+      - name: Install lavapipe
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/lavapipe
+        with:
+          validation-layer: ${{ matrix.backend == 'vulkan' }}
+          egl: ${{ matrix.backend == 'gl' }}
 
       - uses: jdx/mise-action@v5
 
@@ -160,19 +185,22 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Clippy
-        run: mise run clippy
-
       - name: Test
-        if: ${{ !cancelled() }}
-        run: mise run ci:test metal webgpu
+        run: mise run ci:test --backend-only ${{ matrix.backend }}
+
+      - name: Test the C ABI
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        env:
+          MLN_C_TEST_BACKEND:
+            ${{ matrix.backend == 'gl' && 'opengl' || 'vulkan' }}
+        run: mise run test:c-abi
 
       - name: Upload the render test results
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: render-tests-macos
-          path: target/llvm-cov-target/tmp/*/render_tests*
+          name: render-tests-${{ matrix.os }}-${{ matrix.backend }}
+          path: target/llvm-cov-target/tmp/render_tests*
           if-no-files-found: ignore
 
       - name: Upload the coverage to Codecov
@@ -268,7 +296,7 @@ jobs:
   # The one check for branch protection to require: it fails when a job above
   # failed or was cancelled. A job that the plan skips passes.
   ci-passed:
-    needs: [plan, lint, linux, macos, web]
+    needs: [plan, lint, test, backend, web]
     if: always()
     runs-on: ubuntu-26.04
     permissions: {}

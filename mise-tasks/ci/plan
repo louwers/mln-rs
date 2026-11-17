@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #MISE description="Print which of CI's selected jobs and steps a change needs, from its `git diff --name-status` on stdin"
 # CI's plan job runs this on a pull request's changes (`git diff --name-status
-# main... | mise run ci:plan`); pushes to main run everything. macos and web
-# are skipped when every changed path is one that they don't build or test.
-# Packaging (`mise run package`) runs when a manifest changes or a file is
+# main... | mise run ci:plan`); pushes to main run everything. The macOS jobs
+# (macos) and web are skipped when every changed path is one that they don't
+# build or test. Packaging (`mise run package`) runs when a manifest changes or a file is
 # added, deleted or renamed, which can change what a package includes.
 set -euo pipefail
 macos=false
