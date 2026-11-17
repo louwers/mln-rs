@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::time::Instant;
 
 use block2::RcBlock;
 use mln_mtl::surface_target::{Overlay, OverlayTarget};
@@ -27,6 +28,7 @@ use objc2_metal::{
 use objc2_quartz_core::CACurrentMediaTime;
 
 use crate::overlay::Paint;
+use crate::presentation::seconds;
 
 const SHADER: &str = r"
 #include <metal_stdlib>
@@ -82,11 +84,17 @@ pub(crate) fn metal_overlay(paint: Rc<RefCell<Paint>>) -> Overlay {
     Box::new(move |target: &OverlayTarget<'_>| {
         // Every frame, so that the presentations follow the map's frames
         // whatever the controls do.
-        let shown = paint.borrow().presentations.send(CACurrentMediaTime());
+        let shown = {
+            let paint = paint.borrow();
+            let sent = seconds(Instant::now());
+            paint.presentations.send(paint.frame_time.map_or(sent, seconds), sent)
+        };
         let report = RcBlock::new(move |drawable: NonNull<ProtocolObject<dyn MTLDrawable>>| {
             // SAFETY: the drawable that Metal calls the handler for.
             let at = unsafe { drawable.as_ref() }.presentedTime();
-            shown.report((at > 0.0).then_some(at));
+            // From Core Animation's media clock to the records'.
+            let time = seconds(Instant::now()) - (CACurrentMediaTime() - at);
+            shown.report((at > 0.0).then_some(time));
         });
         // SAFETY: a block that Metal copies, and that only reads the drawable
         // it gets.

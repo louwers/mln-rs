@@ -41,6 +41,7 @@ use winit::window::{Fullscreen, Window, WindowId};
 use crate::Args;
 #[cfg(target_os = "macos")]
 use crate::metal_layer::MetalLayer;
+use crate::pacing::Refresh;
 use crate::settings::Settings;
 use crate::view::{self, Launch};
 
@@ -109,7 +110,7 @@ pub(crate) struct Inbox {
     /// The map has something new to draw.
     redraw: AtomicBool,
     /// The display refreshed since the render thread asked its frame pacer.
-    refreshed: AtomicBool,
+    refreshed: Mutex<Option<Refresh>>,
 }
 
 #[derive(Default)]
@@ -146,14 +147,14 @@ impl Inbox {
     }
 
     /// Wakes the render thread at a display refresh, to draw a frame.
-    pub(crate) fn wake_for_refresh(&self) {
-        self.refreshed.store(true, Ordering::SeqCst);
+    pub(crate) fn wake_for_refresh(&self, refresh: Refresh) {
+        *self.refreshed.lock() = Some(refresh);
         self.wake();
     }
 
-    /// Whether the display refreshed since the last call.
-    pub(crate) fn take_refresh(&self) -> bool {
-        self.refreshed.swap(false, Ordering::SeqCst)
+    /// The display's refresh since the last call, if it refreshed.
+    pub(crate) fn take_refresh(&self) -> Option<Refresh> {
+        self.refreshed.lock().take()
     }
 
     pub(crate) fn is_empty(&self) -> bool {

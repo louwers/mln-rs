@@ -10,19 +10,28 @@ use std::time::{Duration, Instant};
 /// without, for a display that stops refreshing, as one that sleeps does.
 const REFRESH_TIMEOUT: Duration = Duration::from_millis(100);
 
+/// A refresh of the display, as a frame pacer reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Refresh {
+    /// When the display shows a frame started at the refresh, where the
+    /// pacer knows.
+    pub(crate) shown_at: Option<Instant>,
+}
+
 /// The display's refreshes, as a frame pacer reports them.
 pub(crate) trait Refreshes {
     /// Asks for the display's next refresh.
     fn request(&self);
 
-    /// Whether the display refreshed since the last call.
-    fn take(&self) -> bool;
+    /// The refresh since the last call, if the display refreshed.
+    fn take(&self) -> Option<Refresh>;
 }
 
 /// Whether a frame that is due can start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Ready {
-    Now,
+    /// It can, and the display shows it at the instant, where that's known.
+    Now(Option<Instant>),
     /// Not before the display refreshes or the instant comes.
     Wait(Instant),
 }
@@ -51,7 +60,7 @@ impl<R: Refreshes> Pacing<R> {
                 return Ready::Wait(self.next_frame_at);
             }
             self.next_frame_at = now + self.interval;
-            return Ready::Now;
+            return Ready::Now(None);
         };
         let requested = *self.requested.get_or_insert_with(|| {
             // A refresh that came before the frame asked, for an earlier
@@ -61,9 +70,13 @@ impl<R: Refreshes> Pacing<R> {
             now
         });
         let late = requested + REFRESH_TIMEOUT;
-        if refreshes.take() || now >= late {
+        if let Some(refresh) = refreshes.take() {
             self.requested = None;
-            return Ready::Now;
+            return Ready::Now(refresh.shown_at);
+        }
+        if now >= late {
+            self.requested = None;
+            return Ready::Now(None);
         }
         Ready::Wait(late)
     }
@@ -77,8 +90,14 @@ mod tests {
 
     #[derive(Default)]
     struct FakeRefreshes {
-        refreshed: Cell<bool>,
+        refreshed: Cell<Option<Refresh>>,
         requests: Cell<u32>,
+    }
+
+    impl FakeRefreshes {
+        fn refresh(&self, shown_at: Option<Instant>) {
+            self.refreshed.set(Some(Refresh { shown_at }));
+        }
     }
 
     impl Refreshes for &FakeRefreshes {
@@ -86,8 +105,8 @@ mod tests {
             self.requests.set(self.requests.get() + 1);
         }
 
-        fn take(&self) -> bool {
-            self.refreshed.replace(false)
+        fn take(&self) -> Option<Refresh> {
+            self.refreshed.take()
         }
     }
 
@@ -103,8 +122,8 @@ mod tests {
         // Woken by something else, the frame keeps waiting, and asks once.
         assert_eq!(pacing.ready(start + 2 * MS), Ready::Wait(start + REFRESH_TIMEOUT));
         assert_eq!(display.requests.get(), 1);
-        display.refreshed.set(true);
-        assert_eq!(pacing.ready(start + 8 * MS), Ready::Now);
+        display.refresh(Some(start + 16 * MS));
+        assert_eq!(pacing.ready(start + 8 * MS), Ready::Now(Some(start + 16 * MS)));
     }
 
     #[test]
@@ -112,7 +131,7 @@ mod tests {
         let display = FakeRefreshes::default();
         let start = Instant::now();
         let mut pacing = Pacing::new(Some(&display), 16 * MS, start);
-        display.refreshed.set(true);
+        display.refresh(None);
         assert_eq!(pacing.ready(start), Ready::Wait(start + REFRESH_TIMEOUT));
     }
 
@@ -124,8 +143,8 @@ mod tests {
         let start = Instant::now();
         let mut pacing = Pacing::new(Some(&display), 16 * MS, start);
         assert_eq!(pacing.ready(start), Ready::Wait(start + REFRESH_TIMEOUT));
-        assert_eq!(pacing.ready(start + REFRESH_TIMEOUT), Ready::Now);
-        display.refreshed.set(true);
+        assert_eq!(pacing.ready(start + REFRESH_TIMEOUT), Ready::Now(None));
+        display.refresh(None);
         let later = start + 10 * REFRESH_TIMEOUT;
         assert_eq!(pacing.ready(later), Ready::Wait(later + REFRESH_TIMEOUT));
         assert_eq!(display.requests.get(), 2);
@@ -135,8 +154,8 @@ mod tests {
     fn without_refreshes_frames_come_an_interval_apart() {
         let start = Instant::now();
         let mut pacing = Pacing::<&FakeRefreshes>::new(None, 16 * MS, start);
-        assert_eq!(pacing.ready(start), Ready::Now);
+        assert_eq!(pacing.ready(start), Ready::Now(None));
         assert_eq!(pacing.ready(start + 5 * MS), Ready::Wait(start + 16 * MS));
-        assert_eq!(pacing.ready(start + 16 * MS), Ready::Now);
+        assert_eq!(pacing.ready(start + 16 * MS), Ready::Now(None));
     }
 }

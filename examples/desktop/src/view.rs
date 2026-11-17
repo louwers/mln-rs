@@ -64,7 +64,7 @@ use crate::Args;
 use crate::backend::{self, Kind, WindowSession, WindowSurfaces};
 use crate::host::{Inbox, Message, UserEvent};
 use crate::overlay::Paint;
-use crate::pacing::{Pacing, Ready, Refreshes};
+use crate::pacing::{Pacing, Ready, Refresh, Refreshes};
 use crate::presentation::{Cadence, Presentation};
 use crate::settings::Settings;
 use crate::styles::{self, Style};
@@ -215,7 +215,7 @@ pub(crate) fn run(launch: Launch) {
         None
     } else {
         let woken = Arc::clone(&inbox);
-        match FramePacer::new(None, move |_, _| woken.wake_for_refresh()) {
+        match FramePacer::new(None, move |shown_at, _| woken.wake_for_refresh(Refresh { shown_at })) {
             Ok(pacer) => Some(DisplayRefreshes { pacer, inbox: Arc::clone(&inbox) }),
             Err(e) => {
                 Log::info(Event::Render, format!("Pacing frames on a timer: {}", e.message));
@@ -229,6 +229,7 @@ pub(crate) fn run(launch: Launch) {
         proxy,
         start,
         pacing: Pacing::new(refreshes, frame_interval, Instant::now()),
+        frame_shown_at: None,
         runtime,
         map,
         surfaces,
@@ -327,7 +328,7 @@ impl Refreshes for DisplayRefreshes {
         self.pacer.request(());
     }
 
-    fn take(&self) -> bool {
+    fn take(&self) -> Option<Refresh> {
         self.inbox.take_refresh()
     }
 }
@@ -337,6 +338,8 @@ struct View {
     proxy: EventLoopProxy<UserEvent>,
     start: Instant,
     pacing: Pacing<DisplayRefreshes>,
+    /// When the display shows the frame being drawn, where the pacer knows.
+    frame_shown_at: Option<Instant>,
 
     runtime: Runtime,
     map: Map,
@@ -456,11 +459,15 @@ impl View {
                 self.inbox.wait(self.next_deadline());
                 continue;
             }
-            if !self.benchmark
-                && let Ready::Wait(until) = self.pacing.ready(now)
-            {
-                self.inbox.wait(Some(until));
-                continue;
+            self.frame_shown_at = None;
+            if !self.benchmark {
+                match self.pacing.ready(now) {
+                    Ready::Now(shown_at) => self.frame_shown_at = shown_at,
+                    Ready::Wait(until) => {
+                        self.inbox.wait(Some(until));
+                        continue;
+                    }
+                }
             }
             self.frame();
         }
@@ -573,7 +580,11 @@ impl View {
         let Some(window) = &self.window else { return };
         let mode = if self.dirty || self.benchmark { DemandMode::Force } else { DemandMode::IfChanged };
         self.next_token += 1;
-        match window.session().demand_frame(FrameDemand::new(mode, self.next_token)) {
+        // The frame's animations sample when the display shows it, or as
+        // the demand is made.
+        self.paint.borrow_mut().frame_time = Some(self.frame_shown_at.unwrap_or_else(Instant::now));
+        let demand = FrameDemand::new(mode, self.next_token).shown_at(self.frame_shown_at);
+        match window.session().demand_frame(demand) {
             Ok(()) => {
                 self.demanded = Some(self.next_token);
                 self.redraw = false;

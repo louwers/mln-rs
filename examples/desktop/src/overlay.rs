@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Instant;
 
 use crate::presentation::Presentations;
 
@@ -22,6 +23,8 @@ pub(crate) struct Paint {
     pub(crate) renderer: Option<String>,
     /// When the frames that the overlay drew over reached the display.
     pub(crate) presentations: Presentations,
+    /// When the animations of the frame that the overlay draws over sampled.
+    pub(crate) frame_time: Option<Instant>,
 }
 
 impl Paint {
