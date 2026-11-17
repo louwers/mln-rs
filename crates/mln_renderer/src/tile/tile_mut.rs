@@ -20,6 +20,7 @@ use mln_vec_map::VecSet;
 
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
+use crate::draw_cache::ChangedBuckets;
 use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::render_orchestrator::drop_on_workers;
 use crate::tile::contents::{Contents, GeometryContents, release};
@@ -428,7 +429,9 @@ impl<'a> TileMut<'a> {
         let shown = contents.map(|contents| {
             let mut version = 0;
             if let Some(geometry) = contents.geometry() {
-                geometry.set_feature_state(self.source.feature_state.current_states());
+                // New buckets, which no drawables copied yet.
+                let mut changed = ChangedBuckets::default();
+                geometry.set_feature_state(self.source.feature_state.current_states(), &mut changed);
                 version = self.source.feature_state.version();
             }
             Shown::new(contents, version)

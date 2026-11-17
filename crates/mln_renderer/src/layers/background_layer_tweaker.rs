@@ -18,6 +18,7 @@ use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layer_type::ErasedEvaluatedLayer;
+use crate::layers::LayerTiles;
 use crate::paint_parameters::PaintParameters;
 
 pub(crate) struct BackgroundLayerTweaker {
@@ -44,7 +45,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, _tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }

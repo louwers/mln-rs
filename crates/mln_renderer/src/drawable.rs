@@ -36,7 +36,6 @@ use crate::layers::color_relief_layer_tweaker::ColorReliefDrawableData;
 use crate::layers::hillshade_prepare_layer_tweaker::HillshadePrepareDrawableData;
 use crate::layers::line_layer_tweaker::LineDrawableData;
 use crate::layers::render_symbol_layer::SymbolDrawableData;
-use crate::layers::{DrawableBinders, DrawableRenderTile};
 use crate::paint_parameters::PaintParameters;
 use crate::render_pass::RenderPass;
 
@@ -152,10 +151,6 @@ pub(crate) struct Drawable {
     pub(crate) create_time: Instant,
     color_mode: ColorMode,
     cull_face_mode: CullFaceMode,
-    /// The bucket and the binders of its data-driven attributes.
-    pub(crate) binders: Option<Rc<DrawableBinders>>,
-    /// The render tile the drawable draws.
-    pub(crate) render_tile: Option<DrawableRenderTile>,
 
     segments: Vec<UniqueDrawSegment>,
     indexes: Option<IndexVectorBasePtr>,
@@ -223,8 +218,6 @@ impl Drawable {
             create_time: Instant::now(),
             color_mode: ColorMode::disabled(),
             cull_face_mode: CullFaceMode::disabled(),
-            binders: None,
-            render_tile: None,
             segments: Vec::new(),
             indexes: None,
             vertex_count: 0,

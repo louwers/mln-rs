@@ -8,7 +8,7 @@
 
 use std::any::Any;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_style_types::image::ImagePositions;
 use mln_tile::TileLayer;
@@ -29,23 +29,18 @@ pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
 /// The data members of `Bucket`.
 ///
 /// Port-only: the codec writes what a worker sets (`tile/worker_codec`); the
-/// upload flag, the id and the version are the side's that has the bucket.
+/// upload flag and the id are the side's that has the bucket.
 #[derive(Debug, mln_wire::Wire)]
 pub(crate) struct BucketBase {
     #[wire(skip)]
     pub(crate) uploaded: AtomicBool,
     #[wire(skip, default = "SimpleIdentity::new")]
     pub(crate) bucket_id: SimpleIdentity,
-    /// Bumped by `update` (feature state); the render layers compare it to
-    /// refresh their drawables' copies of the vertex data. C++ updates the
-    /// shared vertex vectors in place instead.
-    #[wire(skip)]
-    pub(crate) version: AtomicU64,
 }
 
 impl Default for BucketBase {
     fn default() -> Self {
-        BucketBase { version: AtomicU64::new(0), uploaded: AtomicBool::new(false), bucket_id: SimpleIdentity::new() }
+        BucketBase { uploaded: AtomicBool::new(false), bucket_id: SimpleIdentity::new() }
     }
 }
 
@@ -77,7 +72,8 @@ pub(crate) trait Bucket: Any + Send + Sync {
         Ok(())
     }
 
-    /// Re-evaluates the feature-state dependent attribute values. Takes
+    /// Re-evaluates the feature-state dependent attribute values of the
+    /// layer `layer_id`, and returns whether the bucket has any. Takes
     /// `&self` because the bucket is shared (see the file comment);
     /// implementations lock their binders.
     fn update(
@@ -86,18 +82,14 @@ pub(crate) trait Bucket: Any + Send + Sync {
         _layer: &TileLayer<'_>,
         _layer_id: &str,
         _image_positions: &ImagePositions,
-    ) {
+    ) -> bool {
+        false
     }
 
     /// How far above the ground the bucket's highest content is raised,
     /// for a layer whose content elevation is an expression.
     fn max_content_elevation(&self) -> f32 {
         0.0
-    }
-
-    /// The `version` counter (see `BucketBase::version`).
-    fn get_version(&self) -> u64 {
-        self.base().version.load(Ordering::SeqCst)
     }
 
     fn record_sdf_pattern(&mut self, _layer_id: &str, _sdf: bool) {}

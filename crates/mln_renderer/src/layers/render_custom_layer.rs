@@ -25,6 +25,7 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
+use crate::draw_cache::LayerDraws;
 use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupKind};
 use crate::layer_type::LayerType;
@@ -160,10 +161,11 @@ impl RenderLayer for RenderCustomLayer {
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        draws: &mut LayerDraws,
     ) {
-        if self.base.layer_group.is_none() {
+        if draws.group.is_none() {
             let kind = LayerGroupKind::Custom(CustomLayerDraw { shared: Rc::clone(&self.shared) });
-            self.base.layer_group = Some(LayerGroup::new(kind));
+            draws.group = Some(LayerGroup::new(kind));
         }
     }
 

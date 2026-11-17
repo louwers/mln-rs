@@ -22,6 +22,7 @@ use mln_vec_map::VecMap;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::algorithm::update_tile_masks::update_tile_masks;
+use crate::draw_cache::ChangedBuckets;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
 use crate::tile::contents::Contents;
@@ -893,11 +894,15 @@ impl SourceTiles {
         self.rendered.len()
     }
 
-    pub(crate) fn coalesce_feature_state(&mut self) {
+    /// Brings the rendered tiles' buckets up to date with the source's
+    /// feature state, and adds the buckets whose vertex data that changed to
+    /// `changed`.
+    pub(crate) fn coalesce_feature_state(&mut self, changed: &mut ChangedBuckets) {
         let keys: BTreeSet<OverscaledTileID> = self.rendered.values().map(|entry| entry.key).collect();
         let SourceTiles { info, tiles, .. } = self;
         info.feature_state.coalesce_changes(
             tiles.values_mut().filter(|slot| keys.contains(&slot.tile.id)).filter_map(|slot| slot.tile.shown.as_mut()),
+            changed,
         );
     }
 

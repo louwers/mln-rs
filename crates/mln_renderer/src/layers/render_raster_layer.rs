@@ -39,9 +39,10 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 
 use super::raster_layer_tweaker::RasterLayerTweaker;
-use super::{shared_vertices, update_tile};
+use super::{LayerTiles, shared_vertices, update_tile};
 use crate::bucket::NoBucket;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
+use crate::draw_cache::LayerDraws;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
@@ -275,11 +276,11 @@ impl RenderLayer for RenderRasterLayer {
         }
         self.image_data = params.source.and_then(crate::render_source::RenderSource::get_image_render_data);
         // It is possible image data is not available until the source loads it.
-        self.update_render_tile_ids();
+        self.update_tile_entries(params.draws);
     }
 
-    fn release_render_data(&mut self) {
-        crate::render_layer::release_render_data_base(self);
+    fn release_render_data(&mut self, draws: &mut LayerDraws) {
+        crate::render_layer::release_render_data_base(self, draws);
         if let Some(layer_group) = &mut self.image_layer_group {
             layer_group.clear_drawables();
         }
@@ -288,21 +289,21 @@ impl RenderLayer for RenderRasterLayer {
     }
 
     /// The layer's tweaker sets up both its tile group and its image group.
-    fn tweak(&mut self, parameters: &PaintParameters<'_>) {
+    fn tweak(&mut self, parameters: &PaintParameters<'_>, draws: &mut LayerDraws) {
         if !self.base.is_renderable {
             return;
         }
         let Some(tweaker) = &mut self.base.layer_tweaker else {
             return;
         };
-        for group in [&mut self.base.layer_group, &mut self.image_layer_group].into_iter().flatten() {
-            tweaker.execute(group, parameters);
+        for group in [&mut draws.group, &mut self.image_layer_group].into_iter().flatten() {
+            tweaker.execute(group, &LayerTiles::none(), parameters);
         }
     }
 
-    fn layer_groups<'a>(&'a mut self, groups: &mut Vec<&'a mut LayerGroup>) {
+    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<&'a mut LayerGroup>) {
         if self.base.is_renderable {
-            groups.extend([&mut self.base.layer_group, &mut self.image_layer_group].into_iter().flatten());
+            groups.extend([&mut draws.group, &mut self.image_layer_group].into_iter().flatten());
         }
     }
 
@@ -313,8 +314,9 @@ impl RenderLayer for RenderRasterLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        draws: &mut LayerDraws,
     ) {
-        if self.update_projection_variant(state) {
+        if self.update_projection_variant(state, draws) {
             self.raster_shader = None;
             if self.base.projection_variant == ProjectionVariant::Mercator {
                 self.globe_meshes.clear();
@@ -323,9 +325,7 @@ impl RenderLayer for RenderRasterLayer {
         let render_tiles = self.base.render_tiles.clone().filter(|t| !t.is_empty());
         let image_data = self.image_data.clone();
         if render_tiles.is_none() && image_data.is_none() {
-            if let Some(layer_group) = &mut self.base.layer_group {
-                layer_group.clear_drawables();
-            }
+            draws.clear_drawables();
             if let Some(layer_group) = &mut self.image_layer_group {
                 layer_group.clear_drawables();
             }
@@ -359,16 +359,14 @@ impl RenderLayer for RenderRasterLayer {
             return;
         };
 
-        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
         {
             {
                 let tile_layer_group = &mut layer_group;
                 tile_layer_group.composite = self.composite();
                 // Remove existing drawables that are no longer in the cover set
-                let base = &self.base;
-                tile_layer_group.remove_drawables_if(|drawable| {
-                    drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-                });
+                tile_layer_group
+                    .remove_drawables_if(|drawable| drawable.tile_id.is_some_and(|id| !draws.has_tile(&id)));
             }
 
             if self.static_data_vertices.is_none() {
@@ -420,7 +418,7 @@ impl RenderLayer for RenderRasterLayer {
                     )
                 };
 
-                if self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id) {
+                if draws.set_bucket(&tile_id, bucket.base.bucket_id) {
                     // Bucket ID changed, we need to rebuild the drawables
                     layer_group.remove_drawables(render_pass, &tile_id);
                     cleared = true;
@@ -543,6 +541,6 @@ impl RenderLayer for RenderRasterLayer {
                 }
             }
         }
-        self.base.layer_group = Some(layer_group);
+        draws.group = Some(layer_group);
     }
 }

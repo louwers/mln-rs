@@ -13,7 +13,7 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
-use super::{DrawableRenderTile, cast_matrix, slot_bucket};
+use super::{LayerTiles, cast_matrix};
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
@@ -53,7 +53,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -113,6 +113,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         // shaders.
         let zero_to_one = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !state.is_globe_rendering();
         let key = self.base.key;
+        let layer_id = self.base.id.clone();
         layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = true;
@@ -123,25 +124,16 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
                 return;
             }
 
-            let Some(binders_slot) = drawable.binders.clone() else {
+            let Some((tile, bucket)) = tiles.bucket::<FillExtrusion>(&tile_id) else {
                 debug_assert!(false);
                 return;
             };
-            let Some((bucket, layer_id)) = slot_bucket::<FillExtrusionBucket>(&binders_slot) else {
-                debug_assert!(false);
-                return;
-            };
-            let Some(binders_lock) = bucket.paint_property_binders.get(layer_id) else {
+            let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
                 debug_assert!(false);
                 return;
             };
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
-            let tile = drawable.render_tile.as_ref().map(DrawableRenderTile::tile);
-            if tile.is_none() {
-                debug_assert!(false);
-                return;
-            }
 
             let tile_id = tile_id.to_unwrapped();
             let mut projection = get_projection_data(
@@ -178,8 +170,8 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
                 texture_size = tex.borrow().size();
             }
 
-            let pattern_pos_a = tile.and_then(|t| t.get_pattern(fill_pattern_value.from.id()));
-            let pattern_pos_b = tile.and_then(|t| t.get_pattern(fill_pattern_value.to.id()));
+            let pattern_pos_a = tile.get_pattern(fill_pattern_value.from.id());
+            let pattern_pos_b = tile.get_pattern(fill_pattern_value.to.id());
 
             let pattern_t = binders.fill_extrusion_pattern.interpolation_factor(zoom).0;
             drawable_ubo_vector[i as usize] = FillExtrusionDrawableUBO {

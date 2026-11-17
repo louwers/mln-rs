@@ -520,24 +520,6 @@ pub(crate) struct SymbolBucket {
     #[wire(skip)]
     has_format_section_overrides: OnceLock<bool>,
 
-    /// Bumped whenever the vertex data changes after the bucket is shared
-    /// (placement, sorting), so drawables can refresh their attributes.
-    #[wire(skip)]
-    pub(crate) version: AtomicU32,
-    /// What changed (the C++ shared vectors' `updateModified`): the
-    /// opacity vertices (placement), the dynamic vertices (line labels,
-    /// variable anchors), the triangle order (sortFeatures) and the paint
-    /// property binders (feature state). `RenderSymbolLayer` refreshes only
-    /// those in its drawables.
-    #[wire(skip)]
-    pub(crate) opacity_version: AtomicU32,
-    #[wire(skip)]
-    pub(crate) dynamic_version: AtomicU32,
-    #[wire(skip)]
-    pub(crate) sort_version: AtomicU32,
-    #[wire(skip)]
-    pub(crate) binder_version: AtomicU32,
-
     state: Mutex<SymbolBucketState>,
 }
 
@@ -600,11 +582,6 @@ impl SymbolBucket {
             allow_vertical_placement,
             placement_modes,
             has_format_section_overrides: OnceLock::new(),
-            version: AtomicU32::new(0),
-            opacity_version: AtomicU32::new(0),
-            dynamic_version: AtomicU32::new(0),
-            sort_version: AtomicU32::new(0),
-            binder_version: AtomicU32::new(0),
             state: Mutex::new(SymbolBucketState {
                 sorted_angle: f32::MAX,
                 symbol_instances,
@@ -622,10 +599,6 @@ impl SymbolBucket {
     /// The mutable state while the bucket is still owned (worker thread).
     pub(crate) fn state_mut(&mut self) -> &mut SymbolBucketState {
         self.state.get_mut()
-    }
-
-    pub(crate) fn bump_version(&self) {
-        self.version.fetch_add(1, Ordering::SeqCst);
     }
 
     pub(crate) fn has_text_data(&self) -> bool {
@@ -663,15 +636,18 @@ impl SymbolBucket {
         has_text_variable_anchor_offset || !self.layout.text_variable_anchor.uniform().is_empty()
     }
 
-    pub(crate) fn sort_features(&self, angle: f32) {
+    /// Sorts the symbols by their position along the screen's y axis at
+    /// the map's bearing `angle`, where the layout asks for that, and
+    /// returns whether that changed the order of the triangles.
+    pub(crate) fn sort_features(&self, angle: f32) -> bool {
         if !self.sort_features_by_y {
-            return;
+            return false;
         }
         debug_assert!(angle != f32::MAX);
 
         let mut state = self.state();
         if state.sorted_angle == angle {
-            return;
+            return false;
         }
 
         state.sorted_angle = angle;
@@ -680,12 +656,10 @@ impl SymbolBucket {
         // segments so don't try. Sorting within segments separately seemed
         // not to be worth the complexity.
         if state.text.segments.len() > 1 || (state.icon.segments.len() > 1 || state.sdf_icon.segments.len() > 1) {
-            return;
+            return false;
         }
 
         self.base.uploaded.store(false, Ordering::SeqCst);
-        self.sort_version.fetch_add(1, Ordering::SeqCst);
-        self.bump_version();
 
         let state = &mut *state;
         state.text.triangles.clear();
@@ -728,6 +702,7 @@ impl SymbolBucket {
         }
 
         state.feature_sort_order = Some(Arc::new(symbols_sort_order));
+        true
     }
 
     /// The indices into `symbol_instances` of a sort key range, or all
@@ -744,19 +719,13 @@ impl SymbolBucket {
     /// and the buffers' `updateModified`.
     pub(crate) fn mark_vertices_updated(&self, update_opacities: bool, dynamic_updated: bool) {
         let mut state = self.state();
-        if update_opacities {
+        if update_opacities || dynamic_updated {
             self.base.uploaded.store(false, Ordering::SeqCst);
-            self.opacity_version.fetch_add(1, Ordering::SeqCst);
-        }
-        if dynamic_updated {
-            self.base.uploaded.store(false, Ordering::SeqCst);
-            self.dynamic_version.fetch_add(1, Ordering::SeqCst);
         }
         if !self.base.uploaded.load(Ordering::SeqCst) {
             state.text.update_modified();
             state.icon.update_modified();
             state.sdf_icon.update_modified();
-            self.bump_version();
         }
     }
 
@@ -885,16 +854,21 @@ impl Bucket for SymbolBucket {
         mln_wire::Wire::write(self, w);
     }
 
-    /// Re-evaluates the feature-state dependent attribute values.
-    fn update(&self, states: &FeatureStates, layer: &TileLayer<'_>, layer_id: &str, image_positions: &ImagePositions) {
-        if let Some(binders) = self.paint_properties.get(layer_id) {
-            let mut binders = binders.write();
-            binders.icon_binders.update_vertex_vectors(states, layer, image_positions);
-            binders.text_binders.update_vertex_vectors(states, layer, image_positions);
-            self.base.uploaded.store(false, Ordering::SeqCst);
-            self.binder_version.fetch_add(1, Ordering::SeqCst);
-            self.bump_version();
-        }
+    fn update(
+        &self,
+        states: &FeatureStates,
+        layer: &TileLayer<'_>,
+        layer_id: &str,
+        image_positions: &ImagePositions,
+    ) -> bool {
+        let Some(binders) = self.paint_properties.get(layer_id) else {
+            return false;
+        };
+        let mut binders = binders.write();
+        binders.icon_binders.update_vertex_vectors(states, layer, image_positions);
+        binders.text_binders.update_vertex_vectors(states, layer, image_positions);
+        self.base.uploaded.store(false, Ordering::SeqCst);
+        true
     }
 }
 

@@ -14,6 +14,7 @@ use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, to_projection_ubo};
 use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
+use crate::layers::LayerTiles;
 use crate::paint_parameters::PaintParameters;
 
 /// Per-tile DEM properties that are set during drawable creation and read by
@@ -50,7 +51,7 @@ impl LayerTweaker for ColorReliefLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, _tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         let context = parameters.context;
         let Some(properties) = self.base.evaluated_properties.clone() else {
             return;

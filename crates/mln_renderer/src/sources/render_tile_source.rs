@@ -41,7 +41,7 @@ use crate::layer_group::LayerGroup;
 // layers: debug
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::cast_matrix;
+use crate::layers::{LayerTiles, cast_matrix};
 use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
 use crate::render_pass::RenderPass;
@@ -319,7 +319,7 @@ impl LayerTweaker for PolylineLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, _tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         let context = parameters.context;
         if layer_group.empty() {
             return;
@@ -474,8 +474,6 @@ impl RenderSource for RenderTileSource {
             self.render_tiles = Rc::new(Vec::new());
             return;
         };
-        // layers: feature state
-        source.coalesce_feature_state();
         let mut tiles: Vec<RenderTile> = Vec::with_capacity(source.rendered_count());
         for rendered in source.rendered() {
             let mut render_tile = RenderTile::new(*rendered.id, rendered.tile, rendered.hold_for_fade);

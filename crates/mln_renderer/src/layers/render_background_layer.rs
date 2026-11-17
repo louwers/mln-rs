@@ -13,6 +13,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::background_layer_properties;
 use crate::bucket::NoBucket;
+use crate::draw_cache::LayerDraws;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
@@ -131,6 +132,7 @@ impl RenderLayer for RenderBackgroundLayer {
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        draws: &mut LayerDraws,
     ) {
         let zoom = state.get_integer_zoom();
         let zoom_range = Range::new(0u8, zoom);
@@ -152,7 +154,7 @@ impl RenderLayer for RenderBackgroundLayer {
 
         // renderTiles is always empty, we use tileCover instead
         if tile_cover.is_empty() {
-            self.remove_all_drawables();
+            self.remove_all_drawables(draws);
             return;
         }
 
@@ -166,11 +168,11 @@ impl RenderLayer for RenderBackgroundLayer {
         // If the result is transparent or missing, just remove any existing
         // drawables and stop
         if draw_passes == RenderPass::None {
-            self.remove_all_drawables();
+            self.remove_all_drawables(draws);
             return;
         }
 
-        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
         'draw: {
             if self.base.layer_tweaker.is_none() {
                 // Background drawables have no source buckets to replace them
@@ -183,7 +185,7 @@ impl RenderLayer for RenderBackgroundLayer {
                 )));
             }
 
-            if self.update_projection_variant(state) {
+            if self.update_projection_variant(state, draws) {
                 self.plain_shader = None;
                 self.pattern_shader = None;
             }
@@ -272,6 +274,6 @@ impl RenderLayer for RenderBackgroundLayer {
                 }
             }
         }
-        self.base.layer_group = Some(layer_group);
+        draws.group = Some(layer_group);
     }
 }

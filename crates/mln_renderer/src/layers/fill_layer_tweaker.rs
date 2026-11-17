@@ -14,9 +14,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::render_fill_layer::FillVariant;
-use super::{DrawableRenderTile, cast_matrix, slot_bucket};
+use super::{LayerTiles, cast_matrix};
 use crate::bucket::Bucket;
-use crate::buckets::fill_bucket::FillBucket;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -54,7 +53,7 @@ impl LayerTweaker for FillLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -109,30 +108,23 @@ impl LayerTweaker for FillLayerTweaker {
                 return;
             }
 
+            let Some((tile, bucket)) = tiles.bucket::<Fill>(&tile_id) else {
+                debug_assert!(false);
+                return;
+            };
             let tile_id = tile_id.to_unwrapped();
-
-            let Some(binders_slot) = drawable.binders.clone() else {
-                debug_assert!(false);
-                return;
-            };
-            let Some((bucket, layer_id)) = slot_bucket::<FillBucket>(&binders_slot) else {
-                debug_assert!(false);
-                return;
-            };
-            let Some(binders_lock) = bucket.paint_property_binders.get(layer_id) else {
+            let Some(binders_lock) = bucket.paint_property_binders.get(&id) else {
                 debug_assert!(false);
                 return;
             };
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
-            let tile = drawable.render_tile.as_ref().map(DrawableRenderTile::tile);
-            debug_assert!(tile.is_some());
 
             let sdf_pattern: f32 = if bucket.is_sdf_pattern(&id) { 1.0 } else { 0.0 };
 
             let fill_pattern_value = evaluated.fill_pattern.faded();
-            let pattern_pos_a = tile.and_then(|t| t.get_pattern(fill_pattern_value.from.id()));
-            let pattern_pos_b = tile.and_then(|t| t.get_pattern(fill_pattern_value.to.id()));
+            let pattern_pos_a = tile.get_pattern(fill_pattern_value.from.id());
+            let pattern_pos_b = tile.get_pattern(fill_pattern_value.to.id());
 
             let projection = get_projection_data(
                 &tile_id,

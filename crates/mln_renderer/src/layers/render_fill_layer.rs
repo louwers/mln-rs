@@ -22,9 +22,10 @@ use mln_util::Color;
 use mln_util::error::Error;
 
 use super::fill_layer_tweaker::FillLayerTweaker;
-use super::{DrawableBinders, DrawableRenderTile, refresh_if_bucket_updated, shared_vertices, update_tile};
+use super::{refresh_paint_attributes, shared_vertices, update_tile};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
+use crate::draw_cache::LayerDraws;
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
 use crate::layer_composite::Composite;
@@ -260,9 +261,10 @@ impl RenderLayer for RenderFillLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        draws: &mut LayerDraws,
     ) {
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables();
+            self.remove_all_drawables(draws);
             return;
         };
 
@@ -273,7 +275,7 @@ impl RenderLayer for RenderFillLayer {
             )));
         }
 
-        self.update_projection_variant(state);
+        self.update_projection_variant(state, draws);
 
         if self.fill_shader_group.is_none() {
             self.fill_shader_group = shaders.shader_group(FILL_SHADER_NAME);
@@ -300,7 +302,7 @@ impl RenderLayer for RenderFillLayer {
             self.pattern_shader_group.clone(),
             self.outline_pattern_shader_group.clone(),
         ) else {
-            self.remove_all_drawables();
+            self.remove_all_drawables(draws);
             return;
         };
 
@@ -318,17 +320,14 @@ impl RenderLayer for RenderFillLayer {
         };
 
         // The layer's group, which this fills, and puts back when it's done.
-        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
         {
             let paint = &self.values.evaluated.paint;
             layer_group.composite =
                 Composite::of(*paint.fill_layer_opacity.uniform(), *paint.fill_layer_blend.uniform());
-            let base = &self.base;
             // If the render pass has changed or the tile has dropped out of
             // the cover set, remove it.
-            layer_group.remove_drawables_if(|drawable| {
-                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
+            layer_group.remove_drawables_if(|drawable| drawable.tile_id.is_some_and(|id| !draws.has_tile(&id)));
 
             layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
         }
@@ -371,13 +370,13 @@ impl RenderLayer for RenderFillLayer {
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
 
-            let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+            let prev_bucket_id = draws.bucket(&tile_id);
             if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // This tile was previously set up from a different bucket,
                 // drop and re-create any drawables for it.
                 layer_group.remove_drawables(render_pass, &tile_id);
             }
-            self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
+            draws.set_bucket(&tile_id, bucket.base.bucket_id);
 
             let Some(evaluated) = render_data.layer::<Fill>().map(|layer| &layer.paint) else {
                 continue;
@@ -392,10 +391,11 @@ impl RenderLayer for RenderFillLayer {
             // Drawables' stored attributes point directly into the bucket's
             // shared vectors; the backend upload guard fires automatically
             // when those change.
+            let changes = draws.take_changes(&tile_id);
             let update_existing = |drawable: &mut crate::drawable::Drawable| {
                 let current = drawable.tweaker == tweaker;
                 if current {
-                    refresh_if_bucket_updated(drawable, |attrs| {
+                    refresh_paint_attributes(drawable, changes, |attrs| {
                         read_fill_attributes(attrs, binders, &paint_of(), evaluated, &mut Default::default());
                     });
                 }
@@ -478,7 +478,6 @@ impl RenderLayer for RenderFillLayer {
                 }
             };
 
-            let layer_id = self.base.style.base().id.clone();
             let mut finish = |builder: &mut DrawableBuilder, type_: FillVariant| {
                 builder.flush();
 
@@ -486,8 +485,6 @@ impl RenderLayer for RenderFillLayer {
                     drawable.tile_id = Some(tile_id);
                     drawable.type_ = type_ as usize;
                     drawable.tweaker = tweaker;
-                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &layer_id));
-                    drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
                     layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
                 }
             };
@@ -642,6 +639,6 @@ impl RenderLayer for RenderFillLayer {
                 }
             }
         }
-        self.base.layer_group = Some(layer_group);
+        draws.group = Some(layer_group);
     }
 }

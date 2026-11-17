@@ -49,6 +49,7 @@ use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, PlacedSymbol, PlacedSymbolPools, SortKeyRange, SymbolBucket, SymbolBucketState,
     ZoomEvaluatedSize, get_sorted_symbols,
 };
+use crate::draw_cache::{BucketChanges, ChangedBuckets};
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::layout::symbol_projection::{
@@ -1620,21 +1621,39 @@ impl Placement {
         }
     }
 
-    pub(crate) fn update_layer_buckets(&self, layer: &dyn RenderLayer, state: &TransformState, update_opacities: bool) {
+    /// Brings the vertices of the buckets `layer` places up to date with
+    /// the placement, and adds what changed of them to `changed`.
+    pub(crate) fn update_layer_buckets(
+        &self,
+        layer: &dyn RenderLayer,
+        state: &TransformState,
+        update_opacities: bool,
+        changed: &mut ChangedBuckets,
+    ) {
         let mut seen_cross_tile_ids: BTreeSet<NonZeroU32> = BTreeSet::new();
         for item in layer.get_placement_data() {
             // `sortKeyRange->isFirstRange()`: `start == 0u`.
             if item.sort_key_range.is_none_or(|range| range.start == 0) {
-                item.bucket.update_vertices(self, update_opacities, state, item, &mut seen_cross_tile_ids);
+                let changes =
+                    item.bucket.update_vertices(self, update_opacities, state, item, &mut seen_cross_tile_ids);
+                changed.mark(item.bucket.base.bucket_id, changes);
             }
         }
     }
 
     /// Lays out the positions of a layer drawn from buckets other layers
-    /// place, after `update_layer_buckets`.
-    pub(crate) fn update_follower_buckets(&self, layer: &dyn RenderLayer, state: &TransformState) {
+    /// place, after `update_layer_buckets`, and adds the buckets whose
+    /// positions changed to `changed`.
+    pub(crate) fn update_follower_buckets(
+        &self,
+        layer: &dyn RenderLayer,
+        state: &TransformState,
+        changed: &mut ChangedBuckets,
+    ) {
         for item in layer.get_follower_data() {
-            item.bucket.update_layer_vertices(self, state, item, layer.get_id());
+            if item.bucket.update_layer_vertices(self, state, item, layer.get_id()) {
+                changed.mark(item.bucket.base.bucket_id, BucketChanges { dynamic: true, ..BucketChanges::default() });
+            }
         }
     }
 
@@ -1925,12 +1944,15 @@ impl Placement {
         result
     }
 
+    /// Sets the opacities of the bucket's symbols from the placement, and
+    /// returns whether sorting the symbols for the map's bearing changed the
+    /// order of the bucket's triangles.
     pub(crate) fn update_bucket_opacities(
         &self,
         bucket: &SymbolBucket,
         state: &TransformState,
         seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
-    ) {
+    ) -> bool {
         let layout = &*bucket.layout;
         let variable_placement = bucket.has_variable_text_anchors();
         let mut guard = bucket.state();
@@ -2208,11 +2230,12 @@ impl Placement {
         }
         drop(guard);
 
-        bucket.sort_features(state.get_bearing() as f32);
+        let sorted = bucket.sort_features(state.get_bearing() as f32);
 
         if let Some(retained_data) = self.retained_query_data.get(&bucket.bucket_instance_id) {
             *retained_data.feature_sort_order.borrow_mut() = bucket.state().feature_sort_order.clone();
         }
+        sorted
     }
 
     /// The virtual `symbolFadeChange(now)`.
@@ -2694,6 +2717,9 @@ impl SymbolBucket {
         placement.place_symbol_bucket(data, seen_ids);
     }
 
+    /// Brings the bucket's vertices up to date with `placement`, its
+    /// opacities only with `update_opacities`, and returns what of them
+    /// changed.
     pub(crate) fn update_vertices(
         &self,
         placement: &Placement,
@@ -2701,34 +2727,28 @@ impl SymbolBucket {
         state: &TransformState,
         data: &BucketPlacementData,
         seen_ids: &mut BTreeSet<NonZeroU32>,
-    ) {
-        if update_opacities {
-            placement.update_bucket_opacities(self, state, seen_ids);
-        }
+    ) -> BucketChanges {
+        let sorted = update_opacities && placement.update_bucket_opacities(self, state, seen_ids);
 
         let dynamic_updated = placement.update_bucket_dynamic_attribute_data(self, state, data, None);
 
         // `uploaded = false` for either change, then the buffers'
         // `updateModified()` when not uploaded.
         self.mark_vertices_updated(update_opacities, dynamic_updated);
+        BucketChanges { paint: false, opacity: update_opacities, dynamic: dynamic_updated, sort: sorted }
     }
 
     /// Lays out the positions a layer sharing this bucket draws at its own
-    /// translation, from the leader's placement.
+    /// translation, from the leader's placement, and returns whether they
+    /// changed.
     pub(crate) fn update_layer_vertices(
         &self,
         placement: &Placement,
         state: &TransformState,
         data: &BucketPlacementData,
         layer_id: &str,
-    ) {
-        if !placement.update_bucket_dynamic_attribute_data(self, state, data, Some(layer_id)) {
-            return;
-        }
-        // The layer's positions' `updateModified()`: drawables refresh their
-        // dynamic attributes.
-        self.dynamic_version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.bump_version();
+    ) -> bool {
+        placement.update_bucket_dynamic_attribute_data(self, state, data, Some(layer_id))
     }
 }
 

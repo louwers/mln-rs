@@ -13,8 +13,7 @@ use mln_style::layers::{Line, LinePaintProperties};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use super::{DrawableRenderTile, cast_matrix, slot_bucket};
-use crate::buckets::line_bucket::LineBucket;
+use super::{LayerTiles, cast_matrix};
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -95,7 +94,7 @@ impl LayerTweaker for LineLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -141,6 +140,7 @@ impl LayerTweaker for LineLayerTweaker {
         let mut tile_props_ubo_vector = vec![LineTilePropsUnionUBO::default(); count];
 
         let key = self.base.key;
+        let layer_id = self.base.id.clone();
         layer_group.visit_drawables(|drawable| {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
@@ -152,27 +152,20 @@ impl LayerTweaker for LineLayerTweaker {
                 return;
             }
 
+            let Some((tile, bucket)) = tiles.bucket::<Line>(&tile_id) else {
+                debug_assert!(false);
+                return;
+            };
             let tile_id = tile_id.to_unwrapped();
-
-            let Some(binders_slot) = drawable.binders.clone() else {
-                debug_assert!(false);
-                return;
-            };
-            let Some((bucket, layer_id)) = slot_bucket::<LineBucket>(&binders_slot) else {
-                debug_assert!(false);
-                return;
-            };
-            let Some(binders_lock) = bucket.paint_property_binders.get(layer_id) else {
+            let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
                 debug_assert!(false);
                 return;
             };
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
-            let tile = drawable.render_tile.as_ref().map(DrawableRenderTile::tile);
-            debug_assert!(tile.is_some());
 
-            let pattern_pos_a = tile.and_then(|t| t.get_pattern(line_pattern_value.from.id()));
-            let pattern_pos_b = tile.and_then(|t| t.get_pattern(line_pattern_value.to.id()));
+            let pattern_pos_a = tile.get_pattern(line_pattern_value.from.id());
+            let pattern_pos_b = tile.get_pattern(line_pattern_value.to.id());
 
             let translation = &evaluated.line_translate;
             let anchor = &evaluated.line_translate_anchor;

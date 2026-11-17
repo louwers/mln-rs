@@ -159,8 +159,11 @@ impl TileLayout {
     /// tile, to `states`, as a tile does when a map's feature state
     /// changes: each bucket whose paint depends on feature state evaluates
     /// that paint again for the features that have a state.
-    pub fn set_feature_state(&self, laid_out: &LaidOut, states: &LayerFeatureStates) {
-        laid_out.result.set_feature_state(states, &self.resolved.patterns);
+    /// Returns whether a bucket's vertex data changed.
+    pub fn set_feature_state(&self, laid_out: &LaidOut, states: &LayerFeatureStates) -> bool {
+        let mut changed = crate::draw_cache::ChangedBuckets::default();
+        laid_out.result.set_feature_state(states, &self.resolved.patterns, &mut changed);
+        !changed.is_empty()
     }
 
     fn job(&self, data: TileData) -> JobResult {
@@ -547,17 +550,13 @@ mod tests {
         let (style, data) = (style(), data());
         let layout = TileLayout::new(&style, "s", |type_| type_ == "line", (0, 0, 0), &data, |_| None).unwrap();
         let laid_out = layout.run(data).unwrap();
-        let version = || laid_out.result.layer_render_data["roads"].bucket.get_version();
-        let before = version();
 
         let mut states = LayerFeatureStates::default();
-        layout.set_feature_state(&laid_out, &states);
-        assert_eq!(version(), before, "no state, no change");
+        assert!(!layout.set_feature_state(&laid_out, &states), "no state, no change");
         let mut on = mln_style::expression::expression::FeatureState::new();
         on.insert("on".to_owned(), Value::Bool(true));
         states.entry("l".to_owned()).or_default().insert("1".to_owned(), on);
-        layout.set_feature_state(&laid_out, &states);
-        assert!(version() > before);
+        assert!(layout.set_feature_state(&laid_out, &states));
     }
 
     #[test]

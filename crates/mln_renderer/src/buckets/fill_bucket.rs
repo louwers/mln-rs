@@ -202,13 +202,12 @@ impl Bucket for FillBucket {
         layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,
-    ) {
-        if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write().update_vertex_vectors(states, layer, image_positions);
-            self.base.uploaded.store(false, Ordering::SeqCst);
-
-            // sharedVertices->updateModified()
-            self.base.version.fetch_add(1, Ordering::SeqCst);
-        }
+    ) -> bool {
+        let Some(binders) = self.paint_property_binders.get(layer_id) else {
+            return false;
+        };
+        binders.write().update_vertex_vectors(states, layer, image_positions);
+        self.base.uploaded.store(false, Ordering::SeqCst);
+        true
     }
 }

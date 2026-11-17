@@ -11,6 +11,7 @@ use crate::geometry::dem_data::get_unpack_vector;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase};
 use crate::layer_type::ErasedEvaluatedLayer;
+use crate::layers::LayerTiles;
 use crate::paint_parameters::PaintParameters;
 
 #[derive(Clone, Copy, Debug)]
@@ -39,7 +40,7 @@ impl LayerTweaker for HillshadePrepareLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, _tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }

@@ -10,6 +10,7 @@ use super::cast_matrix;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layer_type::ErasedEvaluatedLayer;
+use crate::layers::LayerTiles;
 use crate::paint_parameters::PaintParameters;
 
 #[derive(Clone, Copy, Debug)]
@@ -37,7 +38,7 @@ impl LayerTweaker for CollisionLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, _tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }

@@ -20,6 +20,7 @@ use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
 use crate::buckets::hillshade_bucket::HillshadeBucket;
+use crate::draw_cache::ChangedBuckets;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
 use crate::tests::tile::{dem_png, png};
@@ -333,14 +334,14 @@ fn queries_and_feature_state_read_the_shown_contents() {
     state.insert("hover".to_owned(), feature::Value::Bool(true));
     let (source, _) = tile.store.source_mut(key).expect("the source");
     source.info.feature_state.update_state(None, "1", &state);
-    source.coalesce_feature_state();
+    source.coalesce_feature_state(&mut ChangedBuckets::default());
     let version = source.info.feature_state.version();
     let shown_version = |tile: &OneTile| tile.tile().shown.as_ref().expect("contents").feature_state_version;
     // Not rendered, so the coalesce left it.
     assert_eq!(shown_version(&tile), 0);
     tile.with(|tile| {
         let (info, tile) = tile.parts();
-        info.feature_state.coalesce_changes(tile.shown.as_mut());
+        info.feature_state.coalesce_changes(tile.shown.as_mut(), &mut ChangedBuckets::default());
     });
     assert_eq!(shown_version(&tile), version);
 

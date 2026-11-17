@@ -1,14 +1,14 @@
 // C++ drawables share the bucket's vertex vectors and see placement's
 // changes through them (`updateModified`). Here a drawable gets copies of
 // the vectors; when placement, sorting or feature state change the bucket
-// (its per-kind change counters), `update` replaces just those attributes
-// (opacity, dynamic positions, binders) and the triangle indices of the
-// tile's existing drawables, as C++ `updateTileDrawable` does.
+// (the changes the tile's entry in `LayerDraws` collects), `update`
+// replaces just those attributes (opacity, dynamic positions, binders) and
+// the triangle indices of the tile's existing drawables, as C++
+// `updateTileDrawable` does.
 
 use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
@@ -41,11 +41,12 @@ use mln_util::mat4::{Mat4, matrix};
 
 use super::collision_layer_tweaker::{CollisionDrawableData, CollisionLayerTweaker};
 use super::symbol_layer_tweaker::SymbolLayerTweaker;
-use super::{DrawableBinders, DrawableRenderTile, shared_vertices, update_tile};
+use super::{LayerTiles, shared_vertices, update_tile};
 use crate::bucket_geometry::{BucketGeometry, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
 };
+use crate::draw_cache::{BucketChanges, LayerDraws};
 use crate::drawable_builder::DrawableBuilder;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
@@ -58,8 +59,7 @@ use crate::layout::symbol_layout::SymbolLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    BucketPlacementData, LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, SymbolTranslate,
-    TypedLayer, handle_wrap_jump_base,
+    BucketPlacementData, LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
@@ -100,26 +100,6 @@ pub(crate) struct SymbolDrawableData {
     /// The bucket segment the drawable draws (`sortFeaturesByKey`), or all
     /// of them.
     pub(crate) segment: Option<usize>,
-}
-
-/// The bucket change counters a tile's drawables reflect.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TileVersions {
-    opacity: u32,
-    dynamic: u32,
-    sort: u32,
-    binder: u32,
-}
-
-impl TileVersions {
-    fn of(bucket: &SymbolBucket) -> Self {
-        TileVersions {
-            opacity: bucket.opacity_version.load(Ordering::SeqCst),
-            dynamic: bucket.dynamic_version.load(Ordering::SeqCst),
-            sort: bucket.sort_version.load(Ordering::SeqCst),
-            binder: bucket.binder_version.load(Ordering::SeqCst),
-        }
-    }
 }
 
 #[must_use]
@@ -399,19 +379,6 @@ fn set_placed_attribute<V: bytemuck::Pod>(
     }
 }
 
-/// Which of a tile's drawable inputs changed since they were built.
-#[derive(Clone, Copy, Debug)]
-struct DrawableRefresh {
-    opacity: bool,
-    dynamic: bool,
-    sort: bool,
-    binders: bool,
-}
-
-impl DrawableRefresh {
-    const ALL: DrawableRefresh = DrawableRefresh { opacity: true, dynamic: true, sort: true, binders: true };
-}
-
 /// Replaces the attributes (and indices) of an existing drawable that
 /// placement, sorting or feature state changed. Halo and fill drawables share
 /// their attribute array, which is refreshed once (`refreshed_attributes`).
@@ -421,7 +388,7 @@ fn update_tile_drawable(
     bucket: &SymbolBucket,
     layer_id: &str,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    refresh: DrawableRefresh,
+    refresh: BucketChanges,
     refreshed_attributes: &mut Vec<*const ()>,
 ) {
     let Some(crate::drawable::DrawableData::Symbol(draw_data)) = &drawable.data else {
@@ -458,9 +425,9 @@ fn update_tile_drawable(
     if !drawable.enabled {
         return;
     }
-    let refresh = if was_enabled { refresh } else { DrawableRefresh::ALL };
+    let refresh = if was_enabled { refresh } else { BucketChanges::ALL };
 
-    if !(refresh.opacity || refresh.dynamic || refresh.sort || refresh.binders) {
+    if !refresh.any() {
         return;
     }
 
@@ -475,7 +442,7 @@ fn update_tile_drawable(
             if refresh.opacity {
                 set_fade_opacity_attribute(buffer, &mut attrs);
             }
-            if refresh.binders
+            if refresh.paint
                 && let Some(paint_props) = bucket.paint_properties.get(layer_id)
             {
                 let paint_props = paint_props.read();
@@ -576,9 +543,6 @@ pub(crate) struct RenderSymbolLayer {
     symbol_icon_group: Option<ShaderGroupPtr>,
     symbol_sdf_group: Option<ShaderGroupPtr>,
     symbol_text_and_icon_group: Option<ShaderGroupPtr>,
-
-    /// The bucket version each tile's drawables were built from.
-    tile_bucket_versions: HashMap<OverscaledTileID, TileVersions>,
 
     collision_box_group: Option<ShaderGroupPtr>,
     collision_circle_group: Option<ShaderGroupPtr>,
@@ -692,7 +656,6 @@ impl RenderSymbolLayer {
             symbol_icon_group: None,
             symbol_sdf_group: None,
             symbol_text_and_icon_group: None,
-            tile_bucket_versions: HashMap::default(),
             collision_box_group: None,
             collision_circle_group: None,
             collision_tile_layer_group: None,
@@ -863,22 +826,24 @@ impl RenderLayer for RenderSymbolLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    fn tweak(&mut self, parameters: &PaintParameters<'_>) {
+    fn tweak(&mut self, parameters: &PaintParameters<'_>, draws: &mut LayerDraws) {
         if !self.base.is_renderable {
             return;
         }
-        if let (Some(tweaker), Some(group)) = (&mut self.base.layer_tweaker, &mut self.base.layer_group) {
-            tweaker.execute(group, parameters);
+        let base = &mut self.base;
+        let tiles = LayerTiles::new(&*base.style, base.render_tiles.as_ref());
+        if let (Some(tweaker), Some(group)) = (&mut base.layer_tweaker, &mut draws.group) {
+            tweaker.execute(group, &tiles, parameters);
         }
         if let (Some(tweaker), Some(group)) = (&mut self.collision_layer_tweaker, &mut self.collision_tile_layer_group)
         {
-            tweaker.execute(group, parameters);
+            tweaker.execute(group, &tiles, parameters);
         }
     }
 
-    fn layer_groups<'a>(&'a mut self, groups: &mut Vec<&'a mut LayerGroup>) {
+    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<&'a mut LayerGroup>) {
         if self.base.is_renderable {
-            groups.extend([&mut self.base.layer_group, &mut self.collision_tile_layer_group].into_iter().flatten());
+            groups.extend([&mut draws.group, &mut self.collision_tile_layer_group].into_iter().flatten());
         }
     }
 
@@ -890,43 +855,35 @@ impl RenderLayer for RenderSymbolLayer {
         &self.follower_data
     }
 
-    fn release_render_data(&mut self) {
-        crate::render_layer::release_render_data_base(self);
+    fn release_render_data(&mut self, draws: &mut LayerDraws) {
+        crate::render_layer::release_render_data_base(self, draws);
         self.placement_data.clear();
     }
 
-    fn remove_all_drawables(&mut self) {
-        if let Some(group) = &mut self.base.layer_group {
-            group.clear_drawables();
-        }
+    fn remove_all_drawables(&mut self, draws: &mut LayerDraws) {
+        draws.clear_drawables();
         if let Some(group) = &mut self.collision_tile_layer_group {
             group.clear_drawables();
         }
-        self.tile_bucket_versions.clear();
     }
 
-    fn handle_wrap_jump(&mut self, wrap_delta: i16) {
-        handle_wrap_jump_base(self, wrap_delta);
-        self.tile_bucket_versions = std::mem::take(&mut self.tile_bucket_versions)
-            .into_iter()
-            .map(|(id, versions)| (id.unwrap_to(id.wrap.wrapping_add(wrap_delta)), versions))
-            .collect();
-    }
-
-    fn tile_layer_groups<'a>(&'a mut self, groups: &mut Vec<&'a mut LayerGroup>) {
-        groups.extend([&mut self.base.layer_group, &mut self.collision_tile_layer_group].into_iter().flatten());
+    fn handle_wrap_jump(&mut self, wrap_delta: i16, draws: &mut LayerDraws) {
+        draws.shift_wraps(wrap_delta);
+        if let Some(group) = &mut self.collision_tile_layer_group {
+            group.shift_wraps(wrap_delta);
+        }
     }
 
     fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
         let Some(source) = params.source else {
             self.base.render_tiles = None;
-            self.base.render_tile_ids.clear();
+            params.draws.clear_tiles();
             return;
         };
         self.base.render_tiles = source.get_render_tiles_sorted_by_y_position();
         self.base.render_tiles_owner = source.get_raw_render_tiles();
 
-        self.update_render_tile_ids();
+        self.update_tile_entries(params.draws);
         if self.base.render_tiles.is_some() {
             self.add_render_passes_from_tiles();
         }
@@ -960,6 +917,7 @@ impl RenderLayer for RenderSymbolLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        draws: &mut LayerDraws,
     ) {
         /// The tweakers built for one tile.
         #[derive(Default)]
@@ -968,20 +926,20 @@ impl RenderLayer for RenderSymbolLayer {
             icon_tweaker: Option<Rc<DrawableAtlasesTweaker>>,
         }
 
-        self.update_projection_variant(state);
+        self.update_projection_variant(state, draws);
         let passes = self.base.passes;
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables();
+            self.remove_all_drawables(draws);
             return;
         };
         if passes == RenderPass::None {
-            self.remove_all_drawables();
+            self.remove_all_drawables(draws);
             return;
         }
 
         // Set up a layer group, which this fills, and puts back when it's
         // done.
-        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
 
         if self.base.layer_tweaker.is_none() {
             self.base.layer_tweaker = Some(Box::new(SymbolLayerTweaker::new(
@@ -1006,25 +964,16 @@ impl RenderLayer for RenderSymbolLayer {
             self.collision_circle_group = shaders.shader_group("CollisionCircleShader");
         }
 
-        // remove drawables that are dropped out of scope
-        {
-            let base = &self.base;
-            layer_group.remove_drawables_if(|drawable| {
-                // If the render pass has changed or the tile has dropped out
-                // of the cover set, remove it.
-                drawable.render_pass != passes
-                    || drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
-        }
+        // remove drawables that are dropped out of scope: if the render pass
+        // has changed or the tile has dropped out of the cover set, remove
+        // it.
+        let dropped = |drawable: &mut crate::drawable::Drawable| {
+            drawable.render_pass != passes || drawable.tile_id.is_some_and(|id| !draws.has_tile(&id))
+        };
+        layer_group.remove_drawables_if(dropped);
         if let Some(collision_group) = &mut self.collision_tile_layer_group {
-            let base = &self.base;
-            collision_group.remove_drawables_if(|drawable| {
-                drawable.render_pass != passes
-                    || drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-            });
+            collision_group.remove_drawables_if(dropped);
         }
-        let render_tile_ids = &self.base.render_tile_ids;
-        self.tile_bucket_versions.retain(|id, _| render_tile_ids.contains_key(id));
 
         let layout = &self.values.style.layout;
         let sort_features_by_key = layout.symbol_sort_key.is_expression();
@@ -1056,35 +1005,22 @@ impl RenderLayer for RenderSymbolLayer {
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 layer_group.remove_drawables(passes, &tile_id);
                 self.remove_collision_tile(passes, &tile_id);
-                self.tile_bucket_versions.remove(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Symbol>() else {
                 continue;
             };
 
-            let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+            let prev_bucket_id = draws.bucket(&tile_id);
             if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // This tile was previously set up from a different bucket,
                 // drop and re-create any drawables for it.
                 layer_group.remove_drawables(passes, &tile_id);
                 self.remove_collision_tile(passes, &tile_id);
-                self.tile_bucket_versions.remove(&tile_id);
             }
-            self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
-            let current_versions = TileVersions::of(bucket);
-            let seen_versions = self.tile_bucket_versions.insert(tile_id, current_versions);
-            // What changed since the drawables were built or last refreshed
-            // (unknown: refresh everything).
-            let refresh = match seen_versions {
-                Some(seen) => DrawableRefresh {
-                    opacity: seen.opacity != current_versions.opacity,
-                    dynamic: seen.dynamic != current_versions.dynamic,
-                    sort: seen.sort != current_versions.sort,
-                    binders: seen.binder != current_versions.binder,
-                },
-                None => DrawableRefresh::ALL,
-            };
+            draws.set_bucket(&tile_id, bucket.base.bucket_id);
+            // What changed since the drawables were built or last refreshed.
+            let refresh = draws.take_changes(&tile_id);
 
             debug_assert!(bucket.paint_properties.contains_key(self.get_id()));
             if !bucket.paint_properties.contains_key(self.get_id()) {
@@ -1355,8 +1291,6 @@ impl RenderLayer for RenderSymbolLayer {
                 for mut drawable in builder.clear_drawables() {
                     drawable.tile_id = Some(tile_id);
                     drawable.tweaker = tweaker;
-                    drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
-                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &style.base().id));
 
                     let has_variable_placement = state_guard.has_variable_placement;
                     drawable.data = Some(crate::drawable::DrawableData::Symbol(SymbolDrawableData {
@@ -1404,6 +1338,6 @@ impl RenderLayer for RenderSymbolLayer {
                 draw(&self.symbol_icon_group, false, "icon");
             }
         }
-        self.base.layer_group = Some(layer_group);
+        draws.group = Some(layer_group);
     }
 }

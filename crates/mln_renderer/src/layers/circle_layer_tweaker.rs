@@ -6,8 +6,7 @@ use mln_gfx::shaders::shader_defines::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUAT
 use mln_style::layers::Circle;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 
-use super::{cast_matrix, slot_bucket};
-use crate::buckets::circle_bucket::CircleBucket;
+use super::{LayerTiles, cast_matrix};
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{
@@ -43,7 +42,7 @@ impl LayerTweaker for CircleLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -85,6 +84,7 @@ impl LayerTweaker for CircleLayerTweaker {
 
         let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         let key = self.base.key;
+        let layer_id = self.base.id.clone();
         layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = false;
@@ -95,17 +95,12 @@ impl LayerTweaker for CircleLayerTweaker {
             if !drawable.tweaked_by(key) {
                 return;
             }
+            let Some((_, bucket)) = tiles.bucket::<Circle>(&tile_id) else {
+                debug_assert!(false);
+                return;
+            };
             let tile_id = tile_id.to_unwrapped();
-
-            let Some(binders_slot) = drawable.binders.clone() else {
-                debug_assert!(false);
-                return;
-            };
-            let Some((bucket, layer_id)) = slot_bucket::<CircleBucket>(&binders_slot) else {
-                debug_assert!(false);
-                return;
-            };
-            let Some(binders_lock) = bucket.paint_property_binders.get(layer_id) else {
+            let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
                 debug_assert!(false);
                 return;
             };

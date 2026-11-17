@@ -39,9 +39,10 @@ use mln_util::size::Size;
 
 use super::hillshade_layer_tweaker::HillshadeLayerTweaker;
 use super::hillshade_prepare_layer_tweaker::{HillshadePrepareDrawableData, HillshadePrepareLayerTweaker};
-use super::{shared_vertices, update_tile};
+use super::{LayerTiles, shared_vertices, update_tile};
 use crate::bucket::NoBucket;
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
+use crate::draw_cache::LayerDraws;
 use crate::drawable::Drawable;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
@@ -180,11 +181,11 @@ impl RenderLayer for RenderHillshadeLayer {
             }
         }
 
-        self.update_render_tile_ids();
+        self.update_tile_entries(params.draws);
     }
 
-    fn release_render_data(&mut self) {
-        crate::render_layer::release_render_data_base(self);
+    fn release_render_data(&mut self, draws: &mut LayerDraws) {
+        crate::render_layer::release_render_data_base(self, draws);
         self.bucket_render_targets.clear();
     }
 
@@ -204,7 +205,7 @@ impl RenderLayer for RenderHillshadeLayer {
             let tweaker = &mut self.prepare_layer_tweaker;
             render_target.render(parameters, |group, parameters| {
                 if let Some(tweaker) = tweaker {
-                    tweaker.execute(group, parameters);
+                    tweaker.execute(group, &LayerTiles::none(), parameters);
                 }
             });
         }
@@ -217,19 +218,20 @@ impl RenderLayer for RenderHillshadeLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        draws: &mut LayerDraws,
     ) {
-        if self.update_projection_variant(state) {
+        if self.update_projection_variant(state, draws) {
             self.hillshade_shader = None;
             if self.base.projection_variant == ProjectionVariant::Mercator {
                 self.globe_meshes.clear();
             }
         }
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables();
+            self.remove_all_drawables(draws);
             return;
         };
 
-        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
         'draw: {
             if self.base.layer_tweaker.is_none() {
                 self.base.layer_tweaker = Some(Box::new(HillshadeLayerTweaker::new(
@@ -260,13 +262,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 break 'draw;
             }
 
-            {
-                let tile_layer_group = &mut layer_group;
-                let base = &self.base;
-                tile_layer_group.remove_drawables_if(|drawable| {
-                    drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-                });
-            }
+            layer_group.remove_drawables_if(|drawable| drawable.tile_id.is_some_and(|id| !draws.has_tile(&id)));
 
             if self.static_data_shared_vertices.is_none() {
                 self.static_data_shared_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
@@ -307,13 +303,13 @@ impl RenderLayer for RenderHillshadeLayer {
                 };
                 let bucket_id = bucket.base.bucket_id;
 
-                let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+                let prev_bucket_id = draws.bucket(&tile_id);
                 if prev_bucket_id.is_some_and(|prev| prev != bucket_id) {
                     // This tile was previously set up from a different bucket,
                     // drop and re-create any drawables for it.
                     layer_group.remove_drawables(render_pass, &tile_id);
                 }
-                self.set_render_tile_bucket_id(&tile_id, bucket_id);
+                draws.set_bucket(&tile_id, bucket_id);
 
                 let generation = bucket.render_target_generation();
                 let render_target_prepared =
@@ -489,6 +485,6 @@ impl RenderLayer for RenderHillshadeLayer {
                 }
             }
         }
-        self.base.layer_group = Some(layer_group);
+        draws.group = Some(layer_group);
     }
 }

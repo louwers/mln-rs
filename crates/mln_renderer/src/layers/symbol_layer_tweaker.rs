@@ -11,8 +11,7 @@ use mln_style_types::{AlignmentType, IconTextFitType};
 use mln_util::mat4::{Mat4, matrix};
 
 use super::render_symbol_layer::{SymbolType, get_screen_matrix};
-use super::{DrawableRenderTile, cast_matrix, slot_bucket};
-use crate::buckets::symbol_bucket::SymbolBucket;
+use super::{LayerTiles, cast_matrix};
 use crate::drawable::Drawable;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
@@ -59,7 +58,7 @@ impl LayerTweaker for SymbolLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -127,21 +126,13 @@ impl LayerTweaker for SymbolLayerTweaker {
             if !drawable.tweaked_by(key) {
                 return;
             }
+            let Some((_, bucket)) = tiles.bucket::<Symbol>(&tile_id) else {
+                debug_assert!(false);
+                return;
+            };
             let tile_id = tile_id.to_unwrapped();
             let is_text = symbol_data.symbol_type == SymbolType::Text;
 
-            let Some(binders_slot) = drawable.binders.clone() else {
-                debug_assert!(false);
-                return;
-            };
-            let Some((bucket, _layer_id)) = slot_bucket::<SymbolBucket>(&binders_slot) else {
-                debug_assert!(false);
-                return;
-            };
-            if drawable.render_tile.as_ref().map(DrawableRenderTile::tile).is_none() {
-                debug_assert!(false);
-                return;
-            }
             let Some(paint_properties) = bucket.paint_properties.get(&id) else {
                 debug_assert!(false);
                 return;

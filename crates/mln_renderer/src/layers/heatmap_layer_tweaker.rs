@@ -6,8 +6,7 @@ use mln_gfx::shaders::shader_defines::{ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALU
 use mln_style::layers::{Heatmap, HeatmapPaintProperties};
 use mln_style_types::TranslateAnchorType;
 
-use super::{cast_matrix, slot_bucket};
-use crate::buckets::heatmap_bucket::HeatmapBucket;
+use super::{LayerTiles, cast_matrix};
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{
@@ -41,7 +40,7 @@ impl LayerTweaker for HeatmapLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -73,6 +72,7 @@ impl LayerTweaker for HeatmapLayerTweaker {
 
         let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         let key = self.base.key;
+        let layer_id = self.base.id.clone();
         layer_group.visit_drawables(|drawable| {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
@@ -82,21 +82,12 @@ impl LayerTweaker for HeatmapLayerTweaker {
             if !drawable.tweaked_by(key) {
                 return;
             }
+            let Some((_, bucket)) = tiles.bucket::<Heatmap>(&tile_id) else {
+                debug_assert!(false);
+                return;
+            };
             let tile_id = tile_id.to_unwrapped();
-
-            let Some(binders_slot) = drawable.binders.clone() else {
-                debug_assert!(false);
-                return;
-            };
-            if drawable.render_tile.is_none() {
-                debug_assert!(false);
-                return;
-            }
-            let Some((bucket, layer_id)) = slot_bucket::<HeatmapBucket>(&binders_slot) else {
-                debug_assert!(false);
-                return;
-            };
-            let Some(binders_lock) = bucket.paint_property_binders.get(layer_id) else {
+            let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
                 debug_assert!(false);
                 return;
             };

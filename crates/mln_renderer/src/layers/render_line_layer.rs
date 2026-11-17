@@ -30,9 +30,10 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::line_layer_tweaker::{LineDrawableData, LineLayerTweaker, LineType};
-use super::{DrawableBinders, DrawableRenderTile, refresh_if_bucket_updated, update_tile};
+use super::{refresh_paint_attributes, update_tile};
 use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
+use crate::draw_cache::LayerDraws;
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
@@ -242,6 +243,9 @@ pub(crate) struct RenderLineLayer {
     /// detect when it needs to be rebuilt.
     color_ramp_global_state: Option<Arc<GlobalStateMap>>,
     color_ramp_texture_2d: Option<Texture2DPtr>,
+    /// Whether the color ramp changed since the drawables that read it were
+    /// built, which the next update drops.
+    color_ramp_changed: bool,
 
     line_shader_group: Option<ShaderGroupPtr>,
     line_gradient_shader_group: Option<ShaderGroupPtr>,
@@ -260,6 +264,7 @@ impl RenderLineLayer {
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             color_ramp_texture_2d: None,
+            color_ramp_changed: false,
             line_shader_group: None,
             line_gradient_shader_group: None,
             line_sdf_shader_group: None,
@@ -280,11 +285,7 @@ impl RenderLineLayer {
 
         if self.color_ramp_texture_2d.is_some() {
             self.color_ramp_texture_2d = None;
-
-            // delete all gradient drawables
-            if let Some(layer_group) = &mut self.base.layer_group {
-                layer_group.clear_drawables();
-            }
+            self.color_ramp_changed = true;
         }
     }
 
@@ -485,15 +486,20 @@ impl RenderLayer for RenderLineLayer {
         state: &TransformState,
         _parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        draws: &mut LayerDraws,
     ) {
-        self.update_projection_variant(state);
+        if std::mem::take(&mut self.color_ramp_changed) {
+            // delete all gradient drawables
+            draws.clear_drawables();
+        }
+        self.update_projection_variant(state, draws);
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables();
+            self.remove_all_drawables(draws);
             return;
         };
 
-        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
         {
             if self.base.layer_tweaker.is_none() {
                 self.base.layer_tweaker = Some(Box::new(LineLayerTweaker::new(
@@ -510,13 +516,11 @@ impl RenderLayer for RenderLineLayer {
                 let paint = &self.values.evaluated.paint;
                 tile_layer_group.composite =
                     Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
-                let base = &self.base;
                 let passes = self.base.passes;
                 // If the render pass has changed or the tile has dropped out of
                 // the cover set, remove it.
                 tile_layer_group.remove_drawables_if(|drawable| {
-                    drawable.render_pass != passes
-                        || drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                    drawable.render_pass != passes || drawable.tile_id.is_some_and(|id| !draws.has_tile(&id))
                 });
 
                 tile_layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
@@ -623,19 +627,20 @@ impl RenderLayer for RenderLineLayer {
                     continue;
                 };
 
-                let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+                let prev_bucket_id = draws.bucket(&tile_id);
                 if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
                     // This tile was previously set up from a different bucket,
                     // drop and re-create any drawables for it.
                     layer_group.remove_drawables(render_pass, &tile_id);
                 }
-                self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
+                draws.set_bucket(&tile_id, bucket.base.bucket_id);
 
+                let changes = draws.take_changes(&tile_id);
                 let update_existing = |drawable: &mut crate::drawable::Drawable| {
                     // A drawable produced on a previous style/bucket should not be updated.
                     let current = drawable.tweaker == tweaker;
                     if current {
-                        refresh_if_bucket_updated(drawable, |attrs| {
+                        refresh_paint_attributes(drawable, changes, |attrs| {
                             read_line_attributes(
                                 attrs,
                                 paint_property_binders,
@@ -656,8 +661,6 @@ impl RenderLayer for RenderLineLayer {
                     drawable.tile_id = Some(tile_id);
                     drawable.type_ = type_ as usize;
                     drawable.tweaker = tweaker;
-                    drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
-                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &layer_id));
 
                     drawable.data =
                         Some(crate::drawable::DrawableData::Line(LineDrawableData { line_pattern_cap: cap_type }));
@@ -849,6 +852,6 @@ impl RenderLayer for RenderLineLayer {
                 }
             }
         }
-        self.base.layer_group = Some(layer_group);
+        draws.group = Some(layer_group);
     }
 }

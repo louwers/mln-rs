@@ -38,12 +38,13 @@ use mln_style_types::AlignmentType;
 use mln_util::error::Error;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
-use super::{DrawableBinders, DrawableRenderTile, shared_vertices, update_tile};
+use super::{shared_vertices, update_tile};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
     FillExtrusionStaticVertex, FillExtrusionWallVertex,
 };
+use crate::draw_cache::LayerDraws;
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
@@ -346,18 +347,19 @@ impl RenderLayer for RenderFillExtrusionLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        draws: &mut LayerDraws,
     ) {
-        self.update_projection_variant(state);
+        self.update_projection_variant(state, draws);
 
         let render_tiles = match self.base.render_tiles.clone() {
             Some(tiles) if !tiles.is_empty() && self.base.passes != RenderPass::None => tiles,
             _ => {
-                self.remove_all_drawables();
+                self.remove_all_drawables(draws);
                 return;
             }
         };
 
-        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
         'draw: {
             if self.base.layer_tweaker.is_none() {
                 self.base.layer_tweaker = Some(Box::new(FillExtrusionLayerTweaker::new(
@@ -394,17 +396,11 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
             let draw_pass = RenderPass::Translucent;
 
-            {
-                let tile_layer_group = &mut layer_group;
-                let base = &self.base;
-                tile_layer_group.remove_drawables_if(|drawable| {
-                    // If the render pass has changed or the tile has dropped out
-                    // of the cover set, remove it.
-                    let tile_id = drawable.tile_id;
-                    !drawable.has_render_pass(draw_pass)
-                        || tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-                });
-            }
+            layer_group.remove_drawables_if(|drawable| {
+                // If the render pass has changed or the tile has dropped out
+                // of the cover set, remove it.
+                !drawable.has_render_pass(draw_pass) || drawable.tile_id.is_some_and(|id| !draws.has_tile(&id))
+            });
 
             let has_pattern = !self.values.unevaluated.fill_extrusion_pattern.is_undefined();
             let opaque = *evaluated.fill_extrusion_opacity.uniform() >= 1.0;
@@ -459,13 +455,13 @@ impl RenderLayer for RenderFillExtrusionLayer {
                     continue;
                 };
 
-                let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+                let prev_bucket_id = draws.bucket(&tile_id);
                 if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
                     // This tile was previously set up from a different bucket,
                     // drop and re-create any drawables for it.
                     layer_group.remove_drawables(draw_pass, &tile_id);
                 }
-                self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
+                draws.set_bucket(&tile_id, bucket.base.bucket_id);
 
                 for builder in
                     [&mut depth_builder, &mut color_builder, &mut wall_depth_builder, &mut wall_color_builder]
@@ -636,8 +632,6 @@ impl RenderLayer for RenderFillExtrusionLayer {
                             drawable.tile_id = Some(tile_id);
                             drawable.type_ = usize::from(has_pattern);
                             drawable.tweaker = tweaker;
-                            drawable.binders = Some(DrawableBinders::new(&render_data.bucket, &layer_id));
-                            drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
 
                             tile_layer_group.add_tile_drawable(draw_pass, &tile_id, drawable);
                         }
@@ -657,7 +651,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 }
             }
         }
-        self.base.layer_group = Some(layer_group);
+        draws.group = Some(layer_group);
     }
 }
 

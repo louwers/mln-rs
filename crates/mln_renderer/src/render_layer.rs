@@ -1,7 +1,8 @@
 // C++ `RenderLayer` is an abstract class with data members; the data is
 // `RenderLayerBase` and the virtual interface is the `RenderLayer` trait.
-// The orchestrator owns the render layers, in the style's order, and each
-// render layer owns the layer groups it draws, with their tweakers.
+// The orchestrator owns the render layers, in the style's order, with what
+// it keeps of each one's drawing (`LayerDraws`); a render layer owns its
+// tweakers and the layer groups of its own.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -14,16 +15,15 @@ use mln_style::expression::Dependency;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{TranslateAnchorType, VisibilityType};
-use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
-use mln_util::hash::HashMap;
-use mln_util::identity::SimpleIdentity;
 
 use crate::bucket::BucketPtr;
+use crate::draw_cache::LayerDraws;
 use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
+use crate::layers::LayerTiles;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
@@ -93,6 +93,9 @@ impl BucketPlacementData {
 
 pub(crate) struct LayerPrepareParameters<'a> {
     pub(crate) source: Option<&'a dyn RenderSource>,
+    /// What the renderer keeps of the layer's drawing, whose tiles become
+    /// the frame's.
+    pub(crate) draws: &'a mut LayerDraws,
     /// conformance: `ImageManager& imageManager` (background-pattern): the image store.
     pub(crate) images: &'a crate::image_store::ImageStore,
     pub(crate) pattern_atlas: &'a RefCell<PatternAtlas>,
@@ -105,10 +108,7 @@ pub(crate) struct RenderLayerBase {
     pub(crate) style: Arc<dyn ErasedLayerStyle>,
 
     pub(crate) passes: RenderPass,
-    /// The group of the layer's drawables, which draws while the layer is
-    /// renderable.
-    pub(crate) layer_group: Option<LayerGroup>,
-    /// Sets the uniforms of the group's drawables each frame.
+    /// Sets the uniforms of the layer's drawables each frame.
     pub(crate) layer_tweaker: Option<Box<dyn LayerTweaker>>,
     pub(crate) style_dependencies: Dependency,
     /// Whether the frame draws the layer.
@@ -118,10 +118,6 @@ pub(crate) struct RenderLayerBase {
     pub(crate) render_tiles: Option<RenderTiles>,
     /// Retains ownership of tiles
     pub(crate) render_tiles_owner: Rc<Vec<RenderTile>>,
-    /// The tile IDs in `render_tiles`, along with the identity of the
-    /// bucket from which they were built (C++ `TinyUnorderedMap`; only
-    /// looked up).
-    pub(crate) render_tile_ids: HashMap<OverscaledTileID, Option<SimpleIdentity>>,
     /// The projection variant this layer's drawables are built with.
     pub(crate) projection_variant: ProjectionVariant,
 }
@@ -133,13 +129,11 @@ impl RenderLayerBase {
             evaluated_properties: properties,
             style,
             passes: RenderPass::None,
-            layer_group: None,
             layer_tweaker: None,
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             render_tiles: None,
             render_tiles_owner: Rc::new(Vec::new()),
-            render_tile_ids: HashMap::default(),
             projection_variant: ProjectionVariant::Mercator,
         }
     }
@@ -296,7 +290,8 @@ pub(crate) trait RenderLayer: LayerParts {
         None
     }
 
-    /// Update a layer with its render data (drawables).
+    /// Brings the layer's drawables in `draws` up to date with the frame's
+    /// tiles.
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
@@ -304,25 +299,26 @@ pub(crate) trait RenderLayer: LayerParts {
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        _draws: &mut LayerDraws,
     ) {
     }
 
     /// Runs the layer's tweakers on its layer groups that draw, before they
     /// upload.
-    fn tweak(&mut self, parameters: &PaintParameters<'_>) {
+    fn tweak(&mut self, parameters: &PaintParameters<'_>, draws: &mut LayerDraws) {
         let base = self.base_mut();
         if base.is_renderable
-            && let (Some(tweaker), Some(group)) = (&mut base.layer_tweaker, &mut base.layer_group)
+            && let (Some(tweaker), Some(group)) = (&mut base.layer_tweaker, &mut draws.group)
         {
-            tweaker.execute(group, parameters);
+            tweaker.execute(group, &LayerTiles::new(&*base.style, base.render_tiles.as_ref()), parameters);
         }
     }
 
-    /// Adds the layer's groups that draw to `groups`, in drawing order.
-    fn layer_groups<'a>(&'a mut self, groups: &mut Vec<&'a mut LayerGroup>) {
-        let base = self.base_mut();
-        if base.is_renderable
-            && let Some(group) = &mut base.layer_group
+    /// Adds the layer's groups that draw, its own and those of `draws`, to
+    /// `groups`, in drawing order.
+    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<&'a mut LayerGroup>) {
+        if self.base().is_renderable
+            && let Some(group) = &mut draws.group
         {
             groups.push(group);
         }
@@ -359,50 +355,42 @@ pub(crate) trait RenderLayer: LayerParts {
     }
 
     /// Called when the layer is included or excluded from rendering.
-    fn mark_layer_renderable(&mut self, will_render: bool) {
-        mark_layer_renderable_base(self, will_render);
+    fn mark_layer_renderable(&mut self, will_render: bool, draws: &mut LayerDraws) {
+        mark_layer_renderable_base(self, will_render, draws);
     }
 
     /// Drops what the last `prepare` and `update` built: the drawables, and
     /// the tiles and placement data that keep the tiles' buckets alive.
     /// Called when the layer stops rendering, since neither runs again until
     /// it renders, and they then rebuild everything from the source's tiles.
-    fn release_render_data(&mut self) {
-        release_render_data_base(self);
+    fn release_render_data(&mut self, draws: &mut LayerDraws) {
+        release_render_data_base(self, draws);
     }
 
-    /// Remove all drawables for the tile from the layer group.
-    fn remove_all_drawables(&mut self) {
-        if let Some(group) = &mut self.base_mut().layer_group {
-            group.clear_drawables();
-        }
+    /// Removes the layer's drawables, its own and those of `draws`.
+    fn remove_all_drawables(&mut self, draws: &mut LayerDraws) {
+        draws.clear_drawables();
     }
 
     /// Moves what the layer keeps for each tile to the tile `wrap_delta`
     /// world copies east of it: the tiles are the same ones under new ids
     /// once the map's center has crossed the antimeridian, and their
     /// drawables stay rather than being built again.
-    fn handle_wrap_jump(&mut self, wrap_delta: i16) {
-        handle_wrap_jump_base(self, wrap_delta);
-    }
-
-    /// Adds the groups that hold the drawables of the layer's tiles to
-    /// `groups`.
-    fn tile_layer_groups<'a>(&'a mut self, groups: &mut Vec<&'a mut LayerGroup>) {
-        groups.extend(self.base_mut().layer_group.as_mut());
+    fn handle_wrap_jump(&mut self, wrap_delta: i16, draws: &mut LayerDraws) {
+        draws.shift_wraps(wrap_delta);
     }
 
     // Non-virtual members of the C++ class.
 
     /// Picks the shader variant for the state's projection; returns true and
     /// drops the drawables when it changed.
-    fn update_projection_variant(&mut self, state: &TransformState) -> bool {
+    fn update_projection_variant(&mut self, state: &TransformState, draws: &mut LayerDraws) -> bool {
         let variant = if state.is_globe_rendering() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
         if variant == self.base().projection_variant {
             return false;
         }
         self.base_mut().projection_variant = variant;
-        self.remove_all_drawables();
+        self.remove_all_drawables(draws);
         true
     }
 
@@ -416,46 +404,11 @@ pub(crate) trait RenderLayer: LayerParts {
         }
     }
 
-    /// Update `renderTileIDs` from `renderTiles`.
-    fn update_render_tile_ids(&mut self) {
-        let base = self.base_mut();
-        let Some(render_tiles) = base.render_tiles.clone().filter(|tiles| !tiles.is_empty()) else {
-            base.render_tile_ids.clear();
-            return;
-        };
-
-        let new_render_tile_ids: HashMap<OverscaledTileID, Option<SimpleIdentity>> = render_tiles
-            .iter()
-            .map(|tile| {
-                let tile_id = *tile.get_overscaled_tile_id();
-                (tile_id, get_render_tile_bucket_id(base, &tile_id))
-            })
-            .collect();
-
-        base.render_tile_ids = new_render_tile_ids;
-    }
-
-    /// Get the bucket ID from which a given tile was built.
-    ///
-    /// When a new style is loaded and contains a layer with the same ID,
-    /// `layerChanged` will be called during style parsing, but the `Bucket`
-    /// in a tile's `RenderData` will only be replaced when the asynchronous
-    /// load for the tile is complete, at which point the drawable for the
-    /// tile may need to be updated or replaced.
-    fn get_render_tile_bucket_id(&self, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
-        get_render_tile_bucket_id(self.base(), tile_id)
-    }
-
-    /// Set the bucket ID from which a given tile was built. Returns true if
-    /// updated, false if the tile ID is not present in the set of tiles to
-    /// be rendered or the ID is unchanged.
-    fn set_render_tile_bucket_id(&mut self, tile_id: &OverscaledTileID, bucket_id: SimpleIdentity) -> bool {
-        match self.base_mut().render_tile_ids.get_mut(tile_id) {
-            Some(id) if *id != Some(bucket_id) => {
-                *id = Some(bucket_id);
-                true
-            }
-            _ => false,
+    /// Makes the tiles of `render_tiles` those `draws` has entries for.
+    fn update_tile_entries(&self, draws: &mut LayerDraws) {
+        match &self.base().render_tiles {
+            Some(render_tiles) => draws.set_tiles(render_tiles.iter().map(|tile| *tile.get_overscaled_tile_id())),
+            None => draws.clear_tiles(),
         }
     }
 
@@ -536,35 +489,25 @@ pub(crate) trait RenderLayer: LayerParts {
 /// The default `RenderLayer::mark_layer_renderable`, callable from
 /// overrides: sets the renderable flag, and releases the render data of a
 /// layer that stops rendering.
-pub(crate) fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(layer: &mut L, will_render: bool) {
+pub(crate) fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
+    layer: &mut L,
+    will_render: bool,
+    draws: &mut LayerDraws,
+) {
     layer.base_mut().is_renderable = will_render;
 
     if !will_render {
-        layer.release_render_data();
-    }
-}
-
-/// The default `RenderLayer::handle_wrap_jump`, callable from overrides.
-pub(crate) fn handle_wrap_jump_base<L: RenderLayer + ?Sized>(layer: &mut L, wrap_delta: i16) {
-    let base = layer.base_mut();
-    base.render_tile_ids = std::mem::take(&mut base.render_tile_ids)
-        .into_iter()
-        .map(|(id, bucket)| (id.unwrap_to(id.wrap.wrapping_add(wrap_delta)), bucket))
-        .collect();
-    let mut groups = Vec::new();
-    layer.tile_layer_groups(&mut groups);
-    for group in groups {
-        group.shift_wraps(wrap_delta);
+        layer.release_render_data(draws);
     }
 }
 
 /// The default `RenderLayer::release_render_data`, callable from overrides.
-pub(crate) fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L) {
-    layer.remove_all_drawables();
+pub(crate) fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L, draws: &mut LayerDraws) {
+    layer.remove_all_drawables(draws);
     let base = layer.base_mut();
     base.render_tiles = None;
     base.render_tiles_owner = Rc::new(Vec::new());
-    base.render_tile_ids.clear();
+    draws.clear_tiles();
 }
 
 /// The default `RenderLayer::prepare(params)`, callable from overrides (C++
@@ -572,9 +515,8 @@ pub(crate) fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L) {
 /// source type the port has no render source for) the layer gets no tiles.
 pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &mut LayerPrepareParameters<'_>) {
     let Some(source) = parameters.source else {
-        let base = layer.base_mut();
-        base.render_tiles = None;
-        base.render_tile_ids.clear();
+        layer.base_mut().render_tiles = None;
+        parameters.draws.clear_tiles();
         return;
     };
     debug_assert!(source.is_enabled());
@@ -587,10 +529,5 @@ pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &
 
     layer.add_render_passes_from_tiles();
 
-    layer.update_render_tile_ids();
-}
-
-/// The bucket id of the render tile `tile_id`, or `None` if there is none.
-fn get_render_tile_bucket_id(base: &RenderLayerBase, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
-    base.render_tile_ids.get(tile_id).copied().flatten()
+    layer.update_tile_entries(parameters.draws);
 }

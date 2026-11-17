@@ -9,6 +9,7 @@ use super::cast_matrix;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase};
 use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
+use crate::layers::LayerTiles;
 use crate::paint_parameters::PaintParameters;
 
 pub(crate) struct HeatmapTextureLayerTweaker {
@@ -30,7 +31,7 @@ impl LayerTweaker for HeatmapTextureLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, _tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }

@@ -17,9 +17,10 @@ use mln_util::Color;
 use mln_util::error::Error;
 
 use super::circle_layer_tweaker::CircleLayerTweaker;
-use super::{DrawableBinders, DrawableRenderTile, refresh_if_bucket_updated, update_tile};
+use super::{refresh_paint_attributes, update_tile};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
+use crate::draw_cache::LayerDraws;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
@@ -321,15 +322,16 @@ impl RenderLayer for RenderCircleLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        draws: &mut LayerDraws,
     ) {
-        self.update_projection_variant(state);
+        self.update_projection_variant(state, draws);
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables();
+            self.remove_all_drawables(draws);
             return;
         };
 
-        let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
+        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
         'draw: {
             if self.base.layer_tweaker.is_none() {
                 self.base.layer_tweaker = Some(Box::new(CircleLayerTweaker::new(
@@ -352,13 +354,7 @@ impl RenderLayer for RenderCircleLayer {
                 break 'draw;
             }
 
-            {
-                let tile_layer_group = &mut layer_group;
-                let base = &self.base;
-                tile_layer_group.remove_drawables_if(|drawable| {
-                    drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-                });
-            }
+            layer_group.remove_drawables_if(|drawable| drawable.tile_id.is_some_and(|id| !draws.has_tile(&id)));
 
             let evaluated_properties = Arc::clone(&self.values.evaluated);
             let evaluated = &evaluated_properties.paint;
@@ -394,21 +390,22 @@ impl RenderLayer for RenderCircleLayer {
                     )
                 };
 
-                let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
+                let prev_bucket_id = draws.bucket(&tile_id);
                 if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
                     // This tile was previously set up from a different bucket,
                     // drop and re-create any drawables for it.
                     layer_group.remove_drawables(render_pass, &tile_id);
                 }
-                self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
+                draws.set_bucket(&tile_id, bucket.base.bucket_id);
 
                 // If there are already drawables for this tile, update their UBOs
                 // and move on to the next tile.
+                let changes = draws.take_changes(&tile_id);
                 let update_existing = |drawable: &mut crate::drawable::Drawable| {
                     // A drawable produced on a previous style/bucket should not be updated.
                     let current = drawable.tweaker == tweaker;
                     if current {
-                        refresh_if_bucket_updated(drawable, |attrs| {
+                        refresh_paint_attributes(drawable, changes, |attrs| {
                             read_circle_attributes(
                                 attrs,
                                 paint_property_binders,
@@ -475,13 +472,11 @@ impl RenderLayer for RenderCircleLayer {
                 for mut drawable in circle_builder.clear_drawables() {
                     drawable.tile_id = Some(tile_id);
                     drawable.tweaker = tweaker;
-                    drawable.binders = Some(DrawableBinders::new(&render_data.bucket, self.get_id()));
-                    drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
 
                     tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
                 }
             }
         }
-        self.base.layer_group = Some(layer_group);
+        draws.group = Some(layer_group);
     }
 }

@@ -20,7 +20,7 @@ use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use crate::layer_group::LayerGroup;
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::cast_matrix;
+use crate::layers::{LayerTiles, cast_matrix};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
 
@@ -78,7 +78,9 @@ pub(crate) trait LayerTweaker {
     fn base(&self) -> &LayerTweakerBase;
     fn base_mut(&mut self) -> &mut LayerTweakerBase;
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>);
+    /// Sets the uniforms of `layer_group`'s drawables, which draw the
+    /// layer's `tiles`.
+    fn execute(&mut self, layer_group: &mut LayerGroup, tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>);
 
     fn update_properties(&mut self, new_props: Arc<dyn ErasedEvaluatedLayer>) {
         let base = self.base_mut();
