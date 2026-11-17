@@ -5,16 +5,17 @@
 //! counts the tile requests that reach the files. Without a delay it passes
 //! everything on at once.
 
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::{Duration, Instant};
 
 use mln_storage::{FileSource, Kind, Request, Resource, Responder, Response};
 use mln_util::chrono::Timestamp;
 use mln_util::hash::HashMap;
-use mln_util::queue::{Queue, WeakQueue};
 use mln_util::thread::Joined;
-use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 /// How long a tile stays fresh: a tile server's `Cache-Control: max-age`.
@@ -37,56 +38,76 @@ pub(crate) fn take_tile_requests() -> usize {
 
 /// `inner`, with the tile latency.
 pub(crate) fn delayed(inner: Arc<dyn FileSource>) -> Arc<dyn FileSource> {
-    let timers = Queue::new();
-    let thread = {
-        let queue = timers.clone();
-        mln_util::thread::spawn("TileLatency", move || {
-            let mut waits = Waits { waiting: HashMap::default(), queue: queue.downgrade() };
-            queue.run(&mut waits);
-            queue.close();
-        })
-        .expect("the tile latency's thread")
-    };
-    Arc::new(Delayed { inner, timers, _thread: Joined::new(thread) })
+    let (waits, received) = mpsc::channel();
+    let thread =
+        mln_util::thread::spawn("TileLatency", move || wait_out(&received)).expect("the tile latency's thread");
+    Arc::new(Delayed { inner, waits, next_wait: AtomicU64::new(0), _thread: Joined::new(thread) })
 }
-
-/// Names a tile's wait.
-static NEXT_WAIT: AtomicU64 = AtomicU64::new(0);
 
 struct Delayed {
     inner: Arc<dyn FileSource>,
     /// The thread where the tiles wait out their latency.
-    timers: Queue<Waits>,
+    waits: mpsc::Sender<Wait>,
+    /// Names the next tile's wait.
+    next_wait: AtomicU64,
     _thread: Joined,
 }
 
 impl Drop for Delayed {
     fn drop(&mut self) {
-        self.timers.stop();
+        let _ = self.waits.send(Wait::End);
     }
 }
 
-/// What a wait runs when it ends, by wait, on the timers' thread.
-struct Waits {
-    waiting: HashMap<u64, Box<dyn FnOnce() + Send>>,
-    queue: WeakQueue<Waits>,
+/// What the latency's thread takes, in the order sent.
+enum Wait {
+    /// Runs `then` at `deadline`, unless `Stop(id)` comes first.
+    Start {
+        id: u64,
+        deadline: Instant,
+        then: Box<dyn FnOnce() + Send>,
+    },
+    Stop(u64),
+    /// Ends the thread, dropping the waits that haven't ended.
+    End,
 }
 
-impl Waits {
-    /// Runs `then` at `deadline`, unless `stop(id)` comes first.
-    fn start(&mut self, id: u64, deadline: Instant, then: Box<dyn FnOnce() + Send>) {
-        self.waiting.insert(id, then);
-        if let Some(queue) = self.queue.upgrade() {
-            queue.post_at(deadline, move |waits| {
-                if let Some(then) = waits.waiting.remove(&id) {
-                    then();
-                }
-            });
+/// The latency's thread: runs each wait's `then` when its deadline passes.
+fn wait_out(received: &mpsc::Receiver<Wait>) {
+    let mut deadlines: BinaryHeap<Reverse<(Instant, u64)>> = BinaryHeap::new();
+    let mut waiting: HashMap<u64, Box<dyn FnOnce() + Send>> = HashMap::default();
+    loop {
+        let now = Instant::now();
+        while let Some(&Reverse((deadline, id))) = deadlines.peek()
+            && deadline <= now
+        {
+            deadlines.pop();
+            // A stopped wait leaves its deadline, which ends nothing.
+            if let Some(then) = waiting.remove(&id) {
+                then();
+            }
         }
-    }
-
-    fn stop(&mut self, id: u64) {
-        self.waiting.remove(&id);
+        let wait = match deadlines.peek() {
+            Some(&Reverse((deadline, _))) => {
+                match received.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                    Ok(wait) => wait,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            }
+            None => match received.recv() {
+                Ok(wait) => wait,
+                Err(_) => return,
+            },
+        };
+        match wait {
+            Wait::Start { id, deadline, then } => {
+                waiting.insert(id, then);
+                deadlines.push(Reverse((deadline, id)));
+            }
+            Wait::Stop(id) => drop(waiting.remove(&id)),
+            Wait::End => return,
+        }
     }
 }
 
@@ -107,7 +128,7 @@ impl FileSource for Delayed {
             return;
         }
         TILE_REQUESTS.fetch_add(1, Ordering::SeqCst);
-        // The tile waits out its latency on the timers' thread, then the
+        // The tile waits out its latency on the latency's thread, then the
         // inner request; cancelling stops either.
         let request: Arc<Mutex<Option<Request>>> = Arc::default();
         let (inner, resource, slot, outer) =
@@ -125,16 +146,12 @@ impl FileSource for Delayed {
             *slot.lock() = Some(fresh);
             inner.load(&resource, inner_responder);
         };
-        let (id, deadline, timers) = (
-            NEXT_WAIT.fetch_add(1, Ordering::Relaxed),
-            Instant::now() + Duration::from_millis(latency),
-            self.timers.downgrade(),
-        );
-        self.timers.post(move |waits| waits.start(id, deadline, Box::new(fire)));
+        let id = self.next_wait.fetch_add(1, Ordering::Relaxed);
+        let deadline = Instant::now() + Duration::from_millis(latency);
+        let _ = self.waits.send(Wait::Start { id, deadline, then: Box::new(fire) });
+        let waits = self.waits.clone();
         responder.on_cancel(move || {
-            if let Some(timers) = timers.upgrade() {
-                timers.post(move |waits| waits.stop(id));
-            }
+            let _ = waits.send(Wait::Stop(id));
             drop(request.lock().take());
         });
     }

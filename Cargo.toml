@@ -47,7 +47,6 @@ feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0
 geojson_vt = { package = "mln-rs-geojson-vt", path = "vendor/geojson-vt", version = "=0.0.12" }
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.12" }
 kdbush = { package = "mln-rs-kdbush", path = "vendor/kdbush", version = "=0.0.12" }
-mln_actor = { package = "mln-rs-actor", path = "crates/mln_actor", version = "=0.0.12" }
 mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.12" }
 mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.12" }
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.12" }

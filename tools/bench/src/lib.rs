@@ -17,6 +17,7 @@ mod stats;
 
 use std::path::PathBuf;
 
+use mln_util::pool::Pool;
 use serde::{Deserialize, Serialize};
 
 /// One metric of a case. Every metric is lower-is-better.
@@ -90,6 +91,9 @@ pub struct Context {
     pub scale: f64,
     /// Where the cases write their last frames, for `compare` to diff.
     pub frames: Option<PathBuf>,
+    /// The pool that the scenes run their background work on, which they
+    /// share as a host's maps share their runtime's.
+    pub pool: Pool,
 }
 
 impl Context {

@@ -5,8 +5,7 @@ version:
 
 - **mln-rs**, the package in the repository root. It re-exports the libraries
   under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
-  `mln_rs::geojson_vt`, and so on, all but `mln_actor`. Users depend on this
-  one.
+  `mln_rs::geojson_vt`, and so on. Users depend on this one.
 - **`mln-rs-<name>`**, one package per library under `crates/` and `vendor/`
   (for example `mln-rs-util` for `mln_util`, `mln-rs-geojson-vt` for
   `geojson_vt`). Their library names are unchanged, so the code still says

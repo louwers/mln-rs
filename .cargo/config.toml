@@ -1,4 +1,0 @@
-# One test at a time per test binary: mln_actor's gtests share the
-# background scheduler and can hang in parallel.
-[env]
-RUST_TEST_THREADS = "1"

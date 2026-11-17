@@ -2458,10 +2458,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-actor"
-version = "0.0.12"
-
-[[package]]
 name = "mln-rs-bench"
 version = "0.0.12"
 dependencies = [

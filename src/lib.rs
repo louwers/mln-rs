@@ -7,9 +7,8 @@
 //! The library crates of <https://github.com/louwers/mln-rs> are re-exported
 //! here under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
 //! `mln_rs::geojson_vt`, and so on. They are published as the `mln-rs-*`
-//! packages, which only exist for this crate. The thread-local handles
-//! (`mln_actor`) and the tile worker codec's encoding (`mln_wire`) are
-//! internal to the port and not re-exported.
+//! packages, which only exist for this crate. The tile worker codec's
+//! encoding (`mln_wire`) is internal to the port and not re-exported.
 //!
 //! GeoJSON is the `geojson` crate's, feature geometry is `geo_types`', and
 //! `geojson_vt` reads any `geo_traits` geometry. The three crates are

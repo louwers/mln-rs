@@ -263,13 +263,6 @@ fn shared_file_source(resource_options: &ResourceOptions, pool: &Pool) -> Arc<dy
     })
 }
 
-/// The pool that the scenes run their background work on, which they share
-/// as a host's maps share their runtime's.
-fn shared_pool() -> &'static Pool {
-    static POOL: OnceLock<Pool> = OnceLock::new();
-    POOL.get_or_init(|| Pool::new(4).expect("the scenes' pool"))
-}
-
 pub struct Scene {
     frontend: HeadlessFrontend,
     /// Whether the scene draws each update of the map as it waits, or only
@@ -283,15 +276,15 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// A map without a style; its GPU device is ready. Its renderer has a
-    /// glyph cache of its own.
+    /// A map without a style, whose background work runs on `pool`; its GPU
+    /// device is ready. Its renderer has a glyph cache of its own.
     #[must_use]
-    pub fn new(size: Size, mode: Mode) -> Scene {
-        Scene::with_glyph_cache(size, mode, Arc::default())
+    pub fn new(size: Size, mode: Mode, pool: &Pool) -> Scene {
+        Scene::with_glyph_cache(size, mode, Arc::default(), pool)
     }
 
     /// A map whose renderer shares `glyph_cache`.
-    pub(crate) fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
+    pub(crate) fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>, pool: &Pool) -> Scene {
         // MLN_BENCH_CACHE_DB names the render suite's cache database where
         // the binary runs without its checkout, as on an Android device.
         let cache = std::env::var_os("MLN_BENCH_CACHE_DB").map_or_else(
@@ -301,7 +294,6 @@ impl Scene {
         let resource_options =
             ResourceOptions { cache_path: cache.display().to_string(), ..ResourceOptions::default() };
         let queue = Queue::new();
-        let pool = shared_pool();
         let mut frontend =
             HeadlessFrontend::with_glyph_cache(size, 1.0, glyph_cache, &queue, pool).expect("a headless frontend");
         let file_source = shared_file_source(&resource_options, pool);
