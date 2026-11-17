@@ -1,0 +1,140 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "height": 64,
+      "width": 128
+    }
+  },
+  "center": [
+    0,
+    0
+  ],
+  "zoom": 2.5,
+  "sources": {
+    "geojson": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "x": 1
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -3.8,
+                0
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "x": 0.5
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                3.8,
+                0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "white"
+      }
+    },
+    {
+      "id": "symbol",
+      "type": "symbol",
+      "source": "geojson",
+      "layout": {
+        "text-field": "Test",
+        "text-font": [
+          "Open Sans Semibold",
+          "Arial Unicode MS Bold"
+        ],
+        "text-size": 20,
+        "text-allow-overlap": true
+      },
+      "paint": {
+        "text-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          [
+            "*",
+            0.2,
+            [
+              "get",
+              "x"
+            ]
+          ],
+          3,
+          [
+            "get",
+            "x"
+          ]
+        ],
+        "text-halo-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          0,
+          3,
+          [
+            "*",
+            6,
+            [
+              "get",
+              "x"
+            ]
+          ]
+        ],
+        "text-halo-blur": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          0,
+          3,
+          [
+            "*",
+            2,
+            [
+              "get",
+              "x"
+            ]
+          ]
+        ],
+        "text-halo-color": "red"
+      }
+    }
+  ]
+}

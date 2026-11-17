@@ -5085,7 +5085,7 @@ struct VertexInput {
     @location(6) projected_pos: vec3<f32>,
     @location(7) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_opacity
-    @location(8) opacity: f32,
+    @location(8) opacity: vec2<f32>,
 #endif
     @location(9) tex_origin: vec2<u32>,
     @location(10) height_offset: f32,
@@ -5119,7 +5119,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #ifdef HAS_UNIFORM_u_opacity
     let final_opacity = fade_opacity;
 #else
-    let paint_opacity = unpack_mix_float(vec2<f32>(in.opacity, in.opacity), drawable.opacity_t);
+    let paint_opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
     let final_opacity = paint_opacity * fade_opacity;
 #endif
 
@@ -5259,7 +5259,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let base_opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u);
     let opacity = base_opacity * in.fade_opacity;
 #else
-    let opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u) * in.opacity;
+    // The vertex stage multiplies the fade opacity in.
+    let opacity = in.opacity;
 #endif
     return textureSample(image, texture_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity;
 }
@@ -5370,13 +5371,13 @@ struct VertexInput {
     @location(9) halo_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(10) opacity: f32,
+    @location(10) opacity: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_width
-    @location(11) halo_width: f32,
+    @location(11) halo_width: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_blur
-    @location(12) halo_blur: f32,
+    @location(12) halo_blur: vec2<f32>,
 #endif
     @location(13) tex_origin: vec2<u32>,
     @location(14) height_offset: f32,
@@ -5534,13 +5535,13 @@ fn main(in: VertexInput) -> VertexOutput {
     out.halo_color = unpack_mix_color(in.halo_color, drawable.halo_color_t);
 #endif
 #ifndef HAS_UNIFORM_u_halo_width
-    out.halo_width = unpack_mix_float(vec2<f32>(in.halo_width, in.halo_width), drawable.halo_width_t);
+    out.halo_width = unpack_mix_float(in.halo_width, drawable.halo_width_t);
 #endif
 #ifndef HAS_UNIFORM_u_halo_blur
-    out.halo_blur = unpack_mix_float(vec2<f32>(in.halo_blur, in.halo_blur), drawable.halo_blur_t);
+    out.halo_blur = unpack_mix_float(in.halo_blur, drawable.halo_blur_t);
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(vec2<f32>(in.opacity, in.opacity), drawable.opacity_t);
+    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
 #endif
 
     return out;
@@ -5741,13 +5742,13 @@ struct VertexInput {
     @location(8) halo_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(9) opacity: f32,
+    @location(9) opacity: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_width
-    @location(10) halo_width: f32,
+    @location(10) halo_width: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_blur
-    @location(11) halo_blur: f32,
+    @location(11) halo_blur: vec2<f32>,
 #endif
     @location(12) tex_origin: vec2<u32>,
     @location(13) height_offset: f32,
@@ -5913,13 +5914,13 @@ fn main(in: VertexInput) -> VertexOutput {
     out.halo_color = unpack_mix_color(in.halo_color, drawable.halo_color_t);
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(vec2<f32>(in.opacity, in.opacity), drawable.opacity_t);
+    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
 #endif
 #ifndef HAS_UNIFORM_u_halo_width
-    out.halo_width = unpack_mix_float(vec2<f32>(in.halo_width, in.halo_width), drawable.halo_width_t);
+    out.halo_width = unpack_mix_float(in.halo_width, drawable.halo_width_t);
 #endif
 #ifndef HAS_UNIFORM_u_halo_blur
-    out.halo_blur = unpack_mix_float(vec2<f32>(in.halo_blur, in.halo_blur), drawable.halo_blur_t);
+    out.halo_blur = unpack_mix_float(in.halo_blur, drawable.halo_blur_t);
 #endif
 
     return out;
