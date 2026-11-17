@@ -20,7 +20,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::shaders::shader_program::{ShaderProgram, ShaderProgramPtr, same_shader};
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
+use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
@@ -87,8 +87,8 @@ struct PipelineVariant {
 pub(crate) struct DrawObjects {
     pub(crate) name: String,
     shader: Option<ShaderProgramPtr>,
-    pub(crate) vertex_attributes: Option<VertexAttributeArrayPtr>,
-    pub(crate) instance_attributes: Option<VertexAttributeArrayPtr>,
+    pub(crate) vertex_attributes: VertexAttributeArray,
+    pub(crate) instance_attributes: Option<VertexAttributeArray>,
     pub(crate) attribute_update_time: Option<Instant>,
     pub(crate) textures: Textures,
     color_mode: ColorMode,
@@ -125,7 +125,7 @@ impl DrawObjects {
         DrawObjects {
             name,
             shader: None,
-            vertex_attributes: None,
+            vertex_attributes: VertexAttributeArray::new(),
             instance_attributes: None,
             attribute_update_time: None,
             textures: Default::default(),
@@ -174,14 +174,15 @@ impl DrawObjects {
         }
 
         let force = self.attribute_update_time.is_none();
-        let build_attributes = match (&self.vertex_attributes, self.attribute_update_time) {
-            (Some(attrs), Some(time)) => attrs.borrow().is_modified_after(time),
-            _ => true,
-        };
-        if build_attributes {
-            let attrs = Rc::clone(self.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr));
-            let mut bindings =
-                upload::build_attribute_bindings(context, shader.vertex_attributes(), &mut attrs.borrow_mut(), force)?;
+        let update_time = self.attribute_update_time;
+        let modified = move |attrs: &VertexAttributeArray| update_time.is_none_or(|time| attrs.is_modified_after(time));
+        if modified(&self.vertex_attributes) {
+            let mut bindings = upload::build_attribute_bindings(
+                context,
+                shader.vertex_attributes(),
+                &mut self.vertex_attributes,
+                force,
+            )?;
             bind_default_values(context, &mut bindings, self.vertex_count)?;
             if self.attribute_bindings != bindings {
                 self.attribute_bindings = bindings;
@@ -189,19 +190,9 @@ impl DrawObjects {
             }
         }
 
-        let build_instances = match (&self.instance_attributes, self.attribute_update_time) {
-            (Some(attrs), Some(time)) => attrs.borrow().is_modified_after(time),
-            (Some(_), None) => true,
-            (None, _) => false,
-        };
-        if build_instances && let Some(attrs) = self.instance_attributes.clone() {
-            let instance_count = attrs.borrow().get_min_count();
-            let mut bindings = upload::build_attribute_bindings(
-                context,
-                shader.instance_attributes(),
-                &mut attrs.borrow_mut(),
-                force,
-            )?;
+        if let Some(attrs) = self.instance_attributes.as_mut().filter(|attrs| modified(attrs)) {
+            let instance_count = attrs.get_min_count();
+            let mut bindings = upload::build_attribute_bindings(context, shader.instance_attributes(), attrs, force)?;
             bind_default_values(context, &mut bindings, instance_count)?;
             if self.instance_bindings != bindings {
                 self.instance_bindings = bindings;
@@ -417,7 +408,7 @@ impl DrawObjects {
     /// Replaces the vertex attributes, vertex count, indexes and segments.
     pub(crate) fn update_vertex_attributes(
         &mut self,
-        vertices: Option<VertexAttributeArrayPtr>,
+        vertices: VertexAttributeArray,
         vertex_count: usize,
         mode: DrawMode,
         indexes: Option<IndexVectorBasePtr>,
@@ -436,9 +427,7 @@ impl DrawObjects {
         if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
             return;
         }
-        let attrs = Rc::clone(self.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr));
-        let mut attrs = attrs.borrow_mut();
-        let Some(attribute) = attrs.set(self.vertex_attr_id, -1, data_type, 0) else {
+        let Some(attribute) = self.vertex_attributes.set(self.vertex_attr_id, -1, data_type, 0) else {
             debug_assert!(false, "draw {} has no vertex attribute {}", self.name, self.vertex_attr_id);
             return;
         };
@@ -497,10 +486,37 @@ impl DrawObjects {
 
     /// Replaces the vertex attributes, which the next upload binds again
     /// even where they appear unchanged.
-    pub(crate) fn set_vertex_attributes(&mut self, value: Option<VertexAttributeArrayPtr>) {
+    pub(crate) fn set_vertex_attributes(&mut self, value: VertexAttributeArray) {
         self.vertex_attributes = value;
         self.attribute_update_time = None;
     }
+}
+
+/// A copy of `attrs`, none of whose attributes has data of its own: the
+/// copy reads the same shared vertex vectors, so draws of either bind the
+/// same buffers.
+#[must_use]
+pub(crate) fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttributeArray {
+    let mut copy = VertexAttributeArray::new();
+    for id in 0..attrs.allocated_size() {
+        let Some(attr) = attrs.get(id) else {
+            continue;
+        };
+        debug_assert!(
+            attr.get_shared_raw_data().is_some() || attr.get_raw_data().is_empty(),
+            "a copied attribute has data of its own"
+        );
+        if let Some(copied) = copy.set(id, attr.get_index(), attr.get_data_type(), 0) {
+            copied.set_shared_raw_data(
+                attr.get_shared_raw_data().cloned(),
+                attr.get_shared_offset(),
+                attr.get_shared_vertex_offset(),
+                attr.get_shared_stride(),
+                attr.get_shared_type(),
+            );
+        }
+    }
+    copy
 }
 
 fn fixed_state(variant: PipelineVariant, color_mode: &ColorMode, cull: CullFaceMode) -> FixedState {

@@ -24,7 +24,6 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
     AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, VertexAttributeArray,
@@ -207,7 +206,7 @@ impl RenderRasterLayer {
                 let geometry = bucket.geometry();
                 let vertices = shared_vertices(&geometry.vertices);
                 objects.update_vertex_attributes(
-                    Some(raster_vertex_attributes(&vertices)),
+                    raster_vertex_attributes(&vertices),
                     geometry.vertices.len(),
                     DrawMode::Triangles(),
                     Some(Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone())))),
@@ -306,31 +305,28 @@ fn new_objects(shader: Option<&ShaderProgramPtr>) -> DrawObjects {
 }
 
 /// The vertex attributes of a raster draw over `vertices`.
-fn raster_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
-    let vertex_attrs = VertexAttributeArray::new_ptr();
-    {
-        let mut attrs = vertex_attrs.borrow_mut();
-        let stride = size_of::<RasterLayoutVertex>() as u32;
-        if let Some(attr) = attrs.set(ID_RASTER_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(
-                Some(Rc::clone(vertices)),
-                0, // offsetof(RasterLayoutVertex, a1)
-                /*vertex_offset=*/ 0,
-                stride,
-                AttributeDataType::Short2,
-            );
-        }
-        if let Some(attr) = attrs.set(ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(
-                Some(Rc::clone(vertices)),
-                4, // offsetof(RasterLayoutVertex, a2)
-                /*vertex_offset=*/ 0,
-                stride,
-                AttributeDataType::Short2,
-            );
-        }
+fn raster_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArray {
+    let mut attrs = VertexAttributeArray::new();
+    let stride = size_of::<RasterLayoutVertex>() as u32;
+    if let Some(attr) = attrs.set(ID_RASTER_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(
+            Some(Rc::clone(vertices)),
+            0, // offsetof(RasterLayoutVertex, a1)
+            /*vertex_offset=*/ 0,
+            stride,
+            AttributeDataType::Short2,
+        );
     }
-    vertex_attrs
+    if let Some(attr) = attrs.set(ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(
+            Some(Rc::clone(vertices)),
+            4, // offsetof(RasterLayoutVertex, a2)
+            /*vertex_offset=*/ 0,
+            stride,
+            AttributeDataType::Short2,
+        );
+    }
+    attrs
 }
 
 impl TypedLayer for RenderRasterLayer {
@@ -422,7 +418,6 @@ impl RenderLayer for RenderRasterLayer {
         let static_vertices = Rc::clone(&static_geometry.vertices);
         let static_indexes = Rc::clone(&static_geometry.indexes);
         let static_segments: Vec<SegmentBase> = static_geometry.segments.iter().map(SegmentBase::copy).collect();
-        let mut static_attrs: Option<VertexAttributeArrayPtr> = None;
 
         // Drop the textures of buckets that are no longer rendered.
         let live_buckets: mln_util::hash::HashSet<SimpleIdentity> =
@@ -474,7 +469,7 @@ impl RenderLayer for RenderRasterLayer {
                     let vertices: VertexVectorBasePtr =
                         Rc::<mln_gfx::vertex_vector::VertexVector<RasterLayoutVertex>>::clone(&globe_mesh.vertices);
                     objects.update_vertex_attributes(
-                        Some(raster_vertex_attributes(&vertices)),
+                        raster_vertex_attributes(&vertices),
                         globe_mesh.vertices.elements(),
                         DrawMode::Triangles(),
                         Some(Rc::clone(&globe_mesh.indices)),
@@ -483,17 +478,15 @@ impl RenderLayer for RenderRasterLayer {
                 } else if shared {
                     let vertices = shared_vertices(&geometry.vertices);
                     objects.update_vertex_attributes(
-                        Some(raster_vertex_attributes(&vertices)),
+                        raster_vertex_attributes(&vertices),
                         geometry.vertices.len(),
                         DrawMode::Triangles(),
                         Some(Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone())))),
                         &geometry.segments,
                     );
                 } else {
-                    let attrs =
-                        Rc::clone(static_attrs.get_or_insert_with(|| raster_vertex_attributes(&static_vertices)));
                     objects.update_vertex_attributes(
-                        Some(attrs),
+                        raster_vertex_attributes(&static_vertices),
                         4,
                         DrawMode::Triangles(),
                         Some(Rc::clone(&static_indexes)),

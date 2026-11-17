@@ -33,7 +33,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO,
 };
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
-use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
+use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
 use mln_map_types::TransformState;
@@ -54,7 +54,7 @@ use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
     FillExtrusionStaticVertex, FillExtrusionWallVertex,
 };
-use crate::draw::DrawObjects;
+use crate::draw::{DrawObjects, copy_shared_attributes};
 use crate::draw_cache::{DrawCache, DrawDepth, DrawPriority, FrameDraw, FrameDraws, LayerDraws};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::context::Context;
@@ -108,11 +108,11 @@ struct ExtrusionUniforms {
     projection: ProjectionUBO,
 }
 
-/// The geometry of draws: vertices in their attributes, and the segments of
-/// indexes they draw.
+/// The geometry of draws: vertices in their attributes, which each draw
+/// reads a copy of, and the segments of indexes they draw.
 struct DrawGeometry<'a> {
-    vertices: &'a VertexAttributeArrayPtr,
-    instances: Option<&'a VertexAttributeArrayPtr>,
+    vertices: &'a VertexAttributeArray,
+    instances: Option<&'a VertexAttributeArray>,
     vertex_count: usize,
     indexes: &'a IndexVectorBasePtr,
     segments: &'a [SegmentBase],
@@ -273,13 +273,13 @@ fn extrusion_draw(shader: &ShaderProgramPtr, in_color: bool, clip: bool, geometr
     objects.set_shader(Some(Rc::clone(shader)));
     let vertex_count = if geometry.segments.is_empty() { 0 } else { geometry.vertex_count };
     objects.update_vertex_attributes(
-        Some(Rc::clone(geometry.vertices)),
+        copy_shared_attributes(geometry.vertices),
         vertex_count,
         DrawMode::Triangles(),
         Some(Rc::clone(geometry.indexes)),
         geometry.segments,
     );
-    objects.instance_attributes = geometry.instances.cloned();
+    objects.instance_attributes = geometry.instances.map(copy_shared_attributes);
     ExtrusionDraw { id: SimpleIdentity::new(), objects, priority: DrawPriority::from(in_color), clip }
 }
 
@@ -606,7 +606,7 @@ impl TileBuilder {
             read_paint_properties(&mut instance_attrs, binders, evaluated, &paint, &mut wall_properties_as_uniforms);
             read_wall_instances(&mut wall_attrs, &mut instance_attrs, &self.static_vertices, &vertices);
             let segments = vec![RenderStaticData::fill_extrusion_segment(walls)];
-            (Some(Rc::new(RefCell::new(instance_attrs))), self.static_vertices.get_raw_count(), segments)
+            (Some(instance_attrs), self.static_vertices.get_raw_count(), segments)
         };
 
         let (shader, wall_shader) = self.first_shaders.get_or_insert_with(|| {
@@ -632,7 +632,7 @@ impl TileBuilder {
         // The draws in color clip where the layer draws into depth first.
         let clip = self.depth_pass;
         let roofs = DrawGeometry {
-            vertices: &Rc::new(RefCell::new(vertex_attrs)),
+            vertices: &vertex_attrs,
             instances: None,
             vertex_count,
             indexes: &bucket_indexes(geometry, bucket, &bucket.triangles),
@@ -646,7 +646,7 @@ impl TileBuilder {
         }
         // A tile with one vertex has no wall.
         let walls_geometry = DrawGeometry {
-            vertices: &Rc::new(RefCell::new(wall_attrs)),
+            vertices: &wall_attrs,
             instances: wall_instance_attrs.as_ref(),
             vertex_count: wall_vertex_count,
             indexes: &self.static_indices,

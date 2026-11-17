@@ -29,7 +29,6 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
-use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
     AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, VertexAttributeArray,
@@ -256,31 +255,28 @@ fn get_lat_range(id: &UnwrappedTileID) -> [f32; 2] {
 
 /// The vertex attributes of a hillshade (or prepare) draw over
 /// `vertices`.
-fn hillshade_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
-    let vertex_attrs = VertexAttributeArray::new_ptr();
-    {
-        let mut attrs = vertex_attrs.borrow_mut();
-        let stride = size_of::<HillshadeLayoutVertex>() as u32;
-        if let Some(attr) = attrs.set(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(
-                Some(Rc::clone(vertices)),
-                0, // offsetof(HillshadeLayoutVertex, a1)
-                0,
-                stride,
-                AttributeDataType::Short2,
-            );
-        }
-        if let Some(attr) = attrs.set(ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(
-                Some(Rc::clone(vertices)),
-                4, // offsetof(HillshadeLayoutVertex, a2)
-                0,
-                stride,
-                AttributeDataType::Short2,
-            );
-        }
+fn hillshade_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArray {
+    let mut attrs = VertexAttributeArray::new();
+    let stride = size_of::<HillshadeLayoutVertex>() as u32;
+    if let Some(attr) = attrs.set(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(
+            Some(Rc::clone(vertices)),
+            0, // offsetof(HillshadeLayoutVertex, a1)
+            0,
+            stride,
+            AttributeDataType::Short2,
+        );
     }
-    vertex_attrs
+    if let Some(attr) = attrs.set(ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(
+            Some(Rc::clone(vertices)),
+            4, // offsetof(HillshadeLayoutVertex, a2)
+            0,
+            stride,
+            AttributeDataType::Short2,
+        );
+    }
+    attrs
 }
 
 impl TypedLayer for RenderHillshadeLayer {
@@ -389,9 +385,6 @@ impl RenderLayer for RenderHillshadeLayer {
             Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
         let static_data_segments = RenderStaticData::raster_segments();
 
-        // The attributes of the prepare draws this update builds.
-        let mut prepare_vertex_attrs: Option<VertexAttributeArrayPtr> = None;
-
         // `resampling` filters the prepared texture the tile's draw samples;
         // the prepare pass reads the DEM with Nearest regardless.
         let resampling_filter = match *self.values.evaluated.paint.resampling.uniform() {
@@ -428,10 +421,7 @@ impl RenderLayer for RenderHillshadeLayer {
                     entry.get().render_target.get_texture()
                 }
                 entry => {
-                    let attrs = Rc::clone(
-                        prepare_vertex_attrs
-                            .get_or_insert_with(|| hillshade_vertex_attributes(&static_data_shared_vertices)),
-                    );
+                    let attrs = hillshade_vertex_attributes(&static_data_shared_vertices);
                     let target = BucketTarget::new(
                         context,
                         bucket,
@@ -490,7 +480,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 let (vertices, vertex_count, indices, segments) = tile_geometry();
                 let vertex_count = if segments.is_empty() { 0 } else { vertex_count };
                 objects.update_vertex_attributes(
-                    Some(hillshade_vertex_attributes(&vertices)),
+                    hillshade_vertex_attributes(&vertices),
                     vertex_count,
                     DrawMode::Triangles(),
                     Some(indices),
@@ -551,7 +541,7 @@ impl BucketTarget {
         tile_id: &UnwrappedTileID,
         maxzoom: u8,
         shader: &ShaderProgramPtr,
-        attrs: VertexAttributeArrayPtr,
+        attrs: VertexAttributeArray,
         quad: (&IndexVectorBasePtr, &[SegmentBase]),
     ) -> BucketTarget {
         let (tilesize, stride, encoding, dem_image) = {
@@ -585,7 +575,7 @@ impl BucketTarget {
         let (indexes, segments) = quad;
         let vertex_count = if segments.is_empty() { 0 } else { 4 };
         objects.update_vertex_attributes(
-            Some(attrs),
+            attrs,
             vertex_count,
             DrawMode::Triangles(),
             Some(Rc::clone(indexes)),

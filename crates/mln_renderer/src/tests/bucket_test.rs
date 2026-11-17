@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_gfx::DrawMode;
 use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
+use mln_gfx::{DrawMode, VertexAttributeArray};
 use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
@@ -373,7 +373,13 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     let indexes = geometry.indexes(&bucket, &bucket.triangles);
     assert_eq!(indexes.borrow().elements(), index_count);
     let mut objects = DrawObjects::new(String::new());
-    objects.update_vertex_attributes(None, vertex_count, DrawMode::Triangles(), Some(indexes), &bucket.segments);
+    objects.update_vertex_attributes(
+        VertexAttributeArray::new(),
+        vertex_count,
+        DrawMode::Triangles(),
+        Some(indexes),
+        &bucket.segments,
+    );
     assert_eq!(triangles.borrow().elements(), index_count);
 }
 

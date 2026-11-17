@@ -2,7 +2,6 @@
 // half-float render target; the layer's draw on the frame colors that
 // texture through the color ramp.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -348,7 +347,7 @@ impl RenderHeatmapLayer {
                 objects.set_shader(Some(Rc::clone(shader)));
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
                 objects.update_vertex_attributes(
-                    Some(Rc::new(RefCell::new(attrs))),
+                    attrs,
                     vertex_count,
                     DrawMode::Triangles(),
                     Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
@@ -483,7 +482,7 @@ impl RenderHeatmapLayer {
         objects.set_texture(Some(render_target_texture), ID_HEATMAP_IMAGE_TEXTURE);
         objects.set_texture(Some(color_ramp), ID_HEATMAP_COLOR_RAMP_TEXTURE);
         objects.update_vertex_attributes(
-            Some(Rc::new(RefCell::new(attrs))),
+            attrs,
             4,
             DrawMode::Triangles(),
             Some(released_indexes(&RenderStaticData::quad_triangle_indices())),

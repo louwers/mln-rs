@@ -6,7 +6,6 @@
 // indices of the tile's draws, as C++ `updateTileDrawable` does.
 
 use std::any::Any;
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -51,7 +50,7 @@ use crate::bucket_geometry::{BucketGeometry, bucket_vertices, paint_vertices, re
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
 };
-use crate::draw::{DrawObjects, DrawSegment};
+use crate::draw::{DrawObjects, DrawSegment, copy_shared_attributes};
 use crate::draw_cache::{BucketChanges, DrawCache, DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDraws};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
@@ -401,6 +400,16 @@ struct SymbolDraw {
     atlases: Rc<DrawableAtlasesTweaker>,
 }
 
+/// What tells apart the draws of a tile that read the same attributes: a
+/// halo and a fill of one symbol type, and of one segment or all of them.
+type AttributesKey = (SymbolType, Option<usize>);
+
+impl SymbolDraw {
+    fn attributes_key(&self) -> AttributesKey {
+        (self.data.symbol_type, self.data.segment)
+    }
+}
+
 /// What the layer keeps of a tile: its draws, as they were built for the
 /// tile's bucket.
 #[derive(Default)]
@@ -450,8 +459,10 @@ fn texture_size(objects: &DrawObjects, texture_id: usize) -> [f32; 2] {
 }
 
 /// Copies again what placement, sorting or feature state changed of the
-/// bucket into a draw of it: its attributes, of which a halo and a fill draw
-/// share one array, copied once (`refreshed_attributes`), and its triangles.
+/// bucket into a draw of it: its attributes, which a halo and a fill draw
+/// read the same of, so only the first of them that is visible copies them
+/// (the keys of those copied are in `refreshed_attributes`), and its
+/// triangles. Returns whether it copied the attributes.
 fn refresh_draw(
     draw: &mut SymbolDraw,
     geometry: Option<&BucketGeometry>,
@@ -459,8 +470,8 @@ fn refresh_draw(
     layer_id: &str,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     refresh: BucketChanges,
-    refreshed_attributes: &mut Vec<*const ()>,
-) {
+    refreshed_attributes: &mut Vec<AttributesKey>,
+) -> bool {
     let is_text = draw.data.symbol_type == SymbolType::Text;
     let sdf_icons = draw.data.symbol_type == SymbolType::IconSDF;
 
@@ -483,40 +494,39 @@ fn refresh_draw(
         draw.visible = buffer.segment_has_visible_vertices(draw.data.segment);
     }
     if !draw.visible {
-        return;
+        return false;
     }
     let refresh = if was_visible { refresh } else { BucketChanges::ALL };
 
     if !refresh.any() {
-        return;
+        return false;
     }
 
-    if let Some(attrs) = draw.objects.vertex_attributes.clone() {
-        let key = Rc::as_ptr(&attrs).cast::<()>();
-        if !refreshed_attributes.contains(&key) {
-            refreshed_attributes.push(key);
-            let mut attrs = attrs.borrow_mut();
-            if refresh.dynamic {
-                set_projected_pos_attribute(buffer, layer_id, &mut attrs);
-            }
-            if refresh.opacity {
-                set_fade_opacity_attribute(buffer, &mut attrs);
-            }
-            if refresh.paint
-                && let Some(paint_props) = bucket.paint_properties.get(layer_id)
-            {
-                let paint_props = paint_props.read();
-                let mut properties_as_uniforms = StringIDSetsPair::default();
-                set_binder_attributes(
-                    geometry,
-                    bucket,
-                    is_text,
-                    &paint_props,
-                    evaluated,
-                    &mut attrs,
-                    &mut properties_as_uniforms,
-                );
-            }
+    let key = draw.attributes_key();
+    let copies = !refreshed_attributes.contains(&key);
+    if copies {
+        refreshed_attributes.push(key);
+        let attrs = &mut draw.objects.vertex_attributes;
+        if refresh.dynamic {
+            set_projected_pos_attribute(buffer, layer_id, attrs);
+        }
+        if refresh.opacity {
+            set_fade_opacity_attribute(buffer, attrs);
+        }
+        if refresh.paint
+            && let Some(paint_props) = bucket.paint_properties.get(layer_id)
+        {
+            let paint_props = paint_props.read();
+            let mut properties_as_uniforms = StringIDSetsPair::default();
+            set_binder_attributes(
+                geometry,
+                bucket,
+                is_text,
+                &paint_props,
+                evaluated,
+                attrs,
+                &mut properties_as_uniforms,
+            );
         }
     }
 
@@ -528,6 +538,7 @@ fn refresh_draw(
         let segments = segments.iter().map(|segment| Box::new(DrawSegment::new(DrawMode::Triangles(), segment.copy())));
         draw.objects.set_index_data(Some(released_indexes(&buffer.triangles)), segments.collect());
     }
+    copies
 }
 
 /// A `SegmentGroup` (a `RenderableSegment` plus its segments).
@@ -772,7 +783,7 @@ impl RenderSymbolLayer {
             objects.set_cull_face_mode(CullFaceMode::disabled());
             objects.set_shader(Some(group.shader(&Default::default(), self.base.projection_variant)));
             objects.update_vertex_attributes(
-                Some(get_collision_vertex_attributes(buffer)),
+                get_collision_vertex_attributes(buffer),
                 buffer.vertices.len(),
                 mode,
                 Some(released_indexes(&buffer.indices)),
@@ -1059,34 +1070,31 @@ fn write_collision_uniforms(draw: &mut CollisionDraw, tile_id: &OverscaledTileID
     buffers.create_or_update_pod(ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
 }
 
-fn get_collision_vertex_attributes(buffer: &CollisionBuffer) -> mln_gfx::vertex_attribute::VertexAttributeArrayPtr {
-    let vertex_attrs = VertexAttributeArray::new_ptr();
-    {
-        let mut attrs = vertex_attrs.borrow_mut();
-        let layout_stride = size_of::<CollisionBoxLayoutVertex>() as u32;
-        let layout = shared_vertices(&buffer.vertices);
-        let dynamic_stride = size_of::<CollisionBoxDynamicVertex>() as u32;
-        let dynamic = shared_vertices(&buffer.dynamic_vertices);
-        if let Some(attr) = attrs.set(ID_COLLISION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(Rc::clone(&layout)), 0, 0, layout_stride, AttributeDataType::Short2);
-        }
-        if let Some(attr) = attrs.set(ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(Rc::clone(&layout)), 4, 0, layout_stride, AttributeDataType::Short2);
-        }
-        if let Some(attr) = attrs.set(ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(Rc::clone(&layout)), 8, 0, layout_stride, AttributeDataType::Short2);
-        }
-        if let Some(attr) = attrs.set(ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(layout), 12, 0, layout_stride, AttributeDataType::Float);
-        }
-        if let Some(attr) = attrs.set(ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(Rc::clone(&dynamic)), 0, 0, dynamic_stride, AttributeDataType::UShort2);
-        }
-        if let Some(attr) = attrs.set(ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(dynamic), 4, 0, dynamic_stride, AttributeDataType::Float2);
-        }
+fn get_collision_vertex_attributes(buffer: &CollisionBuffer) -> VertexAttributeArray {
+    let mut attrs = VertexAttributeArray::new();
+    let layout_stride = size_of::<CollisionBoxLayoutVertex>() as u32;
+    let layout = shared_vertices(&buffer.vertices);
+    let dynamic_stride = size_of::<CollisionBoxDynamicVertex>() as u32;
+    let dynamic = shared_vertices(&buffer.dynamic_vertices);
+    if let Some(attr) = attrs.set(ID_COLLISION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(Some(Rc::clone(&layout)), 0, 0, layout_stride, AttributeDataType::Short2);
     }
-    vertex_attrs
+    if let Some(attr) = attrs.set(ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(Some(Rc::clone(&layout)), 4, 0, layout_stride, AttributeDataType::Short2);
+    }
+    if let Some(attr) = attrs.set(ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(Some(Rc::clone(&layout)), 8, 0, layout_stride, AttributeDataType::Short2);
+    }
+    if let Some(attr) = attrs.set(ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(Some(layout), 12, 0, layout_stride, AttributeDataType::Float);
+    }
+    if let Some(attr) = attrs.set(ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(Some(Rc::clone(&dynamic)), 0, 0, dynamic_stride, AttributeDataType::UShort2);
+    }
+    if let Some(attr) = attrs.set(ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(Some(dynamic), 4, 0, dynamic_stride, AttributeDataType::Float2);
+    }
+    attrs
 }
 
 impl TypedLayer for RenderSymbolLayer {
@@ -1290,10 +1298,31 @@ impl RenderLayer for RenderSymbolLayer {
 
             // A tile the layer keeps draws of refreshes them.
             if let Some(cached) = draws.cache_mut::<SymbolTile>(&tile_id).filter(|cached| !cached.draws.is_empty()) {
-                let mut refreshed_attributes: Vec<*const ()> = Vec::new();
-                for draw in &mut cached.draws {
+                let mut refreshed_attributes = Vec::new();
+                let mut copied = Vec::new();
+                for (index, draw) in cached.draws.iter_mut().enumerate() {
                     let geometry = tile.get_bucket_geometry();
-                    refresh_draw(draw, geometry, bucket, self.get_id(), evaluated, refresh, &mut refreshed_attributes);
+                    if refresh_draw(
+                        draw,
+                        geometry,
+                        bucket,
+                        self.get_id(),
+                        evaluated,
+                        refresh,
+                        &mut refreshed_attributes,
+                    ) {
+                        copied.push(index);
+                    }
+                }
+                // The other draws that read the same attributes read the copies.
+                for source in copied {
+                    let key = cached.draws[source].attributes_key();
+                    for index in 0..cached.draws.len() {
+                        if index != source && cached.draws[index].attributes_key() == key {
+                            let attrs = copy_shared_attributes(&cached.draws[source].objects.vertex_attributes);
+                            cached.draws[index].objects.vertex_attributes = attrs;
+                        }
+                    }
                 }
                 self.rebuild_collision(draws, &tile_id, bucket, evaluated);
                 continue;
@@ -1439,8 +1468,6 @@ impl RenderLayer for RenderSymbolLayer {
                 &mut vertex_attribs,
                 &mut properties_as_uniforms,
             );
-            // The halo and the fill read the same attributes.
-            let vertex_attribs = Rc::new(RefCell::new(vertex_attribs));
 
             let text_halo = evaluated.text_halo_color.constant_or(&Color::black()).a > 0.0
                 && evaluated.text_halo_width.constant_or(&1.0) != 0.0;
@@ -1510,8 +1537,9 @@ impl RenderLayer for RenderSymbolLayer {
                 objects.set_color_mode(&color_mode);
                 objects.set_cull_face_mode(CullFaceMode::disabled());
                 objects.set_shader(Some(shader_group.shader(&properties_as_uniforms, symbol_projection_variant)));
+                // The halo and the fill read the same attributes.
                 objects.update_vertex_attributes(
-                    Some(Rc::clone(&vertex_attribs)),
+                    copy_shared_attributes(&vertex_attribs),
                     buffer.attribute_data.len(),
                     DrawMode::Triangles(),
                     Some(released_indexes(&buffer.triangles)),

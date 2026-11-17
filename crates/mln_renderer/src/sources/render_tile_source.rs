@@ -142,7 +142,7 @@ fn polyline_objects(
     objects.set_cull_face_mode(CullFaceMode::disabled());
     objects.set_shader(Some(Rc::clone(shader)));
     objects.update_vertex_attributes(
-        Some(Rc::new(RefCell::new(attrs))),
+        attrs,
         vertex_count,
         DrawMode::Triangles(),
         Some(Rc::new(RefCell::new(IndexVectorBase::new(indexes)))),

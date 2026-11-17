@@ -20,7 +20,6 @@ use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
     AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
-    VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
@@ -38,7 +37,7 @@ use super::{cast_matrix, refresh_paint_attributes, shared_vertices};
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
-use crate::draw::DrawObjects;
+use crate::draw::{DrawObjects, copy_shared_attributes};
 use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, LayerDraws};
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
@@ -101,14 +100,14 @@ impl FillDraw {
     /// nothing and has no vertices.
     fn set_geometry(
         &mut self,
-        vertices: VertexAttributeArrayPtr,
+        vertices: VertexAttributeArray,
         vertex_count: usize,
         mode: DrawMode,
         indexes: IndexVectorBasePtr,
         segments: &[SegmentBase],
     ) {
         let vertex_count = if segments.is_empty() { 0 } else { vertex_count };
-        self.objects.update_vertex_attributes(Some(vertices), vertex_count, mode, Some(indexes), segments);
+        self.objects.update_vertex_attributes(vertices, vertex_count, mode, Some(indexes), segments);
     }
 }
 
@@ -148,7 +147,7 @@ struct FillUniforms {
 struct OutlineQuad {
     vertices: VertexVectorBasePtr,
     indexes: IndexVectorBasePtr,
-    attributes: VertexAttributeArrayPtr,
+    attributes: VertexAttributeArray,
 }
 
 /// What building the draws of an update's tiles reads of the layer.
@@ -201,8 +200,6 @@ impl TileBuilder<'_> {
                 AttributeDataType::Short2,
             );
         }
-        // The fill and a line outline read the same attributes.
-        let vertex_attrs: VertexAttributeArrayPtr = Rc::new(RefCell::new(vertex_attrs));
 
         // The outline draws in the fill color unless it has one of its own,
         // which a pattern doesn't default to.
@@ -241,8 +238,9 @@ impl TileBuilder<'_> {
 
         let mut fill = (!bucket.triangles.is_empty()).then(|| {
             let mut draw = FillDraw::new(fill_shader, 1, fill_depth);
+            // The fill and a line outline read the same attributes.
             draw.set_geometry(
-                Rc::clone(&vertex_attrs),
+                copy_shared_attributes(&vertex_attrs),
                 fill_vertex_count,
                 DrawMode::Triangles(),
                 bucket_indexes(geometry, bucket, &bucket.triangles),
@@ -268,9 +266,9 @@ impl TileBuilder<'_> {
                         attr.set_shared_raw_data(Some(ends), 0, 0, stride, AttributeDataType::Short2);
                     }
                 }
-                draw.objects.instance_attributes = Some(Rc::new(RefCell::new(instance_attrs)));
+                draw.objects.instance_attributes = Some(instance_attrs);
                 draw.set_geometry(
-                    Rc::clone(&quad.attributes),
+                    copy_shared_attributes(&quad.attributes),
                     quad.vertices.get_raw_count(),
                     DrawMode::Triangles(),
                     Rc::clone(&quad.indexes),
@@ -278,7 +276,7 @@ impl TileBuilder<'_> {
                 );
             } else {
                 draw.set_geometry(
-                    Rc::clone(&vertex_attrs),
+                    copy_shared_attributes(&vertex_attrs),
                     fill_vertex_count,
                     DrawMode::Lines(LINE_WIDTH),
                     bucket_indexes(geometry, bucket, &bucket.basic_lines),
@@ -662,7 +660,7 @@ impl RenderLayer for RenderFillLayer {
                 let stride = size_of::<[i16; 2]>() as u32;
                 attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 0, 0, stride, AttributeDataType::Short2);
             }
-            OutlineQuad { vertices, indexes, attributes: Rc::new(RefCell::new(attributes)) }
+            OutlineQuad { vertices, indexes, attributes }
         });
 
         let pattern = !self.values.unevaluated.fill_pattern.is_undefined();

@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -492,7 +490,7 @@ impl RenderLayer for RenderCircleLayer {
                 ));
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
                 objects.update_vertex_attributes(
-                    Some(Rc::new(RefCell::new(attrs))),
+                    attrs,
                     vertex_count,
                     DrawMode::Triangles(),
                     Some(bucket_indexes(geometry, bucket, &bucket.triangles)),

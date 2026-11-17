@@ -25,7 +25,6 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
     AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, VertexAttributeArray,
@@ -257,31 +256,28 @@ impl RenderColorReliefLayer {
 }
 
 /// The vertex attributes of a color-relief draw over `vertices`.
-fn color_relief_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
-    let vertex_attrs = VertexAttributeArray::new_ptr();
-    {
-        let mut attrs = vertex_attrs.borrow_mut();
-        let stride = size_of::<HillshadeLayoutVertex>() as u32;
-        if let Some(attr) = attrs.set(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(
-                Some(Rc::clone(vertices)),
-                0, // offsetof(HillshadeLayoutVertex, a1)
-                0,
-                stride,
-                AttributeDataType::Short2,
-            );
-        }
-        if let Some(attr) = attrs.set(ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(
-                Some(Rc::clone(vertices)),
-                4, // offsetof(HillshadeLayoutVertex, a2)
-                0,
-                stride,
-                AttributeDataType::Short2,
-            );
-        }
+fn color_relief_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArray {
+    let mut attrs = VertexAttributeArray::new();
+    let stride = size_of::<HillshadeLayoutVertex>() as u32;
+    if let Some(attr) = attrs.set(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(
+            Some(Rc::clone(vertices)),
+            0, // offsetof(HillshadeLayoutVertex, a1)
+            0,
+            stride,
+            AttributeDataType::Short2,
+        );
     }
-    vertex_attrs
+    if let Some(attr) = attrs.set(ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(
+            Some(Rc::clone(vertices)),
+            4, // offsetof(HillshadeLayoutVertex, a2)
+            0,
+            stride,
+            AttributeDataType::Short2,
+        );
+    }
+    attrs
 }
 
 impl TypedLayer for RenderColorReliefLayer {
@@ -531,7 +527,7 @@ impl RenderLayer for RenderColorReliefLayer {
                     objects.set_shader(Some(Rc::clone(&color_relief_shader)));
                     let vertex_count = if segments.is_empty() { 0 } else { vertex_count };
                     objects.update_vertex_attributes(
-                        Some(color_relief_vertex_attributes(&vertices)),
+                        color_relief_vertex_attributes(&vertices),
                         vertex_count,
                         DrawMode::Triangles(),
                         Some(indices),

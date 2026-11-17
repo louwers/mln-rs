@@ -31,9 +31,7 @@ pub(crate) fn refresh_paint_attributes(
     if !changes.paint {
         return;
     }
-    if let Some(attrs) = objects.instance_attributes.as_ref().or(objects.vertex_attributes.as_ref()) {
-        refresh(&mut attrs.borrow_mut());
-    }
+    refresh(objects.instance_attributes.as_mut().unwrap_or(&mut objects.vertex_attributes));
 }
 
 /// A shared gfx vertex vector holding a copy of `vertices`, for data that
