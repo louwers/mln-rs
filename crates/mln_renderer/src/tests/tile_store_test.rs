@@ -141,7 +141,7 @@ fn start_geojson_load(tile: &mut OneTile) -> u64 {
     tile.with(|tile| {
         let (info, tile) = tile.parts();
         let load = info.next();
-        tile.load.origin = OriginLoad::GeoJson { load: Some(load) };
+        tile.load.start_geojson(load);
         load
     })
 }
@@ -212,6 +212,44 @@ fn a_not_modified_reload_keeps_the_data() {
     assert_eq!(tile.layout().data().expect("data").key, key, "the same data");
     assert_eq!(manual.submitted(), 1, "nothing to lay out again");
     assert!(std::rc::Rc::ptr_eq(&tile.tile().shown.as_ref().expect("contents").contents, &shown));
+    assert!(tile.tile().is_complete());
+}
+
+/// A revalidation that fails, and is answered `not_modified` when it is
+/// retried, leaves the tile with its data and complete: the answer is all
+/// the retry brings.
+#[test]
+fn a_retried_revalidation_answered_not_modified_completes() {
+    let test = Test::new();
+    let file_source = Arc::new(Held::default());
+    let manual = Manual::default();
+    let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
+    let id = tile.id;
+    tile.set_style(&style(&[water_layer("water", "red")]));
+    tile.set_necessity(&id, TileNecessity::Required);
+    file_source.respond(water());
+    tile.update();
+    manual.run();
+    tile.update();
+    assert!(tile.tile().is_complete());
+
+    tile.set_necessity(&id, TileNecessity::Optional);
+    tile.set_necessity(&id, TileNecessity::Required);
+    let mut failed = Response::new();
+    failed.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
+    file_source.respond(failed);
+    tile.update();
+    assert!(tile.tile().is_complete(), "a failed revalidation keeps the tile complete");
+
+    tile.store.retry_failed();
+    assert_eq!(file_source.pending(), 1, "the retry");
+    assert!(!tile.tile().is_complete(), "the tile waits for the retry");
+    let mut response = Response::new();
+    response.not_modified = true;
+    file_source.respond(response);
+    tile.update();
+    assert!(tile.shows_layout());
+    assert_eq!(manual.submitted(), 1, "nothing to lay out again");
     assert!(tile.tile().is_complete());
 }
 
@@ -514,6 +552,24 @@ fn a_reloaded_dem_refills_both_borders() {
     tiles.update();
     assert_ne!(edge(&tiles), before, "the reload has other heights");
     assert_borders_match(&tiles, &left, &right);
+}
+
+/// At zoom 1 a tile's neighbour across the antimeridian is the row's other
+/// tile, in the next world copy: the borders there fill from it.
+#[test]
+fn dem_borders_across_the_antimeridian_at_zoom_1() {
+    let test = Test::new();
+    let store = tile_store(&test.run_loop, &test.pool, Box::new(InlineWorkers));
+    let west = OverscaledTileID::with_zxy(1, -1, 1, 1, 0);
+    let east = OverscaledTileID::from_zxy(1, 0, 0);
+    let mut tiles = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), east, MapMode::Static);
+    tiles.add(west);
+    for (id, seed) in [(west, 1), (east, 2)] {
+        tiles.set_image(&id, Some(dem_png(seed)));
+        tiles.update();
+        tiles.update();
+    }
+    assert_borders_match(&tiles, &west, &east);
 }
 
 /// Data that arrives in the inbox starts its tile's job in the update that

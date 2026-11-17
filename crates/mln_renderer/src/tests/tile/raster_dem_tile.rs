@@ -57,7 +57,7 @@ fn on_parsed() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
     let dem = DEMData::new(&PremultipliedImage::new(Size::new(16, 16)), RasterEncoding::Mapbox).expect("DEMData");
-    tiles.with(|tile| tile.apply_now(JobResult::Dem(dem)));
+    tiles.with(|tile| tile.apply_decode_now(JobResult::Dem(dem)));
     assert!(tiles.tile().is_renderable());
     assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());

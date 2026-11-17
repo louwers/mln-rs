@@ -1,8 +1,8 @@
 //! How a tile's data becomes its contents: a geometry tile lays its data out
 //! with its source's style ([`Layout`]), and a raster or raster-dem tile
 //! decodes its image ([`Decode`]). Each runs one job at a time, for one
-//! generation of its inputs; a reply applies only if it names the current
-//! generation.
+//! generation of its inputs; the store applies a reply only if it names the
+//! current generation, and tells them of a stale one (`stale_replied`).
 //!
 //! These are plain state machines: the store hands them the generations it
 //! takes from its source's counter and the lanes its workers have room on,
@@ -62,10 +62,11 @@ pub(crate) struct LayoutData {
 
 /// Where a layout's work stands.
 pub(crate) enum LayoutWork {
-    /// Nothing to do for this generation: the tile shows its layout,
-    /// failed, or waits for the data or style it lacks.
+    /// Nothing to do for this generation: the tile shows its layout, or
+    /// the layout failed.
     Current,
-    /// The generation has no job yet: its first try is next.
+    /// The generation has no job yet: its first try is next once the
+    /// layout has its data and style.
     Outdated,
     Running(Running),
     Waiting(Waiting),
@@ -135,20 +136,26 @@ pub(crate) enum LayoutStep {
     Wait,
     /// The worker lacked data `key`: the next job carries it.
     Resend(DataKey),
-    /// The reply is stale and goes. `images_moved`: it branched on an image
-    /// that came or went since, so the tile lays out again without the
-    /// answer it shows.
-    Outdated {
-        images_moved: bool,
-        result: JobResult,
-    },
+    /// The reply branched on an image that came or went since, and goes:
+    /// the tile lays out again, without the answer it shows.
+    ImagesMoved(JobResult),
     Failed(Error),
 }
 
 /// A raster or raster-dem tile's decode of its image.
 pub(crate) struct Decode {
     generation: u64,
+    target: DecodeTarget,
     work: DecodeWork,
+}
+
+/// What a decode makes of an image.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DecodeTarget {
+    /// An image for raster layers.
+    Raster,
+    /// A DEM of this encoding.
+    Dem(mln_util::tileset::RasterEncoding),
 }
 
 /// Where a decode stands. The tile holds an image only while it is queued
@@ -166,8 +173,6 @@ pub(crate) enum DecodeWork {
 
 /// What the store does with a decode's reply.
 pub(crate) enum DecodeStep {
-    /// The reply is stale and goes.
-    Stale,
     Show(Contents),
     Failed(Error),
 }
@@ -192,7 +197,8 @@ impl Pipeline {
     pub(crate) fn new(kind: TileKind, generation: u64, params: LayoutParams) -> Self {
         match kind {
             TileKind::Geometry => Pipeline::Layout(Box::new(Layout::new(generation, params))),
-            TileKind::Raster | TileKind::Dem(_) => Pipeline::Decode(Decode { generation, work: DecodeWork::Current }),
+            TileKind::Raster => Pipeline::Decode(Decode::new(generation, DecodeTarget::Raster)),
+            TileKind::Dem(encoding) => Pipeline::Decode(Decode::new(generation, DecodeTarget::Dem(encoding))),
         }
     }
 
@@ -479,14 +485,14 @@ impl Layout {
         }
     }
 
-    /// Applies `result`, the reply to `running`, while the images
-    /// `available` exist.
+    /// Applies `result`, the reply to `running`, a job of the current
+    /// generation, while the images `available` exist.
     pub(crate) fn apply(&mut self, running: Running, result: JobResult, available: &Arc<VecSet<String>>) -> LayoutStep {
         let Running { job, known, answer, images } = running;
-        let images_moved = !Arc::ptr_eq(&images, available) && outdated_by(&result, &images, available);
-        if job.id.generation != self.generation || images_moved {
+        debug_assert_eq!(job.id.generation, self.generation, "a reply of the current generation");
+        if !Arc::ptr_eq(&images, available) && outdated_by(&result, &images, available) {
             self.work = LayoutWork::Outdated;
-            return LayoutStep::Outdated { images_moved, result };
+            return LayoutStep::ImagesMoved(result);
         }
         match result {
             JobResult::Laid(output) => {
@@ -537,18 +543,13 @@ impl Layout {
         self.bump(generation);
         self.work = LayoutWork::Outdated;
     }
-
-    /// A first try of the current generation, as if in flight, whose result
-    /// a test applies.
-    #[cfg(test)]
-    pub(crate) fn run_now(&mut self, tile: TileKey, images: Arc<VecSet<String>>) -> Running {
-        let job =
-            InFlight { id: JobId { tile, generation: self.generation }, lane: Lane(0), superseded: Arc::default() };
-        Running { job, known: None, answer: Answer::default(), images }
-    }
 }
 
 impl Decode {
+    fn new(generation: u64, target: DecodeTarget) -> Self {
+        Decode { generation, target, work: DecodeWork::Current }
+    }
+
     /// Decodes `image` at `generation`; with no image, decodes nothing. A
     /// decode in flight goes on, stale, until it replies.
     pub(crate) fn set_image(&mut self, image: Option<Data>, generation: u64) {
@@ -566,24 +567,19 @@ impl Decode {
         matches!(self.work, DecodeWork::Queued(_) | DecodeWork::Running { image: Some(_), .. })
     }
 
-    /// Starts the decode of the queued image, of a tile of `kind`, on the
-    /// lane `lane` picks. Returns the lane and the job; `None`, with the
-    /// work as it was, if nothing is queued or no lane has room.
-    pub(crate) fn next_job(
-        &mut self,
-        tile: TileKey,
-        kind: TileKind,
-        lane: impl FnOnce() -> Option<Lane>,
-    ) -> Option<(Lane, Run)> {
+    /// Starts the decode of the queued image on the lane `lane` picks.
+    /// Returns the lane and the job; `None`, with the work as it was, if
+    /// nothing is queued or no lane has room.
+    pub(crate) fn next_job(&mut self, tile: TileKey, lane: impl FnOnce() -> Option<Lane>) -> Option<(Lane, Run)> {
         let DecodeWork::Queued(image) = &self.work else {
             return None;
         };
         let lane = lane()?;
         let image = Arc::clone(image);
         let data = Arc::clone(&image);
-        let job = match kind {
-            TileKind::Dem(encoding) => Job::Dem { data, encoding },
-            TileKind::Raster | TileKind::Geometry => Job::Raster { data },
+        let job = match self.target {
+            DecodeTarget::Dem(encoding) => Job::Dem { data, encoding },
+            DecodeTarget::Raster => Job::Raster { data },
         };
         let id = JobId { tile, generation: self.generation };
         let superseded = Arc::new(AtomicBool::new(false));
@@ -592,13 +588,10 @@ impl Decode {
         Some((lane, Run { id, job, superseded }))
     }
 
-    /// Applies `result`, the reply to job `id`. Any reply of the current
-    /// generation lets go of the image.
+    /// Applies `result`, the reply to job `id`, of the current generation,
+    /// which lets go of the image.
     pub(crate) fn apply(&mut self, id: JobId, result: JobResult) -> DecodeStep {
-        if id.generation != self.generation {
-            self.stale_replied();
-            return DecodeStep::Stale;
-        }
+        debug_assert_eq!(id.generation, self.generation, "a reply of the current generation");
         self.work = DecodeWork::Current;
         match result {
             JobResult::Raster(image) => DecodeStep::Show(Contents::Raster(Arc::new(RasterBucket::new(image)))),

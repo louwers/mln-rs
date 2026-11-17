@@ -391,7 +391,7 @@ impl TileStore {
                     source
                         .slots()
                         .filter(|slot| slot.tile.has_work())
-                        .map(|slot| (slot.place.order(), index, slot.tile.id)),
+                        .map(|slot| (slot.place().order(), index, slot.tile.id)),
                 );
             }
         }
@@ -439,7 +439,7 @@ impl TileStore {
                 );
                 source.update_each(
                     &mut self.ctx,
-                    |slot| !slot.place.is_cached(),
+                    |slot| !slot.place().is_cached(),
                     |tile| {
                         tile.retry_failed_load();
                     },

@@ -229,6 +229,25 @@ impl OneTile {
         source.update(id, ctx, f).expect("the tile")
     }
 
+    /// Notifies the tile of a visible layer's updated properties, as an
+    /// update of its source does. Returns whether the tile draws the layer.
+    pub(crate) fn layer_properties_updated(
+        &mut self,
+        layer_properties: &std::sync::Arc<dyn crate::layer_type::ErasedEvaluatedLayer>,
+    ) -> bool {
+        let id = self.id;
+        self.layer_properties_updated_at(&id, layer_properties)
+    }
+
+    /// Notifies tile `id` of a visible layer's updated properties.
+    pub(crate) fn layer_properties_updated_at(
+        &mut self,
+        id: &mln_tile_id::OverscaledTileID,
+        layer_properties: &std::sync::Arc<dyn crate::layer_type::ErasedEvaluatedLayer>,
+    ) -> bool {
+        self.with_at(id, |tile| tile.parts().1.layer_properties_updated(layer_properties))
+    }
+
     pub(crate) fn set_style(&mut self, style: &std::sync::Arc<crate::tile::job::SourceStyle>) {
         let id = self.id;
         self.set_style_at(&id, style);

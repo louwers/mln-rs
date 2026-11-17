@@ -196,9 +196,9 @@ pub(crate) struct Tile {
     pub(crate) pipeline: Pipeline,
     /// What the tile draws.
     pub(crate) shown: Option<Shown>,
-    /// The tile has shown contents or failed since it last started
-    /// loading: it has done what it can for now. Only its transitions
-    /// (`TileMut`) write it.
+    /// The tile has shown contents, failed, or heard that its data is
+    /// still fresh since it last started loading: it has done what it can
+    /// for now. Only its transitions (`TileMut`) write it.
     pub(super) settled: bool,
 }
 
@@ -219,8 +219,9 @@ impl Tile {
         self.contents().is_some_and(Contents::is_renderable)
     }
 
-    /// Whether the tile has shown contents or failed since it last started
-    /// loading: whether it has done what it can for now.
+    /// Whether the tile has shown contents, failed, or heard that its data
+    /// is still fresh since it last started loading: whether it has done
+    /// what it can for now.
     pub(crate) fn is_settled(&self) -> bool {
         self.settled
     }

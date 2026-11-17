@@ -1205,9 +1205,9 @@ impl TurningSource {
     /// view's: its jobs and its request.
     fn cached_unwanted(&self) -> usize {
         let unwanted = crate::tile::tile::TileLoadOrder::UNWANTED;
-        let cached: Vec<_> = self.pyramid().slots().filter(|slot| slot.place.is_cached()).collect();
+        let cached: Vec<_> = self.pyramid().slots().filter(|slot| slot.place().is_cached()).collect();
         for slot in &cached {
-            assert_eq!(slot.place.order(), unwanted, "tile {}'s jobs", slot.tile.id);
+            assert_eq!(slot.place().order(), unwanted, "tile {}'s jobs", slot.tile.id);
             assert_eq!(slot.tile.load.request_order(), Some(unwanted.value()), "tile {}'s request", slot.tile.id);
         }
         cached.len()

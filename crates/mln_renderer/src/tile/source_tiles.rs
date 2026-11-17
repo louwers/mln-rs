@@ -66,7 +66,24 @@ pub(crate) struct CoverUpdate<'a, 'p> {
 /// A tile of a source, and its place there.
 pub(crate) struct Slot {
     pub(crate) tile: Tile,
-    pub(crate) place: Place,
+    place: Place,
+}
+
+impl Slot {
+    fn new(tile: Tile, place: Place) -> Self {
+        tile.load.set_order(place.order());
+        Slot { tile, place }
+    }
+
+    pub(crate) fn place(&self) -> Place {
+        self.place
+    }
+
+    /// Moves the tile to `place`, whose order its requests take.
+    fn set_place(&mut self, place: Place) {
+        self.place = place;
+        self.tile.load.set_order(place.order());
+    }
 }
 
 /// Where a source keeps a tile.
@@ -291,27 +308,28 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         if self.tile(key).is_none() {
             return;
         }
-        let ctx = &mut *self.ctx;
-        if self.retain.insert(*key) {
-            let update_parameters = TileUpdateParameters {
-                minimum_update_interval: self.minimum_update_interval,
-                is_volatile: self.is_volatile,
-            };
-            self.source.update(key, ctx, |tile| tile.set_update_parameters(update_parameters));
+        let first = self.retain.insert(*key);
+        if first {
             // The pan pass comes first, so a tile of both covers loads with
             // the coarse ones.
             let order =
                 if self.render { TileLoadOrder::ideal(self.pass_rank) } else { TileLoadOrder::coarse(self.pass_rank) };
             self.pass_rank += 1;
             self.source.set_cover_order(key, order);
-            self.source.update(key, ctx, |tile| tile.set_necessity(necessity));
         }
-
-        // A new pixel ratio lays the tile out again, without the relayout
-        // that drops the cached tiles.
+        let update_parameters = TileUpdateParameters {
+            minimum_update_interval: self.minimum_update_interval,
+            is_volatile: self.is_volatile,
+        };
         let parameters = self.update.parameters;
         let (style, needs_relayout) = (self.style, self.needs_relayout);
-        self.source.update(key, ctx, |tile| {
+        self.source.update(key, self.ctx, |tile| {
+            if first {
+                tile.set_update_parameters(update_parameters);
+                tile.set_necessity(necessity);
+            }
+            // A new pixel ratio lays the tile out again, without the
+            // relayout that drops the cached tiles.
             let pixel_ratio_changed = tile
                 .tile()
                 .pipeline
@@ -392,7 +410,7 @@ impl SourceTiles {
     /// Adds `tile` to the cover, where it is unranked until it is retained.
     pub(crate) fn insert(&mut self, tile: Tile) {
         let place = Place::Cover { order: TileLoadOrder::UNWANTED };
-        self.tiles.insert(tile.id, Slot { tile, place });
+        self.tiles.insert(tile.id, Slot::new(tile, place));
     }
 
     /// Adds a new tile `id` to the cover, which starts loading and lays out
@@ -418,9 +436,8 @@ impl SourceTiles {
 
     /// Ranks cover tile `id` `order` among the tiles the cover retained.
     fn set_cover_order(&mut self, id: &OverscaledTileID, order: TileLoadOrder) {
-        if let Some(Slot { tile, place: Place::Cover { order: current } }) = self.tiles.get_mut(id) {
-            *current = order;
-            tile.load.set_order(order);
+        if let Some(slot) = self.tiles.get_mut(id).filter(|slot| !slot.place.is_cached()) {
+            slot.set_place(Place::Cover { order });
         }
     }
 
@@ -443,7 +460,9 @@ impl SourceTiles {
         for slot in tiles.values_mut().filter(|slot| filter(slot)) {
             let mut tile = TileMut::new(info, &mut slot.tile, store);
             f(&mut tile);
-            if tile.installed() {
+            let tile_installed = tile.installed();
+            drop(tile);
+            if tile_installed {
                 installed.push(slot.tile.id);
             }
         }
@@ -453,9 +472,12 @@ impl SourceTiles {
     }
 
     /// Changes tile `id`, if the source has it, through `f`, and returns
-    /// what `f` returns. This is the only way to change a tile. A DEM tile
-    /// that shows new contents takes its borders from its neighbours, and
-    /// gives them its own.
+    /// what `f` returns. This is the only way to change a tile's load, its
+    /// pipeline and what it shows (and so to settle it or report its
+    /// actions); the source changes only the tile's id, request order and
+    /// the layers and feature state of its contents itself. A DEM tile that
+    /// shows new contents takes its borders from its neighbours, and gives
+    /// them its own.
     pub(crate) fn update<R>(
         &mut self,
         id: &OverscaledTileID,
@@ -466,7 +488,9 @@ impl SourceTiles {
         let slot = tiles.get_mut(id)?;
         let mut tile = TileMut::new(info, &mut slot.tile, store);
         let result = f(&mut tile);
-        if tile.installed() {
+        let installed = tile.installed();
+        drop(tile);
+        if installed {
             self.contents_installed(id);
         }
         Some(result)
@@ -864,9 +888,23 @@ impl SourceTiles {
 
     /// Evicts the oldest cached tiles past the cache's size.
     fn cache_trim(&mut self, ctx: &mut StoreContext) {
-        let cached = self.cached();
-        let excess = cached.len().saturating_sub(self.cache_size);
-        for id in &cached[..excess] {
+        let count = self.tiles.values().filter(|slot| slot.place.is_cached()).count();
+        let excess = count.saturating_sub(self.cache_size);
+        if excess == 0 {
+            return;
+        }
+        let mut cached: Vec<(u64, OverscaledTileID)> = self
+            .tiles
+            .values()
+            .filter_map(|slot| match slot.place {
+                Place::Cached { since } => Some((since, slot.tile.id)),
+                Place::Cover { .. } => None,
+            })
+            .collect();
+        cached.select_nth_unstable(excess - 1);
+        let oldest = &mut cached[..excess];
+        oldest.sort_unstable();
+        for (_, id) in oldest.iter() {
             self.evict(id, ctx);
         }
     }
@@ -883,8 +921,7 @@ impl SourceTiles {
             return;
         };
         self.cache_clock += 1;
-        slot.place = Place::Cached { since: self.cache_clock };
-        slot.tile.load.set_order(TileLoadOrder::UNWANTED);
+        slot.set_place(Place::Cached { since: self.cache_clock });
         self.cache_trim(ctx);
     }
 
@@ -893,7 +930,7 @@ impl SourceTiles {
         let Some(slot) = self.tiles.get_mut(id).filter(|slot| slot.place.is_cached()) else {
             return false;
         };
-        slot.place = Place::Cover { order: TileLoadOrder::UNWANTED };
+        slot.set_place(Place::Cover { order: TileLoadOrder::UNWANTED });
         true
     }
 

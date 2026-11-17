@@ -54,7 +54,7 @@ fn on_error() {
 fn on_parsed() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    tiles.with(|tile| tile.apply_now(JobResult::Raster(PremultipliedImage::new(Size::new(0, 0)))));
+    tiles.with(|tile| tile.apply_decode_now(JobResult::Raster(PremultipliedImage::new(Size::new(0, 0)))));
     assert!(tiles.tile().is_renderable());
     assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());

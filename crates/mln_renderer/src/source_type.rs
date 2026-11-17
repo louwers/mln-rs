@@ -268,7 +268,7 @@ impl TileOrigin for GeoJsonOrigin {
                 let max_z = source.options.get_zoom_range().max;
                 tiles.update_each(
                     ctx,
-                    |slot| !slot.place.is_cached() && slot.tile.id.canonical.z <= max_z,
+                    |slot| !slot.place().is_cached() && slot.tile.id.canonical.z <= max_z,
                     |tile| tile.load_geojson(data, update.needs_relayout),
                 );
             }

@@ -8,7 +8,9 @@
 //! A tile's parse events follow one rule: `StartParse` when the tile becomes
 //! pending, `EndParse` when contents install (preceded by `StartParse` if
 //! none was reported), and `Cancelled` when a pending tile is reset or let
-//! go of.
+//! go of. A borrow reports the `StartParse` its transitions leave due as it
+//! ends, so a transition reports one itself only to put it before another
+//! action.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -34,7 +36,8 @@ use crate::tile::tile_workers::{InlineWorkers, Lane, ReplyBody};
 
 /// A tile, its source and the store, borrowed for a transition. Only
 /// [`SourceTiles::update`](crate::tile::source_tiles::SourceTiles::update)
-/// and `update_each` make one.
+/// and `update_each` make one. Dropping it reports the tile's `StartParse`
+/// if it became pending.
 pub(crate) struct TileMut<'a> {
     source: &'a mut SourceInfo,
     tile: &'a mut Tile,
@@ -47,6 +50,12 @@ pub(crate) struct TileMut<'a> {
 
 fn cant_load_tile_error() -> Error {
     Error::native("Can't load tile.")
+}
+
+impl Drop for TileMut<'_> {
+    fn drop(&mut self) {
+        self.report();
+    }
 }
 
 impl<'a> TileMut<'a> {
@@ -93,7 +102,6 @@ impl<'a> TileMut<'a> {
             }
             Some(DataOrigin::Custom { .. }) | None => {}
         }
-        self.report();
     }
 
     /// Sets how much the tile is needed, and carries out what that asks of
@@ -116,7 +124,6 @@ impl<'a> TileMut<'a> {
                 }
             }
         }
-        self.report();
     }
 
     /// Sets the parameters of the tile's network requests. A network
@@ -127,7 +134,6 @@ impl<'a> TileMut<'a> {
         {
             self.request(Method::Network);
         }
-        self.report();
     }
 
     /// Requests a required tile whose last response was an error again, and
@@ -138,7 +144,6 @@ impl<'a> TileMut<'a> {
         }
         self.restart();
         self.request(Method::Network);
-        self.report();
     }
 
     /// Applies the response to the tile's request `load`; one to another
@@ -148,7 +153,7 @@ impl<'a> TileMut<'a> {
             return;
         };
         match tileset.answer(load) {
-            None => return,
+            None => {}
             Some(Method::Network) => self.take_response(Method::Network, res),
             Some(Method::Cache) => {
                 // When the cache-only request could not be satisfied, don't
@@ -171,7 +176,6 @@ impl<'a> TileMut<'a> {
                 }
             }
         }
-        self.report();
     }
 
     /// Applies what a GeoJSON or custom source gave the tile for load
@@ -189,7 +193,6 @@ impl<'a> TileMut<'a> {
                 }
             }
         }
-        self.report();
     }
 
     /// Loads the tile from GeoJSON `data`. With `relayout`, the tile drops
@@ -206,12 +209,12 @@ impl<'a> TileMut<'a> {
         if let Some(data) = loading::get_geojson_tile(data, key, load, &self.store.inbox, self.source.synchronous) {
             self.take_input(TileInput::Geometry { data: Some(data), missing: false });
         }
-        self.report();
     }
 
     /// Takes in what a load of the tile delivered. A raster tile without an
     /// image shows nothing in its place at once, renderable unless
-    /// `missing`.
+    /// `missing`. The input is of the tile's kind, as its source's kind
+    /// makes both.
     pub(crate) fn take_input(&mut self, input: TileInput) {
         match input {
             TileInput::Geometry { data, missing } => {
@@ -219,17 +222,18 @@ impl<'a> TileMut<'a> {
                 self.change_layout(|layout, generation| layout.set_data(LayoutData { key, data, missing }, generation));
             }
             TileInput::Image { data, missing } => {
-                let has_image = data.is_some();
-                let generation = self.source.next();
                 let Pipeline::Decode(decode) = &mut self.tile.pipeline else {
                     return;
                 };
-                decode.set_image(data, generation);
+                let has_image = data.is_some();
+                decode.set_image(data, self.source.next());
                 if !has_image {
                     self.install((!missing).then_some(Contents::Empty));
                 }
             }
         }
+        // A request that follows, such as for the network after the cache's
+        // data, comes after the parse it starts.
         self.report();
     }
 
@@ -239,7 +243,6 @@ impl<'a> TileMut<'a> {
         self.tile.settled = true;
         self.action(TileOperation::Error);
         self.store.error(&self.source.id, self.tile.id, error);
-        self.report();
     }
 
     /// Lays the tile out with `style`, for `pixel_ratio` and `granularity`.
@@ -252,7 +255,6 @@ impl<'a> TileMut<'a> {
         self.change_layout(|layout, generation| {
             layout.set_style(Arc::clone(style), pixel_ratio, granularity, generation);
         });
-        self.report();
     }
 
     pub(crate) fn set_show_collision_boxes(&mut self, show: bool) {
@@ -260,7 +262,6 @@ impl<'a> TileMut<'a> {
             return;
         }
         self.change_layout(|layout, generation| layout.set_show_collision_boxes(show, generation));
-        self.report();
     }
 
     /// Takes in a change of images: the ones in `changed` were added,
@@ -277,7 +278,6 @@ impl<'a> TileMut<'a> {
         if shown || work {
             self.relayout();
         }
-        self.report();
     }
 
     /// Lays the tile out again if its layout, or the one it runs, lacked
@@ -290,7 +290,6 @@ impl<'a> TileMut<'a> {
         if running || shown {
             self.relayout();
         }
-        self.report();
     }
 
     /// Moves the tile's work on: resolves the dependencies it waits for,
@@ -306,7 +305,6 @@ impl<'a> TileMut<'a> {
         } else if let Some((lane, run)) = self.next_job(false) {
             self.store.submit(lane, run);
         }
-        self.report();
     }
 
     /// Applies the reply to the tile's job `id`, which `lane` ran.
@@ -320,7 +318,6 @@ impl<'a> TileMut<'a> {
         }
         // Else a reply of a worker lost since: the loss, which comes next,
         // runs the job again.
-        self.report();
     }
 
     /// The worker of `lane` is gone: the tile's job there, or the state its
@@ -330,34 +327,16 @@ impl<'a> TileMut<'a> {
             let generation = self.source.next();
             self.tile.pipeline.lane_lost(generation);
         }
-        self.report();
     }
 
-    /// Applies `result` as the reply to the tile's job of its current
-    /// generation.
+    /// Applies `result` as the reply to a raster or raster-dem tile's decode
+    /// of its current generation.
     #[cfg(test)]
-    pub(crate) fn apply_now(&mut self, result: JobResult) {
+    pub(crate) fn apply_decode_now(&mut self, result: JobResult) {
         let key = self.source.tile_key(self.tile);
         let id = JobId { tile: key, generation: self.tile.pipeline.generation() };
-        let images = Arc::clone(self.store.images.available_images());
-        match &mut self.tile.pipeline {
-            Pipeline::Layout(layout) => {
-                let running = layout.run_now(key, images);
-                self.apply_layout(running, result);
-            }
-            Pipeline::Decode(_) => self.apply_result(id, result),
-        }
-        self.report();
-    }
-
-    /// Notifies the tile of a visible layer's updated properties. Returns
-    /// whether the tile draws the layer.
-    #[cfg(test)]
-    pub(crate) fn layer_properties_updated(
-        &mut self,
-        layer_properties: &Arc<dyn crate::layer_type::ErasedEvaluatedLayer>,
-    ) -> bool {
-        self.tile.layer_properties_updated(layer_properties)
+        assert!(matches!(self.tile.pipeline, Pipeline::Decode(_)), "a raster or raster-dem tile");
+        self.apply_result(id, result);
     }
 
     fn action(&mut self, op: TileOperation) {
@@ -423,11 +402,10 @@ impl<'a> TileMut<'a> {
     /// generation, and runs a synchronous source's ready jobs. A raster
     /// tile has no layout: `f` doesn't run.
     fn change_layout(&mut self, f: impl FnOnce(&mut Layout, u64)) {
-        let generation = self.source.next();
         let Some(layout) = self.tile.pipeline.layout_mut() else {
             return;
         };
-        f(layout, generation);
+        f(layout, self.source.next());
         self.advance();
     }
 
@@ -475,17 +453,16 @@ impl<'a> TileMut<'a> {
             }
             Pipeline::Decode(decode) => {
                 let jobs = &mut self.store.jobs;
-                decode.next_job(key, self.source.kind, || if inline { Some(Lane(0)) } else { jobs.lane() })
+                decode.next_job(key, || if inline { Some(Lane(0)) } else { jobs.lane() })
             }
         }
     }
 
     /// Applies `result`, the reply to the tile's job `id`, which is in
-    /// flight.
+    /// flight and of the current generation.
     fn apply_result(&mut self, id: JobId, result: JobResult) {
         match &mut self.tile.pipeline {
             Pipeline::Decode(decode) => match decode.apply(id, result) {
-                DecodeStep::Stale => {}
                 DecodeStep::Show(contents) => self.install(Some(contents)),
                 DecodeStep::Failed(error) => self.fail(error),
             },
@@ -527,17 +504,12 @@ impl<'a> TileMut<'a> {
                 // carries it.
                 self.store.jobs.forget(key);
             }
-            LayoutStep::Outdated { images_moved, result } => {
-                if images_moved {
-                    let generation = self.source.next();
-                    if let Some(layout) = self.tile.pipeline.layout_mut() {
-                        layout.bump(generation);
-                    }
-                    if let Some(shown) = &mut self.tile.shown {
-                        shown.answer_outdated = true;
-                    }
-                }
+            LayoutStep::ImagesMoved(result) => {
                 drop_on_workers(&self.store.pool, result);
+                if let Some(shown) = &mut self.tile.shown {
+                    shown.answer_outdated = true;
+                }
+                layout.bump(self.source.next());
             }
             LayoutStep::Failed(error) => self.fail(error),
         }
@@ -579,8 +551,16 @@ impl<'a> TileMut<'a> {
         };
         match tileset.take(res) {
             Taken::Failed(error) => self.fail(error),
-            // A `not_modified` response leaves the tile with the data it has.
-            Taken::NotModified => self.action(loaded),
+            // A `not_modified` response leaves the tile with the data it has:
+            // it has done what it can, unless its work on that data is under
+            // way, which settles it as it ends. A retried load is unsettled
+            // until it answers, and this may be all it brings.
+            Taken::NotModified => {
+                self.action(loaded);
+                if !self.tile.pipeline.is_pending(true) {
+                    self.tile.settled = true;
+                }
+            }
             Taken::Data => {
                 self.action(loaded);
                 if let Some(origin) = &self.source.origin {
