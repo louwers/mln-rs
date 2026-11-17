@@ -4853,7 +4853,7 @@ out highp vec4 fragColor;
 // on where the image sits in the atlas. Adding an unsnapped offset rounds it
 // to a precision that depends on the origin.
 highp vec2 atlas_pos(highp vec2 origin, highp vec2 offset) {
-    return origin + round(offset * 16777216.0) / 16777216.0;
+    return origin + roundEven(offset * 16777216.0) / 16777216.0;
 }
 
 #ifdef PROJECTION_GLOBE
