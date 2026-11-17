@@ -15,9 +15,9 @@ use mln_gfx::gpu::validation::{
 };
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepth, DepthState, Draw,
-    DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId,
-    ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState, TextureDesc, TextureFormat,
-    TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
+    DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, Id, IdData, LoadOp, PassDesc, PipelineDesc,
+    PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState, TextureDesc,
+    TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
@@ -48,6 +48,8 @@ enum GlObject {
     Sampler(SamplerID),
     Program(ProgramID),
     VertexArray(VertexArrayID),
+    /// A storage buffer's elements, and their GL buffer if a draw made it.
+    Elements(ElementsId),
 }
 
 /// The GL objects let go of since the backend last deleted them.
@@ -69,30 +71,106 @@ impl Deleted {
 /// that far apart. The element size is the block's that reads the buffer,
 /// so the GL buffer is made by the first draw that reads it.
 struct Elements {
-    data: Cell<Vec<u8>>,
+    /// The GL buffer, made by the first draw that reads the elements.
+    object: Option<BufferID>,
+    data: Vec<u8>,
     /// Whether `data` changed since it was uploaded.
-    dirty: Cell<bool>,
+    dirty: bool,
     /// The element size `data` was uploaded for; 0 before the first upload.
-    element_size: Cell<usize>,
+    element_size: usize,
     /// The bytes the GL buffer holds, which a later upload of as many
     /// writes in place.
-    uploaded: Cell<usize>,
+    uploaded: usize,
+}
+
+impl Elements {
+    /// The GL buffer that holds the elements `element_size` bytes apart, a
+    /// multiple of `alignment`, and that distance, uploaded if they
+    /// changed. `context` is current.
+    fn upload(
+        &mut self,
+        context: &GlContext,
+        alignment: u32,
+        element_size: usize,
+    ) -> Result<(BufferID, u64), GpuError> {
+        let stride = element_size.next_multiple_of(alignment as usize);
+        if let Some(object) = self.object
+            && !self.dirty
+            && self.element_size == element_size
+        {
+            return Ok((object, stride as u64));
+        }
+        let gl = context.gl();
+        let object = match self.object {
+            Some(object) => object,
+            // SAFETY: the context is current.
+            None => unsafe { gl.create_buffer() }.map_err(GpuError::Invalid)?,
+        };
+        let data = &self.data;
+        let spaced;
+        let bytes: &[u8] = if stride == element_size {
+            data
+        } else {
+            let count = data.len() / element_size;
+            let mut spacing = vec![0u8; count * stride];
+            for (target, source) in spacing.chunks_exact_mut(stride).zip(data.chunks_exact(element_size)) {
+                target[..element_size].copy_from_slice(source);
+            }
+            spaced = spacing;
+            &spaced
+        };
+        // SAFETY: the buffer is alive, or new. Where it holds as many bytes,
+        // they are written over; otherwise its storage is replaced, so the
+        // cached bindings of it are forgotten.
+        unsafe {
+            if self.object.is_some() && self.uploaded == bytes.len() {
+                gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
+                gl.buffer_sub_data_u8_slice(glow::UNIFORM_BUFFER, 0, bytes);
+            } else {
+                context.state().forget_uniform_buffer(object);
+                gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
+                gl.buffer_data_u8_slice(glow::UNIFORM_BUFFER, bytes, glow::DYNAMIC_DRAW);
+            }
+        }
+        self.uploaded = bytes.len();
+        self.object = Some(object);
+        self.dirty = false;
+        self.element_size = element_size;
+        Ok((object, stride as u64))
+    }
+}
+
+/// The key of a storage buffer's [`Elements`] in [`GlGpu::elements`].
+#[derive(Clone, Copy)]
+struct ElementsId(IdData);
+
+impl Id for ElementsId {
+    fn from_data(data: IdData) -> ElementsId {
+        ElementsId(data)
+    }
+
+    fn data(self) -> IdData {
+        self.0
+    }
 }
 
 /// A GL buffer, deleted when the last holder drops.
 struct NativeBuffer {
-    /// The GL buffer; of a storage buffer, made by the first draw that
-    /// reads it.
-    object: Cell<Option<BufferID>>,
-    /// A storage buffer's bytes.
-    elements: Option<Elements>,
+    /// The GL buffer, unless the buffer is a storage buffer.
+    object: Option<BufferID>,
+    /// The key of a storage buffer's elements, which draws upload, so
+    /// [`GlGpu::elements`] has them.
+    elements: Option<ElementsId>,
     deleted: Rc<Deleted>,
 }
 
 impl Drop for NativeBuffer {
     fn drop(&mut self) {
-        if let Some(object) = self.object.get() {
+        if let Some(object) = self.object {
             self.deleted.push(GlObject::Buffer(object));
+        }
+        if let Some(key) = self.elements {
+            self.deleted.push(GlObject::Elements(key));
         }
     }
 }
@@ -250,6 +328,45 @@ struct Bindings {
     tags: BindingsTags,
 }
 
+impl Bindings {
+    /// Binds the uniform blocks for a draw at `global_index`, uploading the
+    /// storage buffers' `elements` they read, and with `textures`, the
+    /// textures. `context` is current, and GL binds blocks at multiples of
+    /// `alignment`.
+    fn bind(
+        &self,
+        context: &GlContext,
+        elements: &mut SlotMap<ElementsId, Elements>,
+        alignment: u32,
+        global_index: u32,
+        textures: bool,
+    ) -> Result<(), GpuError> {
+        let (gl, state) = (context.gl(), context.state());
+        for block in &self.blocks {
+            let (object, offset, size) = match block.range {
+                BlockRange::Uniform { offset, size } => {
+                    (block.buffer.object.ok_or(GpuError::UnknownId("buffer"))?, offset, size)
+                }
+                BlockRange::Element { first, element_size } => {
+                    let elements = block.buffer.elements.and_then(|key| elements.get_mut(key));
+                    let elements =
+                        elements.ok_or_else(|| GpuError::Invalid("a storage buffer without its bytes".into()))?;
+                    let (object, stride) = elements.upload(context, alignment, element_size)?;
+                    (object, (first + u64::from(global_index)) * stride, block.size as u64)
+                }
+            };
+            state.bind_uniform_buffer_range(gl, block.id, object, offset as i32, size as i32);
+        }
+        if textures {
+            for binding in &self.textures {
+                state.bind_texture(gl, binding.unit, binding.texture.name());
+                state.bind_sampler(gl, binding.unit, Some(binding.sampler.object));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A vertex attribute as `glVertexAttribPointer` takes it.
 struct AttributePointer {
     location: u32,
@@ -399,6 +516,9 @@ pub(crate) struct GlGpu {
     vertex_array: Option<VertexArrayID>,
     deleted: Rc<Deleted>,
     buffers: SlotMap<BufferId, Buffer>,
+    /// The storage buffers' elements, which go when their last holder
+    /// drops.
+    elements: SlotMap<ElementsId, Elements>,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, Rc<NativeSampler>>,
     shaders: SlotMap<ShaderId, Rc<Program>>,
@@ -475,6 +595,7 @@ impl GlGpu {
             vertex_array: None,
             deleted: Rc::default(),
             buffers: SlotMap::with_key(),
+            elements: SlotMap::with_key(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
             shaders: SlotMap::with_key(),
@@ -507,7 +628,7 @@ impl GlGpu {
     }
 
     /// Deletes the GL objects let go of, with the context current.
-    fn delete_let_go(&self) {
+    fn delete_let_go(&mut self) {
         let objects = self.deleted.0.take();
         if objects.is_empty() {
             return;
@@ -537,6 +658,12 @@ impl GlGpu {
                     GlObject::VertexArray(vertex_array) => {
                         state.forget_vertex_array(vertex_array);
                         gl.delete_vertex_array(vertex_array);
+                    }
+                    GlObject::Elements(key) => {
+                        if let Some(buffer) = self.elements.remove(key).and_then(|elements| elements.object) {
+                            state.forget_uniform_buffer(buffer);
+                            gl.delete_buffer(buffer);
+                        }
                     }
                 }
             }
@@ -848,58 +975,6 @@ impl GlGpu {
         });
     }
 
-    /// The GL buffer that holds `buffer`'s elements `element_size` bytes
-    /// apart, and that distance, uploaded if they changed.
-    fn element_buffer(&self, buffer: &NativeBuffer, element_size: usize) -> Result<(BufferID, u64), GpuError> {
-        let stride = element_size.next_multiple_of(self.caps.buffer_offset_alignment as usize);
-        let elements =
-            buffer.elements.as_ref().ok_or_else(|| GpuError::Invalid("a storage buffer without its bytes".into()))?;
-        if let Some(object) = buffer.object.get()
-            && !elements.dirty.get()
-            && elements.element_size.get() == element_size
-        {
-            return Ok((object, stride as u64));
-        }
-        let gl = self.context.gl();
-        let object = match buffer.object.get() {
-            Some(object) => object,
-            // SAFETY: the context is current.
-            None => unsafe { gl.create_buffer() }.map_err(GpuError::Invalid)?,
-        };
-        let data = elements.data.take();
-        let spaced;
-        let bytes: &[u8] = if stride == element_size {
-            &data
-        } else {
-            let count = data.len() / element_size;
-            let mut spacing = vec![0u8; count * stride];
-            for (target, source) in spacing.chunks_exact_mut(stride).zip(data.chunks_exact(element_size)) {
-                target[..element_size].copy_from_slice(source);
-            }
-            spaced = spacing;
-            &spaced
-        };
-        // SAFETY: the buffer is alive, or new. Where it holds as many bytes,
-        // they are written over; otherwise its storage is replaced, so the
-        // cached bindings of it are forgotten.
-        unsafe {
-            if buffer.object.get().is_some() && elements.uploaded.get() == bytes.len() {
-                gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
-                gl.buffer_sub_data_u8_slice(glow::UNIFORM_BUFFER, 0, bytes);
-            } else {
-                self.context.state().forget_uniform_buffer(object);
-                gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
-                gl.buffer_data_u8_slice(glow::UNIFORM_BUFFER, bytes, glow::DYNAMIC_DRAW);
-            }
-        }
-        elements.uploaded.set(bytes.len());
-        elements.data.set(data);
-        buffer.object.set(Some(object));
-        elements.dirty.set(false);
-        elements.element_size.set(element_size);
-        Ok((object, stride as u64))
-    }
-
     /// Binds the vertex array of `geometry` that draws from `bases`, the
     /// base vertex and first instance, made at its first draw.
     fn bind_vertex_array(&mut self, geometry: GeometryId, bases: (i32, u32)) -> Result<VertexArrayID, GpuError> {
@@ -916,7 +991,7 @@ impl GlGpu {
         // SAFETY: the new vertex array is bound, the buffers are alive and
         // the locations are the program's.
         unsafe {
-            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, entry.index_buffer.object.get());
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, entry.index_buffer.object);
             for pointer in &pointers {
                 gl.enable_vertex_attrib_array(pointer.location);
                 gl.bind_buffer(glow::ARRAY_BUFFER, Some(pointer.buffer));
@@ -999,31 +1074,6 @@ impl GlGpu {
         }
     }
 
-    /// Binds the uniform blocks of `bindings` for a draw at `global_index`,
-    /// and with `textures`, its textures.
-    fn bind(&self, bindings: &Bindings, global_index: u32, textures: bool) -> Result<(), GpuError> {
-        let (gl, state) = (self.context.gl(), self.context.state());
-        for block in &bindings.blocks {
-            let (object, offset, size) = match block.range {
-                BlockRange::Uniform { offset, size } => {
-                    (block.buffer.object.get().ok_or(GpuError::UnknownId("buffer"))?, offset, size)
-                }
-                BlockRange::Element { first, element_size } => {
-                    let (object, stride) = self.element_buffer(&block.buffer, element_size)?;
-                    (object, (first + u64::from(global_index)) * stride, block.size as u64)
-                }
-            };
-            state.bind_uniform_buffer_range(gl, block.id, object, offset as i32, size as i32);
-        }
-        if textures {
-            for binding in &bindings.textures {
-                state.bind_texture(gl, binding.unit, binding.texture.name());
-                state.bind_sampler(gl, binding.unit, Some(binding.sampler.object));
-            }
-        }
-        Ok(())
-    }
-
     /// What the checks read of the buffers and textures.
     fn lookup(&self) -> (impl Fn(BufferId) -> Option<BufferInfo> + '_, impl Fn(TextureId) -> Option<TextureInfo> + '_) {
         let buffer =
@@ -1056,7 +1106,7 @@ fn attribute_pointers(
 ) -> Result<Vec<AttributePointer>, GpuError> {
     let mut pointers = Vec::new();
     for ((buffer, offset), layout) in geometry.vertex_buffers.iter().zip(&geometry.layouts) {
-        let object = buffer.object.get().ok_or(GpuError::UnknownId("buffer"))?;
+        let object = buffer.object.ok_or(GpuError::UnknownId("buffer"))?;
         let (first, divisor) = match layout.step {
             VertexStep::Vertex => (i64::from(base_vertex), 0),
             VertexStep::Instance => (i64::from(base_instance), 1),
@@ -1131,13 +1181,8 @@ impl Gpu for GlGpu {
         let deleted = Rc::clone(&self.deleted);
         if desc.usage == BufferUsage::Storage {
             let data = vec![0u8; usize::try_from(size).map_err(|_| unsupported())?];
-            let elements = Some(Elements {
-                data: Cell::new(data),
-                dirty: Cell::new(true),
-                element_size: Cell::new(0),
-                uploaded: Cell::new(0),
-            });
-            let native = Rc::new(NativeBuffer { object: Cell::new(None), elements, deleted });
+            let key = self.elements.insert(Elements { object: None, data, dirty: true, element_size: 0, uploaded: 0 });
+            let native = Rc::new(NativeBuffer { object: None, elements: Some(key), deleted });
             return Ok(self.buffers.insert(Buffer { native, usage: desc.usage, size }));
         }
         let gl_size = i32::try_from(size).map_err(|_| unsupported())?;
@@ -1153,7 +1198,7 @@ impl Gpu for GlGpu {
                 Ok::<_, GpuError>(object)
             }
         })?;
-        let native = Rc::new(NativeBuffer { object: Cell::new(Some(object)), elements: None, deleted });
+        let native = Rc::new(NativeBuffer { object: Some(object), elements: None, deleted });
         Ok(self.buffers.insert(Buffer { native, usage: desc.usage, size }))
     }
 
@@ -1161,18 +1206,17 @@ impl Gpu for GlGpu {
         let entry = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
         validation::check_write(offset, data.len(), entry.size)?;
         let end = offset + data.len() as u64;
-        if let Some(elements) = &entry.native.elements {
-            let mut bytes = elements.data.take();
-            bytes[offset as usize..end as usize].copy_from_slice(data);
-            elements.data.set(bytes);
-            elements.dirty.set(true);
+        if let Some(key) = entry.native.elements {
+            let elements = self.elements.get_mut(key).ok_or(GpuError::UnknownId("buffer"))?;
+            elements.data[offset as usize..end as usize].copy_from_slice(data);
+            elements.dirty = true;
             // The open pass's next draw uploads them.
             if let Some(pass) = &mut self.pass {
                 pass.bindings = None;
             }
             return Ok(());
         }
-        let (usage, object) = (entry.usage, entry.native.object.get());
+        let (usage, object) = (entry.usage, entry.native.object);
         self.current(|gpu| {
             let target = buffer_target(usage);
             // SAFETY: the buffer is alive and holds the bytes written; the
@@ -1198,7 +1242,7 @@ impl Gpu for GlGpu {
         validation::check_write(offset, data.len().next_multiple_of(4), entry.size)?;
         let len = data.len() as u64;
         let end = offset + len.next_multiple_of(4);
-        let (usage, object) = (entry.usage, entry.native.object.get().filter(|_| entry.native.elements.is_none()));
+        let (usage, object) = (entry.usage, entry.native.object);
         let (Some(object), Some(array)) = (object, data.array()) else {
             let mut bytes = data.to_pod_vec::<u8>();
             bytes.resize(bytes.len().next_multiple_of(4), 0);
@@ -1533,10 +1577,11 @@ impl Gpu for GlGpu {
         validation::check_draw(draw, open.target.targets, &pipeline.tags, &bindings.tags, &geometry.tags)?;
         let changed = open.pipeline != Some(draw.pipeline);
         self.set_state(pipeline, changed, open.dynamic.as_ref(), &draw.dynamic, open.attachments);
+        let alignment = self.caps.buffer_offset_alignment;
         if open.bindings != Some(draw.bindings) {
-            self.bind(bindings, draw.global_index, true)?;
+            bindings.bind(&self.context, &mut self.elements, alignment, draw.global_index, true)?;
         } else if bindings.elements && open.global_index != Some(draw.global_index) {
-            self.bind(bindings, draw.global_index, false)?;
+            bindings.bind(&self.context, &mut self.elements, alignment, draw.global_index, false)?;
         }
         let bases = (draw.base_vertex, draw.first_instance);
         let mode = enums::draw_mode(pipeline.state.primitive);
