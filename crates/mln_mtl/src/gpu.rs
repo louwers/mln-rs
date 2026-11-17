@@ -3,7 +3,6 @@
 use std::any::Any;
 use std::collections::VecDeque;
 use std::ptr::NonNull;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use block2::RcBlock;
@@ -38,25 +37,25 @@ use objc2_foundation::{NSDictionary, NSString};
 use objc2_metal::{
     MTLBinding, MTLBindingType, MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding,
     MTLClearColor, MTLColorWriteMask, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction,
-    MTLCompileOptions, MTLCullMode, MTLDepthStencilDescriptor, MTLDevice, MTLDrawable, MTLEvent, MTLGPUFamily,
-    MTLIndexType, MTLLanguageVersion, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
-    MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor,
-    MTLRenderPipelineReflection, MTLResource, MTLResourceOptions, MTLSamplerAddressMode, MTLSamplerDescriptor,
-    MTLSamplerMinMagFilter, MTLSamplerMipFilter, MTLScissorRect, MTLSize, MTLStencilDescriptor, MTLStencilOperation,
-    MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLVertexDescriptor,
-    MTLVertexFormat, MTLVertexStepFunction, MTLViewport, MTLWinding,
+    MTLCompileOptions, MTLCullMode, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDrawable, MTLEvent,
+    MTLFunction, MTLGPUFamily, MTLIndexType, MTLLanguageVersion, MTLLibrary, MTLLoadAction, MTLOrigin,
+    MTLPipelineOption, MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
+    MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState, MTLResource, MTLResourceOptions,
+    MTLSamplerAddressMode, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerMipFilter, MTLSamplerState,
+    MTLScissorRect, MTLSize, MTLStencilDescriptor, MTLStencilOperation, MTLStorageMode, MTLStoreAction, MTLTexture,
+    MTLTextureDescriptor, MTLTextureUsage, MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLViewport,
+    MTLWinding,
 };
 use parking_lot::{Condvar, Mutex};
 
 use crate::Device;
 use crate::custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
-use crate::mtl_fwd::{
-    MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLFunctionPtr, MTLRenderCommandEncoderPtr,
-    MTLRenderPipelineStatePtr, MTLSamplerStatePtr, MTLTexturePtr, MTLVertexDescriptorPtr,
-};
 use crate::readback::{buffer_bytes, encode_region_copy};
 use crate::shaders::msl_sources::PRELUDE;
 use crate::shaders::shader_source::{ShaderSource, shader_source};
+
+/// A retained Metal object of protocol `P`.
+type Object<P> = Retained<ProtocolObject<P>>;
 
 /// The entries of a stage's buffer argument table.
 const MAX_BUFFERS: usize = 31;
@@ -85,28 +84,28 @@ const TEXTURE_FORMATS: [TextureFormat; 14] = [
 
 /// A buffer, and what the checks read of it.
 struct Buffer {
-    buffer: MTLBufferPtr,
+    buffer: Object<dyn MTLBuffer>,
     usage: BufferUsage,
     /// The size asked for, rounded up to a multiple of 4.
     size: u64,
 }
 
 struct Texture {
-    texture: MTLTexturePtr,
+    texture: Object<dyn MTLTexture>,
     format: TextureFormat,
     /// The events that the next flush whose passes draw into it, or that
     /// reads it back, waits for: of
     /// [`wait_before_using`](MetalGpu::wait_before_using).
-    waits: Vec<(Retained<ProtocolObject<dyn MTLEvent>>, u64)>,
+    waits: Vec<(Object<dyn MTLEvent>, u64)>,
 }
 
 /// A program's library functions, and what they read, once a pipeline of
 /// them or its bindings reflected it.
 struct Shader {
     source: &'static ShaderSource,
-    vertex: MTLFunctionPtr,
-    fragment: Option<MTLFunctionPtr>,
-    table: Option<Rc<ShaderTable>>,
+    vertex: Object<dyn MTLFunction>,
+    fragment: Option<Object<dyn MTLFunction>>,
+    table: Option<ShaderTable>,
 }
 
 /// Where a shader's functions read what they read, and what the checks
@@ -139,8 +138,8 @@ struct Binding {
 }
 
 struct Pipeline {
-    state: MTLRenderPipelineStatePtr,
-    depth_stencil: MTLDepthStencilStatePtr,
+    state: Object<dyn MTLRenderPipelineState>,
+    depth_stencil: Object<dyn MTLDepthStencilState>,
     primitive: MTLPrimitiveType,
     cull: MTLCullMode,
     winding: MTLWinding,
@@ -157,9 +156,9 @@ struct Slot {
 
 /// What a shader's draws bind, at the indexes its functions read them.
 struct Bindings {
-    buffers: Vec<(Slot, MTLBufferPtr, usize)>,
-    textures: Vec<(Slot, MTLTexturePtr)>,
-    samplers: Vec<(Slot, MTLSamplerStatePtr)>,
+    buffers: Vec<(Slot, Object<dyn MTLBuffer>, usize)>,
+    textures: Vec<(Slot, Object<dyn MTLTexture>)>,
+    samplers: Vec<(Slot, Object<dyn MTLSamplerState>)>,
     /// Where the functions read `globalIndex`.
     global_index: Vec<Slot>,
     tags: BindingsTags,
@@ -168,14 +167,14 @@ struct Bindings {
 /// The vertex buffers, at their buffer indexes and from their offsets, and
 /// the index buffer, of draws.
 struct Geometry {
-    vertex_buffers: Vec<(usize, MTLBufferPtr, usize)>,
-    index_buffer: MTLBufferPtr,
+    vertex_buffers: Vec<(usize, Object<dyn MTLBuffer>, usize)>,
+    index_buffer: Object<dyn MTLBuffer>,
     tags: GeometryTags,
 }
 
 /// A texture's texels, copied into shared memory.
 struct Readback {
-    buffer: MTLBufferPtr,
+    buffer: Object<dyn MTLBuffer>,
     /// The bytes of the texels, at the start of `buffer`.
     len: usize,
     /// The number of the command buffer that copies them.
@@ -185,7 +184,7 @@ struct Readback {
 /// The open pass's encoder, and what the draws in it set so far: `None`
 /// where a draw sets it again.
 struct OpenPass {
-    encoder: MTLRenderCommandEncoderPtr,
+    encoder: Object<dyn MTLRenderCommandEncoder>,
     target: PassTarget,
     formats: AttachmentFormats,
     pipeline: Option<PipelineId>,
@@ -197,8 +196,8 @@ struct OpenPass {
 
 /// A copy out of the staging buffer of a flush.
 enum Upload {
-    Buffer { from: usize, to: MTLBufferPtr, offset: usize, size: usize },
-    Texture { from: usize, to: MTLTexturePtr, region: TextureRegion, bytes_per_row: usize },
+    Buffer { from: usize, to: Object<dyn MTLBuffer>, offset: usize, size: usize },
+    Texture { from: usize, to: Object<dyn MTLTexture>, region: TextureRegion, bytes_per_row: usize },
 }
 
 /// The writes since the last flush, which the next one copies in before
@@ -307,16 +306,16 @@ pub struct MetalGpu {
     base_vertex_instance: bool,
     buffers: SlotMap<BufferId, Buffer>,
     textures: SlotMap<TextureId, Texture>,
-    samplers: SlotMap<SamplerId, MTLSamplerStatePtr>,
+    samplers: SlotMap<SamplerId, Object<dyn MTLSamplerState>>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
-    depth_stencil_states: HashMap<(DepthState, StencilState, Option<TextureFormat>), MTLDepthStencilStatePtr>,
+    depth_stencil_states: HashMap<(DepthState, StencilState, Option<TextureFormat>), Object<dyn MTLDepthStencilState>>,
     pipelines: SlotMap<PipelineId, Pipeline>,
     bindings: SlotMap<BindingsId, Bindings>,
     geometries: SlotMap<GeometryId, Geometry>,
     uploads: Uploads,
     /// The command buffer of the passes since the last flush.
-    frame: Option<MTLCommandBufferPtr>,
+    frame: Option<Object<dyn MTLCommandBuffer>>,
     pass: Option<OpenPass>,
     /// The number of command buffers committed so far.
     submitted: u64,
@@ -326,11 +325,11 @@ pub struct MetalGpu {
     readbacks: SlotMap<ReadbackId, Readback>,
     /// The events the frame's command buffer waits for, once made, with
     /// their values: those of the textures it uses.
-    waits: Vec<(Retained<ProtocolObject<dyn MTLEvent>>, u64)>,
+    waits: Vec<(Object<dyn MTLEvent>, u64)>,
     /// The events the next flush signals, with their values.
-    signals: Vec<(Retained<ProtocolObject<dyn MTLEvent>>, u64)>,
+    signals: Vec<(Object<dyn MTLEvent>, u64)>,
     /// The drawables the next flush presents.
-    presents: Vec<Retained<ProtocolObject<dyn MTLDrawable>>>,
+    presents: Vec<Object<dyn MTLDrawable>>,
     /// Called with each command buffer just before it's committed.
     #[cfg(test)]
     before_commit: Option<BeforeCommit>,
@@ -465,7 +464,7 @@ impl MetalGpu {
 
     /// The command buffer of the passes since the last flush, which waits
     /// for the events the textures they use wait for.
-    fn frame(&mut self) -> Result<MTLCommandBufferPtr, GpuError> {
+    fn frame(&mut self) -> Result<Object<dyn MTLCommandBuffer>, GpuError> {
         if let Some(frame) = &self.frame {
             return Ok(frame.clone());
         }
@@ -478,7 +477,7 @@ impl MetalGpu {
     }
 
     /// A command buffer of the queue, labelled `label`.
-    fn command_buffer(&self, label: &str) -> Result<MTLCommandBufferPtr, GpuError> {
+    fn command_buffer(&self, label: &str) -> Result<Object<dyn MTLCommandBuffer>, GpuError> {
         let command_buffer = self
             .device
             .queue()
@@ -569,13 +568,14 @@ impl MetalGpu {
         self.textures.get(id).ok_or(GpuError::UnknownId("texture"))
     }
 
-    /// What `shader`'s functions read, which a pipeline of them reflected,
-    /// or else one of each of its attributes in a buffer of its own, drawing
-    /// into an `Rgba8Unorm` attachment.
-    fn shader_table(&mut self, shader: ShaderId) -> Result<Rc<ShaderTable>, GpuError> {
+    /// Gives `shader` its table of what its functions read, if no pipeline
+    /// of them has yet, by reflecting a pipeline of one of each of its
+    /// attributes in a buffer of its own, drawing into an `Rgba8Unorm`
+    /// attachment.
+    fn reflect(&mut self, shader: ShaderId) -> Result<(), GpuError> {
         let entry = self.shaders.get(shader).ok_or(GpuError::UnknownId("shader"))?;
-        if let Some(table) = &entry.table {
-            return Ok(Rc::clone(table));
+        if entry.table.is_some() {
+            return Ok(());
         }
         let source = entry.source;
         let layouts: Vec<VertexBufferLayout> =
@@ -600,8 +600,7 @@ impl MetalGpu {
         let targets = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
         let desc = PipelineDesc { shader, vertex_buffers: &layouts, state, targets };
         autoreleasepool(|_| self.make_pipeline(&desc))?;
-        let entry = self.shaders.get(shader).ok_or(GpuError::UnknownId("shader"))?;
-        entry.table.clone().ok_or_else(|| GpuError::Invalid(format!("{}: no reflection", source.name)))
+        Ok(())
     }
 
     /// The depth-stencil state of `depth` and `stencil`, for attachments of
@@ -613,7 +612,7 @@ impl MetalGpu {
         depth: DepthState,
         stencil: StencilState,
         format: Option<TextureFormat>,
-    ) -> Result<MTLDepthStencilStatePtr, GpuError> {
+    ) -> Result<Object<dyn MTLDepthStencilState>, GpuError> {
         if let Some(state) = self.depth_stencil_states.get(&(depth, stencil, format)) {
             return Ok(state.clone());
         }
@@ -683,7 +682,7 @@ impl MetalGpu {
         if shader.table.is_none() {
             let (bindings, reads) = shader_bindings(&reflection, shader.source, &vertex_buffer_indices)?;
             if let Some(shader) = self.shaders.get_mut(desc.shader) {
-                shader.table = Some(Rc::new(ShaderTable { bindings, reads }));
+                shader.table = Some(ShaderTable { bindings, reads });
             }
         }
 
@@ -708,7 +707,7 @@ impl MetalGpu {
         &self,
         command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
         pass: &PassDesc<'_>,
-    ) -> Result<MTLRenderCommandEncoderPtr, GpuError> {
+    ) -> Result<Object<dyn MTLRenderCommandEncoder>, GpuError> {
         let descriptor = MTLRenderPassDescriptor::new();
         if let Some(attachment) = pass.color {
             let texture = &self.texture(attachment.texture)?.texture;
@@ -769,7 +768,7 @@ fn new_metal_buffer(
     data: Option<&[u8]>,
     size: usize,
     usage: MTLResourceOptions,
-) -> Option<MTLBufferPtr> {
+) -> Option<Object<dyn MTLBuffer>> {
     match data.filter(|d| !d.is_empty() && size != 0) {
         Some(data) => {
             debug_assert!(data.len() >= size);
@@ -797,7 +796,7 @@ fn new_metal_buffer(
 fn vertex_descriptor(
     source: &ShaderSource,
     layouts: &[VertexBufferLayout],
-) -> Result<(MTLVertexDescriptorPtr, Vec<Option<usize>>), GpuError> {
+) -> Result<(Retained<MTLVertexDescriptor>, Vec<Option<usize>>), GpuError> {
     let descriptor = MTLVertexDescriptor::vertexDescriptor();
     let first = first_vertex_buffer(source);
     let mut buffer_indices: Vec<Option<usize>> = Vec::with_capacity(layouts.len());
@@ -939,6 +938,9 @@ fn merge_read(reads: &mut Vec<ShaderBinding>, read: ShaderBinding) {
     reads.push(read);
 }
 
+/// A program's vertex function, and its fragment function if it has one.
+type Functions = (Object<dyn MTLFunction>, Option<Object<dyn MTLFunction>>);
+
 /// Compiles `source`, with `defines` as preprocessor macros, and finds its
 /// `vertex` function and its `fragment` one, if named.
 pub(crate) fn compile<'a>(
@@ -948,7 +950,7 @@ pub(crate) fn compile<'a>(
     vertex: &str,
     fragment: &str,
     defines: impl IntoIterator<Item = (&'a str, &'a str)>,
-) -> Result<(MTLFunctionPtr, Option<MTLFunctionPtr>), GpuError> {
+) -> Result<Functions, GpuError> {
     let (keys, values): (Vec<_>, Vec<_>) = defines
         .into_iter()
         .map(|(key, value)| (NSString::from_str(key), Retained::into_super(NSString::from_str(value))))
@@ -1327,7 +1329,10 @@ impl Gpu for MetalGpu {
     }
 
     fn create_bindings(&mut self, desc: &BindingsDesc<'_>) -> Result<BindingsId, GpuError> {
-        let table = self.shader_table(desc.shader)?;
+        self.reflect(desc.shader)?;
+        let shader = self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?;
+        let name = shader.source.name;
+        let table = shader.table.as_ref().ok_or_else(|| GpuError::Invalid(format!("{name}: no reflection")))?;
         let elements = {
             let buffer =
                 |id| self.buffers.get(id).map(|buffer: &Buffer| BufferInfo { usage: buffer.usage, size: buffer.size });
@@ -1336,7 +1341,6 @@ impl Gpu for MetalGpu {
             let lookup = Lookup { buffer: &buffer, texture: &texture, sampler: &sampler };
             validation::check_bindings(desc, &table.reads, self.caps.buffer_offset_alignment, &lookup)?
         };
-        let name = self.shaders.get(desc.shader).map_or("", |shader| shader.source.name);
         let missing =
             |what: &str, id: u32| GpuError::Invalid(format!("{name} reads {what} {id}, which no entry binds"));
         let texture_entry = |id: u32| {

@@ -7,16 +7,15 @@ use mln_gfx::ExportKinds;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use objc2::rc::Retained;
-use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice};
-
-use crate::mtl_fwd::{MTLCommandQueuePtr, MTLDevicePtr};
+use objc2::runtime::ProtocolObject;
+use objc2_metal::{MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
 
 /// A Metal device and the command queue that renderers on any thread
 /// submit to: the library's, or the host's. Clones share them.
 #[derive(Clone, Debug)]
 pub struct Device {
-    device: MTLDevicePtr,
-    queue: MTLCommandQueuePtr,
+    device: Retained<ProtocolObject<dyn MTLDevice>>,
+    queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
     /// Whether the queue is the host's, which the host submits to too.
     host_queue: bool,
     /// The kinds that the device has exported an image of, probed once.
@@ -66,7 +65,7 @@ impl Device {
     /// `id<MTLCommandQueue>` of it. The device retains both.
     pub unsafe fn from_raw(device: *mut c_void, queue: *mut c_void) -> Result<Device, Error> {
         // SAFETY: the caller's contract: live objects of these protocols.
-        let device: MTLDevicePtr = unsafe { Retained::retain(device.cast()) }
+        let device: Retained<ProtocolObject<dyn MTLDevice>> = unsafe { Retained::retain(device.cast()) }
             .ok_or_else(|| Error::invalid_argument("the Metal device must not be null"))?;
         // SAFETY: as above.
         if let Some(queue) = unsafe { Retained::retain(queue.cast()) } {
@@ -85,12 +84,12 @@ impl Device {
     }
 
     #[must_use]
-    pub fn device(&self) -> &MTLDevicePtr {
+    pub fn device(&self) -> &Retained<ProtocolObject<dyn MTLDevice>> {
         &self.device
     }
 
     #[must_use]
-    pub(crate) fn queue(&self) -> &MTLCommandQueuePtr {
+    pub(crate) fn queue(&self) -> &Retained<ProtocolObject<dyn MTLCommandQueue>> {
         &self.queue
     }
 
