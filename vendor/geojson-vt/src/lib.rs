@@ -25,10 +25,19 @@ use std::collections::BTreeMap;
 
 use detail::{InternalTile, VtFeatures};
 use feature::{Feature, Identifier, PropertyMap};
-use foldhash::HashMap;
 use geo_traits::GeometryTrait;
 pub(crate) use tile::Tile;
 pub use tile::TileFeatures;
+
+/// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
+/// `mln_util::hash`'s.
+#[cfg(not(mln_bench_fixed_hash))]
+type Hasher = foldhash::fast::RandomState;
+#[cfg(mln_bench_fixed_hash)]
+type Hasher = foldhash::fast::FixedState;
+
+#[expect(clippy::disallowed_types, reason = "mln_util::hash's map, which this crate can't depend on")]
+type HashMap<K, V> = std::collections::HashMap<K, V, Hasher>;
 
 /// The geometry, properties and id of each of `features`, as
 /// [`GeoJSONVT::from_features`] reads them.

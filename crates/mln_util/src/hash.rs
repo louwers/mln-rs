@@ -9,7 +9,18 @@
 //! alone, as std's does there.
 
 /// The [`BuildHasher`](std::hash::BuildHasher) of [`HashMap`] and [`HashSet`].
+#[cfg(not(mln_bench_fixed_hash))]
 pub type RandomState = foldhash::fast::RandomState;
+
+/// The benchmarks' builds (`tools/bench/profile.toml`) set the
+/// `mln_bench_fixed_hash` cfg, which gives every map the same seed, so that
+/// each process hashes alike and a benchmark does the same work every run.
+#[cfg(mln_bench_fixed_hash)]
+pub type RandomState = foldhash::fast::FixedState;
+
+/// Whether [`RandomState`] has a fixed seed, as in the benchmarks' builds.
+#[doc(hidden)]
+pub const SEED_IS_FIXED: bool = cfg!(mln_bench_fixed_hash);
 
 /// A [`std::collections::HashMap`] with mln-rs's hasher. Create one with
 /// `default()`, or `with_capacity_and_hasher(n, RandomState::default())`.

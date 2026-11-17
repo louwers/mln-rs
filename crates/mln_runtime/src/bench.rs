@@ -4,9 +4,17 @@
 
 use std::sync::Arc;
 
+use geojson::GeoJson;
 use mln_actor::RunLoop;
+use mln_util::error::Error;
 
 use crate::queue::Queue;
+
+/// Parses GeoJSON text as [`Map::set_geojson_source_data`](crate::Map::set_geojson_source_data)
+/// does, before the source builds its data from it.
+pub fn parse_geojson(json: &str) -> Result<GeoJson, Error> {
+    crate::style::parse_geojson(json)
+}
 
 /// The queue that carries commands to a runtime's thread, and the loop of
 /// that thread, which a posted command wakes. Both run on the thread that
@@ -50,6 +58,15 @@ impl<S: 'static> Default for CommandQueue<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_geojson_as_a_source_takes_it() {
+        assert!(matches!(
+            parse_geojson(r#"{"type":"FeatureCollection","features":[]}"#),
+            Ok(GeoJson::FeatureCollection(_))
+        ));
+        assert!(parse_geojson("{").is_err());
+    }
 
     #[test]
     fn commands_run_in_order_on_the_next_turn() {

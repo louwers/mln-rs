@@ -11,10 +11,19 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
-use foldhash::HashMap;
 use geo_types::Geometry;
 use geometry::Point;
 use kdbush::{KDBush, Nth};
+
+/// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
+/// `mln_util::hash`'s.
+#[cfg(not(mln_bench_fixed_hash))]
+type Hasher = foldhash::fast::RandomState;
+#[cfg(mln_bench_fixed_hash)]
+type Hasher = foldhash::fast::FixedState;
+
+#[expect(clippy::disallowed_types, reason = "mln_util::hash's map, which this crate can't depend on")]
+type HashMap<K, V> = std::collections::HashMap<K, V, Hasher>;
 
 /// `feature_collection<double>`
 pub(crate) type GeoJSONFeatures = Vec<Feature<f64>>;

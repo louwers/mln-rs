@@ -8,11 +8,20 @@
 // member's value.
 
 use feature::Value;
-use foldhash::HashSet;
 use geojson::GeoJson;
 pub use serde_json_borrow::{Map as JsonObject, Value as Json};
 
 use crate::conversion::{ConversionTraits, Convertible, Error};
+
+/// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
+/// `mln_util::hash`'s.
+#[cfg(not(mln_bench_fixed_hash))]
+type Hasher = foldhash::fast::RandomState;
+#[cfg(mln_bench_fixed_hash)]
+type Hasher = foldhash::fast::FixedState;
+
+#[expect(clippy::disallowed_types, reason = "mln_util::hash's set, which this crate can't depend on")]
+type HashSet<T> = std::collections::HashSet<T, Hasher>;
 
 /// What a member past the end of an array reads as, as in the other front
 /// ends.
@@ -49,7 +58,7 @@ fn has_duplicate_keys(object: &JsonObject<'_>) -> bool {
     if entries.len() <= 16 {
         entries.iter().enumerate().any(|(i, (name, _))| entries[..i].iter().any(|(earlier, _)| earlier == name))
     } else {
-        let mut seen = HashSet::with_capacity_and_hasher(entries.len(), foldhash::fast::RandomState::default());
+        let mut seen = HashSet::with_capacity_and_hasher(entries.len(), Hasher::default());
         !entries.iter().all(|(name, _)| seen.insert(&**name))
     }
 }

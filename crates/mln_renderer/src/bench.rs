@@ -28,12 +28,12 @@ use mln_vec_map::VecSet;
 
 use crate::Registry;
 use crate::bucket::LayerFeatureStates;
-use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_type::ErasedEvaluatedLayer;
+use crate::layers::render_symbol_layer::{add_placement_data, symbol_translates};
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::{BucketPlacementData, RenderLayerPtr, SymbolTranslate};
+use crate::render_layer::RenderLayerPtr;
 use crate::render_tile::RenderTile;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
 use crate::text::glyph_store::HBShapeResults;
@@ -253,35 +253,14 @@ impl SymbolView {
                 Rc::get_mut(&mut render_layer).ok_or_else(|| Error::native("a new render layer is shared"))?.get_mut();
             render_layer_mut.evaluate(&parameters);
             let base = render_layer_mut.base_mut();
-            let translate = SymbolTranslate::default();
+            // As the layer's prepare adds its tiles' buckets.
+            let translates = symbol_translates(base);
             for (tile_index, laid_out) in tiles.iter().enumerate() {
                 let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };
-                let Some(bucket) = (*render_data.bucket).downcast_ref::<SymbolBucket>() else { continue };
-                if bucket.bucket_leader_id != layer.get_id() {
-                    continue;
-                }
-                let mut ranges: Vec<_> = bucket.sort_key_ranges.iter().copied().map(Some).collect();
-                ranges.sort_by(|a, b| {
-                    let key = |range: &Option<crate::buckets::symbol_bucket::SortKeyRange>| range.map(|r| r.sort_key);
-                    key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal)
-                });
-                if ranges.is_empty() {
-                    ranges.push(None);
-                }
-                for sort_key_range in ranges {
-                    base.placement_data.push(BucketPlacementData {
-                        bucket: Arc::clone(&render_data.bucket),
-                        tile_owner: Rc::clone(&render_tiles),
-                        tile_index,
-                        feature_index: Some(Arc::clone(&laid_out.result.feature_index)),
-                        source_id: source.to_owned(),
-                        sort_key_range,
-                        text_translate: translate,
-                        icon_translate: translate,
-                    });
-                }
+                let feature_index = || Some(Arc::clone(&laid_out.result.feature_index));
+                add_placement_data(base, &render_tiles, tile_index, &render_data.bucket, feature_index, translates);
             }
-            if !base.placement_data.is_empty() {
+            if !base.placement_data.is_empty() || !base.follower_data.is_empty() {
                 layers.push(render_layer);
             }
         }

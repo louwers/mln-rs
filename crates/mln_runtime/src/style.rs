@@ -459,7 +459,7 @@ fn layer_info(layer: &mln_style::Layer) -> LayerInfo {
 }
 
 /// Parses GeoJSON text, on the runtime's thread.
-fn parse_geojson(json: &str) -> Result<GeoJson, Error> {
+pub(crate) fn parse_geojson(json: &str) -> Result<GeoJson, Error> {
     serde_json::from_str(json).map_err(|error| {
         let what = if error.is_data() { "invalid" } else { "not valid JSON" };
         Error::invalid_argument(format!("GeoJSON data is {what}: {error}"))
