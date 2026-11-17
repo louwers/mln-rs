@@ -14,6 +14,17 @@ counts, cameras chosen by frame index, data generated from a fixed seed, and no
 waiting on the wall clock. Each runs in a process of its own, so no scenario
 inherits another's heap, threads or caches.
 
+A third kind runs outside `mln-bench`: the desktop example's **presented**
+benchmark (`mise run desktop --profile release -- --benchmark[=globe]`) draws
+the camera path of a `macro/frame` scenario in a window, over the same fixtures,
+and prints the times between the frames the window presents. It shows what a
+user sees of a frame, the backend's surface and the display's compositor
+included, which a headless frame leaves out. It gives no verdicts, and nothing
+runs it but a person at a machine with a display: run it on both sides of a
+change by hand, and compare the summaries. `--laps <n>` sets how long it runs
+(10 laps of 120 frames; 0 draws until the window closes, for a profiler). The
+fixtures and the paths come from `workload/`, a crate both programs share.
+
 ## Running
 
 ```sh

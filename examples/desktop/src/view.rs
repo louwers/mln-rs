@@ -12,7 +12,9 @@
 // takes the messages that came since the last, and the session's frame waits
 // for the surface's next texture. Frames start at the display's refreshes,
 // or at its refresh interval where the platform reports no refreshes
-// (pacing.rs). In benchmark mode they come as fast as the surface takes them.
+// (pacing.rs). In benchmark mode (benchmark.rs) they come as fast as the
+// surface takes them, each at the next point of the benchmark's camera path,
+// without the controls, and input doesn't move the map.
 //
 // Mouse, touch, wheel, trackpad and the arrow, `+` and `-` keys go to a
 // `GestureRecognizer` (mln_gestures), which moves the map's camera and
@@ -40,8 +42,8 @@ use std::time::{Duration, Instant};
 use mln_frame_pacer::FramePacer;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
 use mln_map::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase,
-    MapDebugOptions, MapEvent,
+    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapDebugOptions,
+    MapEvent, RenderMode,
 };
 use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
@@ -59,6 +61,7 @@ use winit::keyboard::KeyCode;
 
 use crate::Args;
 use crate::backend::{self, Kind, WindowSession, WindowSurfaces};
+use crate::benchmark::Benchmark;
 use crate::host::{Inbox, Message, UserEvent};
 use crate::overlay::Paint;
 use crate::pacing::{Pacing, Ready, Refreshes};
@@ -130,20 +133,29 @@ pub(crate) fn run(launch: Launch) {
     #[cfg(target_os = "macos")]
     let surfaces = WindowSurfaces { proxy: proxy.clone() };
 
-    if args.benchmark {
-        Log::info(Event::General, "BENCHMARK MODE: Some optimizations are disabled.");
-    }
-
-    let cache_db = args.cache.clone().unwrap_or_else(|| "/tmp/mbgl-cache.db".to_owned());
-    let runtime = match Runtime::new(&RuntimeOptions { cache_path: Some(cache_db.into()), ..RuntimeOptions::default() })
-    {
+    let benchmark = match args.benchmark.map(|path| Benchmark::new(path, args.laps.unwrap_or(10))).transpose() {
+        Ok(benchmark) => benchmark,
+        Err(e) => {
+            Log::error(Event::Setup, e);
+            return;
+        }
+    };
+    // A benchmark reads its fixtures through `asset://` URLs, and nothing
+    // else: no cache database, and no network.
+    let runtime_options = if let Some(benchmark) = &benchmark {
+        RuntimeOptions { asset_path: Some(benchmark.asset_path()), ..RuntimeOptions::default() }
+    } else {
+        let cache_db = args.cache.clone().unwrap_or_else(|| "/tmp/mbgl-cache.db".to_owned());
+        RuntimeOptions { cache_path: Some(cache_db.into()), ..RuntimeOptions::default() }
+    };
+    let runtime = match Runtime::new(&runtime_options) {
         Ok(runtime) => runtime,
         Err(e) => {
             Log::error(Event::Setup, e.message);
             return;
         }
     };
-    if !settings.online {
+    if !settings.online || benchmark.is_some() {
         // The cache still serves what it has.
         log_failure(runtime.set_resource_provider(|request: ResourceRequest| {
             let mut response = Response::new();
@@ -165,7 +177,7 @@ pub(crate) fn run(launch: Launch) {
     let options = MapOptions {
         map: mln_map::MapOptions { size: map_size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
         event_mask: EventMask::NONE | EventType::MapStyleLoaded | EventType::MapIdle | EventType::MapSourceChanged,
-        system_fonts: !args.no_system_fonts,
+        system_fonts: !args.no_system_fonts && benchmark.is_none(),
         ..MapOptions::default()
     };
     let map = match runtime.create_map(options).and_then(|(map, created)| created.wait().map(|_| map)) {
@@ -176,15 +188,19 @@ pub(crate) fn run(launch: Launch) {
         }
     };
     log_failure(map.set_bounds(BoundOptions { max_pitch: Some(settings.max_pitch), ..Default::default() }));
-    let camera = CameraOptions {
-        center: LatLng::new(settings.latitude, settings.longitude).ok(),
-        center_altitude: Some(settings.altitude),
-        zoom: Some(settings.zoom),
-        bearing: Some(settings.bearing),
-        pitch: Some(settings.pitch),
-        roll: Some(settings.roll),
-        fov: Some(settings.fov),
-        ..Default::default()
+    let camera = if let Some(benchmark) = &benchmark {
+        benchmark.start()
+    } else {
+        CameraOptions {
+            center: LatLng::new(settings.latitude, settings.longitude).ok(),
+            center_altitude: Some(settings.altitude),
+            zoom: Some(settings.zoom),
+            bearing: Some(settings.bearing),
+            pitch: Some(settings.pitch),
+            roll: Some(settings.roll),
+            fov: Some(settings.fov),
+            ..Default::default()
+        }
     };
     log_failure(map.update_camera(CameraUpdate { camera, ..Default::default() }));
     log_failure(map.set_debug_flags(MapDebugOptions(settings.debug)));
@@ -207,7 +223,7 @@ pub(crate) fn run(launch: Launch) {
     };
 
     // Benchmark frames don't wait for the display.
-    let refreshes = if args.benchmark {
+    let refreshes = if benchmark.is_some() {
         None
     } else {
         let woken = Arc::clone(&inbox);
@@ -250,7 +266,7 @@ pub(crate) fn run(launch: Launch) {
         style: styles::style_for(&style_url),
         next_backend: None,
         frame_report: String::new(),
-        benchmark: args.benchmark,
+        benchmark,
         pixel_ratio,
         physical_size: size,
         size: map_size,
@@ -263,10 +279,27 @@ pub(crate) fn run(launch: Launch) {
         quit_at: args.quit_after.map(|s| Instant::now() + Duration::from_secs_f64(s)),
         style_reported: false,
     };
-    let style = view.style.clone();
-    view.load_style(style);
+    if let Some(benchmark) = &view.benchmark {
+        log_failure(view.map.set_style_json(benchmark.style()));
+        let title = format!("mln-rs: benchmark, {} path", benchmark.name());
+        let _ = view.proxy.send_event(UserEvent::SetTitle(title));
+    } else {
+        let style = view.style.clone();
+        view.load_style(style);
+    }
 
     view.run();
+
+    if let Some(benchmark) = &view.benchmark {
+        let window = format!(
+            "{}x{} at pixel ratio {}, {}",
+            view.size.width,
+            view.size.height,
+            view.pixel_ratio,
+            view.window.as_ref().map(|window| window.adapter(&view.paint.borrow())).unwrap_or_default()
+        );
+        println!("{}", benchmark.summary(&window));
+    }
 
     match view.map.camera().and_then(Completion::wait) {
         Ok(query) => {
@@ -376,7 +409,8 @@ struct View {
     next_backend: Option<Kind>,
     frame_report: String,
 
-    benchmark: bool,
+    /// The benchmark mode's path and the frames it timed.
+    benchmark: Option<Benchmark>,
     pixel_ratio: f64,
     /// The window's size in physical pixels.
     physical_size: PhysicalSize<u32>,
@@ -446,7 +480,7 @@ impl View {
                 self.inbox.wait(self.next_deadline());
                 continue;
             }
-            if !self.benchmark
+            if self.benchmark.is_none()
                 && let Ready::Wait(until) = self.pacing.ready(now)
             {
                 self.inbox.wait(Some(until));
@@ -476,12 +510,20 @@ impl View {
             }
         };
         let mut rendered = false;
+        let now = Instant::now();
         for result in results {
             if result.token.is_some() && result.token == self.demanded {
                 self.demanded = None;
             }
             match result.disposition {
-                FrameDisposition::Rendered => rendered = true,
+                FrameDisposition::Rendered => {
+                    rendered = true;
+                    if let Some(benchmark) = &mut self.benchmark
+                        && benchmark.rendered(result.token, now, result.mode == RenderMode::Full, result.needs_repaint)
+                    {
+                        self.quit = true;
+                    }
+                }
                 // No texture right now (e.g. a timeout while the compositor
                 // is busy, or a hidden window): try again on the next frame.
                 FrameDisposition::TargetNotReady => self.dirty = true,
@@ -502,7 +544,7 @@ impl View {
     /// Whether the map has a frame to draw: a new update, or what the view
     /// marked.
     fn needs_frame(&self) -> bool {
-        self.redraw || self.dirty || self.benchmark
+        self.redraw || self.dirty || self.benchmark.is_some()
     }
 
     /// Whether a frame has something to do.
@@ -535,17 +577,10 @@ impl View {
         let ms = self.ms(now);
         self.gestures_animating = self.gestures.frame(&mut self.map, ms);
 
-        // A perf probe: `MLN_PAN_PX=<px>` pans the map by that many pixels
-        // every frame, reversing every 2 s (so it stays over the same area),
-        // so the "Frame time" log measures continuous camera movement.
-        if let Some(dx) = std::env::var("MLN_PAN_PX").ok().and_then(|v| v.parse::<f64>().ok()) {
-            let dx = if (ms / 2000.0) as i64 % 2 == 0 { dx } else { -dx };
-            let pan = CameraDelta { offset: Some(ScreenCoordinate::new(dx, 0.0)), ..Default::default() };
-            log_failure(self.map.apply_camera_delta(pan));
-        }
-
         self.redraw |= self.inbox.take_redraw();
-        if self.ui_input.is_some() || self.needs_frame() || self.ui_repaint_at.is_some_and(|at| at <= now) {
+        let controls_due =
+            self.ui_input.is_some() || self.needs_frame() || self.ui_repaint_at.is_some_and(|at| at <= now);
+        if controls_due && self.benchmark.is_none() {
             self.controls_frame(now);
         }
         self.demand_frame();
@@ -561,8 +596,13 @@ impl View {
             return;
         }
         let Some(window) = &self.window else { return };
-        let mode = if self.dirty || self.benchmark { DemandMode::Force } else { DemandMode::IfChanged };
+        let mode = if self.dirty || self.benchmark.is_some() { DemandMode::Force } else { DemandMode::IfChanged };
         self.next_token += 1;
+        // The demand waits for the commands sent before it, so its frame
+        // shows the path's next camera.
+        if let Some(camera) = self.benchmark.as_mut().and_then(|benchmark| benchmark.next_camera(self.next_token)) {
+            log_failure(self.map.update_camera(CameraUpdate { camera, ..Default::default() }));
+        }
         match window.session().demand_frame(FrameDemand::new(mode, self.next_token)) {
             Ok(()) => {
                 self.demanded = Some(self.next_token);
@@ -578,6 +618,10 @@ impl View {
 
     /// Applies one message from the window or the runtime.
     fn handle(&mut self, message: Message) {
+        // A benchmark's camera follows its path, and it has no controls.
+        if self.benchmark.is_some() && matches!(message, Message::Input { .. } | Message::Key { .. } | Message::Ui(_)) {
+            return;
+        }
         match message {
             Message::Input { input, at } => self.gesture(input, at),
             Message::Key { code, pressed, modifiers, at } => self.on_key(code, pressed, modifiers, at),

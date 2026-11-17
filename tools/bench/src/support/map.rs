@@ -9,12 +9,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+pub(crate) use mln_bench_workload::paths::{tile_at, tile_center};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_runtime::Device;
 use mln_storage::FileSource;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
-use mln_util::geo::LatLng;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
@@ -361,33 +361,4 @@ impl HeadlessMap {
 /// Writes `image` as a PNG to `path`.
 pub(crate) fn save_png(image: &mln_util::image::PremultipliedImage, path: &Path) {
     std::fs::write(path, mln_image::encode_png(image)).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-}
-
-/// The center of the 512-pixel tile `z`/`x`/`y` of Web Mercator.
-pub(crate) fn tile_center(z: u8, x: u32, y: u32) -> LatLng {
-    let tiles = f64::from(1u32 << z);
-    let longitude = (f64::from(x) + 0.5) / tiles * 360.0 - 180.0;
-    let latitude = (std::f64::consts::PI * (1.0 - 2.0 * (f64::from(y) + 0.5) / tiles)).sinh().atan().to_degrees();
-    LatLng::new(latitude, longitude).expect("a tile's center")
-}
-
-/// The tile of zoom `z` that holds `point`.
-pub(crate) fn tile_at(z: u8, point: LatLng) -> (u32, u32) {
-    let tiles = f64::from(1u32 << z);
-    let x = (point.longitude() + 180.0) / 360.0 * tiles;
-    let latitude = point.latitude().to_radians();
-    let y = (1.0 - latitude.tan().asinh() / std::f64::consts::PI) / 2.0 * tiles;
-    (x.floor() as u32, y.floor() as u32)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_tile_holds_its_center() {
-        for (z, x, y) in [(0, 0, 0), (14, 2620, 6332), (6, 10, 24)] {
-            assert_eq!(tile_at(z, tile_center(z, x, y)), (x, y));
-        }
-    }
 }

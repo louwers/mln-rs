@@ -43,7 +43,7 @@ const TILES: &[(u8, &[(u32, u32)])] = &[
 /// first tile load before.
 fn street(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
-    let center = super::area_center(&fixtures, Tiles::Street);
+    let center = fixtures.area_center(Tiles::Street);
     let camera = |z: u8, x: u32, y: u32| CameraOptions {
         center: Some(tile_center(z, x, y)),
         zoom: Some(f64::from(z)),

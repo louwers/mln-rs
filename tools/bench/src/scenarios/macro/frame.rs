@@ -3,13 +3,13 @@
 
 use std::time::Instant;
 
+use mln_bench_workload::paths::{FRAMES, Path};
 use mln_map::{CameraOptions, MapMode};
-use mln_util::geo::LatLng;
 
 use super::VIEW;
 use crate::scenario::{Bench, Kind, Scenario};
-use crate::support::fixtures::{Fixtures, Tiles};
-use crate::support::map::{HeadlessMap, tile_at, tile_center};
+use crate::support::fixtures::Fixtures;
+use crate::support::map::HeadlessMap;
 
 pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
@@ -26,58 +26,25 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
     },
 ];
 
-/// Frames of each path: two seconds at 60 Hz, which places symbols about
-/// seven times and fades them in and out between placements.
-const FRAMES: usize = 120;
-
-/// The question: what does a frame of western San Francisco (the Sunset
-/// District) at zoom 13.5 cost while the camera turns a full circle, pans
-/// around a small circle and tilts to 10 degrees and back? One measured
-/// unit is one frame: its update, symbol placement, draw calls and the GPU
-/// finishing it.
-///
-/// The camera circles the corner where four tiles of zoom 13 meet, and its
-/// view stays inside them; at a steeper tilt it would see more.
+/// The question: what does a frame of western San Francisco at zoom 13.5
+/// cost while the camera turns, pans and tilts over loaded tiles
+/// ([`Path::Street`])? One measured unit is one frame: its update, symbol
+/// placement, draw calls and the GPU finishing it.
 fn street(bench: &mut Bench) {
-    let fixtures = Fixtures::open(bench);
-    let (x, y) = tile_at(12, super::area_center(&fixtures, Tiles::Street));
-    let corner = tile_center(12, x, y);
-    let camera = move |frame: usize| {
-        let t = frame as f64 / FRAMES as f64;
-        let turn = std::f64::consts::TAU * t;
-        CameraOptions {
-            center: Some(
-                LatLng::new(corner.latitude() + 0.002 * turn.sin(), corner.longitude() + 0.003 * turn.cos())
-                    .expect("a center"),
-            ),
-            zoom: Some(13.5),
-            bearing: Some(360.0 * t),
-            pitch: Some(10.0 * (std::f64::consts::PI * t).sin()),
-            ..Default::default()
-        }
-    };
-    let style = fixtures.style(Tiles::Street);
-    let map = HeadlessMap::open(bench, &fixtures, VIEW, MapMode::Continuous, &style, &camera(0));
-    frames(bench, map, camera);
+    path(bench, Path::Street);
 }
 
-/// The question: what does a frame of the whole globe (zoom 1.5) cost
-/// while it turns 120 degrees of longitude under the camera, which turns
-/// and tilts to 30 degrees and back? One measured unit is one frame.
+/// The question: what does a frame of the whole globe cost while it turns
+/// and tilts over loaded tiles ([`Path::Globe`])? One measured unit is one
+/// frame.
 fn globe(bench: &mut Bench) {
+    path(bench, Path::Globe);
+}
+
+fn path(bench: &mut Bench, path: Path) {
     let fixtures = Fixtures::open(bench);
-    let camera = |frame: usize| {
-        let t = frame as f64 / FRAMES as f64;
-        let wave = (std::f64::consts::PI * t).sin();
-        CameraOptions {
-            center: Some(LatLng::new(20.0 + 15.0 * wave, -60.0 + 120.0 * t).expect("a center")),
-            zoom: Some(1.5),
-            bearing: Some(30.0 * t),
-            pitch: Some(30.0 * wave),
-            ..Default::default()
-        }
-    };
-    let style = super::globe_style(&fixtures);
+    let camera = path.camera(&fixtures);
+    let style = path.style(&fixtures);
     let map = HeadlessMap::open(bench, &fixtures, VIEW, MapMode::Continuous, &style, &camera(0));
     frames(bench, map, camera);
 }

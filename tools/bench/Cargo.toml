@@ -24,6 +24,9 @@ layout-probe = []
 # any base's Cargo.lock satisfies them as it stands.
 [dependencies]
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
+# The fixture snapshot and the camera paths, which the desktop example's
+# benchmark mode shares.
+mln_bench_workload = { package = "mln-rs-bench-workload", path = "workload" }
 mln_conversion = { package = "mln-rs-conversion", path = "../../crates/mln_conversion" }
 mln_expression = { package = "mln-rs-expression", path = "../../crates/mln_expression" }
 mln_gfx = { package = "mln-rs-gfx", path = "../../crates/mln_gfx" }
@@ -58,7 +61,7 @@ mln_text = { package = "mln-rs-text", path = "../../crates/mln_text" }
 mln_tile = { package = "mln-rs-tile", path = "../../crates/mln_tile" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "../../crates/mln_tile_id" }
 mln_util = { package = "mln-rs-util", path = "../../crates/mln_util" }
-# The count of the map's background tasks (support/workers.rs).
+# The latency file source's held answers (support/latency.rs).
 parking_lot = "0.12"
 # Single tiles of the fixtures' archives (support/fixtures.rs).
 pmtiles = { version = "0.28", default-features = false }

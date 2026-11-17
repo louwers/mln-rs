@@ -9,8 +9,11 @@
 // - ui.rs: the controls, which view.rs lays out and an overlay of the window's
 //   backend paints over the map (overlay.rs, metal_overlay.rs,
 //   vulkan_overlay.rs, d3d12_overlay.rs, gl_overlay.rs).
+// - benchmark.rs: the benchmark mode, a camera path of the benchmarks drawn
+//   in the window, timed.
 //
-// Command line: -h/--help, -f/--fullscreen, -b/--benchmark, -o/--offline,
+// Command line: -h/--help, -f/--fullscreen, -b/--benchmark[=PATH], --laps,
+// -o/--offline,
 // -s/--style URL, -c/--cache FILE, -x/--lon, -y/--lat, -a/--alt, --fov,
 // -z/--zoom, --bearing, -p/--pitch, -r/--roll,
 // -P/--maxPitch, --backend (metal, the default on macOS, webgpu: wgpu, the
@@ -24,6 +27,7 @@
 // CJK (mln_system_fonts).
 
 mod backend;
+mod benchmark;
 #[cfg(windows)]
 mod d3d12_overlay;
 #[cfg(target_os = "linux")]
@@ -54,7 +58,11 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
 
       -h, --help                        Display this help menu
       -f, --fullscreen                  Toggle fullscreen
-      -b, --benchmark                   Toggle benchmark
+      -b, --benchmark[=path]            Draw a benchmark camera path (street, the
+                                        default, or globe) as fast as the window
+                                        takes frames, print their times, quit
+      --laps=[number]                   Laps of the benchmark's path (10; 0: until
+                                        the window closes)
       -o, --offline                     Toggle offline
       -s[URL], --style=[URL]            Map stylesheet
       -c[file], --cache=[file]          Cache database file name
@@ -81,7 +89,10 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
 #[derive(Default)]
 pub(crate) struct Args {
     pub(crate) fullscreen: bool,
-    pub(crate) benchmark: bool,
+    /// The benchmark mode's camera path.
+    pub(crate) benchmark: Option<mln_bench_workload::paths::Path>,
+    /// The benchmark's laps, or `None` for its default.
+    pub(crate) laps: Option<usize>,
     pub(crate) offline: bool,
     pub(crate) style: Option<String>,
     pub(crate) cache: Option<String>,
@@ -132,7 +143,17 @@ fn parse_args() -> Result<Args, String> {
                 std::process::exit(0);
             }
             "f" | "fullscreen" => args.fullscreen = true,
-            "b" | "benchmark" => args.benchmark = true,
+            "b" | "benchmark" => {
+                let path = inline
+                    .as_deref()
+                    .map_or(Ok(mln_bench_workload::paths::Path::Street), mln_bench_workload::paths::Path::parse)?;
+                args.benchmark = Some(path);
+            }
+            "laps" => {
+                let laps = value(&name)?;
+                args.laps =
+                    Some(laps.parse().map_err(|_| format!("Argument '{name}' received invalid value type '{laps}'"))?);
+            }
             "o" | "offline" => args.offline = true,
             "s" | "style" => args.style = Some(value(&name)?),
             "c" | "cache" => args.cache = Some(value(&name)?),

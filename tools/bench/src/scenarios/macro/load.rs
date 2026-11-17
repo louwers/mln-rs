@@ -52,7 +52,7 @@ fn street(bench: &mut Bench) {
 /// tiles of zooms 0 and 1) from nothing take? One measured unit is one load.
 fn globe(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
-    let style = super::globe_style(&fixtures);
+    let style = fixtures.globe_style();
     let camera = CameraOptions {
         center: Some(LatLng::new(30.0, 10.0).expect("a center")),
         zoom: Some(1.5),
@@ -67,11 +67,8 @@ fn globe(bench: &mut Bench) {
 fn cjk(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
     let style = fixtures.style(Tiles::Cjk);
-    let camera = CameraOptions {
-        center: Some(super::area_center(&fixtures, Tiles::Cjk)),
-        zoom: Some(14.0),
-        ..Default::default()
-    };
+    let camera =
+        CameraOptions { center: Some(fixtures.area_center(Tiles::Cjk)), zoom: Some(14.0), ..Default::default() };
     load(bench, &fixtures, &style, &camera);
 }
 

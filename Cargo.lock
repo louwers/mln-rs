@@ -2507,6 +2507,7 @@ name = "mln-rs-bench"
 version = "0.0.12"
 dependencies = [
  "libc",
+ "mln-rs-bench-workload",
  "mln-rs-conversion",
  "mln-rs-d3d12",
  "mln-rs-expression",
@@ -2546,6 +2547,17 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "mln-rs-bench-workload"
+version = "0.0.12"
+dependencies = [
+ "mln-rs-map",
+ "mln-rs-util",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -2635,6 +2647,7 @@ dependencies = [
  "egui-winit",
  "egui_extras",
  "egui_glow",
+ "mln-rs-bench-workload",
  "mln-rs-d3d12",
  "mln-rs-frame-pacer",
  "mln-rs-gestures",

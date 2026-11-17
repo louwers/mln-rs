@@ -25,6 +25,8 @@ egui.workspace = true
 egui-wgpu.workspace = true
 egui_extras.workspace = true
 egui-winit.workspace = true
+# The benchmark mode's fixtures and camera paths, the benchmarks' (benchmark.rs).
+mln_bench_workload.workspace = true
 mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_image.workspace = true

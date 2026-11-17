@@ -316,6 +316,10 @@ impl ApplicationHandler<UserEvent> for Host {
         if args.fullscreen {
             attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
         }
+        // A benchmark's frames keep the size the paths were made for.
+        if args.benchmark.is_some() {
+            attributes = attributes.with_resizable(false);
+        }
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(e) => {

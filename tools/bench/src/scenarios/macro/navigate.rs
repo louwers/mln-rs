@@ -62,7 +62,7 @@ const FLIGHT: [Key; 4] = [
 /// advance, so every run draws the same frames with the same tiles.
 fn street(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
-    let center = super::area_center(&fixtures, Tiles::Street);
+    let center = fixtures.area_center(Tiles::Street);
     let camera = |frame: usize| {
         let leg = FLIGHT.windows(2).find(|leg| frame <= leg[1].frame).expect("a frame of the flight");
         let (from, to) = (&leg[0], &leg[1]);
