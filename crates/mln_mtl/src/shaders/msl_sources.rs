@@ -1643,12 +1643,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = props.light_position_base.w;
+    const auto base   = max(props.light_position_base.w, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
 #if defined(HAS_UNIFORM_u_height)
-    const auto height = props.height;
+    const auto height = max(props.height, 0.0);
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
@@ -1852,12 +1852,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = props.light_position_base.w;
+    const auto base   = max(props.light_position_base.w, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
 #if defined(HAS_UNIFORM_u_height)
-    const auto height = props.height;
+    const auto height = max(props.height, 0.0);
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
@@ -2097,12 +2097,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = props.light_position_base.w;
+    const auto base   = max(props.light_position_base.w, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
 #if defined(HAS_UNIFORM_u_height)
-    const auto height = props.height;
+    const auto height = max(props.height, 0.0);
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
@@ -2321,12 +2321,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = props.light_position_base.w;
+    const auto base   = max(props.light_position_base.w, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
 #if defined(HAS_UNIFORM_u_height)
-    const auto height = props.height;
+    const auto height = max(props.height, 0.0);
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif

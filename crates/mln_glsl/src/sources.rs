@@ -2492,13 +2492,13 @@ void main() {
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = props.light_position_base.w;
+    const float base = max(props.light_position_base.w, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
 
 #if defined(HAS_UNIFORM_u_height)
-    const float height = props.height;
+    const float height = max(props.height, 0.0);
 #else
     const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
 #endif
@@ -2656,13 +2656,13 @@ void main() {
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = props.light_position_base.w;
+    const float base = max(props.light_position_base.w, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
 
 #if defined(HAS_UNIFORM_u_height)
-    const float height = props.height;
+    const float height = max(props.height, 0.0);
 #else
     const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
 #endif
@@ -2835,13 +2835,13 @@ void main() {
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = props.light_position_base.w;
+    const float base = max(props.light_position_base.w, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
 
 #if defined(HAS_UNIFORM_u_height)
-    const float height = props.height;
+    const float height = max(props.height, 0.0);
 #else
     const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
 #endif
@@ -3124,13 +3124,13 @@ void main() {
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = props.light_position_base.w;
+    const float base = max(props.light_position_base.w, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
 
 #if defined(HAS_UNIFORM_u_height)
-    const float height = props.height;
+    const float height = max(props.height, 0.0);
 #else
     const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
 #endif
