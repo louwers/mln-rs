@@ -719,7 +719,7 @@ impl TileStore {
         let inbox = Inbox::new(wake);
         let ctx = StoreContext {
             inbox: inbox.sender().clone(),
-            jobs: Jobs::new(workers),
+            jobs: Jobs::new(workers, inbox.sender()),
             glyphs,
             images,
             atlas: DynamicTextureAtlas::new(),
@@ -760,7 +760,7 @@ impl TileStore {
     /// Runs the tiles' jobs in `workers`. The jobs in flight on the previous
     /// workers run again there.
     pub(crate) fn set_workers(&mut self, workers: Box<dyn TileWorkers>) {
-        self.ctx.jobs.set_workers(workers);
+        self.ctx.jobs.set_workers(workers, &self.ctx.inbox);
         for source in self.sources.values_mut() {
             let lanes: Vec<Lane> = source.tiles.values().filter_map(|tile| tile.work.lane()).collect();
             for lane in lanes {
@@ -816,41 +816,51 @@ impl TileStore {
     pub(crate) fn receive(&mut self) {
         self.ctx.glyphs.update();
         while let Some(event) = self.inbox.next() {
-            match event {
-                TileEvent::Response { tile, load, response } => {
-                    if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.data.load() == Some(load)) {
-                        source.with_tile(&tile, &mut self.ctx, |info, tile, ctx| {
-                            info.apply_response(tile, ctx, load, response);
-                        });
-                    }
+            self.take(event);
+        }
+    }
+
+    /// Takes in one event for the tiles.
+    fn take(&mut self, event: TileEvent) {
+        match event {
+            TileEvent::Response { tile, load, response } => {
+                if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.data.load() == Some(load)) {
+                    source.with_tile(&tile, &mut self.ctx, |info, tile, ctx| {
+                        info.apply_response(tile, ctx, load, response);
+                    });
                 }
-                TileEvent::Data { tile, load, data } => {
-                    if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.data.load() == Some(load)) {
-                        source.with_tile(&tile, &mut self.ctx, |info, tile, ctx| {
-                            info.apply_source_data(tile, ctx, load, data);
-                        });
-                    }
+            }
+            TileEvent::Data { tile, load, data } => {
+                if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.data.load() == Some(load)) {
+                    source.with_tile(&tile, &mut self.ctx, |info, tile, ctx| {
+                        info.apply_source_data(tile, ctx, load, data);
+                    });
                 }
-                TileEvent::Reply { lane, id, body, times } => {
-                    if !self.ctx.jobs.replied(&id, times) {
-                        drop_on_workers(&self.ctx.pool, body);
-                        continue;
-                    }
-                    let running = |tile: &Tile| matches!(&tile.work, WorkState::Running(running) if running.id == id);
-                    match find(&mut self.sources, id.tile, running) {
-                        Some((source, tile)) => source.apply_reply(&tile, &mut self.ctx, lane, id, body),
-                        None => drop_on_workers(&self.ctx.pool, body),
-                    }
+            }
+            TileEvent::Reply { lane, id, body, times } => {
+                if !self.ctx.jobs.replied(&id, times) {
+                    drop_on_workers(&self.ctx.pool, body);
+                    return;
                 }
-                TileEvent::LaneLost(lane) => {
-                    self.ctx.jobs.lost(lane);
-                    for source in self.sources.values_mut() {
-                        source.lane_lost(lane);
-                    }
+                let running = |tile: &Tile| matches!(&tile.work, WorkState::Running(running) if running.id == id);
+                match find(&mut self.sources, id.tile, running) {
+                    Some((source, tile)) => source.apply_reply(&tile, &mut self.ctx, lane, id, body),
+                    None => drop_on_workers(&self.ctx.pool, body),
                 }
-                TileEvent::Glyphs { font_stack, range, id, result } => {
-                    self.ctx.glyphs.take_response(&font_stack, range, id, result);
+            }
+            TileEvent::LaneLost(lane) => {
+                self.ctx.jobs.lost(lane);
+                for source in self.sources.values_mut() {
+                    source.lane_lost(lane);
                 }
+            }
+            TileEvent::Remote(event) => {
+                if let Some(event) = self.ctx.jobs.receive(event) {
+                    self.take(event);
+                }
+            }
+            TileEvent::Glyphs { font_stack, range, id, result } => {
+                self.ctx.glyphs.take_response(&font_stack, range, id, result);
             }
         }
     }

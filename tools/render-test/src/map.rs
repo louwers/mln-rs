@@ -55,14 +55,11 @@ impl Impl {
             HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, queue, pool).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let post = {
-                let queue = queue.clone();
-                Arc::new(move |task: Box<dyn FnOnce() + Send>| queue.post(move |()| task()))
-            };
-            let workers = RemoteWorkers::new(post, Arc::clone(&registry), |replies| {
-                Box::new(ThreadWorkerInstances::new(count, Arc::clone(&registry), &replies))
+            let instances = Arc::clone(&registry);
+            let workers = RemoteWorkers::new(Arc::clone(&registry), move |replies| {
+                Box::new(ThreadWorkerInstances::new(count, instances, &replies))
             });
-            frontend.renderer().set_tile_workers(&workers);
+            frontend.renderer().set_tile_workers(workers);
         }
         let file_source = proxy_loader(&resource_options, pool);
         let mut map = Map::with_registry(

@@ -17,16 +17,12 @@
 // but the bytes; the render-test runner uses it
 // (`--tileWorkerCodec`) to run the suites through the codec.
 
-use std::cell::{Cell, OnceCell, RefCell};
-use std::rc::{Rc, Weak};
 use std::sync::{Arc, mpsc};
-use std::time::Duration;
 
-use mln_actor::LocalObject;
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
+use mln_util::serialization::payload::Payload;
 use mln_util::thread::Joined;
-use mln_util::time::Instant;
 
 use super::TileWorkerHost;
 use super::envelope::{self, Encoded};
@@ -55,58 +51,68 @@ pub trait WorkerInstances {
     }
 }
 
-/// Runs a task on the thread of the renderer that uses a `RemoteWorkers`,
-/// after the tasks posted before it. Called from any thread.
-pub type Post = Arc<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>;
-
-/// Delivers worker instances' replies to their `RemoteWorkers`, from any
-/// thread: each is handled by a task on the renderer's thread, in the
-/// order they were sent.
+/// Delivers worker instances' replies, from any thread, to the inbox of the
+/// tile store whose `RemoteWorkers` started them, in the order they were
+/// sent. The store hands them to its workers when it takes in what arrived.
 #[derive(Clone)]
 pub struct ReplySink {
-    post: Post,
-    workers: Arc<LocalObject<Weak<RemoteWorkers>>>,
+    inbox: InboxSender,
+    origin: Origin,
 }
 
 impl ReplySink {
     /// Delivers a reply of instance `instance`.
     pub fn send(&self, instance: usize, reply: Encoded) {
-        self.deliver(move |workers| workers.receive(instance, reply));
+        self.deliver(instance, Some(reply));
     }
 
     /// Reports that instance `instance` is gone, with every job it had.
     pub fn lost(&self, instance: usize) {
-        self.deliver(move |workers| workers.lose(Lane(instance)));
+        self.deliver(instance, None);
     }
 
-    fn deliver(&self, f: impl FnOnce(&RemoteWorkers) + Send + 'static) {
-        let workers = Arc::clone(&self.workers);
-        (self.post)(Box::new(move || {
-            if let Some(workers) = workers.get().and_then(|weak| weak.upgrade()) {
-                f(&workers);
-            }
-        }));
+    fn deliver(&self, instance: usize, reply: Option<Encoded>) {
+        let event = RemoteEvent { origin: self.origin.clone(), lane: Lane(instance), reply };
+        self.inbox.send(TileEvent::Remote(event));
     }
 }
 
-/// The map side of tile workers in other worker instances.
+/// Which `RemoteWorkers` a [`RemoteEvent`] is for: a store's inbox may still
+/// hold events of the workers it replaced.
+#[derive(Clone)]
+struct Origin(Arc<()>);
+
+impl Origin {
+    fn is(&self, other: &Origin) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// What a worker instance sent its `RemoteWorkers`: a reply, or `None` when
+/// the instance is lost.
+pub(crate) struct RemoteEvent {
+    origin: Origin,
+    lane: Lane,
+    reply: Option<Encoded>,
+}
+
+/// Makes the worker instances, given the sink for their replies.
+type Start = Box<dyn FnOnce(ReplySink) -> Box<dyn WorkerInstances>>;
+
+/// The map side of tile workers in other worker instances. The renderer
+/// given it owns it (`Renderer::set_tile_workers`), and its instances start
+/// then.
 pub struct RemoteWorkers {
-    state: RefCell<State>,
-    /// Whether each lane's instance takes jobs: not once lost without a
-    /// replacement.
-    live: Vec<Cell<bool>>,
-    /// Where the replies go: the inbox of the first renderer that submits.
-    inbox: OnceCell<InboxSender>,
-    /// The bytes sent and received for jobs.
-    bytes: Cell<(u64, u64)>,
-    /// The time this thread spent on replies since `take_receive_time`.
-    receive_time: Cell<Duration>,
-}
-
-struct State {
-    instances: Box<dyn WorkerInstances>,
-    lanes: Vec<RemoteLane>,
     registry: Arc<Registry>,
+    origin: Origin,
+    /// What makes the instances, until they start.
+    start: Option<Start>,
+    /// The instances, once started.
+    instances: Option<Box<dyn WorkerInstances>>,
+    /// Each instance's jobs; none until the instances start.
+    lanes: Vec<RemoteLane>,
+    /// The bytes sent and received for jobs.
+    bytes: (u64, u64),
 }
 
 /// One instance's jobs.
@@ -116,118 +122,85 @@ struct RemoteLane {
     /// Counts the instances the lane had: a reply of an earlier one can't be
     /// read with this one's tables.
     instance: u64,
+    /// Whether the lane's instance takes jobs: not once lost without a
+    /// replacement.
+    live: bool,
 }
 
 impl RemoteLane {
     /// The lane of its `instance`th instance, with tables of its own.
-    fn new(registry: &Arc<Registry>, instance: u64) -> Self {
-        RemoteLane { codec: MapCodec::new(Arc::clone(registry)), in_flight: HashSet::default(), instance }
+    fn new(registry: &Arc<Registry>, instance: u64, live: bool) -> Self {
+        RemoteLane { codec: MapCodec::new(Arc::clone(registry)), in_flight: HashSet::default(), instance, live }
     }
 }
 
 impl RemoteWorkers {
-    /// Workers in the instances `instances` creates, with the sink for their
-    /// replies. The replies are handled in the tasks that `post` runs on
-    /// this thread, the renderer's, which uses the workers. The jobs name
-    /// `registry`'s registrations, so each instance's host needs a registry
-    /// filled by the same calls.
+    /// Workers in the instances that `instances` makes, given the sink for
+    /// their replies, once a renderer's tiles take the workers. It must make
+    /// at least one. The jobs name `registry`'s registrations, so each
+    /// instance's host needs a registry filled by the same calls.
     pub fn new(
-        post: Post,
         registry: Arc<Registry>,
-        instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>,
-    ) -> Rc<Self> {
-        Rc::new_cyclic(|self_weak: &Weak<RemoteWorkers>| {
-            let workers = Arc::new(LocalObject::new(Weak::clone(self_weak)));
-            let instances = instances(ReplySink { post, workers });
-            let count = instances.count();
-            assert!(count > 0, "RemoteWorkers need a worker instance");
-            RemoteWorkers {
-                state: RefCell::new(State {
-                    instances,
-                    lanes: (0..count).map(|_| RemoteLane::new(&registry, 0)).collect(),
-                    registry,
-                }),
-                live: (0..count).map(|_| Cell::new(true)).collect(),
-                inbox: OnceCell::new(),
-                bytes: Cell::new((0, 0)),
-                receive_time: Cell::new(Duration::ZERO),
-            }
-        })
-    }
-
-    /// Port-only: the time this thread spent receiving replies and decoding
-    /// them, since the last call.
-    pub fn take_receive_time(&self) -> Duration {
-        self.receive_time.take()
-    }
-
-    fn send(&self, event: TileEvent) {
-        if let Some(inbox) = self.inbox.get() {
-            inbox.send(event);
+        instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances> + 'static,
+    ) -> Self {
+        RemoteWorkers {
+            registry,
+            origin: Origin(Arc::new(())),
+            start: Some(Box::new(instances)),
+            instances: None,
+            lanes: Vec::new(),
+            bytes: (0, 0),
         }
-    }
-
-    fn receive(&self, instance: usize, reply: Encoded) {
-        let start = Instant::now();
-        match envelope::read_reply_header(&reply.bytes) {
-            Some((id, times, body)) => self.job_reply(Lane(instance), id, times, body, reply.payloads),
-            None => self.lose(Lane(instance)),
-        }
-        self.receive_time.set(self.receive_time.get() + start.elapsed());
     }
 
     fn job_reply(
-        &self,
+        &mut self,
         lane: Lane,
         id: JobId,
         times: JobTimes,
         body: &[u8],
-        payloads: Vec<mln_util::serialization::payload::Payload>,
-    ) {
-        let body = {
-            let mut state = self.state.borrow_mut();
-            // A reply of an instance lost since isn't in flight any more.
-            let Some(remote) = state.lanes.get_mut(lane.0) else {
-                return;
-            };
-            if !remote.in_flight.remove(&id) {
-                return;
-            }
-            let size = body.len() + payloads.iter().map(mln_util::serialization::payload::Payload::len).sum::<usize>();
-            let (sent, received) = self.bytes.get();
-            self.bytes.set((sent, received + size as u64));
-            ReplyBody::Encoded { body: Encoded { bytes: body.to_vec(), payloads }, instance: remote.instance }
-        };
-        self.send(TileEvent::Reply { lane, id, body, times });
+        payloads: Vec<Payload>,
+    ) -> Option<TileEvent> {
+        // A reply of an instance lost since isn't in flight any more.
+        let remote = self.lanes.get_mut(lane.0)?;
+        if !remote.in_flight.remove(&id) {
+            return None;
+        }
+        let size = body.len() + payloads.iter().map(Payload::len).sum::<usize>();
+        self.bytes.1 += size as u64;
+        let body = ReplyBody::Encoded { body: Encoded { bytes: body.to_vec(), payloads }, instance: remote.instance };
+        Some(TileEvent::Reply { lane, id, body, times })
     }
 
     /// Gives up on the instance of `lane`: its jobs, the replies not yet
     /// read, and its shared tables, on both sides.
-    fn lose(&self, lane: Lane) {
-        {
-            let mut state = self.state.borrow_mut();
-            let state = &mut *state;
-            let (Some(remote), Some(live)) = (state.lanes.get_mut(lane.0), self.live.get(lane.0)) else {
-                return;
-            };
-            Log::error(Event::General, format!("Tile worker {} was lost", lane.0));
-            live.set(state.instances.replace(lane.0));
-            *remote = RemoteLane::new(&state.registry, remote.instance + 1);
-        }
-        self.send(TileEvent::LaneLost(lane));
+    fn lose(&mut self, lane: Lane) -> Option<TileEvent> {
+        let remote = self.lanes.get_mut(lane.0)?;
+        Log::error(Event::General, format!("Tile worker {} was lost", lane.0));
+        let live = self.instances.as_mut().is_some_and(|instances| instances.replace(lane.0));
+        *remote = RemoteLane::new(&self.registry, remote.instance + 1, live);
+        Some(TileEvent::LaneLost(lane))
     }
 }
 
-/// The renderer's handle on `RemoteWorkers`, as its `TileWorkers`.
-pub(crate) struct RemoteJobs(pub(crate) Rc<RemoteWorkers>);
+impl TileWorkers for RemoteWorkers {
+    fn connect(&mut self, inbox: &InboxSender) {
+        let Some(start) = self.start.take() else {
+            return;
+        };
+        let instances = start(ReplySink { inbox: inbox.clone(), origin: self.origin.clone() });
+        let count = instances.count();
+        assert!(count > 0, "RemoteWorkers need a worker instance");
+        self.lanes = (0..count).map(|_| RemoteLane::new(&self.registry, 0, true)).collect();
+        self.instances = Some(instances);
+    }
 
-impl TileWorkers for RemoteJobs {
     fn lanes(&self) -> usize {
-        self.0.live.len()
+        self.lanes.len()
     }
 
     fn capacity(&self, lane: Lane) -> usize {
-        if self.0.live.get(lane.0).is_some_and(Cell::get) { JOBS_PER_LANE } else { 0 }
+        if self.lanes.get(lane.0).is_some_and(|remote| remote.live) { JOBS_PER_LANE } else { 0 }
     }
 
     fn caches_data(&self) -> bool {
@@ -235,28 +208,34 @@ impl TileWorkers for RemoteJobs {
     }
 
     fn submit(&mut self, lane: Lane, run: Run, inbox: &InboxSender) {
-        let _ = self.0.inbox.set(inbox.clone());
-        let failed = {
-            let mut state = self.0.state.borrow_mut();
-            let state = &mut *state;
-            let Some(remote) = state.lanes.get_mut(lane.0) else {
-                return;
-            };
-            match remote.codec.encode_run(&run) {
-                Ok(request) => {
-                    remote.in_flight.insert(run.id);
-                    let (sent, received) = self.0.bytes.get();
-                    self.0.bytes.set((sent + request.len() as u64, received));
-                    state.instances.post(lane.0, request);
-                    None
-                }
-                Err(error) => Some(error),
-            }
+        let (Some(remote), Some(instances)) = (self.lanes.get_mut(lane.0), self.instances.as_mut()) else {
+            return;
         };
-        // As a worker reports a job it can't decode.
-        if let Some(error) = failed {
-            let body = ReplyBody::Result(JobResult::Failed(mln_util::error::Error::native(error)));
-            self.0.send(TileEvent::Reply { lane, id: run.id, body, times: JobTimes::default() });
+        match remote.codec.encode_run(&run) {
+            Ok(request) => {
+                remote.in_flight.insert(run.id);
+                self.bytes.0 += request.len() as u64;
+                instances.post(lane.0, request);
+            }
+            // As a worker reports a job it can't decode.
+            Err(error) => {
+                let body = ReplyBody::Result(JobResult::Failed(mln_util::error::Error::native(error)));
+                inbox.send(TileEvent::Reply { lane, id: run.id, body, times: JobTimes::default() });
+            }
+        }
+    }
+
+    fn receive(&mut self, event: RemoteEvent) -> Option<TileEvent> {
+        if !event.origin.is(&self.origin) {
+            return None;
+        }
+        let lane = event.lane;
+        let Some(reply) = event.reply else {
+            return self.lose(lane);
+        };
+        match envelope::read_reply_header(&reply.bytes) {
+            Some((id, times, body)) => self.job_reply(lane, id, times, body, reply.payloads),
+            None => self.lose(lane),
         }
     }
 
@@ -264,18 +243,14 @@ impl TileWorkers for RemoteJobs {
         match body {
             ReplyBody::Result(result) => Some(result),
             ReplyBody::Encoded { body, instance } => {
-                let start = Instant::now();
-                let mut state = self.0.state.borrow_mut();
-                let remote = state.lanes.get_mut(lane.0).filter(|remote| remote.instance == instance)?;
-                let result = remote.codec.decode_result(body);
-                self.0.receive_time.set(self.0.receive_time.get() + start.elapsed());
-                Some(result)
+                let remote = self.lanes.get_mut(lane.0).filter(|remote| remote.instance == instance)?;
+                Some(remote.codec.decode_result(body))
             }
         }
     }
 
     fn bytes(&self) -> (u64, u64) {
-        self.0.bytes.get()
+        self.bytes
     }
 }
 

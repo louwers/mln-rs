@@ -11,7 +11,6 @@ use mln_style::sources::geojson::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
-use mln_util::queue::Queue;
 
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
@@ -21,13 +20,12 @@ use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::TileWorkers;
 
 struct GeoJSONTileTest {
-    run_loop: Queue<()>,
     thread_pool: TaskGroup,
 }
 
 impl GeoJSONTileTest {
     fn new() -> Self {
-        GeoJSONTileTest { run_loop: Queue::new(), thread_pool: TaskGroup::new(&crate::tests::pool()) }
+        GeoJSONTileTest { thread_pool: TaskGroup::new(&crate::tests::pool()) }
     }
 
     /// Tiles `ids` of a GeoJSON source of `data`, whose jobs run on
@@ -50,17 +48,6 @@ impl GeoJSONTileTest {
 
     fn pool(&self) -> Box<dyn TileWorkers> {
         Box::new(crate::tile::tile_workers::PoolWorkers::new(self.thread_pool.clone(), 8))
-    }
-
-    /// Runs the loop and updates `tiles` until the tiles `ids` are complete.
-    fn settle(&self, tiles: &mut OneTile, ids: &[OverscaledTileID]) {
-        let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(30);
-        while !ids.iter().all(|id| tiles.tile_at(id).is_complete()) {
-            assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't complete");
-            self.run_loop.run_once(&mut ());
-            tiles.update();
-            std::thread::yield_now();
-        }
     }
 }
 
@@ -130,7 +117,7 @@ fn issue_7648() {
     let mut tiles = test.tiles(Arc::clone(&data), &[root()], test.pool(), false);
     let layer_properties = circle_layer_properties();
     tiles.set_style(&style(&[Arc::clone(&layer_properties)]));
-    test.settle(&mut tiles, &[root()]);
+    tiles.settle(&[root()]);
     assert!(tiles.changes() >= 1);
 
     tiles.with(|info, tile, ctx| info.load_geojson(tile, ctx, &data, false));
@@ -138,7 +125,6 @@ fn issue_7648() {
     // flickering.
     while !tiles.tile().is_complete() {
         assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
-        test.run_loop.run_once(&mut ());
         tiles.update();
     }
     assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
@@ -155,7 +141,7 @@ fn issue_9927() {
 
     let layer_properties = circle_layer_properties();
     tiles.set_style(&style(&[Arc::clone(&layer_properties)]));
-    test.settle(&mut tiles, &[root()]);
+    tiles.settle(&[root()]);
 
     assert!(tiles.tile().is_renderable());
     assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
@@ -188,8 +174,7 @@ fn evaluated_circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
 #[test]
 fn update_through_the_codec() {
     let test = GeoJSONTileTest::new();
-    let workers = crate::tests::tile::remote_workers(&test.run_loop, 2);
-    let workers = Box::new(crate::tile::worker_codec::RemoteJobs(workers));
+    let workers = Box::new(crate::tests::tile::remote_workers(2));
     let layer_properties = evaluated_circle_layer_properties();
     // Two tiles, so both instances get one.
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
@@ -197,7 +182,7 @@ fn update_through_the_codec() {
     for id in &ids {
         tiles.with_at(id, |info, tile, ctx| info.set_style(tile, ctx, &style(std::slice::from_ref(&layer_properties))));
     }
-    test.settle(&mut tiles, &ids);
+    tiles.settle(&ids);
     for id in &ids {
         assert!(tiles.tile_at(id).is_renderable());
         assert!(tiles.with_at(id, |_, tile, _| tile.layer_properties_updated(&layer_properties)));
@@ -206,6 +191,6 @@ fn update_through_the_codec() {
     let data = point_data();
     tiles.with_at(&ids[0], |info, tile, ctx| info.load_geojson(tile, ctx, &data, false));
     assert!(!tiles.tile_at(&ids[0]).is_complete());
-    test.settle(&mut tiles, &ids[..1]);
+    tiles.settle(&ids[..1]);
     assert!(tiles.tile_at(&ids[0]).is_renderable());
 }

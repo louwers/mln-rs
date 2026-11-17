@@ -98,17 +98,17 @@ fn missing_and_empty() {
     let id = tiles.id;
 
     tiles.set_image(&id, Some(png(16, 16)));
-    test.settle(&mut tiles, &[id]);
+    tiles.settle(&[id]);
     assert!(tiles.tile().is_renderable());
     assert!(image_size(&tiles, &id).is_some());
 
     tiles.set_missing(&id);
-    test.settle(&mut tiles, &[id]);
+    tiles.settle(&[id]);
     assert!(!tiles.tile().is_renderable());
     assert!(tiles.tile().contents.is_none());
 
     tiles.set_image(&id, None);
-    test.settle(&mut tiles, &[id]);
+    tiles.settle(&[id]);
     assert!(tiles.tile().is_renderable());
     assert!(matches!(tiles.tile().contents.as_deref(), Some(Contents::Empty)));
 }
@@ -125,7 +125,7 @@ fn decode_through_the_codec() {
         tiles.set_image(id, Some(png(size, size)));
         assert!(!tiles.tile_at(id).is_complete());
     }
-    test.settle(&mut tiles, &ids);
+    tiles.settle(&ids);
     for (id, size) in ids.iter().zip([16, 32]) {
         assert!(tiles.tile_at(id).is_renderable());
         assert_eq!(image_size(&tiles, id), Some(Size::new(size, size)));
@@ -133,7 +133,7 @@ fn decode_through_the_codec() {
     assert_eq!(tiles.errors(), Vec::<String>::new());
 
     tiles.set_image(&ids[0], Some(Arc::new(b"not an image".to_vec())));
-    test.settle(&mut tiles, &ids[..1]);
+    tiles.settle(&ids[..1]);
     assert_eq!(tiles.errors().len(), 1);
     // It keeps the image it had.
     assert!(tiles.tile_at(&ids[0]).is_renderable());

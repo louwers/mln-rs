@@ -229,7 +229,6 @@ fn set_mlt_tile_data() {
     loader.set_tile_data(root.canonical, (Some(data), TileDataFormat::Mlt));
     while !tiles.tile().is_complete() {
         test.local_pool.run_all();
-        test.run_loop.run_once(&mut ());
         tiles.update();
     }
 

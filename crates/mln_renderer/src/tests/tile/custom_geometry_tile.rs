@@ -162,7 +162,6 @@ fn invoke_tile_changed() {
     }]))));
     while !tiles.tile().is_complete() {
         test.local_pool.run_all();
-        test.run_loop.run_once(&mut ());
         tiles.update();
     }
     // Once present, the bucket should never "disappear", which would cause

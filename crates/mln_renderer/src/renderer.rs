@@ -190,7 +190,7 @@ impl Renderer {
     /// Port-only: runs the tiles' jobs, and the raster tiles' workers, in
     /// `workers` (by default on the renderer's pool). Set it before the
     /// first render so that every tile uses it.
-    pub fn set_tile_workers(&mut self, workers: &Rc<RemoteWorkers>) {
+    pub fn set_tile_workers(&mut self, workers: RemoteWorkers) {
         self.orchestrator.set_tile_workers(workers);
     }
 

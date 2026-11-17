@@ -22,11 +22,10 @@ use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::TileWorkers;
 
 /// The fixture shared by `RasterTileTest` and `RasterDEMTileTest`
-/// (`test/tile/raster_tile.test.cpp`, `raster_dem_tile.test.cpp`): a queue,
-/// which the remote workers' replies run on, the workers' pool, which the tiles' stores free on, and a pool without
+/// (`test/tile/raster_tile.test.cpp`, `raster_dem_tile.test.cpp`): the
+/// workers' pool, which the tiles' stores free on, and a pool without
 /// threads, which the test runs itself.
 pub(crate) struct RasterTileTest {
-    pub(crate) run_loop: mln_util::queue::Queue<()>,
     pub(crate) thread_pool: TaskGroup,
     pub(crate) local_pool: Pool,
 }
@@ -34,11 +33,7 @@ pub(crate) struct RasterTileTest {
 impl RasterTileTest {
     #[must_use]
     pub(crate) fn new() -> Self {
-        RasterTileTest {
-            run_loop: mln_util::queue::Queue::new(),
-            thread_pool: TaskGroup::new(&crate::tests::pool()),
-            local_pool: Pool::local(),
-        }
+        RasterTileTest { thread_pool: TaskGroup::new(&crate::tests::pool()), local_pool: Pool::local() }
     }
 
     /// Tile `id` of `kind`, whose jobs run on `workers`.
@@ -56,26 +51,10 @@ impl RasterTileTest {
     /// Tiles 1/0/0 and 1/1/0 of `kind`, whose jobs run in `count` worker
     /// instances on threads, reached only through the worker codec.
     pub(crate) fn remote_tiles(&self, kind: TileKind, count: usize) -> OneTile {
-        let workers = remote_workers(&self.run_loop, count);
-        let workers = Box::new(crate::tile::worker_codec::RemoteJobs(workers));
+        let workers = Box::new(remote_workers(count));
         let mut tiles = self.tiles(kind, OverscaledTileID::from_zxy(1, 0, 0), workers);
         tiles.add(OverscaledTileID::from_zxy(1, 1, 0));
         tiles
-    }
-
-    /// Runs the queue and updates `tiles` until the tiles `ids` are all
-    /// complete.
-    pub(crate) fn settle(&self, tiles: &mut OneTile, ids: &[OverscaledTileID]) {
-        let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            self.run_loop.run_once(&mut ());
-            tiles.update();
-            if ids.iter().all(|id| tiles.tile_at(id).is_complete()) {
-                return;
-            }
-            assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't complete");
-            std::thread::yield_now();
-        }
     }
 }
 
@@ -88,13 +67,10 @@ impl Default for RasterTileTest {
 /// Port-only: workers in `count` worker instances on threads, reached only
 /// through the worker codec.
 #[must_use]
-pub(crate) fn remote_workers(
-    queue: &mln_util::queue::Queue<()>,
-    count: usize,
-) -> std::rc::Rc<crate::tile::worker_codec::RemoteWorkers> {
+pub(crate) fn remote_workers(count: usize) -> crate::tile::worker_codec::RemoteWorkers {
     use crate::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
     let registry = crate::Registry::with_builtins();
-    RemoteWorkers::new(crate::tests::post_to(queue), Arc::clone(&registry), |replies| {
+    RemoteWorkers::new(Arc::clone(&registry), move |replies| {
         Box::new(ThreadWorkerInstances::new(count, registry, &replies))
     })
 }

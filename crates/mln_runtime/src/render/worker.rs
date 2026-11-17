@@ -239,8 +239,6 @@ struct Gfx {
     registry: Arc<Registry>,
     /// The font family the renderer draws CJK glyphs in (`Init`).
     local_font_family: Option<String>,
-    /// The session's work, where the renderer's tile workers reply.
-    queue: SessionQueue,
     /// Where the renderer's background work runs (`Init`).
     pool: Pool,
 }
@@ -250,9 +248,8 @@ impl Gfx {
     /// renderer's, which the renderer makes when it first draws.
     const OBJECTS: u32 = 2;
 
-    /// A renderer on `init`'s target, which reports to `events`. Its tile
-    /// workers' replies run on `queue`.
-    fn new(init: Init, events: &RendererEvents, queue: &SessionQueue) -> Result<Gfx, Error> {
+    /// A renderer on `init`'s target, which reports to `events`.
+    fn new(init: Init, events: &RendererEvents) -> Result<Gfx, Error> {
         let Init {
             target,
             size,
@@ -290,18 +287,8 @@ impl Gfx {
             &pool,
         );
         renderer.set_tile_cache_enabled(tile_cache_enabled);
-        set_tile_workers(&mut renderer, &registry, queue);
-        Ok(Gfx {
-            renderer,
-            target,
-            backend,
-            glyph_cache,
-            font_face_engine,
-            registry,
-            local_font_family,
-            queue: queue.clone(),
-            pool,
-        })
+        set_tile_workers(&mut renderer, &registry);
+        Ok(Gfx { renderer, target, backend, glyph_cache, font_face_engine, registry, local_font_family, pool })
     }
 
     /// Whether the target can take a frame now: its window, if any, has an
@@ -331,7 +318,7 @@ impl Gfx {
         );
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
-        set_tile_workers(&mut renderer, &self.registry, &self.queue);
+        set_tile_workers(&mut renderer, &self.registry);
         self.renderer = renderer;
     }
 }
@@ -344,23 +331,15 @@ fn invalidate(events: &RendererEvents) -> Waker {
 }
 
 /// In the browser, puts the renderer's tile workers in the instance's Web
-/// Workers, which lay out with `registry` and whose replies run on `queue`.
-/// Elsewhere they stay on the background threads.
-fn set_tile_workers(renderer: &mut Renderer, registry: &Arc<Registry>, queue: &SessionQueue) {
+/// Workers, which lay out with `registry`. Elsewhere they stay on the
+/// background threads.
+fn set_tile_workers(renderer: &mut Renderer, registry: &Arc<Registry>) {
     #[cfg(target_family = "wasm")]
-    {
-        let queue = queue.downgrade();
-        let post: mln_renderer::tile::worker_codec::Post = Arc::new(move |task| {
-            if let Some(queue) = queue.upgrade() {
-                queue.post(move |_| task());
-            }
-        });
-        if let Some(workers) = crate::web::tile_workers(post, registry) {
-            renderer.set_tile_workers(&workers);
-        }
+    if let Some(workers) = crate::web::tile_workers(registry) {
+        renderer.set_tile_workers(workers);
     }
     #[cfg(not(target_family = "wasm"))]
-    let _ = (renderer, registry, queue);
+    let _ = (renderer, registry);
 }
 
 /// A host's frame demand on its way, and the last command sent before it.
@@ -590,7 +569,7 @@ impl Worker {
             TargetInit::Borrowed { ring, .. } => Some(ring.clone()),
             _ => None,
         };
-        let built = attaching.then(|| Gfx::new(init, &renderer_events, &shared.queue));
+        let built = attaching.then(|| Gfx::new(init, &renderer_events));
         let gfx = match built {
             Some(Ok(mut gfx)) => {
                 gfx.renderer.set_event_queue(Some(renderer_events.clone()));

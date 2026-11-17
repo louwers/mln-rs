@@ -50,7 +50,7 @@ use crate::tile::inbox::Waker;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile::tile_workers::PoolWorkers;
-use crate::tile::worker_codec::{RemoteJobs, RemoteWorkers};
+use crate::tile::worker_codec::RemoteWorkers;
 use crate::tile_parameters::TileParameters;
 use crate::update_parameters::UpdateParameters;
 
@@ -316,8 +316,8 @@ impl RenderOrchestrator {
 
     /// Port-only: runs the tiles' jobs in `workers` (by default on the
     /// thread pool). The jobs in flight elsewhere run again there.
-    pub(crate) fn set_tile_workers(&mut self, workers: &Rc<RemoteWorkers>) {
-        self.tile_store.set_workers(Box::new(RemoteJobs(Rc::clone(workers))));
+    pub(crate) fn set_tile_workers(&mut self, workers: RemoteWorkers) {
+        self.tile_store.set_workers(Box::new(workers));
     }
 
     /// Sets the queue the orchestrator and its parts push their events to.

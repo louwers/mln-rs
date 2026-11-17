@@ -102,17 +102,17 @@ fn missing_and_empty() {
     let id = tiles.id;
 
     tiles.set_image(&id, Some(png(16, 16)));
-    test.settle(&mut tiles, &[id]);
+    tiles.settle(&[id]);
     assert!(tiles.tile().is_renderable());
     assert!(dem(&tiles, &id).is_some());
 
     tiles.set_missing(&id);
-    test.settle(&mut tiles, &[id]);
+    tiles.settle(&[id]);
     assert!(!tiles.tile().is_renderable());
     assert!(dem(&tiles, &id).is_none());
 
     tiles.set_image(&id, None);
-    test.settle(&mut tiles, &[id]);
+    tiles.settle(&[id]);
     assert!(tiles.tile().is_renderable());
     assert!(dem(&tiles, &id).is_none());
 }
@@ -129,7 +129,7 @@ fn decode_and_backfill_through_the_codec() {
     for id in &ids {
         tiles.set_image(id, Some(png(16, 16)));
     }
-    test.settle(&mut tiles, &ids);
+    tiles.settle(&ids);
     for id in &ids {
         assert!(tiles.tile_at(id).is_renderable());
         let bucket = dem(&tiles, id).expect("a bucket");
@@ -148,7 +148,7 @@ fn decode_and_backfill_through_the_codec() {
 
     // The DEMData constructor's error crosses as the tile's.
     tiles.set_image(&ids[1], Some(png(16, 8)));
-    test.settle(&mut tiles, &ids[1..]);
+    tiles.settle(&ids[1..]);
     assert_eq!(tiles.errors(), ["raster-dem tiles must be square."]);
     assert!(tiles.tile_at(&ids[1]).is_renderable());
 }

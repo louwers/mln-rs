@@ -17,7 +17,7 @@ use mln_util::pool::TaskGroup;
 
 use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::{DataKey, DiscoveryMemo, JobId, JobResult, JobTimes, Reply, Run, run_job};
-use crate::tile::worker_codec::Encoded;
+use crate::tile::worker_codec::{Encoded, RemoteEvent};
 
 /// One worker the jobs go to: one Web Worker, or the whole thread pool.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -37,6 +37,9 @@ pub(crate) enum ReplyBody {
 
 /// The map side of the tile workers.
 pub(crate) trait TileWorkers {
+    /// Called once, before anything else, with the inbox of the store that
+    /// takes the workers.
+    fn connect(&mut self, _inbox: &InboxSender) {}
     fn lanes(&self) -> usize;
     /// The most jobs `lane` takes at once: none for a lane that is gone.
     fn capacity(&self, lane: Lane) -> usize;
@@ -48,6 +51,11 @@ pub(crate) trait TileWorkers {
     /// Starts `run` on `lane`; its reply, or the loss of the lane, goes to
     /// `inbox`.
     fn submit(&mut self, lane: Lane, run: Run, inbox: &InboxSender);
+    /// Reads what a remote worker instance sent: the reply or lost lane it
+    /// makes, if any. Events of other workers make none.
+    fn receive(&mut self, _event: RemoteEvent) -> Option<TileEvent> {
+        None
+    }
     /// The result of a reply of `lane`; `None` for one whose worker instance
     /// was lost since, which can't be read any more.
     fn decode(&mut self, _lane: Lane, body: ReplyBody) -> Option<JobResult> {
@@ -169,13 +177,16 @@ struct JobStats {
 }
 
 impl Jobs {
-    pub(crate) fn new(workers: Box<dyn TileWorkers>) -> Self {
+    /// The jobs of `workers`, whose replies go to `inbox`.
+    pub(crate) fn new(mut workers: Box<dyn TileWorkers>, inbox: &InboxSender) -> Self {
+        workers.connect(inbox);
         Jobs { workers, in_flight: HashMap::default(), hints: HashMap::default(), stats: JobStats::default() }
     }
 
     /// Replaces the workers. The jobs in flight on the previous ones are
     /// lost: their replies, if they come, find no job of these workers.
-    pub(crate) fn set_workers(&mut self, workers: Box<dyn TileWorkers>) {
+    pub(crate) fn set_workers(&mut self, mut workers: Box<dyn TileWorkers>, inbox: &InboxSender) {
+        workers.connect(inbox);
         self.workers = workers;
         self.in_flight.clear();
         self.hints.clear();
@@ -197,6 +208,12 @@ impl Jobs {
         self.stats.discover += times.discover;
         self.stats.build += times.build;
         true
+    }
+
+    /// Hands the workers what a remote worker instance sent; returns the
+    /// reply or lost lane it makes, if any.
+    pub(crate) fn receive(&mut self, event: RemoteEvent) -> Option<TileEvent> {
+        self.workers.receive(event)
     }
 
     /// Forgets `lane`'s jobs and the data it had: its worker is gone.

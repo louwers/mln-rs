@@ -15,7 +15,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_renderer::Registry;
-use mln_renderer::tile::worker_codec::{Post, RemoteWorkers};
+use mln_renderer::tile::worker_codec::RemoteWorkers;
 use mln_storage::OnlineFileSource;
 use mln_storage::network_status::NetworkStatus;
 use mln_util::hash::HashMap;
@@ -99,12 +99,11 @@ pub(crate) fn run_session_now(id: SessionId) {
     }
 }
 
-/// Tile workers for a renderer whose thread runs what `post` posts, in the
-/// instance's tile worker Web Workers, whose jobs name `registry`'s
-/// registrations, or `None` where none start, which leaves the tiles' jobs
-/// on the runtime's pool, in the pump's slices. A Web Worker that panics is
-/// replaced by a new one.
-pub(crate) fn tile_workers(post: Post, registry: &Arc<Registry>) -> Option<Rc<RemoteWorkers>> {
+/// Tile workers for a renderer, in the instance's tile worker Web Workers,
+/// whose jobs name `registry`'s registrations, or `None` where none start,
+/// which leaves the tiles' jobs on the runtime's pool, in the pump's slices.
+/// A Web Worker that panics is replaced by a new one.
+pub(crate) fn tile_workers(registry: &Arc<Registry>) -> Option<RemoteWorkers> {
     let ports = match tile_workers::connect() {
         Ok(ports) => ports,
         Err(error) => {
@@ -124,5 +123,5 @@ pub(crate) fn tile_workers(post: Post, registry: &Arc<Registry>) -> Option<Rc<Re
             .inspect_err(|error| Log::error(Event::General, format!("No tile worker took {instance}'s place: {error}")))
             .ok()
     };
-    Some(tile_workers::workers(post, ports, Arc::clone(registry), |_| {}, fatal, respawn))
+    Some(tile_workers::workers(ports, Arc::clone(registry), |_| {}, fatal, respawn))
 }

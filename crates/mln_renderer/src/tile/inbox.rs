@@ -16,6 +16,7 @@ use mln_util::font_stack::FontStack;
 use crate::text::glyph_store::GlyphResult;
 use crate::tile::job::{JobId, JobTimes, TileKey};
 use crate::tile::tile_workers::{Lane, ReplyBody};
+use crate::tile::worker_codec::RemoteEvent;
 
 /// Asks the renderer for an update, from any thread.
 pub(crate) type Waker = Arc<dyn Fn() + Send + Sync>;
@@ -31,6 +32,8 @@ pub(crate) enum TileEvent {
     Reply { lane: Lane, id: JobId, body: ReplyBody, times: JobTimes },
     /// The worker of `lane` is gone, with every job it had.
     LaneLost(Lane),
+    /// What a remote worker instance sent, for the store's workers to read.
+    Remote(RemoteEvent),
     /// The answer to the glyph store's request `id`, for a glyph range. It
     /// applies only while the range still waits for that request.
     Glyphs { font_stack: FontStack, range: GlyphRange, id: u64, result: GlyphResult },

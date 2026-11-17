@@ -48,12 +48,6 @@ mod tile_store_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 
-/// Posts to `queue` what remote tile workers deliver.
-pub(crate) fn post_to(queue: &mln_util::queue::Queue<()>) -> crate::tile::worker_codec::Post {
-    let queue = queue.clone();
-    std::sync::Arc::new(move |task: Box<dyn FnOnce() + Send>| queue.post(move |()| task()))
-}
-
 /// A pool for a test's background work.
 pub(crate) fn pool() -> mln_util::pool::Pool {
     mln_util::pool::Pool::new(4).expect("a pool")
@@ -293,6 +287,24 @@ impl OneTile {
     /// One update of the store.
     pub(crate) fn update(&mut self) -> bool {
         update(&mut self.store)
+    }
+
+    /// Updates the store until the tiles `ids` are all complete, updating at
+    /// least once.
+    ///
+    /// # Panics
+    ///
+    /// If they don't complete within 30 seconds.
+    pub(crate) fn settle(&mut self, ids: &[mln_tile_id::OverscaledTileID]) {
+        let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            self.update();
+            if ids.iter().all(|id| self.tile_at(id).is_complete()) {
+                return;
+            }
+            assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't complete");
+            std::thread::yield_now();
+        }
     }
 
     /// Whether the tile shows a layout.

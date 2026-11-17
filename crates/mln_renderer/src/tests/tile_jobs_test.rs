@@ -20,7 +20,6 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::hash::HashSet;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
-use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use parking_lot::Mutex;
@@ -38,7 +37,7 @@ use crate::tile::inbox::{Inbox, InboxSender, TileEvent};
 use crate::tile::job::{DataInput, Job, JobId, JobResult, JobTimes, LayoutJob, Reply, Run};
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::{InlineWorkers, Lane, PoolWorkers, ReplyBody, TileWorkers};
-use crate::tile::worker_codec::{Encoded, RemoteJobs, RemoteWorkers, ReplySink, TileWorkerHost, WorkerInstances};
+use crate::tile::worker_codec::{Encoded, RemoteWorkers, ReplySink, TileWorkerHost, WorkerInstances};
 
 /// Workers whose jobs run when the test says so, or get the replies the
 /// test makes up.
@@ -152,7 +151,6 @@ pub(super) fn points() -> TileData {
 }
 
 struct Test {
-    run_loop: Queue<()>,
     thread_pool: TaskGroup,
     tile: OneTile,
     asked: Rc<Asked>,
@@ -161,15 +159,8 @@ struct Test {
 impl Test {
     /// A tile whose jobs run on `workers`, with a loaded sprite of `images`.
     fn new(workers: Box<dyn TileWorkers>, images: &[&str]) -> Self {
-        Self::on(|_| workers, images)
-    }
-
-    /// A tile whose jobs run on the workers `workers` makes on the test's
-    /// loop.
-    fn on(workers: impl FnOnce(&Queue<()>) -> Box<dyn TileWorkers>, images: &[&str]) -> Self {
-        let run_loop = Queue::new();
         let thread_pool = TaskGroup::new(&crate::tests::pool());
-        let mut store = tile_store(&thread_pool, workers(&run_loop));
+        let mut store = tile_store(&thread_pool, workers);
         let asked = Rc::new(Asked::default());
         store.images_mut().set_observer(Some(Rc::<Asked>::clone(&asked)));
         for id in images {
@@ -178,7 +169,7 @@ impl Test {
         store.images_mut().set_loaded(true);
         let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));
         let tile = OneTile::new(store, TileKind::Geometry, id, MapMode::Static);
-        Test { run_loop, thread_pool, tile, asked }
+        Test { thread_pool, tile, asked }
     }
 
     /// The renderer's update.
@@ -217,7 +208,6 @@ impl Test {
 
 impl Drop for Test {
     fn drop(&mut self) {
-        self.run_loop.run_once(&mut ());
         self.thread_pool.wait();
     }
 }
@@ -555,12 +545,12 @@ impl Instances {
     }
 
     /// `RemoteWorkers` over these instances.
-    fn workers(&self, run_loop: &Queue<()>) -> Box<dyn TileWorkers> {
-        let workers = RemoteWorkers::new(crate::tests::post_to(run_loop), Registry::with_builtins(), |sink| {
-            self.0.borrow_mut().sink = Some(sink);
-            Box::new(self.clone())
-        });
-        Box::new(RemoteJobs(workers))
+    fn workers(&self) -> Box<dyn TileWorkers> {
+        let instances = self.clone();
+        Box::new(RemoteWorkers::new(Registry::with_builtins(), move |sink| {
+            instances.0.borrow_mut().sink = Some(sink);
+            Box::new(instances)
+        }))
     }
 
     /// Runs the frames that wait for `instance`, and sends their replies.
@@ -612,42 +602,34 @@ impl WorkerInstances for Instances {
     }
 }
 
-impl Test {
-    /// The renderer's update, after the replies and losses the loop got.
-    fn update_after(&mut self) -> bool {
-        while self.run_loop.run_once(&mut ()) {}
-        self.update()
-    }
-}
-
 /// A Web Worker that dies while it discovers a tile's dependencies, and
 /// another while it lays the tile out with them: each time the tile's job
 /// runs again, on a new worker with new tables, and the tile lays out.
 #[test]
 fn a_worker_lost_during_discovery_and_during_a_resume() {
     let instances = Instances::new(1);
-    let mut test = Test::on(|run_loop| instances.workers(run_loop), &["marker"]);
+    let mut test = Test::new(instances.workers(), &["marker"]);
     test.load(&[icons(&json!("marker"), 1.0)]);
     test.update();
     assert_eq!(instances.queued(0), 1);
 
     // During discovery.
     instances.kill(0);
-    test.update_after();
+    test.update();
     assert_eq!(instances.0.borrow().started, 2);
     assert_eq!(instances.queued(0), 1, "the first try runs again, on the new worker");
     instances.step(0);
-    test.update_after();
+    test.update();
     assert_eq!(instances.queued(0), 1, "the resume");
 
     // During the resume.
     instances.kill(0);
-    test.update_after();
+    test.update();
     assert_eq!(instances.queued(0), 1, "the first try runs again");
     assert!(!test.shows_layout());
     for _ in 0..2 {
         instances.step(0);
-        test.update_after();
+        test.update();
     }
     assert!(test.shows_layout() && test.is_complete());
 }
@@ -656,19 +638,43 @@ fn a_worker_lost_during_discovery_and_during_a_resume() {
 #[test]
 fn an_unreadable_reply_loses_its_worker() {
     let instances = Instances::new(2);
-    let mut test = Test::on(|run_loop| instances.workers(run_loop), &[]);
+    let mut test = Test::new(instances.workers(), &[]);
     test.load(&[layer(json!({"id": "dots", "type": "circle"}))]);
     test.update();
     let lane = (0..2).find(|lane| instances.queued(*lane) == 1).expect("a lane with the job");
     instances.0.borrow().sink.as_ref().unwrap().send(lane, Encoded::from(vec![0, 1, 2]));
-    test.update_after();
+    test.update();
     assert_eq!(instances.0.borrow().started, 3);
     let queued: usize = (0..2).map(|lane| instances.queued(lane)).sum();
     assert_eq!(queued, 1, "the job runs again");
     for lane in 0..2 {
         instances.step(lane);
     }
-    test.update_after();
+    test.update();
+    assert!(test.shows_layout());
+}
+
+/// What the instances of replaced workers send, a reply or their loss,
+/// reaches only those workers, not the ones in their place.
+#[test]
+fn replaced_workers_reach_no_other_workers() {
+    let (old, new) = (Instances::new(1), Instances::new(1));
+    let mut test = Test::new(old.workers(), &[]);
+    test.load(&[layer(json!({"id": "dots", "type": "circle"}))]);
+    test.update();
+    assert_eq!(old.queued(0), 1);
+
+    test.tile.store.set_workers(new.workers());
+    test.update();
+    assert_eq!(new.queued(0), 1, "the job runs again on the new workers");
+    old.step(0);
+    old.kill(0);
+    test.update();
+    assert_eq!(new.0.borrow().started, 1, "the old instance's loss isn't the new one's");
+    assert!(!test.shows_layout(), "nor is its reply");
+
+    new.step(0);
+    test.update();
     assert!(test.shows_layout());
 }
 
@@ -774,27 +780,22 @@ fn raster_decodes_apply_in_any_order() {
 /// its data, which it sends again to the worker in its place.
 #[test]
 fn a_worker_lost_during_a_decode() {
-    let run_loop = Queue::new();
     let pool = TaskGroup::new(&crate::tests::pool());
     let instances = Instances::new(1);
     let kind = TileKind::Dem(mln_util::tileset::RasterEncoding::Mapbox);
-    let mut tiles = raster_tiles(&pool, instances.workers(&run_loop), kind);
-    let update = |tiles: &mut OneTile| {
-        while run_loop.run_once(&mut ()) {}
-        tiles.update();
-    };
+    let mut tiles = raster_tiles(&pool, instances.workers(), kind);
     let id = tiles.id;
     tiles.set_image(&id, Some(png(16, 16)));
-    update(&mut tiles);
+    tiles.update();
     assert_eq!(instances.queued(0), 1);
 
     instances.kill(0);
-    update(&mut tiles);
+    tiles.update();
     assert_eq!(instances.0.borrow().started, 2);
     assert_eq!(instances.queued(0), 1, "the decode runs again, on the new worker");
     assert!(!tiles.tile().is_complete());
     instances.step(0);
-    update(&mut tiles);
+    tiles.update();
     assert!(tiles.tile().is_complete() && tiles.tile().is_renderable());
     let Some(Contents::Dem(bucket)) = tiles.tile().contents.as_deref() else {
         panic!("a DEM");
