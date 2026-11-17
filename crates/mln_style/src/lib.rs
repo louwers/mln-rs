@@ -14,9 +14,9 @@
 //! - [`Style::apply`] makes an [`Edit`], the only way to change a style; the
 //!   JSON entry points (`add_layer_json`, `set_layer_property_json`, ...)
 //!   parse and then apply one.
-//! - [`Parts::between`] says in O(1) which parts two versions differ in, and
-//!   [`diff::StyleDiff::between`] what a renderer has to redo for each layer,
-//!   source and image to go from one version to another.
+//! - [`Style::is_same_version`] says in O(1) whether two versions are the
+//!   same, and [`diff::StyleDiff::between`] what a renderer has to redo for
+//!   each layer, source and image to go from one version to another.
 //! - Loading isn't here: the map's loader fetches documents, sprites and
 //!   source descriptions, and [`Style::from_json`] parses a document. A
 //!   style holds its sources as values ([`SourceList`]), and what their
@@ -78,7 +78,7 @@ mod style_json;
 pub mod style_property;
 pub mod transition_options;
 
-pub use edit::{Edit, Parts};
+pub use edit::Edit;
 pub use layer::Layer;
 pub use layer_list::LayerList;
 pub use layer_type::LayerTypeInfo;

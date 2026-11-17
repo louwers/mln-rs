@@ -5,7 +5,7 @@ use mln_conversion::Convertible;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 
-use crate::edit::{Edit, Parts};
+use crate::edit::Edit;
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
 use crate::image;
@@ -54,7 +54,7 @@ pub(crate) type ImageList = Vec<Arc<image::Impl>>;
 /// projection, global state and the document's own members) sit behind
 /// their own `Arc`s, so a clone is cheap and an edit copies only the part it
 /// changes. Two versions whose part `Arc`s are the same pointer have the
-/// same part, which [`Parts::between`](crate::edit::Parts::between) and
+/// same part, which [`is_same_version`](Self::is_same_version) and
 /// [`StyleDiff::between`](crate::diff::StyleDiff::between) read.
 #[derive(Clone)]
 pub struct Style {
@@ -449,11 +449,10 @@ impl Style {
         Ok(())
     }
 
-    /// The parts whose `Arc`s differ from `other`'s (see [`Parts::between`]).
-    pub(crate) fn parts_differing_from(&self, other: &Style) -> Parts {
-        fn same<T: ?Sized>(a: &Arc<T>, b: &Arc<T>) -> bool {
-            Arc::ptr_eq(a, b)
-        }
+    /// Whether `other` is the same version as `self`: every part is the same
+    /// `Arc`, and the transitions are equal. O(1): it walks nothing.
+    #[must_use]
+    pub fn is_same_version(&self, other: &Style) -> bool {
         fn same_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
             match (a, b) {
                 (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -461,25 +460,22 @@ impl Style {
                 _ => false,
             }
         }
-        let mut parts = Parts::default();
-        parts.insert_if(Parts::LAYERS, !same(&self.layers, &other.layers));
-        parts.insert_if(Parts::SOURCES, !same(&self.sources, &other.sources));
-        parts.insert_if(Parts::IMAGES, !same(&self.images, &other.images));
-        parts.insert_if(Parts::LIGHT, !same(&self.light, &other.light));
-        parts.insert_if(Parts::SKY, !same_option(self.sky.as_ref(), other.sky.as_ref()));
-        parts.insert_if(Parts::PROJECTION, !same(&self.projection, &other.projection));
-        parts.insert_if(Parts::TRANSITION, self.transition != other.transition);
-        parts.insert_if(Parts::GLOBAL_STATE, !same(&self.global_state, &other.global_state));
-        let document = same(&self.registry, &other.registry)
-            && same(&self.json, &other.json)
-            && same(&self.name, &other.name)
+        Arc::ptr_eq(&self.layers, &other.layers)
+            && Arc::ptr_eq(&self.sources, &other.sources)
+            && Arc::ptr_eq(&self.images, &other.images)
+            && Arc::ptr_eq(&self.light, &other.light)
+            && same_option(self.sky.as_ref(), other.sky.as_ref())
+            && Arc::ptr_eq(&self.projection, &other.projection)
+            && self.transition == other.transition
+            && Arc::ptr_eq(&self.global_state, &other.global_state)
+            && Arc::ptr_eq(&self.registry, &other.registry)
+            && Arc::ptr_eq(&self.json, &other.json)
+            && Arc::ptr_eq(&self.name, &other.name)
             && self.default_camera == other.default_camera
-            && same(&self.sprites, &other.sprites)
-            && same(&self.glyph_url, &other.glyph_url)
+            && Arc::ptr_eq(&self.sprites, &other.sprites)
+            && Arc::ptr_eq(&self.glyph_url, &other.glyph_url)
             && same_option(self.font_faces.as_ref(), other.font_faces.as_ref())
-            && same(&self.global_state_defaults, &other.global_state_defaults);
-        parts.insert_if(Parts::DOCUMENT, !document);
-        parts
+            && Arc::ptr_eq(&self.global_state_defaults, &other.global_state_defaults)
     }
 
     /// Calls `f` with a copy of the layer `id`, and keeps the copy if `f`

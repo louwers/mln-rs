@@ -17,7 +17,7 @@ use mln_renderer::{
 };
 use mln_storage::{FileSource, Loader, ResourceOptions};
 use mln_style::conversion::{Convertible, convert_source};
-use mln_style::{Edit, Parts, Source, Style, StyleRegistry};
+use mln_style::{Edit, Source, Style, StyleRegistry};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
@@ -822,15 +822,14 @@ impl Map {
     /// sources, shares a new projection with the transform and publishes an
     /// update. Returns whether anything changed.
     fn react_to_change(&mut self, before: Arc<Style>) -> bool {
-        let parts = Parts::between(&before, &self.style);
-        if parts.is_empty() {
+        if before.is_same_version(&self.style) {
             self.style = before;
             return false;
         }
-        if parts.contains(Parts::SOURCES) {
+        if !Arc::ptr_eq(before.get_sources(), self.style.get_sources()) {
             self.watch_sources();
         }
-        if parts.contains(Parts::PROJECTION) {
+        if !Arc::ptr_eq(before.get_projection(), self.style.get_projection()) {
             self.share_projection_with_transform();
         }
         self.on_update();

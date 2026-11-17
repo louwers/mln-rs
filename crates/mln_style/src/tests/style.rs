@@ -10,7 +10,7 @@ use mln_util::tileset::PartialTileset;
 use mln_util::{Color, LatLng};
 
 use super::util::{FixtureLog, new_layer, parse_json};
-use crate::edit::{Edit, Parts};
+use crate::edit::Edit;
 use crate::expression::Functions;
 use crate::layer_type::LayerStyle;
 use crate::layers::Line;
@@ -199,7 +199,7 @@ fn image_removal_changes_the_images() {
 
     let before = style.clone();
     edit(&mut style, Edit::RemoveImage("image".to_owned()));
-    assert_eq!(Parts::IMAGES, Parts::between(&before, &style));
+    assert_eq!(["images"], *parts_that_differ(&before, &style));
     assert!(style.get_images().is_empty());
 }
 
@@ -231,16 +231,16 @@ fn transition_options_change_the_transition() {
     edit(&mut style, Edit::SetTransition(transition(true)));
     assert_eq!(Some(Duration::from_millis(123)), style.get_transition_options().duration);
     assert_eq!(Some(Duration::from_millis(45)), style.get_transition_options().delay);
-    assert_eq!(Parts::TRANSITION, Parts::between(&before, &style));
+    assert_eq!(["transition"], *parts_that_differ(&before, &style));
 
     let before = style.clone();
     edit(&mut style, Edit::SetTransition(transition(false)));
     assert!(!style.get_transition_options().enable_placement_transitions);
-    assert_eq!(Parts::TRANSITION, Parts::between(&before, &style));
+    assert_eq!(["transition"], *parts_that_differ(&before, &style));
 
     let before = style.clone();
     edit(&mut style, Edit::SetTransition(transition(false)));
-    assert!(Parts::between(&before, &style).is_empty());
+    assert!(before.is_same_version(&style));
 }
 
 #[test]
@@ -278,7 +278,7 @@ fn layer_changes_leave_earlier_versions_unchanged() {
     assert_eq!("Layer a already exists", error.message);
     let added = style.clone();
     assert_eq!(["a", "c", "b"], *ids(added.get_layer_list()));
-    assert_eq!(Parts::LAYERS, Parts::between(&loaded, &added));
+    assert_eq!(["layers"], *parts_that_differ(&loaded, &added));
 
     edit(&mut style, Edit::RemoveLayer("a".to_owned()));
     assert_eq!(["c", "b"], *ids(style.get_layer_list()));
@@ -583,11 +583,11 @@ fn sources_keep_the_order_they_were_added_in() {
     edit(&mut style, Edit::SetSourceCommon { id: "b".to_owned(), common });
     assert_eq!(["c", "b", "a"], *ids_of(style.get_sources()));
     assert!(style.get_source("b").unwrap().common().volatile);
-    assert_eq!(Parts::SOURCES, Parts::between(&before, &style));
+    assert_eq!(["sources"], *parts_that_differ(&before, &style));
     // The same members change nothing.
     let after = style.clone();
     edit(&mut style, Edit::SetSourceCommon { id: "b".to_owned(), common });
-    assert!(Parts::between(&after, &style).is_empty());
+    assert!(after.is_same_version(&style));
 
     edit(&mut style, Edit::RemoveSource("b".to_owned()));
     assert_eq!(["c", "a"], *ids_of(style.get_sources()));
@@ -597,27 +597,50 @@ fn sources_keep_the_order_they_were_added_in() {
 }
 
 #[test]
-fn parts_name_what_differs() {
+fn an_edit_replaces_only_the_part_it_changes() {
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background"}]}"#);
-    let mut case = |edit_to_make: Edit, part: Parts| {
+    let mut case = |edit_to_make: Edit, parts: &[&str]| {
         let before = style.clone();
         edit(&mut style, edit_to_make);
-        assert_eq!(part, Parts::between(&before, &style));
+        assert_eq!(parts, parts_that_differ(&before, &style));
     };
-    case(Edit::SetLayerZoomRange { layer: "bg".to_owned(), min: 1.0, max: 2.0 }, Parts::LAYERS);
-    case(Edit::AddSource(vector_source("s")), Parts::SOURCES);
-    case(Edit::AddImage(make_image("i")), Parts::IMAGES);
-    case(Edit::SetLight(crate::light::Light::new()), Parts::LIGHT);
-    case(Edit::SetSky(Some(Sky::new())), Parts::SKY);
-    case(Edit::SetProjection(Projection::new()), Parts::PROJECTION);
-    case(Edit::SetTransition(TransitionOptions::new(Some(Duration::from_millis(1)), None, true)), Parts::TRANSITION);
-    case(Edit::SetGlobalState { name: "k".to_owned(), value: Value::Bool(true) }, Parts::GLOBAL_STATE);
-    case(Edit::SetGlobalStateDefaults(crate::expression::GlobalStateMap::new()), Parts::GLOBAL_STATE | Parts::DOCUMENT);
+    case(Edit::SetLayerZoomRange { layer: "bg".to_owned(), min: 1.0, max: 2.0 }, &["layers"]);
+    case(Edit::AddSource(vector_source("s")), &["sources"]);
+    case(Edit::AddImage(make_image("i")), &["images"]);
+    case(Edit::SetLight(crate::light::Light::new()), &["light"]);
+    case(Edit::SetSky(Some(Sky::new())), &["sky"]);
+    case(Edit::SetProjection(Projection::new()), &["projection"]);
+    case(Edit::SetTransition(TransitionOptions::new(Some(Duration::from_millis(1)), None, true)), &["transition"]);
+    case(Edit::SetGlobalState { name: "k".to_owned(), value: Value::Bool(true) }, &["global state"]);
+    case(
+        Edit::SetGlobalStateDefaults(crate::expression::GlobalStateMap::new()),
+        &["global state", "global state defaults"],
+    );
     let other =
         Style::from_json(style.registry(), r#"{"version":8,"name":"other","sources":{},"layers":[]}"#, None).unwrap();
-    assert!(Parts::between(&style, &other).contains(Parts::DOCUMENT | Parts::LAYERS));
-    assert!(Parts::between(&style, &style.clone()).is_empty());
+    assert!(!style.is_same_version(&other));
+    assert!(style.is_same_version(&style.clone()));
+}
+
+/// The parts of `a` and `b` whose `Arc`s differ, and the transition if it
+/// differs.
+fn parts_that_differ(a: &Style, b: &Style) -> Vec<&'static str> {
+    let sky = |style: &Style| style.get_sky().map(Arc::as_ptr);
+    [
+        ("layers", Arc::ptr_eq(a.get_layer_list(), b.get_layer_list())),
+        ("sources", Arc::ptr_eq(a.get_sources(), b.get_sources())),
+        ("images", Arc::ptr_eq(a.get_images(), b.get_images())),
+        ("light", Arc::ptr_eq(a.get_light(), b.get_light())),
+        ("sky", sky(a) == sky(b)),
+        ("projection", Arc::ptr_eq(a.get_projection(), b.get_projection())),
+        ("transition", a.get_transition_options() == b.get_transition_options()),
+        ("global state", Arc::ptr_eq(a.get_global_state(), b.get_global_state())),
+        ("global state defaults", Arc::ptr_eq(a.get_global_state_defaults(), b.get_global_state_defaults())),
+    ]
+    .into_iter()
+    .filter_map(|(part, same)| (!same).then_some(part))
+    .collect()
 }
 
 fn ids_of(sources: &crate::SourceList) -> Vec<String> {

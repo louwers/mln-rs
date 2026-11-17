@@ -152,7 +152,7 @@ fn a_description_of_a_load_the_source_moved_on_from_changes_nothing() {
         result: description,
     };
     style.apply(edit).unwrap();
-    assert!(crate::Parts::between(&before, &style).is_empty());
+    assert!(before.is_same_version(&style));
 }
 
 // gtest: Source.RasterDEMInlineZoomOverridesTileJSON

@@ -1,5 +1,5 @@
-//! Changes to a style, as values: [`Edit`], which [`Style::apply`] makes,
-//! and [`Parts`], which says which parts differ between two versions.
+//! Changes to a style, as values: [`Edit`], which
+//! [`Style::apply`](crate::Style::apply) makes.
 
 use std::sync::Arc;
 
@@ -17,10 +17,9 @@ use crate::sky::Sky;
 use crate::source_type::{
     Described, ErasedDescription, Source, SourceCommon, SourceData, SourceInstance, StyleSourceType,
 };
-use crate::style::Style;
 use crate::transition_options::TransitionOptions;
 
-/// A change to a style, which [`Style::apply`] makes.
+/// A change to a style, which [`Style::apply`](crate::Style::apply) makes.
 #[expect(clippy::large_enum_variant, reason = "an edit is made and applied at once, not stored")]
 pub enum Edit {
     /// Adds `layer` below the layer `before`, or on top when `before` is
@@ -138,54 +137,5 @@ impl Edit {
             Ok(change(&mut data).then(|| source.with_data(data)))
         };
         Edit::UpdateSource { id: id.into(), update: Box::new(update) }
-    }
-}
-
-/// The parts of a style that differ between two versions.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub struct Parts(u16);
-
-impl Parts {
-    pub const LAYERS: Parts = Parts(1 << 0);
-    pub const SOURCES: Parts = Parts(1 << 1);
-    pub const IMAGES: Parts = Parts(1 << 2);
-    pub const LIGHT: Parts = Parts(1 << 3);
-    pub const SKY: Parts = Parts(1 << 4);
-    pub const PROJECTION: Parts = Parts(1 << 5);
-    pub const TRANSITION: Parts = Parts(1 << 6);
-    pub const GLOBAL_STATE: Parts = Parts(1 << 7);
-    /// The document's own members: its JSON, name, default camera, sprites,
-    /// glyph URL and font faces, and the global state's defaults.
-    pub const DOCUMENT: Parts = Parts(1 << 8);
-
-    /// The parts whose `Arc`s differ between `old` and `new`, and the
-    /// transition, compared by value. O(1): it walks nothing.
-    #[must_use]
-    pub fn between(old: &Style, new: &Style) -> Parts {
-        old.parts_differing_from(new)
-    }
-
-    #[must_use]
-    pub fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-
-    /// Whether `self` has every part of `other`.
-    #[must_use]
-    pub fn contains(self, other: Parts) -> bool {
-        self.0 & other.0 == other.0
-    }
-
-    pub(crate) fn insert_if(&mut self, part: Parts, differs: bool) {
-        if differs {
-            self.0 |= part.0;
-        }
-    }
-}
-
-impl std::ops::BitOr for Parts {
-    type Output = Parts;
-    fn bitor(self, other: Parts) -> Parts {
-        Parts(self.0 | other.0)
     }
 }
