@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::ops::Range;
-use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use mln_gfx::gpu::validation::{
@@ -56,7 +55,7 @@ struct Texture {
 
 /// A compiled program, and what it reads from its bindings.
 struct Shader {
-    program: Rc<ShaderProgram>,
+    program: ShaderProgram,
     reads: Vec<ShaderBinding>,
 }
 
@@ -698,7 +697,7 @@ impl Gpu for WebGpu {
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let program = shader_program::compile(self.device.device(), self.index_table.layout(), key)?;
         let reads = shader_bindings(&program)?;
-        Ok(self.shaders.insert(Shader { program: Rc::new(program), reads }))
+        Ok(self.shaders.insert(Shader { program, reads }))
     }
 
     fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
