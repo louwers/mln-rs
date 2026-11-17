@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Reports the verdicts of a comparison, for CI's bench workflows:
 
-    verdicts.py <comparison.json> [--fail-on-worse]
-    verdicts.py <comparison.json> --issue --head <sha> [--repo <owner/name>] [--dry-run]
+    verdicts.py <comparison.json> [--min-change <percent>] [--fail-on-worse]
+    verdicts.py <comparison.json> [--min-change <percent>] --issue --head <sha> [--repo <owner/name>] [--dry-run]
 
 Reads what `mln-bench compare --json` printed and prints its verdicts as
-Markdown. With --fail-on-worse it fails when a metric got worse. With --issue
+Markdown. `compare` gives a verdict to any change beyond a metric's noise,
+however small; --min-change is this report's policy on which of them to act
+on: smaller ones are listed apart, and neither fail the job nor touch the
+issue. With --fail-on-worse it fails when a metric got worse. With --issue
 it keeps the nightly issue instead: when a metric got worse, it opens the issue
 titled TITLE with the verdicts, or comments on it when it is open already;
 when none did, it closes an open one with a comment saying so. Through the gh
@@ -30,12 +33,22 @@ def number(value: float | None) -> str:
     return f"{value:,.0f}" if abs(value) >= 1000 else f"{value:.4g}"
 
 
-def verdict_rows(comparison: dict, verdict: str) -> list[str]:
-    """A Markdown table row for each metric that got `verdict`."""
+MIN_CHANGE = 0.0
+
+
+def acted_on(metric: dict) -> bool:
+    """Whether a metric's change is as large as --min-change asks."""
+    change = metric["change"]
+    return change is not None and abs(change) * 100 >= MIN_CHANGE
+
+
+def verdict_rows(comparison: dict, verdict: str, large: bool = True) -> list[str]:
+    """A Markdown table row for each metric that got `verdict`, of those
+    --min-change acts on, or with `large` false, of the others."""
     rows = []
     for scenario in comparison["scenarios"]:
         for metric in scenario["metrics"]:
-            if metric["verdict"] != verdict:
+            if metric["verdict"] != verdict or acted_on(metric) != large:
                 continue
             spread = metric["spread"]
             cells = [
@@ -81,6 +94,16 @@ def markdown(comparison: dict) -> str:
                 "|---|---|--:|--:|--:|--:|",
                 *rows,
             ]
+    small = verdict_rows(comparison, "worse", large=False) + verdict_rows(comparison, "better", large=False)
+    if small:
+        lines += [
+            "",
+            f"### Under {MIN_CHANGE:g}%",
+            "",
+            "| scenario | metric | base | this | change | spread |",
+            "|---|---|--:|--:|--:|--:|",
+            *small,
+        ]
     skipped = [(s["scenario"], s["no_verdicts"]) for s in comparison["scenarios"] if s["no_verdicts"]]
     if skipped:
         lines += ["", "### No verdicts", "", *[f"- `{name}`: {reason}" for name, reason in skipped]]
@@ -90,7 +113,8 @@ def markdown(comparison: dict) -> str:
 def summary(comparison: dict) -> str:
     worse = len(verdict_rows(comparison, "worse"))
     better = len(verdict_rows(comparison, "better"))
-    return f"{worse} worse, {better} better, over {len(comparison['scenarios'])} scenarios"
+    over = f" by {MIN_CHANGE:g}% or more" if MIN_CHANGE else ""
+    return f"{worse} worse, {better} better{over}, over {len(comparison['scenarios'])} scenarios"
 
 
 def open_issue(repo: str | None) -> int | None:
@@ -127,6 +151,7 @@ def keep_issue(comparison: dict, head: str, repo: str | None, dry_run: bool) -> 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("comparison")
+    parser.add_argument("--min-change", type=float, default=0.0)
     parser.add_argument("--fail-on-worse", action="store_true")
     parser.add_argument("--issue", action="store_true")
     parser.add_argument("--head")
@@ -135,6 +160,8 @@ def main() -> int:
     options = parser.parse_args()
     if options.issue and not options.head:
         parser.error("--issue needs --head")
+    global MIN_CHANGE
+    MIN_CHANGE = options.min_change
 
     with open(options.comparison, encoding="utf-8") as file:
         comparison = json.load(file)

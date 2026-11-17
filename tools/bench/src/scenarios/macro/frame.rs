@@ -1,8 +1,6 @@
 //! Frames of a loaded map as its camera pans, turns and tilts, as during a
 //! gesture or an animation over tiles already there.
 
-use std::time::Instant;
-
 use mln_bench_workload::paths::{FRAMES, Path};
 use mln_map::{CameraOptions, MapMode};
 
@@ -81,22 +79,18 @@ fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> Cam
     let drawn = map.frames();
     let objects = map.gpu_objects_created();
     let work = map.background_work();
-    let mut times = Vec::with_capacity(FRAMES);
     for frame in 0..FRAMES {
         map.jump(&camera(frame));
-        let start = Instant::now();
         bench.measure(|| {
             map.draw_frame();
             map.wait_for_workers();
         });
-        times.push(start.elapsed());
     }
     bench.count("background_work", map.background_work() - work);
     assert_eq!(map.frames() - drawn, FRAMES as u64, "one frame per camera");
-    bench.per("frame", FRAMES as u64);
+    bench.per_part("frame");
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
     bench.count("gpu_objects", map.gpu_objects_created() - objects);
-    bench.percentiles("frame", &times);
     if let Some(path) = &bench.image {
         map.save_image(path);
     }

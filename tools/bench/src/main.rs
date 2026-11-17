@@ -29,9 +29,7 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 const USAGE: &str = "usage:
   mln-bench list [--filter <s>]... [--json]
   mln-bench run [--filter <s>]... [--images <dir>] [--json]
-  mln-bench compare <ref> [--filter <s>]... [--rounds <n>] [--threshold <percent>]
-                          [--instructions-threshold <percent>]
-                          [--time-threshold <percent>] [--max-load <n>] [--json]
+  mln-bench compare <ref> [--filter <s>]... [--rounds <n>] [--max-load <n>] [--json]
   mln-bench fixtures [--from <dir>]
 
 --filter keeps the scenarios whose names contain one of the strings.
@@ -39,11 +37,11 @@ run and compare run each scenario in a process of its own (mln-bench exec).
 --images writes the last image each scenario drew to <dir>, as PNG files
 named after the scenarios.
 compare builds this checkout's harness against <ref> and compares the two
-(tools/bench/README.md). A count gets a verdict when it moves by over
---threshold (0.25% by default), or --instructions-threshold for instructions
-(1%), and by over twice its spread. --rounds runs each side n times, and
-gives the wall time a verdict when a rank test finds a change over
---time-threshold (2%). Rounds run alone among the machine's benchmark runs,
+(tools/bench/README.md). A count gets a verdict when it moves by over twice
+its noise: how far it moves between runs, and for instructions between
+builds of the same code laid out differently. --rounds runs each side n
+times, and gives the wall time a verdict when a rank test finds it changed.
+Rounds run alone among the machine's benchmark runs,
 and not at all while its load average is over --max-load (a quarter of its
 cores by default).
 fixtures installs the snapshot that tools/bench/fixtures.json names, from its
@@ -74,9 +72,6 @@ struct Options {
     filters: Vec<String>,
     json: bool,
     rounds: Option<usize>,
-    threshold: f64,
-    instructions_threshold: f64,
-    time_threshold: f64,
     max_load: Option<f64>,
     from: Option<PathBuf>,
     images: Option<PathBuf>,
@@ -90,9 +85,6 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         filters: Vec::new(),
         json: false,
         rounds: None,
-        threshold: 0.25,
-        instructions_threshold: 1.0,
-        time_threshold: 2.0,
         max_load: None,
         from: None,
         images: None,
@@ -107,9 +99,6 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--filter" => options.filters.push(value()?),
             "--json" => options.json = true,
             "--rounds" => options.rounds = Some(value()?.parse().map_err(|_| "--rounds needs a number")?),
-            "--threshold" => options.threshold = number(value()?)?,
-            "--instructions-threshold" => options.instructions_threshold = number(value()?)?,
-            "--time-threshold" => options.time_threshold = number(value()?)?,
             "--max-load" => options.max_load = Some(number(value()?)?),
             "--from" => options.from = Some(PathBuf::from(value()?)),
             "--images" => options.images = Some(PathBuf::from(value()?)),
@@ -181,9 +170,6 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 base: (*base).to_owned(),
                 filters: options.filters,
                 rounds: options.rounds,
-                threshold: options.threshold,
-                instructions_threshold: options.instructions_threshold,
-                time_threshold: options.time_threshold,
                 max_load: options.max_load.unwrap_or_else(host::default_max_load),
             })?;
             if options.json {

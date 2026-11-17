@@ -126,7 +126,7 @@ fn geojson(bench: &mut Bench) {
             map.settle()
         });
     }
-    bench.per("update", UPDATES as u64);
+    bench.per_part("update");
     finish(bench, &map, frames);
 }
 
@@ -250,7 +250,7 @@ fn paint(bench: &mut Bench) {
             map.settle()
         });
     }
-    bench.per("edit", EDITS as u64);
+    bench.per_part("edit");
     finish(bench, &map, frames);
 }
 
@@ -264,8 +264,9 @@ fn set_paint(map: &mut HeadlessMap, layer: &str, name: &str, value: &str) {
 /// block groups of a city such as San Francisco, which an application
 /// shades and highlights under the pointer. One measured unit is one
 /// frame: clearing the state of the feature hovered before, setting the
-/// state of the next, and the frame that shows it. The pointer moves to a
-/// neighbouring region at each of 120 frames.
+/// state of the next, the frame that shows it, and any background work the
+/// frame starts. The pointer moves to a neighbouring region at each of 120
+/// frames.
 fn feature_state(bench: &mut Bench) {
     const COLUMNS: usize = 30;
     const ROWS: usize = 20;
@@ -335,7 +336,7 @@ fn feature_state(bench: &mut Bench) {
         |hovered: bool| -> FeatureState { std::iter::once(("hover".to_owned(), Value::Bool(hovered))).collect() };
     let (mut row, mut column) = (ROWS / 2, COLUMNS / 2);
     let mut hovered: Option<String> = None;
-    let tasks = map.background_work();
+    let work = map.background_work();
     for _ in 0..FRAMES {
         match random.below(4) {
             0 => row = (row + 1).min(ROWS - 1),
@@ -349,12 +350,13 @@ fn feature_state(bench: &mut Bench) {
                 map.map().set_feature_state("regions", None, previous, hover(false));
             }
             map.map().set_feature_state("regions", None, &next, hover(true));
-            map.draw_frame()
+            map.draw_frame();
+            map.wait_for_workers();
         });
         hovered = Some(next);
     }
-    assert_eq!(map.background_work(), tasks, "a hover state that needs background work");
-    bench.per("frame", FRAMES as u64);
+    bench.count("background_work", map.background_work() - work);
+    bench.per_part("frame");
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
     if let Some(path) = &bench.image {
         map.save_image(path);

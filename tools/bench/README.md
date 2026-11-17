@@ -212,17 +212,27 @@ is left out):
 A scenario adds its own counts and times, such as `frames`, `frames_incomplete`
 (frames drawn with tiles missing), `tile_requests`, `gpu_buffers` (the bytes of
 the GPU's vertex and index buffers), `gpu_objects` (the textures and buffers the
-renderer made) or frame-time percentiles. A scenario that repeats a unit of
-work, such as a frame or a tile, also reports `instructions`, `allocations` and
-`allocated` per unit, such as `instructions_per_frame`, as context.
+renderer made) or `background_work` (the times a frame started work off the
+frame, such as laying out a tile). A scenario that repeats a unit of work, such
+as a frame or a tile, also reports `instructions`, `allocations` and `allocated`
+per unit, such as `instructions_per_frame`, as context.
+
+A user feels the costliest frames, not the average one: the frame that crosses
+the antimeridian, or the one where a tile arrives. So a scenario whose measured
+parts are each one unit of a user's experience (a frame, a tile, an edit) also
+reports how the units spread, with no need to know which are costly:
+`instructions`, `allocations` and `allocated` of the median unit, the 90th
+percentile and the costliest, such as `allocations_per_frame_max`, which are
+counts and get verdicts, and the same of `wall`, as context.
 
 How closely a count repeats depends on what it counts. Allocations and bytes
 repeat exactly in most scenarios. Instructions move by a few hundredths of a
 percent between runs of one binary, but also with where the binary's code lies,
-which an edit anywhere can change: by a few tenths of a percent in most
-scenarios, and by a few percent in some. Counts that depend on how several
-threads interleave, such as every count of `macro/load/runtime`, move by more.
-Times depend on the machine and its load.
+which an edit anywhere can change: by a tenth of a percent in most scenarios,
+and by a few percent, up to ten, in some. That is real, the binary runs those
+instructions, but it doesn't come from what the edit does. Counts that depend on
+how several threads interleave, such as every count of `macro/load/runtime`,
+move by more. Times depend on the machine and its load.
 
 ## Comparing
 
@@ -252,13 +262,16 @@ later ones none. The ref is also built a second time with the harness's
 `layout-probe` feature, which adds code that never runs and so moves the rest,
 and each scenario runs once on that build.
 
-A count's spread is the larger range of either side's runs; for instructions,
-also how far the layout probe moved them. A count gets a verdict when this
-checkout's median moves from the ref's by more than twice its spread and by more
-than a threshold: `--threshold` (0.25% by default), or
-`--instructions-threshold` (1%) for instructions. A scenario whose counts get a
-verdict runs twice more on this checkout, and the verdicts come from all three
-runs. Per-unit counts get no verdicts of their own.
+A count's noise (its spread in the report) is the larger range of either side's
+runs; for instructions, also the most that the layout probe of any ref compared
+so far moved them, since one build of moved code shows too little of how far
+they move. A count gets a verdict when this checkout's median moves from the
+ref's by more than twice its noise, however small the change: a count that
+repeats exactly gets one for any change, and the report shows how large it is.
+Whether a change that size matters is the reader's call, or a CI workflow's
+policy (`verdicts.py --min-change`). A scenario whose counts get a verdict runs
+twice more on this checkout, and the verdicts come from all three runs. Per-unit
+means get no verdicts of their own.
 
 ### Times
 
@@ -266,10 +279,9 @@ Without `--rounds`, times show what one run of each side took, as context.
 `--rounds <n>` runs each side n times, interleaved ABBA so that changes in the
 machine's load hit both alike. Each scenario's `wall` time then gets a verdict
 when a two-sided Mann-Whitney U test, Holm-adjusted over every scenario
-compared, gives p < 0.05 and the median moves by more than `--time-threshold`
-(2% by default); its other times are context. The fewest rounds that can give a
-verdict grow with the scenarios compared: 4 for one scenario, 7 for all of them.
-Compare times only within one configuration.
+compared, gives p < 0.05; its other times are context. The fewest rounds that
+can give a verdict grow with the scenarios compared: 4 for one scenario, 7 for
+all of them. Compare times only within one configuration.
 
 Rounds need a quiet machine, and several sessions often measure on one. Every
 `mln-bench` that measures holds one lock of the user's: runs that judge only
@@ -289,12 +301,14 @@ no verdicts.
 ### In CI
 
 GitHub's runners have no GPU, so CI's two workflows compare on lavapipe, with
-one run per side: only counts get verdicts there. `bench`, run by hand on a
-branch, compares it with a base and fails on a worse verdict. `bench-nightly`
-compares main with main a day earlier and keeps the issue "Nightly benchmarks:
-main got worse": a night with a worse verdict opens it or comments on it, and a
-night without one closes it. Both report through `verdicts.py`, which reads
-`compare --json`.
+one run per side: only counts get verdicts there, and the runners count no
+instructions. Both act only on changes of 1% or more
+(`verdicts.py --min-change`), and list smaller verdicts apart. `bench`, run by
+hand on a branch, compares it with a base and fails on a worse verdict.
+`bench-nightly` compares main with main a day earlier and keeps the issue
+"Nightly benchmarks: main got worse": a night with a worse verdict opens it or
+comments on it, and a night without one closes it. Both report through
+`verdicts.py`, which reads `compare --json`.
 
 ## Reading a report
 
@@ -308,11 +322,10 @@ micro/expression/evaluate/liberty (counts: 3 base runs, 3 of this checkout)
 ```
 
 `base` is the ref's median, `this` this checkout's, `change` the difference as a
-share of the base. `spread` is a count's run-to-run range as a share of the
-base, or with rounds the tested time's adjusted p-value. `WORSE` and `better`
-are verdicts; a blank is no verdict, and `(context)` marks a metric that gets
-none. The last line counts the verdicts; comparing a commit with itself gives
-none.
+share of the base. `spread` is a count's noise as a share of the base, or with
+rounds the tested time's adjusted p-value. `WORSE` and `better` are verdicts; a
+blank is no verdict, and `(context)` marks a metric that gets none. The last
+line counts the verdicts; comparing a commit with itself gives none.
 
 ## Adding a scenario
 
@@ -350,14 +363,15 @@ fn evaluate(bench: &mut Bench) {
 
 `Bench::measure` runs the part that counts; call it once, or once per frame to
 leave work between frames out. Measuring a part costs thousands of instructions
-of its own, so a scenario of many small steps measures them as one part.
-`count`, `bytes`, `time` and `percentiles` declare the scenario's own metrics,
-and `per` the unit of work it repeats. A macro scenario sets `bench.gpu` to the
-device it drew on, and writes its last image to `bench.image` when that is set,
-outside its measured parts. What more than one scenario uses goes in
-`src/support/`: the headless map (`support::map`), the fixtures
-(`support::fixtures`) and seeded data (`support::random`); what more than one
-micro scenario uses, such as the tiles they read, in `src/scenarios/micro/`.
+of its own, so a scenario of many small steps measures them as one part. `count`
+and `bytes` declare the scenario's own metrics, and `per` the unit of work it
+repeats, or `per_part` that each measured part is one unit, which adds how the
+units spread. A macro scenario sets `bench.gpu` to the device it drew on, and
+writes its last image to `bench.image` when that is set, outside its measured
+parts. What more than one scenario uses goes in `src/support/`: the headless map
+(`support::map`), the fixtures (`support::fixtures`) and seeded data
+(`support::random`); what more than one micro scenario uses, such as the tiles
+they read, in `src/scenarios/micro/`.
 
 ### Reaching a library's internal stages
 

@@ -2,8 +2,6 @@
 //! its renderer, reused for each tile, drawing tiles it hasn't drawn
 //! before as still images and reading them back.
 
-use std::time::Instant;
-
 use mln_map::{CameraOptions, MapMode};
 use mln_util::size::Size;
 
@@ -64,19 +62,15 @@ fn street(bench: &mut Bench) {
     let mut map = HeadlessMap::open(bench, &fixtures, TILE, MapMode::Tile, &style, &camera(6, x, y));
     map.render_still();
 
-    let mut times = Vec::with_capacity(tiles.len());
     let mut image = None;
     for &(z, x, y) in &tiles {
-        let start = Instant::now();
         image = Some(bench.measure(|| {
             map.jump(&camera(z, x, y));
             map.render_still()
         }));
-        times.push(start.elapsed());
     }
-    bench.per("tile", tiles.len() as u64);
+    bench.per_part("tile");
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
-    bench.percentiles("tile", &times);
     if let (Some(path), Some(image)) = (&bench.image, image) {
         save_png(&image, path);
     }

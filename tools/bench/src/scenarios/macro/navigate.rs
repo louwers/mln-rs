@@ -2,7 +2,6 @@
 //! around it, with the tiles it needs arriving while it flies.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use mln_map::{CameraOptions, MapMode};
 use mln_util::geo::LatLng;
@@ -93,27 +92,18 @@ fn street(bench: &mut Bench) {
     latency.set_delay(LATENCY);
     let incomplete = map.frames_incomplete();
     let requests = latency.tile_requests();
-    let mut times = Vec::with_capacity(FRAMES);
-    let mut largest = Some(0);
     for frame in 1..=FRAMES {
         map.jump(&camera(frame));
-        let start = Instant::now();
         bench.measure(|| {
             latency.tick();
             map.wait_for_workers();
             map.draw_frame()
         });
-        times.push(start.elapsed());
-        largest = largest.zip(bench.last_instructions()).map(|(largest, frame)| frame.max(largest));
     }
-    bench.per("frame", FRAMES as u64);
+    bench.per_part("frame");
     bench.count("frames_incomplete", map.frames_incomplete() - incomplete);
     bench.count("tile_requests", latency.tile_requests() - requests);
-    if let Some(largest) = largest {
-        bench.count("instructions_largest_frame", largest);
-    }
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
-    bench.percentiles("frame", &times);
     // The image shows where the flight ends, once everything has arrived.
     if let Some(path) = &bench.image {
         latency.set_delay(0);

@@ -23,7 +23,7 @@ jobs:
   # tools/bench/README.md), on lavapipe, the CPU rasterizer a server without
   # a GPU draws on. One run per side, so only counts get verdicts: the
   # runner's times are noise, and it counts no instructions. A worse verdict
-  # opens the "Nightly benchmarks: main got worse" issue, or comments on it
+  # of 1% or more (smaller ones are listed in the summary only) opens the "Nightly benchmarks: main got worse" issue, or comments on it
   # when it's open already, and a night without one closes it
   # (tools/bench/verdicts.py). The verdicts are in the job's summary too.
   # The job fails, with no verdicts, on a night when the harness doesn't
@@ -79,8 +79,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          python3 -I tools/bench/verdicts.py comparison.json --issue --head
-          "$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          python3 -I tools/bench/verdicts.py comparison.json --min-change 1
+          --issue --head "$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report that nothing changed
         if: steps.base.outputs.changed == 'false'

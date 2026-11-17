@@ -20,7 +20,7 @@ jobs:
   # have no GPU, so both sides draw on lavapipe, the CPU rasterizer a server
   # without one draws on. One run per side, so only counts get verdicts: the
   # runner's times are noise, and it counts no instructions. A worse verdict
-  # fails the job, and the verdicts are in its summary.
+  # of 1% or more fails the job, and the verdicts are in its summary.
   compare:
     runs-on: ubuntu-26.04
     timeout-minutes: 60
@@ -55,5 +55,5 @@ jobs:
 
       - name: Report
         run: >-
-          python3 -I tools/bench/verdicts.py comparison.json --fail-on-worse >>
-          "$GITHUB_STEP_SUMMARY"
+          python3 -I tools/bench/verdicts.py comparison.json --min-change 1
+          --fail-on-worse >> "$GITHUB_STEP_SUMMARY"

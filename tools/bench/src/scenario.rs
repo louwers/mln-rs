@@ -81,6 +81,15 @@ pub(crate) struct Metric {
 pub(crate) const STANDARD_METRICS: [&str; 7] =
     ["instructions", "allocations", "allocated", "peak_heap", "retained_heap", "wall", "cpu"];
 
+/// What one measured part counted, and how long it took.
+#[derive(Clone, Copy)]
+struct Part {
+    instructions: Option<u64>,
+    allocations: u64,
+    allocated: u64,
+    wall: Duration,
+}
+
 /// What a scenario measures through: the measured parts of its run, its own
 /// metrics, and what the environment adds that the runner can't see.
 #[derive(Default)]
@@ -90,8 +99,11 @@ pub(crate) struct Bench {
     measuring: bool,
     /// `None` once a part ran where the counters couldn't be read.
     instructions: Option<u64>,
-    /// What the last part retired, where the counters could be read.
-    last_instructions: Option<u64>,
+    /// What each measured part counted, in order.
+    parts: Vec<Part>,
+    /// Whether each measured part is one unit of the scenario's work
+    /// ([`Bench::per_part`]).
+    per_part: bool,
     allocations: u64,
     allocated: u64,
     peak_heap: i64,
@@ -143,22 +155,21 @@ impl Bench {
         let baseline = self.baseline.unwrap_or_default();
 
         self.instructions = self.instructions.zip(instructions).map(|(total, part)| total + part);
-        self.last_instructions = instructions;
-        self.allocations += end.allocations - heap.allocations;
-        self.allocated += end.allocated - heap.allocated;
+        let part = Part {
+            instructions,
+            allocations: end.allocations - heap.allocations,
+            allocated: end.allocated - heap.allocated,
+            wall,
+        };
+        self.parts.push(part);
+        self.allocations += part.allocations;
+        self.allocated += part.allocated;
         self.peak_heap = self.peak_heap.max(meter::peak() - baseline);
         self.retained_heap = end.live - baseline;
         self.wall += wall;
         self.cpu += cpu;
         self.measuring = false;
         result
-    }
-
-    /// The instructions the last measured part retired, where the system
-    /// counts them: for a scenario that reports its largest part, such as
-    /// its costliest frame, as well as the total.
-    pub(crate) fn last_instructions(&self) -> Option<u64> {
-        self.last_instructions
     }
 
     /// Declares a count of the scenario's own, such as frames drawn.
@@ -171,24 +182,6 @@ impl Bench {
         self.add(name, MetricKind::Count, Unit::Bytes, value as f64);
     }
 
-    /// Declares a time of the scenario's own.
-    pub(crate) fn time(&mut self, name: &str, value: Duration) {
-        self.add(name, MetricKind::Time, Unit::Ms, ms(value));
-    }
-
-    /// Declares the 50th, 90th and 99th percentiles of `samples`, such as
-    /// frame times, as `<name>_p50`, `<name>_p90` and `<name>_p99`.
-    pub(crate) fn percentiles(&mut self, name: &str, samples: &[Duration]) {
-        assert!(!samples.is_empty(), "{name}: no samples");
-        let mut sorted = samples.to_vec();
-        sorted.sort();
-        for percentile in [50, 90, 99] {
-            // The nearest rank.
-            let rank = (sorted.len() * percentile).div_ceil(100).max(1);
-            self.time(&format!("{name}_p{percentile}"), sorted[rank - 1]);
-        }
-    }
-
     /// Declares that the measured parts did `n` units of the scenario's
     /// work, such as frames or tiles, called `unit`: the run reports
     /// `instructions`, `allocations` and `allocated` per unit too, as
@@ -197,6 +190,21 @@ impl Bench {
         assert!(self.per.is_none(), "per() twice");
         assert!(n > 0, "{unit}: no units");
         self.per = Some((unit.to_owned(), n));
+    }
+
+    /// Declares that each measured part was one unit of the scenario's
+    /// work, such as a frame, a tile or an edit, called `unit`: as
+    /// [`per`](Self::per) does, and the run reports how the units' counts
+    /// and times spread too, as `<metric>_per_<unit>_p50`, `_p90` and `_max`
+    /// (nearest rank). The costliest units, such as a frame that crosses the
+    /// antimeridian or the one where a tile arrives, show there however few
+    /// they are among the rest. Counts of the spread get verdicts, as totals
+    /// do; times are context.
+    pub(crate) fn per_part(&mut self, unit: &str) {
+        let parts = self.parts.len() as u64;
+        assert!(parts >= 2, "{unit}: per_part needs two measured parts or more");
+        self.per(unit, parts);
+        self.per_part = true;
     }
 
     fn add(&mut self, name: &str, kind: MetricKind, unit: Unit, value: f64) {
@@ -236,10 +244,35 @@ impl Bench {
                 })
                 .collect();
             metrics.extend(per_unit);
+            if self.per_part {
+                metrics.extend(spread_of_parts(&self.parts, unit));
+            }
         }
         metrics.extend(self.own);
         metrics
     }
+}
+
+/// The 50th and 90th percentiles and the largest of each part's
+/// instructions, allocations, bytes allocated and wall time.
+fn spread_of_parts(parts: &[Part], unit: &str) -> Vec<Metric> {
+    let mut metrics = Vec::new();
+    let mut add = |name: &str, kind: MetricKind, metric_unit: Unit, mut values: Vec<f64>| {
+        values.sort_by(f64::total_cmp);
+        for (suffix, rank) in [("p50", 50), ("p90", 90), ("max", 100)] {
+            let index = (values.len() * rank).div_ceil(100).max(1) - 1;
+            let name = format!("{name}_per_{unit}_{suffix}");
+            metrics.push(Metric { name, kind, unit: metric_unit, value: values[index] });
+        }
+    };
+    let instructions: Option<Vec<f64>> = parts.iter().map(|part| part.instructions.map(|n| n as f64)).collect();
+    if let Some(instructions) = instructions {
+        add("instructions", MetricKind::Count, Unit::Count, instructions);
+    }
+    add("allocations", MetricKind::Count, Unit::Count, parts.iter().map(|part| part.allocations as f64).collect());
+    add("allocated", MetricKind::Count, Unit::Bytes, parts.iter().map(|part| part.allocated as f64).collect());
+    add("wall", MetricKind::Time, Unit::Ms, parts.iter().map(|part| ms(part.wall)).collect());
+    metrics
 }
 
 fn ms(duration: Duration) -> f64 {
@@ -266,16 +299,20 @@ mod tests {
     }
 
     #[test]
-    fn percentiles_take_the_nearest_rank() {
+    fn per_part_reports_how_the_parts_spread() {
         let mut bench = Bench::new();
-        bench.measure(|| ());
-        let samples: Vec<Duration> = (1..=100).map(Duration::from_millis).collect();
-        bench.percentiles("frame", &samples);
+        for size in 1..=10usize {
+            // Part 10 allocates ten times, the rest once.
+            let count = if size == 10 { 10 } else { 1 };
+            bench.measure(|| (0..count).map(|_| std::hint::black_box(vec![0u8; 64])).collect::<Vec<_>>());
+        }
+        bench.per_part("frame");
         let metrics = bench.finish();
-        let get = |name: &str| metrics.iter().find(|metric| metric.name == name).unwrap().value;
-        assert_eq!(get("frame_p50"), 50.0);
-        assert_eq!(get("frame_p90"), 90.0);
-        assert_eq!(get("frame_p99"), 99.0);
+        let get = |name: &str| metrics.iter().find(|metric| metric.name == name).unwrap();
+        assert!(get("allocations_per_frame_max").value >= 10.0);
+        assert!(get("allocations_per_frame_p50").value < get("allocations_per_frame_max").value);
+        assert_eq!(get("allocations_per_frame_max").kind, MetricKind::Count);
+        assert_eq!(get("wall_per_frame_p90").kind, MetricKind::Time);
     }
 
     #[test]
